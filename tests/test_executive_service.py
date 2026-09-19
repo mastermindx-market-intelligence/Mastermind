@@ -118,6 +118,7 @@ def _phase3_source_messages(parent, candidate):
 from common.redaction import TRUNCATION_MARKER
 from control_plane import ceo_intent as ceo_intent_mod
 from control_plane import executive_dialogue_observation as observation_mod
+from control_plane.model_router import ModelRouter
 from control_plane import executive_ceo_ingress as ceo_ingress_mod
 from control_plane.executive_runtime import (
     AttemptLease,
@@ -127,6 +128,7 @@ from control_plane.executive_runtime import (
     OrchestrationDispatchOutcome,
     Runtime,
     StateConflict,
+    WorkerStatus,
 )
 from control_plane.executive_canary import (
     PrincipalIdentity,
@@ -7925,6 +7927,371 @@ def test_bounded_service_tick_persists_one_refusal_without_mutating_root(
             await service.close()
 
     asyncio.run(exercise())
+
+
+def test_armed_service_advances_review_repair_without_web_continue(
+    tmp_path: Path,
+    short_socket_root: Path,
+):
+    async def wait_until(service, predicate, *, timeout: float = 30.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if predicate():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError(
+            "bounded service did not reach aggregation handoff: "
+            f"last_error={service._coo_last_error} "
+            f"last_outcome={service._coo_last_outcome} "
+            f"dispatch_errors={service._dispatch_errors}"
+        )
+
+    class TypedCooSupervisor(_FakeSupervisor):
+        def __init__(self, runtime: Runtime, *, service_config: ServiceConfig):
+            super().__init__(runtime)
+            self.service_config = service_config
+            self.dispatches: dict[str, OrchestrationDispatchOutcome] = {}
+
+        async def start_cycle_job(self, job_id: str, *, command_id: str):
+            job = self.runtime.jobs.get_job(job_id)
+            assert job is not None
+            if job.orchestration_role != "review":
+                self.runtime.workers.set_worker_status(
+                    "codex-reviewer-01",
+                    WorkerStatus.OFFLINE,
+                    quota_class=self.service_config.coo_quota_class,
+                )
+            if job.orchestration_role == "review":
+                self.runtime.workers.set_worker_status(
+                    "codex-reviewer-01", WorkerStatus.AVAILABLE
+                )
+                self.runtime.workers.set_worker_status(
+                    self.service_config.worker_id, WorkerStatus.OFFLINE
+                )
+            outcome = self.runtime.attempts.dispatch_cycle_job(
+                job_id,
+                command_id=command_id,
+                lease_owner="service-typed-fixture",
+            )
+            if outcome is None:
+                raise StateConflict(f"typed fixture capacity unavailable for {job_id}")
+            self.started_jobs.append(job_id)
+            self.dispatches[job_id] = outcome
+            if outcome.lease_token is None:
+                raise RuntimeError(
+                    "OUTCOME TOKEN MISSING " + repr((job_id, command_id))
+                )
+            return _Active(
+                lease=AttemptLease(
+                    attempt=outcome.attempt,
+                    lease_token=str(outcome.lease_token),
+                )
+            )
+
+        async def finish_job(self, active: _Active):
+            dispatch = self.dispatches[active.lease.attempt.job_id]
+            attempt = active.lease.attempt
+            assert dispatch.lease_token is not None
+            assert active.lease.lease_token is not None
+            assert self.started_jobs[-1] == attempt.job_id
+            job = self.runtime.jobs.get_job(attempt.job_id)
+            assert job is not None and job.orchestration_role
+            plan_job = next(
+                item
+                for item in self.runtime.jobs.list_jobs()
+                if item.root_job_id == job.root_job_id
+                and item.orchestration_role == "plan"
+            )
+            if job.orchestration_role == "plan":
+                plan_body = {
+                    "schema_version": "mastermind.execution_plan/v1",
+                    "root_job_id": job.root_job_id,
+                    "plan_attempt_id": attempt.attempt_id,
+                    "steps": [
+                        {
+                            "ordinal": 0,
+                            "step_id": "step-1",
+                            "objective": "Perform one bounded read-only task.",
+                            "business_impact": "routine",
+                            "review_required": True,
+                            "requested_authorities": ["READ"],
+                            "allowed_write_paths": [],
+                            "validation_ids": [],
+                            "attempt_limit": 1,
+                            "cost_class": "small",
+                        }
+                    ],
+                }
+            else:
+                plan_terminal = plan_job.result
+                assert plan_terminal is not None
+                plan_body = plan_terminal["result_envelope"]["role_result"]
+            plan_digest = canonical_digest(plan_body)
+
+            if job.orchestration_role == "plan":
+                body = plan_body
+            elif job.orchestration_role in {"work", "repair"}:
+                body = {
+                    "schema_version": "mastermind.work_result/v1"
+                    if job.orchestration_role == "work"
+                    else "mastermind.repair_result/v1",
+                    "root_job_id": job.root_job_id,
+                    "plan_attempt_id": job.plan_attempt_id,
+                    "plan_digest": plan_digest,
+                    "plan_step_id": job.plan_step_id,
+                    "repair_round": job.repair_round,
+                    "artifacts": [],
+                    "evidence_digests": [],
+                }
+                if job.orchestration_role == "repair":
+                    assert job.supersedes_job_id and job.orchestration_provenance
+                    rejected_review_id = job.orchestration_provenance["source_id"]
+                    rejected_review = self.runtime.jobs.get_job(rejected_review_id)
+                    assert rejected_review is not None and rejected_review.result
+                    body["supersedes_job_id"] = job.supersedes_job_id
+                    body["rejected_review_job_id"] = rejected_review_id
+                    rejected_envelope = rejected_review.result["result_envelope"]
+                    body["rejected_review_result_digest"] = canonical_digest(
+                        rejected_envelope["role_result"]
+                    )
+            elif job.orchestration_role == "review":
+                assert job.reviews_job_id
+                reviewed = self.runtime.jobs.get_job(job.reviews_job_id)
+                reviewed_result = reviewed.result if reviewed is not None else None
+                reviewed_envelope = (
+                    reviewed_result.get("result_envelope")
+                    if reviewed_result is not None
+                    else None
+                )
+                reviewed_body = (
+                    reviewed_envelope.get("role_result")
+                    if reviewed_envelope is not None
+                    else None
+                )
+                assert reviewed_body is not None and reviewed_body[
+                    "schema_version"
+                ] in {
+                    "mastermind.work_result/v1",
+                    "mastermind.repair_result/v1",
+                }
+                assert reviewed_envelope is not None
+                body = _review_body(
+                    root_id=job.root_job_id,
+                    plan_attempt_id=str(job.plan_attempt_id),
+                    plan_digest=plan_digest,
+                    target_job_id=reviewed.job_id,
+                    target_attempt_id=str(reviewed.current_attempt_id),
+                    target_result_digest=canonical_digest(
+                        reviewed_envelope["role_result"]
+                    ),
+                    repair_round=int(job.repair_round or 0),
+                    verdict="reject" if job.repair_round == 0 else "approve",
+                )
+            else:
+                assert job.orchestration_role == "aggregation"
+                handoff = self.runtime.jobs.get_cycle_handoff(job.job_id)
+                body = {
+                    "schema_version": "mastermind.aggregation_result/v1",
+                    "root_job_id": job.root_job_id,
+                    "handoff_digest": handoff["handoff_digest"],
+                    "policy_sha": handoff["policy_sha"],
+                    "plan_attempt_id": handoff["plan_attempt_id"],
+                    "plan_digest": handoff["plan_digest"],
+                    "revisions": [
+                        {
+                            key: item[key]
+                            for key in {
+                                "ordinal",
+                                "plan_step_id",
+                                "current_job_id",
+                                "current_attempt_id",
+                                "current_result_digest",
+                                "repair_round",
+                                "review_required",
+                                "qualifying_review_job_id",
+                                "qualifying_review_attempt_id",
+                                "qualifying_review_result_digest",
+                            }
+                        }
+                        for item in handoff["revisions"]
+                    ],
+                    "aggregate_summary": "One bounded repaired result is ready.",
+                    "evidence_digests": [],
+                }
+
+            seal, _terminal = _complete_ohf_role(
+                self.runtime,
+                dispatch,
+                body,
+                identity_seed=8400 + len(self.started_jobs),
+            )
+            if job.orchestration_role == "review":
+                self.runtime.workers.set_worker_status(
+                    self.service_config.worker_id, WorkerStatus.AVAILABLE
+                )
+                self.runtime.workers.set_worker_status(
+                    "codex-reviewer-01", WorkerStatus.OFFLINE
+                )
+            return seal
+
+    async def exercise() -> None:
+        base_config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=3600.0,
+        )
+        config = base_config
+        object.__setattr__(base_config, "coo_tick_interval_seconds", 0.01)
+
+        def runtime_factory(root: Path):
+            return prewarm_runtime
+
+        def supervisor_factory(runtime: Runtime):
+            return TypedCooSupervisor(runtime, service_config=config)
+
+        service = ExecutiveControlService(
+            config,
+            runtime_factory=runtime_factory,
+            supervisor_factory=supervisor_factory,
+            autonomy_guard=lambda: None,
+        )
+        binding = service._coo_execution_binding
+        reviewer_capabilities = list(
+            ModelRouter.load()
+            .model_aliases[config.coo_model_alias]
+            .capabilities
+        )
+        prewarm_runtime = Runtime.at(config.runtime_root)
+        prewarm_runtime.workers.register_worker(
+            "codex-reviewer-01",
+            provider=str(binding["provider"]),
+            account_label=f"{config.worker_account_label}-reviewer",
+            worker_type=config.worker_type,
+            quota_classes={
+                config.coo_quota_class: {
+                    "provider": str(binding["provider"]),
+                    "model": str(binding["model"]),
+                    "effort": str(binding["effort"]),
+                    "cost_class": str(binding["cost_class"]),
+                    "capabilities": reviewer_capabilities,
+                    "metadata": {
+                        "routing_policy_version": binding[
+                            "routing_policy_version"
+                        ],
+                        "execution_profile_id": binding["execution_profile_id"],
+                        "execution_profile_digest": binding[
+                            "execution_profile_digest"
+                        ],
+                        "capability_policy_version": binding[
+                            "capability_policy_version"
+                        ],
+                        "capability_policy_digest": binding[
+                            "capability_policy_digest"
+                        ],
+                    },
+                    "status": WorkerStatus.OFFLINE,
+                }
+            },
+            metadata={"service_managed": True},
+        )
+        # ``ExecutiveControlService.start`` must reconcile this existing Runtime,
+        # not construct an unrelated instance that drops the reviewer identity.
+        await service.start()
+        try:
+            service._register_worker()
+            runtime = service.runtime
+            submitted = service._submit_service_intent(
+                _coo_intent(config, "offline-delivery")
+            )
+            root_id = str(submitted["job_id"])
+            runtime = service.runtime
+            assert runtime is not None
+            await wait_until(
+                service, lambda: _handoff_ready(runtime, root_id)
+            )
+            assert service._coo_last_error is None
+            assert service._coo_last_tick_at is not None
+            def all_children_completed() -> bool:
+                children = [
+                    job
+                    for job in runtime.jobs.list_jobs()
+                    if job.root_job_id == root_id and job.orchestration_role
+                ]
+                return len(children) == 6 and all(
+                    job.status is JobStatus.COMPLETED for job in children
+                )
+
+            await wait_until(service, all_children_completed)
+            handoff = runtime.jobs.get_cycle_handoff(root_id)
+            revision = handoff["revisions"][0]
+            assert revision["repair_round"] == 1
+            roles = {
+                (job.orchestration_role, int(job.repair_round or 0)): job
+                for job in runtime.jobs.list_jobs()
+                if job.root_job_id == root_id and job.orchestration_role
+            }
+            assert roles[("review", 0)].status is JobStatus.COMPLETED
+            assert roles[("repair", 1)].status is JobStatus.COMPLETED
+            assert revision["current_job_id"] == roles[("repair", 1)].job_id
+            assert (
+                revision["qualifying_review_job_id"]
+                != roles[("review", 0)].job_id
+            )
+            assert sum(
+                job.orchestration_role == "repair"
+                for job in runtime.jobs.list_jobs()
+                if job.root_job_id == root_id
+            ) == 1
+            for child in roles.values():
+                assert child.status is JobStatus.COMPLETED
+            assert service._dispatch_errors == {}
+            pre_close_handoff = handoff
+        finally:
+            await service.close()
+
+        restart_service = ExecutiveControlService(
+            config,
+            runtime_factory=lambda _root: runtime,
+            supervisor_factory=lambda runtime: TypedCooSupervisor(
+                runtime, service_config=config
+            ),
+            autonomy_guard=lambda: None,
+        )
+        await restart_service.start()
+        try:
+            await wait_until(
+                restart_service,
+                lambda: restart_service._startup_reconciliation is not None,
+            )
+            assert restart_service._coo_last_error is None
+            restart_handoff = runtime.jobs.get_cycle_handoff(root_id)
+            assert restart_handoff == pre_close_handoff
+            role_counts = {}
+            for job in runtime.jobs.list_jobs():
+                if job.root_job_id == root_id and job.orchestration_role:
+                    role_counts[job.orchestration_role] = (
+                        role_counts.get(job.orchestration_role, 0) + 1
+                    )
+            assert role_counts == {
+                "plan": 1,
+                "work": 1,
+                "review": 2,
+                "repair": 1,
+                "aggregation": 1,
+            }
+        finally:
+            await restart_service.close()
+
+    asyncio.run(exercise())
+
+
+def _handoff_ready(runtime: Runtime, root_id: str) -> bool:
+    try:
+        runtime.jobs.get_cycle_handoff(root_id)
+    except StateConflict:
+        return False
+    return True
 
 
 def test_unarmed_service_admits_but_cannot_advance_bound_v2_root(

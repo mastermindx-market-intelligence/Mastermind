@@ -6,8 +6,9 @@ crosses the distinct-UID worker broker; this entrypoint has no local adapter or
 TCP fallback.  G1 adds one exact-root deterministic COO-cycle operation and one
 bounded service tick; both remain disabled by checked-in host configuration.
 C1 may additionally expose the already-implemented dedicated CeoIngress state
-listener through the SAME service process while CEO write admission remains
-hard-disabled. Restore operations are deliberately offline CLI commands and are
+listener through the SAME service process while C1 write admission remains
+hard-disabled. An explicitly configured App peer has a separate admission
+setting and canonical read binding on that same socket. Restore operations are deliberately offline CLI commands and are
 never exposed through the live control socket.
 """
 from __future__ import annotations
@@ -24,6 +25,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+_ROOT = Path(__file__).resolve().parents[1]
+if os.fspath(_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_ROOT))
+
 from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
@@ -32,6 +37,7 @@ from control_plane.executive_autonomy import (
 from control_plane.executive_service import (
     ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
+    CeoIngressAppBinding,
     ServiceConfig,
     ServiceError,
     activate_launchd_socket,
@@ -136,6 +142,7 @@ _CONFIG_OPTIONAL = frozenset(
         "effort",
         "cost_class",
         "coo_autonomy_armed",
+        "ceo_submit_armed",
         "coo_operator_harness_armed",
         "coo_tick_interval_seconds",
         "coo_model_alias",
@@ -150,6 +157,10 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_socket_path",
         "ceo_ingress_launchd_socket_name",
         "ceo_ingress_peer_uid",
+        "ceo_ingress_app_peer_uid",
+        "ceo_ingress_app_armed",
+        "ceo_ingress_app_macro_root",
+        "ceo_ingress_app_boot_python",
         "terminal_return_armed",
         "terminal_return_socket_path",
         "dialogue_observation_socket_path",
@@ -166,6 +177,9 @@ _CEO_INGRESS_CONFIG_KEYS = frozenset(
         "ceo_ingress_peer_uid",
     }
 )
+_CEO_INGRESS_APP_CONFIG_KEYS = frozenset({
+    "ceo_ingress_app_peer_uid", "ceo_ingress_app_armed", "ceo_ingress_app_macro_root",
+})
 _TERMINAL_RETURN_CONFIG_KEYS = frozenset(
     {
         "terminal_return_armed",
@@ -280,15 +294,68 @@ def _path(value: Any, name: str) -> Path:
     return Path(value).resolve(strict=False)
 
 
+def _sealed_root_executable(value: Any, name: str) -> Path:
+    """Require one root-owned executable behind no symlink/writable ancestor."""
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        raise ServiceError(f"control config {name} must be an absolute path")
+    path = Path(value)
+    try:
+        if path.resolve(strict=True) != path:
+            raise ServiceError(f"control config {name} must not traverse symlinks")
+        for node in (path, *path.parents):
+            info = node.lstat()
+            if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise ServiceError(
+                    f"control config {name} must be root-owned and sealed through its path"
+                )
+            if node == path:
+                if (not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111
+                        or info.st_nlink != 1):
+                    raise ServiceError(
+                        f"control config {name} must name one sealed executable file"
+                    )
+            elif not stat.S_ISDIR(info.st_mode):
+                raise ServiceError(
+                    f"control config {name} has a non-directory ancestor"
+                )
+    except ServiceError:
+        raise
+    except OSError as exc:
+        raise ServiceError(f"control config {name} is unavailable") from exc
+    return path
+
+
+def _attest_app_boot_runtime(path: Path) -> Path:
+    """Bind the optional App boot interpreter to the accepted CF2 capacity runtime."""
+    from control_plane.ceo_boot_packet import attest_capacity_boot_runtime
+
+    try:
+        attest_capacity_boot_runtime(path)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise ServiceError("App boot runtime attestation failed") from exc
+    return path
+
+
 def _integer(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ServiceError(f"control config {name} must be a non-negative integer")
     return value
 
 
-def load_control_config(path: str | Path) -> dict[str, Any]:
-    """Load the exact secret-free, root-owned production composition contract."""
+def load_control_config(
+    path: str | Path, *, enforce_current_uid: bool = True
+) -> dict[str, Any]:
+    """Load the exact secret-free, root-owned production composition contract.
 
+    The service path keeps the default live-UID check.  A root-only credential
+    interlock may request static validation so it can prove the configured
+    control UID without impersonating that UID or weakening service startup.
+    """
+
+    if type(enforce_current_uid) is not bool:
+        raise ServiceError("control config UID enforcement selector must be boolean")
+    if not enforce_current_uid and os.geteuid() != 0:
+        raise ServiceError("static control config validation requires root")
     config = _private_json(Path(path), label="Executive control config", root_owned=True)
     if config.get("schema_version") != CONTROL_CONFIG_SCHEMA_VERSION:
         raise ServiceError("unsupported Executive control config schema")
@@ -307,6 +374,14 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
+    app_present = keys & _CEO_INGRESS_APP_CONFIG_KEYS
+    if app_present and (
+        app_present != _CEO_INGRESS_APP_CONFIG_KEYS
+        or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
+    if "ceo_ingress_app_boot_python" in keys and app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
+        raise ServiceError("App boot interpreter requires the complete App binding")
     terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
     if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
         raise ServiceError("terminal-return control config fields must be supplied together")
@@ -361,6 +436,27 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["ceo_ingress_peer_uid"] = _integer(
             config["ceo_ingress_peer_uid"], "ceo_ingress_peer_uid"
         )
+    if app_present:
+        config["ceo_ingress_app_peer_uid"] = _integer(
+            config["ceo_ingress_app_peer_uid"], "ceo_ingress_app_peer_uid"
+        )
+        if config["ceo_ingress_app_peer_uid"] in {
+            config["control_uid"], config["ceo_ingress_peer_uid"], config["worker_uid"],
+            *config["allowed_peer_uids"],
+        }:
+            raise ServiceError("App peer must be distinct from control, Operator, C1 and worker identities")
+        if type(config["ceo_ingress_app_armed"]) is not bool:
+            raise ServiceError("App admission arming must be boolean")
+        config["ceo_ingress_app_macro_root"] = _path(
+            config["ceo_ingress_app_macro_root"], "ceo_ingress_app_macro_root"
+        )
+        if "ceo_ingress_app_boot_python" in config:
+            sealed_boot_python = _sealed_root_executable(
+                config["ceo_ingress_app_boot_python"], "ceo_ingress_app_boot_python"
+            )
+            config["ceo_ingress_app_boot_python"] = _attest_app_boot_runtime(
+                sealed_boot_python
+            )
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
             config["dialogue_observation_peer_uid"],
@@ -417,7 +513,7 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError(
                 "control config dialogue_wake_retry_policy is invalid"
             ) from exc
-    if config["control_uid"] != os.geteuid():
+    if enforce_current_uid and config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
         raise ServiceError("worker_uid must differ from control_uid")
@@ -486,6 +582,10 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["coo_autonomy_armed"], bool
     ):
         raise ServiceError("control config coo_autonomy_armed must be boolean")
+    if "ceo_submit_armed" in config and not isinstance(
+        config["ceo_submit_armed"], bool
+    ):
+        raise ServiceError("control config ceo_submit_armed must be boolean")
     if "coo_operator_harness_armed" in config and not isinstance(
         config["coo_operator_harness_armed"], bool
     ):
@@ -907,6 +1007,7 @@ def _service_from_config(
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
+        ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
             "coo_operator_harness_armed", False
         ),
@@ -1023,6 +1124,24 @@ def _service_from_config(
             "ceo_ingress_armed": False,
             "ceo_ingress_activated_socket": ceo_listener,
         }
+    if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
+        # SDK-free canonical projection runs under the existing control uid.
+        # The network App has no Runtime database or source-checkout access.
+        from integrations.executive_mcp.installed import InstalledExecutiveReaders
+        readers = InstalledExecutiveReaders(
+            repo_root=Path(raw["proof_source_repository"]),
+            macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+            runtime_root=Path(raw["runtime_root"]),
+            boot_python=(Path(raw["ceo_ingress_app_boot_python"])
+                         if "ceo_ingress_app_boot_python" in raw else None),
+            code_root=Path(__file__).resolve().parents[1],
+            expected_source_sha=str(raw["proof_base_sha"]),
+        )
+        ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
+            peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
+            armed=raw["ceo_ingress_app_armed"],
+            grounding_provider=readers, read_provider=readers,
+        )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
         _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)

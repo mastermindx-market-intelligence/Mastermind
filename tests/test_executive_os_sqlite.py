@@ -3054,3 +3054,99 @@ def test_bound_managed_schema_cancellation_drains_acquired_connection(tmp_path, 
     with pytest.raises(PersistenceError):
         with runtime.store.read():
             pytest.fail("invalid request cannot reconnect")
+
+
+# FP1B transaction proofs: reuse the existing host-keyed ResourceBroker plane.
+def _fp1b_m2_context(*, host="a"):
+    from test_executive_physical_resources import _fp1b_context
+    request, policy, observations = _fp1b_context(host=host)
+    # Preserve the synthetic M2 fixture's qualified timing envelope; no Runtime
+    # production path is armed by these test-only values.
+    policy["waits"] = {
+        "service_request_max_ms": 2000,
+        "database_lock_max_ms": 1000,
+    }
+    policy["freshness"]["decision_to_effect_max_ms"] = 1000
+    return request, policy, observations
+
+
+def test_fp1b_m2_same_host_v2_last_capacity_still_allows_only_one_reservation(m2_store):
+    import copy
+    runtime, second, _, context = m2_store("fp1b-same-host")
+    request, policy, observations = _fp1b_m2_context(host="a")
+    context["policy"] = policy
+    context["observations"] = observations
+    context["observations"]["pools"]["external"]["available"] = 60
+    other = copy.deepcopy(request)
+    other["operation_key"] = "fp1b-other"
+    other["command_id"] = "physical:fp1b-other"
+    barrier = Barrier(2)
+
+    def reserve(pair):
+        barrier.wait()
+        return _m2_reserve(*pair)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(reserve, [(runtime, request), (second, other)]))
+    assert sorted(result["code"] for result in results) == [
+        "INSUFFICIENT_CAPACITY",
+        "RESERVED",
+    ]
+    assert len(_m2_rows(runtime)["physical_resource_commitments"]) == 1
+
+
+def test_fp1b_m2_equivalent_pool_ids_on_two_qualified_hosts_account_independently(m2_store):
+    runtime, second, _, context = m2_store("fp1b-two-hosts")
+    request_a, policy, observations_a = _fp1b_m2_context(host="a")
+    request_b, policy_b, observations_b = _fp1b_m2_context(host="b")
+    assert policy_b == policy
+    request_b["operation_key"] = "fp1b-host-b"
+    request_b["command_id"] = "physical:fp1b-host-b"
+    observations_a["pools"]["external"]["available"] = 60
+    observations_b["pools"]["external"]["available"] = 60
+
+    context["policy"] = policy
+    context["observations"] = observations_a
+    first = _m2_reserve(runtime, request_a)
+    assert first["admitted"] and first["code"] == "RESERVED"
+
+    context["observations"] = observations_b
+    second_result = _m2_reserve(second, request_b)
+    assert second_result["admitted"] and second_result["code"] == "RESERVED"
+    with runtime.store.read() as connection:
+        rows = connection.execute(
+            "SELECT host_id,capacity_pool_id,remaining_charge "
+            "FROM physical_resource_commitments c "
+            "JOIN physical_resource_demands d USING(commitment_id,allocation_generation) "
+            "WHERE d.capacity_pool_id='external' ORDER BY host_id"
+        ).fetchall()
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        (request_a["host_id"], "external", 40),
+        (request_b["host_id"], "external", 40),
+    ]
+
+
+def test_fp1b_m2_host_qualification_move_inside_write_lock_fails_closed(m2_store):
+    runtime, _, _, context = m2_store("fp1b-host-move")
+    request, policy, observations = _fp1b_m2_context(host="a")
+    context["policy"] = policy
+    context["observations"] = observations
+    reserved = _m2_reserve(runtime, request)
+    assert reserved["admitted"] and reserved["code"] == "RESERVED"
+    before = _m2_rows(runtime)
+
+    def move(_broker, _connection, stage):
+        if stage == "locked":
+            context["policy"]["host_qualifications"][0][
+                "qualification_revision"
+            ] = "host-qualification-moved"
+
+    context["at_stage"] = move
+    result = runtime.broker.begin_physical(
+        _m2_envelope(request, reserved, "fp1b-host-move"),
+        caller_context=None,
+    )
+    assert result["admitted"] is False
+    assert result["fresh_begin"] is False
+    assert result["code"] == "ADMISSION_MOVED"
+    assert _m2_rows(runtime) == before

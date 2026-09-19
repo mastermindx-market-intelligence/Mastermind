@@ -16,6 +16,7 @@ from typing import Any, Mapping
 from control_plane.wake_events import mint_obligation_id
 
 
+CONSULTATION_SOURCE_SCHEMA = "mastermind.company_consultation_mcp.v1"
 PHYSICAL_SOURCE_SCHEMA = "mastermind.dialogue_physical_source/v2"
 SOURCE_OBSERVATION_SCHEMA = "mastermind.dialogue_source_observation/v1"
 SOURCE_SNAPSHOT_SCHEMA = "mastermind.dialogue_source_snapshot/v1"
@@ -119,6 +120,90 @@ def correlated_source_ref(
         "candidate": _candidate(candidate).to_dict(),
     }
     return "agent_dialogue_attention:" + hashlib.sha256(canonical_bytes(material)).hexdigest()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ConsultationSourceIdentity:
+    """Immutable consultation source identity; Wake remains the durable owner."""
+
+    schema: str
+    consultation_id: str
+    message_key: str
+    semantic_fingerprint: str
+    root_job_id: str
+    requester_job_id: str
+    requester_attempt_id: str
+    recipient_job_id: str
+    recipient_attempt_id: str
+    binding_id: str
+    binding_generation: int
+    digest: str
+
+    def __post_init__(self) -> None:
+        if self.schema != CONSULTATION_SOURCE_SCHEMA:
+            raise DialogueSourceResolutionError("consultation source schema is unknown")
+        _text(self.consultation_id, "consultation_id", _TOKEN)
+        _text(self.message_key, "message_key", _MESSAGE_KEY)
+        _text(self.semantic_fingerprint, "semantic_fingerprint", _DIGEST)
+        _text(self.root_job_id, "root_job_id", _TOKEN)
+        _text(self.requester_job_id, "requester_job_id", _TOKEN)
+        _text(self.requester_attempt_id, "requester_attempt_id", _TOKEN)
+        _text(self.recipient_job_id, "recipient_job_id", _TOKEN)
+        _text(self.recipient_attempt_id, "recipient_attempt_id", _TOKEN)
+        binding = _text(self.binding_id, "binding_id", _TOKEN)
+        if not binding.startswith("bind-") or type(self.binding_generation) is not int or self.binding_generation < 1:
+            raise DialogueSourceResolutionError("recipient binding is malformed")
+        expected = hashlib.sha256(canonical_bytes(self._material())).hexdigest()
+        if self.digest != expected:
+            raise DialogueSourceResolutionError("consultation source digest disagrees")
+
+    def _material(self) -> dict[str, Any]:
+        return {
+            field.name: getattr(self, field.name)
+            for field in dataclasses.fields(self)
+            if field.name != "digest"
+        }
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        consultation_id: str,
+        message_key: str,
+        semantic_fingerprint: str,
+        root_job_id: str,
+        requester_job_id: str,
+        requester_attempt_id: str,
+        recipient_job_id: str,
+        recipient_attempt_id: str,
+        binding_id: str,
+        binding_generation: int,
+    ) -> "ConsultationSourceIdentity":
+        material = {
+            "schema": CONSULTATION_SOURCE_SCHEMA,
+            "consultation_id": consultation_id,
+            "message_key": message_key,
+            "semantic_fingerprint": semantic_fingerprint,
+            "root_job_id": root_job_id,
+            "requester_job_id": requester_job_id,
+            "requester_attempt_id": requester_attempt_id,
+            "recipient_job_id": recipient_job_id,
+            "recipient_attempt_id": recipient_attempt_id,
+            "binding_id": binding_id,
+            "binding_generation": binding_generation,
+        }
+        return cls(**material, digest=hashlib.sha256(canonical_bytes(material)).hexdigest())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self._material(), "digest": self.digest}
+
+
+def peer_attention_source_ref(identity: ConsultationSourceIdentity) -> str:
+    if type(identity) is not ConsultationSourceIdentity:
+        raise DialogueSourceResolutionError("peer source must be a closed typed identity")
+    return "agent_dialogue_attention:" + hashlib.sha256(
+        canonical_bytes(identity.to_dict())
+    ).hexdigest()
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

@@ -46,18 +46,24 @@ from control_plane.executive_ambient_process import (
     NullAmbientClassifier,
 )
 from control_plane.codex_worker import (
-    CodexWorkerAdapter,
     GitPreflightFailed,
     GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
     LaunchValidationStageError,
     ProcessIdentityError,
 )
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    WorkerExecutionAdapter,
+    adapter_descriptor,
+    bind_reviewed_adapter,
+)
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
@@ -122,8 +128,6 @@ from control_plane.worker_browser_b1 import (
     BrowserReviewError,
     browser_review_receipt,
 )
-
-
 BROKER_REQUEST_SCHEMA_VERSION = "mastermind.executive_worker_broker_request/v1"
 BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1"
 UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v2"
@@ -166,6 +170,7 @@ _OHF_OPERATIONS = frozenset(
         "ohf-begin-turn",
         "ohf-deliver-attention",
         "ohf-collect-turn",
+        "ohf-observe-turn",
         "ohf-interrupt",
         "ohf-stop",
         "ohf-cancel",
@@ -211,6 +216,10 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class WorkerAdapterNotImplementedError(WorkerBrokerError):
+    """A reviewed adapter is not implemented for broker execution."""
 
 
 class BrokerPreSubmitError(WorkerBrokerError):
@@ -1285,10 +1294,11 @@ class ExecutiveWorkerBroker:
 
     def __init__(
         self,
-        adapter: CodexWorkerAdapter,
+        adapter: WorkerExecutionAdapter,
         policy: BrokerPolicy,
         sweeper: ResidualSweeper,
         *,
+        adapter_id: str = "codex-cli",
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
@@ -1299,7 +1309,16 @@ class ExecutiveWorkerBroker:
         ]
         | None = None,
     ) -> None:
+        try:
+            descriptor = bind_reviewed_adapter(adapter, adapter_id)
+        except AdapterBindingError as exc:
+            raise WorkerBrokerError(str(exc)) from exc
+        except Exception as exc:
+            raise WorkerBrokerError(
+                f"worker adapter {adapter_id!r} failed to bind"
+            ) from exc
         self.adapter = adapter
+        self.adapter_id = descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -1334,6 +1353,7 @@ class ExecutiveWorkerBroker:
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
+        self._observer_refusals: list[tuple[Any, str]] = []
         self._state_lock = asyncio.Lock()
         self._starting = False
         self._validation_busy = False
@@ -1448,6 +1468,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
+        if operation == "ohf-observe-turn":
+            return await self._ohf_observe_turn(payload)
         if operation == "ohf-interrupt":
             return await self._ohf_interrupt(payload)
         if operation == "ohf-stop":
@@ -2091,6 +2113,129 @@ class ExecutiveWorkerBroker:
         finally:
             await self._operator_release_busy(state)
 
+    async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        expected = {
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+            "cursor",
+            "max_items",
+        }
+        if set(payload) != expected:
+            raise BrokerStateError("ohf-observe-turn payload fields are invalid")
+        identity_fields = (
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+        )
+        if any(
+            not isinstance(payload[field], str) or not payload[field]
+            for field in identity_fields
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        async with self._state_lock:
+            active = self._operator_run
+            if active is None:
+                self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+                raise BrokerStateError("UNKNOWN_GENERATION")
+            generation_number = active.generation.generation_number
+            worker_id = active.generation.worker_id
+        if (
+            payload["attempt"] != active.epoch.attempt_id
+            or payload["epoch"] != active.epoch.session_epoch_id
+            or payload["generation"] != active.generation.process_generation_id
+            or generation_number != active.generation.generation_number
+            or worker_id != active.generation.worker_id
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        native_turn = None
+        projection = getattr(active.adapter, "visible_turn_projection", None)
+        if projection is None:
+            self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+            raise BrokerStateError("UNKNOWN_GENERATION")
+        grant_key = projection.check_grant(payload["reader_grant"])
+        if grant_key is None:
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
+        exact_local = None
+        generation_state = active.adapter._generations.get(
+            active.generation.process_generation_id
+        )
+        if generation_state is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        for local_turn, candidate_native in generation_state.turns.items():
+            if (
+                local_turn == payload["turn"]
+                and candidate_native
+                and candidate_native == grant_key.native_turn_id
+            ):
+                exact_local = local_turn
+                native_turn = candidate_native
+                break
+        if exact_local is None or native_turn is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        expected_key = TurnKey(
+            active.epoch.attempt_id,
+            active.epoch.session_epoch_id,
+            active.generation.process_generation_id,
+            active.generation.generation_number,
+            active.generation.worker_id,
+            exact_local,
+            native_turn,
+        )
+        if grant_key != expected_key:
+            self._observer_refusals.append((grant_key, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        try:
+            result = projection.read(
+                expected_key,
+                reader_grant=payload["reader_grant"],
+                cursor=payload["cursor"],
+                max_items=payload["max_items"],
+            )
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if not isinstance(code, str):
+                raise
+            self._observer_refusals.append((expected_key, code))
+            raise BrokerStateError(code) from None
+        return {
+            "items": [
+                {
+                    "source_item_id": item.source_item_id,
+                    "source_sequence": item.source_sequence,
+                    "publication_sequence": item.publication_sequence,
+                    "state": item.state,
+                    "text": item.text,
+                    "byte_length": item.byte_length,
+                    "truncated": False,
+                    "gap": None,
+                }
+                for item in result.items
+            ],
+            "next_cursor": result.next_cursor,
+            "gaps": [
+                {
+                    "from_publication_sequence": gap.from_publication_sequence,
+                    "to_publication_sequence": gap.to_publication_sequence,
+                    "reason": gap.reason,
+                }
+                for gap in result.gaps
+            ],
+            "terminal": result.terminal,
+            "publication_epoch": result.publication_epoch,
+            "retained_scope": list(result.retained_scope),
+            "resync_required": result.resync_required,
+        }
+
     async def _ohf_deliver_attention(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send one bounded nudge through the already-owned current writer."""
 
@@ -2631,6 +2776,24 @@ class ExecutiveWorkerBroker:
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        descriptor = adapter_descriptor(self.adapter_id)
+        if not descriptor.implemented:
+            raise WorkerAdapterNotImplementedError(
+                f"worker adapter {descriptor.adapter_id!r} is not implemented "
+                "for broker execution"
+            )
+        binding = getattr(self.adapter, "binding", None)
+        if binding is not None:
+            if getattr(binding, "implementation_state", None) == "SPEC_ONLY":
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "is SPEC_ONLY for broker execution"
+                )
+            if getattr(binding, "autonomous_allowed", None) is False:
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "does not allow autonomous broker execution"
+                )
         self._require_current_autonomy()
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
@@ -3430,6 +3593,8 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
 
 class RemoteCodexWorkerAdapter:
     """Control-side Codex adapter facade backed by the distinct-UID broker."""
+
+    adapter_id = "codex-cli"
 
     def __init__(
         self,

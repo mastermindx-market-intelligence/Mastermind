@@ -38,6 +38,7 @@ import re
 import signal
 import stat
 import subprocess
+import weakref
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Sequence
@@ -53,10 +54,12 @@ from control_plane.worker_execution_contract import (
     MAX_ARTIFACTS,
     MAX_ARTIFACT_BYTES,
     MAX_ARTIFACT_TOTAL_BYTES,
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     ArtifactReceipt,
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    LaunchAttestation,
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
@@ -83,6 +86,8 @@ _MAX_VALIDATION_STDOUT_BYTES = 4 * 1024 * 1024
 _MAX_VALIDATION_STDERR_BYTES = 1 * 1024 * 1024
 _MAX_VALIDATION_ARGV_BYTES = 64 * 1024
 _MAX_PROJECT_CONFIG_BYTES = 64 * 1024
+_LOCAL_TRANSPORT_FINALIZATION_SECONDS = 5.0
+_LOCAL_STREAM_DRAIN_SECONDS = 0.1
 _AUDITED_PROJECT_CONFIG_SHA256 = "d7e836eb5a6cbd4cb4e97de41f8182add663cb2a152dc4e381f82553f571bb7f"
 _ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"})
 _GIT_COMMAND_TIMEOUT_SECONDS = 15.0
@@ -134,7 +139,6 @@ _JSONL_EVENT_TYPES = frozenset({
     "error",
 })
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-LAUNCH_ATTESTATION_SCHEMA_VERSION = "mastermind.executive_launch_attestation/v1"
 SECRET_CANARY_SCHEMA_VERSION = "mastermind.executive_secret_canary/v1"
 ISOLATION_MANIFEST_SCHEMA_VERSION = "mastermind.executive_isolation_manifest/v1"
 _SECRET_CANARY_CHECKS = frozenset(
@@ -251,51 +255,15 @@ class ProcessIdentity:
 
 
 @dataclasses.dataclass(frozen=True)
-class LaunchAttestation:
-    """Complete, secret-free launch receipt persisted before RUNNING."""
-
-    schema_version: str
-    created_at: str
-    executable_path: str
-    binary: BinaryAttestation
-    rendered_argv: tuple[str, ...]
-    environment_keys: tuple[str, ...]
-    permission_profile_sha256: str
-    prompt_sha256: str
-    expected_base_sha: str | None
-    observed_base_sha: str
-    workspace_identity: Mapping[str, Any]
-    worker_identity: Mapping[str, Any]
-    provider_home_identity: Mapping[str, Any]
-    secret_canary_verdict: Mapping[str, Any]
-    launch_nonce: str
-    process_identity: Mapping[str, Any]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "created_at": self.created_at,
-            "executable_path": self.executable_path,
-            "binary": dataclasses.asdict(self.binary),
-            "rendered_argv": list(self.rendered_argv),
-            "environment_keys": list(self.environment_keys),
-            "permission_profile_sha256": self.permission_profile_sha256,
-            "prompt_sha256": self.prompt_sha256,
-            "expected_base_sha": self.expected_base_sha,
-            "observed_base_sha": self.observed_base_sha,
-            "workspace_identity": _jsonable(self.workspace_identity),
-            "worker_identity": _jsonable(self.worker_identity),
-            "provider_home_identity": _jsonable(self.provider_home_identity),
-            "secret_canary_verdict": _jsonable(self.secret_canary_verdict),
-            "launch_nonce": self.launch_nonce,
-            "process_identity": dict(self.process_identity),
-        }
-
-
-@dataclasses.dataclass(frozen=True)
 class _GitSnapshot:
     head: str
     status: bytes
+
+
+@dataclasses.dataclass(frozen=True)
+class _OwnedTaskSettlement:
+    converged: bool
+    errors: tuple[str, ...]
 
 
 @dataclasses.dataclass
@@ -383,6 +351,25 @@ class _JSONLState:
 
 
 @dataclasses.dataclass
+class _ProcessFinalizationState:
+    process: asyncio.subprocess.Process
+    transport: Any
+    pipe_transports: tuple[Any | None, Any | None, Any | None]
+    streams: tuple[Any | None, Any | None, Any | None]
+    stream_transports: tuple[Any | None, Any | None, Any | None]
+    lock: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock)
+    group_proven_absent: bool = False
+    copied_returncode: int | None = None
+    transport_close_started: bool = False
+    transport_close_completed: bool = False
+    transport_close_count: int = 0
+    forced_retirement: bool = False
+    signal_sent: bool = False
+    sigkill_sent: bool = False
+    error: str | None = None
+
+
+@dataclasses.dataclass
 class _RunState:
     spec: LaunchSpec
     ref: ProcessRef
@@ -394,6 +381,7 @@ class _RunState:
     violation: asyncio.Event
     process_wait_task: asyncio.Task[int]
     launch_attestation: LaunchAttestation
+    finalization: _ProcessFinalizationState
     stdout_task: asyncio.Task[None] | None = None
     stderr_task: asyncio.Task[None] | None = None
     monitor_task: asyncio.Task[None] | None = None
@@ -1253,7 +1241,7 @@ def _create_private_file(path: Path) -> int:
         raise LaunchValidationError(f"run output already exists: {path}") from exc
 
 
-def _validate_codex_home(path: Path) -> Path:
+def _validate_codex_home_directory(path: Path) -> Path:
     try:
         info = path.lstat()
         resolved = path.resolve(strict=True)
@@ -1263,6 +1251,11 @@ def _validate_codex_home(path: Path) -> Path:
         raise LaunchValidationError("CODEX_HOME must be a real directory")
     if stat.S_IMODE(info.st_mode) & 0o077:
         raise LaunchValidationError("CODEX_HOME must be mode 0700 or narrower")
+    return resolved
+
+
+def _validate_codex_home(path: Path) -> Path:
+    resolved = _validate_codex_home_directory(path)
     auth = resolved / "auth.json"
     try:
         auth_info = auth.lstat()
@@ -1808,6 +1801,26 @@ def _process_group_exists(pgid: int) -> bool:
     return True
 
 
+def _signal_process_group_once(
+    pgid: int,
+    sig: int,
+    *,
+    finalization: _ProcessFinalizationState,
+    label: str,
+) -> bool:
+    """Send one group signal or fail closed through the typed finalization boundary."""
+
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        return False
+    except OSError as exc:
+        error = finalization.error or f"{label} signal failed: {type(exc).__name__}"
+        finalization.error = error
+        raise ProcessIdentityError(error) from exc
+    return True
+
+
 async def _wait_for_process_group_exit(pgid: int, *, timeout: float = 2.0) -> bool:
     deadline = asyncio.get_running_loop().time() + timeout
     while _process_group_exists(pgid):
@@ -1815,6 +1828,108 @@ async def _wait_for_process_group_exit(pgid: int, *, timeout: float = 2.0) -> bo
             return False
         await asyncio.sleep(0.02)
     return True
+
+
+async def _cleanup_unpublished_process(
+    process: asyncio.subprocess.Process,
+    *,
+    wait_task: asyncio.Task[int] | None,
+    owned_fds: Sequence[int],
+    label: str,
+) -> ProcessIdentityError | None:
+    """Attempt one bounded fail-closed cleanup before a process is published."""
+
+    failures: list[str] = []
+    local_wait_task = wait_task
+    try:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except BaseException as exc:  # preserve cancellation until owned cleanup ends
+            failures.append(f"signal:{type(exc).__name__}")
+
+        if not failures:
+            if local_wait_task is None:
+                local_wait_task = asyncio.create_task(process.wait())
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(local_wait_task),
+                    timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                failures.append("process-wait-timeout")
+            except BaseException as exc:  # exact local task; never retry signaling
+                failures.append(f"process-wait:{type(exc).__name__}")
+            else:
+                try:
+                    group_absent = await _wait_for_process_group_exit(process.pid)
+                except BaseException as exc:
+                    failures.append(f"group-absence:{type(exc).__name__}")
+                else:
+                    if not group_absent:
+                        failures.append("process-group-still-present")
+    finally:
+        if failures and local_wait_task is not None:
+            if not local_wait_task.done():
+                local_wait_task.cancel()
+            await asyncio.gather(local_wait_task, return_exceptions=True)
+        for fd in owned_fds:
+            try:
+                os.close(fd)
+            except OSError as exc:
+                failures.append(f"fd-close:{type(exc).__name__}")
+
+    if failures:
+        return ProcessIdentityError(f"{label} cleanup failed: {', '.join(failures)}")
+    return None
+
+
+async def _raise_after_unpublished_process_failure(
+    process: asyncio.subprocess.Process,
+    original: BaseException,
+    *,
+    wait_task: asyncio.Task[int] | None = None,
+    owned_fds: Sequence[int] = (),
+    label: str,
+) -> None:
+    """Finish bounded quarantine, then preserve cancellation or causal failure."""
+
+    cleanup_task = asyncio.create_task(
+        _cleanup_unpublished_process(
+            process,
+            wait_task=wait_task,
+            owned_fds=owned_fds,
+            label=label,
+        )
+    )
+    pending_cancellation = (
+        original if isinstance(original, asyncio.CancelledError) else None
+    )
+    while not cleanup_task.done():
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError as exc:
+            if pending_cancellation is None:
+                pending_cancellation = exc
+
+    try:
+        cleanup_error = cleanup_task.result()
+    except BaseException as exc:
+        cleanup_error = ProcessIdentityError(
+            f"{label} cleanup failed internally: {type(exc).__name__}"
+        )
+
+    if pending_cancellation is not None:
+        if cleanup_error is not None:
+            pending_cancellation.add_note(str(cleanup_error))
+            raise pending_cancellation from cleanup_error
+        if pending_cancellation is original:
+            raise pending_cancellation
+        raise pending_cancellation from original
+    if cleanup_error is not None:
+        raise cleanup_error from original
+    raise original.with_traceback(original.__traceback__)
 
 
 async def _hash_validation_stream(
@@ -1836,8 +1951,287 @@ async def _hash_validation_stream(
     return digest.hexdigest(), total
 
 
+def _stream_transport(stream: Any | None) -> Any | None:
+    if stream is None:
+        return None
+    value = getattr(stream, "_transport", None)
+    if value is None:
+        value = getattr(stream, "transport", None)
+    return value
+
+
+def _capture_process_finalization(
+    process: asyncio.subprocess.Process,
+) -> _ProcessFinalizationState:
+    transport = getattr(process, "_transport", None)
+    getter = getattr(transport, "get_pipe_transport", None)
+    closer = getattr(transport, "close", None)
+    if transport is None or not callable(getter) or not callable(closer):
+        raise ProcessIdentityError("asyncio subprocess transport is unavailable")
+    pipes = tuple(getter(fd) for fd in (0, 1, 2))
+    streams = (
+        getattr(process, "stdin", None),
+        getattr(process, "stdout", None),
+        getattr(process, "stderr", None),
+    )
+    stream_transports = tuple(_stream_transport(stream) for stream in streams)
+    for fd in (1, 2):
+        if streams[fd] is not None and stream_transports[fd] is not pipes[fd]:
+            raise ProcessIdentityError(
+                f"asyncio subprocess stream {fd} binding is inconsistent"
+            )
+    if streams[0] is not None and stream_transports[0] is not pipes[0]:
+        raise ProcessIdentityError("asyncio subprocess stdin binding is inconsistent")
+    return _ProcessFinalizationState(
+        process=process,
+        transport=transport,
+        pipe_transports=pipes,  # type: ignore[arg-type]
+        streams=streams,
+        stream_transports=stream_transports,
+    )
+
+
+def _verify_process_finalization_identity(state: _ProcessFinalizationState) -> None:
+    process = state.process
+    if getattr(process, "_transport", None) is not state.transport:
+        raise ProcessIdentityError("asyncio subprocess transport identity changed")
+    getter = getattr(state.transport, "get_pipe_transport", None)
+    if not callable(getter):
+        raise ProcessIdentityError("asyncio subprocess pipe transport is unavailable")
+    current_pipes = tuple(getter(fd) for fd in (0, 1, 2))
+    for fd in (1, 2):
+        if current_pipes[fd] is None and state.pipe_transports[fd] is not None:
+            raise ProcessIdentityError(f"asyncio subprocess pipe {fd} disappeared")
+        if current_pipes[fd] is not state.pipe_transports[fd]:
+            raise ProcessIdentityError(
+                f"asyncio subprocess pipe {fd} identity changed"
+            )
+    if current_pipes[0] not in {state.pipe_transports[0], None}:
+        raise ProcessIdentityError("asyncio subprocess pipe 0 identity changed")
+    current_streams = (
+        getattr(process, "stdin", None),
+        getattr(process, "stdout", None),
+        getattr(process, "stderr", None),
+    )
+    for fd in (1, 2):
+        expected_stream = state.streams[fd]
+        if expected_stream is not None and current_streams[fd] is not expected_stream:
+            raise ProcessIdentityError(
+                f"asyncio subprocess stream {fd} object identity changed"
+            )
+        if expected_stream is not None and (
+            _stream_transport(current_streams[fd]) is not state.stream_transports[fd]
+        ):
+            raise ProcessIdentityError(
+                f"asyncio subprocess stream {fd} transport identity changed"
+            )
+    if state.streams[0] is not None and current_streams[0] is not state.streams[0]:
+        raise ProcessIdentityError("asyncio subprocess stdin stream identity changed")
+
+
+def _known_process_returncode(state: _ProcessFinalizationState, *, label: str) -> int:
+    getter = getattr(state.transport, "get_returncode", None)
+    if not callable(getter):
+        raise ProcessIdentityError(
+            f"{label} transport retirement requires a return code accessor"
+        )
+    process_code = state.process.returncode
+    transport_code = getter()
+    if process_code is None or transport_code is None:
+        raise ProcessIdentityError(
+            f"{label} transport retirement requires known return code"
+        )
+    if int(process_code) != int(transport_code):
+        raise ProcessIdentityError(f"{label} transport return code identity changed")
+    value = int(process_code)
+    if state.copied_returncode not in {None, value}:
+        raise ProcessIdentityError(f"{label} copied return code changed")
+    state.copied_returncode = value
+    return value
+
+
+def _latch_process_group_absence(
+    state: _ProcessFinalizationState, *, label: str
+) -> int:
+    value = _known_process_returncode(state, label=label)
+    state.group_proven_absent = True
+    return value
+
+
+def _retire_process_transport(state: _ProcessFinalizationState, *, label: str) -> int:
+    if not state.group_proven_absent:
+        raise ProcessIdentityError(
+            f"{label} transport retirement lacks group-absence proof"
+        )
+    if state.error is not None:
+        raise ProcessIdentityError(state.error)
+    if state.transport_close_completed:
+        return _known_process_returncode(state, label=label)
+    if state.transport_close_started:
+        state.error = f"{label} transport retirement did not complete"
+        raise ProcessIdentityError(state.error)
+    _verify_process_finalization_identity(state)
+    value = _known_process_returncode(state, label=label)
+    state.transport_close_started = True
+    try:
+        state.transport.close()
+    except Exception as exc:
+        state.error = f"{label} transport close failed: {type(exc).__name__}"
+        raise ProcessIdentityError(state.error) from exc
+    state.transport_close_count += 1
+    state.transport_close_completed = True
+    state.forced_retirement = True
+    return value
+
+
+async def _retire_transport_and_release_wait(
+    state: _ProcessFinalizationState,
+    wait_task: asyncio.Task[int],
+    *,
+    label: str,
+) -> None:
+    async with state.lock:
+        value = _retire_process_transport(state, label=label)
+    try:
+        observed = await asyncio.wait_for(
+            asyncio.shield(wait_task),
+            timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        state.error = (
+            f"{label} process wait did not converge after local transport retirement"
+        )
+        raise ProcessIdentityError(state.error) from exc
+    if int(observed) != value:
+        state.error = f"{label} process wait return code changed"
+        raise ProcessIdentityError(state.error)
+
+
+async def _tasks_finish_within(
+    tasks: Sequence[asyncio.Task[Any]], *, timeout: float
+) -> bool:
+    pending = tuple(task for task in tasks if not task.done())
+    if not pending:
+        return True
+    _done, remaining = await asyncio.wait(pending, timeout=timeout)
+    return not remaining
+
+
+async def _wait_for_known_returncode(
+    process: asyncio.subprocess.Process,
+) -> int:
+    """Observe local asyncio process exit without probing PID/PGID identity."""
+
+    while process.returncode is None:
+        await asyncio.sleep(0.01)
+    return int(process.returncode)
+
+
+async def _settle_or_cancel_owned_tasks(
+    tasks: Sequence[asyncio.Task[Any] | None],
+    *,
+    timeout: float | None = None,
+) -> _OwnedTaskSettlement:
+    """Bound and consume only the exact adapter-owned local tasks supplied."""
+
+    current = asyncio.current_task()
+    seen: set[int] = set()
+    owned: list[asyncio.Task[Any]] = []
+    for task in tasks:
+        if task is None or task is current or id(task) in seen:
+            continue
+        seen.add(id(task))
+        owned.append(task)
+    if not owned:
+        return _OwnedTaskSettlement(converged=True, errors=())
+    budget = max(
+        0.0,
+        _LOCAL_TRANSPORT_FINALIZATION_SECONDS
+        if timeout is None
+        else float(timeout),
+    )
+
+    async def settle() -> _OwnedTaskSettlement:
+        pending = {task for task in owned if not task.done()}
+        required_cancellation = False
+        if pending:
+            _done, remaining = await asyncio.wait(pending, timeout=budget)
+            if remaining:
+                required_cancellation = True
+                for task in remaining:
+                    task.cancel()
+                _done, remaining = await asyncio.wait(remaining, timeout=budget)
+        else:
+            remaining = set()
+
+        errors: list[str] = []
+        for index, task in enumerate(owned, start=1):
+            if not task.done() or task.cancelled():
+                continue
+            try:
+                task.result()
+            except BaseException as exc:  # exact owned task; safe type evidence only
+                errors.append(f"owned task {index} failed: {type(exc).__name__}")
+        return _OwnedTaskSettlement(
+            converged=not required_cancellation and not remaining,
+            errors=tuple(errors),
+        )
+
+    settlement_task = asyncio.create_task(settle())
+    pending_cancellation: asyncio.CancelledError | None = None
+    while not settlement_task.done():
+        try:
+            await asyncio.shield(settlement_task)
+        except asyncio.CancelledError as exc:
+            if pending_cancellation is None:
+                pending_cancellation = exc
+    try:
+        settlement = settlement_task.result()
+    except BaseException as exc:
+        if pending_cancellation is not None:
+            pending_cancellation.add_note(
+                f"owned task settlement failed internally: {type(exc).__name__}"
+            )
+            raise pending_cancellation from exc
+        raise
+    if pending_cancellation is not None:
+        for error in settlement.errors:
+            pending_cancellation.add_note(error)
+        if not settlement.converged:
+            pending_cancellation.add_note("owned tasks did not converge")
+        raise pending_cancellation
+    return settlement
+
+
+async def _bounded_task_convergence(
+    tasks: Sequence[asyncio.Task[Any]],
+    *,
+    label: str,
+) -> None:
+    settlement = await _settle_or_cancel_owned_tasks(tasks)
+    details = list(settlement.errors)
+    if not settlement.converged:
+        details.insert(0, "owned tasks did not converge")
+    if not details:
+        return
+    raise ProcessIdentityError(f"{label}: {'; '.join(details)}")
+
+
+def _record_worker_forced_retirement(state: _RunState) -> None:
+    if not state.finalization.forced_retirement:
+        return
+    marker = "provider transport required forced local retirement after process-group absence"
+    if marker not in state.stream_errors:
+        state.stream_errors.append(marker)
+        state.violation.set()
+
+_CONSTRUCTED_CODEX_ADAPTERS: weakref.WeakSet["CodexWorkerAdapter"] = weakref.WeakSet()
+
+
 class CodexWorkerAdapter:
     """One-host, one-shot Codex process adapter with no queue/runtime authority."""
+
+    adapter_id = "codex-cli"
 
     def __init__(
         self,
@@ -1848,6 +2242,8 @@ class CodexWorkerAdapter:
         allowed_versions: frozenset[str] | None = None,
         required_team_identifier: str | None = _OPENAI_TEAM_IDENTIFIER,
         inspector: ProcessInspector | None = None,
+        provider_realm: Any | None = None,
+        provider_credential_loader: Any | None = None,
     ) -> None:
         path = Path(binary_path)
         if not path.is_absolute():
@@ -1867,8 +2263,17 @@ class CodexWorkerAdapter:
         ):
             raise BinaryAttestationError("injected Codex signer is not allowlisted")
         self._codex_home = Path(codex_home) if codex_home is not None else None
+        self.provider_realm = provider_realm
+        self.provider_credential_loader = provider_credential_loader
+        if (provider_realm is None) != (provider_credential_loader is None):
+            from control_plane.codex_provider_realm import ProviderRealmError
+
+            raise ProviderRealmError(
+                "provider realm and credential loader must be configured together"
+            )
         self.inspector = inspector or ProcessInspector()
         self._runs: dict[str, _RunState] = {}
+        _CONSTRUCTED_CODEX_ADAPTERS.add(self)
 
     @property
     def codex_home(self) -> Path:
@@ -1876,10 +2281,17 @@ class CodexWorkerAdapter:
             raise LaunchValidationError("Codex home is not configured")
         return self._codex_home
 
+    def _validated_codex_home_directory(self) -> Path:
+        """Re-open the private provider-home directory without reading auth."""
+
+        return _validate_codex_home_directory(self.codex_home)
+
     def _validated_codex_home(self) -> Path:
         """Re-open the adapter-private provider home at each execution edge."""
 
-        return _validate_codex_home(self.codex_home)
+        if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
+            return _validate_codex_home(self.codex_home)
+        return self._validated_codex_home_directory()
 
     def _bind_legacy_codex_home(self, _codex_home: str | os.PathLike[str]) -> None:
         """Reject every attempt to inject a second provider-home authority."""
@@ -1970,10 +2382,10 @@ class CodexWorkerAdapter:
                 raise LaunchValidationError("configured worker account does not exist") from exc
             if worker_account.pw_uid != expected_uid or worker_account.pw_gid != expected_gid:
                 raise LaunchValidationError("configured worker account UID/GID does not match")
-            for label, protected_path in (
-                ("provider home", codex_home),
-                ("provider auth", codex_home / "auth.json"),
-            ):
+            protected_paths = [("provider home", codex_home)]
+            if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
+                protected_paths.append(("provider auth", codex_home / "auth.json"))
+            for label, protected_path in protected_paths:
                 if protected_path.lstat().st_uid != expected_uid:
                     raise LaunchValidationError(
                         f"{label} is not owned by the configured worker principal"
@@ -2411,14 +2823,18 @@ class CodexWorkerAdapter:
                 codex_home=codex_home,
             )
         )
+        if self.provider_realm is not None:
+            for override in self.provider_realm.config_overrides():
+                argv.extend(["-c", override])
         for feature in _DISABLED_FEATURES:
             argv.extend(["--disable", feature])
         argv.append("-")
         return argv
 
-    @staticmethod
-    def _environment(spec: LaunchSpec, home: Path, tmp: Path, codex_home: Path) -> dict[str, str]:
-        return {
+    def _environment(
+        self, spec: LaunchSpec, home: Path, tmp: Path, codex_home: Path
+    ) -> dict[str, str]:
+        environment = {
             "HOME": str(home),
             "USER": spec.worker_user,
             "LOGNAME": spec.worker_user,
@@ -2436,6 +2852,17 @@ class CodexWorkerAdapter:
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_OPTIONAL_LOCKS": "0",
         }
+        if self.provider_realm is not None:
+            loader = self.provider_credential_loader
+            if loader is None:
+                raise LaunchValidationError("provider credential loader is unavailable")
+            try:
+                credential = loader()
+                credential = self.provider_realm.validate_credential(credential)
+            except Exception:
+                raise LaunchValidationError("provider credential is unavailable") from None
+            environment[self.provider_realm.env_key] = credential
+        return environment
 
     @staticmethod
     def _validation_environment(spec: LaunchSpec, home: Path, tmp: Path) -> dict[str, str]:
@@ -2463,51 +2890,122 @@ class CodexWorkerAdapter:
         self,
         process: asyncio.subprocess.Process,
         wait_task: asyncio.Task[int],
+        finalization: _ProcessFinalizationState,
         *,
         pid: int,
         pgid: int,
         start_identity: str,
         boot_id: str,
         grace_seconds: float,
-    ) -> None:
-        if not wait_task.done():
+    ) -> bool:
+        if finalization.group_proven_absent:
+            await _retire_transport_and_release_wait(
+                finalization, wait_task, label="validation"
+            )
+            return True
+
+        leader_exited = process.returncode is not None or wait_task.done()
+        if leader_exited:
+            if self.inspector.boot_session_id() != boot_id:
+                raise ProcessIdentityError("validation process boot identity changed")
+            try:
+                identity, observed_pgid = self.inspector.identity(pid)
+            except ProcessIdentityError:
+                if not _process_group_exists(pgid):
+                    _latch_process_group_absence(
+                        finalization, label="validation"
+                    )
+                    await _retire_transport_and_release_wait(
+                        finalization, wait_task, label="validation"
+                    )
+                    return True
+            else:
+                if identity != start_identity or observed_pgid != pgid:
+                    raise ProcessIdentityError("validation process identity changed")
+                raise ProcessIdentityError(
+                    "validation process leader remained resolvable after recorded exit"
+                )
+
+        if not leader_exited and not finalization.signal_sent:
             if self.inspector.boot_session_id() != boot_id:
                 raise ProcessIdentityError("validation process boot identity changed")
             identity, observed_pgid = self.inspector.identity(pid)
             if identity != start_identity or observed_pgid != pgid:
                 raise ProcessIdentityError("validation process identity changed")
+            if _signal_process_group_once(
+                pgid,
+                signal.SIGTERM,
+                finalization=finalization,
+                label="validation process",
+            ):
+                finalization.signal_sent = True
+
+        if not leader_exited:
             try:
-                os.killpg(pgid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                await asyncio.wait_for(asyncio.shield(wait_task), timeout=grace_seconds)
+                await asyncio.wait_for(
+                    asyncio.shield(wait_task), timeout=grace_seconds
+                )
+                leader_exited = True
             except asyncio.TimeoutError:
-                if not wait_task.done():
-                    if self.inspector.boot_session_id() != boot_id:
-                        raise ProcessIdentityError(
-                            "validation process boot identity changed before SIGKILL"
-                        )
-                    try:
-                        identity, observed_pgid = self.inspector.identity(pid)
-                    except ProcessIdentityError:
-                        if not _process_group_exists(pgid):
-                            raise ProcessIdentityError(
-                                "validation leader disappeared with no residual group"
-                            )
-                    else:
-                        if identity != start_identity or observed_pgid != pgid:
-                            raise ProcessIdentityError(
-                                "validation process identity changed before SIGKILL"
-                            )
-        if _process_group_exists(pgid):
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except ProcessLookupError:
                 pass
-        await wait_task
-        if not await _wait_for_process_group_exit(pgid):
-            raise ProcessIdentityError("validation process group survived SIGKILL")
+
+        leader_exited = leader_exited or process.returncode is not None or wait_task.done()
+        if self.inspector.boot_session_id() != boot_id:
+            raise ProcessIdentityError(
+                "validation process boot identity changed before final settlement"
+            )
+        try:
+            identity, observed_pgid = self.inspector.identity(pid)
+        except ProcessIdentityError:
+            group_exists = _process_group_exists(pgid)
+            if not group_exists:
+                _latch_process_group_absence(finalization, label="validation")
+                await _retire_transport_and_release_wait(
+                    finalization, wait_task, label="validation"
+                )
+                return True
+        else:
+            if identity != start_identity or observed_pgid != pgid:
+                raise ProcessIdentityError(
+                    "validation process identity changed before final settlement"
+                )
+            if leader_exited:
+                raise ProcessIdentityError(
+                    "validation process leader remained resolvable after recorded exit"
+                )
+            group_exists = _process_group_exists(pgid)
+
+        if group_exists:
+            if not finalization.sigkill_sent:
+                if _signal_process_group_once(
+                    pgid,
+                    signal.SIGKILL,
+                    finalization=finalization,
+                    label="validation process",
+                ):
+                    finalization.signal_sent = True
+                    finalization.sigkill_sent = True
+                else:
+                    group_exists = False
+            if group_exists and not wait_task.done():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(wait_task),
+                        timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+            if group_exists and not await _wait_for_process_group_exit(pgid):
+                raise ProcessIdentityError(
+                    "validation process group survived SIGKILL"
+                )
+
+        _latch_process_group_absence(finalization, label="validation")
+        await _retire_transport_and_release_wait(
+            finalization, wait_task, label="validation"
+        )
+        return True
+
 
     async def run_validation_argv(
         self,
@@ -2542,7 +3040,7 @@ class CodexWorkerAdapter:
         if not 0.1 <= timeout <= 3600:
             raise LaunchValidationError("validation timeout is out of bounds")
 
-        codex_home = self._validated_codex_home()
+        codex_home = self._validated_codex_home_directory()
         _authority_set(spec)
         workspace_lexical = Path(spec.workspace_path)
         if not workspace_lexical.is_absolute():
@@ -2604,12 +3102,19 @@ class CodexWorkerAdapter:
             limit=128 * 1024,
         )
         if process.stdout is None or process.stderr is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            raise CodexWorkerError("validation process pipes were not created")
+            await _raise_after_unpublished_process_failure(
+                process,
+                CodexWorkerError("validation process pipes were not created"),
+                label="unpublished validation launch",
+            )
+        try:
+            finalization = _capture_process_finalization(process)
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                label="unpublished validation launch",
+            )
         try:
             start_identity, pgid = self.inspector.identity(process.pid)
             boot_id = self.inspector.boot_session_id()
@@ -2617,13 +3122,12 @@ class CodexWorkerAdapter:
                 raise ProcessIdentityError(
                     "validation process did not become its own process group"
                 )
-        except Exception:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            raise
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                label="unpublished validation launch",
+            )
 
         output_exceeded = asyncio.Event()
         wait_task = asyncio.create_task(process.wait())
@@ -2642,11 +3146,12 @@ class CodexWorkerAdapter:
             )
         )
         exceeded_task = asyncio.create_task(output_exceeded.wait())
+        returncode_task = asyncio.create_task(_wait_for_known_returncode(process))
         timed_out = False
         error: str | None = None
         try:
             done, _ = await asyncio.wait(
-                {wait_task, exceeded_task},
+                {wait_task, exceeded_task, returncode_task},
                 timeout=timeout,
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -2656,6 +3161,7 @@ class CodexWorkerAdapter:
                 await self._terminate_validation_process(
                     process,
                     wait_task,
+                    finalization,
                     pid=process.pid,
                     pgid=pgid,
                     start_identity=start_identity,
@@ -2667,40 +3173,167 @@ class CodexWorkerAdapter:
                 await self._terminate_validation_process(
                     process,
                     wait_task,
+                    finalization,
                     pid=process.pid,
                     pgid=pgid,
                     start_identity=start_identity,
                     boot_id=boot_id,
                     grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
                 )
-            await wait_task
-            if _process_group_exists(pgid):
-                os.killpg(pgid, signal.SIGKILL)
-                if not await _wait_for_process_group_exit(pgid):
-                    raise ProcessIdentityError(
-                        "validation left a live descendant process group"
+            elif returncode_task in done and not wait_task.done():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(wait_task),
+                        timeout=_LOCAL_STREAM_DRAIN_SECONDS,
                     )
-                error = error or "validation left live descendants"
-        except asyncio.CancelledError:
-            await asyncio.shield(
-                self._terminate_validation_process(
+                except asyncio.TimeoutError:
+                    await self._terminate_validation_process(
+                        process,
+                        wait_task,
+                        finalization,
+                        pid=process.pid,
+                        pgid=pgid,
+                        start_identity=start_identity,
+                        boot_id=boot_id,
+                        grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
+                    )
+                    error = error or "validation required forced local stream finalization"
+            if wait_task.done() and error is None:
+                await _tasks_finish_within(
+                    (stdout_task, stderr_task),
+                    timeout=_LOCAL_STREAM_DRAIN_SECONDS,
+                )
+            streams_pending = not stdout_task.done() or not stderr_task.done()
+            if wait_task.done() and streams_pending and not finalization.group_proven_absent:
+                await self._terminate_validation_process(
                     process,
                     wait_task,
+                    finalization,
                     pid=process.pid,
                     pgid=pgid,
                     start_identity=start_identity,
                     boot_id=boot_id,
                     grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
                 )
+                error = error or "validation required forced local stream finalization"
+
+            if not finalization.group_proven_absent:
+                await wait_task
+                if self.inspector.boot_session_id() != boot_id:
+                    raise ProcessIdentityError(
+                        "validation process boot identity changed after exit"
+                    )
+                try:
+                    identity, observed_pgid = self.inspector.identity(process.pid)
+                except ProcessIdentityError:
+                    group_exists = _process_group_exists(pgid)
+                else:
+                    if identity != start_identity or observed_pgid != pgid:
+                        raise ProcessIdentityError(
+                            "validation process identity changed after exit"
+                        )
+                    raise ProcessIdentityError(
+                        "validation process leader remained resolvable after recorded exit"
+                    )
+                if group_exists:
+                    if _signal_process_group_once(
+                        pgid,
+                        signal.SIGKILL,
+                        finalization=finalization,
+                        label="validation process",
+                    ):
+                        finalization.signal_sent = True
+                        finalization.sigkill_sent = True
+                    else:
+                        group_exists = False
+                    if group_exists and not await _wait_for_process_group_exit(pgid):
+                        raise ProcessIdentityError(
+                            "validation left a live descendant process group"
+                        )
+                    error = error or "validation left live descendants"
+                _latch_process_group_absence(finalization, label="validation")
+
+            if finalization.forced_retirement:
+                await _bounded_task_convergence(
+                    (stdout_task, stderr_task),
+                    label="validation stream finalization",
+                )
+                error = error or "validation required forced local stream finalization"
+        except ProcessIdentityError as exc:
+            settlement = await _settle_or_cancel_owned_tasks(
+                (wait_task, stdout_task, stderr_task),
+                timeout=_LOCAL_STREAM_DRAIN_SECONDS,
             )
-            await asyncio.shield(
-                asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-            )
+            for error in settlement.errors:
+                exc.add_note(error)
+            if not settlement.converged:
+                exc.add_note("validation owned tasks did not converge")
             raise
+        except asyncio.CancelledError as cancellation:
+            async def finish_cancellation_cleanup() -> tuple[
+                ProcessIdentityError | None, _OwnedTaskSettlement
+            ]:
+                cleanup_error: ProcessIdentityError | None = None
+                try:
+                    await self._terminate_validation_process(
+                        process,
+                        wait_task,
+                        finalization,
+                        pid=process.pid,
+                        pgid=pgid,
+                        start_identity=start_identity,
+                        boot_id=boot_id,
+                        grace_seconds=min(float(spec.cancel_grace_seconds), 5.0),
+                    )
+                except ProcessIdentityError as exc:
+                    cleanup_error = exc
+                settlement = await _settle_or_cancel_owned_tasks(
+                    (wait_task, stdout_task, stderr_task),
+                    timeout=_LOCAL_STREAM_DRAIN_SECONDS,
+                )
+                return cleanup_error, settlement
+
+            cleanup_task = asyncio.create_task(finish_cancellation_cleanup())
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    # Retain the original caller cancellation, but do not let a
+                    # repeated cancellation orphan adapter-owned cleanup.
+                    continue
+                except BaseException:
+                    if not cleanup_task.done():
+                        raise
+                    break
+            try:
+                cleanup_error, settlement = cleanup_task.result()
+            except BaseException as exc:
+                cancellation.add_note(
+                    "validation cancellation cleanup failed internally: "
+                    f"{type(exc).__name__}"
+                )
+                raise cancellation from exc
+            if cleanup_error is not None:
+                cancellation.add_note(str(cleanup_error))
+            for error in settlement.errors:
+                cancellation.add_note(error)
+            if not settlement.converged:
+                cancellation.add_note("validation owned tasks did not converge")
+            if cleanup_error is not None:
+                raise cancellation from cleanup_error
+            raise cancellation
         finally:
             exceeded_task.cancel()
-            await asyncio.gather(exceeded_task, return_exceptions=True)
+            returncode_task.cancel()
+            await asyncio.gather(
+                exceeded_task, returncode_task, return_exceptions=True
+            )
 
+        if finalization.forced_retirement:
+            await _bounded_task_convergence(
+                (stdout_task, stderr_task),
+                label="validation stream finalization",
+            )
         stdout_hash, stdout_size = await stdout_task
         stderr_hash, stderr_size = await stderr_task
         if stdout_size > _MAX_VALIDATION_STDOUT_BYTES:
@@ -2762,19 +3395,26 @@ class CodexWorkerAdapter:
                 start_new_session=True,
                 limit=128 * 1024,
             )
-        except Exception:
+        except BaseException:
             os.close(stdout_fd)
             os.close(stderr_fd)
             raise
         if process.stdin is None or process.stdout is None or process.stderr is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            os.close(stdout_fd)
-            os.close(stderr_fd)
-            raise CodexWorkerError("Codex process pipes were not created")
+            await _raise_after_unpublished_process_failure(
+                process,
+                CodexWorkerError("Codex process pipes were not created"),
+                owned_fds=(stdout_fd, stderr_fd),
+                label="unpublished Codex launch",
+            )
+        try:
+            finalization = _capture_process_finalization(process)
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                owned_fds=(stdout_fd, stderr_fd),
+                label="unpublished Codex launch",
+            )
         try:
             observed_identity = self.inspector.inspect(process.pid)
             start_identity = observed_identity.start_identity
@@ -2794,101 +3434,111 @@ class CodexWorkerAdapter:
                 and observed_identity.effective_gid != int(spec.expected_worker_gid)
             ):
                 raise ProcessIdentityError("Codex process effective GID does not match worker")
-        except Exception:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            await process.wait()
-            os.close(stdout_fd)
-            os.close(stderr_fd)
-            raise
-        ref = ProcessRef(
-            run_id=spec.run_id,
-            pid=process.pid,
-            pgid=pgid,
-            process_start_identity=start_identity,
-            boot_session_id=boot_id,
-            launch_nonce=uuid4().hex,
-            provider_session_id=None,
-            stdout_path=str(stdout_path),
-            stderr_path=str(stderr_path),
-            result_path=str(result_path),
-            started_at=_utc_now(),
-            binary=self.binary,
-            base_sha=baseline.head,
-            session_id=observed_identity.session_id,
-            effective_uid=observed_identity.effective_uid,
-            effective_gid=observed_identity.effective_gid,
-            real_uid=observed_identity.real_uid,
-            real_gid=observed_identity.real_gid,
-        )
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                owned_fds=(stdout_fd, stderr_fd),
+                label="unpublished Codex launch",
+            )
+        process_wait_task: asyncio.Task[int] | None = None
         try:
-            observed_user = pwd.getpwuid(observed_identity.effective_uid).pw_name
-        except KeyError:
-            observed_user = None
-        permission_profile = {
-            "permission_overrides": self._permission_overrides(
-                spec,
-                workspace,
-                codex_home=codex_home,
-            ),
-            "isolation_manifest_sha256": spec.isolation_manifest_sha256,
-            "network_enabled": False,
-            "disabled_features": list(_DISABLED_FEATURES),
-            "shell_environment_policy": "include_only",
-        }
-        launch_attestation = LaunchAttestation(
-            schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
-            created_at=_utc_now(),
-            executable_path=self.binary.real_path,
-            binary=self.binary,
-            rendered_argv=_redact_argv(argv),
-            environment_keys=tuple(sorted(environment)),
-            permission_profile_sha256=_canonical_sha256(permission_profile),
-            prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8")).hexdigest(),
-            expected_base_sha=spec.expected_base_sha,
-            observed_base_sha=baseline.head,
-            workspace_identity={**_path_identity(workspace), "git_head": baseline.head},
-            worker_identity={
-                "requested_user": spec.worker_user,
-                "observed_user": observed_user,
-                "expected_uid": spec.expected_worker_uid,
-                "expected_gid": spec.expected_worker_gid,
-                "effective_uid": observed_identity.effective_uid,
-                "effective_gid": observed_identity.effective_gid,
-                "real_uid": observed_identity.real_uid,
-                "real_gid": observed_identity.real_gid,
-            },
-            provider_home_identity=_path_identity(codex_home),
-            secret_canary_verdict=canary_verdict,
-            launch_nonce=ref.launch_nonce,
-            process_identity={
-                "pid": ref.pid,
-                "pgid": ref.pgid,
-                "session_id": ref.session_id,
-                "start_identity": ref.process_start_identity,
-                "boot_id": ref.boot_session_id,
-                "effective_uid": ref.effective_uid,
-                "effective_gid": ref.effective_gid,
-                "real_uid": ref.real_uid,
-                "real_gid": ref.real_gid,
-            },
-        )
-        parser = _JSONLState()
-        state = _RunState(
-            spec=spec,
-            ref=ref,
-            process=process,
-            parser=parser,
-            baseline=baseline,
-            stdout_fd=stdout_fd,
-            stderr_fd=stderr_fd,
-            violation=asyncio.Event(),
-            process_wait_task=asyncio.create_task(process.wait()),
-            launch_attestation=launch_attestation,
-            status=WorkerRunStatus.RUNNING,
-        )
+            ref = ProcessRef(
+                run_id=spec.run_id,
+                pid=process.pid,
+                pgid=pgid,
+                process_start_identity=start_identity,
+                boot_session_id=boot_id,
+                launch_nonce=uuid4().hex,
+                provider_session_id=None,
+                stdout_path=str(stdout_path),
+                stderr_path=str(stderr_path),
+                result_path=str(result_path),
+                started_at=_utc_now(),
+                binary=self.binary,
+                base_sha=baseline.head,
+                session_id=observed_identity.session_id,
+                effective_uid=observed_identity.effective_uid,
+                effective_gid=observed_identity.effective_gid,
+                real_uid=observed_identity.real_uid,
+                real_gid=observed_identity.real_gid,
+            )
+            try:
+                observed_user = pwd.getpwuid(observed_identity.effective_uid).pw_name
+            except KeyError:
+                observed_user = None
+            permission_profile = {
+                "permission_overrides": self._permission_overrides(
+                    spec,
+                    workspace,
+                    codex_home=codex_home,
+                ),
+                "isolation_manifest_sha256": spec.isolation_manifest_sha256,
+                "network_enabled": False,
+                "disabled_features": list(_DISABLED_FEATURES),
+                "shell_environment_policy": "include_only",
+            }
+            launch_attestation = LaunchAttestation(
+                schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
+                created_at=_utc_now(),
+                executable_path=self.binary.real_path,
+                binary=self.binary,
+                rendered_argv=_redact_argv(argv),
+                environment_keys=tuple(sorted(environment)),
+                permission_profile_sha256=_canonical_sha256(permission_profile),
+                prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8")).hexdigest(),
+                expected_base_sha=spec.expected_base_sha,
+                observed_base_sha=baseline.head,
+                workspace_identity={**_path_identity(workspace), "git_head": baseline.head},
+                worker_identity={
+                    "requested_user": spec.worker_user,
+                    "observed_user": observed_user,
+                    "expected_uid": spec.expected_worker_uid,
+                    "expected_gid": spec.expected_worker_gid,
+                    "effective_uid": observed_identity.effective_uid,
+                    "effective_gid": observed_identity.effective_gid,
+                    "real_uid": observed_identity.real_uid,
+                    "real_gid": observed_identity.real_gid,
+                },
+                provider_home_identity=_path_identity(codex_home),
+                secret_canary_verdict=canary_verdict,
+                launch_nonce=ref.launch_nonce,
+                process_identity={
+                    "pid": ref.pid,
+                    "pgid": ref.pgid,
+                    "session_id": ref.session_id,
+                    "start_identity": ref.process_start_identity,
+                    "boot_id": ref.boot_session_id,
+                    "effective_uid": ref.effective_uid,
+                    "effective_gid": ref.effective_gid,
+                    "real_uid": ref.real_uid,
+                    "real_gid": ref.real_gid,
+                },
+            )
+            parser = _JSONLState()
+            process_wait_task = asyncio.create_task(process.wait())
+            state = _RunState(
+                spec=spec,
+                ref=ref,
+                process=process,
+                parser=parser,
+                baseline=baseline,
+                stdout_fd=stdout_fd,
+                stderr_fd=stderr_fd,
+                violation=asyncio.Event(),
+                process_wait_task=process_wait_task,
+                launch_attestation=launch_attestation,
+                finalization=finalization,
+                status=WorkerRunStatus.RUNNING,
+            )
+        except BaseException as exc:
+            await _raise_after_unpublished_process_failure(
+                process,
+                exc,
+                wait_task=process_wait_task,
+                owned_fds=(stdout_fd, stderr_fd),
+                label="unpublished Codex launch",
+            )
         self._runs[spec.run_id] = state
         state.stdout_task = asyncio.create_task(_pump_stream(
             process.stdout,
@@ -2939,89 +3589,238 @@ class CodexWorkerAdapter:
             return False
         return identity == ref.process_start_identity and pgid == ref.pgid
 
-    async def _kill_residual_process_group(self, state: _RunState) -> bool:
+    async def _kill_residual_process_group(
+        self,
+        state: _RunState,
+        *,
+        latch_absence: bool = False,
+    ) -> bool:
         """Kill descendants that outlive the already-reaped group leader."""
 
-        if not _process_group_exists(state.ref.pgid):
+        finalization = state.finalization
+        if finalization.group_proven_absent:
             return False
+        if self.inspector.boot_session_id() != state.ref.boot_session_id:
+            finalization.error = "process boot identity changed after exit"
+            raise ProcessIdentityError(finalization.error)
         try:
-            os.killpg(state.ref.pgid, signal.SIGKILL)
-        except ProcessLookupError:
+            identity, observed_pgid = self.inspector.identity(state.ref.pid)
+        except ProcessIdentityError:
+            pass
+        else:
+            if (
+                identity != state.ref.process_start_identity
+                or observed_pgid != state.ref.pgid
+            ):
+                finalization.error = "process identity changed after exit"
+            else:
+                finalization.error = "process leader remained resolvable after recorded exit"
+            raise ProcessIdentityError(finalization.error)
+        if not _process_group_exists(state.ref.pgid):
+            if latch_absence:
+                _latch_process_group_absence(finalization, label="worker")
+            return False
+        if not _signal_process_group_once(
+            state.ref.pgid,
+            signal.SIGKILL,
+            finalization=finalization,
+            label="worker process",
+        ):
+            if latch_absence:
+                _latch_process_group_absence(finalization, label="worker")
             return False
         state.escalated = True
+        finalization.signal_sent = True
+        finalization.sigkill_sent = True
         if not await _wait_for_process_group_exit(state.ref.pgid):
             raise ProcessIdentityError(
                 f"process group {state.ref.pgid} survived SIGKILL"
             )
+        if latch_absence:
+            _latch_process_group_absence(finalization, label="worker")
         return True
 
     async def _terminate(self, state: _RunState) -> tuple[bool, bool, bool]:
         async with state.termination_lock:
-            leader_already_exited = state.process_wait_task.done()
-            sent = False
-            escalated = False
-            if not leader_already_exited:
+            finalization = state.finalization
+            if finalization.error is not None:
+                raise ProcessIdentityError(finalization.error)
+            if finalization.group_proven_absent:
+                if finalization.error is not None:
+                    raise ProcessIdentityError(finalization.error)
+                if (
+                    not finalization.transport_close_completed
+                    and (
+                        not state.process_wait_task.done()
+                        or state.stdout_task is not None
+                        and not state.stdout_task.done()
+                        or state.stderr_task is not None
+                        and not state.stderr_task.done()
+                    )
+                ):
+                    await _retire_transport_and_release_wait(
+                        finalization, state.process_wait_task, label="worker"
+                    )
+                _record_worker_forced_retirement(state)
+                return (
+                    finalization.signal_sent,
+                    finalization.sigkill_sent,
+                    not finalization.signal_sent,
+                )
+
+            leader_exited = (
+                state.process.returncode is not None
+                or state.process_wait_task.done()
+            )
+            if leader_exited:
+                if self.inspector.boot_session_id() != state.ref.boot_session_id:
+                    raise ProcessIdentityError(
+                        "process boot identity changed after exit"
+                    )
+                try:
+                    identity, observed_pgid = self.inspector.identity(state.ref.pid)
+                except ProcessIdentityError:
+                    if not _process_group_exists(state.ref.pgid):
+                        _latch_process_group_absence(
+                            finalization, label="worker"
+                        )
+                        await _retire_transport_and_release_wait(
+                            finalization,
+                            state.process_wait_task,
+                            label="worker",
+                        )
+                        _record_worker_forced_retirement(state)
+                        return False, False, True
+                else:
+                    if (
+                        identity != state.ref.process_start_identity
+                        or observed_pgid != state.ref.pgid
+                    ):
+                        raise ProcessIdentityError(
+                            "refusing to signal a process whose identity changed"
+                        )
+                    raise ProcessIdentityError(
+                        "process leader remained resolvable after recorded exit"
+                    )
+            if not leader_exited and not finalization.signal_sent:
                 if not self._identity_matches(state.ref):
                     raise ProcessIdentityError(
                         "refusing to signal a process whose identity changed"
                     )
-                try:
-                    os.killpg(state.ref.pgid, signal.SIGTERM)
-                    sent = True
-                except ProcessLookupError:
-                    pass
+                if _signal_process_group_once(
+                    state.ref.pgid,
+                    signal.SIGTERM,
+                    finalization=finalization,
+                    label="worker process",
+                ):
+                    finalization.signal_sent = True
+
+            if not leader_exited:
                 try:
                     await asyncio.wait_for(
                         asyncio.shield(state.process_wait_task),
                         timeout=float(state.spec.cancel_grace_seconds),
                     )
+                    leader_exited = True
                 except asyncio.TimeoutError:
-                    # A descendant can keep the transport pipes open after the
-                    # group leader has obeyed SIGTERM.  In that case the
-                    # asyncio wait task is still pending even though proc_pidinfo
-                    # can no longer resolve the leader.  A nonempty group keeps
-                    # its PGID allocated, so killing that residual group is safe;
-                    # a *live* leader must still match the persisted identity.
-                    if self.inspector.boot_session_id() != state.ref.boot_session_id:
-                        raise ProcessIdentityError(
-                            "process boot identity changed before SIGKILL escalation"
-                        )
-                    try:
-                        identity, observed_pgid = self.inspector.identity(state.ref.pid)
-                    except ProcessIdentityError:
-                        if not _process_group_exists(state.ref.pgid):
-                            raise ProcessIdentityError(
-                                "process leader disappeared with no residual group"
-                            )
-                    else:
-                        if (
-                            identity != state.ref.process_start_identity
-                            or observed_pgid != state.ref.pgid
-                        ):
-                            raise ProcessIdentityError(
-                                "process identity changed before SIGKILL escalation"
-                            )
-                    try:
-                        os.killpg(state.ref.pgid, signal.SIGKILL)
-                        sent = True
-                    except ProcessLookupError:
-                        pass
-                    escalated = True
-                    state.escalated = True
-                    await state.process_wait_task
+                    pass
 
-            await state.process_wait_task
-            residual_killed = await self._kill_residual_process_group(state)
-            if residual_killed:
-                sent = True
-                escalated = True
-            return sent, escalated, leader_already_exited and not residual_killed
+            leader_exited = (
+                leader_exited
+                or state.process.returncode is not None
+                or state.process_wait_task.done()
+            )
+            if self.inspector.boot_session_id() != state.ref.boot_session_id:
+                raise ProcessIdentityError(
+                    "process boot identity changed before final settlement"
+                )
+            try:
+                identity, observed_pgid = self.inspector.identity(state.ref.pid)
+            except ProcessIdentityError:
+                group_exists = _process_group_exists(state.ref.pgid)
+                if not group_exists:
+                    _latch_process_group_absence(
+                        finalization, label="worker"
+                    )
+                    await _retire_transport_and_release_wait(
+                        finalization,
+                        state.process_wait_task,
+                        label="worker",
+                    )
+                    _record_worker_forced_retirement(state)
+                    return (
+                        finalization.signal_sent,
+                        finalization.sigkill_sent,
+                        not finalization.signal_sent,
+                    )
+            else:
+                if (
+                    identity != state.ref.process_start_identity
+                    or observed_pgid != state.ref.pgid
+                ):
+                    raise ProcessIdentityError(
+                        "process identity changed before final settlement"
+                    )
+                if leader_exited:
+                    raise ProcessIdentityError(
+                        "process leader remained resolvable after recorded exit"
+                    )
+                group_exists = _process_group_exists(state.ref.pgid)
+
+            if group_exists:
+                if not finalization.sigkill_sent:
+                    if _signal_process_group_once(
+                        state.ref.pgid,
+                        signal.SIGKILL,
+                        finalization=finalization,
+                        label="worker process",
+                    ):
+                        finalization.signal_sent = True
+                        finalization.sigkill_sent = True
+                        state.escalated = True
+                    else:
+                        group_exists = False
+                if group_exists and not state.process_wait_task.done():
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(state.process_wait_task),
+                            timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+                if group_exists and not await _wait_for_process_group_exit(
+                    state.ref.pgid
+                ):
+                    raise ProcessIdentityError(
+                        f"process group {state.ref.pgid} survived SIGKILL"
+                    )
+
+            _latch_process_group_absence(finalization, label="worker")
+            if (
+                not state.process_wait_task.done()
+                or state.stdout_task is not None and not state.stdout_task.done()
+                or state.stderr_task is not None and not state.stderr_task.done()
+            ):
+                await _retire_transport_and_release_wait(
+                    finalization,
+                    state.process_wait_task,
+                    label="worker",
+                )
+                _record_worker_forced_retirement(state)
+            return (
+                finalization.signal_sent,
+                finalization.sigkill_sent,
+                not finalization.signal_sent,
+            )
+
 
     async def _monitor(self, state: _RunState) -> None:
         violation_task = asyncio.create_task(state.violation.wait())
+        returncode_task = asyncio.create_task(_wait_for_known_returncode(state.process))
+        termination_failed = False
         try:
             done, _pending = await asyncio.wait(
-                {state.process_wait_task, violation_task},
+                {state.process_wait_task, violation_task, returncode_task},
                 timeout=float(state.spec.timeout_seconds),
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -3030,25 +3829,159 @@ class CodexWorkerAdapter:
                 try:
                     await self._terminate(state)
                 except ProcessIdentityError as exc:
-                    state.stream_errors.append(str(exc))
+                    message = str(exc)[:3000]
+                    if message not in state.stream_errors:
+                        state.stream_errors.append(message)
+                    if state.finalization.error is None:
+                        state.finalization.error = message
+                    termination_failed = True
             elif violation_task in done and state.violation.is_set() and not state.process_wait_task.done():
                 try:
                     await self._terminate(state)
                 except ProcessIdentityError as exc:
-                    state.stream_errors.append(str(exc))
-            await state.process_wait_task
-            async with state.termination_lock:
-                residual_killed = await self._kill_residual_process_group(state)
-            if residual_killed:
-                state.stream_errors.append(
-                    "provider process left live descendants after its leader exited"
+                    message = str(exc)[:3000]
+                    if message not in state.stream_errors:
+                        state.stream_errors.append(message)
+                    if state.finalization.error is None:
+                        state.finalization.error = message
+                    termination_failed = True
+            elif returncode_task in done and not state.process_wait_task.done():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(state.process_wait_task),
+                        timeout=_LOCAL_STREAM_DRAIN_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    try:
+                        await self._terminate(state)
+                    except ProcessIdentityError as exc:
+                        message = str(exc)[:3000]
+                        if message not in state.stream_errors:
+                            state.stream_errors.append(message)
+                        if state.finalization.error is None:
+                            state.finalization.error = message
+                        termination_failed = True
+
+            if termination_failed and not state.finalization.group_proven_absent:
+                settlement = await _settle_or_cancel_owned_tasks(
+                    (
+                        state.process_wait_task,
+                        state.stdout_task,
+                        state.stderr_task,
+                    )
                 )
-                state.violation.set()
+                if not settlement.converged:
+                    marker = (
+                        "worker pre-latch identity failure required bounded "
+                        "local task cancellation"
+                    )
+                    if marker not in state.stream_errors:
+                        state.stream_errors.append(marker)
+                for error in settlement.errors:
+                    marker = f"worker local task settlement: {error}"
+                    if marker not in state.stream_errors:
+                        state.stream_errors.append(marker)
+                return
+
+            if not (termination_failed and state.finalization.group_proven_absent):
+                await state.process_wait_task
+
+            tasks = [
+                task for task in (state.stdout_task, state.stderr_task)
+                if task is not None
+            ]
+            if state.finalization.group_proven_absent:
+                if any(not task.done() for task in tasks):
+                    try:
+                        _retire_process_transport(state.finalization, label="worker")
+                        _record_worker_forced_retirement(state)
+                    except ProcessIdentityError as exc:
+                        state.stream_errors.append(str(exc))
+                try:
+                    await _bounded_task_convergence(
+                        tasks, label="worker stream finalization"
+                    )
+                except ProcessIdentityError as exc:
+                    state.stream_errors.append(str(exc))
+            elif not termination_failed:
+                pending_streams = [task for task in tasks if not task.done()]
+                if pending_streams:
+                    done_streams, pending_streams_set = await asyncio.wait(
+                        pending_streams,
+                        timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+                    )
+                    pending_streams = list(pending_streams_set)
+                if pending_streams:
+                    if self.inspector.boot_session_id() != state.ref.boot_session_id:
+                        state.stream_errors.append(
+                            "process boot identity changed during local stream finalization"
+                        )
+                    else:
+                        async with state.termination_lock:
+                            try:
+                                residual_killed = await self._kill_residual_process_group(
+                                    state, latch_absence=True
+                                )
+                            except ProcessIdentityError as exc:
+                                state.stream_errors.append(str(exc))
+                                termination_failed = True
+                            else:
+                                if residual_killed:
+                                    state.stream_errors.append(
+                                        "provider process left live descendants after its leader exited"
+                                    )
+                                    state.violation.set()
+                            if state.finalization.group_proven_absent:
+                                try:
+                                    _retire_process_transport(
+                                        state.finalization, label="worker"
+                                    )
+                                    _record_worker_forced_retirement(state)
+                                except ProcessIdentityError as exc:
+                                    state.stream_errors.append(str(exc))
+                        if state.finalization.group_proven_absent:
+                            try:
+                                await _bounded_task_convergence(
+                                    tasks, label="worker stream finalization"
+                                )
+                            except ProcessIdentityError as exc:
+                                state.stream_errors.append(str(exc))
+                else:
+                    async with state.termination_lock:
+                        try:
+                            residual_killed = await self._kill_residual_process_group(
+                                state, latch_absence=True
+                            )
+                        except ProcessIdentityError as exc:
+                            state.stream_errors.append(str(exc))
+                            termination_failed = True
+                        else:
+                            if residual_killed:
+                                state.stream_errors.append(
+                                    "provider process left live descendants after its leader exited"
+                                )
+                                state.violation.set()
         finally:
             violation_task.cancel()
-            await asyncio.gather(violation_task, return_exceptions=True)
-            tasks = [task for task in (state.stdout_task, state.stderr_task) if task is not None]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            returncode_task.cancel()
+            await asyncio.gather(
+                violation_task, returncode_task, return_exceptions=True
+            )
+            tasks = [
+                task for task in (state.stdout_task, state.stderr_task)
+                if task is not None
+            ]
+            if state.finalization.group_proven_absent or state.finalization.error is not None:
+                try:
+                    await _bounded_task_convergence(
+                        tasks, label="worker terminal stream cleanup"
+                    )
+                except ProcessIdentityError as exc:
+                    message = str(exc)
+                    if message not in state.stream_errors:
+                        state.stream_errors.append(message)
+            else:
+                await asyncio.gather(*tasks, return_exceptions=True)
             state.finished_at = _utc_now()
 
     async def status(self, ref: ProcessRef) -> WorkerRunStatus:
@@ -3068,17 +4001,74 @@ class CodexWorkerAdapter:
             raise LaunchValidationError("cancellation reason is required")
         state.cancel_reason = reason[:1000]
         state.status = WorkerRunStatus.CANCELLING
-        sent, escalated, already_exited = await self._terminate(state)
-        if state.monitor_task is not None:
-            await state.monitor_task
-        return CancelReceipt(
-            run_id=ref.run_id,
-            reason=state.cancel_reason,
-            signal_sent=sent,
-            escalated_to_sigkill=escalated,
-            already_exited=already_exited,
-            finished_at=state.finished_at or _utc_now(),
-        )
+
+        async def finish_cancellation_transaction() -> CancelReceipt:
+            try:
+                sent, escalated, already_exited = await self._terminate(state)
+            except ProcessIdentityError as exc:
+                if state.finalization.error is not None:
+                    monitor_task = state.monitor_task
+                    if monitor_task is not None and not monitor_task.done():
+                        monitor_task.cancel()
+                    settlement = await _settle_or_cancel_owned_tasks(
+                        (
+                            state.process_wait_task,
+                            state.stdout_task,
+                            state.stderr_task,
+                        ),
+                        timeout=_LOCAL_STREAM_DRAIN_SECONDS,
+                    )
+                    for error in settlement.errors:
+                        exc.add_note(error)
+                        marker = f"worker local task settlement: {error}"
+                        if marker not in state.stream_errors:
+                            state.stream_errors.append(marker)
+                    if not settlement.converged:
+                        exc.add_note("worker owned tasks did not converge")
+                    if monitor_task is not None:
+                        await asyncio.gather(monitor_task, return_exceptions=True)
+                    if state.finished_at is None:
+                        state.finished_at = _utc_now()
+                raise
+            if state.monitor_task is not None:
+                await state.monitor_task
+            return CancelReceipt(
+                run_id=ref.run_id,
+                reason=state.cancel_reason,
+                signal_sent=sent,
+                escalated_to_sigkill=escalated,
+                already_exited=already_exited,
+                finished_at=state.finished_at or _utc_now(),
+            )
+
+        cancellation_task = asyncio.create_task(finish_cancellation_transaction())
+        pending_cancellation: asyncio.CancelledError | None = None
+        while not cancellation_task.done():
+            try:
+                await asyncio.shield(cancellation_task)
+            except asyncio.CancelledError as exc:
+                if pending_cancellation is None:
+                    pending_cancellation = exc
+            except BaseException:
+                if not cancellation_task.done():
+                    raise
+                break
+        try:
+            receipt = cancellation_task.result()
+        except BaseException as exc:
+            if pending_cancellation is not None:
+                if isinstance(exc, ProcessIdentityError):
+                    pending_cancellation.add_note(str(exc))
+                else:
+                    pending_cancellation.add_note(
+                        "worker cancellation transaction failed internally: "
+                        f"{type(exc).__name__}"
+                    )
+                raise pending_cancellation from exc
+            raise
+        if pending_cancellation is not None:
+            raise pending_cancellation
+        return receipt
 
     def _validate_process_ref_after_exit(self, state: _RunState) -> None:
         # Once reaped, proc_pidinfo should no longer resolve the exact identity.
@@ -3230,7 +4220,8 @@ class CodexWorkerAdapter:
         error: str | None = None
         git_after: _GitSnapshot | None = None
         try:
-            self._validate_process_ref_after_exit(state)
+            if not state.finalization.group_proven_absent:
+                self._validate_process_ref_after_exit(state)
             if state.cancel_reason:
                 status_value = WorkerRunStatus.CANCELLED
                 error = f"cancelled: {state.cancel_reason}"

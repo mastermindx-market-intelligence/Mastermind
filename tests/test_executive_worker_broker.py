@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import dataclasses
 import hashlib
+import inspect
 import itertools
 import json
 import os
@@ -21,15 +22,36 @@ import pytest
 from control_plane.codex_worker import (
     BinaryAttestation,
     CancelReceipt,
+    CodexWorkerAdapter,
     CollectionReceipt,
     GitPreflightFailed,
     GitPreflightTimeout,
     LaunchValidationError,
     LaunchValidationStageError,
+    ProcessInspector,
     ProcessRef,
     ValidationReceipt,
     WorkerResult,
     WorkerRunStatus,
+)
+from control_plane.claude_subscription_worker import (
+    attest_claude_binary as attest_fixture_claude_binary,
+)
+from control_plane.codex_provider_realm import (
+    _PROVIDER_REALM_OWNER_SEAM,
+    issue_provider_realm_enrollment_receipt,
+)
+from control_plane.model_router import (
+    _CAPACITY_OWNER_SEAM,
+    export_capacity_owner_fact,
+)
+from control_plane.subscription_canary_admission import seal_subscription_canary_admission
+from control_plane.subscription_harness_bindings import DEFAULT_BINDINGS_PATH
+from control_plane.subscription_provider_profiles import DEFAULT_PROFILES_PATH
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    bind_reviewed_adapter,
+    construct_reviewed_adapter,
 )
 from control_plane.worker_execution_contract import WorkerLaunchSpec
 from control_plane.executive_worker_broker import (
@@ -50,8 +72,10 @@ from control_plane.executive_worker_broker import (
     UIDSweepReceipt,
     UID_SWEEP_SCHEMA_VERSION,
     WorkerBrokerClient,
+    WorkerBrokerError,
     _ps_pids_for_uid,
 )
+from control_plane.executive_steward import CapacityState, SourceOwner
 
 
 class FakeSweeper:
@@ -75,6 +99,8 @@ class FakeSweeper:
 
 
 class FakeAdapter:
+    adapter_id = "codex-cli"
+
     def __init__(self) -> None:
         self.spec = None
         self.ref = None
@@ -205,6 +231,47 @@ class FakeAdapter:
         )
 
 
+def _reviewed_codex_kwargs(root: Path) -> dict:
+    root.mkdir(parents=True, exist_ok=True)
+    binary = root / "fake-codex"
+    if not binary.exists():
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary.chmod(0o700)
+    info = binary.lstat()
+    attestation = BinaryAttestation(
+        path=str(binary),
+        real_path=str(binary.resolve()),
+        version="test-0",
+        sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+        team_identifier=None,
+        size=info.st_size,
+        device=info.st_dev,
+        inode=info.st_ino,
+        mode=stat.S_IMODE(info.st_mode),
+        uid=info.st_uid,
+        gid=info.st_gid,
+        mtime_ns=info.st_mtime_ns,
+    )
+    codex_home = root / "codex-home"
+    codex_home.mkdir(mode=0o700, exist_ok=True)
+    return {
+        "binary_path": binary,
+        "codex_home": codex_home,
+        "binary_attestation": attestation,
+        "allowed_versions": frozenset({"test-0"}),
+        "required_team_identifier": None,
+    }
+
+
+def _reviewed_codex_adapter(root: Path) -> CodexWorkerAdapter:
+    kwargs = _reviewed_codex_kwargs(root)
+    return construct_reviewed_adapter(  # type: ignore[return-value]
+        "codex-cli",
+        kwargs.pop("binary_path"),
+        **kwargs,
+    )
+
+
 def _fixture(tmp_path: Path):
     worker_uid = os.geteuid()
     worker_gid = os.getegid()
@@ -233,9 +300,11 @@ def _fixture(tmp_path: Path):
             set(os.getgroups()) - {worker_gid}
         ),
     )
+    reviewed = _reviewed_codex_adapter(tmp_path / "reviewed-adapter")
     adapter = FakeAdapter()
     sweeper = FakeSweeper()
-    broker = ExecutiveWorkerBroker(adapter, policy, sweeper)
+    broker = ExecutiveWorkerBroker(reviewed, policy, sweeper)
+    broker.adapter = adapter
     peer = PeerCredentials(uid=control_uid, gid=worker_gid, pid=100)
     spec = {
         "run_id": "run-1",
@@ -315,6 +384,261 @@ def _request(operation: str, payload: dict, *, suffix: str = "1") -> dict:
         "operation": operation,
         "payload": payload,
     }
+
+
+
+def _protocol_stub(adapter_id: str):
+    class _Stub:
+        async def start(self, spec):
+            return None
+
+        async def collect_result(self, ref):
+            return None
+
+        async def cancel(self, ref, reason):
+            return None
+
+        async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
+            return None
+
+        async def status(self, ref):
+            return WorkerRunStatus.RUNNING
+
+    _Stub.adapter_id = adapter_id
+    return _Stub()
+
+
+def test_broker_adapter_identity_is_fixed_and_unimplemented_ids_fail_closed(tmp_path: Path):
+    broker, adapter, sweeper, peer, spec = _fixture(tmp_path)
+    assert broker.adapter is adapter
+    assert broker.adapter_id == "codex-cli"
+    assert adapter.adapter_id == "codex-cli"
+    with pytest.raises(WorkerBrokerError, match="not implemented"):
+        ExecutiveWorkerBroker(
+            _protocol_stub("openai-compatible"),
+            broker.policy,
+            sweeper,
+            adapter_id="openai-compatible",
+        )
+
+
+def test_broker_refuses_adapter_identity_mismatch(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    with pytest.raises(WorkerBrokerError, match="does not match descriptor"):
+        ExecutiveWorkerBroker(
+            _protocol_stub("openai-compatible"),
+            broker.policy,
+            sweeper,
+            adapter_id="codex-cli",
+        )
+
+
+def test_broker_refuses_statusless_adapter(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+
+    class AdapterWithoutStatus:
+        adapter_id = "codex-cli"
+
+        async def start(self, spec):
+            return None
+
+        async def collect_result(self, ref):
+            return None
+
+        async def cancel(self, ref, reason):
+            return None
+
+        async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
+            return None
+
+    with pytest.raises(WorkerBrokerError, match="does not expose status"):
+        ExecutiveWorkerBroker(
+            AdapterWithoutStatus(), broker.policy, sweeper, adapter_id="codex-cli"
+        )
+
+
+def test_broker_refuses_caller_label_versus_object_identity(tmp_path: Path):
+    broker, adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    assert adapter.adapter_id == "codex-cli"
+    with pytest.raises(WorkerBrokerError, match="does not match descriptor"):
+        ExecutiveWorkerBroker(
+            adapter, broker.policy, sweeper, adapter_id="openai-compatible"
+        )
+
+
+def test_broker_refuses_foreign_class_claiming_reviewed_identity(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+
+    class Spoof:
+        adapter_id = "codex-cli"
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(WorkerBrokerError) as refused:
+        ExecutiveWorkerBroker(Spoof(), broker.policy, sweeper, adapter_id="codex-cli")
+    assert type(refused.value.__cause__) is AdapterBindingError
+    assert "reviewed implementation" in str(refused.value)
+
+
+def test_factory_and_bind_refuse_foreign_subclass_and_rebox(tmp_path: Path):
+    import inspect
+
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    assert "adapter" not in inspect.signature(construct_reviewed_adapter).parameters
+
+    class Spoof:
+        adapter_id = "codex-cli"
+
+        def status(self, ref=None):
+            return None
+
+    class ClaimSubclass(CodexWorkerAdapter):
+        pass
+
+    kwargs = _reviewed_codex_kwargs(tmp_path / "claim-subclass")
+    subclass_instance = ClaimSubclass(kwargs.pop("binary_path"), **kwargs)
+    foreign = Spoof()
+    rebox = object.__new__(CodexWorkerAdapter)
+    rebox.__dict__.update(
+        {
+            "binary": None,
+            "_codex_home": None,
+            "inspector": ProcessInspector(),
+            "_runs": {},
+        }
+    )
+    claimants = (foreign, subclass_instance, rebox)
+
+    for claimant in claimants:
+        with pytest.raises(AdapterBindingError, match="does not accept a caller-supplied"):
+            construct_reviewed_adapter("codex-cli", claimant)
+        with pytest.raises(AdapterBindingError) as binding_refused:
+            bind_reviewed_adapter(claimant, "codex-cli")
+        if claimant is rebox:
+            assert "was not constructed by the reviewed class" in str(binding_refused.value)
+        with pytest.raises(WorkerBrokerError) as refused:
+            ExecutiveWorkerBroker(
+                claimant, broker.policy, sweeper, adapter_id="codex-cli"
+            )
+        assert type(refused.value.__cause__) is AdapterBindingError
+
+
+def test_broker_reports_raising_binding_attribute_access_as_worker_broker_error(
+    tmp_path: Path,
+):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+
+    class RaisingAdapterId:
+        @property
+        def adapter_id(self):
+            raise RuntimeError("adapter-id-boom")
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(WorkerBrokerError) as refused_id:
+        ExecutiveWorkerBroker(
+            RaisingAdapterId(), broker.policy, sweeper, adapter_id="codex-cli"
+        )
+    assert type(refused_id.value.__cause__) is AdapterBindingError
+    assert type(refused_id.value.__cause__.__cause__) is RuntimeError
+    assert "adapter-id-boom" in str(refused_id.value.__cause__.__cause__)
+
+    class RaisingStatus:
+        adapter_id = "codex-cli"
+
+        @property
+        def status(self):
+            raise RuntimeError("status-boom")
+
+    with pytest.raises(WorkerBrokerError) as refused_status:
+        ExecutiveWorkerBroker(
+            RaisingStatus(), broker.policy, sweeper, adapter_id="codex-cli"
+        )
+    assert type(refused_status.value.__cause__) is AdapterBindingError
+    assert type(refused_status.value.__cause__.__cause__) is RuntimeError
+    assert "status-boom" in str(refused_status.value.__cause__.__cause__)
+
+
+def test_broker_binds_real_codex_adapter_identity(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    kwargs = _reviewed_codex_kwargs(tmp_path / "real-codex")
+    adapter = CodexWorkerAdapter(kwargs.pop("binary_path"), **kwargs)
+    bound = ExecutiveWorkerBroker(adapter, broker.policy, sweeper)
+    assert bound.adapter is adapter
+    assert type(bound.adapter) is CodexWorkerAdapter
+    assert bound.adapter_id == "codex-cli"
+    assert adapter.adapter_id == "codex-cli"
+    assert callable(adapter.status)
+
+
+def test_reviewed_constructor_binds_two_exact_heterogeneous_adapter_identities(
+    tmp_path: Path,
+):
+    codex_kwargs = _reviewed_codex_kwargs(tmp_path / "codex")
+    codex = construct_reviewed_adapter(
+        "codex-cli", codex_kwargs.pop("binary_path"), **codex_kwargs
+    )
+    codex_descriptor = bind_reviewed_adapter(codex, "codex-cli")
+
+    bindings = json.loads(DEFAULT_BINDINGS_PATH.read_text(encoding="utf-8"))
+    profiles = json.loads(DEFAULT_PROFILES_PATH.read_text(encoding="utf-8"))
+    binding_id = "glm-coding-plan.claude-code-anthropic"
+    bindings["bindings"][binding_id]["implementation_state"] = "BUILT_NOT_PROVEN"
+    claude_binary = tmp_path / "fixture-claude"
+    claude_binary.write_text(
+        "#!/bin/sh\nprintf '2.1.239 (Claude Code)\\n'\n",
+        encoding="utf-8",
+    )
+    claude_binary.chmod(0o700)
+    claude_attestation = attest_fixture_claude_binary(
+        claude_binary, allowed_versions=frozenset({"2.1.239"})
+    )
+    with _CAPACITY_OWNER_SEAM.install_test_key(
+        b"hf1q-test-capacity-owner"
+    ), _PROVIDER_REALM_OWNER_SEAM.install_test_key(
+        b"hf1q-test-provider-realm-owner"
+    ), _PROVIDER_REALM_OWNER_SEAM.install_test_enrollment("enrolled"):
+        capacity_fact = export_capacity_owner_fact(
+            worker_id="worker-1",
+            state=CapacityState.AVAILABLE,
+            generation=7,
+        )
+        realm_receipt = issue_provider_realm_enrollment_receipt(
+            binding_id=binding_id,
+            bindings_document=bindings,
+            profiles_document=profiles,
+            generation=3,
+        )
+        admission = seal_subscription_canary_admission(
+            capacity_fact=capacity_fact,
+            realm_receipt=realm_receipt,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+        claude = construct_reviewed_adapter(
+            "claude-compatible-subscription",
+            claude_binary,
+            admission=admission,
+            credential_loader=lambda: "fixture-credential",
+            binary_attestation=claude_attestation,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+    claude_descriptor = bind_reviewed_adapter(
+        claude, "claude-compatible-subscription"
+    )
+
+    assert type(codex) is not type(claude)
+    assert codex.adapter_id == codex_descriptor.adapter_id == "codex-cli"
+    assert claude.adapter_id == claude_descriptor.adapter_id
+    assert claude.adapter_id == claude.binding.adapter_id
+    assert claude.binding.implementation_state == "BUILT_NOT_PROVEN"
+    assert codex_descriptor.implemented
+    assert not claude_descriptor.implemented
+    assert "provider_home" not in inspect.signature(type(claude).__init__).parameters
+    assert "codex_home" not in inspect.signature(type(claude).__init__).parameters
 
 
 def test_broker_rejects_wrong_peer_and_unknown_operation(tmp_path: Path) -> None:

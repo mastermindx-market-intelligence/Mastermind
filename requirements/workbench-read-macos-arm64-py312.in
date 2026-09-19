@@ -1,0 +1,13 @@
+# Workbench Read P0 direct runtime roots — macOS arm64 / CPython 3.12
+#
+# Compile on an organization-authorized Darwin arm64 host with CPython 3.12
+# using pip-tools 7.6.1 and --generate-hashes. The generated dedicated lock,
+# not the broad repository gate lock, owns every transitive dependency.
+# Resolver movement from these exact direct identities is a HOLD.
+mcp==1.28.1
+PyJWT[crypto]==2.13.0
+httpx==0.28.1
+jsonschema==4.26.0
+pydantic==2.13.5
+starlette==1.6.0
+uvicorn[standard]==0.52.4

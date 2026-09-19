@@ -1,9 +1,9 @@
-"""Credential-free per-job Git workspace preparation for Executive OS.
+"""Git workspace custody for Executive workers and trusted attended sessions.
 
-The supervisor, not the model process, owns workspace creation.  A local clone
-copies Git metadata instead of linking to the administrative repository, checks
-out one immutable base commit, creates one task branch, and removes every
-remote before the worker starts.
+The supervisor, not the model process, owns workspace creation. Untrusted workers
+receive private credentialless clones with distinct Git metadata. Trusted attended
+Web/host sessions may instead receive linked worktrees that share only the source
+repository object store and remain bound to one explicit operation.
 """
 from __future__ import annotations
 
@@ -20,6 +20,10 @@ from typing import Callable, Mapping, Sequence
 
 
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_LINKED_OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+_LINKED_LANE_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+_EXACT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+LINKED_WORKTREE_LOCK_PREFIX = "mastermind-linked-worktree:v1"
 LAUNCH_CLEAN_STATUS_ARGS = (
     "status",
     "--porcelain=v1",
@@ -215,6 +219,46 @@ class WorkspaceReceipt:
     workspace_uid: int
     workspace_gid: int
     workspace_mode: int
+
+    def to_dict(self) -> dict[str, object]:
+        return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class LinkedWorkspaceReceipt:
+    """Custody receipt for a trusted same-principal linked Git worktree.
+
+    Executive workers still require a private credentialless clone. Attended
+    Web/host sessions may share only the administrative Git object store.
+    """
+
+    source_repository: str
+    workspace_root: str
+    workspace_path: str
+    operation_id: str
+    lane: str
+    base_sha: str
+    head_sha: str
+    branch: str
+    common_git_dir: str
+    lock_reason: str
+    reused: bool
+
+    def to_dict(self) -> dict[str, object]:
+        return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class LinkedWorkspaceReleaseReceipt:
+    source_repository: str
+    workspace_path: str
+    state: str
+    head_sha: str
+    branch: str
+    dirty: bool
+    recoverability: str
+    removed: bool
+    reason: str
 
     def to_dict(self) -> dict[str, object]:
         return dataclasses.asdict(self)
@@ -611,4 +655,457 @@ def prepare_credentialless_clone(
         workspace_uid=workspace_info.st_uid,
         workspace_gid=workspace_info.st_gid,
         workspace_mode=stat.S_IMODE(workspace_info.st_mode),
+    )
+
+
+def _common_git_dir(repository: Path, *, env: dict[str, str]) -> Path:
+    raw = _run(
+        ["git", "-C", str(repository), "rev-parse", "--git-common-dir"],
+        cwd=None,
+        env=env,
+    )
+    path = Path(raw)
+    if not path.is_absolute():
+        path = repository / path
+    return path.resolve()
+
+
+def _worktree_records(source: Path, *, env: dict[str, str]) -> list[dict[str, str]]:
+    """Parse ``git worktree list --porcelain`` without inventing new state."""
+
+    output = _run(
+        ["git", "-C", str(source), "worktree", "list", "--porcelain"],
+        cwd=None,
+        env=env,
+    )
+    records: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for line in [*output.splitlines(), ""]:
+        if not line:
+            if current:
+                records.append(current)
+                current = {}
+            continue
+        key, separator, value = line.partition(" ")
+        current[key] = value if separator else ""
+    return records
+
+
+def _worktree_record(
+    source: Path, destination: Path, *, env: dict[str, str]
+) -> dict[str, str] | None:
+    wanted = str(destination.resolve())
+    for record in _worktree_records(source, env=env):
+        raw = record.get("worktree")
+        if raw and str(Path(raw).resolve()) == wanted:
+            return record
+    return None
+
+
+def _run_status(
+    argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]
+) -> tuple[int, str, str]:
+    """Run a bounded Git predicate where exit 1 can be meaningful."""
+
+    try:
+        completed = subprocess.run(
+            list(argv),
+            cwd=str(cwd) if cwd is not None else None,
+            env=env,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
+    return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
+
+
+def _managed_linked_lock_reason(*, operation_id: str, lane: str, base_sha: str) -> str:
+    return (
+        f"{LINKED_WORKTREE_LOCK_PREFIX} operation={operation_id} "
+        f"lane={lane} base={base_sha}"
+    )
+
+
+def _lock_value(reason: str, key: str) -> str | None:
+    marker = f"{key}="
+    for token in reason.split():
+        if token.startswith(marker):
+            return token[len(marker) :]
+    return None
+
+
+def _require_linked_identity(
+    source: Path,
+    destination: Path,
+    *,
+    env: dict[str, str],
+    expected_lock_reason: str | None = None,
+) -> tuple[dict[str, str], str, str, Path]:
+    record = _worktree_record(source, destination, env=env)
+    if record is None:
+        raise WorkspaceError("workspace is not registered to the source repository")
+    reason = record.get("locked", "")
+    if not reason.startswith(LINKED_WORKTREE_LOCK_PREFIX):
+        raise WorkspaceError("workspace is not a managed linked worktree")
+    if expected_lock_reason is not None and reason != expected_lock_reason:
+        raise WorkspaceError("workspace lock identity does not match the requested operation")
+    if not destination.is_dir():
+        raise WorkspaceError("registered linked workspace path is unavailable")
+    dot_git = destination / ".git"
+    if not dot_git.is_file():
+        raise WorkspaceError("linked workspace must use a worktree .git file")
+    source_common = _common_git_dir(source, env=env)
+    destination_common = _common_git_dir(destination, env=env)
+    if destination_common != source_common:
+        raise WorkspaceError("linked workspace does not share the source Git common directory")
+    head = _run(["git", "-C", str(destination), "rev-parse", "HEAD"], cwd=None, env=env)
+    branch = _run(
+        ["git", "-C", str(destination), "branch", "--show-current"], cwd=None, env=env
+    )
+    return record, head, branch, destination_common
+
+
+def prepare_linked_worktree(
+    source_repository: str | Path,
+    workspace_root: str | Path,
+    *,
+    operation_id: str,
+    lane: str,
+    base_sha: str,
+    branch: str,
+    workspace_name: str | None = None,
+) -> LinkedWorkspaceReceipt:
+    """Acquire one low-storage linked worktree for a trusted attended session.
+
+    The function is idempotent for the same operation/path/branch/base identity.
+    It never removes remotes or changes shared repository configuration.  It is
+    therefore only for the same authenticated OS principal as the source owner;
+    untrusted Executive workers must continue to use ``prepare_credentialless_clone``.
+    """
+
+    operation = str(operation_id).strip()
+    selected_lane = str(lane).strip().lower()
+    selected_base = str(base_sha).strip().lower()
+    selected_branch = str(branch).strip()
+    name = str(workspace_name or operation).strip().lower()
+    if not _LINKED_OPERATION_RE.fullmatch(operation):
+        raise WorkspaceError("operation_id is unsafe for linked workspace custody")
+    if not _LINKED_LANE_RE.fullmatch(selected_lane):
+        raise WorkspaceError("lane is unsafe for linked workspace custody")
+    if not _LINKED_OPERATION_RE.fullmatch(name):
+        raise WorkspaceError("workspace_name is unsafe for linked workspace custody")
+    if not _EXACT_SHA_RE.fullmatch(selected_base):
+        raise WorkspaceError("base_sha must be an exact 40-character lowercase commit SHA")
+
+    source = Path(source_repository).expanduser().resolve()
+    root = Path(workspace_root).expanduser().resolve()
+    if not source.is_dir():
+        raise WorkspaceError(f"source repository is not a directory: {source}")
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lane_root = (root / selected_lane).resolve()
+    if lane_root.parent != root:
+        raise WorkspaceError("linked workspace lane escaped its assigned root")
+    lane_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination = (lane_root / name).resolve()
+    if destination.parent != lane_root:
+        raise WorkspaceError("linked workspace destination escaped its assigned lane")
+
+    env = _git_env(root / ".control-home")
+    _run(["git", "-C", str(source), "rev-parse", "--is-inside-work-tree"], cwd=None, env=env)
+    resolved_base = _run(
+        ["git", "-C", str(source), "rev-parse", "--verify", f"{selected_base}^{{commit}}"],
+        cwd=None,
+        env=env,
+    ).lower()
+    if resolved_base != selected_base:
+        raise WorkspaceError("base_sha did not resolve to the exact requested commit")
+    _run(["git", "check-ref-format", "--branch", selected_branch], cwd=source, env=env)
+    expected_lock = _managed_linked_lock_reason(
+        operation_id=operation, lane=selected_lane, base_sha=resolved_base
+    )
+
+    if destination.exists():
+        _, head, actual_branch, common = _require_linked_identity(
+            source, destination, env=env, expected_lock_reason=expected_lock
+        )
+        if actual_branch != selected_branch:
+            raise WorkspaceError("existing linked workspace branch does not match the operation")
+        return LinkedWorkspaceReceipt(
+            source_repository=str(source),
+            workspace_root=str(root),
+            workspace_path=str(destination),
+            operation_id=operation,
+            lane=selected_lane,
+            base_sha=resolved_base,
+            head_sha=head,
+            branch=actual_branch,
+            common_git_dir=str(common),
+            lock_reason=expected_lock,
+            reused=True,
+        )
+
+    branch_code, existing_branch, _ = _run_status(
+        ["git", "-C", str(source), "rev-parse", "--verify", "--quiet", f"refs/heads/{selected_branch}"],
+        cwd=None,
+        env=env,
+    )
+    if branch_code == 0 and existing_branch:
+        raise WorkspaceError("linked workspace branch already exists without its bound workspace")
+    if branch_code not in {0, 1}:
+        raise WorkspaceError("could not determine whether the linked workspace branch exists")
+
+    created = False
+    try:
+        _run(
+            [
+                "git",
+                "-C",
+                str(source),
+                "worktree",
+                "add",
+                "-b",
+                selected_branch,
+                str(destination),
+                resolved_base,
+            ],
+            cwd=None,
+            env=env,
+        )
+        created = True
+        _run(
+            [
+                "git",
+                "-C",
+                str(source),
+                "worktree",
+                "lock",
+                "--reason",
+                expected_lock,
+                str(destination),
+            ],
+            cwd=None,
+            env=env,
+        )
+        _, head, actual_branch, common = _require_linked_identity(
+            source, destination, env=env, expected_lock_reason=expected_lock
+        )
+        if head.lower() != resolved_base or actual_branch != selected_branch:
+            raise WorkspaceError("linked workspace failed its exact base/branch self-check")
+        cleanliness = observe_launch_cleanliness(
+            lambda arguments: _run_bytes(
+                ["git", *arguments],
+                cwd=destination,
+                env=git_observation_env(env),
+            )
+        )
+        if cleanliness.dirty:
+            raise WorkspaceError("linked workspace was not clean immediately after acquisition")
+    except BaseException:
+        if created:
+            _run_status(
+                ["git", "-C", str(source), "worktree", "unlock", str(destination)],
+                cwd=None,
+                env=env,
+            )
+            _run_status(
+                ["git", "-C", str(source), "worktree", "remove", "--force", str(destination)],
+                cwd=None,
+                env=env,
+            )
+            branch_code, branch_head, _ = _run_status(
+                ["git", "-C", str(source), "rev-parse", f"refs/heads/{selected_branch}"],
+                cwd=None,
+                env=env,
+            )
+            if branch_code == 0 and branch_head.lower() == resolved_base:
+                _run_status(
+                    ["git", "-C", str(source), "branch", "-D", selected_branch],
+                    cwd=None,
+                    env=env,
+                )
+        raise
+
+    return LinkedWorkspaceReceipt(
+        source_repository=str(source),
+        workspace_root=str(root),
+        workspace_path=str(destination),
+        operation_id=operation,
+        lane=selected_lane,
+        base_sha=resolved_base,
+        head_sha=head,
+        branch=actual_branch,
+        common_git_dir=str(common),
+        lock_reason=expected_lock,
+        reused=False,
+    )
+
+
+def inspect_linked_worktree(
+    source_repository: str | Path,
+    workspace_root: str | Path,
+    workspace_path: str | Path,
+    *,
+    expected_operation_id: str | None = None,
+) -> LinkedWorkspaceReleaseReceipt:
+    """Classify whether a managed linked worktree can be removed without data loss."""
+
+    source = Path(source_repository).expanduser().resolve()
+    root = Path(workspace_root).expanduser().resolve()
+    destination = Path(workspace_path).expanduser().resolve()
+    try:
+        destination.relative_to(root)
+    except ValueError as exc:
+        raise WorkspaceError("workspace is outside the managed linked-worktree root") from exc
+    if destination == root:
+        raise WorkspaceError("managed workspace may not be the workspace root itself")
+    env = _git_env(root / ".control-home")
+    record, head, branch, _ = _require_linked_identity(source, destination, env=env)
+    lock_reason = record.get("locked", "")
+    if expected_operation_id is not None:
+        observed_operation = _lock_value(lock_reason, "operation")
+        if observed_operation != expected_operation_id:
+            raise WorkspaceError("workspace operation identity does not match the release request")
+    base = _lock_value(lock_reason, "base") or ""
+    cleanliness = observe_launch_cleanliness(
+        lambda arguments: _run_bytes(
+            ["git", *arguments], cwd=destination, env=git_observation_env(env)
+        )
+    )
+    if cleanliness.dirty:
+        return LinkedWorkspaceReleaseReceipt(
+            source_repository=str(source),
+            workspace_path=str(destination),
+            state="PRESERVED_DIRTY",
+            head_sha=head,
+            branch=branch,
+            dirty=True,
+            recoverability="WORKSPACE_ONLY_CHANGES_PRESENT",
+            removed=False,
+            reason="tracked or untracked workspace changes are present",
+        )
+
+    if head.lower() == base.lower():
+        recoverability = "UNCHANGED_FROM_ACQUIRED_BASE"
+    else:
+        ancestor_code, _, _ = _run_status(
+            [
+                "git",
+                "-C",
+                str(source),
+                "merge-base",
+                "--is-ancestor",
+                head,
+                "refs/remotes/origin/master",
+            ],
+            cwd=None,
+            env=env,
+        )
+        remote_head = ""
+        if branch:
+            remote_code, remote_value, _ = _run_status(
+                ["git", "-C", str(source), "rev-parse", f"refs/remotes/origin/{branch}"],
+                cwd=None,
+                env=env,
+            )
+            if remote_code == 0:
+                remote_head = remote_value
+        if ancestor_code == 0:
+            recoverability = "HEAD_REACHABLE_FROM_ORIGIN_MASTER"
+        elif remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"
+        else:
+            return LinkedWorkspaceReleaseReceipt(
+                source_repository=str(source),
+                workspace_path=str(destination),
+                state="PRESERVED_UNPUBLISHED",
+                head_sha=head,
+                branch=branch,
+                dirty=False,
+                recoverability="LOCAL_HEAD_NOT_RECOVERABLE_FROM_OBSERVED_ORIGIN_REFS",
+                removed=False,
+                reason="clean workspace has commits not observed on origin/master or origin branch",
+            )
+
+    return LinkedWorkspaceReleaseReceipt(
+        source_repository=str(source),
+        workspace_path=str(destination),
+        state="RELEASABLE",
+        head_sha=head,
+        branch=branch,
+        dirty=False,
+        recoverability=recoverability,
+        removed=False,
+        reason="workspace is clean and its HEAD is recoverable without this checkout",
+    )
+
+
+def release_linked_worktree(
+    source_repository: str | Path,
+    workspace_root: str | Path,
+    workspace_path: str | Path,
+    *,
+    expected_operation_id: str | None = None,
+) -> LinkedWorkspaceReleaseReceipt:
+    """Remove a managed linked worktree only after fail-closed recoverability checks."""
+
+    inspection = inspect_linked_worktree(
+        source_repository,
+        workspace_root,
+        workspace_path,
+        expected_operation_id=expected_operation_id,
+    )
+    if inspection.state != "RELEASABLE":
+        return inspection
+
+    source = Path(source_repository).expanduser().resolve()
+    root = Path(workspace_root).expanduser().resolve()
+    destination = Path(workspace_path).expanduser().resolve()
+    env = _git_env(root / ".control-home")
+    record = _worktree_record(source, destination, env=env)
+    if record is None:
+        raise WorkspaceError("workspace registration disappeared before release")
+    original_lock_reason = record.get("locked", "")
+    if not original_lock_reason.startswith(LINKED_WORKTREE_LOCK_PREFIX):
+        raise WorkspaceError("workspace custody lock disappeared before release")
+
+    _run(
+        ["git", "-C", str(source), "worktree", "unlock", str(destination)],
+        cwd=None,
+        env=env,
+    )
+    try:
+        _run(
+            ["git", "-C", str(source), "worktree", "remove", str(destination)],
+            cwd=None,
+            env=env,
+        )
+    except BaseException:
+        # Preserve the exact original custody identity if removal did not
+        # complete. Never synthesize a replacement operation/base on failure.
+        if destination.exists():
+            _run_status(
+                [
+                    "git",
+                    "-C",
+                    str(source),
+                    "worktree",
+                    "lock",
+                    "--reason",
+                    original_lock_reason,
+                    str(destination),
+                ],
+                cwd=None,
+                env=env,
+            )
+        raise
+
+    return dataclasses.replace(
+        inspection,
+        state="REMOVED",
+        removed=True,
+        reason="clean recoverable linked worktree removed; branch/ref history retained",
     )
