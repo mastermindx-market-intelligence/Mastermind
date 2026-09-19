@@ -246,6 +246,7 @@ def _install_host(
     )
     relay_group = SimpleNamespace(gr_gid=egid, gr_mem=[])
     monkeypatch.setattr(enrollment.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(enrollment.sys, "platform", "darwin")
     monkeypatch.setattr(enrollment.pwd, "getpwnam", lambda _name: relay_home)
     monkeypatch.setattr(enrollment.grp, "getgrnam", lambda _name: relay_group)
     monkeypatch.setattr(
