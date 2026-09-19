@@ -4,20 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
-from pathlib import Path
-from typing import NoReturn, TextIO
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if __package__ in {None, ""} and str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from ops.executive_os.host_recovery_readiness import (  # noqa: E402
-    RecoveryReadinessProbeError,
-    parse_pmset_custom,
-)
+from typing import Callable, Dict, NoReturn, Optional, Sequence, TextIO, Tuple
 
 RECEIPT_SCHEMA = "mastermind.secondary_host_power_policy_receipt/v1"
 PMSET_SET_COMMAND = (
@@ -32,6 +22,8 @@ PMSET_READ_COMMAND = ("/usr/bin/pmset", "-g", "custom")
 COMMAND_TIMEOUT_SECONDS = 10
 MAX_OUTPUT_BYTES = 64 * 1024
 _FIXED_ENV = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"}
+_POWER_SECTION_RE = re.compile(r"^([A-Za-z][A-Za-z ]*?)\s*:\s*$")
+_POWER_SETTING_RE = re.compile(r"^([a-z][a-z0-9]*)\s+(0|[1-9][0-9]{0,9})$")
 
 
 class SecondaryHostPowerPolicyError(RuntimeError):
@@ -42,7 +34,7 @@ def _refuse() -> NoReturn:
     raise SecondaryHostPowerPolicyError("SECONDARY_HOST_POWER_POLICY_REFUSED")
 
 
-def _default_runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+def _default_runner(command: Tuple[str, ...]) -> subprocess.CompletedProcess:
     return subprocess.run(
         list(command),
         stdin=subprocess.DEVNULL,
@@ -56,9 +48,9 @@ def _default_runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str
 
 
 def _run_checked(
-    runner: Callable[[tuple[str, ...]], subprocess.CompletedProcess[str]],
-    command: tuple[str, ...],
-) -> subprocess.CompletedProcess[str]:
+    runner: Callable[[Tuple[str, ...]], subprocess.CompletedProcess],
+    command: Tuple[str, ...],
+) -> subprocess.CompletedProcess:
     try:
         completed = runner(command)
     except Exception:
@@ -73,11 +65,37 @@ def _run_checked(
     return completed
 
 
+def _parse_ac_power(stdout: str) -> Dict[str, int]:
+    """Parse only the numeric AC section needed for the post-effect proof."""
+
+    if not isinstance(stdout, str) or not stdout.strip():
+        _refuse()
+    sections: Dict[str, Dict[str, int]] = {}
+    current: Optional[Dict[str, int]] = None
+    for raw in stdout.splitlines():
+        if not raw.strip():
+            continue
+        section = _POWER_SECTION_RE.fullmatch(raw.strip())
+        if section is not None:
+            current = {}
+            sections[section.group(1)] = current
+            continue
+        if current is None:
+            _refuse()
+        setting = _POWER_SETTING_RE.fullmatch(raw.strip())
+        if setting is not None:
+            current[setting.group(1)] = int(setting.group(2))
+    ac = sections.get("AC Power")
+    if not isinstance(ac, dict):
+        _refuse()
+    return ac
+
+
 def prepare_secondary_host_power_policy(
     *,
-    runner: Callable[[tuple[str, ...]], subprocess.CompletedProcess[str]] | None = None,
-    euid: int | None = None,
-) -> dict[str, object]:
+    runner: Optional[Callable[[Tuple[str, ...]], subprocess.CompletedProcess]] = None,
+    euid: Optional[int] = None,
+) -> Dict[str, object]:
     """Set charger-only fleet power policy and prove the resulting AC state."""
 
     observed_euid = os.geteuid() if euid is None else euid
@@ -87,13 +105,8 @@ def prepare_secondary_host_power_policy(
     run = runner or _default_runner
     _run_checked(run, PMSET_SET_COMMAND)
     observed = _run_checked(run, PMSET_READ_COMMAND)
-    try:
-        sections = parse_pmset_custom(observed.stdout)
-    except RecoveryReadinessProbeError:
-        _refuse()
-
-    ac = sections.get("AC Power")
-    if not isinstance(ac, dict) or ac.get("sleep") != 0 or ac.get("autorestart") != 1:
+    ac = _parse_ac_power(observed.stdout)
+    if ac.get("sleep") != 0 or ac.get("autorestart") != 1:
         _refuse()
 
     return {
@@ -105,10 +118,10 @@ def prepare_secondary_host_power_policy(
 
 
 def main(
-    argv: Sequence[str] | None = None,
+    argv: Optional[Sequence[str]] = None,
     *,
-    stdout: TextIO | None = None,
-    stderr: TextIO | None = None,
+    stdout: Optional[TextIO] = None,
+    stderr: Optional[TextIO] = None,
 ) -> int:
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
