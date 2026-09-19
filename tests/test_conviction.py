@@ -270,3 +270,38 @@ def test_candidates_seed_respects_manual_exclude(monkeypatch):
     monkeypatch.setattr("brain.ledger.all_theses", lambda: [])
     cands = conviction.candidates()
     assert "NVDA" not in cands and "GOODX" in cands
+
+
+def test_context_only_altdata_cannot_enter_conviction_candidate_pool(monkeypatch):
+    """Research-visible Article-3-refused alt-data may not originate a position candidate."""
+    from brain import intake
+    from portfolio import prophet_feed
+
+    artifact = {
+        "brain_usable": True,
+        "is_context_only": True,
+        "article3": {"granted": False, "reason": "insufficient-n"},
+        "signals": [{
+            "ticker": "CTXX",
+            "signal_score": 90,
+            "action": "ACCUMULATE",
+            "channels": ["patent_cluster"],
+        }],
+    }
+    monkeypatch.setattr(
+        intake, "_read",
+        lambda rel: artifact if rel == "altdata/mastermind.json" else None,
+    )
+    monkeypatch.setattr(intake, "_from_briefing", lambda: ({}, {}, {}))
+    monkeypatch.setattr(intake, "_SIMPLE_SOURCES", ("altdata",))
+    monkeypatch.setattr(intake, "_LOADERS", {"altdata": "_from_altdata"})
+    monkeypatch.setattr(conviction, "regime_seed", lambda: [])
+    monkeypatch.setattr(conviction, "universe", lambda: [])
+    monkeypatch.setattr(conviction, "nw_universe_scan", lambda: [])
+    monkeypatch.setattr("brain.ledger.all_theses", lambda: [])
+    monkeypatch.setattr(prophet_feed, "candidate_tickers", lambda: [])
+
+    research = intake.queue(limit=5)
+    assert research[0]["ticker"] == "CTXX" and research[0]["score"] == 0.8
+    assert research[0]["candidacy_score"] == 0.0
+    assert "CTXX" not in conviction.candidates()

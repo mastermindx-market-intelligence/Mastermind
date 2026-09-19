@@ -82,14 +82,18 @@ def _from_briefing() -> tuple[dict, dict, dict]:
         queue[t] = {"score": _f(x.get("priority")) or 0.0,
                     "reason": x.get("situation") or x.get("read") or "briefing priority",
                     "lean": x.get("lean"), "confidence": _f(x.get("confidence")),
-                    "falsifier": x.get("falsifier")}
+                    "falsifier": x.get("falsifier"),
+                    # Derived display/context summary: useful research salience, never
+                    # independent candidacy authority.
+                    "ranking_eligible": False}
     for x in b.get("divergences") or []:
         t = _u(x.get("ticker"))
         if t:
             div[t] = {"score": _DIVERGENCE_BONUS,
                       "reason": f"divergence: {x.get('read') or 'tape vs smart-money disagree'}",
                       "lean": x.get("lean"), "confidence": _f(x.get("confidence")),
-                      "falsifier": x.get("falsifier")}
+                      "falsifier": x.get("falsifier"),
+                      "ranking_eligible": False}
     macro = dict(b.get("macro_context") or {})
     if b.get("as_of"):
         macro.setdefault("as_of", b.get("as_of"))     # surface the briefing date on the frame
@@ -246,6 +250,14 @@ def _from_altdata() -> dict:
         "calibration_n_scored": calibration.get("n_scored"),
         "calibration_hit_rate": calibration.get("hit_rate"),
     }
+    # The upstream Article-3 tenant owns promotion. Preserve refused/context-only
+    # evidence for research inspection, but it cannot originate or boost candidacy.
+    # Missing qualification is fail-closed; no downstream consumer fabricates a grant.
+    ranking_eligible = (
+        article3.get("granted") is True
+        and d.get("is_context_only") is False
+        and d.get("brain_usable") is True
+    )
     out = {}
     for s in (d.get("signals") or []):
         t = _u(s.get("ticker"))
@@ -257,7 +269,8 @@ def _from_altdata() -> dict:
                   "reason": f"alt-data {act or ''} (score {int(sc)}, {','.join(s.get('channels') or [])})".strip(),
                   "lean": 1 if (sc >= 65 and act != "AVOID") else -1 if (act == "AVOID" or sc < 35) else 0,
                   "confidence": None, "falsifier": s.get("falsifier"),
-                  "qualification": qualification}
+                  "qualification": qualification,
+                  "ranking_eligible": ranking_eligible}
     return out
 
 
@@ -551,11 +564,17 @@ _LOADERS = {"standout": "_from_standouts", "radar": "_from_radar", "altdata": "_
             "neural_web": "_from_neural_web", "cycles_bottoming": "_from_cycles_bottoming"}
 
 
-def build(limit: int = 40) -> dict:
+def build(limit: int | None = 40) -> dict:
     """The unified intake queue + macro frame. PURE w.r.t. inputs; reads vendored artifacts.
 
-    Returns {as_of?, macro_context, n_universe, candidates:[{ticker, score, sources:[...],
-    reasons:[...], lean, confidence, falsifier, n_sources}], note}. Never raises."""
+    score is research salience across every observed source. candidacy_score is
+    the separately governed score from sources allowed to widen the portfolio candidate
+    pool. A context-only source may remain prominent for investigation while
+    contributing zero candidacy authority.
+
+    Returns {as_of?, macro_context, n_universe, candidates:[{ticker, score,
+    candidacy_score, sources:[...], reasons:[...], lean, confidence, falsifier,
+    n_sources, n_observed_sources, source_qualification}], note}. Never raises."""
     briefing_q, briefing_div, macro = _from_briefing()
     per_source: dict[str, dict] = {"briefing": briefing_q, "divergence": briefing_div}
     for name in _SIMPLE_SOURCES:
@@ -570,19 +589,28 @@ def build(limit: int = 40) -> dict:
     for src, table in per_source.items():
         for t, rec in table.items():
             m = merged.setdefault(t, {"ticker": t, "sources": [], "reasons": [],
-                                      "_scores": [], "lean_votes": [], "confidence": None,
-                                      "falsifier": None, "source_qualification": {}})
+                                      "_source_scores": {}, "_scores": [],
+                                      "_eligible_sources": [], "lean_votes": [],
+                                      "confidence": None, "falsifier": None,
+                                      "source_qualification": {}})
             m["sources"].append(src)
             if rec.get("reason"):
                 m["reasons"].append(rec["reason"])
-            m["_scores"].append(rec.get("score") or 0.0)
-            _lean = rec.get("lean")
-            # only NUMERIC leans vote — a source JSON can carry a string lean (e.g. an arrow glyph),
-            # which would TypeError in the sum() below; coerce/skip rather than crash the funnel.
-            if isinstance(_lean, (int, float)) and not isinstance(_lean, bool):
-                m["lean_votes"].append(int(_lean))
-            if rec.get("confidence") is not None and (m["confidence"] is None or rec["confidence"] > m["confidence"]):
-                m["confidence"] = rec["confidence"]
+            m["_source_scores"][src] = rec.get("score") or 0.0
+            # Existing loaders are eligible by default. A producer can explicitly refuse
+            # rank/candidacy authority while remaining visible as provenance.
+            eligible = (rec.get("ranking_eligible", True) is True
+                        and src not in _NON_INDEPENDENT_SOURCES)
+            if eligible:
+                m["_eligible_sources"].append(src)
+                m["_scores"].append(rec.get("score") or 0.0)
+                _lean = rec.get("lean")
+                # only NUMERIC leans vote — a source JSON can carry a string lean (e.g. an arrow glyph),
+                # which would TypeError in the sum() below; coerce/skip rather than crash the funnel.
+                if isinstance(_lean, (int, float)) and not isinstance(_lean, bool):
+                    m["lean_votes"].append(int(_lean))
+                if rec.get("confidence") is not None and (m["confidence"] is None or rec["confidence"] > m["confidence"]):
+                    m["confidence"] = rec["confidence"]
             if rec.get("falsifier") and not m["falsifier"]:
                 m["falsifier"] = rec["falsifier"]
             if isinstance(rec.get("qualification"), dict):
@@ -590,14 +618,43 @@ def build(limit: int = 40) -> dict:
 
     out = []
     for t, m in merged.items():
-        observed = len(set(m["sources"]))
-        indep = len({s for s in m["sources"] if s not in _NON_INDEPENDENT_SOURCES})
-        base = max(m["_scores"]) if m["_scores"] else 0.0
-        score = round(min(base + _CORROBORATION * max(indep - 1, 0)
-                          + (_DIVERGENCE_BONUS if "divergence" in m["sources"] else 0.0), 1.0), 3)
+        observed_sources = set(m["sources"])
+        observed = len(observed_sources)
+        eligible_sources = set(m["_eligible_sources"])
+        observed_indep = len({s for s in observed_sources if s not in _NON_INDEPENDENT_SOURCES})
+        indep = len({s for s in eligible_sources if s not in _NON_INDEPENDENT_SOURCES})
+
+        # Research salience may use context-only observations: they are useful reasons to
+        # investigate. But a fused briefing is an alternate summary of the primitive desks,
+        # not another layer to stack on top of them. Build the primitive salience first,
+        # then take the stronger of that or the derived briefing. Divergence is one explicit
+        # flag bonus and is never also counted as a base score.
+        primitive_sources = observed_sources - _NON_INDEPENDENT_SOURCES
+        primitive_base = (max(m["_source_scores"].get(s, 0.0) for s in primitive_sources)
+                          if primitive_sources else 0.0)
+        primitive_salience = min(
+            primitive_base + _CORROBORATION * max(observed_indep - 1, 0), 1.0
+        )
+        briefing_base = m["_source_scores"].get("briefing", 0.0)
+        research_base = max(primitive_salience, briefing_base)
+        score = round(min(
+            research_base
+            + (_DIVERGENCE_BONUS if "divergence" in observed_sources else 0.0),
+            1.0,
+        ), 3)
+
+        # Portfolio candidacy is a separate authority surface: only explicitly eligible
+        # primitive sources contribute. Context-only and derived evidence remain visible
+        # but inert here.
+        candidacy_base = max(m["_scores"]) if m["_scores"] else 0.0
+        candidacy_score = round(min(
+            candidacy_base + _CORROBORATION * max(indep - 1, 0),
+            1.0,
+        ), 3)
         votes = m["lean_votes"]
         lean = (1 if sum(votes) > 0 else -1 if sum(votes) < 0 else 0) if votes else None
-        out.append({"ticker": t, "score": score, "sources": sorted(set(m["sources"])),
+        out.append({"ticker": t, "score": score, "candidacy_score": candidacy_score,
+                    "sources": sorted(observed_sources),
                     "n_sources": indep, "n_observed_sources": observed,
                     "reasons": m["reasons"][:4], "lean": lean,
                     "confidence": m["confidence"], "falsifier": m["falsifier"],
@@ -607,17 +664,19 @@ def build(limit: int = 40) -> dict:
     # seed fallback so the queue is never empty (inert/pre-build state)
     if not out:
         for t in _SEED:
-            out.append({"ticker": t, "score": 0.3, "sources": ["seed"], "n_sources": 0,
-                        "n_observed_sources": 0,
+            out.append({"ticker": t, "score": 0.3, "candidacy_score": 0.3,
+                        "sources": ["seed"], "n_sources": 0, "n_observed_sources": 0,
                         "reasons": ["static seed (dashboard signals not built yet)"],
                         "lean": None, "confidence": None, "falsifier": None,
                         "source_qualification": {}, "divergent": False})
 
     out.sort(key=lambda x: (x["score"], x["n_sources"]), reverse=True)
+    selected = out if limit is None else out[:max(0, limit)]
     return {"as_of": macro.get("as_of"), "macro_context": macro,
-            "n_universe": len(out), "candidates": out[:max(0, limit)],
-            "note": "Unified intake across the dashboard signal engines — corroboration across "
-                    "independent engines lifts a name. Context-only; decides what to look at, never sizes."}
+            "n_universe": len(out), "candidates": selected,
+            "note": "Unified intake across dashboard signal engines. score = research salience; "
+                    "candidacy_score = separately governed portfolio-candidate authority. "
+                    "Context-only evidence remains inspectable and never sizes by itself."}
 
 
 def queue(limit: int = 40) -> list[dict]:
@@ -626,8 +685,16 @@ def queue(limit: int = 40) -> list[dict]:
 
 
 def tickers(limit: int = 40, min_score: float = 0.0) -> list[str]:
-    """Ranked tickers only — for callers that just want the expanded universe."""
-    return [c["ticker"] for c in queue(limit) if c["score"] >= min_score]
+    """Portfolio-candidacy tickers only.
+
+    Filter the complete research queue by candidacy_score before truncation so a
+    high-salience context-only name cannot crowd an eligible lower-salience name out.
+    """
+    candidates = build(limit=None)["candidates"]
+    eligible = [c for c in candidates
+                if c["candidacy_score"] > 0.0 and c["candidacy_score"] >= min_score]
+    eligible.sort(key=lambda c: (c["candidacy_score"], c["n_sources"], c["score"]), reverse=True)
+    return [c["ticker"] for c in eligible[:max(0, limit)]]
 
 
 def salience_tiers(limit: int = 40) -> dict:
