@@ -108,6 +108,11 @@ MANIFEST_KEYS_V2 = MANIFEST_KEYS_V1 + (
     "backendHash",
     "dependencyTreeHash",
 )
+LEGACY_PROVISIONED_MANIFEST_KEYS = MANIFEST_KEYS_V1 + (
+    "provisioned_from",
+    "installation_state",
+)
+LEGACY_PROVISIONED_STATE = "LOCAL_GATEWAY_PREPARED_TUNNEL_NOT_CREATED"
 
 
 class CmdResult:
@@ -512,17 +517,40 @@ def _valid_manifest(data, account: str, label: str) -> bool:
     if not isinstance(data, dict):
         return False
     version = data.get("version")
+    keys = frozenset(data)
+    legacy_provisioned = (
+        version == 1 and keys == frozenset(LEGACY_PROVISIONED_MANIFEST_KEYS)
+    )
     expected_keys = (
         frozenset(MANIFEST_KEYS_V1)
-        if version == 1
+        if version == 1 and not legacy_provisioned
         else frozenset(MANIFEST_KEYS_V2)
         if version == MANIFEST_VERSION
+        else frozenset(LEGACY_PROVISIONED_MANIFEST_KEYS)
+        if legacy_provisioned
         else None
     )
-    if expected_keys is None or frozenset(data) != expected_keys:
+    if expected_keys is None or keys != expected_keys:
         return False
     if data.get("account") != account or data.get("label") != label:
         return False
+    if legacy_provisioned:
+        if data.get("installation_state") != LEGACY_PROVISIONED_STATE:
+            return False
+        provisioned_from = data.get("provisioned_from")
+        if not isinstance(provisioned_from, str) or not provisioned_from:
+            return False
+        source_account = Path(provisioned_from)
+        expected_parent = (
+            _user_root() / ".local" / "share" / "studio-direct-mcp" / "private"
+        )
+        if (
+            not source_account.is_absolute()
+            or source_account.parent != expected_parent
+            or source_account.name == account
+            or ACCOUNT_LABEL_RE.fullmatch(source_account.name) is None
+        ):
+            return False
     files = data.get("files")
     if not isinstance(files, dict) or frozenset(files) not in KNOWN_MANIFEST_FILESETS:
         return False

@@ -275,6 +275,50 @@ class TestIdentity(unittest.TestCase):
         self.assertFalse(svc._valid_manifest({**base, "files": extra}, "test-account", _label_for("test-account")))
         self.assertFalse(svc._valid_manifest({**base, "version": 2, "files": current}, "test-account", _label_for("test-account")))
 
+    def test_v1_provisioned_manifest_accepts_only_exact_inert_legacy_shape(self):
+        digest = "0" * 64
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            base = {
+                "version": 1,
+                "account": "chatgpt4",
+                "label": _label_for("chatgpt4"),
+                "configHash": digest,
+                "plistHash": digest,
+                "source": "/tmp/src",
+                "node": "/tmp/node",
+                "backend": "/tmp/backend",
+                "host": "127.0.0.1",
+                "port": 45024,
+                "files": {name: digest for name in svc.LEGACY_STAGE_FILES_V1},
+                "provisioned_from": str(
+                    home / ".local" / "share" / "studio-direct-mcp" / "private" / "chatgpt3"
+                ),
+                "installation_state": svc.LEGACY_PROVISIONED_STATE,
+            }
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                self.assertTrue(
+                    svc._valid_manifest(base, "chatgpt4", _label_for("chatgpt4"))
+                )
+                wrong_state = {**base, "installation_state": "READY"}
+                self.assertFalse(
+                    svc._valid_manifest(wrong_state, "chatgpt4", _label_for("chatgpt4"))
+                )
+                wrong_source = {**base, "provisioned_from": "/tmp/chatgpt3"}
+                self.assertFalse(
+                    svc._valid_manifest(wrong_source, "chatgpt4", _label_for("chatgpt4"))
+                )
+                same_account = {
+                    **base,
+                    "provisioned_from": str(
+                        home / ".local" / "share" / "studio-direct-mcp" / "private" / "chatgpt4"
+                    ),
+                }
+                self.assertFalse(
+                    svc._valid_manifest(same_account, "chatgpt4", _label_for("chatgpt4"))
+                )
+
     def test_dir_mode_is_0700(self):
         self.assertEqual(svc.DIR_MODE, 0o700)
 
