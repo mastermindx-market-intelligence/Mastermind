@@ -1,25 +1,24 @@
-name: Session B Replay and Quarantine Hardening
+name: Session B Atomic Publisher
 
 on:
   push:
     branches:
       - sol/executive-worker-restart-survivability-380-20260918
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: session-b-replay-quarantine-hardening
+  group: session-b-atomic-publisher
   cancel-in-progress: true
 
 jobs:
-  build:
+  qualify-and-publish:
     runs-on: macos-14
     timeout-minutes: 60
 
     steps:
-      - name: Checkout exact source carrier
+      - name: Checkout exact carrier
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -46,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Apply replay and quarantine hardening
+      - name: Apply verified hardening patch
         run: python .github/session_b_followup_patch.py
 
       - name: Compile changed source
@@ -69,7 +68,7 @@ jobs:
             tests/test_executive_worker_broker.py \
             tests/test_executive_service.py \
             -k 'identity_persistence or before_checkpoint or stale_fence or reused_pgid or exactly_replayable or recorded_process_exit or truthful_exit_code or legacy_process_is_quarantined or recovered_cancel or remote_adapter_reattaches or restart_cancel_pending or duplicate_restart_reconcile' \
-            2>&1 | tee session-b-followup-focused.log
+            2>&1 | tee session-b-atomic-focused.log
 
       - name: Run complete owning regression pack
         shell: bash
@@ -82,43 +81,180 @@ jobs:
             tests/test_executive_supervisor.py \
             tests/test_executive_worker_broker.py \
             tests/test_executive_service.py \
-            2>&1 | tee session-b-followup-regression.log
+            2>&1 | tee session-b-atomic-regression.log
 
-      - name: Inspect product delta
+      - name: Verify exact candidate delta
         run: |
           git diff --check
-          git status --short
-          git diff --stat
+          python - <<'PY'
+          import subprocess
 
-      - name: Upload immutable follow-up evidence
+          changed = {
+              line.strip()
+              for line in subprocess.check_output(
+                  ["git", "diff", "--name-only"], text=True
+              ).splitlines()
+              if line.strip()
+          }
+          allowed = {
+              "control_plane/executive_supervisor.py",
+              "tests/test_executive_supervisor.py",
+          }
+          unexpected = sorted(
+              path
+              for path in changed
+              if path not in allowed
+              and not path.startswith("mastermind.egg-info/")
+          )
+          if unexpected:
+              raise SystemExit(f"unexpected candidate paths: {unexpected}")
+          if not allowed.issubset(changed):
+              raise SystemExit(
+                  f"missing candidate paths: {sorted(allowed - changed)}"
+              )
+          PY
+
+      - name: Upload immutable qualification evidence
         uses: actions/upload-artifact@v4
         with:
-          name: session-b-followup-evidence
+          name: session-b-atomic-publication-evidence
           path: |
-            session-b-followup-focused.log
-            session-b-followup-regression.log
+            session-b-atomic-focused.log
+            session-b-atomic-regression.log
           if-no-files-found: error
 
-      - name: Remove generated and temporary files
+      - name: Publish one exact fast-forward commit through Git data API
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: sol/executive-worker-restart-survivability-380-20260918
         run: |
-          rm -rf mastermind.egg-info
-          rm -f \
-            .github/session_b_followup_patch.py \
-            .github/workflows/session-b-followup-builder.yml
-          rm -f \
-            session-b-followup-focused.log \
-            session-b-followup-regression.log
+          python - <<'PY'
+          from __future__ import annotations
 
-      - name: Commit and push exact verified follow-up head
-        run: |
-          git config user.name "Mastermind Session B Builder"
-          git config user.email "session-b-builder@users.noreply.github.com"
-          git add -A
-          git diff --cached --check
-          test -n "$(git diff --cached --name-only)"
-          if git diff --cached --name-only | grep -q '^mastermind\.egg-info/'; then
-            echo "Generated package metadata remains staged"
-            exit 1
-          fi
-          git commit -m "fix(executive): harden restart replay and quarantine"
-          git push origin HEAD:sol/executive-worker-restart-survivability-380-20260918
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import urllib.error
+          import urllib.request
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          branch = os.environ["TARGET_BRANCH"]
+          api_root = "https://api.github.com"
+
+          def request(method: str, path: str, payload=None):
+              data = None
+              if payload is not None:
+                  data = json.dumps(payload).encode("utf-8")
+              req = urllib.request.Request(
+                  api_root + path,
+                  data=data,
+                  method=method,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {token}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "mastermind-session-b-atomic-publisher",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      return json.loads(response.read().decode("utf-8"))
+              except urllib.error.HTTPError as exc:
+                  body = exc.read().decode("utf-8", errors="replace")
+                  raise RuntimeError(
+                      f"GitHub API {method} {path} failed: {exc.code} {body}"
+                  ) from exc
+
+          parent = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"], text=True
+          ).strip()
+          ref_path = f"/repos/{repo}/git/ref/heads/{branch}"
+          observed = request("GET", ref_path)["object"]["sha"]
+          if observed != parent:
+              raise SystemExit(
+                  f"carrier moved before publication: parent={parent} remote={observed}"
+              )
+
+          parent_commit = request(
+              "GET", f"/repos/{repo}/git/commits/{parent}"
+          )
+          base_tree = parent_commit["tree"]["sha"]
+          updates = (
+              "control_plane/executive_supervisor.py",
+              "tests/test_executive_supervisor.py",
+          )
+          tree_entries = []
+          for path in updates:
+              content = pathlib.Path(path).read_text(encoding="utf-8")
+              blob = request(
+                  "POST",
+                  f"/repos/{repo}/git/blobs",
+                  {"content": content, "encoding": "utf-8"},
+              )
+              tree_entries.append(
+                  {
+                      "path": path,
+                      "mode": "100644",
+                      "type": "blob",
+                      "sha": blob["sha"],
+                  }
+              )
+
+          deletions = (
+              ".github/session_b_followup_patch.py",
+              ".github/workflows/session-b-followup-builder.yml",
+              "mastermind.egg-info/PKG-INFO",
+              "mastermind.egg-info/SESSION_B_REPUBLISH_TRIGGER",
+              "mastermind.egg-info/SOURCES.txt",
+              "mastermind.egg-info/dependency_links.txt",
+              "mastermind.egg-info/requires.txt",
+              "mastermind.egg-info/top_level.txt",
+          )
+          for path in deletions:
+              tree_entries.append(
+                  {
+                      "path": path,
+                      "mode": "100644",
+                      "type": "blob",
+                      "sha": None,
+                  }
+              )
+
+          tree = request(
+              "POST",
+              f"/repos/{repo}/git/trees",
+              {"base_tree": base_tree, "tree": tree_entries},
+          )
+          commit = request(
+              "POST",
+              f"/repos/{repo}/git/commits",
+              {
+                  "message": "fix(executive): harden restart replay and quarantine",
+                  "tree": tree["sha"],
+                  "parents": [parent],
+              },
+          )
+
+          current = request("GET", ref_path)["object"]["sha"]
+          if current != parent:
+              raise SystemExit(
+                  f"carrier moved during publication: parent={parent} remote={current}"
+              )
+          request(
+              "PATCH",
+              f"/repos/{repo}/git/refs/heads/{branch}",
+              {"sha": commit["sha"], "force": False},
+          )
+          print(
+              json.dumps(
+                  {
+                      "parent": parent,
+                      "tree": tree["sha"],
+                      "commit": commit["sha"],
+                  },
+                  sort_keys=True,
+              )
+          )
+          PY
