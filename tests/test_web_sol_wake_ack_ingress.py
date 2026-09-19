@@ -4,6 +4,12 @@ The model-authored surface remains only sorted opaque WAKE-* ids.  All session,
 binding, nudge and conversation evidence below represents trusted host projection
 and must never be accepted from tool arguments or persisted as a second identity
 store.
+
+Web-Sol's accepted ``WebSolRuntimeBindingLease`` is runtime-only and detached, so
+the ingress cannot re-derive the exact target the way the worker seam projects a
+durable RuntimeBinding.  The current lease is therefore carried into the ingress
+as the live proof, and every trusted identity fact is discriminated against it
+before any acknowledgement is persisted.
 """
 from __future__ import annotations
 
@@ -16,7 +22,6 @@ from control_plane import wake_ack_ingress as ack_ingress
 from control_plane.executive_runtime import Runtime
 from control_plane.session_targets import (
     SCHEMA as TARGET_SCHEMA,
-    RuntimeBinding,
     SessionTarget,
     SessionTargetRegistry,
     route_obligation,
@@ -31,6 +36,7 @@ from control_plane.wake_ledger import (
     requested_record,
 )
 from control_plane.wake_persist import WakeLedgerRepository
+from integrations.chairman_surfaces import web_sol_runtime_binding as wrb
 
 
 _OID_A = mint_obligation_id(
@@ -43,6 +49,12 @@ _OID_B = mint_obligation_id(
     source_ref="eia-000000000082",
     wake_kind="job_failed",
 )
+
+_ADAPTER_INSTANCE_ID = "a" * 64
+_CENSUS_DIGEST = "9" * 64
+_CONVERSATION_FINGERPRINT = "d" * 64
+_BOOT_NONCE = "boot-nonce-0000000001"
+_ROTATED_BOOT_NONCE = "boot-nonce-0000000002"
 
 
 def _symbols():
@@ -72,14 +84,59 @@ def test_web_sol_ack_projection_is_closed_and_model_claim_stays_ids_only() -> No
     ]
 
 
+def _logical_target(session_alias: str = "EXECUTIVE-CEO-A") -> SessionTarget:
+    return SessionTarget(
+        session_alias=session_alias,
+        target_seat="ceo",
+        reasoning_surface="chatgpt-sol",
+        wake_transport="chatgpt-gui",
+        allowed_transports=("chatgpt-gui",),
+        workstream=None,
+        target_enabled=True,
+    )
+
+
+def _lease(
+    *,
+    session_alias: str = "EXECUTIVE-CEO-A",
+    boot_nonce: str = _BOOT_NONCE,
+    conversation_fingerprint: str = _CONVERSATION_FINGERPRINT,
+) -> wrb.WebSolRuntimeBindingLease:
+    """Return one self-proving current Web-Sol lease; no persistence involved."""
+
+    target = wrb.ExactWebSolTarget(
+        adapter_instance_id=_ADAPTER_INSTANCE_ID,
+        seat_ref="ceo",
+        env_manager="gologin",
+        folder_id=None,
+        profile_id="0" * 24,
+        conversation_fingerprint=conversation_fingerprint,
+        census_digest=_CENSUS_DIGEST,
+    )
+    binding = wrb.project_runtime_binding(
+        target,
+        _logical_target(session_alias),
+        boot_nonce=boot_nonce,
+    )
+    return wrb.WebSolRuntimeBindingLease(
+        target=target,
+        runtime_binding=binding,
+        runtime_binding_fingerprint=wrb.runtime_binding_fingerprint(binding, target),
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class _Fixture:
     runtime: Runtime
     repository: WakeLedgerRepository
-    binding: RuntimeBinding
+    lease: wrb.WebSolRuntimeBindingLease
     obligations: tuple[object, ...]
     nudge_id: str
     trusted: object
+
+    @property
+    def binding(self):
+        return self.lease.runtime_binding
 
 
 def _fixture(
@@ -91,15 +148,7 @@ def _fixture(
 ) -> _Fixture:
     projection, _acknowledge = _symbols()
     runtime = Runtime.at(tmp_path)
-    target = SessionTarget(
-        session_alias="EXECUTIVE-CEO-A",
-        target_seat="ceo",
-        reasoning_surface="chatgpt-sol",
-        wake_transport="chatgpt-gui",
-        allowed_transports=("chatgpt-gui",),
-        workstream=None,
-        target_enabled=True,
-    )
+    target = _logical_target()
     registry = SessionTargetRegistry(
         schema=TARGET_SCHEMA,
         lifecycle_authority="executive_os",
@@ -110,14 +159,8 @@ def _fixture(
         root_job_bindings={},
         targets={target.session_alias: target},
     )
-    binding = RuntimeBinding(
-        session_alias=target.session_alias,
-        binding_id="bind-wsx-" + "a" * 48,
-        binding_generation=1,
-        native_handle="wsx-runtime-" + "b" * 16,
-        account_label="chatgpt3",
-        reasoning_surface=target.reasoning_surface,
-    )
+    lease = _lease()
+    binding = lease.runtime_binding
     ids = (_OID_A, _OID_B)[:obligation_count]
     obligations = tuple(
         mint_obligation(
@@ -180,8 +223,8 @@ def _fixture(
         binding_id=binding.binding_id,
         binding_generation=binding.binding_generation,
         native_handle=str(binding.native_handle),
-        runtime_binding_fingerprint="c" * 64,
-        conversation_fingerprint="d" * 64,
+        runtime_binding_fingerprint=lease.runtime_binding_fingerprint,
+        conversation_fingerprint=lease.target.conversation_fingerprint,
         nudge_id=nudge_id,
         obligation_ids=tuple(sorted(ids)),
         terminal_ack_trailer=True,
@@ -189,7 +232,7 @@ def _fixture(
     return _Fixture(
         runtime=runtime,
         repository=repository,
-        binding=binding,
+        lease=lease,
         obligations=obligations,
         nudge_id=nudge_id,
         trusted=trusted,
@@ -210,8 +253,12 @@ def test_exact_web_sol_delivery_persists_one_ack_and_identical_replay_is_idempot
     _projection, acknowledge = _symbols()
     fixture = _fixture(tmp_path)
     claim = ack_ingress.WakeAckClaim(fixture.trusted.obligation_ids)
-    first = acknowledge(fixture.runtime, claim=claim, trusted=fixture.trusted)
-    second = acknowledge(fixture.runtime, claim=claim, trusted=fixture.trusted)
+    first = acknowledge(
+        fixture.runtime, claim=claim, trusted=fixture.trusted, lease=fixture.lease
+    )
+    second = acknowledge(
+        fixture.runtime, claim=claim, trusted=fixture.trusted, lease=fixture.lease
+    )
 
     assert len(first) == len(second) == 1
     assert first[0].inserted is True
@@ -234,6 +281,101 @@ def test_exact_web_sol_delivery_persists_one_ack_and_identical_replay_is_idempot
         assert forbidden not in payload
 
 
+def test_exact_replay_stays_idempotent_without_a_still_current_lease(tmp_path) -> None:
+    """A durable identical ACK replays without re-proving the old live lease."""
+
+    _projection, acknowledge = _symbols()
+    fixture = _fixture(tmp_path)
+    claim = ack_ingress.WakeAckClaim(fixture.trusted.obligation_ids)
+    first = acknowledge(
+        fixture.runtime, claim=claim, trusted=fixture.trusted, lease=fixture.lease
+    )
+    assert first[0].inserted is True
+
+    replay = acknowledge(fixture.runtime, claim=claim, trusted=fixture.trusted)
+    assert len(replay) == 1
+    assert replay[0].inserted is False
+    assert len(_ack_rows(fixture, fixture.trusted.obligation_ids[0])) == 1
+
+
+def test_first_persistence_requires_the_live_web_sol_proof(tmp_path) -> None:
+    _projection, acknowledge = _symbols()
+    fixture = _fixture(tmp_path)
+    claim = ack_ingress.WakeAckClaim(fixture.trusted.obligation_ids)
+    with pytest.raises(ack_ingress.WakeAckIngressError, match="lease"):
+        acknowledge(fixture.runtime, claim=claim, trusted=fixture.trusted)
+    assert _ack_rows(fixture, fixture.obligations[0].obligation_id) == ()
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("native_handle", "wsx-runtime-" + "f" * 16),
+        ("runtime_binding_fingerprint", "e" * 64),
+        ("conversation_fingerprint", "f" * 64),
+    ],
+)
+def test_valid_format_but_wrong_exact_session_evidence_refuses(
+    tmp_path,
+    field_name,
+    value,
+) -> None:
+    """Syntactically valid identity facts must still match the current lease."""
+
+    _projection, acknowledge = _symbols()
+    fixture = _fixture(tmp_path)
+    trusted = dataclasses.replace(fixture.trusted, **{field_name: value})
+    assert getattr(fixture.trusted, field_name) != value
+    claim = ack_ingress.WakeAckClaim(trusted.obligation_ids)
+    with pytest.raises(ack_ingress.WakeAckIngressError):
+        acknowledge(
+            fixture.runtime, claim=claim, trusted=trusted, lease=fixture.lease
+        )
+    assert _ack_rows(fixture, fixture.obligations[0].obligation_id) == ()
+
+
+def test_rotated_native_boot_refuses_the_pre_rotation_ack(tmp_path) -> None:
+    """A restarted native host cannot retroactively ACK the prior life."""
+
+    _projection, acknowledge = _symbols()
+    fixture = _fixture(tmp_path)
+    rotated = _lease(boot_nonce=_ROTATED_BOOT_NONCE)
+    assert rotated.runtime_binding.binding_id != fixture.binding.binding_id
+    assert rotated.runtime_binding.native_handle != fixture.binding.native_handle
+    claim = ack_ingress.WakeAckClaim(fixture.trusted.obligation_ids)
+    with pytest.raises(ack_ingress.WakeAckIngressError):
+        acknowledge(
+            fixture.runtime, claim=claim, trusted=fixture.trusted, lease=rotated
+        )
+    assert _ack_rows(fixture, fixture.obligations[0].obligation_id) == ()
+
+
+def test_wrong_conversation_lease_refuses_even_with_matching_binding(tmp_path) -> None:
+    """Another exact conversation in the same seat is still the wrong target."""
+
+    _projection, acknowledge = _symbols()
+    fixture = _fixture(tmp_path)
+    other = _lease(conversation_fingerprint="b" * 64)
+    claim = ack_ingress.WakeAckClaim(fixture.trusted.obligation_ids)
+    with pytest.raises(ack_ingress.WakeAckIngressError):
+        acknowledge(fixture.runtime, claim=claim, trusted=fixture.trusted, lease=other)
+    assert _ack_rows(fixture, fixture.obligations[0].obligation_id) == ()
+
+
+def test_non_web_sol_proof_object_refuses(tmp_path) -> None:
+    """Only the accepted Web-Sol lease shape is admissible as live proof."""
+
+    _projection, acknowledge = _symbols()
+    fixture = _fixture(tmp_path)
+    claim = ack_ingress.WakeAckClaim(fixture.trusted.obligation_ids)
+    impostor = dataclasses.replace(fixture.trusted)
+    with pytest.raises(ack_ingress.WakeAckIngressError, match="lease"):
+        acknowledge(
+            fixture.runtime, claim=claim, trusted=fixture.trusted, lease=impostor
+        )
+    assert _ack_rows(fixture, fixture.obligations[0].obligation_id) == ()
+
+
 @pytest.mark.parametrize(
     ("field_name", "value"),
     [
@@ -253,7 +395,9 @@ def test_stale_wrong_session_binding_generation_or_nudge_refuses_without_ack(
     trusted = dataclasses.replace(fixture.trusted, **{field_name: value})
     claim = ack_ingress.WakeAckClaim(trusted.obligation_ids)
     with pytest.raises(ack_ingress.WakeAckIngressError):
-        acknowledge(fixture.runtime, claim=claim, trusted=trusted)
+        acknowledge(
+            fixture.runtime, claim=claim, trusted=trusted, lease=fixture.lease
+        )
     assert _ack_rows(fixture, fixture.obligations[0].obligation_id) == ()
 
 
@@ -265,7 +409,9 @@ def test_wrong_delivery_surface_or_transport_refuses(tmp_path) -> None:
     )
     claim = ack_ingress.WakeAckClaim(fixture.trusted.obligation_ids)
     with pytest.raises(ack_ingress.WakeAckIngressError, match="chatgpt-gui"):
-        acknowledge(fixture.runtime, claim=claim, trusted=fixture.trusted)
+        acknowledge(
+            fixture.runtime, claim=claim, trusted=fixture.trusted, lease=fixture.lease
+        )
 
 
 def test_claim_must_cover_the_complete_delivered_nudge_group(tmp_path) -> None:
@@ -278,6 +424,7 @@ def test_claim_must_cover_the_complete_delivered_nudge_group(tmp_path) -> None:
             fixture.runtime,
             claim=ack_ingress.WakeAckClaim(partial_ids),
             trusted=partial,
+            lease=fixture.lease,
         )
     assert all(_ack_rows(fixture, item.obligation_id) == () for item in fixture.obligations)
 
@@ -285,6 +432,7 @@ def test_claim_must_cover_the_complete_delivered_nudge_group(tmp_path) -> None:
         fixture.runtime,
         claim=ack_ingress.WakeAckClaim(fixture.trusted.obligation_ids),
         trusted=fixture.trusted,
+        lease=fixture.lease,
     )
     assert len(complete) == 2
     assert all(item.inserted is True for item in complete)
@@ -298,6 +446,7 @@ def test_missing_member_delivery_refuses_the_entire_coalesced_ack(tmp_path) -> N
             fixture.runtime,
             claim=ack_ingress.WakeAckClaim(fixture.trusted.obligation_ids),
             trusted=fixture.trusted,
+            lease=fixture.lease,
         )
     assert all(_ack_rows(fixture, item.obligation_id) == () for item in fixture.obligations)
 
