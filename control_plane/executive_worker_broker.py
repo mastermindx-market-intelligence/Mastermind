@@ -52,12 +52,18 @@ from control_plane.codex_worker import (
     LaunchValidationStageError,
     ProcessIdentityError,
 )
-from control_plane.worker_adapter import WorkerExecutionAdapter, adapter_descriptor
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    WorkerExecutionAdapter,
+    adapter_descriptor,
+    bind_reviewed_adapter,
+)
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
@@ -112,7 +118,6 @@ from control_plane.worker_execution_contract import (
     CancelReceipt,
     CollectionReceipt,
     ValidationReceipt,
-    WorkerLaunchIdentity,
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerResult,
@@ -123,8 +128,6 @@ from control_plane.worker_browser_b1 import (
     BrowserReviewError,
     browser_review_receipt,
 )
-
-
 BROKER_REQUEST_SCHEMA_VERSION = "mastermind.executive_worker_broker_request/v1"
 BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1"
 UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v2"
@@ -167,6 +170,7 @@ _OHF_OPERATIONS = frozenset(
         "ohf-begin-turn",
         "ohf-deliver-attention",
         "ohf-collect-turn",
+        "ohf-observe-turn",
         "ohf-interrupt",
         "ohf-stop",
         "ohf-cancel",
@@ -212,6 +216,10 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class WorkerAdapterNotImplementedError(WorkerBrokerError):
+    """A reviewed adapter is not implemented for broker execution."""
 
 
 class BrokerPreSubmitError(WorkerBrokerError):
@@ -1301,9 +1309,14 @@ class ExecutiveWorkerBroker:
         ]
         | None = None,
     ) -> None:
-        descriptor = adapter_descriptor(adapter_id)
-        if not descriptor.implemented:
-            raise WorkerBrokerError(f"worker adapter {adapter_id!r} is not implemented")
+        try:
+            descriptor = bind_reviewed_adapter(adapter, adapter_id)
+        except AdapterBindingError as exc:
+            raise WorkerBrokerError(str(exc)) from exc
+        except Exception as exc:
+            raise WorkerBrokerError(
+                f"worker adapter {adapter_id!r} failed to bind"
+            ) from exc
         self.adapter = adapter
         self.adapter_id = descriptor.adapter_id
         self.policy = policy
@@ -1340,6 +1353,7 @@ class ExecutiveWorkerBroker:
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
+        self._observer_refusals: list[tuple[Any, str]] = []
         self._state_lock = asyncio.Lock()
         self._starting = False
         self._validation_busy = False
@@ -1454,6 +1468,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
+        if operation == "ohf-observe-turn":
+            return await self._ohf_observe_turn(payload)
         if operation == "ohf-interrupt":
             return await self._ohf_interrupt(payload)
         if operation == "ohf-stop":
@@ -2097,6 +2113,129 @@ class ExecutiveWorkerBroker:
         finally:
             await self._operator_release_busy(state)
 
+    async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        expected = {
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+            "cursor",
+            "max_items",
+        }
+        if set(payload) != expected:
+            raise BrokerStateError("ohf-observe-turn payload fields are invalid")
+        identity_fields = (
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+        )
+        if any(
+            not isinstance(payload[field], str) or not payload[field]
+            for field in identity_fields
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        async with self._state_lock:
+            active = self._operator_run
+            if active is None:
+                self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+                raise BrokerStateError("UNKNOWN_GENERATION")
+            generation_number = active.generation.generation_number
+            worker_id = active.generation.worker_id
+        if (
+            payload["attempt"] != active.epoch.attempt_id
+            or payload["epoch"] != active.epoch.session_epoch_id
+            or payload["generation"] != active.generation.process_generation_id
+            or generation_number != active.generation.generation_number
+            or worker_id != active.generation.worker_id
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        native_turn = None
+        projection = getattr(active.adapter, "visible_turn_projection", None)
+        if projection is None:
+            self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+            raise BrokerStateError("UNKNOWN_GENERATION")
+        grant_key = projection.check_grant(payload["reader_grant"])
+        if grant_key is None:
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
+        exact_local = None
+        generation_state = active.adapter._generations.get(
+            active.generation.process_generation_id
+        )
+        if generation_state is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        for local_turn, candidate_native in generation_state.turns.items():
+            if (
+                local_turn == payload["turn"]
+                and candidate_native
+                and candidate_native == grant_key.native_turn_id
+            ):
+                exact_local = local_turn
+                native_turn = candidate_native
+                break
+        if exact_local is None or native_turn is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        expected_key = TurnKey(
+            active.epoch.attempt_id,
+            active.epoch.session_epoch_id,
+            active.generation.process_generation_id,
+            active.generation.generation_number,
+            active.generation.worker_id,
+            exact_local,
+            native_turn,
+        )
+        if grant_key != expected_key:
+            self._observer_refusals.append((grant_key, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        try:
+            result = projection.read(
+                expected_key,
+                reader_grant=payload["reader_grant"],
+                cursor=payload["cursor"],
+                max_items=payload["max_items"],
+            )
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if not isinstance(code, str):
+                raise
+            self._observer_refusals.append((expected_key, code))
+            raise BrokerStateError(code) from None
+        return {
+            "items": [
+                {
+                    "source_item_id": item.source_item_id,
+                    "source_sequence": item.source_sequence,
+                    "publication_sequence": item.publication_sequence,
+                    "state": item.state,
+                    "text": item.text,
+                    "byte_length": item.byte_length,
+                    "truncated": False,
+                    "gap": None,
+                }
+                for item in result.items
+            ],
+            "next_cursor": result.next_cursor,
+            "gaps": [
+                {
+                    "from_publication_sequence": gap.from_publication_sequence,
+                    "to_publication_sequence": gap.to_publication_sequence,
+                    "reason": gap.reason,
+                }
+                for gap in result.gaps
+            ],
+            "terminal": result.terminal,
+            "publication_epoch": result.publication_epoch,
+            "retained_scope": list(result.retained_scope),
+            "resync_required": result.resync_required,
+        }
+
     async def _ohf_deliver_attention(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send one bounded nudge through the already-owned current writer."""
 
@@ -2637,6 +2776,24 @@ class ExecutiveWorkerBroker:
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        descriptor = adapter_descriptor(self.adapter_id)
+        if not descriptor.implemented:
+            raise WorkerAdapterNotImplementedError(
+                f"worker adapter {descriptor.adapter_id!r} is not implemented "
+                "for broker execution"
+            )
+        binding = getattr(self.adapter, "binding", None)
+        if binding is not None:
+            if getattr(binding, "implementation_state", None) == "SPEC_ONLY":
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "is SPEC_ONLY for broker execution"
+                )
+            if getattr(binding, "autonomous_allowed", None) is False:
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "does not allow autonomous broker execution"
+                )
         self._require_current_autonomy()
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
@@ -2762,12 +2919,7 @@ class ExecutiveWorkerBroker:
             elif state.terminal_error is not None:
                 status = "ERROR"
             else:
-                status_method = getattr(self.adapter, "status", None)
-                if not callable(status_method):
-                    raise BrokerStateError(
-                        f"worker adapter {self.adapter_id!r} does not expose status for an active run"
-                    )
-                status = await status_method(state.process_ref)
+                status = await self.adapter.status(state.process_ref)
             result["run"] = {
                 "run_id": run_id,
                 "status": status,
@@ -3442,6 +3594,8 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
 class RemoteCodexWorkerAdapter:
     """Control-side Codex adapter facade backed by the distinct-UID broker."""
 
+    adapter_id = "codex-cli"
+
     def __init__(
         self,
         client: WorkerBrokerClient,
@@ -3747,165 +3901,6 @@ class RemoteWorkerProcessController:
         )
 
 
-@dataclasses.dataclass(frozen=True)
-class RemoteWorkerBrokerEndpoint:
-    """One fixed transport endpoint for an Executive-selected worker identity."""
-
-    worker_id: str
-    client: WorkerBrokerClient
-    identity: WorkerLaunchIdentity
-
-    def __post_init__(self) -> None:
-        worker_id = str(self.worker_id or "").strip()
-        if not _ID_RE.fullmatch(worker_id):
-            raise WorkerBrokerError("remote worker endpoint has invalid worker_id")
-        if self.identity.worker_id != worker_id:
-            raise WorkerBrokerError("remote worker endpoint identity disagrees with worker_id")
-        object.__setattr__(self, "worker_id", worker_id)
-
-
-class RemoteWorkerBrokerFleet:
-    """Exact worker-id transport binding with no provider selection or failover.
-
-    Executive Runtime selects and persists ``Attempt.worker_id`` before this
-    object is consulted.  The fleet only maps that exact identity to one fixed
-    broker carrier.  It binds ``run_id -> worker_id`` before invoking ``start``
-    and retains the binding after any exception so ambiguous effects can only be
-    reconciled on the same carrier.
-    """
-
-    def __init__(
-        self,
-        endpoints: Sequence[RemoteWorkerBrokerEndpoint],
-        *,
-        validation_commands_for_spec: (
-            Callable[[WorkerLaunchSpec], Sequence[Sequence[str]]] | None
-        ) = None,
-        adapter_factory: Callable[[RemoteWorkerBrokerEndpoint], Any] | None = None,
-        controller_factory: Callable[[RemoteWorkerBrokerEndpoint], Any] | None = None,
-    ) -> None:
-        rows = tuple(endpoints)
-        if not rows:
-            raise WorkerBrokerError("remote worker broker fleet requires endpoints")
-        worker_ids = tuple(row.worker_id for row in rows)
-        if len(worker_ids) != len(set(worker_ids)):
-            raise WorkerBrokerError("remote worker broker fleet has duplicate worker_id")
-        validation_resolver = validation_commands_for_spec or (lambda _spec: ())
-        if adapter_factory is None:
-            adapter_factory = lambda row: RemoteCodexWorkerAdapter(
-                row.client,
-                validation_commands_for_spec=validation_resolver,
-            )
-        if controller_factory is None:
-            controller_factory = lambda row: RemoteWorkerProcessController(row.client)
-        self._endpoints = {row.worker_id: row for row in rows}
-        self._adapters = {row.worker_id: adapter_factory(row) for row in rows}
-        self._controllers = {row.worker_id: controller_factory(row) for row in rows}
-        self._run_workers: dict[str, str] = {}
-        self.inspector = _UnavailableRemoteInspector()
-
-    @property
-    def worker_ids(self) -> tuple[str, ...]:
-        return tuple(sorted(self._endpoints))
-
-    def launch_identity(self, worker_id: str) -> WorkerLaunchIdentity:
-        try:
-            return self._endpoints[str(worker_id)].identity
-        except KeyError as exc:
-            raise BrokerStateError("selected worker has no configured broker endpoint") from exc
-
-    def _adapter_for_worker(self, worker_id: str) -> Any:
-        try:
-            return self._adapters[str(worker_id)]
-        except KeyError as exc:
-            raise BrokerStateError("selected worker has no configured broker endpoint") from exc
-
-    def _controller_for_worker(self, worker_id: str) -> Any:
-        try:
-            return self._controllers[str(worker_id)]
-        except KeyError as exc:
-            raise BrokerStateError("persisted worker has no configured broker endpoint") from exc
-
-    def _worker_for_run(self, run_id: str) -> str:
-        try:
-            return self._run_workers[str(run_id)]
-        except KeyError as exc:
-            raise BrokerStateError("run has no bound worker broker carrier") from exc
-
-    def _adapter_for_ref(self, ref: WorkerProcessRef) -> Any:
-        return self._adapter_for_worker(self._worker_for_run(ref.run_id))
-
-    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
-        if spec.run_id in self._run_workers:
-            raise BrokerStateError("run is already bound to a worker broker carrier")
-        adapter = self._adapter_for_worker(spec.worker_id)
-        self._run_workers[spec.run_id] = spec.worker_id
-        return await adapter.start(spec)
-
-    def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
-        adapter = self._adapter_for_ref(ref)
-        reader = getattr(adapter, "launch_attestation", None)
-        if not callable(reader):
-            raise BrokerStateError("bound worker adapter has no launch attestation")
-        return reader(ref)
-
-    def uid_sweep_receipt(self, subject: Any) -> Mapping[str, Any]:
-        if isinstance(subject, WorkerProcessRef):
-            delegate = self._adapter_for_ref(subject)
-        else:
-            worker_id = getattr(subject, "worker_id", None)
-            if not isinstance(worker_id, str):
-                raise BrokerStateError("UID sweep subject has no worker identity")
-            delegate = self._controller_for_worker(worker_id)
-        reader = getattr(delegate, "uid_sweep_receipt", None)
-        if not callable(reader):
-            raise BrokerStateError("bound worker carrier has no UID sweep receipt")
-        return reader(subject)
-
-    async def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
-        adapter = self._adapter_for_worker(self._worker_for_run(run_id))
-        cleanup = getattr(adapter, "cleanup_unbound_run", None)
-        if not callable(cleanup):
-            raise BrokerStateError("bound worker adapter cannot reconcile ambiguous start")
-        return await cleanup(run_id)
-
-    async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:
-        return await self._adapter_for_ref(ref).status(ref)
-
-    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
-        return await self._adapter_for_ref(ref).collect_result(ref)
-
-    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt:
-        return await self._adapter_for_ref(ref).cancel(ref, reason)
-
-    async def run_validation_argv(
-        self,
-        spec: WorkerLaunchSpec,
-        argv: Sequence[str],
-        *,
-        timeout_seconds: float = 300.0,
-    ) -> ValidationReceipt:
-        worker_id = self._worker_for_run(spec.run_id)
-        if worker_id != spec.worker_id:
-            raise BrokerStateError("LaunchSpec worker differs from bound broker carrier")
-        return await self._adapter_for_worker(worker_id).run_validation_argv(
-            spec,
-            argv,
-            timeout_seconds=timeout_seconds,
-        )
-
-    def presence(self, attempt: Any):
-        return self._controller_for_worker(attempt.worker_id).presence(attempt)
-
-    def absence_verified(self, attempt: Any) -> bool:
-        return bool(
-            self._controller_for_worker(attempt.worker_id).absence_verified(attempt)
-        )
-
-    def terminate(self, attempt: Any) -> None:
-        self._controller_for_worker(attempt.worker_id).terminate(attempt)
-
-
 class _UnavailableRemoteInspector:
     """Fail-closed marker: cross-UID inspection must use the remote controller."""
 
@@ -3940,8 +3935,6 @@ __all__ = [
     "PeerCredentials",
     "RemoteBrokerError",
     "RemoteCodexWorkerAdapter",
-    "RemoteWorkerBrokerEndpoint",
-    "RemoteWorkerBrokerFleet",
     "RemoteWorkerProcessController",
     "UIDSweepReceipt",
     "WorkerBrokerClient",

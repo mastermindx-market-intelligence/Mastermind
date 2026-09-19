@@ -15,6 +15,7 @@ _DIGEST_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 _OPERATION_KEY_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{7,127}\Z")
 _SESSION_REF_RE = re.compile(r"\Aasd-session-[a-z0-9][a-z0-9-]{7,63}\Z")
 _CHILD_ROLES = frozenset({"plan", "work", "review", "repair"})
+_ROOT_ROLE = "aggregation"
 _PROVENANCE_KEYS = frozenset(
     {
         "schema_version",
@@ -52,6 +53,21 @@ def _is_wire_id(value: Any) -> bool:
 
 def _validate_revision_lineage(job: Job) -> None:
     role = job.orchestration_role
+    if role == _ROOT_ROLE:
+        if any(
+            value is not None
+            for value in (
+                job.plan_attempt_id,
+                job.plan_digest,
+                job.plan_step_id,
+                job.repair_round,
+                job.reviews_job_id,
+                job.supersedes_job_id,
+            )
+        ):
+            _refuse("aggregation root carries child revision lineage")
+        return
+
     if role == "plan":
         if any(
             value is not None
@@ -107,24 +123,36 @@ def _validate_revision_lineage(job: Job) -> None:
 def _validate_orchestration_child(job: Job) -> None:
     if not isinstance(job, Job):
         _refuse("identity projection requires one Runtime Job")
-    for name, value in {
+    required_ids = {
         "job_id": job.job_id,
         "root_job_id": job.root_job_id,
-        "parent_job_id": job.parent_job_id,
-    }.items():
+    }
+    if job.orchestration_role != _ROOT_ROLE:
+        required_ids["parent_job_id"] = job.parent_job_id
+    for name, value in required_ids.items():
         if not isinstance(value, str) or _JOB_ID_RE.fullmatch(value) is None:
             _refuse(f"{name} is not a canonical Runtime Job identifier")
-    if job.job_id == job.root_job_id:
-        _refuse("orchestration child cannot be its own root")
-    if (
-        job.parent_job_id != job.root_job_id
-        or isinstance(job.depth, bool)
-        or not isinstance(job.depth, int)
-        or job.depth != 1
-    ):
-        _refuse("orchestration child is not a direct root child")
-    if job.orchestration_role not in _CHILD_ROLES:
-        _refuse("Job is not a closed orchestration child role")
+    if job.orchestration_role == _ROOT_ROLE:
+        if (
+            job.job_id != job.root_job_id
+            or job.parent_job_id is not None
+            or isinstance(job.depth, bool)
+            or not isinstance(job.depth, int)
+            or job.depth != 0
+        ):
+            _refuse("aggregation root is not a strict root")
+    else:
+        if job.job_id == job.root_job_id:
+            _refuse("orchestration child cannot be its own root")
+        if (
+            job.parent_job_id != job.root_job_id
+            or isinstance(job.depth, bool)
+            or not isinstance(job.depth, int)
+            or job.depth != 1
+        ):
+            _refuse("orchestration child is not a direct root child")
+        if job.orchestration_role not in _CHILD_ROLES:
+            _refuse("Job is not a closed orchestration child role")
 
     provenance = job.orchestration_provenance
     if not isinstance(provenance, dict) or set(provenance) != _PROVENANCE_KEYS:
@@ -132,11 +160,15 @@ def _validate_orchestration_child(job: Job) -> None:
     if (
         provenance["schema_version"]
         != "mastermind.executive_orchestration_provenance/v1"
-        or provenance["creator"] != "coo_cycle"
         or provenance["job_id"] != job.job_id
-        or provenance["parent_job_id"] != job.parent_job_id
         or provenance["root_job_id"] != job.root_job_id
         or provenance["role"] != job.orchestration_role
+        or provenance["parent_job_id"] != job.parent_job_id
+        or (
+            provenance["creator"] != "ceo_intent"
+            if job.orchestration_role == _ROOT_ROLE
+            else provenance["creator"] != "coo_cycle"
+        )
         or not _is_wire_id(provenance["source_id"])
         or not isinstance(provenance["source_digest"], str)
         or _DIGEST_RE.fullmatch(provenance["source_digest"]) is None

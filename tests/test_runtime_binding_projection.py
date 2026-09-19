@@ -27,7 +27,10 @@ from control_plane.operator_harness_contract import (
     TurnStartObservation,
     WorkspaceIdentity,
 )
-from control_plane.runtime_binding_projection import project_runtime_binding
+from control_plane.runtime_binding_projection import (
+    _PROVIDER_TO_REASONING_SURFACE,
+    project_runtime_binding,
+)
 from control_plane.session_targets import SessionTarget
 
 
@@ -58,11 +61,11 @@ def _intent() -> dict[str, object]:
     }
 
 
-def _profile(dispatch) -> RequestedExecutionProfile:
+def _profile(dispatch, *, provider: str = "openai-codex") -> RequestedExecutionProfile:
     attempt = dispatch.attempt
     return RequestedExecutionProfile(
         worker_id=str(attempt.worker_id),
-        provider="openai-codex",
+        provider=provider,
         requested_model="fixture-model",
         harness_kind="fixture",
         harness_binary_digest="a" * 64,
@@ -99,17 +102,17 @@ def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestati
     )
 
 
-def _admitted_runtime(tmp_path):
+def _admitted_runtime(tmp_path, *, provider: str = "openai-codex"):
     runtime = Runtime.at(tmp_path)
     runtime.workers.register_worker(
         "worker-a",
-        provider="openai-codex",
+        provider=provider,
         account_label="account-a",
         worker_type="fixture",
         capabilities=["read"],
         quota_classes={
             "default": {
-                "provider": "openai-codex",
+                "provider": provider,
                 "capabilities": ["read"],
                 "cost_class": "small",
             }
@@ -128,7 +131,7 @@ def _admitted_runtime(tmp_path):
         worker_id="worker-a",
     )
     assert dispatch is not None and dispatch.lease_token is not None
-    profile = _profile(dispatch)
+    profile = _profile(dispatch, provider=provider)
     harness = runtime.operator_harness
     sealed = harness.seal_operator_harness_attempt(
         dispatch.attempt.attempt_id,
@@ -557,6 +560,17 @@ def test_projection_refuses_provider_session_drift_and_unknown_provider(tmp_path
         connection.execute("UPDATE workers SET provider='openai' WHERE worker_id='worker-a'")
     with pytest.raises(StateConflict):
         project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_grok_bot_provider_with_no_surface_mapping(tmp_path):
+    assert "grok-bot" not in _PROVIDER_TO_REASONING_SURFACE
+    assert "grok-bot" not in set(_PROVIDER_TO_REASONING_SURFACE.values())
+
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(
+        tmp_path, provider="grok-bot"
+    )
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target(surface="grok-bot"))
 
 
 def test_projection_refuses_non_ohf_attempt_and_wrong_source_admission(tmp_path):

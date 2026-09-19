@@ -219,7 +219,7 @@ def _resolve_subscription_binding(value: Any) -> SubscriptionHarnessBinding:
         raise WorkerConfigError("subscription harness binding is not reviewed") from exc
     if binding.adapter_id != "codex-cli" or not descriptor.implemented:
         raise WorkerConfigError("subscription harness binding is not implemented by Codex")
-    wire_api = "chat" if binding.protocol == "openai-chat" else binding.protocol
+    wire_api = binding.protocol
     matches = tuple(
         realm
         for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
@@ -235,7 +235,7 @@ def _resolve_subscription_binding(value: Any) -> SubscriptionHarnessBinding:
 def _resolve_subscription_realm(
     binding: SubscriptionHarnessBinding,
 ) -> CodexProviderRealm:
-    wire_api = "chat" if binding.protocol == "openai-chat" else binding.protocol
+    wire_api = binding.protocol
     matches = tuple(
         realm
         for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()

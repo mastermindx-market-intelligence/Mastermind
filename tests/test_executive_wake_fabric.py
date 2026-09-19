@@ -1245,3 +1245,27 @@ def test_mixed_binding_generations_cannot_coalesce():
 def test_negative_binding_generation_fails_closed():
     with pytest.raises(SessionTargetError, match="integer|>= 1"):
         RuntimeBinding(session_alias="PROPHET-COO-A", binding_id=_BIND, binding_generation=-1)
+
+
+def test_grok_bot_vocabulary_adds_no_target_or_transport_implementation() -> None:
+    assert "grok-bot" in REASONING_SURFACES
+    binding = RuntimeBinding(
+        session_alias="GROK-BOT-A",
+        binding_id="bind-grokbot00000001",
+        binding_generation=1,
+        reasoning_surface="grok-bot",
+    )
+    assert binding.reasoning_surface == "grok-bot"
+
+    registry = load_session_targets()
+    assert all(
+        target.reasoning_surface != "grok-bot"
+        for target in registry.targets.values()
+    )
+    assert "grok-bot" not in DEFAULT_TARGETS_PATH.read_text(encoding="utf-8")
+    assert transport_implemented("grok-computer") is False
+    assert {
+        transport_id
+        for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
+        if descriptor.transport_implemented
+    } == {"codex-app-server"}

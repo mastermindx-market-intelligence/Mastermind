@@ -20,6 +20,7 @@ from control_plane.executive_autonomy import (
     sha256_file,
     validate_disarmed_interlock_document,
 )
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 from scripts.executive_os_phase1c import load_control_config
 from scripts.executive_os_phase1c_worker import _load_config as load_worker_config
 
@@ -60,20 +61,10 @@ def evaluate_credential_mutation_state(
 
 
 def _has_acl(path: Path) -> bool:
-    if sys.platform != "darwin":
-        return False
-    completed = subprocess.run(
-        ["/usr/bin/stat", "-f", "%Sp", os.fspath(path)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        check=False,
-        timeout=5,
-    )
-    if completed.returncode != 0:
-        raise CredentialInterlockError("cannot inspect autonomy config ACL")
-    return completed.stdout.strip().endswith("+")
+    try:
+        return has_macos_acl(path)
+    except FilesystemSecurityError:
+        raise CredentialInterlockError("cannot inspect autonomy config ACL") from None
 
 
 def _require_safe_config(path: Path) -> None:
@@ -105,7 +96,7 @@ def assert_credential_mutation_disarmed(
         _require_safe_config(path)
     transaction_present = autonomy_transaction.exists() or autonomy_transaction.is_symlink()
     try:
-        control = load_control_config(control_config)
+        control = load_control_config(control_config, enforce_current_uid=False)
         worker = load_worker_config(worker_config, require_root_owner=True)
     except Exception as exc:
         raise CredentialInterlockError("autonomy config validation refused") from exc

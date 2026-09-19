@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
+from control_plane.provider_protocols import PROVIDER_PROTOCOLS as _ALLOWED_PROTOCOLS
 from control_plane.subscription_provider_profiles import (
     SubscriptionProviderProfile,
     get_profile,
@@ -25,11 +26,25 @@ DEFAULT_BINDINGS_PATH = (
     / "config"
     / "subscription_harness_bindings.v1.json"
 )
-_ALLOWED_PROTOCOLS = {"anthropic", "responses", "openai-chat"}
 _ALLOWED_STATES = {"SPEC_ONLY", "BUILT_NOT_PROVEN", "PROVEN_LIVE"}
+_REQUIRED_KEYS = frozenset(
+    {
+        "profile_id",
+        "provider",
+        "harness_id",
+        "adapter_id",
+        "protocol",
+        "endpoint",
+        "model_classes",
+        "implementation_state",
+        "autonomous_allowed",
+        "activation_gates",
+    }
+)
 _REQUIRED_GATES = (
     "adapter_implemented",
-    "provider_realm_enrolled",    "capacity_known",
+    "provider_realm_enrolled",
+    "capacity_known",
     "real_canary_passed",
     "usage_policy_satisfied",
 )
@@ -72,7 +87,7 @@ def _identifier(value: Any, label: str) -> str:
     allowed = set("abcdefghijklmnopqrstuvwxyz0123456789-_.")
     if any(ch not in allowed for ch in value.lower()):
         raise HarnessBindingError(f"invalid {label}: {value!r}")
-    return value
+    return value.lower()
 
 
 def _safe_https(value: Any) -> str:
@@ -90,6 +105,34 @@ def _safe_https(value: Any) -> str:
     ):
         raise HarnessBindingError("binding endpoint must be credential-free HTTPS")
     return endpoint
+
+
+def _effective_base_url(row: Mapping[str, Any], profile: Any) -> str:
+    endpoint = row["endpoint"]
+    if endpoint["source"] == "profile":
+        return profile.base_url
+    return _safe_https(endpoint["base_url"])
+
+
+def _reviewed_codex_realm(
+    binding_id: str,
+    provider: str,
+    effective_base_url: str,
+    protocol: str,
+) -> None:
+    from control_plane.codex_provider_realm import REVIEWED_CODEX_PROVIDER_REALMS
+
+    matches = tuple(
+        realm
+        for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
+        if realm.provider_alias == provider
+        and realm.base_url == effective_base_url
+        and realm.wire_api == protocol
+    )
+    if len(matches) != 1:
+        raise HarnessBindingError(
+            f"binding {binding_id!r} has no exact reviewed Codex realm"
+        )
 
 
 def _profiles(document: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -111,13 +154,15 @@ def validate_bindings(
         _identifier(binding_id, "binding id")
         if not isinstance(row, Mapping):
             raise HarnessBindingError(f"binding {binding_id!r} must be a mapping")
+        if set(row) != _REQUIRED_KEYS:
+            raise HarnessBindingError(f"binding {binding_id!r} has invalid fields")
         profile_id = _identifier(row.get("profile_id"), "profile id")
         profile = get_profile(profile_id, document=profiles)
         provider = _identifier(row.get("provider"), "provider")
         if provider != profile.provider:
             raise HarnessBindingError(f"binding {binding_id!r} provider disagrees")
-        _identifier(row.get("harness_id"), "harness id")
-        _identifier(row.get("adapter_id"), "adapter id")
+        harness_id = _identifier(row.get("harness_id"), "harness id")
+        adapter_id = _identifier(row.get("adapter_id"), "adapter id")
         protocol = row.get("protocol")
         if protocol not in _ALLOWED_PROTOCOLS:
             raise HarnessBindingError(f"binding {binding_id!r} protocol is unsupported")
@@ -149,6 +194,28 @@ def validate_bindings(
         state = row.get("implementation_state")
         if state not in _ALLOWED_STATES:
             raise HarnessBindingError(f"binding {binding_id!r} state is invalid")
+        normalized_harness_id = str(harness_id).strip().lower()
+        normalized_adapter_id = str(adapter_id).strip().lower()
+        if (
+            normalized_harness_id == "codex-cli"
+            or normalized_adapter_id == "codex-cli"
+        ):
+            from control_plane.codex_provider_realm import CODEX_WIRE_API_RESPONSES
+
+            if normalized_harness_id != normalized_adapter_id:
+                raise HarnessBindingError(
+                    f"binding {binding_id!r} codex harness identity disagrees"
+                )
+            if protocol != CODEX_WIRE_API_RESPONSES or state == "SPEC_ONLY":
+                raise HarnessBindingError(
+                    f"binding {binding_id!r} is not a reviewed Codex Responses lane"
+                )
+            _reviewed_codex_realm(
+                binding_id,
+                provider,
+                _effective_base_url(row, profile),
+                protocol,
+            )
         autonomous = row.get("autonomous_allowed")
         if type(autonomous) is not bool:
             raise HarnessBindingError(f"binding {binding_id!r} autonomous flag is invalid")
@@ -186,16 +253,15 @@ def get_binding(
     if not isinstance(row, Mapping):
         raise HarnessBindingError(f"unknown harness binding {binding_id!r}")
     profile = get_profile(row["profile_id"], document=_profiles(profiles_document))
-    endpoint = row["endpoint"]
-    effective_base_url = (
-        profile.base_url if endpoint["source"] == "profile" else _safe_https(endpoint["base_url"])
-    )
+    effective_base_url = _effective_base_url(row, profile)
+    harness_id = _identifier(row["harness_id"], "harness id")
+    adapter_id = _identifier(row["adapter_id"], "adapter id")
     return SubscriptionHarnessBinding(
         binding_id=binding_id,
         profile_id=row["profile_id"],
         provider=row["provider"],
-        harness_id=row["harness_id"],
-        adapter_id=row["adapter_id"],
+        harness_id=harness_id,
+        adapter_id=adapter_id,
         protocol=row["protocol"],
         effective_base_url=effective_base_url,
         model_classes=tuple(row["model_classes"]),

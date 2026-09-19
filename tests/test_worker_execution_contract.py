@@ -18,11 +18,13 @@ from control_plane import executive_worker_broker
 from control_plane import worker_adapter
 from control_plane import worker_execution_contract
 from control_plane.worker_execution_contract import (
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     WORKER_EXECUTION_CONTRACT_VERSION,
     ArtifactReceipt,
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    LaunchAttestation,
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
@@ -68,6 +70,8 @@ _MOVED_NAMES = {
     "BinaryAttestation",
     "CancelReceipt",
     "CollectionReceipt",
+    "LAUNCH_ATTESTATION_SCHEMA_VERSION",
+    "LaunchAttestation",
     "LaunchSpec",
     "ProcessRef",
     "ValidationReceipt",
@@ -686,6 +690,8 @@ def test_codex_compatibility_names_are_the_common_types() -> None:
         "BinaryAttestation": BinaryAttestation,
         "CancelReceipt": CancelReceipt,
         "CollectionReceipt": CollectionReceipt,
+        "LAUNCH_ATTESTATION_SCHEMA_VERSION": LAUNCH_ATTESTATION_SCHEMA_VERSION,
+        "LaunchAttestation": LaunchAttestation,
         "LaunchSpec": WorkerLaunchSpec,
         "ProcessRef": WorkerProcessRef,
         "ValidationReceipt": ValidationReceipt,
@@ -696,7 +702,58 @@ def test_codex_compatibility_names_are_the_common_types() -> None:
     for name, common_type in aliases.items():
         exported = getattr(codex_worker, name)
         assert exported is common_type
-        assert exported.__module__ == "control_plane.worker_execution_contract"
+        if isinstance(exported, type):
+            assert exported.__module__ == "control_plane.worker_execution_contract"
+        else:
+            assert getattr(worker_execution_contract, name) == exported
+
+
+def test_launch_attestation_to_dict_shape() -> None:
+    binary = _binary()
+    attestation = LaunchAttestation(
+        schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
+        created_at="2026-09-17T00:00:00+00:00",
+        executable_path="/fixture/provider",
+        binary=binary,
+        rendered_argv=("/fixture/provider", "exec", "--json", "-"),
+        environment_keys=("CODEX_HOME", "HOME", "PATH"),
+        permission_profile_sha256="c" * 64,
+        prompt_sha256="d" * 64,
+        expected_base_sha="e" * 40,
+        observed_base_sha="f" * 40,
+        workspace_identity={"path": "/fixture/workspace"},
+        worker_identity={"requested_user": "mastermind-worker"},
+        provider_home_identity={"path": "/fixture/provider-home"},
+        secret_canary_verdict={"schema_version": "v1", "passed": True},
+        launch_nonce="nonce-fixture",
+        process_identity={"pid": 42420, "pgid": 42420},
+    )
+
+    expected_keys = (
+        "schema_version",
+        "created_at",
+        "executable_path",
+        "binary",
+        "rendered_argv",
+        "environment_keys",
+        "permission_profile_sha256",
+        "prompt_sha256",
+        "expected_base_sha",
+        "observed_base_sha",
+        "workspace_identity",
+        "worker_identity",
+        "provider_home_identity",
+        "secret_canary_verdict",
+        "launch_nonce",
+        "process_identity",
+    )
+    assert tuple(attestation.to_dict().keys()) == expected_keys
+    assert attestation.to_dict()["schema_version"] == (
+        "mastermind.executive_launch_attestation/v1"
+    )
+    assert LAUNCH_ATTESTATION_SCHEMA_VERSION == (
+        "mastermind.executive_launch_attestation/v1"
+    )
 
 
 def test_common_consumers_do_not_import_moved_types_from_codex() -> None:

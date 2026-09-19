@@ -33,7 +33,10 @@ from control_plane.executive_terminal_return import (
 )
 from control_plane.executive_workspace import prepare_credentialless_clone
 from control_plane.session_targets import RuntimeBinding, load_session_targets
+from control_plane.session_targets import route_obligation
+from control_plane.wake_dispatcher import WakePreSubmitError
 from control_plane.wake_ledger import LedgerPhase
+from control_plane.wake_events import mint_obligation
 from control_plane.wake_persist import WakeLedgerRepository
 from integrations.executive_wake.registry import WakeDispatcherRegistry
 from integrations.mastermind_company_mcp.adapter import DialogueBinding
@@ -79,6 +82,11 @@ from tests.test_executive_wake_persisted_dispatch import (
 from tests.test_executive_service import _config as _executive_config
 from tests.test_executive_supervisor import FakeInspector, _supervisor
 from tests.test_executive_terminal_return import _PlannerSealedWorkerAdapter
+from tests.test_executive_os_phase1fc import (
+    _complete_ohf_role,
+    _cycle_through_completed_work,
+    _review_body,
+)
 from tests.test_slack_agent_dialogue_engine_v2 import ExactV2AuthorityPolicy
 from tests.test_slack_agent_dialogue_service import wait_for_service_start
 
@@ -1588,3 +1596,309 @@ def test_terminal_candidate_posts_one_result_and_one_persisted_wake_across_repla
         socket_root = Path(raw).resolve()
         assert stat.S_IMODE(socket_root.lstat().st_mode) == 0o700
         asyncio.run(scenario(socket_root))
+
+
+def test_offline_web_ceo_aggregation_terminal_obligation_remains_delivered_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests import test_executive_os_phase1fc as phase1fc
+
+    def sourced_submit(runtime, payload):
+        return ceo_intent.submit_intent(
+            runtime,
+            {**payload, "workstream": "WS:EXECUTIVE-OS"},
+            dialogue_source={
+                "schema_version": "mastermind.executive_dialogue_source/v1",
+                "work_ref": "WS:EXECUTIVE-OS",
+                "commission_ref": {
+                    "repository": REPO,
+                    "commit": "c" * 40,
+                    "path": "docs/commissions/executive-terminal-return.md",
+                    "content_sha256": "d" * 64,
+                },
+                "watch_mode": "turn_watch_v1",
+            },
+            require_dialogue_source=True,
+        )
+
+    original_submit = phase1fc.submit_intent
+    monkeypatch.setattr(phase1fc, "submit_intent", sourced_submit)
+    runtime, cycle, dispatches, root, planner, work, work_seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime",
+            intent_id="CEO-OFFLINE-AGGREGATION-RETURN",
+            review_workers=["worker-b"],
+        )
+    )
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review = dispatches[-1]
+    review_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(runtime.jobs.get_job(work.attempt.job_id).plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+    )
+    _complete_ohf_role(runtime, review, review_body, identity_seed=9301)
+    assert cycle.run_once(root.job_id).action == "HANDOFF_CREATED"
+    handoff = runtime.jobs.get_cycle_handoff(root.job_id)
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    aggregation = dispatches[-1]
+    aggregation_body = {
+        "schema_version": "mastermind.aggregation_result/v1",
+        "root_job_id": root.job_id,
+        "handoff_digest": handoff["handoff_digest"],
+        "policy_sha": handoff["policy_sha"],
+        "plan_attempt_id": handoff["plan_attempt_id"],
+        "plan_digest": handoff["plan_digest"],
+        "revisions": [
+            {key: item[key] for key in {
+                "ordinal",
+                "plan_step_id",
+                "current_job_id",
+                "current_attempt_id",
+                "current_result_digest",
+                "repair_round",
+                "review_required",
+                "qualifying_review_job_id",
+                "qualifying_review_attempt_id",
+                "qualifying_review_result_digest",
+            }}
+            for item in handoff["revisions"]
+        ],
+        "aggregate_summary": "One bounded reviewed offline result is ready.",
+        "evidence_digests": [],
+    }
+    _complete_ohf_role(
+        runtime, aggregation, aggregation_body, identity_seed=9302
+    )
+    assert original_submit is not None
+
+    material = runtime.validated_role_completion(
+        root.job_id,
+        expected_attempt_id=aggregation.attempt.attempt_id,
+    )
+    candidate = reduce_terminal_return(material=material)
+    assert candidate.role == "aggregation"
+    assert candidate.root_job_id == root.job_id
+    assert candidate.job_id == root.job_id
+
+    operations: list[str] = []
+
+    async def service_call(_socket_path, request, **kwargs):
+        operations.append(str(request["operation"]))
+        if request["operation"] == "bind_or_verify_relay_parent_thread":
+            return {
+                "ok": True,
+                "result": {
+                    "attestation": "mastermind.agent_dialogue.relay_parent/v1",
+                    "thread_ts": "1787961600.000001",
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
+                },
+            }
+        if request["operation"] == "send_message":
+            before_write = kwargs.pop("before_write")
+            result = before_write()
+            if inspect.isawaitable(result):
+                await result
+            assert kwargs == {}
+        message = request["args"]["message"]
+        return {
+            "ok": True,
+            "result": {
+                "action": "POSTED",
+                "message_key": message["message_key"],
+                "fingerprint": message["fingerprint"],
+                "message_ts": "1787961600.000002",
+                "duplicate_timestamps": [],
+                "thread_ts": "1787961600.000001",
+                "parent_author_user_id": BOT,
+                "parent_fingerprint": "e" * 64,
+            },
+        }
+
+    projector = ExecutiveTerminalReturnProjector(
+        RuntimeTerminalReturnBindingResolver(lambda: runtime),
+        socket_path=tmp_path / "unavailable-agent-relay.sock",
+        service_call=service_call,
+    )
+
+    class ProjectingCallback:
+        async def project(self, projected, *, before_write):
+            receipt = await projector.project(projected, before_write=before_write)
+            return dataclasses.asdict(receipt)
+
+        async def reconcile(self, _projected):
+            raise AssertionError("an APPLIED projection must reconcile by read")
+
+    async def project_once() -> None:
+        projection_service = ExecutiveControlService(
+            _executive_config(tmp_path / "projection"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=ProjectingCallback(),
+        )
+        projection_service.runtime = runtime
+        await projection_service._project_terminal_return(
+            root.job_id,
+            expected_attempt_id=aggregation.attempt.attempt_id,
+        )
+        assert projection_service._terminal_return_last_diagnostic == (
+            "terminal-return:APPLIED"
+        ), (
+            projection_service._terminal_return_last_diagnostic
+        )
+
+    asyncio.run(project_once())
+    assert operations == [
+        "bind_or_verify_relay_parent_thread",
+        "send_message",
+    ]
+    terminal_events = [
+        event.event_type
+        for event in runtime.events.list_events(
+            attempt_id=aggregation.attempt.attempt_id
+        )
+        if event.event_type.startswith("EXECUTIVE_TERMINAL_RETURN_")
+    ]
+    assert terminal_events == [
+        "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+        "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+        "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+    ]
+    event_count = len(runtime.events.list_events())
+
+    binding = RuntimeBinding(
+        session_alias="EXECUTIVE-CEO-A",
+        binding_id="bind-offline-aggregation-01",
+        binding_generation=1,
+        native_handle="thread-offline-aggregation",
+        account_label="codex-offline-aggregation",
+        reasoning_surface="codex",
+    )
+    registry = load_session_targets()
+    target = dataclasses.replace(
+        registry.targets["EXECUTIVE-CEO-A"],
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        target_enabled=True,
+    )
+    registry = dataclasses.replace(
+        registry,
+        production_armed=True,
+        targets={**registry.targets, target.session_alias: target},
+    ).with_root_job_bindings({root.job_id: {"ceo": "EXECUTIVE-CEO-A"}})
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "f" * 64,
+        declared_target_seat="ceo",
+        job_id=candidate.job_id,
+        attempt_id=candidate.attempt_id,
+        root_job_id=candidate.root_job_id,
+        source_workstream="WS:EXECUTIVE-OS",
+        source_created_at="2026-09-14T00:00:01Z",
+        emitted_at="2026-09-14T00:00:02Z",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    wake_repo = WakeLedgerRepository(runtime)
+    dispatcher = _Dispatcher(repo=wake_repo)
+    carrier = PersistedWakeCarrier(
+        repository=wake_repo,
+        dispatchers=WakeDispatcherRegistry({"codex-app-server": dispatcher}),
+        current_binding_for=lambda _route: binding,
+        retry_policy=_POLICY,
+    )
+    asyncio.run(carrier.submit(obligation, route))
+    delivered = [
+        item.record.phase
+        for item in wake_repo.list_records(obligation.obligation_id)
+    ]
+    assert delivered == [
+        LedgerPhase.WAKE_REQUESTED,
+        LedgerPhase.DELIVERY_ATTEMPT,
+        LedgerPhase.DELIVERED,
+    ]
+    assert LedgerPhase.TARGET_ACKNOWLEDGED not in delivered
+    assert not [
+        event
+        for event in runtime.events.list_events()
+        if "PRODUCTION_ACCEPT" in event.event_type
+    ]
+
+    reopened_runtime = Runtime.at(tmp_path / "runtime")
+    reopened_material = reopened_runtime.validated_role_completion(
+        root.job_id,
+        expected_attempt_id=aggregation.attempt.attempt_id,
+    )
+    assert reduce_terminal_return(material=reopened_material) == candidate
+    replay_service = ExecutiveControlService(
+        _executive_config(tmp_path / "replay-service"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        terminal_return_projector=ProjectingCallback(),
+    )
+    replay_service.runtime = reopened_runtime
+    asyncio.run(
+        replay_service._project_terminal_return(
+            root.job_id,
+            expected_attempt_id=aggregation.attempt.attempt_id,
+        )
+    )
+    assert replay_service._terminal_return_last_diagnostic == (
+        "terminal-return:ALREADY_APPLIED"
+    )
+    assert operations == [
+        "bind_or_verify_relay_parent_thread",
+        "send_message",
+    ]
+    reopened_event_ids = [
+        event.event_id
+        for event in reopened_runtime.events.list_events()
+        if event.event_id is not None
+    ]
+    assert reopened_event_ids[-event_count:] == list(
+        range(reopened_event_ids[-1] - event_count + 1, reopened_event_ids[-1] + 1)
+    )
+    assert len(set(reopened_event_ids)) == len(reopened_event_ids)
+
+    reopened_wake_repo = WakeLedgerRepository(reopened_runtime)
+    restarted_dispatcher = _Dispatcher(repo=reopened_wake_repo)
+    restarted_carrier = PersistedWakeCarrier(
+        repository=reopened_wake_repo,
+        dispatchers=WakeDispatcherRegistry(
+            {"codex-app-server": restarted_dispatcher}
+        ),
+        current_binding_for=lambda _route: binding,
+        retry_policy=_POLICY,
+    )
+    assert asyncio.run(
+        restarted_carrier.reconcile(obligation, route)
+    ) is not None
+    assert restarted_dispatcher.nudge_calls == 0
+
+    stale_binding = dataclasses.replace(
+        binding,
+        binding_generation=binding.binding_generation + 1,
+    )
+    stale_carrier = PersistedWakeCarrier(
+        repository=reopened_wake_repo,
+        dispatchers=WakeDispatcherRegistry(
+            {"codex-app-server": restarted_dispatcher}
+        ),
+        current_binding_for=lambda _route: stale_binding,
+        retry_policy=_POLICY,
+    )
+    with pytest.raises(WakePreSubmitError, match="current RuntimeBinding"):
+        asyncio.run(stale_carrier.submit(obligation, route))
+    replayed_wake = [
+        item.record.phase
+        for item in reopened_wake_repo.list_records(obligation.obligation_id)
+    ]
+    assert replayed_wake == delivered
+    assert restarted_dispatcher.nudge_calls == 0

@@ -15,6 +15,7 @@ from typing import Any, Protocol, runtime_checkable
 
 
 WORKER_EXECUTION_CONTRACT_VERSION = "mastermind.worker_execution_contract/v1"
+LAUNCH_ATTESTATION_SCHEMA_VERSION = "mastermind.executive_launch_attestation/v1"
 
 MAX_ARTIFACTS = 32
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
@@ -61,6 +62,21 @@ def _freeze(value: Any) -> Any:
     return value
 
 
+def _jsonable(value: Any) -> Any:
+    if dataclasses.is_dataclass(value):
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
 class WorkerRunStatus(str, Enum):
     STARTING = "STARTING"
     RUNNING = "RUNNING"
@@ -86,6 +102,48 @@ class BinaryAttestation:
     uid: int
     gid: int
     mtime_ns: int
+
+
+@dataclasses.dataclass(frozen=True)
+class LaunchAttestation:
+    """Complete, secret-free launch receipt persisted before RUNNING."""
+
+    schema_version: str
+    created_at: str
+    executable_path: str
+    binary: BinaryAttestation
+    rendered_argv: tuple[str, ...]
+    environment_keys: tuple[str, ...]
+    permission_profile_sha256: str
+    prompt_sha256: str
+    expected_base_sha: str | None
+    observed_base_sha: str
+    workspace_identity: Mapping[str, Any]
+    worker_identity: Mapping[str, Any]
+    provider_home_identity: Mapping[str, Any]
+    secret_canary_verdict: Mapping[str, Any]
+    launch_nonce: str
+    process_identity: Mapping[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "created_at": self.created_at,
+            "executable_path": self.executable_path,
+            "binary": dataclasses.asdict(self.binary),
+            "rendered_argv": list(self.rendered_argv),
+            "environment_keys": list(self.environment_keys),
+            "permission_profile_sha256": self.permission_profile_sha256,
+            "prompt_sha256": self.prompt_sha256,
+            "expected_base_sha": self.expected_base_sha,
+            "observed_base_sha": self.observed_base_sha,
+            "workspace_identity": _jsonable(self.workspace_identity),
+            "worker_identity": _jsonable(self.worker_identity),
+            "provider_home_identity": _jsonable(self.provider_home_identity),
+            "secret_canary_verdict": _jsonable(self.secret_canary_verdict),
+            "launch_nonce": self.launch_nonce,
+            "process_identity": dict(self.process_identity),
+        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -273,6 +331,7 @@ class ProcessInspector(Protocol):
 
 __all__ = [
     "WORKER_EXECUTION_CONTRACT_VERSION",
+    "LAUNCH_ATTESTATION_SCHEMA_VERSION",
     "MAX_ARTIFACTS",
     "MAX_ARTIFACT_BYTES",
     "MAX_ARTIFACT_TOTAL_BYTES",
@@ -280,6 +339,7 @@ __all__ = [
     "BinaryAttestation",
     "CancelReceipt",
     "CollectionReceipt",
+    "LaunchAttestation",
     "ProcessInspector",
     "ValidationReceipt",
     "WorkerLaunchIdentity",

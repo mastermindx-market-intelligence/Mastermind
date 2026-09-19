@@ -61,6 +61,10 @@ binary plists are rejected before a repeated key can overwrite its predecessor.
 Plist parsing is in-process, and only validated projections enter the receipt.
 Unknown fields are deliberately not projected.
 
+The worker configuration and Codex attestation identify the installer's fixed
+destination, `/Library/Application Support/MastermindExecutive/bin/codex-0.147.0`.
+The Homebrew executable is installer input, not the installed worker identity.
+
 Private config, tokens, keys, canaries, provider auth, DR, job, backup, relay,
 and socket paths are metadata-only. Their bytes, hashes, values, prefixes, and
 suffixes are never read or emitted. Metadata is restricted to lexical path,
@@ -82,6 +86,17 @@ when the final path is absent. The exact macOS
 `/var -> /private/var` alias is the only accepted alias. ACL checks use the
 macOS stat marker and bind pre/post device and inode.
 
+For the three frozen socket metadata paths only, the exact `/var/run`
+ancestor may be root:daemon (UID 0, GID 1), mode `0775`, matching the installed
+macOS 26.5 `com.apple.files.data-template` package receipt. This explicitly
+trusts the OS daemon group at that parent for metadata observation. The parent
+must still be a directory with matching named/descriptor identity; descendant
+directories retain the existing owner and no-group/other-write checks, and the
+entire ancestor chain is rechecked after observation. Other groups, owners,
+write modes, aliases, and non-frozen paths receive no exception. Content reads
+retain their strict descriptor-walk policy. The collector neither opens these
+sockets nor changes OS directory permissions.
+
 The command adapter permits only:
 
 ```text
@@ -90,6 +105,14 @@ The command adapter permits only:
 /bin/ps -o uid=,gid=,pid=,ppid= -p <exact positive launchd pid>
 /usr/bin/stat -f %Sp <one frozen path>
 ```
+
+The disabled-service parser accepts native `enabled`/`disabled` entries and
+legacy `false`/`true` entries. It projects only the five frozen service labels,
+ignoring other services in the system listing. Missing overrides are emitted
+as `disabled: null`; they never imply a disabled or safely stopped service.
+Such uncertainty retains `EFFECT_UNKNOWN` while preserving the collected facts.
+Malformed framing, invalid values for a frozen label, and duplicate frozen
+labels remain `MALFORMED_LAUNCHD` refusals.
 
 Commands use no shell, a five-second total execution/settlement deadline, no
 retry, acquisition-time bounded nonblocking output, `stdin=DEVNULL`, and

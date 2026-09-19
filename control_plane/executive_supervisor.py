@@ -29,12 +29,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
 
-from control_plane.codex_worker import (
-    ISOLATION_MANIFEST_SCHEMA_VERSION,
-    LAUNCH_ATTESTATION_SCHEMA_VERSION,
-    ProcessIdentityError,
-)
 from control_plane.worker_execution_contract import (
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     CollectionReceipt,
     ProcessInspector,
     ValidationReceipt,
@@ -86,6 +82,15 @@ class SupervisorError(RuntimeProofError):
 
 class TerminalAssignmentSealError(SupervisorError):
     """A worker assignment could not be sealed before terminal state."""
+
+
+def _codex_worker_contract():
+    from control_plane.codex_worker import (
+        ISOLATION_MANIFEST_SCHEMA_VERSION,
+        ProcessIdentityError,
+    )
+
+    return ISOLATION_MANIFEST_SCHEMA_VERSION, LAUNCH_ATTESTATION_SCHEMA_VERSION, ProcessIdentityError
 
 
 class _ValidationCancelled(Exception):
@@ -148,7 +153,7 @@ class IdentitySafeProcessController:
             if self.inspector.boot_session_id() != attempt.boot_id:
                 return ProcessPresence.ABSENT
             identity, pgid = self.inspector.identity(attempt.pid)
-        except ProcessIdentityError:
+        except _codex_worker_contract()[2]:
             # ProcessInspector intentionally fails closed when identity cannot be
             # resolved.  Distinguish a truly absent PID from an extant PID whose
             # identity is merely unreadable before authorizing LOST/requeue.
@@ -747,7 +752,7 @@ class ExecutiveSupervisor:
                     "assigned path disappeared during isolation-root enumeration"
                 )
         manifest = {
-            "schema_version": ISOLATION_MANIFEST_SCHEMA_VERSION,
+            "schema_version": _codex_worker_contract()[0],
             "roots": sorted(root_documents, key=lambda value: str(value["path"])),
             "entries": sorted(
                 entry_documents,

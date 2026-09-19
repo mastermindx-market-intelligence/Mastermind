@@ -1,7 +1,6 @@
 {
   "schema": "mastermind.subscription_provider_profiles/v1",
   "verified_at": "2026-09-13T06:55:00Z",
-  "adapter_id": "claude-compatible-subscription",
   "profiles": {
     "glm-coding-plan": {
       "provider": "glm",
@@ -9,10 +8,10 @@
       "protocol": "anthropic",
       "base_url": "https://api.z.ai/api/anthropic",
       "models": {
-        "routine": "GLM-5.3",
+        "routine": "GLM-5.3-Flash",
         "hard": "GLM-5.3",
         "fast": "GLM-5.3-Flash",
-        "subagent": "GLM-5.3"
+        "subagent": "GLM-5.3-Flash"
       },
       "default_model_class": "routine",
       "supported_tool_only": true,
@@ -29,10 +28,7 @@
         "interactive_only": true,
         "unattended_background_allowed": false,
         "production_backend_allowed": false
-      },
-      "notes": [
-        "Current GLM Coding Plan profiles target the provider-supported Claude Code harness and current GLM-5.3 family."
-      ]
+      }
     },
     "alibaba-token-plan-personal": {
       "provider": "alibaba",
@@ -84,9 +80,6 @@
       },
       "autonomous_allowed": false,
       "activation_gate": "provider_realm_enrolled_and_capacity_known",
-      "notes": [
-        "Current Token Plan explicitly includes M3 and supports Claude Code; production workloads should use pay-as-you-go per provider guidance."
-      ],
       "usage_policy": {
         "supported_harness_required": true,
         "interactive_only": true,

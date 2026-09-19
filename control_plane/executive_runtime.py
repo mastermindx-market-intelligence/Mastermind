@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import fnmatch
 import hmac
 import importlib
 import json
@@ -39,6 +40,7 @@ from common.commission_ref import (
     CommissionRefError,
     normalize_commission_ref,
 )
+
 from control_plane.executive_authority import (
     AuthorityDenied,
     AuthorityPolicyError,
@@ -67,6 +69,7 @@ from control_plane.executive_retry_safety import (
 from control_plane.operator_harness_contract import (
     AttemptExecutionMode,
     CandidateResult,
+    CheckpointObservation,
     EventCursor,
     LaunchDecision,
     NormalizedEvent,
@@ -91,8 +94,39 @@ from control_plane.operator_harness_contract import (
 from scripts.ohf.redaction import redact_evidence, redact_evidence_text
 
 SCHEMA_VERSION = 4
+
+
+def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
+    value_parts = value.split("/")
+
+    def _matches(pattern: str) -> bool:
+        pattern_parts = pattern.split("/")
+
+        def _walk(pattern_index: int, value_index: int) -> bool:
+            if pattern_index == len(pattern_parts):
+                return value_index == len(value_parts)
+            part = pattern_parts[pattern_index]
+            if part == "**":
+                return any(
+                    _walk(pattern_index + 1, candidate)
+                    for candidate in range(value_index, len(value_parts) + 1)
+                )
+            return (
+                value_index < len(value_parts)
+                and fnmatch.fnmatchcase(value_parts[value_index], part)
+                and _walk(pattern_index + 1, value_index + 1)
+            )
+
+        return _walk(0, 0)
+
+    return any(_matches(pattern) for pattern in patterns)
+
+
 OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION = (
     "mastermind.operator_harness_internal_generation_operation/v1"
+)
+OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION = (
+    "mastermind.operator_harness_checkpoint_operation/v1"
 )
 OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION = (
     "mastermind.operator_harness_reconcile_observation/v1"
@@ -144,6 +178,13 @@ V2_HOST_EXECUTION_BINDING_KEYS = frozenset(
     }
     | OPERATOR_HARNESS_BINDING_KEYS
 )
+HOST_EXECUTION_BINDING_VERSION_KEY = "host_execution_binding_version"
+HOST_EXECUTION_BINDING_V2 = "mastermind.host_execution_binding/v2"
+HOST_EXECUTION_BINDING_V3 = "mastermind.host_execution_binding/v3"
+V3_HOST_EXECUTION_BINDING_KEYS = frozenset(
+    V2_HOST_EXECUTION_BINDING_KEYS | {"work_placement_union"}
+)
+WORK_PLACEMENT_UNION_MAX_MEMBERS = 8
 EXECUTIVE_DIALOGUE_SOURCE_SCHEMA = "mastermind.executive_dialogue_source/v1"
 _EXECUTIVE_DIALOGUE_SOURCE_KEYS = frozenset(
     {
@@ -510,7 +551,11 @@ def _normalise_capabilities(
     )
 
 
-def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
+def _normalise_constraints(
+    value: dict[str, Any] | None,
+    *,
+    host_admitted_placement_union: bool = False,
+) -> dict[str, Any]:
     if value is not None and not isinstance(value, dict):
         raise StateConflict("job constraints must be a mapping")
     raw = value or {}
@@ -722,7 +767,60 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
         result["operator_harness_binary_digest"] = harness_digest
         result["operator_harness_version"] = harness_version
         result["operator_harness_armed"] = raw["operator_harness_armed"]
+    if host_admitted_placement_union and "work_placement_union" in raw:
+        result["work_placement_union"] = _normalise_work_placement_union(
+            raw["work_placement_union"]
+        )
     return result
+
+
+def _normalise_work_placement_union(
+    value: Any,
+) -> list[dict[str, str]]:
+    if not isinstance(value, (list, tuple)) or len(value) > (
+        WORK_PLACEMENT_UNION_MAX_MEMBERS
+    ):
+        raise StateConflict("host work-placement union must be a bounded list")
+    if not value:
+        raise StateConflict(
+            "host work-placement union must admit at least one placement"
+        )
+    members: list[dict[str, str]] = []
+    identities: set[tuple[str, str]] = set()
+    for member in value:
+        if not isinstance(member, Mapping) or set(member) != {
+            "provider_realm",
+            "quota_class",
+        }:
+            raise StateConflict(
+                "host work-placement union member must name exactly "
+                "a provider realm and quota class"
+            )
+        normalized_member = {
+            key: str(member[key]).strip()
+            for key in ("provider_realm", "quota_class")
+        }
+        if any(
+            _ROUTING_VALUE_RE.fullmatch(item) is None
+            for item in normalized_member.values()
+        ):
+            raise StateConflict(
+                "host work-placement union member values are invalid"
+            )
+        identity = (
+            normalized_member["provider_realm"],
+            normalized_member["quota_class"],
+        )
+        if identity in identities:
+            raise StateConflict(
+                "host work-placement union members must be distinct"
+            )
+        identities.add(identity)
+        members.append(normalized_member)
+    return sorted(
+        members,
+        key=lambda item: (item["provider_realm"], item["quota_class"]),
+    )
 
 
 def _normalise_seat(value: str, *, field: str) -> str:
@@ -786,6 +884,45 @@ def _assert_child_does_not_widen_parent(
             raise StateConflict(
                 "child cost_class may only shrink relative to the parent"
             )
+
+
+def _project_work_placement(
+    constraints: dict[str, Any],
+    root_constraints: Mapping[str, Any],
+    placement: Mapping[str, Any],
+    *,
+    raw_root_constraints: Mapping[str, Any],
+) -> dict[str, Any]:
+    provider_realm = str(placement.get("provider_realm") or "").strip().lower()
+    quota_class = str(placement.get("quota_class") or "").strip().lower()
+    if (
+        _ROUTING_VALUE_RE.fullmatch(provider_realm) is None
+        or _ROUTING_VALUE_RE.fullmatch(quota_class) is None
+    ):
+        raise StateConflict("plan step placement values are invalid")
+    admitted_union = raw_root_constraints.get("work_placement_union")
+    if not isinstance(admitted_union, list):
+        raise StateConflict(
+            "plan step placement is outside the reviewed host work-placement union"
+        )
+    member = next(
+        (
+            item
+            for item in admitted_union
+            if isinstance(item, Mapping)
+            and str(item.get("provider_realm") or "").strip().lower() == provider_realm
+            and str(item.get("quota_class") or "").strip().lower() == quota_class
+        ),
+        None,
+    )
+    if member is None:
+        raise StateConflict(
+            "plan step placement is outside the reviewed host work-placement union"
+        )
+    projected = dict(constraints)
+    projected["provider"] = provider_realm
+    projected["eligible_quota_classes"] = [quota_class]
+    return projected
 
 
 def _has_executive_provenance(
@@ -3688,7 +3825,8 @@ def _job_from_row(row: sqlite3.Row) -> Job:
         created_at=_iso(int(row["created_at_ms"])),
         updated_at=_iso(int(row["updated_at_ms"])),
         constraints=_normalise_constraints(
-            _json_loads(row["constraints_json"], fallback={})
+            _json_loads(row["constraints_json"], fallback={}),
+            host_admitted_placement_union=row["orchestration_role"] == "aggregation",
         ),
         current_attempt_id=row["current_attempt_id"],
         attempt_count=int(row["attempt_count"]),
@@ -5799,7 +5937,26 @@ def _sealed_worker_result_payload(
         != evidence["assignment_seal_receipt_digest"]
     ):
         raise StateConflict("sealed-worker receipt digests are invalid")
-    from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+
+
+    def uid_sweep_receipt_is_passing(value: Any) -> bool:
+        before = value.get("residual_pids_before") if isinstance(value, Mapping) else None
+        after = value.get("residual_pids_after") if isinstance(value, Mapping) else None
+        return (
+            isinstance(value, Mapping)
+            and value.get("schema_version") == "mastermind.executive_uid_sweep/v2"
+            and value.get("passed") is True
+            and isinstance(before, list)
+            and isinstance(after, list)
+            and after == []
+            and all(
+                type(item) is int
+                and item > 0
+                and str(item) == str(item).strip()
+                for item in before
+            )
+            and value.get("found_residuals") is bool(before)
+        )
 
     if (
         not uid_sweep_receipt_is_passing(collection_receipt["uid_sweep"])
@@ -6023,8 +6180,6 @@ def _sealed_worker_result_payload(
         artifacts_match = artifact_manifest == []
     else:
         try:
-            from control_plane.codex_worker import _path_matches_patterns
-
             artifacts_match = (
                 isinstance(declared_artifacts, list)
                 and [
@@ -6039,7 +6194,7 @@ def _sealed_worker_result_payload(
                     for item in artifact_manifest
                 )
             )
-        except (ImportError, KeyError, TypeError):
+        except (KeyError, TypeError):
             artifacts_match = False
     if (
         not isinstance(role_result, dict)
@@ -6885,6 +7040,7 @@ def _validated_plan_admission(
             plan_digest=str(admission["plan_digest"]),
             plan_step_id=str(step["step_id"]),
             repair_round=0,
+            placement=step.get("placement"),
         )
     try:
         expected_total = policy.reserved_children_total(tuple(requirements))
@@ -7980,6 +8136,7 @@ def _insert_cycle_child(
     provenance_source_id: str | None = None,
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
+    placement: dict[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
 
@@ -7995,6 +8152,15 @@ def _insert_cycle_child(
     )
     constraints = dict(root_constraints)
     constraints["cost_class"] = cost_class
+    if role == "work" and placement is not None:
+        constraints = _project_work_placement(
+            constraints,
+            root_constraints,
+            placement,
+            raw_root_constraints=_strict_canonical_json_loads(
+                str(root_row["constraints_json"]), name="root constraints"
+            ),
+        )
     constraints = _normalise_constraints(constraints)
     try:
         authority = ExecutiveAuthorityPolicy.load().authorize(
@@ -8197,6 +8363,7 @@ def _reconcile_cycle_child_creation(
     provenance_source_id: str | None = None,
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
+    placement: dict[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Reconcile one immutable child creation without consulting mutable phase state."""
 
@@ -8222,6 +8389,15 @@ def _reconcile_cycle_child_creation(
     )
     expected_constraints = dict(root_constraints)
     expected_constraints["cost_class"] = cost_class
+    if role == "work" and placement is not None:
+        expected_constraints = _project_work_placement(
+            expected_constraints,
+            root_constraints,
+            placement,
+            raw_root_constraints=_strict_canonical_json_loads(
+                str(root_row["constraints_json"]), name="root constraints"
+            ),
+        )
     expected_constraints = _normalise_constraints(expected_constraints)
     stored_authorities = _strict_canonical_json_loads(
         str(row["requested_authorities_json"]), name="cycle child authorities"
@@ -8551,13 +8727,37 @@ class JobRegistry:
         contract = normalized["execution_contract"]
         constraints = dict(contract.get("constraints") or {})
         if execution_binding is not None:
-            if not isinstance(execution_binding, dict) or set(execution_binding) != set(
+            version = execution_binding.get(
+                HOST_EXECUTION_BINDING_VERSION_KEY,
+                HOST_EXECUTION_BINDING_V2,
+            )
+            if version not in {HOST_EXECUTION_BINDING_V2, HOST_EXECUTION_BINDING_V3}:
+                raise StateConflict("host execution binding version is unknown")
+            carried = dict(execution_binding)
+            carried.pop(HOST_EXECUTION_BINDING_VERSION_KEY, None)
+            admitted_union = None
+            if version == HOST_EXECUTION_BINDING_V3:
+                if not isinstance(execution_binding, dict) or set(carried) != set(
+                    V3_HOST_EXECUTION_BINDING_KEYS
+                ):
+                    raise StateConflict(
+                        "v2 host execution binding fields are incomplete or drifted"
+                    )
+                if "work_placement_union" in constraints:
+                    raise StateConflict(
+                        "caller constraint work_placement_union conflicts "
+                        "with reviewed host composition"
+                    )
+                admitted_union = _normalise_work_placement_union(
+                    carried.pop("work_placement_union")
+                )
+            if not isinstance(execution_binding, dict) or set(carried) != set(
                 V2_HOST_EXECUTION_BINDING_KEYS
             ):
                 raise StateConflict(
                     "v2 host execution binding fields are incomplete or drifted"
                 )
-            bound = _normalise_constraints(execution_binding)
+            bound = _normalise_constraints(carried)
             if set(bound) != set(V2_HOST_EXECUTION_BINDING_KEYS):
                 raise StateConflict(
                     "v2 host execution binding did not normalize exactly"
@@ -8569,7 +8769,14 @@ class JobRegistry:
                         f"caller constraint {key} conflicts with reviewed host composition"
                     )
             normalized_caller.update(bound)
-            constraints = _normalise_constraints(normalized_caller)
+            if admitted_union is not None:
+                normalized_caller["work_placement_union"] = admitted_union
+                constraints = _normalise_constraints(
+                    normalized_caller,
+                    host_admitted_placement_union=True,
+                )
+            else:
+                constraints = _normalise_constraints(normalized_caller)
         worktree = contract.get("worktree")
         if worktree is not None:
             if workspace_root is None:
@@ -8885,6 +9092,21 @@ class JobRegistry:
                 )
                 for step in plan_body["steps"]
             )
+            if plan_body["schema_version"] == "mastermind.execution_plan/v2":
+                if any("placement" not in step for step in plan_body["steps"]):
+                    raise StateConflict(
+                        "v2 plan work steps require an exact placement"
+                    )
+                for step in plan_body["steps"]:
+                    placement = step.get("placement")
+                    if (
+                        not isinstance(placement, dict)
+                        or set(placement)
+                        != {"provider_realm", "quota_class"}
+                    ):
+                        raise StateConflict(
+                            "v2 plan step placement is invalid"
+                        )
             try:
                 reserved_total = policy.reserved_children_total(requirements)
             except CooCyclePolicyError as exc:
@@ -8920,6 +9142,7 @@ class JobRegistry:
                     plan_digest=plan_digest,
                     plan_step_id=str(step["step_id"]),
                     repair_round=0,
+                    placement=step.get("placement"),
                 )
                 created_ids.append(str(member["job_id"]))
                 reservation_steps.append(
@@ -10073,7 +10296,13 @@ class JobRegistry:
             raise StateConflict(
                 f"escalation_target={escalation_target!r} requires its typed executive provenance"
             )
-        normalized_constraints = _normalise_constraints(constraints)
+        normalized_constraints = _normalise_constraints(
+            constraints,
+            host_admitted_placement_union=(
+                orchestration_role == "aggregation"
+                and _v2_root_capability is _V2_ROOT_CREATION_CAPABILITY
+            ),
+        )
         try:
             authority = ExecutiveAuthorityPolicy.load().authorize(
                 ["READ"] if requested_authorities is None else requested_authorities,
@@ -14729,6 +14958,219 @@ class OperatorHarnessRegistry:
                 },
             )
 
+    def reserve_checkpoint_operation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        """Commit a checkpoint INTENT before any provider compaction call."""
+
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            if (
+                self._event(connection, operation_id.command_id) is not None
+                or found["state"] != SessionEpochState.CURRENT.value
+                or not found["executive_writer_held"]
+                or found["ended_at_ms"] is not None
+            ):
+                raise StateConflict("checkpoint operation INTENT preconditions failed")
+            payload = {
+                "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                "attempt_id": str(found["attempt_id"]),
+                "session_epoch_id": generation.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": generation.worker_id,
+                "provider_session_id": found["epoch_session"],
+                "expected_checkpoint_sequence": int(row["checkpoint_sequence"]) + 1,
+            }
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.INTENT,
+                row=row,
+                payload=payload,
+            )
+
+    def apply_checkpoint_operation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        observation: CheckpointObservation,
+        fence_generation: int,
+        lease_token: str,
+    ) -> Job:
+        """Apply one checkpoint only from its exact committed INTENT."""
+
+        checkpoint = JobPayload.from_value(observation.checkpoint_candidate).to_dict()
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            expected = {
+                "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                "attempt_id": str(found["attempt_id"]),
+                "session_epoch_id": generation.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": generation.worker_id,
+                "provider_session_id": found["epoch_session"],
+                "expected_checkpoint_sequence": int(row["checkpoint_sequence"]) + 1,
+            }
+            intent = self._event(connection, operation_id.command_id)
+            intent_payload = (
+                _json_loads(intent["payload_json"], fallback={}) if intent else {}
+            )
+            applied_id = operation_receipt_command_id(
+                operation_id, OperationReceiptKind.APPLIED
+            )
+            if self._event(connection, applied_id) is not None:
+                return JobRegistry(self.store).get_job(str(row["job_id"]))
+            if (
+                intent is None
+                or intent["event_type"] != OperationReceiptKind.INTENT.value
+                or intent_payload != expected
+            ):
+                raise StateConflict("checkpoint operation result does not match INTENT")
+            sequence = int(row["checkpoint_sequence"]) + 1
+            expiry = max(
+                int(row["lease_expires_at_ms"]),
+                timestamp + self.store.lease_seconds * 1000,
+            )
+            connection.execute(
+                """
+                UPDATE attempts
+                SET status='CHECKPOINTED',checkpoint_sequence=?,checkpoint_json=?,heartbeat_at_ms=?,
+                    lease_expires_at_ms=?,updated_at_ms=?,version=version+1
+                WHERE attempt_id=?
+                """,
+                (
+                    sequence,
+                    _json_dumps(checkpoint),
+                    timestamp,
+                    expiry,
+                    timestamp,
+                    str(row["attempt_id"]),
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE jobs SET status='CHECKPOINTED',checkpoint_json=?,updated_at_ms=?,version=version+1
+                WHERE job_id=? AND current_attempt_id=?
+                """,
+                (
+                    _json_dumps(checkpoint),
+                    timestamp,
+                    str(row["job_id"]),
+                    str(row["attempt_id"]),
+                ),
+            )
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=str(row["job_id"]),
+                event_type="JOB_CHECKPOINTED",
+                job_id=str(row["job_id"]),
+                attempt_id=str(row["attempt_id"]),
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={"checkpoint_sequence": sequence},
+                timestamp_ms=timestamp,
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.APPLIED,
+                row=row,
+                payload={
+                    "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                    "process_generation_id": generation.process_generation_id,
+                    "checkpoint_sequence": sequence,
+                    "provider_mutated_state": observation.provider_mutated_state,
+                },
+            )
+        job = JobRegistry(self.store).get_job(str(row["job_id"]))
+        assert job is not None
+        return job
+
     def record_reconcile_observation(
         self,
         *,
@@ -17871,7 +18313,7 @@ class Runtime:
                 )
             role = str(job_row["orchestration_role"] or "")
             if (
-                role not in {"plan", "work", "review", "repair"}
+                role not in {"plan", "work", "review", "repair", "aggregation"}
                 or job_row["current_attempt_id"] != attempt_token
             ):
                 raise StateConflict("terminal completion binding is not current")
@@ -18458,7 +18900,12 @@ __all__ = [
     "RuntimeStore",
     "SCHEMA_VERSION",
     "StateConflict",
+    "HOST_EXECUTION_BINDING_V2",
+    "HOST_EXECUTION_BINDING_V3",
+    "HOST_EXECUTION_BINDING_VERSION_KEY",
     "V2_HOST_EXECUTION_BINDING_KEYS",
+    "V3_HOST_EXECUTION_BINDING_KEYS",
+    "WORK_PLACEMENT_UNION_MAX_MEMBERS",
     "ValidatedRoleCompletion",
     "Worker",
     "WorkerQuotaClass",

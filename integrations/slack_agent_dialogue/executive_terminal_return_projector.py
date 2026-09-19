@@ -283,7 +283,7 @@ def _build_message(
         or _DIGEST_RE.fullmatch(candidate.terminal_evidence_digest) is None
         or candidate.message_key
         != f"asd-exec-result-{candidate.terminal_evidence_digest}"
-        or candidate.role not in {"plan", "work", "review", "repair"}
+        or candidate.role not in {"plan", "work", "review", "repair", "aggregation"}
         or any(
             not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None
             for value in (

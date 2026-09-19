@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_agent_capabilities/v4",
-  "policy_version": "2026-09-01.mastermind-operator-p1-fixture",
+  "policy_version": "2026-09-18.mastermind-operator-p1-browser-b1-runtime-r2",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "mcp_servers": {
@@ -58,7 +58,7 @@
       "manifest_digest": "de100f6c8cfbf1a77fb1c2e4c8a17193c4a51eb78d8eaf59fbed942e7d2e9e71",
       "runtime_root": "/Volumes/Mastermind/worker-browser-b1/runtime",
       "runtime_manifest_path": "/Volumes/Mastermind/worker-browser-b1/runtime/worker-browser-b1-install-manifest.json",
-      "runtime_manifest_digest": "ca55da0fbdd1366bfc6fd78612ebe9cc669e45ef5c21b084ad338b50e2d0e49d",
+      "runtime_manifest_digest": "c4b15f3ba4d5c20e869b63af86109ed57d2da929d525d1d8a0a2c65625209e9f",
       "artifact_root": "/Volumes/Mastermind/worker-browser-b1/artifacts",
       "browser": "chromium",
       "browser_revision": "1237"

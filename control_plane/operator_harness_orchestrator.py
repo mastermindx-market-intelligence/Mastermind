@@ -19,6 +19,7 @@ from typing import Callable, Protocol, Sequence
 
 from control_plane.operator_harness_contract import (
     CandidateResult,
+    CheckpointObservation,
     EventCursor,
     LaunchComparison,
     LaunchDecision,
@@ -37,6 +38,7 @@ from control_plane.operator_harness_contract import (
     TurnStartObservation,
     compare_launch,
 )
+from control_plane.operator_harness_contract import SupportsCheckpoint
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     OperatorPrincipalObservation,
@@ -151,6 +153,21 @@ class RuntimePort(Protocol):
         generation: ProcessGenerationRef,
         operation_id: OperationId,
         operation_kind: str,
+    ) -> None: ...
+
+    def begin_operator_checkpoint(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+    ) -> None: ...
+
+    def apply_operator_checkpoint(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        observation: CheckpointObservation,
     ) -> None: ...
 
     def graceful_stop_operator_generation(
@@ -702,6 +719,43 @@ class OperatorHarnessOrchestrator:
             )
             raise OperatorEffectUnknown(
                 "graceful_stop external effect is unknown"
+            ) from exc
+
+    def checkpoint(
+        self,
+        session: OperatorSessionReceipt | OperatorStartHandle,
+        *,
+        operation_id: OperationId,
+    ) -> CheckpointObservation:
+        self._assert_replayable(operation_id)
+        if not isinstance(self.adapter, SupportsCheckpoint):
+            raise OperatorHarnessOrchestrationError(
+                "adapter does not support checkpoint"
+            )
+        self.runtime.begin_operator_checkpoint(
+            session.attempt_id, session.generation, operation_id
+        )
+        self.runtime.extend_operator_lease(session.attempt_id, 60)
+        try:
+            observed = self.adapter.checkpoint(
+                operation_id=operation_id, generation=session.generation
+            )
+            self.runtime.apply_operator_checkpoint(
+                session.attempt_id,
+                session.generation,
+                operation_id,
+                observed,
+            )
+            return observed
+        except Exception as exc:
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="checkpoint",
+                error=exc,
+            )
+            raise OperatorEffectUnknown(
+                "checkpoint external effect is unknown"
             ) from exc
 
     def cancel(
