@@ -486,6 +486,36 @@ def _write_private_json(path: Path, value: Any) -> None:
         os.close(directory)
 
 
+def _write_or_verify_private_json(
+    path: Path,
+    value: Any,
+    *,
+    name: str,
+) -> None:
+    """Create one receipt or accept only its exact private durable replay."""
+
+    material = _jsonable(value)
+    try:
+        _write_private_json(path, material)
+        return
+    except FileExistsError:
+        pass
+    try:
+        info = path.lstat()
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        raise SupervisorError(f"existing {name} cannot be verified") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) & 0o077
+        or existing != material
+    ):
+        raise SupervisorError(f"existing {name} identity or payload drifted")
+
+
 def _write_private_recovery_prompt(path: Path, prompt: str) -> None:
     payload = prompt.encode("utf-8")
     if not payload or len(payload) > 1024 * 1024:
@@ -1458,7 +1488,9 @@ class ExecutiveSupervisor:
                     "complete remote collection has no dedicated-UID sweep receipt"
                 )
             payload = collection
-        _write_private_json(path, payload)
+        _write_or_verify_private_json(
+            path, payload, name="collection receipt"
+        )
         return path
 
     @staticmethod
@@ -1758,7 +1790,9 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "complete remote validation has no dedicated-UID sweep receipt"
             )
-        _write_private_json(path, payload)
+        _write_or_verify_private_json(
+            path, payload, name="supervisor validation receipt"
+        )
         return path
 
     async def _run_supervisor_validations(
@@ -1832,15 +1866,31 @@ class ExecutiveSupervisor:
             return seal_path
 
         if receipt.result.exit_code is None:
-            raise SupervisorError("Codex process has no terminal exit code")
-        self.runtime.attempts.record_process_exit(
-            attempt.attempt_id,
-            fence_generation=fence,
-            lease_token=token,
-            exit_code=receipt.result.exit_code,
-            result_path=receipt.process_ref.result_path,
-            provider_session_id=receipt.result.provider_session_id,
-        )
+            raise SupervisorError(
+                "recovered local worker has no truthful durable OS exit code; "
+                "the original Attempt remains quarantined"
+            )
+        current_attempt = self.runtime.attempts.get_attempt(attempt.attempt_id)
+        if current_attempt is None:
+            raise SupervisorError("terminal Attempt disappeared before exit evidence")
+        if current_attempt.exit_code is None:
+            self.runtime.attempts.record_process_exit(
+                attempt.attempt_id,
+                fence_generation=fence,
+                lease_token=token,
+                exit_code=receipt.result.exit_code,
+                result_path=receipt.process_ref.result_path,
+                provider_session_id=receipt.result.provider_session_id,
+            )
+        elif (
+            int(current_attempt.exit_code) != int(receipt.result.exit_code)
+            or current_attempt.result_path != receipt.process_ref.result_path
+            or current_attempt.provider_session_id
+            != receipt.result.provider_session_id
+        ):
+            raise SupervisorError(
+                "persisted process-exit evidence differs from recovered collection"
+            )
         job = self._job(attempt.job_id)
         if job.status == JobStatus.CANCEL_REQUESTED:
             ensure_sealed()
@@ -2385,12 +2435,12 @@ class ExecutiveSupervisor:
         return sweep
 
     def reconcile_restart(self, *, requeue_lost: bool = True) -> list[ReconcileReceipt]:
-        """Inspect durable nonterminal attempts after a supervisor restart.
+        """Recover exact sealed workers or quarantine uncertainty after restart.
 
-        A live local child cannot be reconstructed because the in-memory JSONL
-        parser was lost.  It is identity-safely terminated and verified absent
-        before any fence rotation, cancellation acknowledgement, LOST state, or
-        requeue.  Ambiguous and provider-only identities remain quarantined.
+        A durable recovery binding adopts the original Job/Attempt and existing
+        provider execution without another start. Healthy legacy executions
+        lacking that binding remain active and quarantined; cancellation is the
+        only path that may identity-safely terminate one during reconciliation.
         """
 
         outcomes: list[ReconcileReceipt] = []
@@ -2424,6 +2474,29 @@ class ExecutiveSupervisor:
                         )
                     )
                     continue
+            if (
+                process_was_live
+                and not isinstance(recovery_raw, Mapping)
+                and attempt.status is not AttemptStatus.CANCEL_REQUESTED
+            ):
+                expired = self._attempt_lease_expired(attempt)
+                outcomes.append(
+                    ReconcileReceipt(
+                        attempt_id=attempt.attempt_id,
+                        job_id=attempt.job_id,
+                        status=(
+                            ReconcileStatus.LEASE_EXPIRED_QUARANTINED
+                            if expired
+                            else ReconcileStatus.LIVE_QUARANTINED
+                        ),
+                        process_was_live=True,
+                        error=(
+                            "healthy legacy worker has no durable recovery binding; "
+                            "refusing to signal or replace the original execution"
+                        ),
+                    )
+                )
+                continue
             if process_was_live:
                 self.process_controller.terminate(attempt)
                 if not self.process_controller.absence_verified(attempt):
