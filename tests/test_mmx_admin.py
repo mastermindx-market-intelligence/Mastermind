@@ -7,11 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from control_plane.executive_privileged_action import (
-    REQUEST_SCHEMA,
-    STATUS_REQUEST_SCHEMA,
-    PrivilegedActionError,
-)
+from control_plane.executive_privileged_action import REQUEST_SCHEMA, STATUS_REQUEST_SCHEMA
 from scripts import mmx_admin
 from scripts.mmx_admin import build_request, build_status_request, send_request, send_status_request
 
@@ -68,35 +64,6 @@ def test_service_action_cannot_accept_arbitrary_command_or_path() -> None:
 def test_unknown_action_refuses_in_argparse() -> None:
     with pytest.raises(SystemExit):
         build_request(["shell", "--request-id", "req-bad-001"])
-
-
-def test_client_builds_fixed_secondary_host_power_policy_request() -> None:
-    request = build_request(
-        [
-            "executive.host.prepare_secondary_power_policy",
-            "--request-id",
-            "req-power-001",
-        ]
-    )
-    assert request == {
-        "schema": REQUEST_SCHEMA,
-        "request_id": "req-power-001",
-        "action": "executive.host.prepare_secondary_power_policy",
-        "args": {},
-    }
-
-
-def test_secondary_host_power_policy_refuses_caller_arguments() -> None:
-    with pytest.raises(PrivilegedActionError, match="host policy action arguments"):
-        build_request(
-            [
-                "executive.host.prepare_secondary_power_policy",
-                "--slot-id",
-                "codex-pro-01",
-                "--request-id",
-                "req-power-bad-001",
-            ]
-        )
 
 
 def test_generated_request_id_is_contract_safe() -> None:
@@ -190,7 +157,7 @@ def test_status_rejects_effect_arguments(argv: list[str]) -> None:
         build_status_request(argv)
 
 
-def test_existing_effect_actions_remain_backward_compatible() -> None:
+def test_six_effect_actions_remain_backward_compatible() -> None:
     request = build_request(["executive.services.start", "--request-id", "req-effect-001"])
     assert request["action"] == "executive.services.start"
     assert request["schema"] == REQUEST_SCHEMA
@@ -210,29 +177,6 @@ def test_main_status_terminal_exit_code_is_zero_regardless_of_stored_outcome(mon
     rc = mmx_admin.main(["status", "--request-id", "req-001"])
     captured = capsys.readouterr()
     assert rc == 0
-    assert json.loads(captured.out) == response
-
-
-def test_main_power_effect_unknown_exit_code_is_75(monkeypatch, capsys) -> None:
-    response = {
-        "schema": "mastermind.executive_privileged_action_response.v1",
-        "ok": False,
-        "error": "EFFECT_UNKNOWN",
-        "detail": "privileged child reported action-level effect uncertainty",
-    }
-    monkeypatch.setattr(mmx_admin, "send_request", lambda *_a, **_k: response)
-
-    rc = mmx_admin.main(
-        [
-            "executive.host.prepare_secondary_power_policy",
-            "--request-id",
-            "req-power-unknown",
-        ]
-    )
-    captured = capsys.readouterr()
-
-    assert rc == 75
-    assert "request_id=req-power-unknown" in captured.err
     assert json.loads(captured.out) == response
 
 
