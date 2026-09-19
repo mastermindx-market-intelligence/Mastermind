@@ -129,6 +129,43 @@ adjudication.
 
 A fresh host-local canary was executed from the exact semantic head as the non-root workstation user.
 
+Exact sidecar invocation used by the harness:
+
+```bash
+/private/tmp/mmx-obs-p0-ci-7b9fd796/venv/bin/python \
+  scripts/runtime_observability_sidecar.py \
+  --socket-path /private/tmp/obs-p0-manual-canary/runtime-observability.sock \
+  --max-events 1
+```
+
+The harness ran from
+`/Volumes/Mastermind/Mastermind/worktrees/obs-p0-finish-20260918-sol`, built exactly this event,
+sent it once through `UnixDatagramRuntimeDiagnosticEmitter`, waited for the one-event sidecar to
+exit, then sent the identical event again to the removed socket:
+
+```python
+event = build_runtime_diagnostic_event(
+    service="worker-broker",
+    event_name="diagnostics.canary",
+    signal="POINT",
+    outcome="SUCCEEDED",
+    correlation={"attempt_id": "attempt:obs-p0-manual-canary"},
+    dimensions={
+        "phase": "broker",
+        "environment": "test",
+        "transport": "unix-datagram",
+        "evidence_source": "runtime-emitter",
+    },
+)
+live_emit = UnixDatagramRuntimeDiagnosticEmitter(socket_path).emit(event)
+# sidecar exited after max-events=1 and removed the exact owned socket
+stopped_emit = UnixDatagramRuntimeDiagnosticEmitter(socket_path).emit(event)
+```
+
+The manual harness additionally parsed the exact canonical event bytes through
+`parse_runtime_diagnostic_packet()` to compare event SHA-256, trace/span coordinates, and metric
+labels against the sidecar JSON line. It performed no repository write and no production activation.
+
 Receipt:
 
 ```json
