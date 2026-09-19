@@ -691,6 +691,14 @@ ALLOWED_PATHS = frozenset(
         "scripts/agent_eval/prereg.py",
         "tests/test_agent_eval_prereg.py",
         "experiments/agent_eval/e1/preregistration.json",
+        # A2 exact-path repair, recovery-principal authorized 2026-09-17:
+        # harness-convergence-a2-boundary-repair-20260917-sol-001 / PR #692.
+        # The host bridge is OUTSIDE the inert core. This adds no core import
+        # exception and removes no core discovery. Its tests retain this
+        # program's fence and cover the bridge's closed pure-owner closure.
+        "scripts/agent_eval_host_factor_lock.py",
+        "tests/test_agent_eval_host_factor_lock.py",
+        "docs/superpowers/plans/2026-09-17-agent-eval-host-factor-boundary-repair.md",
     }
 )
 
