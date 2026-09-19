@@ -14,7 +14,7 @@ The first consumer is PR #846's fixed charger-power action. This preparation is 
 
 This path creates no new lifecycle or authority plane. It composes existing owners:
 
-- `bootstrap-host.sh` owns creation of the reviewed local service/operator principals and is a prerequisite, not reimplemented here;
+- `bootstrap-host.sh` owns creation **and canonical names/UID/GID values** of the reviewed local service/operator principals; this preparation parses those exact protected assignments after source custody is proven instead of redeclaring topology identities;
 - `provision-python-runtime.sh --verify-only` owns the exact PSF Python 3.12.10 runtime receipt and bytes;
 - `install_source_policy.py` owns exact source admission;
 - `release_manifest.py` owns immutable release identity;
@@ -48,11 +48,7 @@ The script must execute from the same direct Git checkout named by `--source-rep
 
 ## Prerequisites
 
-This slice does not create principals or provision Python. The existing host bootstrap and runtime provisioner must already have established:
-
-- `_mastermind_exec` UID/GID 450;
-- `_mastermind_ops` GID 453 with the named operator as a member;
-- the pinned root-owned PSF Python 3.12.10 runtime and provenance receipt.
+This slice does not create principals or provision Python. The existing host bootstrap and runtime provisioner must already have established the protected bootstrap's canonical control principal/group, canonical ops group with the named operator as a member, and the pinned root-owned PSF Python 3.12.10 runtime/provenance receipt. The preparation script consumes those protected identity assignments from `bootstrap-host.sh`; it does not introduce another identity catalog.
 
 Homebrew Python is not a substitute for the Executive runtime.
 
@@ -75,7 +71,7 @@ The script may enable/bootstrap only the privileged broker. If the arm attempt f
 
 Success requires all of:
 
-1. socket metadata is exactly UID 450 / GID 453 / mode 0660;
+1. socket metadata is exactly the protected bootstrap's canonical control UID / ops GID and the reviewed privileged-socket mode;
 2. the named non-root operator sends one `mmx-admin status` query with a fixed request ID;
 3. the response is exact-schema `NOT_FOUND`, correlated to that request ID and the requested installed release SHA;
 4. the three central labels are still absent after all mutations;
