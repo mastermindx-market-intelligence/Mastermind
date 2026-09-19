@@ -165,6 +165,61 @@ the snapshot to a separately owned evidence location, validate it again through
 scan the artifact for prohibited raw fields. It must not install a daemon,
 modify policy, kill a process, create a reservation, or claim an idle baseline.
 
+
+## Operational fleet-hygiene guardrails
+
+These guardrails record operator lessons for integrating temporary/local execution
+harnesses with the existing Capacity and physical-resource owners. They do not arm
+HP0, create a host registry, define production thresholds, or make a local harness
+canonical.
+
+1. **Provider concurrency is not physical-host capacity.** A provider/account pool
+   may admit more model calls than one Mac can execute safely. Provider leases and
+   physical host admission remain separate gates. A launcher must not translate a
+   provider cap directly into local CPU/process concurrency.
+2. **Control-plane seats fail closed for autonomous execution.** A machine serving
+   interactive control, browser, or principal duties should not become a generic
+   worker merely because a caller sets an environment flag. Any local-only
+   exception must be a bounded capability requirement (for example, an engine that
+   is genuinely unavailable on qualified remote hosts), declared by the existing
+   placement policy and still subject to physical load and active-lane limits.
+3. **Remote binding is physical, not nominal.** A logical host key must reconcile to
+   the observed physical host/generation before execution. Copying a launcher or
+   registry file to another machine must not make that machine impersonate the
+   selected host.
+4. **Recheck at launch.** Load, active-lane count, disk headroom and required power/
+   availability gates are observation-time facts. Long-lived queue daemons must
+   reload accepted policy or be recycled only at a proven idle boundary; a stale
+   daemon must not preserve older, looser startup limits.
+5. **Started work stays on its carrier.** Once a lane or external process has
+   STARTED, host pressure does not authorize re-home, duplicate launch or blind
+   retry. Lower scheduling priority when appropriate, preserve the carrier, and
+   reconcile its terminal/effect state there.
+6. **Terminalization includes bounded workspace hygiene.** After the durable result
+   is written, a lane may remove only its own clean, registered worktree under the
+   configured worktree root. Dirty, locked, unregistered, process-referenced or
+   path-ambiguous worktrees are preserved. Cleanup precedes the terminal success
+   marker so a completed lane does not silently leak disk indefinitely.
+7. **Orphan cleanup requires ownership proof.** High CPU alone is not permission to
+   kill a process. Trace parentage, open file/pipe endpoints, current output
+   progress and the owning service/session. A process whose parent/control path is
+   gone and whose output cannot be consumed may be terminated only after preserving
+   ambiguous/incomplete output as evidence. Active CI workers, browser realms and
+   other sessions remain intact.
+8. **Storage pressure is a placement concern.** Remote execution can fail from
+   accumulated worktrees long before CPU or memory is exhausted. Reclaim only
+   clean, inactive, registered worktrees with an immediate pre-remove process
+   recheck; never use broad raw deletion as a substitute for owner-aware cleanup.
+9. **Investigation should be bounded.** Avoid filesystem-wide scans and recursive
+   disk walks on a pressured host. Prefer owner metadata, exact worktree registries,
+   process trees and bounded roots. Completed search helpers that outlive their
+   owner should be reconciled as support-process leaks rather than left consuming
+   I/O indefinitely.
+
+A local seat harness that implements these rules remains an interim operational
+consumer of Capacity/Fleet policy. It does not become a second scheduler, resource
+authority, lifecycle owner or production-armed physical-resource registry.
+
 ## Continuation
 
 HP0 stops at a reviewed Draft/Hold source and one read-only Mac canary. A later,
