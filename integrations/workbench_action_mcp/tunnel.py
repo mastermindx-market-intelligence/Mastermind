@@ -75,6 +75,7 @@ from .command_contracts import (
     MAX_ARTIFACT_CHUNK_BYTES,
     MAX_PAGE_BYTES as MAX_COMMAND_PAGE_BYTES,
     MAX_PAGE_LINES as MAX_COMMAND_PAGE_LINES,
+    MAX_RELATIVE_PATH_BYTES,
     MAX_PROCESS_DEADLINE_S,
     RECIPE_SHA256,
     CommandHostBinding,
@@ -155,7 +156,7 @@ _REFERENCE_SCHEMA = {"type": "string", "minLength": 1, "maxLength": 256}
 _COMMAND_PREPARE_INPUT = _closed_schema(
     {
         "project_ref": _REFERENCE_SCHEMA,
-        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": MAX_RELATIVE_PATH_BYTES},
         "recipe_id": {
             "type": "string",
             "enum": sorted(RECIPE_SHA256),
