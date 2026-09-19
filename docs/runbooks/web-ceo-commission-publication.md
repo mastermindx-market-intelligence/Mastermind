@@ -1,6 +1,6 @@
 # Web CEO immutable commission publication
 
-Status: **SOURCE CANDIDATE / BUILT_NOT_PROVEN / NOT INSTALLED**
+Status: **HOST-COMPOSED SOURCE CANDIDATE / BUILT_NOT_PROVEN / NOT INSTALLED**
 
 This runbook defines the bounded publication/lookup seam for complete Web-CEO worker
 briefs. It does not change the public `submit_ceo_intent` schema, grant execution
@@ -81,13 +81,22 @@ post-release Web branch commit is normally absent from the installed credentiall
 worker clone, so the consumer must support one exact, credential-free fixed-host read by
 commit/path and verify the persisted digest before provider work.
 
-## Production wiring gate
+## Production wiring and install gate
 
-The source provider is intended to be injected through the **existing**
-`ceo_ingress_dialogue_source_provider` seam. The installed host composition currently has
-no such provider. Do not create another ingress daemon/socket or import an integration
-implementation into `control_plane/**`; the incumbent host-composition owner must wire the
-provider when its current source custody is clear.
+The existing `scripts/executive_os_phase1c.py` host now composes
+`GitHubWebCommissionSourceProvider` into the **existing**
+`ceo_ingress_dialogue_source_provider` seam whenever the already-owned Executive App
+binding is present. Provider construction is network-inert. Remote branch/blob
+observations occur only when trusted CeoIngress evaluates a new admission, and the
+existing service performs the second observation immediately before root mutation.
+Worker launch never resolves or refreshes the Web branch.
+
+There is deliberately no new control-config field, provider selector, repository/branch
+setting, credential, daemon, socket, or install switch. The existing App binding and
+`ceo_submit_armed` owners remain the admission/authority controls; the exact release
+installer already installs the integration module with the rest of the immutable source.
+A control installation without the App binding does not compose this provider. The public
+five-tool request remains source-free and cannot choose or suppress the trusted source.
 
 A production acceptance canary owes all of these as separate evidence:
 

@@ -387,7 +387,9 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     from integrations.mastermind_executive_app.admission import (
         AdmissionOutcome, STATUS_EFFECT_UNKNOWN,
     )
-    from integrations.mastermind_executive_app.gateway import make_jwt_authenticators
+    from integrations.mastermind_executive_app.gateway import (
+        make_jwt_authenticators, make_shared_jwks_cache,
+    )
 
     if settings.read_only:
         raise ValueError("five-tool MCP refuses read-only app settings")
@@ -395,6 +397,10 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
     configured = dataclasses.replace(settings, allow_submit_authorized_reads=True)
+    if configured.jwks_cache is None:
+        shared_cache = make_shared_jwks_cache(configured.policies)
+        if shared_cache is not None:
+            configured = dataclasses.replace(configured, jwks_cache=shared_cache)
     authenticators = make_jwt_authenticators(configured.policies, jwks_cache=configured.jwks_cache)
     verifier = _ExecutivePolicyVerifiers(*(
         MastermindTokenVerifier(authenticator=authenticator, policy=policy,

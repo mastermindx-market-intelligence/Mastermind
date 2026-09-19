@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,69 @@ def test_provider_refuses_ambiguous_exact_identity(monkeypatch: pytest.MonkeyPat
         provider(target, "WS:CEO-DELEGATION")
 
 
+def test_phase1c_host_composes_web_commission_source_without_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    phase1c = importlib.import_module("scripts.executive_os_phase1c")
+    source_mod = importlib.import_module(
+        "integrations.mastermind_executive_app.web_commission_source"
+    )
+    installed = importlib.import_module("integrations.executive_mcp.installed")
+    broker = importlib.import_module("control_plane.executive_worker_broker")
+    from tests.test_ceo_submit_armed_composition import _off_host, _raw, _write
+
+    class HostProvider:
+        calls = 0
+
+        def __call__(self, _intent_id: str, _work_ref: str):
+            self.calls += 1
+            raise AssertionError("source acquisition must not run during host composition")
+
+    class Readers:
+        def observe(self):
+            return {}
+
+    provider = HostProvider()
+    constructed: list[bool] = []
+    monkeypatch.setattr(
+        source_mod,
+        "GitHubWebCommissionSourceProvider",
+        lambda: constructed.append(True) or provider,
+    )
+    monkeypatch.setattr(installed, "InstalledExecutiveReaders", lambda **_kwargs: Readers())
+    monkeypatch.setattr(broker, "WorkerBrokerClient", lambda *a, **k: object())
+    monkeypatch.setattr(phase1c, "activate_launchd_socket", lambda _name: object())
+
+    captured: dict[str, object] = {}
+
+    class FakeService:
+        def __init__(self, config, **kwargs):
+            captured["config"] = config
+            captured.update(kwargs)
+
+    monkeypatch.setattr(phase1c, "ExecutiveControlService", FakeService)
+    raw = _raw(
+        tmp_path,
+        worker_uid=_off_host(451),
+        allowed_peer_uids=[450, 501],
+        ceo_ingress_socket_path=str(tmp_path / "ingress.sock"),
+        ceo_ingress_launchd_socket_name="CeoIngress",
+        ceo_ingress_peer_uid=_off_host(452),
+        ceo_ingress_app_peer_uid=_off_host(458),
+        ceo_ingress_app_armed=True,
+        ceo_ingress_app_macro_root=str(tmp_path / "macro"),
+        ceo_submit_armed=True,
+    )
+
+    phase1c._service_from_config(
+        phase1c.load_control_config(_write(tmp_path, raw))
+    )
+
+    assert constructed == [True]
+    assert captured["ceo_ingress_dialogue_source_provider"] is provider
+    assert provider.calls == 0
+
+
 def test_provider_is_a_real_strict_v2_admission_consumer(tmp_path: Path) -> None:
     config = _config(tmp_path)
     runtime = Runtime.at(config.runtime_root)
@@ -117,6 +181,8 @@ def test_provider_is_a_real_strict_v2_admission_consumer(tmp_path: Path) -> None
 
     event = runtime.store.find_event_by_command_id(ceo_intent.command_id_for(intent_id))
     assert event is not None
+    assert event["event_type"] == "JOB_CREATED"
+    assert len(runtime.jobs.list_jobs()) == 1
     source = event["payload"]["provenance"]["dialogue_source"]
     assert source["commission_ref"]["commit"] == commit
     assert source["commission_ref"]["content_sha256"] == hashlib.sha256(content).hexdigest()
@@ -219,6 +285,8 @@ def test_public_app_request_ref_resolves_same_web_branch_into_strict_v2_root(
     assert receipt["intent_id"] == intent_id
     event = runtime.store.find_event_by_command_id(ceo_intent.command_id_for(intent_id))
     assert event is not None
+    assert event["event_type"] == "JOB_CREATED"
+    assert len(runtime.jobs.list_jobs()) == 1
     source = event["payload"]["provenance"]["dialogue_source"]
     assert source["commission_ref"] == {
         "repository": CANONICAL_REPOSITORY,
