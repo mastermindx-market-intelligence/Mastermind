@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -47,6 +48,7 @@ COMMAND_TOOLS = {
     "prepare_project_command",
     "run_project_command",
     "read_action_result",
+    "read_action_artifact",
     "reconcile_action",
 }
 _PRIVATE_PYTHON = ""
@@ -269,7 +271,7 @@ def test_manifest_reports_final_tools_recipes_and_limits_without_durable_prepare
     assert set(data["supported_tools"]) == ALL_TOOLS
     assert data["recipes"] == [
         {"recipe_id": name, "sha256": RECIPE_SHA256[name]}
-        for name in ("canary_checksum", "canary_refuse")
+        for name in sorted(RECIPE_SHA256)
     ]
     assert data["effects"] == {
         "file_write": True,
@@ -280,6 +282,8 @@ def test_manifest_reports_final_tools_recipes_and_limits_without_durable_prepare
     assert data["limits"]["process_deadline_seconds"] == 5.0
     assert data["limits"]["command_result_page_lines"] == 128
     assert data["limits"]["command_result_page_bytes"] == 8192
+    assert data["limits"]["artifact_maximum_bytes"] == 65536
+    assert data["limits"]["artifact_chunk_bytes"] == 49152
 
 
 @pytest.mark.parametrize(
@@ -586,7 +590,7 @@ def test_oversized_escaped_preview_returns_closed_preview_error(tmp_path) -> Non
         "identity; non-Darwin adapter identities are deliberately refused"
     ),
 )
-def test_native_stdio_all_ten_routes_and_restart_command_reconciliation(
+def test_native_stdio_all_eleven_routes_and_restart_command_reconciliation(
     tmp_path,
 ) -> None:
     document, project, _, _ = _command_document(tmp_path)
@@ -743,6 +747,20 @@ def test_native_stdio_all_ten_routes_and_restart_command_reconciliation(
             )
             assert reconciled["effect_state"] == "APPLIED"
             assert reconciled["exit_code"] == exit_code
+            descriptor = next(
+                row for row in reconciled["artifacts"] if row["stream"] == "stdout"
+            )
+            artifact_page = call(
+                process,
+                "read_action_artifact",
+                {
+                    "artifact_ref": descriptor["artifact_ref"],
+                    "offset": 0,
+                    "max_bytes": 64,
+                },
+            )
+            assert artifact_page["artifact_id"] == descriptor["artifact_id"]
+            assert artifact_page["content_kind"] == "text"
         process.assert_exit(0)
 
     after_reconcile = {
@@ -842,7 +860,7 @@ def test_native_stdio_adapter_boot_refuses_command_without_claim_spawn_or_effect
     assert target.read_bytes() == content
 
 
-def test_launcher_describe_reports_exact_ten_tool_source_profile(tmp_path) -> None:
+def test_launcher_describe_reports_exact_eleven_tool_source_profile(tmp_path) -> None:
     launcher = (
         Path(__file__).resolve().parents[2]
         / "scripts"
@@ -862,3 +880,164 @@ def test_launcher_describe_reports_exact_ten_tool_source_profile(tmp_path) -> No
     )
     assert completed.returncode == 0
     assert set(json.loads(completed.stdout)["tools"]) == ALL_TOOLS
+
+
+
+def test_text_artifact_returns_native_text_without_any_path_selector(
+    tmp_path, stable_process_boot
+) -> None:
+    document, project, audit, _ = _command_document(tmp_path)
+    target = project / "sample.py"
+    content = b"value = 1\n"
+    target.write_bytes(content)
+
+    async def exercise():
+        runtime = await create_runtime_channel(parse_tunnel_config(document))
+        try:
+            server = create_tunnel_action_server(runtime)
+            prepared = await _call(
+                server,
+                "prepare_project_command",
+                {
+                    "project_ref": document["lease"]["project_ref"],
+                    "relative_path": "sample.py",
+                    "recipe_id": "canary_checksum",
+                    "expected_sha256": hashlib.sha256(content).hexdigest(),
+                },
+            )
+            applied = await _call(
+                server,
+                "run_project_command",
+                {"action_ref": prepared.structuredContent["action_ref"]},
+            )
+            stdout = next(
+                row
+                for row in applied.structuredContent["artifacts"]
+                if row["stream"] == "stdout"
+            )
+            exact = await _call(
+                server,
+                "read_action_artifact",
+                {
+                    "artifact_ref": stdout["artifact_ref"],
+                    "offset": 0,
+                    "max_bytes": 97,
+                },
+            )
+            refused = await _call(
+                server,
+                "read_action_artifact",
+                {
+                    "artifact_ref": stdout["artifact_ref"],
+                    "offset": 0,
+                    "max_bytes": 97,
+                    "path": "/etc/passwd",
+                },
+            )
+            return stdout, exact, refused
+        finally:
+            await runtime.aclose(timeout=5.0)
+
+    descriptor, exact, refused = asyncio.run(exercise())
+    assert exact.isError is False
+    assert exact.structuredContent["artifact_id"] == descriptor["artifact_id"]
+    assert exact.structuredContent["content_kind"] == "text"
+    assert exact.structuredContent["media_type"] == "text/plain; charset=utf-8"
+    assert exact.structuredContent["text"] == exact.content[0].text
+    assert exact.structuredContent["returned_bytes"] == len(
+        exact.content[0].text.encode("utf-8")
+    )
+    assert not hasattr(exact.content[0], "data")
+    assert _error_code(refused) == "INVALID_REQUEST"
+    rows = _audit_lines(audit)
+    assert rows[-2]["tool"] == "read_action_artifact"
+    assert rows[-2]["accepted"] is True
+    assert rows[-1]["tool"] == "read_action_artifact"
+    assert rows[-1]["code"] == "request_refused"
+
+
+
+def test_png_artifact_returns_native_image_and_lossless_binary_range(
+    tmp_path, stable_process_boot
+) -> None:
+    document, project, _, _ = _command_document(tmp_path)
+    target = project / "sample.py"
+    content = b"value = 1\n"
+    target.write_bytes(content)
+
+    async def exercise():
+        runtime = await create_runtime_channel(parse_tunnel_config(document))
+        try:
+            server = create_tunnel_action_server(runtime)
+            prepared = await _call(
+                server,
+                "prepare_project_command",
+                {
+                    "project_ref": document["lease"]["project_ref"],
+                    "relative_path": "sample.py",
+                    "recipe_id": "source_fingerprint_png",
+                    "expected_sha256": hashlib.sha256(content).hexdigest(),
+                },
+            )
+            assert prepared.isError is False
+            applied = await _call(
+                server,
+                "run_project_command",
+                {"action_ref": prepared.structuredContent["action_ref"]},
+            )
+            assert applied.isError is False
+            descriptor = next(
+                row
+                for row in applied.structuredContent["artifacts"]
+                if row["stream"] == "stdout"
+            )
+            image = await _call(
+                server,
+                "read_action_artifact",
+                {
+                    "artifact_ref": descriptor["artifact_ref"],
+                    "offset": 0,
+                    "max_bytes": 49152,
+                },
+            )
+            partial = await _call(
+                server,
+                "read_action_artifact",
+                {
+                    "artifact_ref": descriptor["artifact_ref"],
+                    "offset": 1,
+                    "max_bytes": 64,
+                },
+            )
+            return descriptor, image, partial
+        finally:
+            await runtime.aclose(timeout=5.0)
+
+    descriptor, image, partial = asyncio.run(exercise())
+    assert descriptor["media_type"] == "image/png"
+    assert descriptor["transfer"]["direct_view_supported"] is True
+
+    assert image.isError is False
+    assert image.structuredContent["content_kind"] == "image"
+    assert "text" not in image.structuredContent
+    assert "_payload_base64" not in image.structuredContent
+    assert len(image.content) == 1
+    assert isinstance(image.content[0], mcp_types.ImageContent)
+    raw = base64.b64decode(image.content[0].data, validate=True)
+    assert raw.startswith(b"\x89PNG\r\n\x1a\n")
+    assert image.content[0].mimeType == "image/png"
+    assert len(raw) == descriptor["byte_length"]
+    assert hashlib.sha256(raw).hexdigest() == descriptor["sha256"]
+
+    assert partial.isError is False
+    assert partial.structuredContent["content_kind"] == "blob"
+    assert "text" not in partial.structuredContent
+    assert len(partial.content) == 1
+    assert isinstance(partial.content[0], mcp_types.EmbeddedResource)
+    blob = partial.content[0].resource
+    assert isinstance(blob, mcp_types.BlobResourceContents)
+    assert blob.mimeType == "image/png"
+    assert base64.b64decode(blob.blob, validate=True) == raw[1:65]
+    assert partial.structuredContent["returned_bytes"] == 64
+    assert partial.structuredContent["next_offset"] == 65
+    assert "/Users/" not in str(blob.uri)

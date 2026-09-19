@@ -76,6 +76,11 @@ class ProjectActionRefused(Exception):
             "ACTION_INVALID",
             "ACTION_EXPIRED",
             "ACTION_UNAVAILABLE",
+            "ARTIFACT_INVALID",
+            "ARTIFACT_EXPIRED",
+            "ARTIFACT_BINDING_CHANGED",
+            "ARTIFACT_UNAVAILABLE",
+            "ARTIFACT_RANGE_INVALID",
         }
     )
 

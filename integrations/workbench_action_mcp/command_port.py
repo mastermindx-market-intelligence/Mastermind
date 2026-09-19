@@ -10,6 +10,7 @@ which case the same rule as the text patch port yields ``NOT_APPLIED``.
 from __future__ import annotations
 
 import asyncio
+import base64
 import dataclasses
 import hashlib
 import inspect
@@ -43,16 +44,25 @@ from .action_artifacts import (
     write_action_process,
 )
 from .command_contracts import (
+    ARTIFACT_TOKEN_SCHEMA,
     COMMAND_TOKEN_SCHEMA,
+    MAX_ARTIFACT_BYTES,
+    MAX_ARTIFACT_CHUNK_BYTES,
+    MAX_DIRECT_IMAGE_BYTES,
     MAX_PAGE_BYTES,
     MAX_PAGE_LINES,
     MAX_PROCESS_DEADLINE_S,
     MAX_STDERR_BYTES,
     MAX_STDOUT_BYTES,
+    PNG_MEDIA_TYPE,
     RECIPE_IDS,
     RECIPE_SHA256,
+    TEXT_MEDIA_TYPE,
     CommandHostBinding,
+    PreparedActionArtifact,
     PreparedClosedCommand,
+    artifact_media_type,
+    derive_artifact_id,
     validate_command_host_binding,
 )
 from .contracts import (
@@ -77,6 +87,9 @@ _REQUEST_KEYS = frozenset(
 _READ_KEYS = frozenset(
     {"action_ref", "stream", "start_line", "max_lines", "max_content_bytes"}
 )
+_ARTIFACT_READ_KEYS = frozenset({"artifact_ref", "offset", "max_bytes"})
+ARTIFACT_DESCRIPTOR_SCHEMA = "mastermind.workbench_action_artifact_descriptor.v1"
+ARTIFACT_OWNER = "mastermind.workbench_action"
 _RESULT_KEYS = frozenset(
     {
         "recipe_id",
@@ -525,24 +538,28 @@ def _validated_details(value: object, prepared: PreparedClosedCommand) -> dict[s
     return dict(value)
 
 
-def _qualified_result(
+
+@dataclasses.dataclass(frozen=True)
+class _QualifiedCommandEvidence:
+    details: dict[str, Any]
+    stdout: bytes
+    stderr: bytes
+
+
+def _qualified_evidence(
     store: ActionArtifactStore, prepared: PreparedClosedCommand
-) -> dict[str, Any] | None:
+) -> tuple[str, _QualifiedCommandEvidence | None]:
     identity = _artifact_identity(prepared)
     try:
         classified = classify_action(store, identity)
         if classified.claimable:
-            return None
+            return "absent", None
         if (
             classified.evidence_status != "qualified"
             or classified.effect_state != "APPLIED"
             or classified.result is None
         ):
-            return _result_receipt(
-                prepared,
-                effect_state="EFFECT_UNKNOWN",
-                cleanup_uncertain=store.cleanup_uncertain,
-            )
+            return "uncertain", None
         details = _validated_details(classified.result.details, prepared)
         process = read_action_process(store, identity)
         stdout = read_action_blob(store, prepared.action_id, "stdout")
@@ -564,19 +581,184 @@ def _qualified_result(
             or len(stderr) != details["stderr_bytes"]
         ):
             raise ActionArtifactUncertain("command evidence mismatch")
-        return _result_receipt(
-            prepared,
-            effect_state="APPLIED",
-            details=details,
-            cleanup_uncertain=store.cleanup_uncertain,
+        return "qualified", _QualifiedCommandEvidence(
+            details=details, stdout=stdout, stderr=stderr
         )
     except (ActionArtifactError, ActionArtifactUncertain, OSError, ValueError, TypeError):
+        return "uncertain", None
+
+
+def _qualified_result(
+    store: ActionArtifactStore,
+    prepared: PreparedClosedCommand,
+    artifact_issuer: Callable[
+        [PreparedClosedCommand, _QualifiedCommandEvidence], list[dict[str, Any]]
+    ]
+    | None = None,
+) -> dict[str, Any] | None:
+    status, evidence = _qualified_evidence(store, prepared)
+    if status == "absent":
+        return None
+    if status != "qualified" or evidence is None:
         return _result_receipt(
             prepared,
             effect_state="EFFECT_UNKNOWN",
             cleanup_uncertain=True,
         )
+    receipt = _result_receipt(
+        prepared,
+        effect_state="APPLIED",
+        details=evidence.details,
+        cleanup_uncertain=store.cleanup_uncertain,
+    )
+    if artifact_issuer is not None:
+        receipt["artifacts"] = artifact_issuer(prepared, evidence)
+    return receipt
 
+
+def _artifact_size_state(byte_length: int, truncated: bool) -> str:
+    if truncated:
+        return "retained_prefix"
+    return "empty" if byte_length == 0 else "complete"
+
+
+def _artifact_producer(prepared: PreparedClosedCommand) -> dict[str, Any]:
+    return {
+        "kind": "workbench_action",
+        "action_id": prepared.action_id,
+        "recipe_id": prepared.recipe_id,
+        "project_ref": prepared.project_ref,
+        "context_ref": prepared.context_ref,
+        "responsibility_ref": prepared.responsibility_ref,
+        "operation_ref": prepared.operation_ref,
+        "owner_ref": prepared.owner_ref,
+        "generation": prepared.generation,
+        "host_id": prepared.host_id,
+        "boot_session_id": prepared.boot_session_id,
+    }
+
+
+def _artifact_source(prepared: PreparedClosedCommand) -> dict[str, Any]:
+    return {
+        "relative_path": prepared.relative_path,
+        "preimage_sha256": prepared.preimage_sha256,
+        "source_identity": prepared.source_identity,
+    }
+
+
+def _artifact_descriptor(
+    prepared: PreparedClosedCommand,
+    *,
+    stream: str,
+    raw: bytes,
+    truncated: bool,
+    issued_at_ms: int,
+    expires_at_ms: int,
+    token_codec: ActionTokenCodec,
+) -> dict[str, Any]:
+    media_type = artifact_media_type(prepared.recipe_id, stream)
+    digest = hashlib.sha256(raw).hexdigest()
+    artifact_id = derive_artifact_id(
+        action_id=prepared.action_id,
+        project_ref=prepared.project_ref,
+        generation=prepared.generation,
+        recipe_id=prepared.recipe_id,
+        relative_path=prepared.relative_path,
+        preimage_sha256=prepared.preimage_sha256,
+        source_identity=prepared.source_identity,
+        stream=stream,
+        media_type=media_type,
+        byte_length=len(raw),
+        sha256=digest,
+        truncated=truncated,
+    )
+    reference = PreparedActionArtifact(
+        schema=ARTIFACT_TOKEN_SCHEMA,
+        artifact_id=artifact_id,
+        action_id=prepared.action_id,
+        subject_digest=prepared.subject_digest,
+        client_ref=prepared.client_ref,
+        resource=prepared.resource,
+        project_ref=prepared.project_ref,
+        context_ref=prepared.context_ref,
+        responsibility_ref=prepared.responsibility_ref,
+        operation_ref=prepared.operation_ref,
+        owner_ref=prepared.owner_ref,
+        generation=prepared.generation,
+        root_device=prepared.root_device,
+        root_inode=prepared.root_inode,
+        artifact_store_device=prepared.artifact_store_device,
+        artifact_store_inode=prepared.artifact_store_inode,
+        committed_head=prepared.committed_head,
+        host_id=prepared.host_id,
+        boot_session_id=prepared.boot_session_id,
+        relative_path=prepared.relative_path,
+        recipe_id=prepared.recipe_id,
+        preimage_sha256=prepared.preimage_sha256,
+        source_identity=prepared.source_identity,
+        command_issued_at_ms=prepared.issued_at_ms,
+        command_expires_at_ms=prepared.expires_at_ms,
+        stream=stream,
+        media_type=media_type,
+        byte_length=len(raw),
+        sha256=digest,
+        truncated=truncated,
+        issued_at_ms=issued_at_ms,
+        expires_at_ms=expires_at_ms,
+    )
+    direct_view = (
+        media_type == PNG_MEDIA_TYPE and len(raw) <= MAX_DIRECT_IMAGE_BYTES
+    )
+    return {
+        "schema": ARTIFACT_DESCRIPTOR_SCHEMA,
+        "artifact_id": artifact_id,
+        "artifact_ref": token_codec.encode_artifact(reference),
+        "owner": ARTIFACT_OWNER,
+        "stream": stream,
+        "media_type": media_type,
+        "byte_length": len(raw),
+        "sha256": digest,
+        "truncated": truncated,
+        "size_state": _artifact_size_state(len(raw), truncated),
+        "producer": _artifact_producer(prepared),
+        "source": _artifact_source(prepared),
+        "transfer": {
+            "maximum_artifact_bytes": MAX_ARTIFACT_BYTES,
+            "maximum_chunk_bytes": MAX_ARTIFACT_CHUNK_BYTES,
+            "direct_view_supported": direct_view,
+        },
+        "issued_at_ms": issued_at_ms,
+        "expires_at_ms": expires_at_ms,
+    }
+
+
+def _prepared_from_artifact(reference: PreparedActionArtifact) -> PreparedClosedCommand:
+    return PreparedClosedCommand(
+        schema=COMMAND_TOKEN_SCHEMA,
+        action_id=reference.action_id,
+        subject_digest=reference.subject_digest,
+        client_ref=reference.client_ref,
+        resource=reference.resource,
+        project_ref=reference.project_ref,
+        context_ref=reference.context_ref,
+        responsibility_ref=reference.responsibility_ref,
+        operation_ref=reference.operation_ref,
+        owner_ref=reference.owner_ref,
+        generation=reference.generation,
+        root_device=reference.root_device,
+        root_inode=reference.root_inode,
+        artifact_store_device=reference.artifact_store_device,
+        artifact_store_inode=reference.artifact_store_inode,
+        committed_head=reference.committed_head,
+        host_id=reference.host_id,
+        boot_session_id=reference.boot_session_id,
+        relative_path=reference.relative_path,
+        recipe_id=reference.recipe_id,
+        preimage_sha256=reference.preimage_sha256,
+        source_identity=reference.source_identity,
+        issued_at_ms=reference.command_issued_at_ms,
+        expires_at_ms=reference.command_expires_at_ms,
+    )
 
 def _capture_process(
     process: subprocess.Popen[bytes],
@@ -839,6 +1021,81 @@ def create_command_port(
             raise ProjectActionRefused("ACTION_BINDING_CHANGED")
         return value
 
+
+    def decode_artifact(
+        caller: ActionCaller, artifact_ref: object
+    ) -> PreparedActionArtifact:
+        validate_action_caller(caller)
+        try:
+            reference = token_codec.decode_artifact_evidence(
+                artifact_ref, now_ms=_now(clock_ms)
+            )
+        except ActionContractError as error:
+            raise ProjectActionRefused("ARTIFACT_INVALID") from error
+        if _now(clock_ms) >= reference.expires_at_ms:
+            raise ProjectActionRefused("ARTIFACT_EXPIRED")
+        if (
+            caller.subject_digest != reference.subject_digest
+            or caller.client_ref != reference.client_ref
+            or caller.resource != reference.resource
+        ):
+            raise ProjectActionRefused("ARTIFACT_BINDING_CHANGED")
+        return reference
+
+    def artifact_binding_for(
+        caller: ActionCaller, reference: PreparedActionArtifact
+    ) -> tuple[PreparedClosedCommand, ProjectActionBinding]:
+        prepared = _prepared_from_artifact(reference)
+        try:
+            return prepared, binding_for(caller, prepared)
+        except ProjectActionRefused as error:
+            raise ProjectActionRefused("ARTIFACT_BINDING_CHANGED") from error
+
+    def issue_artifacts(
+        caller: ActionCaller,
+        prepared: PreparedClosedCommand,
+        evidence: _QualifiedCommandEvidence,
+    ) -> list[dict[str, Any]]:
+        initial = binding_for(caller, prepared)
+        initial_key = _binding_key(initial)
+        issued_at = _now(clock_ms)
+        expires_at = min(
+            issued_at + action_ttl_ms,
+            initial.scope.expires_at_ms,
+            caller.expires_at * 1000,
+        )
+        if expires_at <= issued_at:
+            raise ProjectActionRefused("ARTIFACT_BINDING_CHANGED")
+        rows = [
+            _artifact_descriptor(
+                prepared,
+                stream="stdout",
+                raw=evidence.stdout,
+                truncated=evidence.details["stdout_truncated"],
+                issued_at_ms=issued_at,
+                expires_at_ms=expires_at,
+                token_codec=token_codec,
+            ),
+            _artifact_descriptor(
+                prepared,
+                stream="stderr",
+                raw=evidence.stderr,
+                truncated=evidence.details["stderr_truncated"],
+                issued_at_ms=issued_at,
+                expires_at_ms=expires_at,
+                token_codec=token_codec,
+            ),
+        ]
+        final = binding_for(caller, prepared)
+        if _binding_key(final) != initial_key:
+            raise ProjectActionRefused("ARTIFACT_BINDING_CHANGED")
+        return rows
+
+    def artifact_issuer(caller: ActionCaller):
+        return lambda prepared, evidence: issue_artifacts(
+            caller, prepared, evidence
+        )
+
     async def prepare_project_command(
         caller: ActionCaller, arguments: Mapping[str, Any]
     ) -> Mapping[str, Any]:
@@ -992,7 +1249,7 @@ def create_command_port(
                     writer = acquire_store_writer(_live_store(store))
                 except ActionArtifactBusy:
                     return reply(
-                        _qualified_result(store, prepared)
+                        _qualified_result(store, prepared, artifact_issuer(caller))
                         or _result_receipt(
                             prepared,
                             effect_state="EFFECT_UNKNOWN",
@@ -1001,7 +1258,7 @@ def create_command_port(
                     )
                 except ActionArtifactUncertain as error:
                     raise ProjectActionRefused("ACTION_UNAVAILABLE") from error
-                existing = _qualified_result(store, prepared)
+                existing = _qualified_result(store, prepared, artifact_issuer(caller))
                 if existing is not None:
                     return reply(existing)
                 outcome = claim_action(
@@ -1117,11 +1374,13 @@ def create_command_port(
                     details=details,
                 )
                 return reply(
-                    _result_receipt(
+                    _qualified_result(
+                        store, prepared, artifact_issuer(caller)
+                    )
+                    or _result_receipt(
                         prepared,
-                        effect_state="APPLIED",
-                        details=details,
-                        cleanup_uncertain=store.cleanup_uncertain,
+                        effect_state="EFFECT_UNKNOWN",
+                        cleanup_uncertain=True,
                     )
                 )
             except ProjectActionRefused:
@@ -1218,6 +1477,149 @@ def create_command_port(
             prepared, effect_state=effect, cleanup_uncertain=store.cleanup_uncertain
         )
 
+
+    async def read_action_artifact(
+        caller: ActionCaller, arguments: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        try:
+            request = dict(arguments)
+            if (
+                not set(request) <= _ARTIFACT_READ_KEYS
+                or "artifact_ref" not in request
+            ):
+                raise ProjectActionRefused("ARTIFACT_INVALID")
+            offset = request.get("offset", 0)
+            maximum = request.get("max_bytes", MAX_ARTIFACT_CHUNK_BYTES)
+            if (
+                type(offset) is not int
+                or not 0 <= offset <= MAX_ARTIFACT_BYTES
+                or type(maximum) is not int
+                or not 1 <= maximum <= MAX_ARTIFACT_CHUNK_BYTES
+            ):
+                raise ProjectActionRefused("ARTIFACT_RANGE_INVALID")
+        except ProjectActionRefused:
+            raise
+        except Exception as error:
+            raise ProjectActionRefused("ARTIFACT_INVALID") from error
+        reference = decode_artifact(caller, request["artifact_ref"])
+
+        def operation() -> dict[str, Any]:
+            if _now(clock_ms) >= reference.expires_at_ms:
+                raise ProjectActionRefused("ARTIFACT_EXPIRED")
+            prepared, initial = artifact_binding_for(caller, reference)
+            initial_key = _binding_key(initial)
+            status, evidence = _qualified_evidence(_live_store(store), prepared)
+            if status != "qualified" or evidence is None:
+                raise ProjectActionRefused("ARTIFACT_UNAVAILABLE")
+            raw = evidence.stdout if reference.stream == "stdout" else evidence.stderr
+            truncated = evidence.details[f"{reference.stream}_truncated"]
+            media_type = artifact_media_type(prepared.recipe_id, reference.stream)
+            digest = hashlib.sha256(raw).hexdigest()
+            artifact_id = derive_artifact_id(
+                action_id=prepared.action_id,
+                project_ref=prepared.project_ref,
+                generation=prepared.generation,
+                recipe_id=prepared.recipe_id,
+                relative_path=prepared.relative_path,
+                preimage_sha256=prepared.preimage_sha256,
+                source_identity=prepared.source_identity,
+                stream=reference.stream,
+                media_type=media_type,
+                byte_length=len(raw),
+                sha256=digest,
+                truncated=truncated,
+            )
+            if (
+                reference.artifact_id != artifact_id
+                or reference.media_type != media_type
+                or reference.byte_length != len(raw)
+                or reference.sha256 != digest
+                or reference.truncated is not truncated
+            ):
+                raise ProjectActionRefused("ARTIFACT_UNAVAILABLE")
+            if offset > len(raw):
+                raise ProjectActionRefused("ARTIFACT_RANGE_INVALID")
+            end = min(len(raw), offset + maximum)
+            content_kind = "blob"
+            payload: dict[str, Any] = {}
+            if media_type == TEXT_MEDIA_TYPE:
+                try:
+                    raw.decode("utf-8", errors="strict")
+                    raw[:offset].decode("utf-8", errors="strict")
+                except UnicodeError as error:
+                    raise ProjectActionRefused("ARTIFACT_RANGE_INVALID") from error
+                while end > offset:
+                    try:
+                        selected_text = raw[offset:end].decode(
+                            "utf-8", errors="strict"
+                        )
+                        break
+                    except UnicodeDecodeError as error:
+                        if error.reason != "unexpected end of data":
+                            raise ProjectActionRefused(
+                                "ARTIFACT_RANGE_INVALID"
+                            ) from error
+                        end -= 1
+                else:
+                    if offset < len(raw):
+                        raise ProjectActionRefused("ARTIFACT_RANGE_INVALID")
+                    selected_text = ""
+                selected = raw[offset:end]
+                content_kind = "text"
+                payload["text"] = selected_text
+            else:
+                selected = raw[offset:end]
+                if (
+                    media_type == PNG_MEDIA_TYPE
+                    and offset == 0
+                    and end == len(raw)
+                    and len(raw) <= MAX_DIRECT_IMAGE_BYTES
+                ):
+                    content_kind = "image"
+                payload["_payload_base64"] = base64.b64encode(selected).decode(
+                    "ascii"
+                )
+            confirmed = read_action_blob(
+                _live_store(store), prepared.action_id, reference.stream
+            )
+            if confirmed is None or confirmed != raw:
+                raise ProjectActionRefused("ARTIFACT_UNAVAILABLE")
+            _prepared, final = artifact_binding_for(caller, reference)
+            if _binding_key(final) != initial_key:
+                raise ProjectActionRefused("ARTIFACT_BINDING_CHANGED")
+            response = {
+                "status": "OK",
+                "artifact_id": artifact_id,
+                "owner": ARTIFACT_OWNER,
+                "stream": reference.stream,
+                "media_type": media_type,
+                "byte_length": len(raw),
+                "sha256": digest,
+                "truncated": truncated,
+                "size_state": _artifact_size_state(len(raw), truncated),
+                "offset": offset,
+                "returned_bytes": len(selected),
+                "next_offset": None if end >= len(raw) else end,
+                "chunk_sha256": hashlib.sha256(selected).hexdigest(),
+                "content_kind": content_kind,
+                "producer": _artifact_producer(prepared),
+                "source": _artifact_source(prepared),
+            }
+            response.update(payload)
+            return response
+
+        pending = run_io(operation)
+        if not inspect.isawaitable(pending):
+            raise ProjectActionRefused("ARTIFACT_UNAVAILABLE")
+        try:
+            return await pending
+        except asyncio.CancelledError:
+            raise
+        except ProjectActionRefused:
+            raise
+        except Exception as error:
+            raise ProjectActionRefused("ARTIFACT_UNAVAILABLE") from error
+
     async def reconcile_action(
         caller: ActionCaller, action_ref: object
     ) -> Mapping[str, Any]:
@@ -1225,7 +1627,9 @@ def create_command_port(
 
         def operation() -> dict[str, Any]:
             historical_binding(caller, prepared)
-            return _qualified_result(_live_store(store), prepared) or unclaimed_receipt(
+            return _qualified_result(
+                _live_store(store), prepared, artifact_issuer(caller)
+            ) or unclaimed_receipt(
                 prepared, action_ref
             )
 
@@ -1330,6 +1734,7 @@ def create_command_port(
         prepare_project_command,
         run_project_command,
         read_action_result,
+        read_action_artifact,
         reconcile_action,
     )
 

@@ -1,7 +1,7 @@
 # Mastermind Workbench Local MCP + Secure MCP Tunnel
 
 **State: BUILT_NOT_PROVEN.** The pure Personal-Pro local Read profile and the
-ten-tool attended Workbench Action tunnel profile exist in source. Real SDK
+eleven-tool attended Workbench Action tunnel profile exist in source. Real SDK
 stdio initialize/list/call tests pass locally. The attended profile is not
 installed or admitted by ChatGPT in this source receipt. C1 validation reuses
 the existing dedicated private Workbench tunnel and its one actual Personal
@@ -45,10 +45,13 @@ runtime. Its manifest reports the `attended_workbench_f0` profile and exactly:
 1. `workspace_manifest`, `read_project_file`, `preview_text_replace`;
 2. `prepare_text_patch`, `commit_text_patch`, `reconcile_text_patch`;
 3. `prepare_project_command`, `run_project_command`, `read_action_result`,
-   `reconcile_action`.
+   `read_action_artifact`, `reconcile_action`.
+
+
+Artifact bytes remain in the existing Action artifact store. A command result issues signed, expiring descriptors for retained stdout/stderr; `read_action_artifact` accepts only the descriptor plus a bounded byte range. Text is strict UTF-8 on byte boundaries, complete small PNGs are native MCP images, and other binary ranges are lossless MCP blobs. Never add a project path, host path, arbitrary URI, output-slot override, or media-type override to this tool. Preserve the existing action key and artifact directory across ordinary restarts so the same Action can reconcile and renew a reference; key or generation rotation must first settle any unresolved effect.
 
 `commit_text_patch` and `run_project_command` are honestly modifying. Command
-execution is limited to the pinned checksum and intentional-refusal canaries;
+execution is limited to the pinned checksum, intentional-refusal, and deterministic source-fingerprint PNG canaries;
 the preview-only `preview_project_command` is absent. The first native target
 is C1 Personal because the user reports custom change/write support there.
 There is no Business-only condition: actual tool scan and invocation decide
