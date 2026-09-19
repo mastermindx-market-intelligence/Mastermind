@@ -827,3 +827,71 @@ def test_clean_snapshot_avoids_full_reachable_object_history_transport(tmp_path:
     ) == head
     assert any(call[:2] == ("git", "rev-list") and "--parents" in call for call in calls)
     assert not any(call[:2] == ("git", "rev-list") and "--objects" in call for call in calls)
+
+
+def test_installed_collector_runs_macro_closure_once_with_cumulative_budget(
+    tmp_path: Path,
+):
+    import json
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+
+    mastermind_parent = tmp_path / "mastermind-fixture"
+    macro_parent = tmp_path / "macro-fixture"
+    mastermind_parent.mkdir()
+    macro_parent.mkdir()
+    repo, _tracked = _clean_repo(mastermind_parent)
+    macro, _macro_tracked = _clean_repo(macro_parent)
+    code = tmp_path / "immutable-release"
+    (code / "scripts").mkdir(parents=True)
+    python = tmp_path / "python"
+    python.write_text("fixture", encoding="utf-8")
+    source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    macro_sha = _git(macro, "rev-parse", "HEAD").stdout.strip()
+    macro_history_walks = 0
+    child_budget: dict[str, float] = {}
+
+    def runner(argv, **kwargs):
+        nonlocal macro_history_walks
+        normalized = tuple(str(item) for item in argv)
+        if normalized[0] == "git":
+            if (
+                Path(kwargs["cwd"]) == macro
+                and normalized[1:3] == ("rev-list", "--parents")
+            ):
+                macro_history_walks += 1
+            return _default_packet_runner(argv, **kwargs)
+
+        child_macro = Path(normalized[normalized.index("--macro-root") + 1])
+        child_budget["runner"] = float(kwargs["timeout"])
+        child_budget["inner"] = float(normalized[normalized.index("--timeout") + 1])
+        return {
+            "code": 0,
+            "stdout": json.dumps({
+                "schema": "mastermind.ceo_boot_packet.v1",
+                "mastermind": {"root": str(repo), "sha": source_sha, "branch": "HEAD"},
+                "macro": {
+                    "root": str(child_macro), "sha": macro_sha,
+                    "resolved_via": "flag", "candidates_tried": [],
+                },
+            }),
+            "stderr": "", "timed_out": False,
+            "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo, macro_root=macro, code_root=code,
+        python_executable=python, runner=runner, expected_source_sha=source_sha,
+    )
+    packet = collector(
+        repo_root=repo, macro_root_flag=str(macro), now=None, timeout=28.0,
+    )
+
+    assert macro_history_walks == 1
+    assert 0 < child_budget["runner"] < 28.0
+    assert 0 < child_budget["inner"] < child_budget["runner"]
+    assert packet["mastermind"]["sha"] == source_sha
+    assert packet["macro"]["sha"] == macro_sha
+    assert packet["macro"]["root"] == str(macro)
