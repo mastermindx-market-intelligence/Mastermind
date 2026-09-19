@@ -18,11 +18,15 @@
   const STATES = Object.freeze({
     OBSERVED: "Cue sampled", DISCARDED: "Discarded", FROZEN: "Frozen", LOADING: "Loading / unknown",
     NAVIGATING: "Navigating", NOT_A_CONVERSATION: "No conversation locator", INVALID_TAB: "Invalid tab identity",
-    OUT_OF_SCOPE: "Outside approved scope", PROBE_UNAVAILABLE: "No reachable content script",
+    OUT_OF_SCOPE: "Outside approved scope", PROBE_UNAVAILABLE: "Content probe unreachable",
     PROBE_TIMEOUT: "Probe timed out", INVALID_PROBE: "Probe rejected", TARGET_CHANGED: "Target changed",
     LOOKUP_UNAVAILABLE: "Tab lookup unavailable", SWEEP_DEADLINE: "Not sampled in deadline",
     PROBE_SLOTS_EXHAUSTED: "Probe slots unavailable",
   });
+  const PROBE_FAILURE_STATES = new Set([
+    "PROBE_UNAVAILABLE", "PROBE_TIMEOUT", "INVALID_PROBE", "LOOKUP_UNAVAILABLE",
+    "SWEEP_DEADLINE", "PROBE_SLOTS_EXHAUSTED",
+  ]);
   let busy = false;
   let generation = 0;
   if (globalThis.addEventListener) globalThis.addEventListener("pagehide", () => {generation++; clearSnapshot();});
@@ -41,6 +45,17 @@
     byId("rows").replaceChildren(); byId("summary").replaceChildren();
     byId("scope").textContent = ""; byId("timestamp").textContent = "";
   }
+  function probeWarning(result) {
+    if (!Number.isSafeInteger(result.initial_tab_count) || !Array.isArray(result.rows)) return null;
+    const failed = result.rows.filter(row => PROBE_FAILURE_STATES.has(row.status));
+    if (!failed.length) return null;
+    const measured = Number.isSafeInteger(result.probed_tab_count) ? result.probed_tab_count : 0;
+    const total = result.initial_tab_count;
+    if (failed.length === result.rows.length && failed.every(row => row.status === "PROBE_UNAVAILABLE")) {
+      return `Document probes unreachable (${measured}/${total}). If this extension was just installed or updated, reload one affected ChatGPT tab and refresh this snapshot.`;
+    }
+    return `Document probe coverage degraded (${measured}/${total}); ${failed.length} tab${failed.length === 1 ? "" : "s"} could not be sampled. Unknown cue state is not evidence that those chats are idle.`;
+  }
   function render(result) {
     const hasInventory = Number.isSafeInteger(result.initial_tab_count);
     byId("summary").replaceChildren(
@@ -50,11 +65,13 @@
       metric(hasInventory ? result.duplicate_tab_count : null, "Extra conversation views"),
     );
     const status = byId("status");
+    const probeWarningText = probeWarning(result);
     status.className = `status${result.inventory_coverage === "UNAVAILABLE" ? " error" :
-      result.inventory_coverage === "PARTIAL" ? " warning" : ""}`;
-    status.textContent = REASONS[result.reason] || "Observation unavailable.";
+      result.inventory_coverage === "PARTIAL" || probeWarningText ? " warning" : ""}`;
+    const inventoryText = REASONS[result.reason] || "Observation unavailable.";
+    status.textContent = probeWarningText ? `${inventoryText} ${probeWarningText}` : inventoryText;
     const scope = "Normal ChatGPT tabs in this profile only · " + (hasInventory
-      ? `${result.probed_tab_count} sampled · ${result.unique_conversation_count} distinct observed conversation locators`
+      ? `${result.probed_tab_count}/${result.initial_tab_count} document probes sampled · ${result.unique_conversation_count} distinct observed conversation locators`
       : "Inventory unavailable");
     byId("scope").textContent = scope + (result.excluded_private_count ? ` · ${result.excluded_private_count} private tabs excluded` : "") +
       (result.omitted_tab_count ? ` · ${result.omitted_tab_count} returned entries omitted` : "") +
@@ -80,9 +97,13 @@
       browser.append(element("span", STATES[row.status] || "Unknown"));
       browser.append(element("span", row.selected_in_window === true ? "Selected in its window" :
         row.selected_in_window === false ? "Not selected in its window" : "Window selection unknown", "detail"));
+      if (row.status === "PROBE_UNAVAILABLE") {
+        browser.append(element("span", "If this tab predates the current extension load, reload it once and refresh.", "detail"));
+      }
       const mode = document.createElement("td");
       mode.append(element("span", "Unverified / Unverified"));
       mode.append(element("span", "Served model: unknown", "detail"));
+      mode.append(element("span", "Model/effort telemetry is not implemented in census v1", "detail"));
       tr.append(surface, cue, browser, mode); rows.append(tr);
     }
     if (!result.rows.length) {
