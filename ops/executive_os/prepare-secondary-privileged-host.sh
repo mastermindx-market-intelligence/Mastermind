@@ -156,8 +156,31 @@ case "$(/usr/bin/stat -f '%Sp' "$SOURCE_PARENT")" in *+) refuse "source parent h
 [ -f "$BOOTSTRAP_SOURCE" ] && [ ! -L "$BOOTSTRAP_SOURCE" ] || refuse "canonical bootstrap identity source is unavailable"
 bootstrap_value() {
   local key="$1" value
-  value="$(/usr/bin/awk -F= -v key="$key" '$1 == key && $2 ~ /^"[A-Za-z0-9_.-]+"$/ {gsub(/"/, "", $2); print $2}' "$BOOTSTRAP_SOURCE")"
-  case "$value" in ''|*SOURCE_REPO_REAL="$(cd "$SOURCE_REPO" && /bin/pwd -P)"
+  value="$(/usr/bin/awk -F= -v key="$key" '
+    $1 == key && $2 ~ /^"[A-Za-z0-9_.-]+"$/ {
+      candidate=$2
+      gsub(/"/, "", candidate)
+      found += 1
+      result=candidate
+    }
+    END {
+      if (found != 1) exit 65
+      print result
+    }
+  ' "$BOOTSTRAP_SOURCE")" || refuse "canonical bootstrap identity field is missing or ambiguous: $key"
+  [ -n "$value" ] || refuse "canonical bootstrap identity field is empty: $key"
+  /usr/bin/printf '%s\n' "$value"
+}
+CONTROL_USER="$(bootstrap_value CONTROL_USER)"
+CONTROL_GROUP="$(bootstrap_value CONTROL_GROUP)"
+CONTROL_UID="$(bootstrap_value CONTROL_UID)"
+CONTROL_GID="$(bootstrap_value CONTROL_GID)"
+OPS_GROUP="$(bootstrap_value OPS_GROUP)"
+OPS_GID="$(bootstrap_value OPS_GID)"
+case "$CONTROL_UID:$CONTROL_GID:$OPS_GID" in *[!0-9:]*|'') refuse "canonical bootstrap numeric identity is invalid" ;; esac
+
+# Only after filesystem custody is immutable may root invoke Git or helpers from it.
+SOURCE_REPO_REAL="$(cd "$SOURCE_REPO" && /bin/pwd -P)"
 [ "$SOURCE_REPO_REAL" = "$SCRIPT_SOURCE_REPO" ] || refuse "script and source repo must be the same checkout"
 [ "$(/usr/bin/git -C "$SOURCE_REPO" rev-parse HEAD)" = "$EXPECTED_SHA" ] || refuse "source HEAD differs from expected SHA"
 [ -z "$('/usr/bin/git' -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=all)" ] || refuse "source repo is not clean"
