@@ -10,6 +10,10 @@ import pytest
 
 
 RELAY_UID = 452
+APP_BOOT_PYTHON = Path(
+    "/Library/Application Support/MastermindExecutive/capacity-runtimes/"
+    "cf1-pyyaml-6.0.3-cp312-arm64/bin/python3.12"
+)
 
 
 def _module():
@@ -109,6 +113,60 @@ def _write_config(tmp_path, raw):
     path.write_text(json.dumps({k: str(v) if isinstance(v, Path) else list(v) if isinstance(v, tuple) else v for k,v in raw.items()}))
     path.chmod(0o600)
     return path
+
+
+def test_app_boot_python_uses_capacity_runtime_attestor(monkeypatch, tmp_path):
+    module = _module()
+    observed: list[Path] = []
+    monkeypatch.setattr(module, "_sealed_root_executable", lambda value, _name: Path(value))
+    monkeypatch.setattr(
+        module, "_attest_app_boot_runtime",
+        lambda path: observed.append(Path(path)) or Path(path),
+    )
+    raw = _raw(tmp_path)
+    raw.update(
+        ceo_ingress_app_peer_uid=os.geteuid() + 10,
+        ceo_ingress_app_armed=True,
+        ceo_ingress_app_macro_root=tmp_path / "macro",
+        ceo_ingress_app_boot_python=APP_BOOT_PYTHON,
+    )
+    loaded = module.load_control_config(_write_config(tmp_path, raw))
+    assert observed == [APP_BOOT_PYTHON]
+    assert loaded["ceo_ingress_app_boot_python"] == APP_BOOT_PYTHON
+
+
+def test_service_composes_hardened_app_reader(monkeypatch, tmp_path):
+    module = _module()
+    raw = _raw(tmp_path)
+    raw.update(
+        ceo_ingress_app_peer_uid=os.geteuid() + 10,
+        ceo_ingress_app_armed=True,
+        ceo_ingress_app_macro_root=tmp_path / "macro",
+        ceo_ingress_app_boot_python=APP_BOOT_PYTHON,
+    )
+    captured_reader: dict[str, object] = {}
+    captured_service: dict[str, object] = {}
+    installed = importlib.import_module("integrations.executive_mcp.installed")
+    class FakeReaders:
+        def __init__(self, **kwargs): captured_reader.update(kwargs)
+        def observe(self):
+            return {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40,
+                    "boot_packet_schema": "mastermind.ceo_boot_packet.v1"}
+    class FakeService:
+        def __init__(self, _config, **kwargs): captured_service.update(kwargs)
+    monkeypatch.setattr(installed, "InstalledExecutiveReaders", FakeReaders)
+    monkeypatch.setattr(module, "ExecutiveControlService", FakeService)
+    monkeypatch.setattr(module, "activate_launchd_socket", lambda _name: object())
+    monkeypatch.setattr(importlib.import_module("control_plane.executive_worker_broker"),
+                        "WorkerBrokerClient", lambda *_args, **_kwargs: object())
+    module._service_from_config(raw)
+    assert captured_reader["repo_root"] == raw["proof_source_repository"]
+    assert captured_reader["macro_root"] == raw["ceo_ingress_app_macro_root"]
+    assert captured_reader["runtime_root"] == raw["runtime_root"]
+    assert captured_reader["boot_python"] == APP_BOOT_PYTHON
+    assert captured_reader["code_root"] == Path(module.__file__).resolve().parents[1]
+    assert captured_reader["expected_source_sha"] == raw["proof_base_sha"]
+    assert captured_service["ceo_ingress_app_binding"].armed is True
 
 
 def test_app_config_is_explicit_and_keeps_c1_unarmed(tmp_path):

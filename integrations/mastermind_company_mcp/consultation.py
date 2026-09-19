@@ -332,8 +332,12 @@ def _validated_artifact_revisions(value: Any) -> list[dict[str, str]]:
             not isinstance(normalized["repository"], str)
             or len(normalized["repository"]) > 200
             or _ARTIFACT_REPOSITORY_RE.fullmatch(normalized["repository"]) is None
+            or _SECRET_RE.search(normalized["repository"]) is not None
             or not isinstance(normalized["path"], str)
             or _ARTIFACT_PATH_RE.fullmatch(normalized["path"]) is None
+            # Immutable artifact identities must not be normalized after admission.
+            or any(part in {"", ".", ".."} for part in normalized["path"].split("/"))
+            or _SECRET_RE.search(normalized["path"]) is not None
             or not isinstance(normalized["commit"], str)
             or re.fullmatch(r"[0-9a-f]{40}", normalized["commit"]) is None
             or not isinstance(normalized["content_sha256"], str)
@@ -585,22 +589,46 @@ def _result_after_dispatch(tool: str, data: Any) -> dict[str, Any]:
     return _capped_envelope(envelope)
 
 
+def _closed_ambiguous_error_data(data: Any) -> dict[str, list[dict[str, str]]]:
+    empty: dict[str, list[dict[str, str]]] = {"peers": []}
+    try:
+        if (
+            not isinstance(data, Mapping)
+            or set(data) != {"peers"}
+            or not isinstance(data.get("peers"), list)
+        ):
+            return empty
+        peers = [_validated_dispatch_peer(peer) for peer in data["peers"]]
+        peer_refs = [peer["peer_ref"] for peer in peers]
+        if len(peer_refs) != len(set(peer_refs)):
+            return empty
+        return {"peers": peers}
+    except Exception:
+        return empty
+
+
 def _error(tool: str, code: str, data: Any = None) -> dict[str, Any]:
     if code not in COMPANY_CONSULTATION_ERROR_CODES:
         code = "INTERNAL_ERROR"
-    if code == "AMBIGUOUS" and data is None:
-        data = {"peers": []}
-    return _capped_envelope(
-        {
-            "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
-            "tool": tool,
-            "ok": False,
-            "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
-            "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
-            "data": data,
-            "error": {"code": code, "message": code},
-        }
+    closed_data = (
+        _closed_ambiguous_error_data(data) if code == "AMBIGUOUS" else None
     )
+    envelope = {
+        "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
+        "tool": tool,
+        "ok": False,
+        "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
+        "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
+        "data": closed_data,
+        "error": {"code": code, "message": code},
+    }
+    if (
+        code == "AMBIGUOUS"
+        and len(canonical_company_consultation_json(envelope))
+        > COMPANY_CONSULTATION_MAX_RESPONSE_BYTES
+    ):
+        envelope["data"] = {"peers": []}
+    return _capped_envelope(envelope)
 
 
 class CompanyConsultationGateway:

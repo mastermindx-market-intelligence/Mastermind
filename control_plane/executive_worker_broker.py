@@ -63,6 +63,7 @@ from control_plane.executive_orchestration_principal import (
     ProviderHomeIdentityObservation,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
@@ -2181,13 +2182,21 @@ class ExecutiveWorkerBroker:
         if exact_local is None or native_turn is None:
             self._observer_refusals.append((None, "TURN_NOT_BOUND"))
             raise BrokerStateError("TURN_NOT_BOUND")
-        key = grant_key
-        if grant_key != key:
-            self._observer_refusals.append((key, "GENERATION_INVALID"))
+        expected_key = TurnKey(
+            active.epoch.attempt_id,
+            active.epoch.session_epoch_id,
+            active.generation.process_generation_id,
+            active.generation.generation_number,
+            active.generation.worker_id,
+            exact_local,
+            native_turn,
+        )
+        if grant_key != expected_key:
+            self._observer_refusals.append((grant_key, "GENERATION_INVALID"))
             raise BrokerStateError("GENERATION_INVALID")
         try:
             result = projection.read(
-                key,
+                expected_key,
                 reader_grant=payload["reader_grant"],
                 cursor=payload["cursor"],
                 max_items=payload["max_items"],
@@ -2196,7 +2205,7 @@ class ExecutiveWorkerBroker:
             code = getattr(exc, "code", None)
             if not isinstance(code, str):
                 raise
-            self._observer_refusals.append((key, code))
+            self._observer_refusals.append((expected_key, code))
             raise BrokerStateError(code) from None
         return {
             "items": [
