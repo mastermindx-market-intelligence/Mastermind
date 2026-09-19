@@ -23,8 +23,8 @@ export const STUDIO_GIT_PUBLISH_STATUS_TOOL = Object.freeze({
     'Read-only publication status for one existing Mastermind attended Web workspace. ' +
     'The host resolves the workspace, repository, branch and origin from the canonical mmx-workspace ' +
     'registration. The caller supplies only the operation id. Reports the current local HEAD, remote ' +
-    'branch HEAD and whether the workspace is clean. It never creates a workspace, commits, pushes, ' +
-    'changes a ref, or accepts a repository, path, branch, remote, credential, shell command or force option.',
+    'branch HEAD and whether the workspace is clean. This read-only schema has no capability to create ' +
+    'a workspace, commit, push, change a ref, or accept a repository, path, branch, remote, credential, shell command or force option.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -58,7 +58,7 @@ export const STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL = Object.freeze({
     'single-line commit message. Ignored files stay uncommitted. A private temporary index prevents ' +
     'pre-commit staging side effects; after the fenced ref update is known applied, the real index is ' +
     'synchronized to that exact commit. Compare-and-swap ref update prevents stale-head publication. ' +
-    'It never contacts origin, pushes, accepts paths, changes remotes, or accepts shell commands.',
+    'This operation is local-only; its schema has no capability to contact origin, push, accept paths, change remotes, or accept shell commands.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -99,8 +99,8 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
     'same host-resolved sol/web-* origin branch without force, tags, branch selection or credential input. ' +
     'Requires the caller to fence the action with the exact expected local HEAD. If the remote already ' +
     'equals that HEAD, no push is issued. A failure after push starts is EFFECT_UNKNOWN unless remote ' +
-    'readback proves the exact HEAD is applied; never blindly retry an EFFECT_UNKNOWN result. Use ' +
-    'studio_git_publish_status to reconcile before any later action.',
+    'readback proves the exact HEAD is applied. EFFECT_UNKNOWN remains unresolved and carries no retry authority; ' +
+    'studio_git_publish_status exposes read-only reconciliation state for any later decision.',
   inputSchema: {
     type: 'object',
     properties: {

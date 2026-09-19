@@ -166,6 +166,15 @@ test('configured gateway exposes typed Git tools with exact truthful annotations
     assert.equal(push.annotations.idempotentHint, true);
     assert.equal(push.annotations.openWorldHint, true);
     assert.deepEqual(Object.keys(push.inputSchema.properties).sort(), ['expected_head_sha', 'operation_id']);
+    const directivePattern =
+      /required workflow|always\b|never\b|only correct tool|must use|do not use|prefer this|critical rule/i;
+    for (const tool of [status, commit, push]) {
+      assert.doesNotMatch(
+        tool.description ?? '',
+        directivePattern,
+        `typed Git description contains classifier-directed language: ${tool.name}`,
+      );
+    }
   } finally {
     await closeAll([f.root, gw, c]);
   }

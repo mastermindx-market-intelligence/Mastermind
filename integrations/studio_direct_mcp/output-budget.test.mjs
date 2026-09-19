@@ -61,7 +61,8 @@ test('unretainable output has no invented receipt or false tool verdict',()=>{
   const p=make({retainedBytes:4096}),out=p.project(result('x'.repeat(10000),{isError:false}));
   assert.ok(size(out)<=2048);assert.equal(body(out).status,'OUTPUT_NOT_RETAINED');
   assert.equal(body(out).receipt_id,undefined);assert.equal(out.isError,false);assert.equal(p.size,0);
-  assert.match(body(out).notice,/[Nn]ever repeat/);
+  assert.match(body(out).notice,/no re-execution authority/i);
+  assert.doesNotMatch(body(out).notice,/always\b|never\b|must use|do not use|only correct tool/i);
 });
 test('owner closure clears bytes and forbids late-result retention',()=>{
   const p=make(),id=body(p.project(result('x'.repeat(5000)))).receipt_id;p.clear();p.clear();

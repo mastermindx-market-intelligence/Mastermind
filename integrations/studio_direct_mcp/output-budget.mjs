@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 export const DEFAULT_OUTPUT_BUDGET = Object.freeze({responseBytes:16384,retainedBytes:8388608,maxEntries:8});
 export const OUTPUT_PAGE_TOOL = Object.freeze({
   name:'studio_output_page', title:'Read retained Studio output',
-  description:'Read a bounded UTF-8 page of an already-returned result using receipt_id and next_offset. Never runs the original tool. Receipts expire with their existing backend owner or bounded eviction; absence never authorizes repeating a modifying call.',
+  description:'Read a bounded UTF-8 page of an already-returned result using receipt_id and next_offset. This is a local receipt read and does not invoke the original tool. Receipts expire with their existing backend owner or bounded eviction. An unavailable receipt provides no evidence about the effect of the original call.',
   inputSchema:{type:'object',properties:{receipt_id:{type:'string',minLength:36,maxLength:36,pattern:'^[0-9a-f-]{36}$'},offset:{type:'integer',minimum:0,maximum:Number.MAX_SAFE_INTEGER}},required:['receipt_id','offset'],additionalProperties:false},
   annotations:{title:'Read retained Studio output',readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
   _meta:{'private-studio-mcp/gateway':true},
@@ -14,7 +14,7 @@ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PREVIEW_CHARS=256;
 const wireBytes=value=>Buffer.byteLength(JSON.stringify(value),'utf8');
 const toolResult=(data,isError)=>({content:[{type:'text',text:JSON.stringify(data)}],...(typeof isError==='boolean'?{isError}:{})});
-const errorResult=status=>toolResult({status,notice:'No backend call was made. Reconcile the original source or effect; never repeat a modifying call to recover output.'},true);
+const errorResult=status=>toolResult({status,notice:'No backend call was made. Receipt unavailability does not establish the original effect; the original source or effect remains unresolved.'},true);
 export class TextOutputPager {
   #entries=new Map(); #bytes=0; #closed=false;
   constructor(options={}) {
@@ -49,8 +49,8 @@ export class TextOutputPager {
       retention:'existing_backend_owner_bounded_memory',
       preview:{head:result.content[0].text.slice(0,PREVIEW_CHARS),tail:result.content.at(-1).text.slice(-PREVIEW_CHARS)},
       notice:retained?
-        'Output projection only, not an execution verdict. Read pages as needed; previews omit content. Never repeat the original action to recover its output. Receipt may expire with owner closure or eviction.':
-        'Backend response received, but full output exceeds retention or its owner is closed. No full-result receipt exists. Never repeat the original action to recover output; reconcile its original source/effect.'};
+        'Output projection only, not an execution verdict. Retained pages expose result content without re-executing the original action; previews omit content. Receipt may expire with owner closure or eviction.':
+        'Backend response received, but full output exceeds retention or its owner is closed. No full-result receipt exists. Output retention provides no re-execution authority; the original source or effect remains authoritative.'};
     let response=toolResult(data,result.isError);
     while(wireBytes(response)>this.limits.responseBytes&&(data.preview.head.length||data.preview.tail.length)){
       data.preview.head=data.preview.head.slice(0,Math.floor(data.preview.head.length/2));
@@ -91,7 +91,7 @@ export function projectOutputSafely(pager, result, options) {
       status: 'OUTPUT_PROJECTION_FAILED',
       backend_result_received: true,
       backend_is_error: typeof result?.isError === 'boolean' ? result.isError : null,
-      notice: 'The backend already replied, but its output projection failed. No output receipt is available. Do not repeat the original action; reconcile its original source or effect. This is not an execution verdict.',
+      notice: 'The backend already replied, but its output projection failed. No output receipt is available. Projection failure provides no re-execution authority; the original source or effect remains authoritative. This is not an execution verdict.',
     }, typeof result?.isError === 'boolean' ? result.isError : undefined);
   }
 }
