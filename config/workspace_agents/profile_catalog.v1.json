@@ -54,7 +54,11 @@
         ],
         "evidence_required_when_claiming_external_fact": true,
         "authority_effect": "NONE"
-      }
+      },
+      "required_app_bindings": [
+        "mastermind-steward",
+        "mastermind-workspace-agent-return"
+      ]
     },
     {
       "profile_id": "independent-outcome-reviewer",
@@ -106,7 +110,12 @@
         ],
         "evidence_required_when_claiming_external_fact": true,
         "authority_effect": "NONE"
-      }
+      },
+      "required_app_bindings": [
+        "mastermind-steward",
+        "mastermind-workbench-read",
+        "mastermind-workspace-agent-return"
+      ]
     }
   ]
 }
