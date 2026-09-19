@@ -1,19 +1,19 @@
-"""control_plane.fabric_job_view — ``mastermind.fabric_job_view.v1``.
+"""control_plane.fabric_job_view — versioned truthful Fabric projections.
 
-One **read-only** projector that renders a single Executive Runtime root —
-parent Job → child Jobs and Attempts → review → repair → accepted result —
-using ONLY existing Executive read paths, and that renders *explicit unknowns*
-wherever the system has no answer yet.
+One **read-only** projector family renders a single Executive Runtime root —
+parent Job → child Jobs and Attempts → review → repair → result state — using
+ONLY existing Executive read paths and explicit unknowns wherever the system
+has no producer.
 
-Why the view exists
--------------------
-Census §1 (``orch/fabric/WB0_TRUTHFUL_VIEW_CENSUS.md``) is the load-bearing
-finding: at this base no Chairman-authenticated admitted job exists and none
-can exist yet (the production CEO-intent submit fence is closed and every arm
-bit in the shipped control template is ``false``).  The only truthful
-rendering available today is an **empty tree with named reasons** — never a
-sample, a fixture relabelled as production, or a placeholder card.  The view
-is therefore judged mainly on how it renders *nothing yet*.
+``mastermind.fabric_job_view.v1`` remains the historical contract.
+``mastermind.fabric_job_view.v2`` separates execution completion from product
+acceptance: Runtime ``COMPLETED`` stays ``COMPLETED`` and acceptance is
+``NOT_PROJECTED`` until a real acceptance owner exists. The v2 root-list
+projection also treats ``ceo_submit_armed=false`` only as new-submission
+unavailability; it never claims that an earlier admitted Job cannot exist.
+
+The projection never fabricates production state, product acceptance, or an
+empty company when an input is missing. Fixture data remains fixture data.
 
 It is not a write path, not an arm, not an install, and not an edit to the
 Control Room document (that document's key set is closed and asserted at
@@ -106,7 +106,9 @@ from typing import Any
 from control_plane import executive_inbox
 
 SCHEMA = "mastermind.fabric_job_view.v1"
+SCHEMA_V2 = "mastermind.fabric_job_view.v2"
 ROOT_LIST_SCHEMA = "mastermind.fabric_job_root_list.v1"
+ROOT_LIST_SCHEMA_V2 = "mastermind.fabric_job_root_list.v2"
 
 #: Closed document key set, asserted by the compositor (A14's idiom).
 OUTPUT_KEYS = frozenset(
@@ -143,6 +145,8 @@ JOB_CARD_KEYS = frozenset(
         "result",
     }
 )
+JOB_CARD_KEYS_V2 = JOB_CARD_KEYS | {"acceptance"}
+ACCEPTANCE_KEYS = frozenset({"state", "producer_owner", "reason"})
 ATTEMPT_CARD_KEYS = frozenset(
     {
         "attempt_id",
@@ -202,10 +206,20 @@ _TERMINAL_RESULT_STATES = {
     "LOST": "LOST",
     "RATE_LIMITED": "RATE_LIMITED",
 }
+_TERMINAL_EXECUTION_STATES_V2 = {
+    "COMPLETED": "COMPLETED",
+    "CANCELLED": "CANCELLED",
+    "FAILED": "FAILED",
+    "LOST": "LOST",
+    "RATE_LIMITED": "RATE_LIMITED",
+}
 _VERDICTS = ("approve", "reject")
 
 _UNARMED_ENTRY = (
     "ceo_submit_armed: false; no Chairman-authenticated admitted job can exist yet"
+)
+_UNARMED_ENTRY_V2 = (
+    "ceo_submit_armed: false; new CEO submissions are unavailable through this arm"
 )
 
 
@@ -438,6 +452,31 @@ def _result_state(job: Any, attempts: Sequence[Any]) -> str:
     return "IN_PROGRESS"
 
 
+def _result_state_v2(job: Any, attempts: Sequence[Any]) -> str:
+    """Execution state only; never aliases completion to product acceptance."""
+
+    status = _enum_value(getattr(job, "status", ""))
+    if status in _TERMINAL_EXECUTION_STATES_V2:
+        return _TERMINAL_EXECUTION_STATES_V2[status]
+    if (
+        not attempts
+        and not getattr(job, "current_attempt_id", None)
+        and not int(getattr(job, "attempt_count", 0) or 0)
+    ):
+        return "NOT_STARTED"
+    return "IN_PROGRESS"
+
+
+def _acceptance_v2() -> tuple[dict[str, Any], dict[str, Any]]:
+    """No product-acceptance producer exists in the current Fabric owner."""
+
+    reason = "product acceptance has no producer in this projection"
+    return (
+        {"state": "NOT_PROJECTED", "producer_owner": None, "reason": reason},
+        _fact("MISSING_PRODUCER", "acceptance.state", None, reason),
+    )
+
+
 def _reviewers_by_subject(jobs: Sequence[Any]) -> dict[str, Any]:
     """subject job id -> the review Job that reviews it.
 
@@ -515,28 +554,37 @@ def _review_block(job: Any, reviewers_by_subject: Mapping[str, Any]):
     return {"required": required, "reviews_job_id": reviews_job_id, "verdict": verdict}, facts
 
 
-def _job_card(job: Any, attempts: Sequence[Any], reviewers_by_subject):
+def _job_card(
+    job: Any,
+    attempts: Sequence[Any],
+    reviewers_by_subject,
+    *,
+    contract_version: int = 1,
+):
     attempt_cards = [_attempt_card(attempt) for attempt in attempts]
     review, facts = _review_block(job, reviewers_by_subject)
     status = _enum_value(getattr(job, "status", ""))
     result = getattr(job, "result", None)
+    state = (
+        _result_state_v2(job, attempts)
+        if contract_version == 2
+        else _result_state(job, attempts)
+    )
     result_block = {
-        "state": _result_state(job, attempts),
+        "state": state,
         "summary": _payload_str(result, "summary"),
         "artifacts": _payload_list(result, "artifacts"),
         "errors": _payload_list(result, "errors"),
         "next_actions": _payload_list(result, "next_actions"),
     }
     if status == "COMPLETED" and not (isinstance(result, Mapping) and result):
-        # A9 requires a non-null accepted result for COMPLETED, so this
-        # combination is itself evidence of damage.
+        reason = (
+            "COMPLETED job carries no result payload"
+            if contract_version == 2
+            else "COMPLETED job carries no accepted result payload"
+        )
         facts = facts + [
-            _fact(
-                "DEGRADED",
-                "result.summary",
-                str(job.job_id),
-                "COMPLETED job carries no accepted result payload",
-            )
+            _fact("DEGRADED", "result.summary", str(job.job_id), reason)
         ]
     card = {
         "job_id": str(job.job_id),
@@ -558,11 +606,18 @@ def _job_card(job: Any, attempts: Sequence[Any], reviewers_by_subject):
         },
         "result": result_block,
     }
-    assert set(card.keys()) == JOB_CARD_KEYS
+    if contract_version == 2:
+        acceptance, missing = _acceptance_v2()
+        card["acceptance"] = acceptance
+        facts = facts + [missing]
+        assert set(acceptance.keys()) == ACCEPTANCE_KEYS
+        assert set(card.keys()) == JOB_CARD_KEYS_V2
+    else:
+        assert set(card.keys()) == JOB_CARD_KEYS
     return card, facts
 
 
-def compose_fabric_view(
+def _compose_fabric_view(
     *,
     root_job_id: str,
     root_job: Any,
@@ -574,6 +629,9 @@ def compose_fabric_view(
     degraded: Iterable[str],
     read_failed: bool = False,
     generated_at: str | None = None,
+    schema: str,
+    contract_version: int,
+    unarmed_entry: str,
 ) -> dict[str, Any]:
     """PURE: render one root's truthful view document.  No I/O whatsoever."""
 
@@ -587,7 +645,10 @@ def compose_fabric_view(
     facts: list[dict[str, Any]] = [_return_path_fact(), _runtime_identity_fact()]
     for job in ([root_job] if root_job is not None else []) + children:
         card, card_facts = _job_card(
-            job, attempts_by_job.get(str(job.job_id), []), reviewers
+            job,
+            attempts_by_job.get(str(job.job_id), []),
+            reviewers,
+            contract_version=contract_version,
         )
         cards = cards + [card]
         facts = facts + card_facts
@@ -633,13 +694,13 @@ def compose_fabric_view(
         ]
 
     if armed.get("ceo_submit_armed") is False:
-        entries = entries + [_UNARMED_ENTRY]
+        entries = entries + [unarmed_entry]
 
     root_card = cards[0] if root_job is not None and cards else None
     child_cards = cards[1:] if root_job is not None and cards else cards
 
     doc = {
-        "schema": SCHEMA,
+        "schema": schema,
         "generated_at": generated_at or _utc_now(),
         "runtime": {
             "root": runtime_identity.get("root"),
@@ -666,6 +727,70 @@ def compose_fabric_view(
     }
     assert set(doc.keys()) == OUTPUT_KEYS  # self-check: closed set, like A14
     return doc
+
+
+def compose_fabric_view(
+    *,
+    root_job_id: str,
+    root_job: Any,
+    jobs: Sequence[Any],
+    attempts_by_job: Mapping[str, Sequence[Any]],
+    joined_job_ids: Iterable[str],
+    runtime_identity: Mapping[str, Any],
+    armed: Mapping[str, Any],
+    degraded: Iterable[str],
+    read_failed: bool = False,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Historical v1 projection; retained byte-semantically for old consumers."""
+
+    return _compose_fabric_view(
+        root_job_id=root_job_id,
+        root_job=root_job,
+        jobs=jobs,
+        attempts_by_job=attempts_by_job,
+        joined_job_ids=joined_job_ids,
+        runtime_identity=runtime_identity,
+        armed=armed,
+        degraded=degraded,
+        read_failed=read_failed,
+        generated_at=generated_at,
+        schema=SCHEMA,
+        contract_version=1,
+        unarmed_entry=_UNARMED_ENTRY,
+    )
+
+
+def compose_fabric_view_v2(
+    *,
+    root_job_id: str,
+    root_job: Any,
+    jobs: Sequence[Any],
+    attempts_by_job: Mapping[str, Sequence[Any]],
+    joined_job_ids: Iterable[str],
+    runtime_identity: Mapping[str, Any],
+    armed: Mapping[str, Any],
+    degraded: Iterable[str],
+    read_failed: bool = False,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Truthful v2: execution completion and product acceptance stay separate."""
+
+    return _compose_fabric_view(
+        root_job_id=root_job_id,
+        root_job=root_job,
+        jobs=jobs,
+        attempts_by_job=attempts_by_job,
+        joined_job_ids=joined_job_ids,
+        runtime_identity=runtime_identity,
+        armed=armed,
+        degraded=degraded,
+        read_failed=read_failed,
+        generated_at=generated_at,
+        schema=SCHEMA_V2,
+        contract_version=2,
+        unarmed_entry=_UNARMED_ENTRY_V2,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -807,19 +932,18 @@ def _gather_jobs(runtime_root: str | Path, root_job_id: str) -> dict[str, Any]:
     )
 
 
-def read_fabric_view(
+def _read_fabric_view(
     runtime_root: str | Path,
     root_job_id: str,
     *,
-    control_config_path: str | Path | None = None,
+    control_config_path: str | Path | None,
+    composer,
 ) -> dict[str, Any]:
-    """Gather one root and render the truthful document.  Read-only."""
-
     armed, armed_degraded = _read_armed(
         None if control_config_path is None else Path(control_config_path)
     )
     gathered = _gather_jobs(runtime_root, str(root_job_id))
-    return compose_fabric_view(
+    return composer(
         root_job_id=str(root_job_id),
         root_job=gathered["root_job"],
         jobs=gathered["jobs"],
@@ -836,13 +960,47 @@ def read_fabric_view(
     )
 
 
-def list_roots(
+def read_fabric_view(
     runtime_root: str | Path,
+    root_job_id: str,
     *,
-    limit: int = LIST_ROOTS_LIMIT,
     control_config_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Bounded enumerator (seat ruling R2): the self-rooted Jobs of one runtime."""
+    """Gather one root and render historical v1. Read-only."""
+
+    return _read_fabric_view(
+        runtime_root,
+        root_job_id,
+        control_config_path=control_config_path,
+        composer=compose_fabric_view,
+    )
+
+
+def read_fabric_view_v2(
+    runtime_root: str | Path,
+    root_job_id: str,
+    *,
+    control_config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Gather one root and render truthful v2 semantics. Read-only."""
+
+    return _read_fabric_view(
+        runtime_root,
+        root_job_id,
+        control_config_path=control_config_path,
+        composer=compose_fabric_view_v2,
+    )
+
+
+def _list_roots(
+    runtime_root: str | Path,
+    *,
+    limit: int,
+    control_config_path: str | Path | None,
+    schema: str,
+    unarmed_entry: str,
+) -> dict[str, Any]:
+    """Historical acquisition path shared by versioned root-list semantics."""
 
     from control_plane import executive_runtime
 
@@ -856,7 +1014,7 @@ def list_roots(
     db_path = runtime_root / DB_RELATIVE_PATH
     entries = list(armed_degraded)
     if armed.get("ceo_submit_armed") is False:
-        entries = entries + [_UNARMED_ENTRY]
+        entries = entries + [unarmed_entry]
     try:
         runtime, db_present, open_degraded = _open_runtime(runtime_root, db_path)
         if runtime is None:
@@ -865,7 +1023,7 @@ def list_roots(
                     "jobs unreadable: runtime database absent; no root can be enumerated"
                 ]
             return {
-                "schema": ROOT_LIST_SCHEMA,
+                "schema": schema,
                 "generated_at": _utc_now(),
                 "runtime": {"root": str(runtime_root), "db_present": db_present, "identity": None},
                 "roots": [],
@@ -894,7 +1052,7 @@ def list_roots(
         for row in rows:
             assert set(row.keys()) == ROOT_ROW_KEYS
         document = {
-            "schema": ROOT_LIST_SCHEMA,
+            "schema": schema,
             "generated_at": _utc_now(),
             "runtime": {"root": str(runtime_root), "db_present": db_present, "identity": None},
             "roots": rows,
@@ -905,7 +1063,7 @@ def list_roots(
         }
     except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError) as exc:
         document = {
-            "schema": ROOT_LIST_SCHEMA,
+            "schema": schema,
             "generated_at": _utc_now(),
             "runtime": {
                 "root": str(runtime_root),
@@ -922,3 +1080,36 @@ def list_roots(
         }
     assert set(document.keys()) == ROOT_LIST_KEYS
     return document
+
+def list_roots(
+    runtime_root: str | Path,
+    *,
+    limit: int = LIST_ROOTS_LIMIT,
+    control_config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Historical v1 root enumeration; retained for old consumers."""
+
+    return _list_roots(
+        runtime_root,
+        limit=limit,
+        control_config_path=control_config_path,
+        schema=ROOT_LIST_SCHEMA,
+        unarmed_entry=_UNARMED_ENTRY,
+    )
+
+
+def list_roots_v2(
+    runtime_root: str | Path,
+    *,
+    limit: int = LIST_ROOTS_LIMIT,
+    control_config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """V2 root enumeration with truthful submission-arm semantics."""
+
+    return _list_roots(
+        runtime_root,
+        limit=limit,
+        control_config_path=control_config_path,
+        schema=ROOT_LIST_SCHEMA_V2,
+        unarmed_entry=_UNARMED_ENTRY_V2,
+    )
