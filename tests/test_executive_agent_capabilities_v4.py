@@ -230,6 +230,17 @@ def test_fixture_package_generation_builds_and_verifies_through_production_modul
 def test_v4_registry_loads_and_verifies_the_real_package_source():
     registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
     assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V4
+    assert registry.policy_version == (
+        "2026-09-18.mastermind-operator-p1-browser-b1-runtime-r2"
+    )
+    assert registry.policy_digest == (
+        "dee789035df3e2acf3578995722f7dc41c5c1a31abed2e489de588497ff9e438"
+    )
+    assert registry.resources[
+        "worker-browser-b1-local"
+    ].runtime_manifest_digest == (
+        "c4b15f3ba4d5c20e869b63af86109ed57d2da929d525d1d8a0a2c65625209e9f"
+    )
     assert tuple(registry.capability_packages) == (PACKAGE_CAPABILITY_ID,)
     generation = registry.capability_packages[PACKAGE_CAPABILITY_ID]
     assert generation.package_content_digest == FROZEN_PACKAGE_CONTENT_DIGEST

@@ -102,6 +102,95 @@ def test_timeout_fails() -> None:
     assert classified["terminal_event_class"] == "timeout"
 
 
+@pytest.mark.parametrize(
+    ("event", "expected_class", "raw_marker"),
+    [
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Output schema is not supported for this request marker-schema-raw"},
+            },
+            "provider_output_schema_unsupported",
+            "marker-schema-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Rate limit exceeded for request marker-rate-raw"},
+            },
+            "provider_rate_limited",
+            "marker-rate-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "This plan does not support Codex usage marker-plan-raw"},
+            },
+            "provider_entitlement_denied",
+            "marker-plan-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Model gpt-test is not available marker-model-raw"},
+            },
+            "provider_model_unavailable",
+            "marker-model-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Unauthorized token sk-abcdefghijklmnopqrstuvwxyz012345 for user@example.com marker-auth-raw"},
+            },
+            "provider_auth_failed",
+            "marker-auth-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Opaque provider failure marker-unknown-raw"},
+            },
+            "provider_turn_failed",
+            "marker-unknown-raw",
+        ),
+        (
+            {
+                "type": "error",
+                "message": "Opaque stream failure marker-stream-raw",
+            },
+            "provider_stream_error",
+            "marker-stream-raw",
+        ),
+    ],
+)
+def test_provider_failure_is_allowlisted_without_retaining_raw_message(
+    event: dict[str, object], expected_class: str, raw_marker: str
+) -> None:
+    stdout = (
+        json.dumps({"type": "thread.started", "thread_id": "t1"}).encode("utf-8")
+        + b"\n"
+        + json.dumps(event).encode("utf-8")
+        + b"\n"
+    )
+    classified = canary.classify_provider_streams(
+        stdout=stdout,
+        stderr=b"",
+        result=None,
+        exit_code=1,
+        timed_out=False,
+    )
+    readiness = canary.evaluate_provider_preflight(
+        login_status_ok=True, canary=classified
+    )
+    encoded = json.dumps(classified)
+    assert classified["terminal_event_class"] == expected_class
+    assert classified["passed"] is False
+    assert readiness["refusal"] == expected_class
+    assert raw_marker not in encoded
+    assert "sk-" not in encoded
+    assert "example.com" not in encoded
+
+
 def test_successful_terminal_turn_and_valid_inert_result_passes(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.provider_home.mkdir()

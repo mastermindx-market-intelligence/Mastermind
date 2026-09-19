@@ -30,6 +30,7 @@ from typing import Any, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from control_plane.worker_execution_contract import (
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     CollectionReceipt,
     ProcessInspector,
     ValidationReceipt,
@@ -85,7 +86,6 @@ class TerminalAssignmentSealError(SupervisorError):
 def _codex_worker_contract():
     from control_plane.codex_worker import (
         ISOLATION_MANIFEST_SCHEMA_VERSION,
-        LAUNCH_ATTESTATION_SCHEMA_VERSION,
         ProcessIdentityError,
     )
 
@@ -1071,7 +1071,7 @@ class ExecutiveSupervisor:
             }
         if (self.require_complete_launch_attestation or effective_grant is not None) and (
             not isinstance(attestation, dict)
-            or attestation.get("schema_version") != _codex_worker_contract()[1]
+            or attestation.get("schema_version") != LAUNCH_ATTESTATION_SCHEMA_VERSION
         ):
             raise SupervisorError("worker adapter did not provide a complete launch attestation")
         if effective_grant is not None:
@@ -1225,7 +1225,7 @@ class ExecutiveSupervisor:
                 fence_generation=lease.attempt.fence_generation,
                 lease_token=lease.lease_token,
                 required_launch_attestation_schema=(
-                    _codex_worker_contract()[1]
+                    LAUNCH_ATTESTATION_SCHEMA_VERSION
                     if self.require_complete_launch_attestation
                     else None
                 ),

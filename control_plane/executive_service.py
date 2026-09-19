@@ -4740,6 +4740,18 @@ class ExecutiveControlService:
         self._require_shared_git_handoff(workspace)
         return observation
 
+    def _require_initial_coo_workspace(self, root: Job) -> dict[str, Any]:
+        """Reuse one read-only initial-workspace rule at selection and execution."""
+        observation = self._require_coo_workspace(root)
+        if (
+            observation["head"] != self.config.proof_base_sha
+            or observation["launch_clean"] is not True
+        ):
+            raise ServiceError(
+                "new COO root requires the clean exact reviewed-base workspace"
+            )
+        return observation
+
     def _require_coo_worker_composed(self) -> None:
         runtime = self._require_runtime()
         binding = self._require_current_coo_binding()
@@ -4949,14 +4961,7 @@ class ExecutiveControlService:
                 if job.parent_job_id == root_id
             ]
             if not children:
-                observation = self._require_coo_workspace(root)
-                if (
-                    observation["head"] != self.config.proof_base_sha
-                    or observation["launch_clean"] is not True
-                ):
-                    raise ServiceError(
-                        "new COO root requires the clean exact reviewed-base workspace"
-                    )
+                self._require_initial_coo_workspace(root)
             live = {
                 value
                 for value, task in self._dispatch_tasks.items()
@@ -4998,7 +5003,15 @@ class ExecutiveControlService:
         finally:
             self._coo_action_tasks.discard(task)
 
-    def _next_bound_coo_root(self) -> str | None:
+    def _next_bound_coo_root(
+        self, *, prestart_refusals: dict[str, Exception] | None = None
+    ) -> str | None:
+        """Select one root, optionally collecting ephemeral pre-start diagnostics.
+
+        Only a QUEUED root with no child or Attempt history may be deferred.
+        Existing work and ambiguous effects retain their reconciliation path.
+        No persistent exclusion, new queue or retry state is introduced.
+        """
         runtime = self._require_runtime()
         with runtime.store.read() as connection:
             rows = connection.execute(
@@ -5022,8 +5035,30 @@ class ExecutiveControlService:
                 event.event_type == "COO_CYCLE_BLOCKED"
                 for event in runtime.events.list_events(job_id=root.job_id)
             )
-            if not blocked:
-                return root.job_id
+            if blocked:
+                continue
+            if (
+                root.status is JobStatus.QUEUED
+                and root.attempt_count == 0
+                and root.current_attempt_id is None
+            ):
+                with runtime.store.read() as connection:
+                    child = connection.execute(
+                        "SELECT 1 FROM jobs WHERE parent_job_id=? LIMIT 1",
+                        (root.job_id,),
+                    ).fetchone()
+                    attempt = connection.execute(
+                        "SELECT 1 FROM attempts WHERE job_id=? LIMIT 1",
+                        (root.job_id,),
+                    ).fetchone()
+                if child is None and attempt is None:
+                    try:
+                        self._require_initial_coo_workspace(root)
+                    except (OSError, ServiceError, StateConflict) as exc:
+                        if prestart_refusals is not None:
+                            prestart_refusals[root.job_id] = exc
+                        continue
+            return root.job_id
         return None
 
     def _record_coo_tick_refusal(self, root_job_id: str, exc: Exception) -> None:
@@ -5079,9 +5114,27 @@ class ExecutiveControlService:
             try:
                 if not self.config.coo_autonomy_armed:
                     continue
-                root_id = self._next_bound_coo_root()
+                # Validate before writing even a diagnostic refusal. The existing
+                # per-action guard revalidates immediately before useful work.
+                self._require_current_autonomy()
+                prestart_refusals: dict[str, Exception] = {}
+                selected_root_id = self._next_bound_coo_root(
+                    prestart_refusals=prestart_refusals
+                )
+                for refused_root_id, refusal in prestart_refusals.items():
+                    self._record_coo_tick_refusal(refused_root_id, refusal)
+                # A diagnostic-write failure must not be attributed to a healthy
+                # root that has not yet been selected for any action.
+                root_id = selected_root_id
                 if root_id is not None:
                     await self._run_coo_cycle(root_id)
+                elif prestart_refusals:
+                    self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
+                        timespec="seconds"
+                    )
+                    self._coo_last_error = (
+                        "ServiceError: no usable never-started COO workspace"
+                    )
             except Exception as exc:
                 self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
                     timespec="seconds"

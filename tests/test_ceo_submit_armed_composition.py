@@ -96,9 +96,71 @@ def _added_line_numbers(path: Path, base: str) -> set[int]:
     return lines
 
 
-def _scan_added_identity_literals(added_lines: str) -> list[str]:
+_NON_PRODUCTION_IDENTITY_DIRS = {
+    ".superpowers", "docs", "fixtures", "research", "review_evidence", "tests",
+}
+_NON_PRODUCTION_IDENTITY_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
+_PERMISSION_MODE_MARKERS = ("chmod", "umask", "st_mode", "dir_mode", "file_mode", "permission")
+_HTTP_STATUS_MARKERS = (
+    "sendjsonerror(", "err?.status", "http_fallback", "http_code",
+    ".status(", "response.status", "statuscode",
+)
+_COMMENT_PREFIXES = ("#", "//", "/*", "*/", "* ")
+
+
+def _is_production_identity_scan_path(path: str) -> bool:
+    parts = tuple(part for part in path.split("/") if part)
+    if not parts:
+        return False
+    name = parts[-1]
+    if any(part in _NON_PRODUCTION_IDENTITY_DIRS for part in parts):
+        return False
+    if name.startswith("test_") or name.endswith("_test.py") or ".test." in name:
+        return False
+    if name in _NON_PRODUCTION_IDENTITY_FILES or name.endswith((".lock", ".md", ".rst")):
+        return False
+    if name.startswith(("README", "CHANGELOG", "LICENSE")):
+        return False
+    return True
+
+
+def _line_mentions_identity_name(line: str) -> bool:
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(line + "\n").readline):
+            if token.type not in {tokenize.NAME, tokenize.STRING}:
+                continue
+            text = token.string.lower()
+            if "_mastermind_" in text:
+                return True
+            if token.type == tokenize.NAME and (
+                {"uid", "uids", "gid", "gids", "peer", "peers"} & set(text.split("_"))
+            ):
+                return True
+    except (IndentationError, tokenize.TokenError):
+        pass
+    return False
+
+
+def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
+    stripped = line.lstrip()
+    if stripped.startswith(_COMMENT_PREFIXES):
+        return True
+    if _line_mentions_identity_name(line):
+        return False
+    lowered = line.lower()
+    if (
+        token_text.lower().startswith("0o")
+        and any(marker in lowered for marker in _PERMISSION_MODE_MARKERS)
+    ):
+        return True
+    if 400 <= value <= 600 and any(marker in lowered for marker in _HTTP_STATUS_MARKERS):
+        return True
+    return False
+
+
+def _scan_identity_source_lines(lines: list[str]) -> list[str]:
     flagged: list[str] = []
-    for line in added_lines.splitlines():
+    for line in lines:
         try:
             tokens = tokenize.generate_tokens(io.StringIO(line + "\n").readline)
             for token in tokens:
@@ -107,12 +169,54 @@ def _scan_added_identity_literals(added_lines: str) -> list[str]:
                         value = int(token.string, 0)
                     except ValueError:
                         continue
-                    if 400 <= value <= 999:
+                    if 400 <= value <= 999 and not _is_known_non_identity_numeric(
+                        line, token.string, value
+                    ):
                         flagged.append(token.string)
-                elif token.type == tokenize.NAME and token.string.startswith("_mastermind_"):
-                    flagged.append(token.string)
+                elif token.type in {tokenize.NAME, tokenize.STRING} and "_mastermind_" in token.string:
+                    start = token.string.find("_mastermind_")
+                    end = start + len("_mastermind_")
+                    while end < len(token.string) and (token.string[end].isalnum() or token.string[end] == "_"):
+                        end += 1
+                    flagged.append(token.string[start:end])
         except (IndentationError, tokenize.TokenError):
             continue
+    return flagged
+
+
+def _scan_added_identity_diff(diff: str) -> list[str]:
+    """Keep the D8 identity ratchet repo-wide without banning unrelated protocol numbers.
+
+    Added production source still fails on every unexplained 400-999 literal and every
+    `_mastermind_*` identity name, including generic aliases moved into a separate file.
+    The only numeric exemptions are semantics that are provably outside the topology
+    plane on the added line itself: explicit HTTP-status handling and octal permission
+    modes. Tests, fixtures, docs/research, and generated dependency locks are not
+    production identity authority and are excluded from this source-only discriminator.
+    """
+    additions_by_path: dict[str, list[str]] = {}
+    current_path: str | None = None
+    for raw in diff.splitlines():
+        if raw.startswith("+++ "):
+            target = raw[4:]
+            if target == "/dev/null":
+                current_path = None
+            elif target.startswith("b/"):
+                current_path = target[2:]
+                additions_by_path.setdefault(current_path, [])
+            else:
+                current_path = target
+                additions_by_path.setdefault(current_path, [])
+            continue
+        if current_path is None or not raw.startswith("+") or raw.startswith("+++"):
+            continue
+        additions_by_path[current_path].append(raw[1:])
+
+    flagged: list[str] = []
+    for path, lines in additions_by_path.items():
+        if not _is_production_identity_scan_path(path):
+            continue
+        flagged.extend(_scan_identity_source_lines(lines))
     return flagged
 
 
@@ -350,7 +454,7 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 321)]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 353)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
@@ -430,6 +534,97 @@ def test_d8_genuinely_distinct_app_peer_uid_is_admitted(tmp_path):
     assert loaded["ceo_ingress_app_peer_uid"] == app_peer
 
 
+def test_d8_scanner_rejects_hidden_numeric_aliases_across_production_files():
+    diff = "\n".join(
+        [
+            "diff --git a/control_plane/new_identity.py b/control_plane/new_identity.py",
+            "--- /dev/null",
+            "+++ b/control_plane/new_identity.py",
+            "@@ -0,0 +1,5 @@",
+            '+worker_uid = config["worker_uid"]',
+            "+DIR_MODE = 0o700",
+            '+worker_user = "_mastermind_shadow"',
+            "+HTTP_WORKER_UID_CODE = 501",
+            "+UID_DIR_MODE = 0o765",
+            "diff --git a/common/identity_constants.py b/common/identity_constants.py",
+            "--- /dev/null",
+            "+++ b/common/identity_constants.py",
+            "@@ -0,0 +1,4 @@",
+            "+FALLBACK = 501",
+            "+ALLOWED = (450, 459)",
+            "+OCTAL_ALIAS = 0o765",
+            "+peer_uid = 777",
+        ]
+    )
+    assert _scan_added_identity_diff(diff) == [
+        "_mastermind_shadow", "501", "0o765", "501", "450", "459", "0o765", "777",
+    ]
+
+
+def test_d8_http_exemption_cannot_hide_identity_shaped_aliases():
+    diff = "\n".join(
+        [
+            "diff --git a/common/identity_status.py b/common/identity_status.py",
+            "--- /dev/null",
+            "+++ b/common/identity_status.py",
+            "@@ -0,0 +1,4 @@",
+            "+status_uid = 501",
+            "+http_peer_uid = 459",
+            "+status_peer = 501",
+            "+response_peer = 459",
+        ]
+    )
+    assert _scan_added_identity_diff(diff) == ["501", "459", "501", "459"]
+
+
+def test_d8_scanner_rejects_mastermind_identity_name_in_unrelated_source():
+    diff = "\n".join(
+        [
+            "diff --git a/integrations/service/runtime.mjs b/integrations/service/runtime.mjs",
+            "--- /dev/null",
+            "+++ b/integrations/service/runtime.mjs",
+            "@@ -0,0 +1 @@",
+            '+const serviceUser = "_mastermind_shadow";',
+        ]
+    )
+    assert _scan_added_identity_diff(diff) == ["_mastermind_shadow"]
+
+def test_d8_scanner_ignores_unrelated_protocol_modes_and_nonproduction_paths():
+    diff = "\n".join(
+        [
+            "diff --git a/integrations/service/gateway.mjs b/integrations/service/gateway.mjs",
+            "--- /dev/null",
+            "+++ b/integrations/service/gateway.mjs",
+            "@@ -0,0 +1,4 @@",
+            "+sendJsonError(res, 404, 'not found');",
+            "+const status = Number(err?.statusCode || 500);",
+            "+return sendJsonError(res, status >= 400 && status < 600 ? status : 500);",
+            "+res.set('Allow', 'POST, DELETE').status(405).json({});",
+            "diff --git a/integrations/service/gateway.py b/integrations/service/gateway.py",
+            "--- /dev/null",
+            "+++ b/integrations/service/gateway.py",
+            "@@ -0,0 +1,2 @@",
+            "+# control_uid is unrelated to this HTTP adapter",
+            "+HTTP_FALLBACK = 503",
+            "diff --git a/integrations/service/private_service.py b/integrations/service/private_service.py",
+            "--- /dev/null",
+            "+++ b/integrations/service/private_service.py",
+            "@@ -0,0 +1 @@",
+            "+DIR_MODE = 0o700",
+            "diff --git a/integrations/service/gateway.test.mjs b/integrations/service/gateway.test.mjs",
+            "--- /dev/null",
+            "+++ b/integrations/service/gateway.test.mjs",
+            "@@ -0,0 +1 @@",
+            "+assert.equal(response.status, 503);",
+            "diff --git a/integrations/service/README.md b/integrations/service/README.md",
+            "--- /dev/null",
+            "+++ b/integrations/service/README.md",
+            "@@ -0,0 +1 @@",
+            "+Private port 443 remains unchanged.",
+        ]
+    )
+    assert _scan_added_identity_diff(diff) == []
+
 def test_d8_template_topology_and_protected_defaults():
     value = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     assert value["allowed_peer_uids"] == [450, 501]
@@ -445,19 +640,4 @@ def test_d8_template_topology_and_protected_defaults():
         ["git", "diff", "--unified=0", base, "HEAD", "--", ":!tests/"], cwd=ROOT,
         check=True, capture_output=True, text=True,
     ).stdout
-    additions = "\n".join(
-        line[1:] for line in diff.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-    )
-    positive = "\n".join(
-        [
-            "ceo_ingress_app_peer_uid = 459",
-            "_EXTRA_PEER = 459",
-            "FALLBACK = 501",
-            "ALLOWED = (450, 459)",
-            "peer_uid = 777",
-        ]
-    )
-    positive_hits = _scan_added_identity_literals(positive)
-    assert positive_hits == ["459", "459", "501", "450", "459", "777"]
-    assert _scan_added_identity_literals(additions) == []
+    assert _scan_added_identity_diff(diff) == []
