@@ -44,7 +44,7 @@ The script accepts only:
 
 There is no caller-selected host, launchd label, executable, command, action, power key/value, Worker, provider, socket, certificate, endpoint, or retry field.
 
-The script must execute from the same direct Git checkout named by `--source-repo`; HEAD must equal the expected SHA and the tree must be clean. Before any root helper is executed from that checkout, the source parent must be root:wheel/non-writable and the checkout must contain no non-root-owned object, group/other-writable object, hard-linked file or filesystem ACL. This prevents a non-root source race across the privilege boundary. The existing source-policy helper must then accept the exact source before mutation.
+The script must execute from the same direct Git checkout named by `--source-repo`; HEAD must equal the expected SHA and the tree must be clean. Before any root helper is executed from that checkout, the source parent must be root:wheel/non-writable and every non-symlink checkout object must be root-owned, non-group/other-writable and ACL-free; regular files may not be hard-linked. The repository's reviewed relative symlink surface remains allowed because secure parent directories prevent non-root replacement and the existing release manifest separately proves installed symlinks remain contained by the immutable release root. This prevents a non-root source race across the privilege boundary without falsely rejecting the repository's legitimate `vendor/macro -> macro_src` link. The existing source-policy helper must then accept the exact source before mutation.
 
 ## Prerequisites
 
