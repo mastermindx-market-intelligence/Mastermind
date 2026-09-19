@@ -1170,3 +1170,128 @@ def test_invalid_provider_result_with_ambient_pid_fails_job_not_containment(
     seal = json.loads(Path(receipt.assignment_seal_receipt_path or "").read_text())
     assert seal["passed"] is True
     assert seal["uid_sweep"]["ambient_pids"] == [88688]
+
+
+@pytest.mark.parametrize("validation_program, terminal", [
+    ("/usr/bin/true", JobStatus.COMPLETED),
+    ("/usr/bin/false", JobStatus.FAILED),
+])
+def test_native_claude_child_job_uses_common_broker_attempt_and_durable_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    validation_program: str, terminal: JobStatus,
+) -> None:
+    """Real adapter/broker/supervisor, synthetic provider and UID-sweep boundaries."""
+    import dataclasses
+    import pwd
+    import uuid
+    from test_executive_worker_broker import (
+        _passing_broker_canary, _real_claude_broker_fixture,
+    )
+    from control_plane.executive_worker_broker import (
+        RemoteClaudeWorkerAdapter, WorkerBrokerClient,
+    )
+
+    async def scenario():
+        broker, _claude, _validator, _sweeper, peer, wire, mode = (
+            _real_claude_broker_fixture(tmp_path, monkeypatch)
+        )
+        worker_id = "claude-native-01"
+        worker_user = pwd.getpwuid(os.geteuid()).pw_name
+        broker.policy = dataclasses.replace(
+            broker.policy, worker_id=worker_id, worker_user=worker_user,
+        )
+        broker.peer_resolver = lambda _socket: peer
+        mode.write_text("executive", encoding="utf-8")
+        runtime_root = tmp_path / "runtime"
+        runtime = Runtime.at(runtime_root, lease_seconds=120)
+        runtime.workers.register_worker(
+            worker_id, provider="anthropic", account_label="provider-free-fixture",
+            worker_type="claude-code", capabilities=["code", "tests"],
+            quota_classes={"claude-native": {
+                "capabilities": ["code", "tests"],
+                "model": "claude-opus-4-6", "effort": "xhigh",
+                "cost_class": "small", "metadata": {"adapter_id": "claude-code"},
+            }},
+        )
+        grant = dict(
+            requested_authorities=["READ", "WRITE_BRANCH", "RUN_TESTS"],
+            allowed_write_paths=["proof.txt"],
+            validation_commands=[[validation_program]],
+            constraints={
+                "provider": "anthropic", "model": "claude-opus-4-6",
+                "effort": "xhigh", "cost_class": "small",
+                "base_sha": wire["expected_base_sha"],
+                "eligible_quota_classes": ["claude-native"],
+                "required_capabilities": ["code", "tests"],
+            },
+            worktree=wire["workspace_path"], attempt_limit=1,
+        )
+        parent = runtime.jobs.create_job("PF1 fixture parent", **grant)
+        child = runtime.jobs.create_job(
+            "Write one bounded fixture proof", parent_job_id=parent.job_id, **grant,
+        )
+        with sqlite3.connect(runtime.store.path) as connection:
+            tables_before = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            ).fetchall()
+        socket_path = Path("/tmp") / f"pf1-runtime-{uuid.uuid4().hex[:12]}.sock"
+        server = await asyncio.start_unix_server(
+            broker.handle_connection, path=str(socket_path), limit=1024 * 1024,
+        )
+        remote = RemoteClaudeWorkerAdapter(
+            WorkerBrokerClient(socket_path),
+            validation_commands_for_spec=lambda _spec: [[validation_program]],
+        )
+        supervisor = ExecutiveSupervisor(
+            runtime, remote, runs_root=broker.policy.run_root,
+            isolation_roots=(broker.policy.workspace_root, broker.policy.run_root),
+            receipts_root=tmp_path / "control-receipts",
+            worker_user=worker_user, worker_uid=os.geteuid(), worker_gid=os.getegid(),
+            shared_run_gid=os.getegid(),
+            secret_canary_verdict=_passing_broker_canary(),
+            require_complete_launch_attestation=True,
+            heartbeat_interval_seconds=0.05, validation_timeout_seconds=5.0,
+            instance_id="pf1-provider-free-supervisor",
+        )
+        try:
+            receipt = await supervisor.run_once(child.job_id)
+        finally:
+            server.close()
+            await server.wait_closed()
+            socket_path.unlink(missing_ok=True)
+        assert receipt.job.status is terminal, receipt.job
+        assert receipt.attempt.status is (AttemptStatus.COMPLETED if terminal is JobStatus.COMPLETED else AttemptStatus.FAILED)
+        assert receipt.job.parent_job_id == parent.job_id
+        assert receipt.attempt.worker_id == worker_id
+        assert len(runtime.attempts.list_attempts(child.job_id)) == 1
+        assert runtime.attempts.list_attempts(parent.job_id) == []
+        assert (Path(wire["workspace_path"]) / "proof.txt").read_text() == "PF1 fixture proof\n"
+        attestation = receipt.attempt.launch_metadata["launch_attestation"]
+        assert attestation["schema_version"] == LAUNCH_ATTESTATION_SCHEMA_VERSION
+        assert attestation["worker_identity"]["effective_uid"] == os.geteuid()
+        assert receipt.attempt.launch_metadata["routing"]["adapter_id"] == "claude-code"
+        events = [event.event_type for event in runtime.events.list_events(
+            attempt_id=receipt.attempt.attempt_id
+        )]
+        assert events.index("ATTEMPT_PROCESS_RECORDED") < events.index("ATTEMPT_RUNNING")
+        assert events.index("ATTEMPT_RUNNING") < events.index("JOB_CHECKPOINTED")
+        assert not any("CLAUDE" in event for event in events)
+        collection = json.loads(Path(receipt.collection_receipt_path).read_text())
+        assert collection["schema_version"] == "mastermind.executive_collection_evidence/v1"
+        assert collection["collection"]["result"]["status"] == "SUCCEEDED"
+        validation = json.loads(Path(receipt.validation_receipt_path).read_text())
+        assert validation["commands"][0]["argv"] == [validation_program]
+        assert validation["commands"][0]["exit_code"] == (0 if terminal is JobStatus.COMPLETED else 1)
+        assert validation["uid_sweep"]["passed"] is True
+        assert Path(receipt.assignment_seal_receipt_path).is_file()
+        quota = runtime.workers.get_quota_class(worker_id, "claude-native")
+        assert quota.status is WorkerStatus.AVAILABLE and quota.active_attempt_id is None
+        reopened = Runtime.at(runtime_root)
+        assert reopened.jobs.get_job(child.job_id).status is terminal
+        assert reopened.attempts.get_attempt(receipt.attempt.attempt_id).status is receipt.attempt.status
+        with sqlite3.connect(runtime.store.path) as connection:
+            assert connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            ).fetchall() == tables_before
+
+    asyncio.run(scenario())
