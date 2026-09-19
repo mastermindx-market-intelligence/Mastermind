@@ -340,7 +340,7 @@ NAVIGATOR_CONTENT_DIGESTS = {
     "fixtures/capability-health-cases.json": "f3815aef7f2183d05a09ee35fe880ccd0c4983ec1069328b4a6e0102c308a986",
     "fixtures/fresh-session-routing-cases.json": "37e186f85529b4970ec53d6a424ed76eb819fed936b40f65883904edb19ce103",
     "references/boot-sources.json": "c30da8f3962ca421f8227ed0111e7da06825523ed3eea16399f6b7b863081e04",
-    "references/capability-health.schema.json": "578b5afb9bb722d32d41e4553424ed8dd73db9bc23eebb9dc26c415a418e4fbd",
+    "references/capability-health.schema.json": "8ec34eea8e377545026befbef46d6709d0c6991190e81a40fb4f074bb229662c",
     "references/capability-state-rules.json": "998545d336d9a262dd65a2d2a3cb65429d5ad7638b8a8c3085e798d3ae779c56",
     "references/catalog.fragment.json": "9de4f15734520939dab7f7a0dfb2b12f72669f4753e87f6b566af238d15e459e",
     "references/navigator-boundary.md": "042a79b897d435d679792fe0e2b50916daedc011eb831f03ac93373219a5678d",

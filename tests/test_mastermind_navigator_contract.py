@@ -540,6 +540,33 @@ def test_health_schema_rejects_every_contradictory_proven_live_packet() -> None:
         validator.validate(unbound)
 
 
+
+def test_health_schema_rejects_state_labels_that_disagree_with_ordered_rules() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    states = {"PROVEN_LIVE", "UNAVAILABLE", "BUILT_NOT_PROVEN", "DEGRADED", "UNKNOWN"}
+
+    for case in fixture["cases"]:
+        packet = _materialize_health_packet(case["packet"])
+        surface = packet["surfaces"][0]
+        expected = case["expected_state"]
+        assert surface["state"] == expected
+        validator.validate(packet)
+
+        for wrong_state in states - {expected}:
+            hostile = copy.deepcopy(packet)
+            hostile_surface = hostile["surfaces"][0]
+            hostile_surface["state"] = wrong_state
+            if wrong_state == "PROVEN_LIVE":
+                hostile_surface["blocker"] = None
+                hostile_surface["next_probe"] = None
+            else:
+                hostile_surface["blocker"] = "wrong state label"
+                hostile_surface["next_probe"] = "recompute from ordered rules"
+            with pytest.raises(jsonschema.ValidationError):
+                validator.validate(hostile)
+
 def test_workbench_cases_fence_attended_and_worker_generations() -> None:
     health = _load("fixtures/capability-health-cases.json")
     by_id = {case["id"]: case for case in health["cases"]}

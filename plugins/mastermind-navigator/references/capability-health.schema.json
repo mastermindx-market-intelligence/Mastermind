@@ -424,8 +424,286 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PROVEN_LIVE"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/stateRuleProvenLive"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "UNAVAILABLE"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/stateRuleUnavailable"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "BUILT_NOT_PROVEN"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/stateRuleBuiltNotProven"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "DEGRADED"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/stateRuleDegraded"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "UNKNOWN"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "$ref": "#/$defs/stateRuleUnknown"
+          }
         }
       ]
+    },
+    "stateRuleProvenLive": {
+      "properties": {
+        "implementation_state": {
+          "const": "BUILT"
+        },
+        "usable_scope": {
+          "const": "FULL"
+        },
+        "binding_current": {
+          "const": "YES"
+        },
+        "installed": {
+          "const": "YES"
+        },
+        "enabled": {
+          "const": "YES"
+        },
+        "authenticated_or_connected": {
+          "const": "YES"
+        },
+        "callable": {
+          "const": "YES"
+        },
+        "organizationally_authorized": {
+          "const": "YES"
+        },
+        "proven_live": {
+          "const": "YES"
+        }
+      },
+      "required": [
+        "implementation_state",
+        "usable_scope",
+        "binding_current",
+        "installed",
+        "enabled",
+        "authenticated_or_connected",
+        "callable",
+        "organizationally_authorized",
+        "proven_live"
+      ]
+    },
+    "stateRuleUnavailable": {
+      "anyOf": [
+        {
+          "properties": {
+            "implementation_state": {
+              "const": "NOT_BUILT"
+            }
+          },
+          "required": [
+            "implementation_state"
+          ]
+        },
+        {
+          "properties": {
+            "usable_scope": {
+              "const": "NONE"
+            }
+          },
+          "required": [
+            "usable_scope"
+          ]
+        },
+        {
+          "properties": {
+            "installed": {
+              "const": "NO"
+            }
+          },
+          "required": [
+            "installed"
+          ]
+        },
+        {
+          "properties": {
+            "enabled": {
+              "const": "NO"
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        },
+        {
+          "properties": {
+            "authenticated_or_connected": {
+              "const": "NO"
+            }
+          },
+          "required": [
+            "authenticated_or_connected"
+          ]
+        },
+        {
+          "properties": {
+            "callable": {
+              "const": "NO"
+            }
+          },
+          "required": [
+            "callable"
+          ]
+        },
+        {
+          "properties": {
+            "organizationally_authorized": {
+              "const": "NO"
+            }
+          },
+          "required": [
+            "organizationally_authorized"
+          ]
+        },
+        {
+          "properties": {
+            "binding_current": {
+              "const": "NO"
+            }
+          },
+          "required": [
+            "binding_current"
+          ]
+        }
+      ]
+    },
+    "stateRuleBuiltNotProven": {
+      "allOf": [
+        {
+          "properties": {
+            "implementation_state": {
+              "const": "BUILT"
+            },
+            "proven_live": {
+              "const": "NO"
+            }
+          },
+          "required": [
+            "implementation_state",
+            "proven_live"
+          ]
+        },
+        {
+          "properties": {
+            "usable_scope": {
+              "enum": [
+                "FULL",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "required": [
+            "usable_scope"
+          ]
+        },
+        {
+          "not": {
+            "$ref": "#/$defs/stateRuleUnavailable"
+          }
+        }
+      ]
+    },
+    "stateRuleDegraded": {
+      "allOf": [
+        {
+          "properties": {
+            "implementation_state": {
+              "const": "BUILT"
+            },
+            "usable_scope": {
+              "const": "PARTIAL"
+            }
+          },
+          "required": [
+            "implementation_state",
+            "usable_scope"
+          ]
+        },
+        {
+          "not": {
+            "$ref": "#/$defs/stateRuleUnavailable"
+          }
+        }
+      ]
+    },
+    "stateRuleUnknown": {
+      "not": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/stateRuleProvenLive"
+          },
+          {
+            "$ref": "#/$defs/stateRuleUnavailable"
+          },
+          {
+            "$ref": "#/$defs/stateRuleBuiltNotProven"
+          },
+          {
+            "$ref": "#/$defs/stateRuleDegraded"
+          }
+        ]
+      }
     }
   }
 }
