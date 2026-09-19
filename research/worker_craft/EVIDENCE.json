@@ -1,129 +1,155 @@
 {
-  "schema": "mastermind.craft_authoring_evidence.v1",
-  "observed_date": "2026-09-13",
-  "procedure_repository": "mastermindx-market-intelligence/Mastermind",
-  "procedure_commit": "9ed16bf0fcc5b47e870350ff2413ff5c8c73b447",
-  "skillpack_version": "1.0.1",
-  "python_tested": "3.13.5",
-  "python_39_compatibility": "intended syntax baseline; Python 3.9 execution not tested",
-  "test_command": "python -B -m unittest discover -s tests -v",
-  "test_result": {
-    "tests": 29,
-    "passed": 29,
-    "failed": 0,
-    "roles_exercised": 8,
-    "real_cli_success_paths": 2,
-    "real_cli_failure_paths": 1,
-    "log_sha256": "da70394261839f4f557c8dadce765c91b9347e32d47661a8ddc10ec5cf117019"
+  "commission_fixture": {
+    "account_selection": "NOT_PERFORMED",
+    "artifact": "examples/ceo-commission.md",
+    "commission_sha256": "3dd587e8b6555ff83e986ef7d835232e2fe0153b8d9fd1892ae73e09c4fc2ef0",
+    "compact_input_sha256": "2fb040f74669d66495942b8e06be1fdbcf0367a2d2501ad4b40e13144eb74430",
+    "method_sha256": "1ad99fbeddee07cd3c4b6996448a190f570a80ac32c52c2c47b8948c6fec6a5b",
+    "model_selection": "NOT_PERFORMED",
+    "normalized_brief_sha256": "4728b1b02577968bb5f43f9683086ea602f0d8461abf248b0836d2cd7ef9864e",
+    "provider_selection": "NOT_PERFORMED",
+    "receipt": "examples/ceo-commission-receipt.json",
+    "request": "examples/ceo-commission-request.json",
+    "schema_version": "mastermind.craft_commission_compilation.v1"
   },
-  "useful_output": "Complete method-enriched brief produced by the real compiler CLI from supplied source-authoring and illustrative design inputs.",
-  "source_state": "BUILT_NOT_PROVEN",
-  "proof_scope": "Local deterministic authoring/CLI behavior only. No fleet or provider proof.",
-  "runtime_admission": "NOT_REQUESTED",
+  "downstream_fixed_path": "research/executive_commissions/COMMISSION.md",
+  "downstream_publication_wiring": "NOT_PERFORMED_IN_THIS_PR",
   "execution_authority": false,
-  "native_skill_installation": "NOT_PERFORMED",
-  "provider_or_model_calls": 0,
   "external_tool_calls_by_compiler": 0,
-  "studio_worker_mutations": 0,
-  "integration_tests_against_full_mastermind_repository": "NOT_RUN; source-only additive scope, full checkout unavailable in this sandbox",
-  "independent_semantic_review": "NOT_PERFORMED",
-  "observed_runtime_gate": "Executive read-only state transport returned HTTP 429; underlying runtime health unknown.",
-  "observed_host_gate": "Studio ping responded; later bounded file read timed out. Earlier compound shell request was blocked by platform safety checks and was not replayed.",
   "files_excluding_this_evidence_file": [
     {
-      "path": "MASTER_PLAN.md",
       "bytes": 26331,
+      "path": "MASTER_PLAN.md",
       "sha256": "8a3b8dd231679a7c801780f725f5f242e60a22c29726432ce2ec7048e13be2e8"
     },
     {
+      "bytes": 4501,
       "path": "README.md",
-      "bytes": 3277,
-      "sha256": "eaa7e77931237b1945f13958217ede4a25045f8b15b7bc043fb03e014c160968"
+      "sha256": "32f799df18ece65e37c568aec31924affd933bea1fc279c67ed99c14fa6882d3"
     },
     {
-      "path": "examples/design-brief.json",
+      "bytes": 557,
+      "path": "examples/ceo-commission-receipt.json",
+      "sha256": "897b1c20c213f636cebf7947f628b3e2e1b509e787394472cd17fcf09b275e29"
+    },
+    {
+      "bytes": 5989,
+      "path": "examples/ceo-commission-request.json",
+      "sha256": "5abcd7c8d91fdd7f838ecadc452c41a1c50457d986606c12cd9c64a50d1cbfe0"
+    },
+    {
+      "bytes": 18586,
+      "path": "examples/ceo-commission.md",
+      "sha256": "3dd587e8b6555ff83e986ef7d835232e2fe0153b8d9fd1892ae73e09c4fc2ef0"
+    },
+    {
       "bytes": 4097,
+      "path": "examples/design-brief.json",
       "sha256": "1ba3c85eef2601c31284ec814c51807049009457b344c42e2a6f6eddaf47a7b6"
     },
     {
-      "path": "examples/program-brief.json",
       "bytes": 4653,
+      "path": "examples/program-brief.json",
       "sha256": "c7e0226fd2f8704ef8b7ae97a5846f751611027f05e6a7dc8897b79f62242379"
     },
     {
-      "path": "mastermind-craft/SKILL.md",
       "bytes": 2420,
+      "path": "mastermind-craft/SKILL.md",
       "sha256": "334db198936192c6a361317c7a928378a13534c29923d21a78fb3565d6e99165"
     },
     {
-      "path": "mastermind-craft/agents/openai.yaml",
       "bytes": 276,
+      "path": "mastermind-craft/agents/openai.yaml",
       "sha256": "92977de5d1497363724d8f5a0eef0c2193b76a17b1692488ea1ae41fdbd87c4d"
     },
     {
-      "path": "mastermind-craft/references/adoption.md",
       "bytes": 3146,
+      "path": "mastermind-craft/references/adoption.md",
       "sha256": "28182534fb26cf2bdfef936af7a8eb8377371ad6723227b9e5b99406f314aeaa"
     },
     {
-      "path": "mastermind-craft/references/backend.md",
       "bytes": 2586,
+      "path": "mastermind-craft/references/backend.md",
       "sha256": "a5e81551955eac28b7167c52ac33c5f14632165cb0c9da2241746fd8b37f50e1"
     },
     {
-      "path": "mastermind-craft/references/brief-format.md",
       "bytes": 3404,
+      "path": "mastermind-craft/references/brief-format.md",
       "sha256": "e74a9b9266259ff1f5e4f2dae28393ffd7c89ebd25fa8883a7e4e0a16f163562"
     },
     {
-      "path": "mastermind-craft/references/common.md",
       "bytes": 3022,
+      "path": "mastermind-craft/references/common.md",
       "sha256": "48e8c7b74d8925c54db4ff40b704d63111bf9e3e7ff492f1ccc3561181b5bf60"
     },
     {
-      "path": "mastermind-craft/references/data-scientist.md",
       "bytes": 2434,
+      "path": "mastermind-craft/references/data-scientist.md",
       "sha256": "1ed83b65ca925cf6dc8dcb9b7eb6404a9fb9d7a401761c13611fe508901f0760"
     },
     {
-      "path": "mastermind-craft/references/designer.md",
       "bytes": 3003,
+      "path": "mastermind-craft/references/designer.md",
       "sha256": "c0cc44c994521aa8ee81d215e90dda499b0b7533b434308d34248d6e1ee97f0c"
     },
     {
-      "path": "mastermind-craft/references/frontend.md",
       "bytes": 2492,
+      "path": "mastermind-craft/references/frontend.md",
       "sha256": "a705cc43828e4e927378fd5e7be23b44afb9136a1178c3a7302b0fb60ef6f678"
     },
     {
-      "path": "mastermind-craft/references/orchestrator.md",
       "bytes": 2645,
+      "path": "mastermind-craft/references/orchestrator.md",
       "sha256": "fe788fe7506affe6be8bcfbd4e3d3a98b35b8a7eca14e3121d527789f6f70aec"
     },
     {
-      "path": "mastermind-craft/references/researcher.md",
       "bytes": 2375,
+      "path": "mastermind-craft/references/researcher.md",
       "sha256": "269cb1d9f5256de5a85d181471976a6767f9c4898b8fb005bd9c434d8223185e"
     },
     {
-      "path": "mastermind-craft/references/reviewer.md",
       "bytes": 2402,
+      "path": "mastermind-craft/references/reviewer.md",
       "sha256": "ed22eccc8ee016044af90a92e2cc744e1950a887ebfd7cecfa5811c3768ce363"
     },
     {
-      "path": "mastermind-craft/references/verifier.md",
       "bytes": 2549,
+      "path": "mastermind-craft/references/verifier.md",
       "sha256": "65c78130f17ec6c50e795da8bd2b854a70bb9fa631fd6fef3ede39a745f6e6ab"
     },
     {
+      "bytes": 21269,
       "path": "mastermind-craft/scripts/brief.py",
-      "bytes": 11618,
-      "sha256": "6d9007885b0b353383d261c32801a3e1b3c355a8b4c344d5c6161d1dd61026f3"
+      "sha256": "3a6dd3ff2cc2731a873988766672269f69a5f92530ffac9918ef5dc81cc68e3f"
     },
     {
+      "bytes": 17597,
       "path": "tests/test_brief.py",
-      "bytes": 11836,
-      "sha256": "da4cdbfcca4b0610a57560381ea23f3447994dc9dcb48eee66b1ea46f89fa7ee"
+      "sha256": "a977bd135f95d2205dd5d76c2393264649439f731c3f6c0d1792bb7f3f659912"
     }
-  ]
+  ],
+  "independent_semantic_review": "NOT_REQUIRED_FOR_THIS_ACCELERATION_WAVE__NOT_PERFORMED",
+  "native_skill_installation": "NOT_PERFORMED",
+  "observed_date": "2026-09-18",
+  "procedure_commit": "55473bb43c3ae1908f53ddd4ccfe724643dd6c69",
+  "procedure_repository": "mastermindx-market-intelligence/Mastermind",
+  "proof_scope": "Current-protected-source local compiler, CLI, golden-byte, fail-closed and hash behavior only; no provider launch, runtime admission, publication, or worker START.",
+  "provider_or_model_calls": 0,
+  "python_tested": "3.14.7",
+  "runtime_admission": "NOT_REQUESTED",
+  "schema": "mastermind.craft_authoring_evidence.v1",
+  "self_review": "FOCUSED_TESTS_PY_COMPILE_DIFF_CHECK_AND_CURRENT_SOURCE_RECONCILIATION",
+  "skillpack_version": "1.0.1",
+  "source_state": "COMPACT_COMPILER_PROVEN_LOCALLY__RUNTIME_NOT_PROVEN",
+  "test_command": "python3 -B -m unittest discover -s research/worker_craft/tests -v",
+  "test_result": {
+    "failed": 0,
+    "log_sha256": "de2ac91a2e79d0d5421882dfd6d7523ba5c41283117035d2eb46deb5b13879a5",
+    "passed": 40,
+    "real_cli_failure_paths": 1,
+    "real_cli_success_paths": 3,
+    "roles_exercised": 8,
+    "tests": 40
+  },
+  "useful_output": "Compact structured Web CEO request deterministically expands through the existing Craft brief compiler into a complete provider-neutral worker commission."
 }

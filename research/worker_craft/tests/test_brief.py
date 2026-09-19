@@ -16,6 +16,9 @@ spec = importlib.util.spec_from_file_location('craft_brief', SCRIPT)
 brief = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(brief)
 EXAMPLE = json.loads((ROOT / 'examples/program-brief.json').read_text())
+COMMISSION_EXAMPLE = json.loads((ROOT / 'examples/ceo-commission-request.json').read_text())
+COMMISSION_GOLDEN = ROOT / 'examples/ceo-commission.md'
+COMMISSION_RECEIPT = ROOT / 'examples/ceo-commission-receipt.json'
 
 
 class BriefTests(unittest.TestCase):
@@ -217,6 +220,103 @@ class BriefTests(unittest.TestCase):
             raw=(ROOT/'mastermind-craft'/row['path']).read_bytes()
             self.assertEqual(row['bytes'],len(raw))
             self.assertEqual(row['sha256'],hashlib.sha256(raw).hexdigest())
+
+    def test_compact_commission_matches_golden_bytes_and_receipt(self):
+        out=brief.compile_commission(COMMISSION_EXAMPLE)
+        golden=COMMISSION_GOLDEN.read_text()
+        receipt=json.loads(COMMISSION_RECEIPT.read_text())
+        self.assertEqual(out['instructions_markdown'],golden)
+        self.assertEqual(out['commission_sha256'],hashlib.sha256(golden.encode()).hexdigest())
+        self.assertEqual(receipt['commission_sha256'],out['commission_sha256'])
+        self.assertEqual(receipt['compact_input_sha256'],out['compact_input_sha256'])
+        self.assertEqual(receipt['normalized_brief_sha256'],out['normalized_brief_sha256'])
+        self.assertEqual(receipt['method_sha256'],out['method_sha256'])
+
+    def test_compact_commission_has_every_required_worker_section(self):
+        markdown=brief.compile_commission(COMMISSION_EXAMPLE)['instructions_markdown']
+        for heading in (
+            'Mission / outcome', 'Why it matters', 'Authority and exact source identities',
+            'Scope / write boundary', 'Input / dependency identity', 'User / machine journey',
+            'Data / null / correction behavior', 'Deterministic vs model-generated method',
+            'Failures / refusals', 'Ordered implementation', 'Acceptance / proof',
+            'Stop conditions', 'Continuation return',
+        ):
+            self.assertIn('## '+heading,markdown)
+        self.assertIn(COMMISSION_EXAMPLE['source']['base']['commit'],markdown)
+        self.assertIn(COMMISSION_EXAMPLE['authority_ref'],markdown)
+
+    def test_compact_commission_dict_order_is_digest_stable(self):
+        changed=dict(reversed(list(COMMISSION_EXAMPLE.items())))
+        self.assertEqual(
+            brief.compile_commission(changed)['commission_sha256'],
+            brief.compile_commission(COMMISSION_EXAMPLE)['commission_sha256'],
+        )
+
+    def test_compact_commission_missing_authority_source_or_acceptance_fails_closed(self):
+        data=deepcopy(COMMISSION_EXAMPLE);data['authority_ref']=None
+        with self.assertRaisesRegex(brief.BriefError,'authority_ref.required'):
+            brief.compile_commission(data)
+        for field in ('source','acceptance'):
+            data=deepcopy(COMMISSION_EXAMPLE);del data[field]
+            with self.assertRaises(brief.BriefError):
+                brief.compile_commission(data)
+
+    def test_compact_commission_empty_governing_source_or_acceptance_fails_closed(self):
+        data=deepcopy(COMMISSION_EXAMPLE);data['source']['governing']=[]
+        with self.assertRaisesRegex(brief.BriefError,'source.governing.list'):
+            brief.compile_commission(data)
+        data=deepcopy(COMMISSION_EXAMPLE);data['acceptance']=[]
+        with self.assertRaisesRegex(brief.BriefError,'acceptance.list'):
+            brief.compile_commission(data)
+
+    def test_compact_commission_refuses_routing_or_credential_fields(self):
+        for field in (
+            'provider','model','account','credential','provider_home','host',
+            'worker_id','native_session','transcript','execution_authority','grant_override',
+        ):
+            with self.subTest(field=field):
+                data=deepcopy(COMMISSION_EXAMPLE);data[field]='forbidden-selector'
+                with self.assertRaisesRegex(brief.BriefError,'commission.fields'):
+                    brief.compile_commission(data)
+
+    def test_compact_compiler_performs_no_provider_model_or_account_selection(self):
+        out=brief.compile_commission(COMMISSION_EXAMPLE)
+        self.assertEqual(out['provider_selection'],'NOT_PERFORMED')
+        self.assertEqual(out['model_selection'],'NOT_PERFORMED')
+        self.assertEqual(out['account_selection'],'NOT_PERFORMED')
+        self.assertFalse(out['execution_authority'])
+        self.assertEqual(out['runtime_admission'],'NOT_REQUESTED')
+        expanded=brief.expand_compact_commission(COMMISSION_EXAMPLE)
+        self.assertEqual(expanded['assignment_ref'],COMMISSION_EXAMPLE['authority_ref'])
+        self.assertEqual(expanded['workspace'],{'workspace_ref':None,'host_ref':None})
+        self.assertIn(brief.PROVIDER_NEUTRAL_CONSTRAINT,expanded['resource_constraints'])
+
+    def test_compact_request_is_strictly_size_bounded(self):
+        data=deepcopy(COMMISSION_EXAMPLE)
+        data['inputs']=[('x'*800)+str(i) for i in range(brief.MAX_ITEMS)]
+        with self.assertRaisesRegex(brief.BriefError,'commission.normalized_size'):
+            brief.compile_commission(data)
+
+    def test_compact_source_base_requires_exact_commit(self):
+        for commit in ('master','55473bb',None,'A'*40):
+            data=deepcopy(COMMISSION_EXAMPLE);data['source']['base']['commit']=commit
+            with self.assertRaises(brief.BriefError):
+                brief.compile_commission(data)
+
+    def test_compact_ordered_implementation_changes_commission_digest(self):
+        before=brief.compile_commission(COMMISSION_EXAMPLE)['commission_sha256']
+        data=deepcopy(COMMISSION_EXAMPLE)
+        data['method']['implementation_order'][0]+=' Changed.'
+        self.assertNotEqual(before,brief.compile_commission(data)['commission_sha256'])
+
+    def test_compact_commission_cli_matches_golden(self):
+        result=subprocess.run(
+            [sys.executable,str(SCRIPT),'compile-commission',
+             str(ROOT/'examples/ceo-commission-request.json'),'--format','markdown'],
+            capture_output=True,timeout=10,check=False,
+        )
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout,COMMISSION_GOLDEN.read_bytes())
 
 
 if __name__=='__main__':unittest.main()

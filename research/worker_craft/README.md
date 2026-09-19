@@ -21,6 +21,7 @@ interpreter tested. No dependencies or network are required.
 ```sh
 python3 mastermind-craft/scripts/brief.py compile examples/program-brief.json --format markdown
 python3 mastermind-craft/scripts/brief.py compile examples/design-brief.json
+python3 mastermind-craft/scripts/brief.py compile-commission examples/ceo-commission-request.json --format markdown
 python3 -B -m unittest discover -s tests -v
 ```
 
@@ -37,6 +38,25 @@ does not make it valid. Null references remain explicitly unbound authoring.
 
 The illustrative design brief assigns no actual screen or Paper mutation. The
 program brief records this source-authoring outcome, not an Executive Job.
+
+## Compact CEO commission input
+
+Schema `mastermind.craft_commission_request.v1` is normalized through this same
+compiler into the existing complete brief; it is not a second brief system. Its closed
+top-level contract is: `schema_version`, `role`, `authority_ref`, `source`,
+`outcome`, `scope`, `inputs`, `data`, `method`, `deliverables`,
+`acceptance`, `failure`, `constraints`, and `continuation`.
+
+`source` carries an exact repository/base commit plus exact governing source refs.
+`method` separates deterministic work, model work, and ordered implementation.
+`failure` separates refusals from terminal stop conditions. Authority, source and
+acceptance are mandatory; the shape is closed so routing/control-plane selectors are
+not silently accepted or defaulted. Normalized compact input is capped at 16 KiB.
+
+The compilation receipt records compact-input, normalized-brief, method, and exact
+commission digests. The checked-in `examples/ceo-commission.md` and receipt are the
+golden provider-neutral bytes intended for the existing fixed
+`research/executive_commissions/COMMISSION.md` publication seam.
 
 ## Adopt it without bypassing the existing system
 
