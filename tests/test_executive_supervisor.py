@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+import control_plane.executive_supervisor as executive_supervisor_mod
 from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
 from control_plane.codex_worker import (
     BinaryAttestation,
@@ -1424,18 +1425,321 @@ def test_local_commission_ignores_git_replacement_objects(
     assert verified.content_sha256 == hashlib.sha256(original).hexdigest()
 
 
-def test_missing_local_commission_commit_refuses_without_network_fallback(
-    tmp_path: Path,
+def test_missing_local_commission_commit_uses_bounded_exact_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"# Remote immutable commission\n\nExact post-base handoff.\n"
+    commit = "f" * 40
+    runtime, root, workspace, _ = _strict_v2_root_with_commission(
+        tmp_path,
+        content=content,
+        ref_commit=commit,
+        digest=hashlib.sha256(content).hexdigest(),
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    def fetch(*, repository: str, commit: str, path: str) -> bytes:
+        calls.append((repository, commit, path))
+        return content
+
+    monkeypatch.setattr(executive_supervisor_mod, "_fetch_remote_commission", fetch)
+    verified = _supervisor(
+        runtime, tmp_path, FakeAdapter(FakeInspector())
+    ).verified_commission(root, workspace)
+
+    assert verified is not None and verified.content == content
+    assert calls == [(
+        "mastermindx-market-intelligence/Mastermind",
+        commit,
+        "research/commission.md",
+    )]
+
+
+def test_local_commit_proving_missing_path_refuses_without_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime, root, workspace, _ = _strict_v2_root_with_commission(
-        tmp_path, ref_commit="f" * 40
+        tmp_path, ref_path="research/missing.md"
     )
-    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    def fetch(**_kwargs):
+        raise AssertionError("semantically absent local path must not use remote fallback")
+
+    monkeypatch.setattr(executive_supervisor_mod, "_fetch_remote_commission", fetch)
+    with pytest.raises(
+        SupervisorError, match="commission path is absent from the exact local commit"
+    ):
+        _supervisor(
+            runtime, tmp_path, FakeAdapter(FakeInspector())
+        ).verified_commission(root, workspace)
+
+
+def _remove_commission_blob_from_local_store(workspace: Path) -> tuple[str, Path]:
+    blob_oid = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD:research/commission.md"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    object_path = workspace / ".git" / "objects" / blob_oid[:2] / blob_oid[2:]
+    assert object_path.is_file(), "fixture requires a loose commission blob"
+    object_path.unlink()
+    return blob_oid, object_path
+
+
+def _git_object_inventory(workspace: Path) -> set[str]:
+    root = workspace / ".git" / "objects"
+    return {
+        str(path.relative_to(root))
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_commit_tree_local_blob_missing_selects_fallback_without_git_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"# Blobless immutable commission\n"
+    runtime, root, workspace, _ = _strict_v2_root_with_commission(
+        tmp_path, content=content
+    )
+    blob_oid, object_path = _remove_commission_blob_from_local_store(workspace)
+    subprocess.run(
+        ["git", "-C", str(workspace), "remote", "add", "origin", "https://127.0.0.1:9/never"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "remote.origin.promisor", "true"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "remote.origin.partialclonefilter", "blob:none"],
+        check=True,
+    )
+    before = _git_object_inventory(workspace)
+    calls = 0
+
+    def fetch(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return content
+
+    monkeypatch.setattr(executive_supervisor_mod, "_fetch_remote_commission", fetch)
+    verified = _supervisor(
+        runtime, tmp_path, FakeAdapter(FakeInspector())
+    ).verified_commission(root, workspace)
+
+    assert verified is not None and verified.content == content
+    assert calls == 1
+    assert not object_path.exists(), "local Git inspection must not materialize the blob"
+    assert _git_object_inventory(workspace) == before
+
+
+def test_oversize_missing_blob_is_not_materialized_before_fallback_size_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"x" * (512 * 1024 + 1)
+    runtime, root, workspace, _ = _strict_v2_root_with_commission(
+        tmp_path, content=content
+    )
+    _blob_oid, object_path = _remove_commission_blob_from_local_store(workspace)
+    subprocess.run(
+        ["git", "-C", str(workspace), "remote", "add", "origin", "https://127.0.0.1:9/never"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "config", "remote.origin.promisor", "true"],
+        check=True,
+    )
+    before = _git_object_inventory(workspace)
+
+    monkeypatch.setattr(
+        executive_supervisor_mod,
+        "_fetch_remote_commission",
+        lambda **_kwargs: content,
+    )
+    with pytest.raises(SupervisorError, match="exceeds the 512 KiB ceiling"):
+        _supervisor(
+            runtime, tmp_path, FakeAdapter(FakeInspector())
+        ).verified_commission(root, workspace)
+
+    assert not object_path.exists()
+    assert _git_object_inventory(workspace) == before
+
+
+def test_remote_commission_fetch_is_fixed_host_proxy_free_and_single_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"# exact remote commission\n"
+    commit = "a" * 40
+    expected_url = (
+        "https://raw.githubusercontent.com/"
+        "mastermindx-market-intelligence/Mastermind/"
+        f"{commit}/research/executive_commissions/commission.md"
+    )
+    captured_handlers: list[object] = []
+
+    class Response:
+        headers = {"Content-Length": str(len(content))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return expected_url
+
+        def read(self, limit):
+            assert limit == (1 << 19) + 1
+            return content
+
+    class Opener:
+        def open(self, request, *, timeout):
+            assert timeout == 10.0
+            assert request.full_url == expected_url
+            parsed = executive_supervisor_mod.urllib.parse.urlsplit(request.full_url)
+            assert parsed.username is None and parsed.password is None
+            assert request.get_header("User-agent") == "Mastermind-Executive-Commission/1"
+            return Response()
+
+    def build_opener(*handlers):
+        captured_handlers.extend(handlers)
+        return Opener()
+
+    monkeypatch.setattr(
+        executive_supervisor_mod.urllib.request,
+        "build_opener",
+        build_opener,
+    )
+
+    assert executive_supervisor_mod._fetch_remote_commission(
+        repository="mastermindx-market-intelligence/Mastermind",
+        commit=commit,
+        path="research/executive_commissions/commission.md",
+    ) == content
+    proxy_handlers = [
+        handler
+        for handler in captured_handlers
+        if isinstance(handler, executive_supervisor_mod.urllib.request.ProxyHandler)
+    ]
+    assert len(proxy_handlers) == 1
+    assert proxy_handlers[0].proxies == {}
+    assert any(
+        isinstance(handler, executive_supervisor_mod._CommissionNoRedirectHandler)
+        for handler in captured_handlers
+    )
+
+
+def test_remote_commission_content_length_ceiling_prevents_body_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commit = "a" * 40
+    read_calls = 0
+
+    class Response:
+        headers = {"Content-Length": str((1 << 19) + 1)}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return (
+                "https://raw.githubusercontent.com/"
+                "mastermindx-market-intelligence/Mastermind/"
+                f"{commit}/research/commission.md"
+            )
+
+        def read(self, _limit):
+            nonlocal read_calls
+            read_calls += 1
+            return b"x"
+
+    class Opener:
+        def open(self, _request, *, timeout):
+            assert timeout == 10.0
+            return Response()
+
+    monkeypatch.setattr(
+        executive_supervisor_mod.urllib.request,
+        "build_opener",
+        lambda *_handlers: Opener(),
+    )
+    with pytest.raises(SupervisorError, match="exceeds the 512 KiB ceiling"):
+        executive_supervisor_mod._fetch_remote_commission(
+            repository="mastermindx-market-intelligence/Mastermind",
+            commit=commit,
+            path="research/commission.md",
+        )
+    assert read_calls == 0
+
+
+def test_remote_commission_fetch_rejects_redirect_or_wrong_final_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"# wrong host\n"
+    commit = "a" * 40
+
+    class Response:
+        headers = {"Content-Length": str(len(content))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return f"https://example.invalid/{commit}/commission.md"
+
+        def read(self, _limit):
+            return content
+
+    class Opener:
+        def open(self, _request, *, timeout):
+            assert timeout == 10.0
+            return Response()
+
+    monkeypatch.setattr(
+        executive_supervisor_mod.urllib.request,
+        "build_opener",
+        lambda *_handlers: Opener(),
+    )
 
     with pytest.raises(
-        SupervisorError, match="commission commit is absent from the local Git object store"
+        SupervisorError,
+        match="escaped the canonical GitHub raw destination",
     ):
-        supervisor.verified_commission(root, workspace)
+        executive_supervisor_mod._fetch_remote_commission(
+            repository="mastermindx-market-intelligence/Mastermind",
+            commit=commit,
+            path="research/commission.md",
+        )
+
+
+def test_remote_commission_fetch_rejects_mutable_ref_before_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        executive_supervisor_mod.urllib.request,
+        "build_opener",
+        lambda *_handlers: (_ for _ in ()).throw(
+            AssertionError("mutable ref must fail before opener construction")
+        ),
+    )
+    with pytest.raises(
+        SupervisorError,
+        match="exact lowercase 40-hex object",
+    ):
+        executive_supervisor_mod._fetch_remote_commission(
+            repository="mastermindx-market-intelligence/Mastermind",
+            commit="master",
+            path="research/commission.md",
+        )
 
 
 def test_commission_commit_identity_must_be_exact_commit_object(
@@ -1504,7 +1808,7 @@ def test_commission_commit_identity_must_be_exact_commit_object(
 @pytest.mark.parametrize(
     ("fixture_kwargs", "message"),
     [
-        ({"ref_path": "research/missing.md"}, "commission blob is absent from the exact local commit"),
+        ({"ref_path": "research/missing.md"}, "commission path is absent from the exact local commit"),
         ({"content": b""}, "commission blob is empty"),
         ({"content": b"x" * (512 * 1024 + 1)}, "exceeds the 512 KiB ceiling"),
         ({"content": b"bad\x00commission"}, "contains a NUL byte"),
@@ -1574,6 +1878,117 @@ def test_sealed_provider_receives_complete_verified_commission_after_owner_only_
     assert not commission_path.stat().st_mode & (stat.S_IRGRP | stat.S_IROTH)
 
 
+def test_post_base_sealed_worker_commission_reaches_prompt_only_after_verified_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"# Post-base sealed commission\n\nUse the immutable published brief.\n"
+    commit = "f" * 40
+    runtime, root, _workspace, _ = _strict_v2_root_with_commission(
+        tmp_path,
+        content=content,
+        ref_commit=commit,
+        digest=hashlib.sha256(content).hexdigest(),
+    )
+    runtime.workers.register_worker(
+        "worker-cycle",
+        provider="codex",
+        account_label="worker-cycle@company",
+        worker_type="fixture",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "capabilities": ["read"],
+                "cost_class": "small",
+            }
+        },
+    )
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    def fetch(*, repository: str, commit: str, path: str) -> bytes:
+        calls.append((repository, commit, path))
+        return content
+
+    monkeypatch.setattr(executive_supervisor_mod, "_fetch_remote_commission", fetch)
+    adapter = FakeAdapter(FakeInspector())
+    supervisor = _supervisor(
+        runtime,
+        tmp_path,
+        adapter,
+        require_complete_launch_attestation=False,
+    )
+
+    with pytest.raises(SupervisorError, match="Codex launch failed"):
+        asyncio.run(
+            supervisor.start_cycle_job(
+                planner.job_id,
+                command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+            )
+        )
+
+    assert calls == [(
+        "mastermindx-market-intelligence/Mastermind",
+        commit,
+        "research/commission.md",
+    )]
+    assert adapter.spec is not None
+    assert content.decode("utf-8") in adapter.spec.prompt
+    assert "--- VERIFIED IMMUTABLE COMMISSION BYTES ---" in adapter.spec.prompt
+
+
+def test_post_base_fallback_digest_mismatch_keeps_provider_start_at_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = b"# Exact remote bytes\n"
+    runtime, root, _workspace, _ = _strict_v2_root_with_commission(
+        tmp_path,
+        content=content,
+        ref_commit="f" * 40,
+        digest="0" * 64,
+    )
+    runtime.workers.register_worker(
+        "worker-cycle",
+        provider="codex",
+        account_label="worker-cycle@company",
+        worker_type="fixture",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "capabilities": ["read"],
+                "cost_class": "small",
+            }
+        },
+    )
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    monkeypatch.setattr(
+        executive_supervisor_mod,
+        "_fetch_remote_commission",
+        lambda **_kwargs: content,
+    )
+    adapter = FakeAdapter(FakeInspector())
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+
+    with pytest.raises(
+        SupervisorError, match="commission content digest differs from immutable source"
+    ):
+        asyncio.run(
+            supervisor.start_cycle_job(
+                planner.job_id,
+                command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+            )
+        )
+
+    assert adapter.spec is None
+
+
 @pytest.mark.parametrize(
     ("case", "fixture_kwargs", "message"),
     [
@@ -1585,12 +2000,12 @@ def test_sealed_provider_receives_complete_verified_commission_after_owner_only_
         (
             "absent_commit",
             {"ref_commit": "f" * 40},
-            "commission commit is absent from the local Git object store",
+            "immutable commission remote evidence is unavailable",
         ),
         (
             "absent_blob",
             {"ref_path": "research/missing.md"},
-            "commission blob is absent from the exact local commit",
+            "commission path is absent from the exact local commit",
         ),
         (
             "digest_mismatch",
@@ -1621,6 +2036,7 @@ def test_sealed_provider_receives_complete_verified_commission_after_owner_only_
 )
 def test_real_commission_refusals_keep_provider_start_at_zero(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     case: str,
     fixture_kwargs: dict[str, object],
     message: str,
@@ -1628,6 +2044,12 @@ def test_real_commission_refusals_keep_provider_start_at_zero(
     runtime, root, _workspace, _content = _strict_v2_root_with_commission(
         tmp_path, **fixture_kwargs
     )
+    if case == "absent_commit":
+        def fail_remote(**_kwargs):
+            raise SupervisorError("immutable commission remote evidence is unavailable")
+        monkeypatch.setattr(
+            executive_supervisor_mod, "_fetch_remote_commission", fail_remote
+        )
     runtime.workers.register_worker(
         "worker-cycle",
         provider="codex",

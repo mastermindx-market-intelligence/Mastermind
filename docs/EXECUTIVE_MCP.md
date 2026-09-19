@@ -174,16 +174,22 @@ grant, allowed paths, validation and provider/lifecycle controls remain authorit
 Before either the sealed worker or read-only Operator planner consumes the commission,
 the supervisor requires the persisted repository identity to equal the canonical Mastermind
 repository **exactly** and binds byte resolution to the durable Job-assigned Git root.
-Mutable local remote labels are not repository authority and are not consulted. The referenced
-40-hex object must already exist in that assigned checkout's local Git object store and must
-itself be a `commit` object; `commit:path` must resolve to an exact `blob`. Missing commits
-or blobs fail closed. Worker launch performs **no network fetch** and does not fall back to
-GitHub, a mutable branch/ref, another clone, or a caller-selected host. Git is invoked with
-replacement-object interpretation and lazy promisor fetching disabled, global/system
-configuration disabled, and interactive prompting disabled.
+Mutable local remote labels are not repository authority and are not consulted. Local Git
+inspection is network-inert: all Git protocols are denied, replacement objects and lazy promisor
+fetching are disabled, global/system configuration is disabled, and interactive prompting is
+disabled. The resolver distinguishes three states. If the exact commit and fixed path/tree prove
+an exact blob whose bytes are already local, the blob is read by its verified object ID. If an
+available exact commit proves the fixed path semantically absent, verification refuses with no
+network fallback. If the exact immutable object graph or referenced blob bytes are merely
+unavailable locally, one bounded fallback may read only
+`https://raw.githubusercontent.com/mastermindx-market-intelligence/Mastermind/<40-hex>/<fixed-path>`.
+That request is credential-free, proxy-free, redirect-free, one-attempt/no-retry, and revalidates
+the final HTTPS destination; it never acquires a mutable branch/ref and never mutates the local
+Git object store.
 
-The local blob is bounded to 512 KiB before reading, then checked for exact SHA-256,
-strict UTF-8 and NUL exclusion before any provider start or resumed model turn. Sealed
+Local and fallback bytes are bounded to 512 KiB before acceptance, then checked for exact
+persisted SHA-256, strict UTF-8 and NUL exclusion before any provider construction/start or
+resumed model turn. Sealed
 workers receive an owner-only `0400` immutable run-input artifact even when the enclosing
 run-input directory uses the already-existing shared worker group for schema traversal.
 The supervisor also injects those already-verified bytes through the existing sealed-worker

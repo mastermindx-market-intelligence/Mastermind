@@ -528,6 +528,7 @@ def _seed_dispatchable_operator_planner(
     *,
     commission_content: bytes | None = None,
     commission_repository: str = "mastermindx-market-intelligence/Mastermind",
+    commission_ref_commit: str | None = None,
 ):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
@@ -636,7 +637,7 @@ def _seed_dispatchable_operator_planner(
                 "work_ref": "WS:TEST-COMMISSION",
                 "commission_ref": {
                     "repository": commission_repository,
-                    "commit": base_sha,
+                    "commit": commission_ref_commit or base_sha,
                     "path": "research/operator-commission.md",
                     "content_sha256": hashlib.sha256(commission_content).hexdigest(),
                 },
@@ -794,6 +795,55 @@ def test_fresh_operator_consumes_persisted_verified_commission_before_provider_t
     assert '"path": "research/operator-commission.md"' in prompt
     assert planner.requested_authorities == ["READ"]
     assert planner.allowed_write_paths == []
+
+
+def test_post_base_operator_commission_uses_verified_fallback_before_provider_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commission = b"# Post-base Operator commission\n\nUse the immutable published brief.\n"
+    commit = "f" * 40
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path,
+        commission_content=commission,
+        commission_ref_commit=commit,
+    )
+    calls: list[tuple[str, str, str]] = []
+
+    def fetch(*, repository: str, commit: str, path: str) -> bytes:
+        calls.append((repository, commit, path))
+        return commission
+
+    monkeypatch.setattr(
+        "control_plane.executive_supervisor._fetch_remote_commission",
+        fetch,
+    )
+    adapters: list[_ActiveAdapter] = []
+
+    def factory(loader):
+        adapter = _ActiveAdapter(runtime, loader, cancel_during_collect=False)
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+    outcome = asyncio.run(
+        supervisor.start_cycle_job(
+            planner.job_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        )
+    )
+
+    assert outcome.outcome == "TERMINAL"
+    assert calls == [(
+        "mastermindx-market-intelligence/Mastermind",
+        commit,
+        "research/operator-commission.md",
+    )]
+    assert len(adapters) == 1 and adapters[0].begin_turn_calls == 1
+    assert commission.decode("utf-8") in adapters[0].prompts[0]
 
 
 def test_real_operator_commission_refusal_precedes_provider_construction(

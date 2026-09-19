@@ -25,6 +25,9 @@ import signal
 import stat
 import subprocess
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
@@ -71,6 +74,8 @@ from control_plane.executive_workspace import (
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
 _COMMISSION_MAX_BYTES = 1 << 19
 _CANONICAL_COMMISSION_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+_COMMISSION_RAW_HOST = "raw.githubusercontent.com"
+_COMMISSION_FETCH_TIMEOUT_SECONDS = 10.0
 _GIT_LOCAL_ONLY_ARGS = (
     "-c",
     "protocol.allow=never",
@@ -125,6 +130,25 @@ class VerifiedCommission:
             "path": self.path,
             "content_sha256": self.content_sha256,
         }
+
+
+class _CommissionLocalState(str, Enum):
+    AVAILABLE = "AVAILABLE"
+    ABSENT = "ABSENT"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+@dataclasses.dataclass(frozen=True)
+class _CommissionLocalResolution:
+    state: _CommissionLocalState
+    blob_oid: str | None = None
+
+
+class _CommissionNoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so one exact immutable URL is the only network request."""
+
+    def redirect_request(self, *_args, **_kwargs):
+        return None
 
 
 class TerminalAssignmentSealError(SupervisorError):
@@ -590,34 +614,12 @@ def _validate_output_scope(job: Job, output: Mapping[str, Any]) -> None:
         raise SupervisorError("completed worker result contains errors")
 
 
-def _commission_git_output(workspace: Path, *argv: str) -> bytes:
+def _commission_git_probe(workspace: Path, *argv: str) -> subprocess.CompletedProcess[bytes]:
+    """Run one transport-denied Git observation and preserve its exit status."""
+
     try:
-        proc = subprocess.run(
+        return subprocess.run(
             ["git", *_GIT_LOCAL_ONLY_ARGS, "-C", str(workspace), *argv],
-            check=True,
-            capture_output=True,
-            timeout=10,
-            env=_GIT_ENV,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SupervisorError("immutable commission Git evidence is unavailable") from exc
-    return bytes(proc.stdout)
-
-
-def _commission_local_object_type(workspace: Path, object_name: str) -> str | None:
-    """Return one local Git object type without resolving through the network."""
-
-    try:
-        proc = subprocess.run(
-            [
-                "git",
-                *_GIT_LOCAL_ONLY_ARGS,
-                "-C",
-                str(workspace),
-                "cat-file",
-                "-t",
-                object_name,
-            ],
             check=False,
             capture_output=True,
             timeout=10,
@@ -625,6 +627,19 @@ def _commission_local_object_type(workspace: Path, object_name: str) -> str | No
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise SupervisorError("immutable commission Git evidence is unavailable") from exc
+
+
+def _commission_git_output(workspace: Path, *argv: str) -> bytes:
+    proc = _commission_git_probe(workspace, *argv)
+    if proc.returncode != 0:
+        raise SupervisorError("immutable commission Git evidence is unavailable")
+    return bytes(proc.stdout)
+
+
+def _commission_local_object_type(workspace: Path, object_name: str) -> str | None:
+    """Return one local Git object type without resolving through the network."""
+
+    proc = _commission_git_probe(workspace, "cat-file", "-t", object_name)
     if proc.returncode != 0:
         return None
     try:
@@ -634,6 +649,156 @@ def _commission_local_object_type(workspace: Path, object_name: str) -> str | No
     if object_type not in {"blob", "commit", "tag", "tree"}:
         raise SupervisorError("immutable commission Git object type is invalid")
     return object_type
+
+
+def _is_lower_hex_sha(value: str) -> bool:
+    return len(value) == 40 and all(ch in "0123456789abcdef" for ch in value)
+
+
+def _commission_local_resolution(
+    workspace: Path, *, commit: str, path: str
+) -> _CommissionLocalResolution:
+    """Resolve local commission availability without allowing any Git transport."""
+
+    commit_type = _commission_local_object_type(workspace, commit)
+    if commit_type is None:
+        return _CommissionLocalResolution(_CommissionLocalState.UNAVAILABLE)
+    if commit_type != "commit":
+        raise SupervisorError("commission commit identity is not an exact Git commit object")
+
+    tree = _commission_git_probe(
+        workspace, "ls-tree", "-z", "--full-tree", commit, "--", path
+    )
+    if tree.returncode != 0:
+        return _CommissionLocalResolution(_CommissionLocalState.UNAVAILABLE)
+
+    records = [record for record in bytes(tree.stdout).split(b"\x00") if record]
+    if not records:
+        return _CommissionLocalResolution(_CommissionLocalState.ABSENT)
+    if len(records) != 1:
+        raise SupervisorError("commission path resolution is ambiguous")
+
+    metadata, separator, raw_path = records[0].partition(b"\t")
+    if separator != b"\t":
+        raise SupervisorError("commission tree evidence is invalid")
+    try:
+        resolved_path = raw_path.decode("utf-8", errors="strict")
+        mode, object_type, blob_oid = metadata.decode(
+            "ascii", errors="strict"
+        ).split()
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise SupervisorError("commission tree evidence is invalid") from exc
+    if resolved_path != path:
+        raise SupervisorError("commission tree evidence resolved a different path")
+    if object_type != "blob" or not mode.startswith("100"):
+        raise SupervisorError("commission path does not identify an exact Git blob")
+    if not _is_lower_hex_sha(blob_oid):
+        raise SupervisorError("commission tree blob identity is invalid")
+
+    blob_type = _commission_local_object_type(workspace, blob_oid)
+    if blob_type is None:
+        return _CommissionLocalResolution(
+            _CommissionLocalState.UNAVAILABLE, blob_oid=blob_oid
+        )
+    if blob_type != "blob":
+        raise SupervisorError("commission tree blob identity is not an exact Git blob")
+    return _CommissionLocalResolution(
+        _CommissionLocalState.AVAILABLE, blob_oid=blob_oid
+    )
+
+
+def _read_local_commission_blob(workspace: Path, blob_oid: str) -> bytes:
+    """Read already-proven local bytes by blob identity, never by commit:path."""
+
+    size_raw = _commission_git_output(workspace, "cat-file", "-s", blob_oid)
+    try:
+        size = int(size_raw.decode("ascii", errors="strict").strip())
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise SupervisorError("commission blob size is not canonical") from exc
+    if size < 1 or size > _COMMISSION_MAX_BYTES:
+        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+    content = _commission_git_output(workspace, "cat-file", "blob", blob_oid)
+    if len(content) != size:
+        raise SupervisorError("commission blob size changed during verification")
+    return content
+
+
+def _fetch_remote_commission(*, repository: str, commit: str, path: str) -> bytes:
+    """Read one exact public GitHub blob with no credentials, proxy, redirect, or retry."""
+
+    if repository != _CANONICAL_COMMISSION_REPOSITORY:
+        raise SupervisorError(
+            "commission repository is outside the canonical Executive repository"
+        )
+    if not _is_lower_hex_sha(commit):
+        raise SupervisorError("commission commit must be an exact lowercase 40-hex object")
+    encoded_path = urllib.parse.quote(path, safe="/")
+    url = f"https://{_COMMISSION_RAW_HOST}/{repository}/{commit}/{encoded_path}"
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != _COMMISSION_RAW_HOST
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port is not None
+    ):
+        raise SupervisorError("commission fetch URL is not the canonical GitHub raw destination")
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/octet-stream",
+            "User-Agent": "Mastermind-Executive-Commission/1",
+        },
+        method="GET",
+    )
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _CommissionNoRedirectHandler(),
+    )
+    try:
+        with opener.open(request, timeout=_COMMISSION_FETCH_TIMEOUT_SECONDS) as response:
+            final_url = response.geturl()
+            final = urllib.parse.urlsplit(final_url)
+            if (
+                final_url != url
+                or final.scheme != "https"
+                or final.hostname != _COMMISSION_RAW_HOST
+                or final.username is not None
+                or final.password is not None
+                or final.port is not None
+            ):
+                raise SupervisorError(
+                    "commission fetch escaped the canonical GitHub raw destination"
+                )
+            length = response.headers.get("Content-Length")
+            declared: int | None = None
+            if length is not None:
+                try:
+                    declared = int(length)
+                except ValueError as exc:
+                    raise SupervisorError(
+                        "commission fetch returned an invalid content length"
+                    ) from exc
+                if declared < 1 or declared > _COMMISSION_MAX_BYTES:
+                    raise SupervisorError(
+                        "commission blob is empty or exceeds the 512 KiB ceiling"
+                    )
+            content = response.read(_COMMISSION_MAX_BYTES + 1)
+    except SupervisorError:
+        raise
+    except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            raise SupervisorError("commission fetch redirect is forbidden") from exc
+        raise SupervisorError("immutable commission remote evidence is unavailable") from exc
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        raise SupervisorError("immutable commission remote evidence is unavailable") from exc
+
+    if not content or len(content) > _COMMISSION_MAX_BYTES:
+        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+    if declared is not None and len(content) != declared:
+        raise SupervisorError("commission fetch content length changed during verification")
+    return bytes(content)
 
 
 def _verify_commission_repository(repository: str) -> None:
@@ -689,27 +854,21 @@ def verify_commission_for_job(
 
     commit = ref.commit
     path = ref.path
-    commit_type = _commission_local_object_type(workspace, commit)
-    if commit_type is None:
-        raise SupervisorError("commission commit is absent from the local Git object store")
-    if commit_type != "commit":
-        raise SupervisorError("commission commit identity is not an exact Git commit object")
-    blob_spec = f"{commit}:{path}"
-    blob_type = _commission_local_object_type(workspace, blob_spec)
-    if blob_type is None:
-        raise SupervisorError("commission blob is absent from the exact local commit")
-    if blob_type != "blob":
-        raise SupervisorError("commission path does not identify an exact Git blob")
-    size_raw = _commission_git_output(workspace, "cat-file", "-s", blob_spec)
-    try:
-        size = int(size_raw.decode("ascii", errors="strict").strip())
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise SupervisorError("commission blob size is not canonical") from exc
-    if size < 1 or size > _COMMISSION_MAX_BYTES:
+    local = _commission_local_resolution(workspace, commit=commit, path=path)
+    if local.state is _CommissionLocalState.ABSENT:
+        raise SupervisorError("commission path is absent from the exact local commit")
+    if local.state is _CommissionLocalState.AVAILABLE:
+        if local.blob_oid is None:  # pragma: no cover - frozen invariant
+            raise SupervisorError("commission local blob identity is unavailable")
+        content = _read_local_commission_blob(workspace, local.blob_oid)
+    else:
+        content = _fetch_remote_commission(
+            repository=ref.repository,
+            commit=commit,
+            path=path,
+        )
+    if not content or len(content) > _COMMISSION_MAX_BYTES:
         raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
-    content = _commission_git_output(workspace, "cat-file", "blob", blob_spec)
-    if len(content) != size:
-        raise SupervisorError("commission blob size changed during verification")
     digest = hashlib.sha256(content).hexdigest()
     if digest != ref.content_sha256:
         raise SupervisorError("commission content digest differs from immutable source")
