@@ -63,6 +63,11 @@ async function snapshot(rows, options = {}) {
 }
 
 // Preserve all fifteen original support scenarios, now loading actual checkout paths.
+test('static guidance separates inventory, probe coverage and unimplemented model telemetry', () => {
+  assert.match(html, /Browser inventory and document-probe coverage are separate/);
+  assert.match(html, /Model and effort telemetry are not implemented in census v1/);
+  assert.match(html, /unknown cue is not proof of idle capacity/);
+});
 test('healthy discarded duplicate rows retain measured counts and unknown model', async () => {
   const ui = await settled(mount(() => snapshot([tab(1), tab(2)])));
   assert.deepEqual(metrics(ui), ['2', '0/2', '0', '2']);
