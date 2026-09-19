@@ -34,7 +34,6 @@ from control_plane.executive_runtime import (
     StateConflict,
     WorkerStatus,
 )
-import control_plane.executive_supervisor as executive_supervisor_mod
 from control_plane.executive_supervisor import (
     ExecutiveSupervisor,
     IdentitySafeProcessController,
@@ -404,6 +403,7 @@ def _supervisor(
     adapter: FakeAdapter,
     *,
     shared_run_gid: int | None = None,
+    require_complete_launch_attestation: bool = True,
 ) -> ExecutiveSupervisor:
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir(mode=0o700, exist_ok=True)
@@ -432,7 +432,7 @@ def _supervisor(
             "observed_at": "2026-08-11T00:00:00Z",
             "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
         },
-        require_complete_launch_attestation=True,
+        require_complete_launch_attestation=require_complete_launch_attestation,
         instance_id="supervisor-fixture",
     )
 
@@ -1340,7 +1340,7 @@ def test_commission_refuses_foreign_workspace_even_with_matching_git_bytes(
 
     assert (foreign / "research" / "commission.md").read_bytes() == content
 
-def test_commission_artifact_is_group_readable_but_non_writable_when_shared(
+def test_commission_artifact_stays_owner_only_inside_shared_run_input(
     tmp_path: Path,
 ) -> None:
     runtime, root, workspace, content = _strict_v2_root_with_commission(tmp_path)
@@ -1368,16 +1368,10 @@ def test_commission_artifact_is_group_readable_but_non_writable_when_shared(
     assert stat.S_IMODE(parent.st_mode) == 0o750
     assert parent.st_gid == os.getegid()
     assert parent.st_mode & stat.S_IXGRP
-    assert stat.S_IMODE(info.st_mode) == 0o440
-    assert info.st_gid == os.getegid()
-    assert info.st_mode & stat.S_IRGRP
+    assert stat.S_IMODE(info.st_mode) == 0o400
+    assert not info.st_mode & (stat.S_IRGRP | stat.S_IROTH)
     assert not info.st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
-    # The original defect made this parent 0700: a distinct UID sharing only
-    # the worker GID could not traverse it.  These group bits discriminate that
-    # failure without requiring privileged uid switching in hermetic CI.
-    assert subprocess.run(
-        ["/bin/cat", str(local_path)], check=True, capture_output=True
-    ).stdout == content
+    assert local_path.read_bytes() == content
 
 
 def test_local_commission_ignores_git_replacement_objects(
@@ -1430,109 +1424,87 @@ def test_local_commission_ignores_git_replacement_objects(
     assert verified.content_sha256 == hashlib.sha256(original).hexdigest()
 
 
-def test_missing_local_commission_commit_uses_exact_remote_blob(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    content = b"# Remote immutable commission\n\nExact dynamic handoff.\n"
-    commit = "f" * 40
-    runtime, root, workspace, _ = _strict_v2_root_with_commission(
-        tmp_path,
-        content=content,
-        ref_commit=commit,
-        digest=hashlib.sha256(content).hexdigest(),
-    )
-    calls: list[tuple[str, str, str]] = []
-
-    def fetch(*, repository: str, commit: str, path: str) -> bytes:
-        calls.append((repository, commit, path))
-        return content
-
-    monkeypatch.setattr(executive_supervisor_mod, "_fetch_remote_commission", fetch)
-    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
-
-    verified = supervisor.verified_commission(root, workspace)
-
-    assert verified is not None and verified.content == content
-    assert calls == [(
-        "mastermindx-market-intelligence/Mastermind",
-        commit,
-        "research/commission.md",
-    )]
-
-
-def test_missing_local_commission_commit_remote_failure_refuses(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_missing_local_commission_commit_refuses_without_network_fallback(
+    tmp_path: Path,
 ) -> None:
     runtime, root, workspace, _ = _strict_v2_root_with_commission(
         tmp_path, ref_commit="f" * 40
     )
-
-    def fetch(**_kwargs):
-        raise SupervisorError("immutable commission remote evidence is unavailable")
-
-    monkeypatch.setattr(executive_supervisor_mod, "_fetch_remote_commission", fetch)
     supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
 
     with pytest.raises(
-        SupervisorError, match="immutable commission remote evidence is unavailable"
+        SupervisorError, match="commission commit is absent from the local Git object store"
     ):
         supervisor.verified_commission(root, workspace)
 
 
-def test_remote_commission_fetch_uses_only_fixed_exact_github_raw_url(
-    monkeypatch: pytest.MonkeyPatch,
+def test_commission_commit_identity_must_be_exact_commit_object(
+    tmp_path: Path,
 ) -> None:
-    content = b"# exact remote commission\n"
-    commit = "a" * 40
-
-    class Response:
-        headers = {"Content-Length": str(len(content))}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def geturl(self):
-            return (
-                "https://raw.githubusercontent.com/"
-                "mastermindx-market-intelligence/Mastermind/"
-                f"{commit}/research/executive_commissions/commission.md"
-            )
-
-        def read(self, limit):
-            assert limit == (1 << 19) + 1
-            return content
-
-    class Opener:
-        def open(self, request, *, timeout):
-            assert timeout == 10.0
-            assert request.full_url == (
-                "https://raw.githubusercontent.com/"
-                "mastermindx-market-intelligence/Mastermind/"
-                f"{commit}/research/executive_commissions/commission.md"
-            )
-            assert request.get_header("User-agent") == "Mastermind-Executive-Commission/1"
-            return Response()
-
-    monkeypatch.setattr(
-        executive_supervisor_mod.urllib.request,
-        "build_opener",
-        lambda *_handlers: Opener(),
+    runtime, root, workspace, content = _strict_v2_root_with_commission(tmp_path)
+    commit = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "-c",
+            "user.name=Mastermind Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "tag",
+            "-a",
+            "commission-tag",
+            "-m",
+            "tag object must not be accepted as a commit",
+            commit,
+        ],
+        check=True,
     )
+    tag_object = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "commission-tag"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    runtime2, root2, workspace2, _ = _strict_v2_root_with_commission(
+        tmp_path / "tag-case",
+        content=content,
+        ref_commit=tag_object,
+    )
+    # The tag exists only in the first fixture; copy it into the second object store without
+    # moving any ref, so the verifier sees an exact local non-commit object at that SHA.
+    tag_bytes = subprocess.run(
+        ["git", "-C", str(workspace), "cat-file", "tag", tag_object],
+        check=True,
+        capture_output=True,
+    ).stdout
+    imported = subprocess.run(
+        ["git", "-C", str(workspace2), "hash-object", "-t", "tag", "-w", "--stdin"],
+        input=tag_bytes.decode("utf-8"),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert imported == tag_object
 
-    assert executive_supervisor_mod._fetch_remote_commission(
-        repository="mastermindx-market-intelligence/Mastermind",
-        commit=commit,
-        path="research/executive_commissions/commission.md",
-    ) == content
+    with pytest.raises(
+        SupervisorError, match="commission commit identity is not an exact Git commit object"
+    ):
+        _supervisor(
+            runtime2, tmp_path / "tag-case", FakeAdapter(FakeInspector())
+        ).verified_commission(root2, workspace2)
 
 
 @pytest.mark.parametrize(
     ("fixture_kwargs", "message"),
     [
-        ({"ref_path": "research/missing.md"}, "Git evidence is unavailable"),
+        ({"ref_path": "research/missing.md"}, "commission blob is absent from the exact local commit"),
         ({"content": b""}, "commission blob is empty"),
         ({"content": b"x" * (512 * 1024 + 1)}, "exceeds the 512 KiB ceiling"),
         ({"content": b"bad\x00commission"}, "contains a NUL byte"),
@@ -1549,6 +1521,165 @@ def test_commission_invalid_object_or_content_refuses(
 
     with pytest.raises(SupervisorError, match=message):
         supervisor.verified_commission(root, workspace)
+
+
+
+
+def test_sealed_provider_receives_complete_verified_commission_after_owner_only_materialization(
+    tmp_path: Path,
+) -> None:
+    runtime, root, _workspace, content = _strict_v2_root_with_commission(tmp_path)
+    runtime.workers.register_worker(
+        "worker-cycle",
+        provider="codex",
+        account_label="worker-cycle@company",
+        worker_type="fixture",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "capabilities": ["read"],
+                "cost_class": "small",
+            }
+        },
+    )
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    adapter = FakeAdapter(FakeInspector())
+    supervisor = _supervisor(
+        runtime,
+        tmp_path,
+        adapter,
+        require_complete_launch_attestation=False,
+    )
+
+    with pytest.raises(SupervisorError, match="Codex launch failed"):
+        asyncio.run(
+            supervisor.start_cycle_job(
+                planner.job_id,
+                command_id=(
+                    f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1"
+                ),
+            )
+        )
+
+    assert adapter.spec is not None, "positive fixture must cross the provider start boundary"
+    assert content.decode("utf-8") in adapter.spec.prompt
+    assert "--- VERIFIED IMMUTABLE COMMISSION BYTES ---" in adapter.spec.prompt
+    commission_path = adapter.spec.run_dir / "input" / "commission-context.md"
+    assert commission_path.read_bytes() == content
+    assert stat.S_IMODE(commission_path.stat().st_mode) == 0o400
+    assert not commission_path.stat().st_mode & (stat.S_IRGRP | stat.S_IROTH)
+
+
+@pytest.mark.parametrize(
+    ("case", "fixture_kwargs", "message"),
+    [
+        (
+            "repo_mismatch",
+            {"repository": "mastermindx-market-intelligence/Other"},
+            "outside the canonical Executive repository",
+        ),
+        (
+            "absent_commit",
+            {"ref_commit": "f" * 40},
+            "commission commit is absent from the local Git object store",
+        ),
+        (
+            "absent_blob",
+            {"ref_path": "research/missing.md"},
+            "commission blob is absent from the exact local commit",
+        ),
+        (
+            "digest_mismatch",
+            {"digest": "0" * 64},
+            "commission content digest differs from immutable source",
+        ),
+        (
+            "oversize",
+            {"content": b"x" * (512 * 1024 + 1)},
+            "exceeds the 512 KiB ceiling",
+        ),
+        (
+            "invalid_utf8",
+            {"content": b"invalid-utf8-\xff"},
+            "commission content must be UTF-8 text",
+        ),
+        (
+            "nul",
+            {"content": b"invalid\x00commission"},
+            "commission content contains a NUL byte",
+        ),
+        (
+            "source_identity_moved",
+            {},
+            "immutable commission source is invalid: terminal completion dialogue source drifted",
+        ),
+    ],
+)
+def test_real_commission_refusals_keep_provider_start_at_zero(
+    tmp_path: Path,
+    case: str,
+    fixture_kwargs: dict[str, object],
+    message: str,
+) -> None:
+    runtime, root, _workspace, _content = _strict_v2_root_with_commission(
+        tmp_path, **fixture_kwargs
+    )
+    runtime.workers.register_worker(
+        "worker-cycle",
+        provider="codex",
+        account_label="worker-cycle@company",
+        worker_type="fixture",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "capabilities": ["read"],
+                "cost_class": "small",
+            }
+        },
+    )
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    if case == "source_identity_moved":
+        with runtime.store.read() as connection:
+            row = connection.execute(
+                """SELECT event_id,payload_json FROM events
+                   WHERE event_type='JOB_CREATED' AND job_id=?""",
+                (root.job_id,),
+            ).fetchone()
+        assert row is not None
+        payload = json.loads(str(row["payload_json"]))
+        payload["provenance"]["dialogue_source"]["commission_ref"]["path"] = (
+            "research/moved.md"
+        )
+        connection = sqlite3.connect(runtime.store.path)
+        try:
+            connection.execute("DROP TRIGGER events_are_immutable_update")
+            connection.execute(
+                "UPDATE events SET payload_json=? WHERE event_id=?",
+                (
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                    int(row["event_id"]),
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    adapter = FakeAdapter(FakeInspector())
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+    command_id = f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1"
+
+    with pytest.raises(SupervisorError, match=message):
+        asyncio.run(supervisor.start_cycle_job(planner.job_id, command_id=command_id))
+
+    assert adapter.spec is None, f"provider start must remain zero for {case}"
 
 
 def test_commission_verification_failure_refuses_before_provider_start(

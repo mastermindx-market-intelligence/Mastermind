@@ -741,7 +741,9 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 f"operator immutable commission verification failed: {exc}"
             ) from exc
-        prompt_by_turn: dict[str, str] = {}
+        prompt_by_turn: dict[str, str] = {
+            "pending": self._prompt(job, lease, verified_commission)
+        }
 
         def load_turn(turn: Any) -> str:
             try:
@@ -763,9 +765,6 @@ class ExecutiveOperatorSupervisor:
                 attempt_id=attempt_id,
                 requested=requested,
                 operation_id=start_operation,
-            )
-            prompt_by_turn["pending"] = self._prompt(
-                job, lease, verified_commission
             )
 
             def bound_prompt(turn: Any) -> str:

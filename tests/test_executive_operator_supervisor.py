@@ -523,7 +523,12 @@ class _CommissionPromptSource(_PromptSource):
         return text
 
 
-def _seed_dispatchable_operator_planner(tmp_path: Path):
+def _seed_dispatchable_operator_planner(
+    tmp_path: Path,
+    *,
+    commission_content: bytes | None = None,
+    commission_repository: str = "mastermindx-market-intelligence/Mastermind",
+):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
     workspace.mkdir(parents=True)
@@ -543,7 +548,11 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
         check=True,
     )
     (workspace / "README.md").write_text("G2 fixture\n", encoding="utf-8")
-    subprocess.run(["git", "add", "README.md"], cwd=workspace, check=True)
+    if commission_content is not None:
+        commission_path = workspace / "research" / "operator-commission.md"
+        commission_path.parent.mkdir(parents=True)
+        commission_path.write_bytes(commission_content)
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
     subprocess.run(
         ["git", "commit", "-q", "-m", "fixture"], cwd=workspace, check=True
     )
@@ -618,11 +627,29 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
         "worktree": str(workspace),
         "attempt_limit": 2,
     }
+    dialogue_kwargs = {}
+    if commission_content is not None:
+        intent["workstream"] = "WS:TEST-COMMISSION"
+        dialogue_kwargs = {
+            "dialogue_source": {
+                "schema_version": "mastermind.executive_dialogue_source/v1",
+                "work_ref": "WS:TEST-COMMISSION",
+                "commission_ref": {
+                    "repository": commission_repository,
+                    "commit": base_sha,
+                    "path": "research/operator-commission.md",
+                    "content_sha256": hashlib.sha256(commission_content).hexdigest(),
+                },
+                "watch_mode": None,
+            },
+            "require_dialogue_source": True,
+        }
     receipt = submit_intent(
         runtime,
         intent,
         workspace_root=workspace_root,
         execution_binding=binding,
+        **dialogue_kwargs,
     )
     root = runtime.jobs.get_job(receipt["job_id"])
     assert root is not None
@@ -649,6 +676,7 @@ class _ActiveAdapter(_RecoveryAdapter):
         self.stop_calls = 0
         self.read_calls = 0
         self.cancel_during_collect = cancel_during_collect
+        self.prompts: list[str] = []
 
     def validate_requested_profile(self, requested):
         self.profile = requested
@@ -663,7 +691,9 @@ class _ActiveAdapter(_RecoveryAdapter):
 
     def begin_turn(self, *, turn, **_kwargs):
         self.begin_turn_calls += 1
-        assert "output schema" in self.turn_input_loader(turn)
+        prompt = self.turn_input_loader(turn)
+        self.prompts.append(prompt)
+        assert "output schema" in prompt
         return TurnStartObservation(self.native_turn_id, True)
 
     def read_events(self, cursor, *, timeout_seconds):
@@ -726,6 +756,79 @@ def test_fresh_operator_planner_completes_one_session_and_releases_epoch(
             (attempt.attempt_id,),
         ).fetchone()
     assert epoch["state"] == "ABANDONED"
+
+
+
+def test_fresh_operator_consumes_persisted_verified_commission_before_provider_turn(
+    tmp_path: Path,
+) -> None:
+    commission = b"# Operator immutable commission\n\nUse the complete exact source.\n"
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path, commission_content=commission
+    )
+    adapters: list[_ActiveAdapter] = []
+
+    def factory(loader):
+        adapter = _ActiveAdapter(runtime, loader, cancel_during_collect=False)
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    outcome = asyncio.run(
+        supervisor.start_cycle_job(
+            planner.job_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        )
+    )
+
+    assert outcome.outcome == "TERMINAL"
+    assert len(adapters) == 1 and adapters[0].begin_turn_calls == 1
+    assert len(adapters[0].prompts) == 1
+    prompt = adapters[0].prompts[0]
+    assert commission.decode("utf-8") in prompt
+    assert '"path": "research/operator-commission.md"' in prompt
+    assert planner.requested_authorities == ["READ"]
+    assert planner.allowed_write_paths == []
+
+
+def test_real_operator_commission_refusal_precedes_provider_construction(
+    tmp_path: Path,
+) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path,
+        commission_content=b"# Exact operator commission\n",
+        commission_repository="mastermindx-market-intelligence/Other",
+    )
+    factory_calls = 0
+
+    def factory(_loader):
+        nonlocal factory_calls
+        factory_calls += 1
+        raise AssertionError("provider construction must remain zero after source refusal")
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(
+        ExecutiveOperatorSupervisorError,
+        match="commission repository is outside the canonical Executive repository",
+    ):
+        asyncio.run(
+            supervisor.start_cycle_job(
+                planner.job_id,
+                command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+            )
+        )
+
+    assert factory_calls == 0
 
 
 def test_active_operator_cancellation_finishes_cancelled_not_quarantined(
