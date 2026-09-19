@@ -186,6 +186,11 @@ class FakeAdapter:
             started_at="2026-08-11T00:00:00+00:00",
             binary=binary,
             base_sha="b" * 40,
+            session_id=self.inspector.pid,
+            effective_uid=os.geteuid(),
+            effective_gid=os.getegid(),
+            real_uid=os.geteuid(),
+            real_gid=os.getegid(),
         )
         if self.ambiguous_start:
             raise ConnectionError("fixture lost broker start response")
@@ -1170,3 +1175,171 @@ def test_invalid_provider_result_with_ambient_pid_fails_job_not_containment(
     seal = json.loads(Path(receipt.assignment_seal_receipt_path or "").read_text())
     assert seal["passed"] is True
     assert seal["uid_sweep"]["ambient_pids"] == [88688]
+
+class RestartCapableFakeAdapter(FakeAdapter):
+    adapter_id = "codex-cli"
+
+    def __init__(self, inspector: FakeInspector, **kwargs) -> None:
+        super().__init__(inspector, **kwargs)
+        self.start_calls = 0
+        self.reattach_calls: list[tuple[object, object]] = []
+
+    async def start(self, spec):
+        self.start_calls += 1
+        return await super().start(spec)
+
+    def reattach(self, spec, binding):
+        recovered = binding.recover_launch_spec()
+        assert recovered == spec
+        self.spec = spec
+        self.ref = binding.process_ref
+        self.reattach_calls.append((spec, binding))
+        return self.ref
+
+    async def collect_result(self, ref):
+        self.inspector.live = False
+        return await super().collect_result(ref)
+
+
+def test_restart_adopts_and_reattaches_live_worker_without_terminating_or_restarting(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    first_adapter = RestartCapableFakeAdapter(inspector)
+    active = asyncio.run(_supervisor(runtime, tmp_path, first_adapter).start_job(job_id))
+    original_fence = active.lease.attempt.fence_generation
+    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    second_adapter = RestartCapableFakeAdapter(inspector)
+    restarted = _supervisor(reopened, tmp_path, second_adapter)
+    outcomes = restarted.reconcile_restart(requeue_lost=False)
+    assert [outcome.status for outcome in outcomes] == [ReconcileStatus.LIVE_RECOVERED]
+    assert restarted.process_controller.terminated_attempt_ids == []
+    assert second_adapter.start_calls == 0
+    assert len(second_adapter.reattach_calls) == 1
+    pending = restarted.take_recovered_runs()
+    assert len(pending) == 1
+    assert restarted.take_recovered_runs() == ()
+    adopted = reopened.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert adopted is not None
+    assert adopted.status is AttemptStatus.CHECKPOINTED
+    assert adopted.fence_generation == original_fence + 1
+    receipt = asyncio.run(restarted.finish_job(pending[0]))
+    assert receipt.job.status is JobStatus.COMPLETED
+    assert receipt.attempt.status is AttemptStatus.COMPLETED
+    assert second_adapter.start_calls == 0
+
+
+def test_restart_recovers_terminal_result_race_instead_of_marking_attempt_lost(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    first_adapter = RestartCapableFakeAdapter(inspector)
+    active = asyncio.run(_supervisor(runtime, tmp_path, first_adapter).start_job(job_id))
+    inspector.live = False
+    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    second_adapter = RestartCapableFakeAdapter(inspector)
+    restarted = _supervisor(reopened, tmp_path, second_adapter)
+    outcomes = restarted.reconcile_restart(requeue_lost=False)
+    assert [outcome.status for outcome in outcomes] == [
+        ReconcileStatus.TERMINAL_RECOVERED
+    ]
+    assert restarted.process_controller.terminated_attempt_ids == []
+    pending = restarted.take_recovered_runs()
+    assert len(pending) == 1
+    receipt = asyncio.run(restarted.finish_job(pending[0]))
+    assert receipt.job.status is JobStatus.COMPLETED
+    assert receipt.attempt.status is AttemptStatus.COMPLETED
+    assert second_adapter.start_calls == 0
+
+
+def test_restart_live_worker_with_expired_lease_is_quarantined_without_signal(
+    tmp_path: Path,
+) -> None:
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
+    inspector = FakeInspector()
+    active = asyncio.run(
+        _supervisor(runtime, tmp_path, RestartCapableFakeAdapter(inspector)).start_job(
+            job_id
+        )
+    )
+    now[0] += 2_000
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
+    restarted = _supervisor(
+        reopened, tmp_path, RestartCapableFakeAdapter(inspector)
+    )
+    outcomes = restarted.reconcile_restart(requeue_lost=False)
+    assert [outcome.status for outcome in outcomes] == [
+        ReconcileStatus.LEASE_EXPIRED_QUARANTINED
+    ]
+    assert restarted.process_controller.terminated_attempt_ids == []
+    assert restarted.take_recovered_runs() == ()
+    persisted = reopened.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert persisted is not None and persisted.status is AttemptStatus.CHECKPOINTED
+
+
+def test_restart_cancel_pending_preserves_same_attempt_and_terminalizes_cancelled(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    active = asyncio.run(
+        _supervisor(runtime, tmp_path, RestartCapableFakeAdapter(inspector)).start_job(
+            job_id
+        )
+    )
+    runtime.jobs.cancel_job(job_id)
+    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    restarted = _supervisor(
+        reopened, tmp_path, RestartCapableFakeAdapter(inspector)
+    )
+    outcomes = restarted.reconcile_restart(requeue_lost=False)
+    assert outcomes[0].status is ReconcileStatus.LIVE_RECOVERED
+    pending = restarted.take_recovered_runs()
+    receipt = asyncio.run(restarted.finish_job(pending[0]))
+    assert receipt.attempt.attempt_id == active.lease.attempt.attempt_id
+    assert receipt.attempt.status is AttemptStatus.CANCELLED
+    assert receipt.job.status is JobStatus.CANCELLED
+
+
+def test_duplicate_restart_reconcile_does_not_reattach_twice(tmp_path: Path) -> None:
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    asyncio.run(
+        _supervisor(runtime, tmp_path, RestartCapableFakeAdapter(inspector)).start_job(
+            job_id
+        )
+    )
+    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    adapter = RestartCapableFakeAdapter(inspector)
+    restarted = _supervisor(reopened, tmp_path, adapter)
+    assert restarted.reconcile_restart(requeue_lost=False)[0].status is (
+        ReconcileStatus.LIVE_RECOVERED
+    )
+    assert restarted.reconcile_restart(requeue_lost=False)[0].status is (
+        ReconcileStatus.ALREADY_RECOVERED
+    )
+    assert len(adapter.reattach_calls) == 1
+
+
+def test_identity_controller_treats_boot_or_pid_reuse_as_unknown(tmp_path: Path) -> None:
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    active = asyncio.run(
+        _supervisor(runtime, tmp_path, RestartCapableFakeAdapter(inspector)).start_job(
+            job_id
+        )
+    )
+    attempt = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert attempt is not None
+    controller = IdentitySafeProcessController(inspector)
+    inspector.boot_id = "changed-boot"
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN
+    inspector.boot_id = attempt.boot_id or ""
+    inspector.start_identity = "reused-pid-start"
+    assert controller.presence(attempt) is ProcessPresence.UNKNOWN

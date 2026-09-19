@@ -120,6 +120,8 @@ from control_plane.worker_execution_contract import (
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
+    WorkerRecoveryBinding,
+    WorkerRecoveryContractError,
     WorkerResult,
     WorkerRunStatus,
 )
@@ -3632,6 +3634,55 @@ class RemoteCodexWorkerAdapter:
         self._specs[spec.run_id] = spec
         self.startup_uid_sweep = startup_sweep
         return process_ref
+
+    def reattach(
+        self,
+        spec: WorkerLaunchSpec,
+        binding: WorkerRecoveryBinding,
+    ) -> WorkerProcessRef:
+        """Rebind one exact broker-owned run without invoking provider start."""
+
+        if binding.adapter_id != self.adapter_id:
+            raise BrokerStateError(
+                "remote recovery adapter identity changed"
+            )
+        try:
+            recovered_spec = binding.recover_launch_spec(type(spec))
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+        if recovered_spec != spec:
+            raise BrokerStateError(
+                "remote recovery launch specification changed"
+            )
+        ref = binding.process_ref
+        existing = self._refs.get(ref.run_id)
+        if existing is not None:
+            if existing == ref and self._specs.get(ref.run_id) == spec:
+                return ref
+            raise BrokerStateError(
+                "remote run is already bound to another execution"
+            )
+        result = self.client.request_sync(
+            "status",
+            {"run_id": ref.run_id},
+        )
+        run = _mapping(result.get("run"), field="run status")
+        observed = _process_ref_from_json(run.get("process_ref"))
+        if observed != ref:
+            raise BrokerProtocolError(
+                "remote recovery status changed immutable process identity"
+            )
+        status = run.get("status")
+        allowed = {
+            item.value for item in WorkerRunStatus
+        } | {"COLLECTED", "ERROR"}
+        if status not in allowed:
+            raise BrokerProtocolError(
+                "remote recovery status is invalid"
+            )
+        self._refs[ref.run_id] = ref
+        self._specs[ref.run_id] = spec
+        return ref
 
     def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
         if self._refs.get(ref.run_id) != ref:

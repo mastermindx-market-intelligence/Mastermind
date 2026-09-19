@@ -1,0 +1,11 @@
+app
+bot
+brain
+bridge
+common
+control_plane
+data_layer
+integrations
+loop
+portfolio
+scripts
