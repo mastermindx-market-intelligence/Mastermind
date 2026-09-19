@@ -405,7 +405,7 @@ def _current_chairman_profile_census(
     ``surface_bindings`` remains a navigation cache, not a new authority
     plane.  For this one hazardous live preflight, however, absence or an
     incomplete/stale cache cannot prove non-collision.  We therefore require
-    the three named Personal-Pro seat references to have one consistent
+    the four named Chairman-owned seat references to have one consistent
     managed-environment identity and at least one observation inside the fixed
     safety window.  ``last_verified_at`` is deliberately not used: current
     ChatGPT opens are unsupported and therefore cannot advance it.  Duplicate

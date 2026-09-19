@@ -115,11 +115,11 @@ git commit -m "fix(realm1): admit the fourth governed Chairman seat"
 - Consumes: the one live Fashionbird Multilogin identity, the unique exact ChatGPT conversation navigation in its current Chromium session file, and `surface_bindings.new_binding/save_bindings`.
 - Produces: one new `chatgpt4` binding with the same CCR work/role/locator contract as seats 1–3.
 
-- [ ] **Step 1: Reconcile pre-write identity without emitting secrets**
+- [x] **Step 1: Reconcile pre-write identity without emitting secrets**
 
 Require exactly one Fashionbird root, exactly one matching running Multilogin row, exactly one exact ChatGPT conversation URL, no existing `chatgpt4` row, and no identity collision with seats 1–3. Emit only booleans, counts, and SHA-256 digests.
 
-- [ ] **Step 2: Perform one atomic write**
+- [x] **Step 2: Perform one atomic write**
 
 Construct the row with:
 
@@ -132,16 +132,25 @@ sb.new_binding(
     locator={"env_manager": "multilogin", "folder_id": folder_id,
              "profile_id": profile_id, "url": exact_url},
     observed_at=now_z,
-    last_verified_at=now_z,
+    last_verified_at=None,
     seat_ref="chatgpt4",
 )
 ```
 
-Append to the existing healthy document and call `sb.save_bindings` once. Do not retry if the write result is ambiguous.
+Append to the existing healthy document and call `sb.save_bindings` once. Keep `last_verified_at` null until the existing verified-open owner proves an actual open. Do not retry if the write result is ambiguous.
 
-- [ ] **Step 3: Verify exact post-write state**
+- [x] **Step 3: Verify exact post-write state**
 
 Reload the binding store and prove four distinct named seat identities, one `chatgpt4` row, no conflicts, mode `0600`, and exact equality between the four bound identities and the four running managed-profile identities. Emit no raw locators.
+
+
+#### Verified live effect — 2026-09-18
+
+- One fresh Fashionbird preflight proved one primary browser, one live-owned Chromium session file, one exact valid ChatGPT conversation, three pre-existing named seats, and Fashionbird as the sole unbound running managed identity.
+- One `surface_bindings.save_bindings` call returned successfully. The private file remained mode `0600`, now contains one `chatgpt4` row, four distinct named identities, zero conflicts, and `last_verified_at: null`.
+- Fresh strict census proved four running managed identities exactly equal the four bound Chairman identities.
+- Fresh MAS-115 load returned `provision_ready=true` with no refusal code. Fashionbird was not stopped, restarted, or repurposed as the disposable profile.
+- Private profile ids, folder ids, binding id, and exact conversation URL were not written to repository source or emitted in receipts.
 
 ### Task 4: Reopen the existing Realm1/Web-Sol journey
 
@@ -152,7 +161,7 @@ Reload the binding store and prove four distinct named seat identities, one `cha
 - Consumes: four-seat source candidate, updated binding store, current disposable provision.
 - Produces: truthful Realm1 status and the next lawful Web-Sol install/effect gate.
 
-- [ ] **Step 1: Run sanitized status from this carrier**
+- [x] **Step 1: Run sanitized status from this carrier**
 
 ```bash
 python3 scripts/mas115_setup.py status
@@ -160,7 +169,7 @@ python3 scripts/mas115_setup.py status
 
 Expected: `chairman_seats_enrolled=4`, `bindings_healthy=true`, `disposable_provision_ready=true`, four Multilogin profiles running.
 
-- [ ] **Step 2: Prove the stopped disposable anchor passes current exact census**
+- [x] **Step 2: Prove the stopped disposable anchor passes current exact census**
 
 Use `_load_current_provision` with one freshly sealed strict environment snapshot. Expected: provision available with no refusal code; output only readiness booleans/code.
 
