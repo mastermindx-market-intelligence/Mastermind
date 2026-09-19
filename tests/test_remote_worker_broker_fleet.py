@@ -251,6 +251,35 @@ class RemoteWorkerBrokerFleetTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TypeError):
             endpoint.secret_canary_verdict["passed"] = False  # type: ignore[index]
 
+    async def test_fresh_fleet_restart_uses_only_persisted_worker_carrier(self) -> None:
+        self.adapters["alibaba-token-01"].fail_start = True
+        first = self._fleet()
+        with self.assertRaisesRegex(RuntimeError, "ambiguous fixture start"):
+            await first.start(_spec("run-restart", "alibaba-token-01"))
+
+        # Lose every process-local run binding. Restart reconciliation must use
+        # only the durable Attempt.worker_id and the fixed endpoint catalog.
+        self.adapters = {
+            "codex-01": _FakeAdapter("codex", 303),
+            "alibaba-token-01": _FakeAdapter("alibaba", 404),
+        }
+        self.controllers = {
+            "codex-01": _FakeController("codex"),
+            "alibaba-token-01": _FakeController("alibaba"),
+        }
+        fresh = self._fleet()
+        attempt = types.SimpleNamespace(
+            worker_id="alibaba-token-01", attempt_id="run-restart"
+        )
+        self.assertEqual(fresh.presence(attempt), ("alibaba", "presence"))
+        self.assertTrue(fresh.absence_verified(attempt))
+        fresh.terminate(attempt)
+        self.assertFalse(self.controllers["codex-01"].calls)
+        self.assertEqual(
+            [call[0] for call in self.controllers["alibaba-token-01"].calls],
+            ["presence", "absence", "terminate"],
+        )
+
     def test_restart_controller_uses_persisted_worker_id(self) -> None:
         fleet = self._fleet()
         attempt = types.SimpleNamespace(
