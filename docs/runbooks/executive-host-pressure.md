@@ -234,6 +234,12 @@ canonical.
     predicates. Do not start an intentionally unarmed Executive service merely to
     make a recovery check green, and do not let a recovery result rank or reserve
     workload capacity.
+13. **Useful-idle is subordinate to real queued work.** Optional quota-saturation
+    or audit work may consume only spare physical/provider capacity. Before an idle
+    launch, consult the existing real-work queues/backlog and recheck immediately
+    before provider/physical admission. If real work is pending, yield. This is a
+    priority guard on the incumbent owners, not permission to create a second
+    scheduler, reservation service, queue or retry plane.
 
 A local seat harness that implements these rules remains an interim operational
 consumer of Capacity/Fleet policy. It does not become a second scheduler, resource
