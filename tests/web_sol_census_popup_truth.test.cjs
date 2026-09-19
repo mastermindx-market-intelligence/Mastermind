@@ -65,8 +65,10 @@ async function snapshot(rows, options = {}) {
 // Preserve all fifteen original support scenarios, now loading actual checkout paths.
 test('healthy discarded duplicate rows retain measured counts and unknown model', async () => {
   const ui = await settled(mount(() => snapshot([tab(1), tab(2)])));
-  assert.deepEqual(metrics(ui), ['2', '0', '2', '1']);
+  assert.deepEqual(metrics(ui), ['2', '0/2', '0', '2']);
+  assert.equal(ui.nodes.summary.children[1].children[1].textContent, 'Document probes');
   assert.match(ui.nodes.scope.textContent, /1 distinct observed conversation locators/);
+  assert.match(ui.nodes.scope.textContent, /1 extra conversation view/);
   assert.equal(ui.nodes.rows.children.length, 2);
   assert.match(ui.nodes.rows.textContent, /Served model: unknown/);
   assert.match(ui.nodes.rows.textContent, /Model\/effort telemetry is not implemented in census v1/);
@@ -75,7 +77,7 @@ test('healthy discarded duplicate rows retain measured counts and unknown model'
 });
 test('successful empty inventory remains distinguishable as measured zero', async () => {
   const ui = await settled(mount(() => snapshot([])));
-  assert.deepEqual(metrics(ui), ['0', '0', '0', '0']);
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
   assert.match(ui.nodes.scope.textContent, /0\/0 document probes sampled/);
   assert.match(ui.nodes.rows.textContent, /No normal ChatGPT tabs were sampled/);
   assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
@@ -83,7 +85,7 @@ test('successful empty inventory remains distinguishable as measured zero', asyn
 test('installed extension version is visible without changing census semantics', async () => {
   const ui = await settled(mount(() => snapshot([]), {version: '0.4.0'}));
   assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.4\.0 · Captured /);
-  assert.deepEqual(metrics(ui), ['0', '0', '0', '0']);
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
 });
 test('complete inventory with unreachable content probes is visibly degraded and actionable', async () => {
   const row = {...tab(1), discarded: false};
@@ -178,7 +180,7 @@ test('partial render failure clears all partially rendered snapshot data', async
 });
 test('partial inventory retains observed rows and explicit coverage warning', async () => {
   const ui = await settled(mount(() => snapshot([tab(1), tab(2)], {finalFail: true})));
-  assert.deepEqual(metrics(ui), ['2', '0', '2', '1']);
+  assert.deepEqual(metrics(ui), ['2', '0/2', '0', '2']);
   assert.match(ui.nodes.status.className, /warning/);
   assert.match(ui.nodes.status.textContent, /completeness is unknown/);
   assert.equal(ui.nodes.rows.children.length, 2);
@@ -201,7 +203,7 @@ test('busy refresh does not dispatch additional collection work', async () => {
   const frame=mount(()=>{throw Error('IFRAME_ACQUISITION');},{iframe:true});
   await tick();assert.equal(frame.calls,0);assert.equal(frame.nodes.rows.children.length,0);
   resolve(prior); await settled(ui);
-  assert.deepEqual(metrics(ui), ['0', '0', '0', '0']);
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
 });
 test('manual refresh recovers after failure without automatic retries', async () => {
   const prior = await snapshot([tab(1)]); let call = 0;
@@ -209,7 +211,7 @@ test('manual refresh recovers after failure without automatic retries', async ()
   assert.equal(ui.calls, 1); await tick(); assert.equal(ui.calls, 1);
   await ui.refresh();
   assert.equal(ui.calls, 2);
-  assert.deepEqual(metrics(ui), ['1', '0', '1', '0']);
+  assert.deepEqual(metrics(ui), ['1', '0/1', '0', '1']);
   assert.equal(ui.nodes.rows.children.length, 1);
   assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
 });
@@ -231,7 +233,7 @@ test('controller requests the same worker broker on initial and manual reads', a
   await ui.refresh();
   assert.equal(ui.received.length, 2);
   for (const [api, instanceId] of ui.received) { assert.equal(api, boundary); assert.equal(instanceId, exactInstance); }
-  assert.deepEqual(metrics(ui), ['0', '0', '0', '0']);
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
 });
 test('selected model and effort remain explicitly unverified in each actual rendered row', async () => {
   const ui = await settled(mount(() => snapshot([tab(1), tab(2)])));
@@ -257,7 +259,7 @@ test('positive generation and disagreeing duplicate cues reach the real controll
           auth_required: false, provider_error_present: false}};
     }};
   const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId), {tabs: boundary}));
-  assert.deepEqual(metrics(ui), ['2', '1', '0', '1']);
+  assert.deepEqual(metrics(ui), ['2', '2/2', '1', '0']);
   assert.match(ui.nodes.rows.children[0].textContent, /Cue present/);
   assert.match(ui.nodes.rows.children[1].textContent, /No cue observed/);
   for (const row of ui.nodes.rows.children) assert.match(row.textContent, /Cue observations differ/);
@@ -269,7 +271,7 @@ test('controller schedules no retry timer on failure, settlement, or manual reco
   assert.equal(ui.calls, 1); assert.equal(ui.schedulingCalls, 0);
   fail = false; await ui.refresh(); await tick();
   assert.equal(ui.calls, 2); assert.equal(ui.schedulingCalls, 0);
-  assert.deepEqual(metrics(ui), ['0', '0', '0', '0']);
+  assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
 });
 test('missing instance configuration is forwarded as missing and never touches browser APIs', async () => {
   let browserCalls = 0;
