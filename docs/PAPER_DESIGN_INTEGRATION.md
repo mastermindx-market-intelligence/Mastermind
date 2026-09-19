@@ -246,4 +246,3 @@ then repeat the same Paper inspection canary.
 
 These two account/client ceremonies are the remaining native-human gates; they are
 not reasons to create additional Paper user accounts or another MCP gateway.
-
