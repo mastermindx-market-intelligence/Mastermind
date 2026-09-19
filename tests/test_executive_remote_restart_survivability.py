@@ -7,6 +7,7 @@ import dataclasses
 import hashlib
 import json
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -151,9 +152,14 @@ def _canary() -> dict:
     }
 
 
-def _runtime_and_job(tmp_path: Path, broker):
+def _runtime_and_job(
+    tmp_path: Path,
+    broker,
+    *,
+    lease_seconds: int = 30,
+):
     runtime_root = tmp_path / "runtime-state"
-    runtime = Runtime.at(runtime_root, lease_seconds=30)
+    runtime = Runtime.at(runtime_root, lease_seconds=lease_seconds)
     runtime.workers.register_worker(
         "codex-01",
         provider="codex",
@@ -947,5 +953,118 @@ def test_cancelled_restart_waits_for_inflight_validation_owner(
             await asyncio.sleep(0.05)
             loop.set_exception_handler(prior_handler)
         assert unhandled == []
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_restart_renews_lease_before_slow_owner_probe(
+    tmp_path: Path,
+) -> None:
+    """A slow broker status read cannot consume the adopted cancellation lease."""
+
+    class SlowFirstPresence:
+        def __init__(self, delegate) -> None:
+            self.delegate = delegate
+            self.calls = 0
+
+        def presence(self, attempt):
+            self.calls += 1
+            if self.calls == 1:
+                time.sleep(1.1)
+            return self.delegate.presence(attempt)
+
+        def absence_verified(self, attempt) -> bool:
+            return self.delegate.absence_verified(attempt)
+
+        def terminate(self, attempt) -> None:
+            self.delegate.terminate(attempt)
+
+        def uid_sweep_receipt(self, attempt):
+            return self.delegate.uid_sweep_receipt(attempt)
+
+    async def scenario() -> None:
+        broker, adapter, server, socket_path, client = await _serve_fixture(
+            tmp_path
+        )
+        runtime_root, runtime, job = _runtime_and_job(
+            tmp_path,
+            broker,
+            lease_seconds=1,
+        )
+        pending: asyncio.Task | None = None
+        finisher: asyncio.Task | None = None
+        try:
+            first = _supervisor_for(
+                runtime,
+                broker,
+                client,
+                tmp_path,
+                instance_id="before-slow-probe-restart",
+            )
+            active = await first.start_job(job.job_id)
+            attempt_id = active.lease.attempt.attempt_id
+
+            adapter.finished.set()
+            collected = await first.adapter.collect_result(active.process_ref)
+            assert collected.result.exit_code == 0
+            adapter.block_validation = True
+            pending = asyncio.create_task(
+                first.adapter.run_validation_argv(
+                    active.launch_spec,
+                    ["/usr/bin/true"],
+                )
+            )
+            await adapter.validation_entered.wait()
+            pending.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pending
+            runtime.jobs.cancel_job(job.job_id)
+
+            del active
+            del first
+            reopened = Runtime.at(runtime_root, lease_seconds=1)
+            restarted = _supervisor_for(
+                reopened,
+                broker,
+                client,
+                tmp_path,
+                instance_id="after-slow-probe-restart",
+            )
+            outcomes = await asyncio.to_thread(
+                restarted.reconcile_restart,
+                requeue_lost=False,
+            )
+            assert [item.status for item in outcomes] == [
+                ReconcileStatus.TERMINAL_RECOVERED
+            ]
+            recovered = restarted.take_recovered_runs()
+            assert len(recovered) == 1
+            slow = SlowFirstPresence(restarted.process_controller)
+            restarted.process_controller = slow
+
+            finisher = asyncio.create_task(
+                restarted.finish_job(recovered[0])
+            )
+            await asyncio.sleep(0.05)
+            adapter.validation_release.set()
+            terminal = await finisher
+
+            assert slow.calls >= 1
+            assert terminal.job.status is JobStatus.CANCELLED
+            assert terminal.attempt.status is AttemptStatus.CANCELLED
+            assert terminal.attempt.attempt_id == attempt_id
+            assert adapter.start_calls == 1
+            assert adapter.collect_calls == 1
+            assert adapter.validation_calls == [("/usr/bin/true",)]
+        finally:
+            adapter.finished.set()
+            adapter.validation_release.set()
+            if pending is not None and not pending.done():
+                pending.cancel()
+            if finisher is not None and not finisher.done():
+                finisher.cancel()
+                await asyncio.gather(finisher, return_exceptions=True)
+            await asyncio.sleep(0)
+            await _close_fixture(broker, adapter, server, socket_path)
 
     asyncio.run(scenario())

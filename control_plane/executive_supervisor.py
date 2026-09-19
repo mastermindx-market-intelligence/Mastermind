@@ -1703,11 +1703,22 @@ class ExecutiveSupervisor:
             return
         attempt = active.lease.attempt
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + max(
+        settlement_seconds = max(
             1.0,
             float(self.validation_timeout_seconds) + 60.0,
         )
+        deadline = loop.time() + settlement_seconds
+        extend_seconds = max(1, int(settlement_seconds) + 1)
         while True:
+            # Refresh before a synchronous broker status probe. The Unix client
+            # has its own bounded timeout, but even that bound must not be able
+            # to consume the adopted lease before cancellation can terminalize.
+            self.runtime.attempts.heartbeat_attempt(
+                attempt.attempt_id,
+                fence_generation=attempt.fence_generation,
+                lease_token=active.lease.lease_token,
+                extend_seconds=extend_seconds,
+            )
             presence = await asyncio.to_thread(
                 self.process_controller.presence, attempt
             )
@@ -1727,11 +1738,6 @@ class ExecutiveSupervisor:
                 raise SupervisorError(
                     "recovered terminal owner did not settle before timeout"
                 )
-            self.runtime.attempts.heartbeat_attempt(
-                attempt.attempt_id,
-                fence_generation=attempt.fence_generation,
-                lease_token=active.lease.lease_token,
-            )
             await asyncio.sleep(self.heartbeat_interval_seconds)
 
     def _active_terminal_uid_sweep(
