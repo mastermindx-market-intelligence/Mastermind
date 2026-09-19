@@ -131,6 +131,20 @@ test('partial document-probe failure stays distinct from healthy inventory cover
   assert.match(ui.nodes.rows.children[0].textContent, /Cue sampled/);
   assert.match(ui.nodes.rows.children[1].textContent, /Content probe unreachable/);
 });
+test('omitted tabs are never described as proven-unreachable document probes', async () => {
+  const rows = Array.from({length: 129}, (_, index) => ({...tab(index + 1), discarded: false}));
+  const boundary = {
+    query: async () => structuredClone(rows),
+    get: async id => structuredClone(rows.find(row => row.id === id)),
+    sendMessage: async () => { throw Error('OMITTED_TAB_PRIVATE_FAILURE'); },
+  };
+  const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId), {tabs: boundary}));
+  assert.match(ui.nodes.status.className, /warning/);
+  assert.match(ui.nodes.status.textContent, /bounded reader did not sample every returned tab/);
+  assert.match(ui.nodes.status.textContent, /Document probe coverage degraded \(0\/129\); 128 tabs could not be sampled/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /Document probes unreachable/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /OMITTED_TAB_PRIVATE_FAILURE/);
+});
 for (const [label, input, options] of [
   ['unconfigured', [], {unconfigured: true}], ['query failure', [], {fail: true}],
   ['invalid inventory', {}, {}], ['inventory overflow', Array(4097).fill(tab(1)), {}],
