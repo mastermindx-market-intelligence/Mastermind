@@ -1193,7 +1193,7 @@ def _strict_v2_root_with_commission(
 ):
     workspace_parent = tmp_path / "workspaces"
     workspace = workspace_parent / "commission-workspace"
-    workspace.mkdir(parents=True)
+    workspace.mkdir(parents=True, mode=0o700)
     subprocess.run(["git", "init", "-q", str(workspace)], check=True)
     commission_path = workspace / "research" / "commission.md"
     commission_path.parent.mkdir(parents=True)
