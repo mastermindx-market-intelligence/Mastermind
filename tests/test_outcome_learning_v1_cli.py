@@ -846,7 +846,7 @@ def test_end_to_end_seal_through_proof_cross_digests_verify(tmp_path):
     assert projection["evaluation_digest"] == canonical_digest(evaluation)
     assert projection["automatic_writes"] is False
     dsc = next(c for c in projection["candidates"] if c["kind"] == "DSC_CANDIDATE")
-    assert dsc["key_hint"] == "OLV1-EPISODE-CONSEQUENCE-2026-09-17"
+    assert dsc["key_hint"] == f"OLV1-EPISODE-CONSEQUENCE-{projection['recorded_at'][:10]}"
 
     rc = cli.main(
         [
