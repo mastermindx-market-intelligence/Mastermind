@@ -657,10 +657,10 @@ def test_proven_live_requires_lifecycle_continuity_and_domain_target_bindings() 
         surface["minimal_tool_family"] = family
         surface["binding"] = {
             "host_ref": None,
-            "project_ref": "irrelevant-project",
+            "project_ref": None,
             "session_ref": None,
             "runtime_generation": None,
-            "source_sha": "b" * 40,
+            "source_sha": None,
         }
         return packet
 

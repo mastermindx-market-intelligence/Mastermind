@@ -428,6 +428,39 @@
                     "required": [
                       "source_sha"
                     ]
+                  },
+                  {
+                    "properties": {
+                      "operation_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "operation_ref"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "work_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "work_ref"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "target_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "target_ref"
+                    ]
                   }
                 ]
               },
