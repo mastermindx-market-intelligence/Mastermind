@@ -1538,7 +1538,7 @@ class MainSemanticConditionalHTTP:
         )
 
 
-def test_main_issues_receipt_when_changed_open_roster_keeps_collision_semantics(
+def test_main_revalidates_collision_roster_outside_generic_conditional_replay(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import json
@@ -1587,10 +1587,12 @@ def test_main_issues_receipt_when_changed_open_roster_keeps_collision_semantics(
     payload = json.loads(captured.out)
     assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
     assert payload["local_equals_remote"] is True
-    assert len(http.conditional_calls) == len(http.first_calls)
+    roster_reads = [url for url in http.first_calls if url == open_pulls]
+    assert len(roster_reads) == 2
+    assert all(url != open_pulls for url, _ in http.conditional_calls)
 
 
-def test_main_refuses_changed_200_on_target_pr_even_when_body_is_identical(
+def test_main_accepts_changed_200_on_target_pr_when_identity_is_identical(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import json
@@ -1614,5 +1616,7 @@ def test_main_refuses_changed_200_on_target_pr_even_when_body_is_identical(
     exit_code = fx._run_cli(module, fx._cli_argv(), http=http)
     captured = capsys.readouterr()
 
-    assert exit_code == 1
-    assert json.loads(captured.out)["code"] == "REMOTE_PROOF_CHANGED"
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
+    assert payload["local_equals_remote"] is True
