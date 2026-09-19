@@ -160,7 +160,7 @@ def tool_spec() -> dict[str, Any]:
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 500,
-                        "pattern": r"^https://(?:github\\.com|linear\\.app)/",
+                        "pattern": r"^https://(?:github\.com|linear\.app)/",
                     },
                 },
             },
