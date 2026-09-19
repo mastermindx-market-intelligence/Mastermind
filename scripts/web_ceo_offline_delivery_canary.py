@@ -39,6 +39,16 @@ def _utc(value: str | None) -> str:
     raise CanaryReaderError("OBSERVED_AT_INVALID")
 
 
+def _wake_delivery_evidence(states: list[str]) -> str:
+    if not states:
+        return "NOT_REQUESTED"
+    if all(state == "ACKNOWLEDGED" for state in states):
+        return "REQUESTED_ACKNOWLEDGED"
+    if any(state in {"DELIVERED", "ACKNOWLEDGED"} for state in states):
+        return "REQUESTED_DELIVERED"
+    return "REQUESTED_NOT_DELIVERED"
+
+
 def _material(
     runtime: Runtime,
     root_job_id: str,
@@ -268,9 +278,10 @@ def build_receipt(
     else:
         projection_state = "PENDING_UNCONSUMED"
 
-    wake_records = []
-    for persisted in WakeLedgerRepository(runtime).list_wake_events():
-        obligation = persisted.record.obligation
+    wake_repository = WakeLedgerRepository(runtime)
+    matched_wake_ids: list[str] = []
+    for persisted in wake_repository.list_wake_events():
+        obligation = persisted.obligation
         if obligation is None:
             continue
         if (
@@ -278,13 +289,42 @@ def build_receipt(
             and obligation.job_id == root_job_id
             and obligation.attempt_id == material.attempt.attempt_id
         ):
-            wake_records.append(persisted.record)
-    if wake_records:
-        phases = {record.phase for record in wake_records}
+            matched_wake_ids.append(obligation.obligation_id)
+
+    wake_records = []
+    wake_states: list[str] = []
+    for obligation_id in sorted(set(matched_wake_ids)):
+        records = [
+            item.record for item in wake_repository.list_records(obligation_id)
+        ]
+        wake_records.extend(records)
+        phases = {record.phase for record in records}
+        attempts: dict[int, set[LedgerPhase]] = {}
+        for record in records:
+            if record.attempt_n is not None:
+                attempts.setdefault(record.attempt_n, set()).add(record.phase)
+        for attempt_phases in attempts.values():
+            terminal = {
+                LedgerPhase.DELIVERED,
+                LedgerPhase.FAILED,
+                LedgerPhase.TARGET_UNAVAILABLE,
+            }
+            if (
+                LedgerPhase.DELIVERY_ATTEMPT in attempt_phases
+                and not (attempt_phases & terminal)
+            ):
+                raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
         if LedgerPhase.TARGET_ACKNOWLEDGED in phases:
-            projection_state = "CONSUMED"
-        elif LedgerPhase.DELIVERED not in phases:
-            raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
+            wake_states.append("ACKNOWLEDGED")
+        elif LedgerPhase.DELIVERED in phases:
+            wake_states.append("DELIVERED")
+        else:
+            wake_states.append("NOT_DELIVERED")
+
+    if wake_states and all(state == "ACKNOWLEDGED" for state in wake_states):
+        projection_state = "CONSUMED"
+    elif "DELIVERED" in wake_states or "ACKNOWLEDGED" in wake_states:
+        projection_state = "DELIVERED_NOT_CONSUMED"
 
     return {
         "schema": RECEIPT_SCHEMA,
@@ -304,9 +344,7 @@ def build_receipt(
             "aggregation_terminal": "RUNTIME_VALIDATED",
             "independent_review": "QUALIFIED",
             "terminal_projection": projection,
-            "wake_delivery": (
-                "REQUESTED_DELIVERED" if wake_records else "NOT_REQUESTED"
-            ),
+            "wake_delivery": _wake_delivery_evidence(wake_states),
         },
         "observed_at": stamp,
     }
