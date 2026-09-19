@@ -44,7 +44,7 @@ The script accepts only:
 
 There is no caller-selected host, launchd label, executable, command, action, power key/value, Worker, provider, socket, certificate, endpoint, or retry field.
 
-The script must execute from the same direct Git checkout named by `--source-repo`; HEAD must equal the expected SHA and the tree must be clean. The existing source-policy helper must accept that source before mutation.
+The script must execute from the same direct Git checkout named by `--source-repo`; HEAD must equal the expected SHA and the tree must be clean. Before any root helper is executed from that checkout, the source parent must be root:wheel/non-writable and the checkout must contain no non-root-owned object, group/other-writable object, hard-linked file or filesystem ACL. This prevents a non-root source race across the privilege boundary. The existing source-policy helper must then accept the exact source before mutation.
 
 ## Prerequisites
 
@@ -60,14 +60,14 @@ Homebrew Python is not a substitute for the Executive runtime.
 
 For one exact immutable release, and no other Executive service, the script may create/reconcile:
 
-- `/Library/Application Support/MastermindExecutive/releases/<sha>` plus the existing release manifest;
+- `/Library/Application Support/MastermindExecutive/releases/<sha>` plus the existing release manifest; a new release is manifested and verified in a private staging directory before one atomic publish to the versioned release path;
 - root-only `config/privileged-broker.json` bound to that exact release;
 - stable non-root `bin/mmx-admin` status client launcher;
 - stable non-root `bin/mmx-secondary-host-power` launcher bound to PR #846's exact-release wrapper;
 - `/Library/LaunchDaemons/com.mastermind.executive.privileged.plist`;
 - the existing privileged receipt/log/runtime directories and launchd socket.
 
-Existing artifacts are accepted only when their bytes and metadata exactly match the candidate generated from the requested release; mismatches refuse instead of being overwritten. This slice is first-generation/same-generation reconciliation, not cross-generation upgrade authority.
+Existing artifacts are accepted only when their bytes and metadata exactly match the candidate generated from the requested release; mismatches refuse instead of being overwritten. Before completion, the failure trap removes only unpublished staging/temp artifacts and, if this run began broker arming, bootouts/disables only the privileged label. This slice is first-generation/same-generation reconciliation, not cross-generation upgrade authority.
 
 ## Arm and proof
 
