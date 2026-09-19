@@ -361,3 +361,27 @@ def test_narrow_connections_default_to_readable_equivalent_list(page):
     expect(page.locator('button[data-relation]')).to_have_count(7)
     expect(page.locator('[data-node]')).to_have_count(6)
     expect(page.get_by_role('button', name='Graph view', exact=True)).to_be_disabled()
+
+
+def test_application_focus_calls_are_centralized_through_connected_guard():
+    text = HTML.read_text()
+    scripts = re.findall(r'<script(?: [^>]*)?>(.*?)</script>', text, re.S)
+    assert len(scripts) == 2
+    app = scripts[1]
+    assert 'function focusConnected(' in app
+    assert 'ReferencePresentation.focusTarget' in app
+    # There must be exactly one actual DOM focus invocation: inside focusConnected.
+    assert app.count('.focus(') == 1
+
+
+def test_acceptance_environment_is_epoch_qualified():
+    record = json.loads(Path(__file__).with_name('reference_acceptance.json').read_text())
+    current = record['environment']
+    native = record['native_source_checks']
+    assert current['scope'] == 'current_native_source_check_environment'
+    assert current['python'] == native['python']
+    assert current['node'] == native['node']
+    historical = record['historical_environment']
+    assert historical['scope'] == 'pre_recovery_original_reference_checkpoint'
+    assert historical['python'] == '3.13.5'
+    assert historical['node'] == 'v22.16.0'

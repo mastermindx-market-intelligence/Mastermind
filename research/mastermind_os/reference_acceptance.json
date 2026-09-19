@@ -10,7 +10,7 @@
   "external_worker_started": false,
   "browser_policy_changed": false,
   "source_checks": {
-    "passed": 13,
+    "passed": 15,
     "failed": 0,
     "latest_exit_code": 0,
     "scope": "actual pure inline JavaScript model + source existence + CSP hash consistency; not DOM/browser behavior",
@@ -25,11 +25,12 @@
         "sha256": "771b48d24262a8208e88878dde2782dba10ba7696bdaead361a44b6ce456681f",
         "exit_code": 0
       }
-    ]
+    ],
+    "stdout_sha256": "511fb971caf59261241ec2a3919d9d10c7dcb9ec044ee07d50b2db465184f057"
   },
   "test_collection": {
-    "total": 52,
-    "source_only": 13,
+    "total": 54,
+    "source_only": 15,
     "browser_dependent": 39
   },
   "red_evidence": {
@@ -78,8 +79,9 @@
     "dom_emulation_used": false
   },
   "environment": {
-    "python": "3.13.5",
-    "node": "v22.16.0"
+    "scope": "current_native_source_check_environment",
+    "python": "3.14.7",
+    "node": "v26.5.0"
   },
   "open_gates": [
     "39 actual browser cases including DOM/event/focus/diagram layout/CSP enforcement are unverified",
@@ -111,19 +113,19 @@
     }
   },
   "artifact_sha256": {
-    "docs/superpowers/specs/2026-09-16-mastermind-os-integrated-rollout-design.md": "0417fb7bcec57fb7d24b53e64257ebdf81f0fc79435f4914cc5d5a358a0a9621",
-    "docs/superpowers/plans/2026-09-16-mastermind-os-reference-workspace.md": "74b86d5e9ca702fe555e17c57430932e4810582dff0c1aca78439891f108578f",
-    "research/mastermind_os/README.md": "af47141a6f8b43d9a68994eb59ce399b13dbcbf767a68997b824c70375875a49",
-    "research/mastermind_os/test_reference_workspace.py": "f92db3c39e016caaad145165ed42e5657d2293057e206672630b98588c67b9db",
-    "research/mastermind_os/reference_workspace.html": "b62ea788538208d5200b81e4b57ac1bf5d2f1f3b82b29fd5457769e66e46a946"
+    "docs/superpowers/specs/2026-09-16-mastermind-os-integrated-rollout-design.md": "39c401ca8b902267438a9edde3f421f2bed75928e97bdd72c335fad1f8ba2127",
+    "docs/superpowers/plans/2026-09-16-mastermind-os-reference-workspace.md": "2f964dff438427fb20550b8fcc9b203123543a9553921f4a4a40e4a88fddb3f7",
+    "research/mastermind_os/README.md": "0f08522fbe46f21f9dcfc41531cef65b8889622262a013615172fd21ea5f03c5",
+    "research/mastermind_os/test_reference_workspace.py": "9d51258dd87ac31f6c34e6c722e90a60965eb8a9d577b9277b01bd159cef4161",
+    "research/mastermind_os/reference_workspace.html": "6e8d2a5643521e217fb3ad40b0bb87b1fc604bd2bf03cd395539617641d49419"
   },
   "next_action": "Consume the repaired #704 freeze plus exact incumbent reader/DF1 contracts, preserve source custody, and admit only the qualified real mission-workspace slice. Browser/installed gates remain open.",
   "native_source_checks": {
-    "observed_at": "2026-09-16T22:09:30Z",
-    "passed": 13,
+    "observed_at": "2026-09-19T05:39:49Z",
+    "passed": 15,
     "failed": 0,
     "exit_code": 0,
-    "stdout_sha256": "cfc14fd2dc11c362cccf5421245ca5ab0e9d286b54a604a80bd2dd5522f6feb9",
+    "stdout_sha256": "511fb971caf59261241ec2a3919d9d10c7dcb9ec044ee07d50b2db465184f057",
     "python": "3.14.7",
     "node": "v26.5.0",
     "inline_script_syntax_exit_codes": [
@@ -140,5 +142,18 @@
     "source_test_or_help_process_matches": 0,
     "source_write_uncertainty": false,
     "original_published_head": "091592da12f28bb9a568b9ba0f668394b4bca4b1"
+  },
+  "historical_environment": {
+    "scope": "pre_recovery_original_reference_checkpoint",
+    "python": "3.13.5",
+    "node": "v22.16.0"
+  },
+  "independent_source_review": {
+    "review_head": "70765be17a28f3db539a636ffebcc89c5e548e93",
+    "return_ts": "1789600165.491269",
+    "verdict": "REQUEST_CHANGES",
+    "firm_blocker": "acceptance record carried two unqualified contradictory environment epochs",
+    "hardening_note": "three application focus call sites bypassed the shared connected-target selector",
+    "repair_state": "REPAIRED_IN_NEXT_CANDIDATE_AWAITING_EXACT_HEAD_REREVIEW"
   }
 }

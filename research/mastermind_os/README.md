@@ -60,7 +60,7 @@ python -m pytest research/mastermind_os/test_reference_workspace.py -q \
   -k 'presentation_model or test_reference_exists or test_csp_is_content_bound'
 ```
 
-Result for this source candidate: **13 passed**. The new model's intended RED was **11 failed** before implementation. Three targeted mutations were killed: duplicate relationship acceptance, disconnected focus-target selection, and removal of all edges. Both actual inline scripts pass Node syntax checking. Full collection is **52 cases: 13 source-only and 39 browser-dependent**. Browser cases remain unrun on this repaired candidate; no screenshots or visual acceptance.
+Result for this source candidate after independent-review repair: **15 passed**. The new model's intended RED was **11 failed** before implementation, and the later review regressions failed **2/2** before their fixes. Three targeted mutations were killed: duplicate relationship acceptance, disconnected focus-target selection, and removal of all edges. Both actual inline scripts pass Node syntax checking. Full collection is **54 cases: 15 source-only and 39 browser-dependent**. Browser cases remain unrun on this repaired candidate; no screenshots or visual acceptance.
 
 ## Real R2 integration, separate from this reference
 
@@ -70,6 +70,6 @@ Claude8 confirmed consumption and relayed the review to the existing #704 native
 
 ## Native continuation recovery — 2026-09-16 22:09 UTC
 
-The same managed Studio workspace recovered with all six prepared file hashes intact and no remaining source-test/help process. The 13 source-only tests were rerun successfully (exit 0) with native Python 3.14.7 / Node v26.5.0. Both exact inline scripts also passed native Node syntax checking. The earlier native timeouts remain historical failed attempts; their outcome was not silently promoted. No browser-dependent case was selected or retried.
+The same managed Studio workspace recovered with all six prepared file hashes intact and no remaining source-test/help process. The original 13 source-only tests were rerun successfully (exit 0) with native Python 3.14.7 / Node v26.5.0. After the independent review, two additional regressions verify current-vs-historical environment qualification and centralized connected-target focus; the current source-only envelope is 15 tests. Both exact inline scripts also passed native Node syntax checking. The earlier native timeouts remain historical failed attempts; their outcome was not silently promoted. No browser-dependent case was selected or retried.
 
 Current procedure pin is `5ee11ab1e993616f3568cfca4069cb21fa61fd8f`; required procedure blobs are unchanged. The existing #704 writer returned `c09672fc50a5895e7552936d3e585455424d85ae`; follow-through review `5228672592` still requires total/currentness-safe posture, no submission availability from a raw arm bit, and a genuinely bounded existing-owner reader. The reference is not that live implementation and remains Draft/HOLD.
