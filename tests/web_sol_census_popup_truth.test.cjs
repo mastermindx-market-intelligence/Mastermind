@@ -43,6 +43,7 @@ function mount(next, options = {}) {
   const context = {MMX_WEB_SOL_INSTANCE: config,
     document: {getElementById(id) { assert.ok(nodes[id]); return nodes[id]; },
     createElement: tag => new Element(tag)}, chrome: {runtime: {
+      id: options.runtimeId || 'kmpbpccecbofdnhpcmjogofgmdodpnko',
       getManifest() { return {version: options.version || '0.2.0'}; },
       sendMessage(message) {
         assert.equal(JSON.stringify(message), JSON.stringify({kind:'MMX_WEB_SOL_CENSUS_REFRESH'}));
@@ -114,7 +115,7 @@ test('coherent profile package declaration is visible without claiming live nati
   assert.match(ui.nodes.adapter.textContent, /protocol 1/);
   assert.match(ui.nodes.adapter.textContent, /capability cccccccc…/);
   assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
-  assert.doesNotMatch(ui.nodes.adapter.textContent, /instanceId|nativeHost|com\.mastermind/);
+  assert.doesNotMatch(ui.nodes.adapter.textContent, /instanceId|nativeHost|com\.mastermind|kmpbpcce/);
 });
 test('package version disagreement is surfaced without pretending the native host was observed', async () => {
   const ui = await settled(mount(() => snapshot([]), {
@@ -135,6 +136,15 @@ test('invalid profile package declaration fails closed without echoing malformed
   assert.match(ui.nodes.adapter.className, /warning/);
   assert.match(ui.nodes.adapter.textContent, /Profile package declaration: invalid/);
   assert.doesNotMatch(ui.nodes.adapter.textContent, /PRIVATE_SENTINEL/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
+});
+test('wrong running extension identity invalidates the profile package declaration', async () => {
+  const ui = await settled(mount(() => snapshot([]), {
+    runtimeId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  }));
+  assert.match(ui.nodes.adapter.className, /warning/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: invalid/);
+  assert.doesNotMatch(ui.nodes.adapter.textContent, /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|kmpbpcce/);
   assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
 });
 test('missing profile package declaration stays unavailable rather than looking healthy', async () => {
