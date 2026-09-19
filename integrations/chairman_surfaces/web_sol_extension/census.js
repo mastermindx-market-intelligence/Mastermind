@@ -72,6 +72,10 @@
   }
   function renderAdapterContract() {
     const node = byId("adapter");
+    // census.html is source-fenced to carry this auxiliary diagnostic node, but
+    // the read-only census must remain usable in older/synthetic DOM harnesses.
+    // Missing presentation space is never upgraded into positive package evidence.
+    if (!node) return;
     const raw = globalThis.MMX_WEB_SOL_INSTANCE;
     const manifestVersion = extensionVersion();
     const boundary = "Configuration evidence only; not a live native-host handshake.";
