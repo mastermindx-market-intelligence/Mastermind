@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import plistlib
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -86,6 +87,31 @@ def build_subscription_worker_config(
     return value
 
 
+def _render_held_worker_plist(
+    template_bytes: bytes,
+    *,
+    slot: Any,
+    paths: Mapping[str, Path],
+    release_root: Path,
+) -> bytes:
+    rendered = render_worker_plist(
+        template_bytes,
+        slot=slot,
+        paths=paths,
+        release_root=release_root,
+    )
+    try:
+        value = plistlib.loads(rendered)
+    except plistlib.InvalidFileException as exc:
+        raise SubscriptionBrokerDefinitionError("PLIST_RENDER_INVALID") from exc
+    if not isinstance(value, dict):
+        raise SubscriptionBrokerDefinitionError("PLIST_RENDER_INVALID")
+    value["RunAtLoad"] = False
+    value["KeepAlive"] = False
+    value["Disabled"] = True
+    return plistlib.dumps(value, fmt=plistlib.FMT_XML, sort_keys=False)
+
+
 def build_definitions(
     *,
     release_root: Path,
@@ -108,7 +134,7 @@ def build_definitions(
             allowed_supplementary_gids=supplementary_gids[slot.slot_id],
         )
         config_bytes = canonical_json(config, pretty=True)
-        plist_bytes = render_worker_plist(
+        plist_bytes = _render_held_worker_plist(
             template_bytes,
             slot=slot,
             paths=paths,

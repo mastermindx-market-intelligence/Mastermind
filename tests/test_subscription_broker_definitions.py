@@ -48,7 +48,7 @@ def test_definitions_render_two_held_v5_brokers_without_capacity_authority() -> 
         "capacity_capability_id",
         "capability_generation",
         "account_label",
-        "credential",
+        "provider-key",
         "api_key",
         "auth.json",
     ):
@@ -100,8 +100,9 @@ def test_plists_bind_exact_principals_and_remain_definitions_only() -> None:
             "--config",
             rows[slot_id]["config_path"],
         ]
-        assert value.get("RunAtLoad") is not True
-        assert value.get("KeepAlive") is not True
+        assert value.get("RunAtLoad") is False
+        assert value.get("KeepAlive") is False
+        assert value.get("Disabled") is True
         assert rows[slot_id]["launchd_state"] == "disabled_unloaded"
         assert rows[slot_id]["worker_execution"] == "held_for_real_canary"
         assert rows[slot_id]["autonomous_allowed"] is False
