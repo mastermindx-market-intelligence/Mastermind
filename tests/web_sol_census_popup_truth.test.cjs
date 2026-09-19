@@ -67,14 +67,60 @@ test('healthy discarded duplicate rows retain measured counts and unknown model'
   assert.match(ui.nodes.scope.textContent, /1 distinct observed conversation locators/);
   assert.equal(ui.nodes.rows.children.length, 2);
   assert.match(ui.nodes.rows.textContent, /Served model: unknown/);
+  assert.match(ui.nodes.rows.textContent, /Model\/effort telemetry is not implemented in census v1/);
+  assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
   assert.match(ui.nodes.timestamp.textContent, /^Captured /);
 });
 test('successful empty inventory remains distinguishable as measured zero', async () => {
   const ui = await settled(mount(() => snapshot([])));
   assert.deepEqual(metrics(ui), ['0', '0', '0', '0']);
-  assert.match(ui.nodes.scope.textContent, /0 sampled/);
+  assert.match(ui.nodes.scope.textContent, /0\/0 document probes sampled/);
   assert.match(ui.nodes.rows.textContent, /No normal ChatGPT tabs were sampled/);
   assert.doesNotMatch(ui.nodes.status.className, /error|warning/);
+});
+test('complete inventory with unreachable content probes is visibly degraded and actionable', async () => {
+  const row = {...tab(1), discarded: false};
+  const boundary = {
+    query: async () => structuredClone([row]),
+    get: async () => structuredClone(row),
+    sendMessage: async () => { throw Error('PRIVATE_SENTINEL'); },
+  };
+  const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId), {tabs: boundary}));
+  assert.match(ui.nodes.status.className, /warning/);
+  assert.match(ui.nodes.status.textContent, /Document probes unreachable \(0\/1\)/);
+  assert.match(ui.nodes.status.textContent, /reload one affected ChatGPT tab/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /PRIVATE_SENTINEL/);
+  assert.match(ui.nodes.scope.textContent, /0\/1 document probes sampled/);
+  assert.match(ui.nodes.rows.textContent, /Content probe unreachable/);
+  assert.match(ui.nodes.rows.textContent, /reload it once and refresh/);
+});
+test('partial document-probe failure stays distinct from healthy inventory coverage', async () => {
+  const rows = [
+    {...tab(1, '11111111-1111-4111-8111-111111111111'), discarded: false},
+    {...tab(2, '22222222-2222-4222-8222-222222222222'), discarded: false},
+  ];
+  const boundary = {
+    query: async () => structuredClone(rows),
+    get: async id => structuredClone(rows.find(row => row.id === id)),
+    sendMessage: async (id, request) => {
+      if (id === 2) throw Error('SECOND_TAB_PRIVATE_FAILURE');
+      const fingerprint = createHash('sha256').update(rows[0].url).digest('hex');
+      assert.equal(request.expected_conversation_fingerprint, fingerprint);
+      return {kind: 'MMX_WEB_SOL_PROBE', conversation_fingerprint: fingerprint,
+        observation: {schema: 'mastermind.web_sol_surface_probe.v1', target_present: true,
+          exact_conversation_loaded: true, page_responsive: true, document_ready_state: 'complete',
+          visibility: 'visible', composer_available: true, generation_state: 'idle',
+          auth_required: false, provider_error_present: false}};
+    },
+  };
+  const ui = await settled(mount((api, instanceId) => core.collect(api, instanceId), {tabs: boundary}));
+  assert.match(ui.nodes.status.className, /warning/);
+  assert.match(ui.nodes.status.textContent, /Document probe coverage degraded \(1\/2\); 1 tab could not be sampled/);
+  assert.match(ui.nodes.status.textContent, /Unknown cue state is not evidence/);
+  assert.doesNotMatch(ui.nodes.status.textContent, /SECOND_TAB_PRIVATE_FAILURE/);
+  assert.match(ui.nodes.scope.textContent, /1\/2 document probes sampled/);
+  assert.match(ui.nodes.rows.children[0].textContent, /Cue sampled/);
+  assert.match(ui.nodes.rows.children[1].textContent, /Content probe unreachable/);
 });
 for (const [label, input, options] of [
   ['unconfigured', [], {unconfigured: true}], ['query failure', [], {fail: true}],
@@ -82,7 +128,7 @@ for (const [label, input, options] of [
 ]) test(`${label} never renders unmeasured counts as zero`, async () => {
   const ui = await settled(mount(() => snapshot(input, options)));
   assert.deepEqual(metrics(ui), ['—', '—', '—', '—']);
-  assert.doesNotMatch(ui.nodes.scope.textContent, /0 sampled|0 distinct/);
+  assert.doesNotMatch(ui.nodes.scope.textContent, /0\/0 document probes sampled|0 distinct/);
   assert.match(ui.nodes.rows.textContent, /not evidence that no sessions exist/);
   assert.match(ui.nodes.timestamp.textContent, /^Attempted /);
 });
@@ -185,6 +231,7 @@ test('selected model and effort remain explicitly unverified in each actual rend
   for (const row of ui.nodes.rows.children) {
     assert.match(row.textContent, /Unverified \/ Unverified/);
     assert.match(row.textContent, /Served model: unknown/);
+    assert.match(row.textContent, /Model\/effort telemetry is not implemented in census v1/);
   }
 });
 test('positive generation and disagreeing duplicate cues reach the real controller from the real collector', async () => {
