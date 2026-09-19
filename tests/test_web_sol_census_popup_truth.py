@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE_TEST = ROOT / "tests" / "web_sol_census_popup_truth.test.cjs"
-EXPECTED_NODE_CASES = 20
+EXPECTED_NODE_CASES = 25
 NODE_TIMEOUT_SECONDS = 20
 MAX_TAP_BYTES = 128 * 1024
 
@@ -64,10 +64,15 @@ def _run_popup_suite() -> None:
 
 
 def _good_tap() -> str:
-    cases = "\n".join(f"ok {number} - case {number}" for number in range(1, 21))
+    cases = "\n".join(
+        f"ok {number} - case {number}"
+        for number in range(1, EXPECTED_NODE_CASES + 1)
+    )
     return (
-        f"TAP version 13\n{cases}\n1..20\n# tests 20\n# suites 0\n"
-        "# pass 20\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n"
+        f"TAP version 13\n{cases}\n1..{EXPECTED_NODE_CASES}\n"
+        f"# tests {EXPECTED_NODE_CASES}\n# suites 0\n"
+        f"# pass {EXPECTED_NODE_CASES}\n# fail 0\n"
+        "# cancelled 0\n# skipped 0\n# todo 0\n"
     )
 
 
@@ -76,7 +81,7 @@ def _completed(stdout: str, *, returncode: int = 0, stderr: str = "") -> subproc
 
 
 
-def test_node_receipt_accepts_complete_twenty_case_success() -> None:
+def test_node_receipt_accepts_complete_expected_case_success() -> None:
     _assert_node_result(_completed(_good_tap()))
 
 
@@ -85,18 +90,30 @@ def test_node_receipt_accepts_complete_twenty_case_success() -> None:
     _completed(_good_tap(), returncode=-9),
     _completed(""),
     _completed("TAP version 13\n1..0\n# tests 0\n# suites 0\n# pass 0\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n"),
-    _completed(_good_tap().replace("# tests 20\n", "")),
-    _completed(_good_tap() + "# tests 20\n"),
-    _completed(_good_tap().replace("# pass 20", "# pass 19")),
+    _completed(_good_tap().replace(f"# tests {EXPECTED_NODE_CASES}\n", "")),
+    _completed(_good_tap() + f"# tests {EXPECTED_NODE_CASES}\n"),
+    _completed(_good_tap().replace(
+        f"# pass {EXPECTED_NODE_CASES}",
+        f"# pass {EXPECTED_NODE_CASES - 1}",
+    )),
     _completed(_good_tap().replace("# fail 0", "# fail 1")),
     _completed(_good_tap().replace("# cancelled 0", "# cancelled 1")),
     _completed(_good_tap().replace("# skipped 0", "# skipped 1")),
     _completed(_good_tap().replace("# todo 0", "# todo 1")),
     _completed(_good_tap().replace("# suites 0", "# suites 1")),
-    _completed(_good_tap().replace("1..20", "1..19")),
-    _completed(_good_tap() + "1..20\n"),
-    _completed(_good_tap().replace("ok 20 - case 20\n", "")),
-    _completed(_good_tap().replace("ok 20 - case 20", "ok 19 - duplicate")),
+    _completed(_good_tap().replace(
+        f"1..{EXPECTED_NODE_CASES}",
+        f"1..{EXPECTED_NODE_CASES - 1}",
+    )),
+    _completed(_good_tap() + f"1..{EXPECTED_NODE_CASES}\n"),
+    _completed(_good_tap().replace(
+        f"ok {EXPECTED_NODE_CASES} - case {EXPECTED_NODE_CASES}\n",
+        "",
+    )),
+    _completed(_good_tap().replace(
+        f"ok {EXPECTED_NODE_CASES} - case {EXPECTED_NODE_CASES}",
+        f"ok {EXPECTED_NODE_CASES - 1} - duplicate",
+    )),
     _completed(_good_tap().replace("ok 1 - case 1\n", "not ok 1 - case 1\n")),
     _completed(_good_tap().replace("ok 1 - case 1\n", "ok 1 - case 1 # SKIP\n")),
     _completed(_good_tap().replace("ok 1 - case 1\n", "ok 1 - case 1 # TODO\n")),
