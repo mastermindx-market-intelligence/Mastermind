@@ -21,7 +21,8 @@ Advance the highest-leverage unfinished capability through the real critical pat
 
 * the requested outcome is production-proven at the level the commission requires; or
 * every materially useful in-scope lane is stopped by a genuine authority, effect-uncertainty,
-  platform, or external-human boundary.
+  platform, or external-human boundary; or
+* Step 8 permits a verified CHECKPOINTED_CONTINUATION while the mission remains incomplete.
 
 A detailed status artifact is not a substitute for capability advancement. A blocker on one lane is
 not permission to end the whole turn while another in-scope critical-path lane remains executable.
@@ -245,6 +246,26 @@ execution may continue only inside its existing grant; unresolved judgment stays
 owner or successor. Exact parent consumption must be proven, not inferred from delivery or a tab name.
 No supported continuation means an honest held result, not a fabricated wake.
 
+Maintain one cumulative working checkpoint, not a chain of historical handoffs. In addition to
+material results, update it before long/effectful/high-output operations. Do not defer all persistence
+to the final response. Preserve mission/scope and authority refs; exact operation/carrier/source
+identities; last verified effect; accepted work and DO_NOT_REDO; rejected approaches and why;
+research hypotheses and falsifiers; active children/returns; unresolved effects; evidence refs;
+and the exact next action. A missing field stays explicitly unknown rather than being invented.
+
+The working checkpoint belongs to existing Agent OS/Runtime/artifact owners. It is distinct from an
+immutable transfer capsule: do not overwrite a prepared capsule for the same target Attempt or
+create a second latest-state store. A new chat does not transfer a lease or source custody. Follow
+existing same-carrier reconciliation and successor admission before resuming a STARTed operation.
+
+Separate the requested work profile from observed model/mode and tool generation. A user report is
+not platform attestation. Unobserved hidden reasoning budgets and unexposed deadlines remain UNKNOWN.
+Measure only what the existing owner can observe: route-local observed payload is not total ChatGPT context.
+There is no fixed 20-minute Web deadline in this procedure, no invented remaining-token counter and
+no mandatory minimum Pro run. Where a real execution deadline exists, preserve recovery reserve before
+a new unit; otherwise use bounded units and proactive persistence. A server reminder cannot interrupt
+hidden reasoning between tool calls. Keep substantive productive Pro work running while safe.
+
 Measure accepted capability progress per Pro turn, worker spend per accepted outcome, avoidable
 repair, review backlog, and completion/continuation reliability through existing evaluation and evidence owners; no new telemetry store.
 Separate successful early completion from premature stopping and platform interruption. Record the
@@ -271,6 +292,31 @@ Before ending a substantial active-execution turn, classify the state into exact
   canonical owner, with a lawful return/wake path armed; local turn continuation would add no useful
   work until that result arrives.
 
+* `CHECKPOINTED_CONTINUATION` — a procedural turn disposition, not an Executive Job/Attempt status.
+  The mission is explicitly incomplete (`MISSION_COMPLETE: false`). This is permitted only when
+  all of the following hold:
+  1. A specific chunk boundary or observed continuity risk justifies ending this turn. A completed
+     plan or arbitrary time target is insufficient; elapsed time alone never satisfies this gate.
+  2. The current cumulative checkpoint has a verified persistence receipt/readback from its existing
+     owner, with an exact immutable revision or digest. It covers all material effects through this
+     boundary, not merely an older snapshot.
+  3. Mission/scope, authority, source identities, accepted/rejected work, pending effects, active
+     children/returns, evidence and unfinished obligations remain recoverable.
+  4. An exact next action and intended resume surface are supplied; no autonomous wake is claimed
+     without an actually proven return path. A fresh chat is a presentation change, not admission.
+  5. Source custody, same-carrier reconciliation and successor gates remain intact. An unresolved
+     effect must remain explicitly frozen, never silently transferred or retried.
+
+A checkpoint is not itself a reason to stop. A permitted continuation protects the remaining mission;
+it never makes a partial delivery PROVEN_OUTCOME. A genuinely safe next unit should continue unless
+one of these verified stop/continuation conditions applies.
+
+An ambiguous checkpoint-write response is EFFECT_UNKNOWN on that same write carrier. Reconcile the
+exact object/revision before retry. A chat-only or local scratch note is not a durable checkpoint.
+If no authorized persistent path is reachable, avoid further effects that enlarge the unrecoverable
+gap; leave an emergency recovery note under the genuine platform/gate disposition, not a fabricated
+CHECKPOINTED_CONTINUATION. Such a note neither proves persistence nor changes the effect state.
+
 If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**. Select the highest-leverage
 unblocked dependency and continue execution.
 
@@ -290,6 +336,9 @@ BLOCKED_LANES_AND_REASON
 DURABLE_EXECUTION_OR_RETURN_REF (if any)
 EXACT_NEXT_ACTION
 WHAT_MUST_NOT_BE_REDONE
+CHECKPOINT_REVISION_AND_VERIFICATION (for continuation)
+MISSION_COMPLETE: false (for continuation)
+INTENDED_RESUME_SURFACE (for continuation)
 ```
 
 Use `CLOSEOUT.md` after material implementation, proof, ruling, reconciliation or handoff so a fresh
@@ -361,7 +410,8 @@ A substantial CEO continuation passes this skill when:
 * effect uncertainty in one lane does not become a global stop while a useful lane is provably
   independent of that uncertainty;
 * no background continuation is claimed without a real durable owner and return path;
-* Sol never finalizes while the truthful state is `MORE_WORK_EXISTS`;
+* Sol never finalizes while the truthful state is `MORE_WORK_EXISTS`; a verified
+  CHECKPOINTED_CONTINUATION must independently satisfy every Step 8 condition;
 * the final stop classification and exact next action are recoverable by a fresh session; and
 * no new lifecycle, queue, retry, memory, permission, or control plane was created to enforce this
   procedure.
