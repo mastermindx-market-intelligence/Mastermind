@@ -40,6 +40,7 @@ from integrations.slack_agent_dialogue.engine import (
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
 from integrations.slack_agent_dialogue.service import (
     CONTROL_VERSION_V2,
+    EXACT_SEND_PROTOCOL,
     ERROR_CODES as DIALOGUE_SERVICE_ERROR_CODES,
     DialogueServiceError,
     call_service,
@@ -460,6 +461,7 @@ class WorkspaceCandidateReturnGateway:
                 "context": context,
                 "thread_ts": current.thread_ts,
                 "message": message,
+                "send_protocol": EXACT_SEND_PROTOCOL,
             },
         }
         try:
