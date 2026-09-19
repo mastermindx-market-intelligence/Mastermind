@@ -82,7 +82,7 @@ export const PAPER_EDIT_TOOL = Object.freeze({
   title: 'Edit Paper Design',
   description:
     'Apply one explicitly requested Paper design edit through the guarded adapter. ' +
-    'Requires the exact inspected snapshot and a stable operation id. The adapter refuses destructive node deletion, ' +
+    'Requires the exact inspected snapshot and a stable operation id. The adapter refuses standalone node-deletion tools, ' +
     'native host export, file-open transitions and token deletion. A lost or ambiguous response is reported as EFFECT_UNKNOWN with retry_allowed=false; the gateway provides no replay path.',
   inputSchema: {
     type: 'object',
@@ -100,7 +100,7 @@ export const PAPER_EDIT_TOOL = Object.freeze({
     readOnlyHint: false,
     destructiveHint: true,
     idempotentHint: false,
-    openWorldHint: false,
+    openWorldHint: true,
   },
   _meta: { 'private-studio-mcp/gateway': true, 'mastermind/paper-design': true },
 });

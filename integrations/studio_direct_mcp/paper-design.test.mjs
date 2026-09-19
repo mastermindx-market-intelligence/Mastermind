@@ -41,6 +41,7 @@ test('paper tools expose three reads plus one explicit mutation', () => {
   assert.equal(PAPER_DESIGN_TOOLS[3].annotations.readOnlyHint, false);
   assert.equal(PAPER_DESIGN_TOOLS[3].annotations.idempotentHint, false);
   assert.equal(PAPER_DESIGN_TOOLS[3].annotations.destructiveHint, true);
+  assert.equal(PAPER_DESIGN_TOOLS[3].annotations.openWorldHint, true);
 });
 
 test('paper config is closed, absolute and digest pinned', () => {
