@@ -53,7 +53,7 @@ The discovery call is evidence about that exact surface and moment. It is not a 
 - Lifecycle, Job, Attempt, Worker, Event, admission, and completion questions route to Executive OS.
 - Organizational workstreams, decisions, discoveries, and handoffs route to Agent OS.
 - Protected source, PR, review, and CI questions route to GitHub.
-- Selected-project reads or actions route to the current Workbench capability; Workbench Read does not imply Workbench Action. Any action requires the owner-admitted execution mode, authenticated subject or approved native context, and the exact current session generation or Executive Job/Attempt/Worker generation before effect.
+- Selected-project reads or actions route to the current Workbench capability; Workbench Read does not imply Workbench Action. Any action requires the owner-admitted execution mode, authenticated subject or approved native context, and the exact current session generation or Executive Job/Attempt/Worker generation before effect. Mode labels never grant authority: ATTENDED_WEB_OPERATOR must bind the current RuntimeBinding/Web-session owner, NATIVE_OPERATOR must bind the approved native-session context owner, and BOUNDED_WORKER must bind the Executive Job/Attempt/Worker owner.
 - Local machine and process work routes to Studio Direct and the existing host/Fleet owner.
 - Governed worker browsing routes to Worker Browser.
 - Exact ChatGPT observation or actuation routes through Web-Sol plus a current RuntimeBinding; never select a target by title, recency, or newest tab.

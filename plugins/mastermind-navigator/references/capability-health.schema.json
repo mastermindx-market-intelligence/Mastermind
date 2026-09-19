@@ -146,6 +146,13 @@
         },
         "target_ref": {
           "$ref": "#/$defs/nullableRef"
+        },
+        "authority_owner": {
+          "enum": [
+            "RuntimeBinding",
+            "approved-native-session-context",
+            "Executive OS Job/Attempt/Worker"
+          ]
         }
       }
     },
@@ -1615,12 +1622,20 @@
         {
           "properties": {
             "execution_mode": {
-              "enum": [
-                "ATTENDED_WEB_OPERATOR",
-                "NATIVE_OPERATOR"
-              ]
+              "const": "ATTENDED_WEB_OPERATOR"
             },
             "project_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority_owner": {
+              "const": "RuntimeBinding"
+            },
+            "authority_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority_generation": {
               "type": "string",
               "minLength": 1
             },
@@ -1631,6 +1646,29 @@
             "runtime_generation": {
               "type": "string",
               "minLength": 1
+            }
+          },
+          "required": [
+            "execution_mode",
+            "project_ref",
+            "authority_owner",
+            "authority_ref",
+            "authority_generation",
+            "session_ref",
+            "runtime_generation"
+          ]
+        },
+        {
+          "properties": {
+            "execution_mode": {
+              "const": "NATIVE_OPERATOR"
+            },
+            "project_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority_owner": {
+              "const": "approved-native-session-context"
             },
             "authority_ref": {
               "type": "string",
@@ -1639,15 +1677,24 @@
             "authority_generation": {
               "type": "string",
               "minLength": 1
+            },
+            "session_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runtime_generation": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
             "execution_mode",
             "project_ref",
-            "session_ref",
-            "runtime_generation",
+            "authority_owner",
             "authority_ref",
-            "authority_generation"
+            "authority_generation",
+            "session_ref",
+            "runtime_generation"
           ]
         },
         {
@@ -1659,6 +1706,9 @@
               "type": "string",
               "minLength": 1
             },
+            "authority_owner": {
+              "const": "Executive OS Job/Attempt/Worker"
+            },
             "authority_ref": {
               "type": "string",
               "minLength": 1
@@ -1671,6 +1721,7 @@
           "required": [
             "execution_mode",
             "project_ref",
+            "authority_owner",
             "authority_ref",
             "authority_generation"
           ]

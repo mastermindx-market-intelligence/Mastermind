@@ -72,8 +72,9 @@
         "expiry and revocation state",
         "current selected-project binding"
       ],
-      "attended_mode_owner": "current session and RuntimeBinding owners",
-      "worker_mode_owner": "Executive OS Job/Attempt/Worker"
+      "attended_mode_owner": "RuntimeBinding plus authenticated Web-session owner",
+      "worker_mode_owner": "Executive OS Job/Attempt/Worker",
+      "native_mode_owner": "approved native-session context owner"
     },
     {
       "capability_class": "local_machine_process",

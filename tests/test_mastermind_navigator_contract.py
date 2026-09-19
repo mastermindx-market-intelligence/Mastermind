@@ -166,7 +166,8 @@ def test_owner_routing_covers_every_required_fresh_session_case() -> None:
         "expiry and revocation state",
         "current selected-project binding",
     ]
-    assert project_route["attended_mode_owner"] == "current session and RuntimeBinding owners"
+    assert project_route["attended_mode_owner"] == "RuntimeBinding plus authenticated Web-session owner"
+    assert project_route["native_mode_owner"] == "approved native-session context owner"
     assert project_route["worker_mode_owner"] == "Executive OS Job/Attempt/Worker"
     assert by_class["exact_chatgpt_actuation"]["binding_requirements"] == [
         "authenticated subject",
@@ -599,14 +600,33 @@ def test_proven_live_requires_route_specific_bindings() -> None:
         "execution_mode": "ATTENDED_WEB_OPERATOR",
         "session_ref": "conversation-1",
         "runtime_generation": "runtime-generation-1",
+        "authority_owner": "RuntimeBinding",
         "authority_ref": "runtime-binding:conversation-1",
         "authority_generation": "policy-generation-1",
     })
     validator.validate(attended)
 
+    native = packet_for("selected_project_action", "Workbench", "workbench")
+    native["surfaces"][0]["binding"].update({
+        "execution_mode": "NATIVE_OPERATOR",
+        "session_ref": "native-session-1",
+        "runtime_generation": "native-generation-1",
+        "authority_owner": "RuntimeBinding",
+        "authority_ref": "runtime-binding:conversation-1",
+        "authority_generation": "policy-generation-1",
+    })
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(native)
+    native["surfaces"][0]["binding"].update({
+        "authority_owner": "approved-native-session-context",
+        "authority_ref": "native-session-context:native-session-1",
+    })
+    validator.validate(native)
+
     worker = packet_for("selected_project_action", "Workbench", "workbench")
     worker["surfaces"][0]["binding"].update({
         "execution_mode": "BOUNDED_WORKER",
+        "authority_owner": "Executive OS Job/Attempt/Worker",
         "authority_ref": "JOB:1/ATTEMPT:1/WORKER:1",
         "authority_generation": "worker-generation-1",
     })
@@ -755,7 +775,9 @@ def test_workbench_cases_fence_attended_and_worker_generations() -> None:
         if case["id"] == "selected-project-action-to-workbench"
     )
     assert "owner-admitted execution mode" in selected["owner_native_action"]
-    assert "exact current session or Executive Job/Attempt/Worker generation" in selected["owner_native_action"]
+    assert "RuntimeBinding for attended Web" in selected["owner_native_action"]
+    assert "approved native-session context for native operator" in selected["owner_native_action"]
+    assert "Executive Job/Attempt/Worker for bounded worker" in selected["owner_native_action"]
 
 
 def test_domain_overlay_visibility_requires_declared_overlay_and_authorization_evidence() -> None:
