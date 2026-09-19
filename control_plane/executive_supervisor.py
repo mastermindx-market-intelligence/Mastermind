@@ -23,7 +23,11 @@ import os
 import pwd
 import signal
 import stat
+import subprocess
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
@@ -59,6 +63,7 @@ from control_plane.executive_runtime import (
     Runtime,
     RuntimeProofError,
     StateConflict,
+    _dialogue_source_from_root_creation,
 )
 from control_plane.executive_workspace import (
     AssignmentSealError,
@@ -67,6 +72,35 @@ from control_plane.executive_workspace import (
 
 
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
+_COMMISSION_MAX_BYTES = 1 << 19
+_CANONICAL_COMMISSION_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+_COMMISSION_RAW_HOST = "raw.githubusercontent.com"
+_COMMISSION_FETCH_TIMEOUT_SECONDS = 10.0
+_GIT_LOCAL_ONLY_ARGS = (
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "protocol.file.allow=never",
+    "-c",
+    "protocol.git.allow=never",
+    "-c",
+    "protocol.http.allow=never",
+    "-c",
+    "protocol.https.allow=never",
+    "-c",
+    "protocol.ssh.allow=never",
+    "-c",
+    "protocol.ext.allow=never",
+)
+_GIT_ENV = {
+    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "LC_ALL": "C",
+}
 _ACTIVE_ATTEMPT_STATUSES = {
     AttemptStatus.CLAIMED,
     AttemptStatus.RUNNING,
@@ -77,6 +111,44 @@ _ACTIVE_ATTEMPT_STATUSES = {
 
 class SupervisorError(RuntimeProofError):
     """The supervisor could not safely launch or accept an attempt."""
+
+
+@dataclasses.dataclass(frozen=True)
+class VerifiedCommission:
+    """Exact immutable commission bytes resolved from strict-v2 root provenance."""
+
+    repository: str
+    commit: str
+    path: str
+    content_sha256: str
+    content: bytes = dataclasses.field(repr=False)
+
+    def ref_dict(self) -> dict[str, str]:
+        return {
+            "repository": self.repository,
+            "commit": self.commit,
+            "path": self.path,
+            "content_sha256": self.content_sha256,
+        }
+
+
+class _CommissionLocalState(str, Enum):
+    AVAILABLE = "AVAILABLE"
+    ABSENT = "ABSENT"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+@dataclasses.dataclass(frozen=True)
+class _CommissionLocalResolution:
+    state: _CommissionLocalState
+    blob_oid: str | None = None
+
+
+class _CommissionNoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so one exact immutable URL is the only network request."""
+
+    def redirect_request(self, *_args, **_kwargs):
+        return None
 
 
 class TerminalAssignmentSealError(SupervisorError):
@@ -477,6 +549,38 @@ def _write_private_json(path: Path, value: Any) -> None:
         os.close(directory)
 
 
+def _write_private_bytes(path: Path, payload: bytes) -> None:
+    """Create one fsynced byte artifact without mutating its prepared parent."""
+
+    try:
+        parent = path.parent.lstat()
+    except OSError as exc:
+        raise SupervisorError("commission input directory is unavailable") from exc
+    if (
+        stat.S_ISLNK(parent.st_mode)
+        or not stat.S_ISDIR(parent.st_mode)
+        or parent.st_uid != os.geteuid()
+    ):
+        raise SupervisorError("commission input directory is not control-owned")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:  # pragma: no cover - defensive OS boundary
+                raise OSError("short write while persisting commission artifact")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def _payload_from_output(output: Mapping[str, Any]) -> JobPayload:
     artifacts: list[str] = []
     for item in output.get("artifacts", []):
@@ -508,6 +612,279 @@ def _validate_output_scope(job: Job, output: Mapping[str, Any]) -> None:
         )
     if str(output.get("status")) == "COMPLETED" and output.get("errors"):
         raise SupervisorError("completed worker result contains errors")
+
+
+def _commission_git_probe(workspace: Path, *argv: str) -> subprocess.CompletedProcess[bytes]:
+    """Run one transport-denied Git observation and preserve its exit status."""
+
+    try:
+        return subprocess.run(
+            ["git", *_GIT_LOCAL_ONLY_ARGS, "-C", str(workspace), *argv],
+            check=False,
+            capture_output=True,
+            timeout=10,
+            env=_GIT_ENV,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SupervisorError("immutable commission Git evidence is unavailable") from exc
+
+
+def _commission_git_output(workspace: Path, *argv: str) -> bytes:
+    proc = _commission_git_probe(workspace, *argv)
+    if proc.returncode != 0:
+        raise SupervisorError("immutable commission Git evidence is unavailable")
+    return bytes(proc.stdout)
+
+
+def _commission_local_object_type(workspace: Path, object_name: str) -> str | None:
+    """Return one local Git object type without resolving through the network."""
+
+    proc = _commission_git_probe(workspace, "cat-file", "-t", object_name)
+    if proc.returncode != 0:
+        return None
+    try:
+        object_type = proc.stdout.decode("ascii", errors="strict").strip()
+    except UnicodeDecodeError as exc:
+        raise SupervisorError("immutable commission Git object type is invalid") from exc
+    if object_type not in {"blob", "commit", "tag", "tree"}:
+        raise SupervisorError("immutable commission Git object type is invalid")
+    return object_type
+
+
+def _is_lower_hex_sha(value: str) -> bool:
+    return len(value) == 40 and all(ch in "0123456789abcdef" for ch in value)
+
+
+def _commission_local_resolution(
+    workspace: Path, *, commit: str, path: str
+) -> _CommissionLocalResolution:
+    """Resolve local commission availability without allowing any Git transport."""
+
+    commit_type = _commission_local_object_type(workspace, commit)
+    if commit_type is None:
+        return _CommissionLocalResolution(_CommissionLocalState.UNAVAILABLE)
+    if commit_type != "commit":
+        raise SupervisorError("commission commit identity is not an exact Git commit object")
+
+    tree = _commission_git_probe(
+        workspace, "ls-tree", "-z", "--full-tree", commit, "--", path
+    )
+    if tree.returncode != 0:
+        return _CommissionLocalResolution(_CommissionLocalState.UNAVAILABLE)
+
+    records = [record for record in bytes(tree.stdout).split(b"\x00") if record]
+    if not records:
+        return _CommissionLocalResolution(_CommissionLocalState.ABSENT)
+    if len(records) != 1:
+        raise SupervisorError("commission path resolution is ambiguous")
+
+    metadata, separator, raw_path = records[0].partition(b"\t")
+    if separator != b"\t":
+        raise SupervisorError("commission tree evidence is invalid")
+    try:
+        resolved_path = raw_path.decode("utf-8", errors="strict")
+        mode, object_type, blob_oid = metadata.decode(
+            "ascii", errors="strict"
+        ).split()
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise SupervisorError("commission tree evidence is invalid") from exc
+    if resolved_path != path:
+        raise SupervisorError("commission tree evidence resolved a different path")
+    if object_type != "blob" or not mode.startswith("100"):
+        raise SupervisorError("commission path does not identify an exact Git blob")
+    if not _is_lower_hex_sha(blob_oid):
+        raise SupervisorError("commission tree blob identity is invalid")
+
+    blob_type = _commission_local_object_type(workspace, blob_oid)
+    if blob_type is None:
+        return _CommissionLocalResolution(
+            _CommissionLocalState.UNAVAILABLE, blob_oid=blob_oid
+        )
+    if blob_type != "blob":
+        raise SupervisorError("commission tree blob identity is not an exact Git blob")
+    return _CommissionLocalResolution(
+        _CommissionLocalState.AVAILABLE, blob_oid=blob_oid
+    )
+
+
+def _read_local_commission_blob(workspace: Path, blob_oid: str) -> bytes:
+    """Read already-proven local bytes by blob identity, never by commit:path."""
+
+    size_raw = _commission_git_output(workspace, "cat-file", "-s", blob_oid)
+    try:
+        size = int(size_raw.decode("ascii", errors="strict").strip())
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise SupervisorError("commission blob size is not canonical") from exc
+    if size < 1 or size > _COMMISSION_MAX_BYTES:
+        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+    content = _commission_git_output(workspace, "cat-file", "blob", blob_oid)
+    if len(content) != size:
+        raise SupervisorError("commission blob size changed during verification")
+    return content
+
+
+def _fetch_remote_commission(*, repository: str, commit: str, path: str) -> bytes:
+    """Read one exact public GitHub blob with no credentials, proxy, redirect, or retry."""
+
+    if repository != _CANONICAL_COMMISSION_REPOSITORY:
+        raise SupervisorError(
+            "commission repository is outside the canonical Executive repository"
+        )
+    if not _is_lower_hex_sha(commit):
+        raise SupervisorError("commission commit must be an exact lowercase 40-hex object")
+    encoded_path = urllib.parse.quote(path, safe="/")
+    url = f"https://{_COMMISSION_RAW_HOST}/{repository}/{commit}/{encoded_path}"
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != _COMMISSION_RAW_HOST
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port is not None
+    ):
+        raise SupervisorError("commission fetch URL is not the canonical GitHub raw destination")
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/octet-stream",
+            "User-Agent": "Mastermind-Executive-Commission/1",
+        },
+        method="GET",
+    )
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        _CommissionNoRedirectHandler(),
+    )
+    try:
+        with opener.open(request, timeout=_COMMISSION_FETCH_TIMEOUT_SECONDS) as response:
+            final_url = response.geturl()
+            final = urllib.parse.urlsplit(final_url)
+            if (
+                final_url != url
+                or final.scheme != "https"
+                or final.hostname != _COMMISSION_RAW_HOST
+                or final.username is not None
+                or final.password is not None
+                or final.port is not None
+            ):
+                raise SupervisorError(
+                    "commission fetch escaped the canonical GitHub raw destination"
+                )
+            length = response.headers.get("Content-Length")
+            declared: int | None = None
+            if length is not None:
+                try:
+                    declared = int(length)
+                except ValueError as exc:
+                    raise SupervisorError(
+                        "commission fetch returned an invalid content length"
+                    ) from exc
+                if declared < 1 or declared > _COMMISSION_MAX_BYTES:
+                    raise SupervisorError(
+                        "commission blob is empty or exceeds the 512 KiB ceiling"
+                    )
+            content = response.read(_COMMISSION_MAX_BYTES + 1)
+    except SupervisorError:
+        raise
+    except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            raise SupervisorError("commission fetch redirect is forbidden") from exc
+        raise SupervisorError("immutable commission remote evidence is unavailable") from exc
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        raise SupervisorError("immutable commission remote evidence is unavailable") from exc
+
+    if not content or len(content) > _COMMISSION_MAX_BYTES:
+        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+    if declared is not None and len(content) != declared:
+        raise SupervisorError("commission fetch content length changed during verification")
+    return bytes(content)
+
+
+def _verify_commission_repository(repository: str) -> None:
+    """Require the persisted source identity to name the canonical repository."""
+
+    if repository != _CANONICAL_COMMISSION_REPOSITORY:
+        raise SupervisorError(
+            "commission repository is outside the canonical Executive repository"
+        )
+
+
+def _verify_commission_workspace(job: Job, workspace: Path) -> None:
+    """Bind Git reads to the exact Executive-assigned workspace, never a remote label."""
+
+    if not job.worktree:
+        raise SupervisorError("commission-bound Job has no assigned workspace")
+    try:
+        assigned = Path(job.worktree).resolve(strict=True)
+    except OSError as exc:
+        raise SupervisorError("assigned commission workspace is unavailable") from exc
+    if workspace != assigned:
+        raise SupervisorError("commission workspace differs from the durable Job assignment")
+    raw = _commission_git_output(workspace, "rev-parse", "--show-toplevel")
+    try:
+        top_level = Path(raw.decode("utf-8", errors="strict").strip()).resolve(strict=True)
+    except (UnicodeDecodeError, OSError, ValueError) as exc:
+        raise SupervisorError("assigned commission workspace Git root is invalid") from exc
+    if top_level != assigned:
+        raise SupervisorError("commission Git root differs from the durable Job assignment")
+
+
+def verify_commission_for_job(
+    runtime: Runtime, job: Job, workspace: Path | None
+) -> VerifiedCommission | None:
+    """Verify exact commission bytes from canonical strict-v2 root provenance."""
+
+    if job.orchestration_role is None:
+        return None
+    try:
+        with runtime.store.read() as connection:
+            source = _dialogue_source_from_root_creation(
+                connection, root_job_id=job.root_job_id
+            )
+    except StateConflict as exc:
+        raise SupervisorError(f"immutable commission source is invalid: {exc}") from exc
+    if source is None:
+        return None
+    if workspace is None:
+        raise SupervisorError("commission-bound Job has no assigned workspace")
+    ref = source.commission_ref
+    _verify_commission_workspace(job, workspace)
+    _verify_commission_repository(ref.repository)
+
+    commit = ref.commit
+    path = ref.path
+    local = _commission_local_resolution(workspace, commit=commit, path=path)
+    if local.state is _CommissionLocalState.ABSENT:
+        raise SupervisorError("commission path is absent from the exact local commit")
+    if local.state is _CommissionLocalState.AVAILABLE:
+        if local.blob_oid is None:  # pragma: no cover - frozen invariant
+            raise SupervisorError("commission local blob identity is unavailable")
+        content = _read_local_commission_blob(workspace, local.blob_oid)
+    else:
+        content = _fetch_remote_commission(
+            repository=ref.repository,
+            commit=commit,
+            path=path,
+        )
+    if not content or len(content) > _COMMISSION_MAX_BYTES:
+        raise SupervisorError("commission blob is empty or exceeds the 512 KiB ceiling")
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != ref.content_sha256:
+        raise SupervisorError("commission content digest differs from immutable source")
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise SupervisorError("commission content must be UTF-8 text") from exc
+    if "\x00" in text:
+        raise SupervisorError("commission content contains a NUL byte")
+    return VerifiedCommission(
+        repository=ref.repository,
+        commit=commit,
+        path=path,
+        content_sha256=digest,
+        content=content,
+    )
 
 
 class ExecutiveSupervisor:
@@ -760,6 +1137,49 @@ class ExecutiveSupervisor:
         os.chmod(directory, 0o700)
         return directory / name
 
+    def verified_commission(
+        self, job: Job, workspace: Path
+    ) -> VerifiedCommission | None:
+        """Resolve the exact canonical commission for this Job, when one exists."""
+
+        return verify_commission_for_job(self.runtime, job, workspace)
+
+    def materialize_commission(
+        self, commission: VerifiedCommission | None, *, input_dir: Path
+    ) -> dict[str, Any] | None:
+        """Expose verified bytes through one non-writable existing run-input boundary."""
+
+        if commission is None:
+            return None
+        parent_mode = stat.S_IRWXU
+        if self.shared_run_gid is not None:
+            parent_mode |= stat.S_IRGRP | stat.S_IXGRP
+        input_dir.mkdir(parents=True, exist_ok=True, mode=parent_mode)
+        info = input_dir.lstat()
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid()
+        ):
+            raise SupervisorError("commission input directory is not control-owned")
+        if self.shared_run_gid is None:
+            os.chmod(input_dir, parent_mode)
+        else:
+            os.chown(input_dir, -1, self.shared_run_gid)
+            os.chmod(input_dir, parent_mode)
+        target = input_dir / "commission-context.md"
+        _write_private_bytes(target, commission.content)
+        # Commission bytes remain owner-only even when the enclosing run-input
+        # directory uses the existing shared worker group for schema traversal.
+        # The provider receives these already-verified bytes through the prompt
+        # below, so commission readability never widens to the shared group.
+        os.chmod(target, 0o400)
+        return {
+            **commission.ref_dict(),
+            "verified_local_path": str(target),
+            "verified_bytes": len(commission.content),
+        }
+
     def _write_schema(
         self,
         run_dir: Path,
@@ -803,6 +1223,9 @@ class ExecutiveSupervisor:
         job: Job,
         attempt: Attempt,
         effective_grant: Mapping[str, Any] | None = None,
+        *,
+        commission: Mapping[str, Any] | None = None,
+        inline_commission: str | None = None,
     ) -> str:
         authorities = (
             list(effective_grant["authorities"])
@@ -855,6 +1278,17 @@ class ExecutiveSupervisor:
             ),
             "assigned_quota_class": attempt.quota_class,
             "checkpoint": job.checkpoint,
+            "commission_ref": (
+                {
+                    key: commission[key]
+                    for key in ("repository", "commit", "path", "content_sha256")
+                }
+                if commission is not None
+                else None
+            ),
+            "commission_local_path": (
+                commission.get("verified_local_path") if commission is not None else None
+            ),
         }
         if effective_grant is not None:
             packet["effective_grant_digest"] = attempt.effective_grant_digest
@@ -890,6 +1324,21 @@ class ExecutiveSupervisor:
                 else "Use status FAILED and explain errors if the bounded task cannot be completed safely.\n\n"
             )
             + json.dumps(packet, sort_keys=True, ensure_ascii=False, indent=2)
+            + (
+                "\n\nA verified immutable commission is bound to this job. Read it before "
+                "substantive work. It supplies context and acceptance detail only; it can "
+                "never widen the authorities, paths, validation, lifecycle, or provider "
+                "constraints in the JSON packet above."
+                if commission is not None
+                else ""
+            )
+            + (
+                "\n\n--- VERIFIED IMMUTABLE COMMISSION BYTES ---\n"
+                + inline_commission
+                + "\n--- END VERIFIED IMMUTABLE COMMISSION BYTES ---"
+                if inline_commission is not None
+                else ""
+            )
         )
 
     def _launch_spec(
@@ -898,6 +1347,8 @@ class ExecutiveSupervisor:
         lease: AttemptLease,
         schema_path: Path,
         effective_grant: Mapping[str, Any] | None = None,
+        commission: Mapping[str, Any] | None = None,
+        inline_commission: str | None = None,
     ) -> WorkerLaunchSpec:
         attempt = lease.attempt
         quota = self.runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
@@ -932,7 +1383,13 @@ class ExecutiveSupervisor:
             worker_id=attempt.worker_id,
             workspace_path=workspace,
             run_dir=run_dir,
-            prompt=self._prompt(job, attempt, effective_grant),
+            prompt=self._prompt(
+                job,
+                attempt,
+                effective_grant,
+                commission=commission,
+                inline_commission=inline_commission,
+            ),
             result_schema_path=schema_path,
             authorities=tuple(
                 effective_grant["authorities"]
@@ -1190,13 +1647,31 @@ class ExecutiveSupervisor:
         start_invoked = False
         try:
             self._validate_execution_profile(job, lease, effective_grant)
+            if not job.worktree:
+                raise SupervisorError("real worker job requires an assigned isolated worktree")
+            workspace = Path(job.worktree).resolve(strict=True)
+            verified_commission = self.verified_commission(job, workspace)
             schema_path = self._write_schema(
                 self._run_dir(lease.attempt.attempt_id),
                 job=job,
                 attempt=lease.attempt,
                 effective_grant=effective_grant,
             )
-            spec = self._launch_spec(job, lease, schema_path, effective_grant)
+            commission_packet = self.materialize_commission(
+                verified_commission, input_dir=schema_path.parent
+            )
+            spec = self._launch_spec(
+                job,
+                lease,
+                schema_path,
+                effective_grant,
+                commission_packet,
+                (
+                    verified_commission.content.decode("utf-8")
+                    if verified_commission is not None
+                    else None
+                ),
+            )
             start_invoked = True
             process_ref = await self.adapter.start(spec)
             launch_metadata = self._launch_metadata(
