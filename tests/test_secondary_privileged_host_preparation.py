@@ -184,6 +184,7 @@ def test_source_trust_allows_repo_symlinks_without_weakening_parent_custody() ->
 def test_identity_and_mode_values_are_consumed_without_new_topology_literals() -> None:
     text = _source()
     assert 'BOOTSTRAP_SOURCE="$SCRIPT_DIR/bootstrap-host.sh"' in text
+    assert "if (found != 1) exit 65" in text
     for key in ("CONTROL_USER", "CONTROL_GROUP", "CONTROL_UID", "CONTROL_GID", "OPS_GROUP", "OPS_GID"):
         assert f'{key}="$(bootstrap_value {key})"' in text
     assert 'CONFIG_MODE="400"' in text
