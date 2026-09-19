@@ -134,6 +134,27 @@ def test_popup_truth_actual_checkout_node_suite() -> None:
     _run_popup_suite()
 
 
+def test_popup_expected_extension_identity_is_derived_from_manifest_key() -> None:
+    import base64
+    import hashlib
+    import json
+
+    extension = ROOT / "integrations" / "chairman_surfaces" / "web_sol_extension"
+    manifest = json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
+    public_key = manifest.get("key")
+    assert isinstance(public_key, str) and public_key
+    der = base64.b64decode(public_key, validate=True)
+    digest = hashlib.sha256(der).digest()[:16]
+    alphabet = "abcdefghijklmnop"
+    expected = "".join(
+        alphabet[byte >> 4] + alphabet[byte & 15]
+        for byte in digest
+    )
+    source = (extension / "census.js").read_text(encoding="utf-8")
+    declaration = f'const EXPECTED_EXTENSION_ID = "{expected}";'
+    assert source.count(declaration) == 1
+
+
 def test_popup_wrapper_requires_node_instead_of_skipping(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shutil, "which", lambda _name: None)
     with pytest.raises(pytest.fail.Exception, match="Node.js is required"):
