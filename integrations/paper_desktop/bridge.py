@@ -23,7 +23,8 @@ from typing import Any
 VERSION = "0.1.0"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
-MAX_REQUEST = 512 * 1024
+MAX_REQUEST = 1 << 19
+PRIVATE_DIR_MODE = 0o700
 SUPPORTED_SERVER = ("paper-desktop", "0.5.11")
 SUPPORTED_CATALOG_SHA256 = "e295e78106615d4058f47f18b661c97b1832231ae77164c534ee42df62a11519"
 READ_TOOLS = frozenset({
@@ -73,7 +74,7 @@ def load_json(value: str | bytes) -> Any:
 
 
 def private_dir(path: Path) -> Path:
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.mkdir(mode=PRIVATE_DIR_MODE, parents=True, exist_ok=True)
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise Refusal("PRIVATE_DIRECTORY_REQUIRED")

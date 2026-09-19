@@ -12,6 +12,9 @@ from pathlib import Path
 import sys
 
 
+PRIVATE_DIR_MODE = 0o700
+
+
 def configs(python: str, server: str, allow_write: bool):
     args = [server] + (["--allow-write"] if allow_write else [])
     entry = {"command": python, "args": args}
@@ -56,27 +59,27 @@ def stage(destination: Path, python: str, allow_write=False):
     source = Path(__file__).resolve().parent
     # Only user-reviewed source is staged. No runtime files or provider credentials.
     files = {name: (source / name).read_bytes() for name in ("bridge.py", "mcp_server.py", "requirements-mcp.txt")}
-    (destination / "runtime").mkdir(mode=0o700, parents=True)
-    destination.chmod(0o700)
+    (destination / "runtime").mkdir(mode=PRIVATE_DIR_MODE, parents=True)
+    destination.chmod(PRIVATE_DIR_MODE)
     for name, data in files.items():
         path = destination / "runtime" / name
         path.write_bytes(data)
         path.chmod(0o600)
     config_root = destination / "client-configs"
-    config_root.mkdir(mode=0o700)
+    config_root.mkdir(mode=PRIVATE_DIR_MODE)
     for name, text in configs(python, str(destination / "runtime" / "mcp_server.py"), allow_write).items():
         (config_root / name).write_text(text)
         (config_root / name).chmod(0o600)
     # These are real project-scoped config paths in a NEW, isolated workspace.
     # No global home or currently running worker is reconfigured.
     workspace = destination / "workspace"
-    workspace.mkdir(mode=0o700)
+    workspace.mkdir(mode=PRIVATE_DIR_MODE)
     names = {"claude-project.mcp.json": ".mcp.json", "cursor.mcp.json": ".cursor/mcp.json",
              "codex.config.toml": ".codex/config.toml", "vscode.mcp.json": ".vscode/mcp.json",
              "opencode.json": "opencode.json"}
     for template, relative in names.items():
         target = workspace / relative
-        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target.parent.mkdir(mode=PRIVATE_DIR_MODE, parents=True, exist_ok=True)
         target.write_text((config_root / template).read_text())
         target.chmod(0o600)
     (workspace / "AGENTS.md").write_text(
@@ -95,7 +98,7 @@ def stage(destination: Path, python: str, allow_write=False):
         shutil.copytree(skill_source, skill_target)
         for namespace in (".agents", ".claude"):
             link = workspace / namespace / "skills" / "paper-design-workflow"
-            link.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            link.parent.mkdir(mode=PRIVATE_DIR_MODE, parents=True, exist_ok=True)
             link.symlink_to("../../../skills/paper-design-workflow", target_is_directory=True)
     enrollment = destination / "ENROLLMENT.md"
     enrollment.write_text(enrollment_text(workspace))
