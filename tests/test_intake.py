@@ -83,8 +83,9 @@ def test_corroboration_lifts_multi_engine(monkeypatch):
             {"ticker": "MULTI", "signal_score": 70, "action": "WATCH", "channels": ["insider"]}]},
     })
     cands = {c["ticker"]: c for c in intake.build(limit=10)["candidates"]}
-    # MULTI is flagged by briefing + radar + altdata (3 engines) → corroboration bonus
-    assert cands["MULTI"]["n_sources"] >= 3
+    # The briefing is a derived summary, so only radar + altdata count as independent.
+    assert cands["MULTI"]["n_sources"] == 2
+    assert cands["MULTI"]["n_observed_sources"] == 3
     assert cands["MULTI"]["score"] > cands["SOLO"]["score"]
     assert set(cands["MULTI"]["sources"]) >= {"briefing", "radar", "altdata"}
 
@@ -160,6 +161,8 @@ def test_salience_tiers(monkeypatch):
             {"ticker": "WATCHME", "priority": 0.30, "lean": 0, "situation": "meh"}]},
         "altdata/mastermind.json": {"signals": [
             {"ticker": "ACTNAME", "signal_score": 80, "action": "BUY", "channels": ["insider"]}]},
+        "basketdata/radar_ticker.json": {"tickers": [
+            {"ticker": "ACTNAME", "state": "POSITIVE_DIVERGENCE", "edge_score": 55}]},
     })
     tiers = intake.salience_tiers(limit=10)
     act = {c["ticker"] for c in tiers["act"]}
