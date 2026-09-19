@@ -215,6 +215,25 @@ canonical.
    process trees and bounded roots. Completed search helpers that outlive their
    owner should be reconciled as support-process leaks rather than left consuming
    I/O indefinitely.
+10. **Persistent support loops need a durable supervisor, not a chat lifetime.**
+    A queue consumer or feeder that must survive login, session rotation or process
+    death should be owned by the existing host service supervisor and restart the
+    same carrier/queue identity. Prove one bounded crash/restart recovery. Supervisor
+    recovery must never mint a second queue, placement authority or duplicate
+    in-flight operation, and policy must still be re-read after restart.
+11. **Proof-only browser/server resources have a terminal lifecycle.** Headless
+    browsers, CDP endpoints and local proof servers used for a bounded acceptance
+    journey should be retired after the owning proof is terminal and recent-use,
+    port and process-owner checks show no continuing consumer. Never infer
+    orphanhood from CPU alone, and never kill an active browser realm to improve a
+    load number.
+12. **Physical recovery readiness is independent from load admission.** A low-load
+    host can still be unrecoverable after power loss, while an intentionally busy
+    host may be perfectly recoverable. Use the existing host-recovery readiness
+    owner for sleep, auto-restart, Remote Login, preboot and required control-service
+    predicates. Do not start an intentionally unarmed Executive service merely to
+    make a recovery check green, and do not let a recovery result rank or reserve
+    workload capacity.
 
 A local seat harness that implements these rules remains an interim operational
 consumer of Capacity/Fleet policy. It does not become a second scheduler, resource
