@@ -83,7 +83,9 @@
     const before = await ops.freshProbe(resolved.tabId, request.conversation_fingerprint);
     if (!before || before.conversation_fingerprint !== request.conversation_fingerprint ||
         !before.observation.target_present || !before.observation.exact_conversation_loaded ||
-        before.observation.auth_required === true || before.observation.composer_available !== true ||
+        before.observation.auth_required === true ||
+        before.observation.provider_error_present === true ||
+        before.observation.composer_available !== true ||
         before.observation.generation_state !== "idle") {
       return result("CONTINUATION_NOT_SUBMITTED", before ? before.observation : ops.unknownObservation());
     }
@@ -123,7 +125,9 @@
       after = await ops.freshProbe(resolved.tabId, request.conversation_fingerprint);
       if (after && after.conversation_fingerprint === request.conversation_fingerprint &&
           after.observation.target_present && after.observation.exact_conversation_loaded &&
-          after.observation.auth_required !== true && after.observation.generation_state === "active") {
+          after.observation.auth_required !== true &&
+          after.observation.provider_error_present !== true &&
+          after.observation.generation_state === "active") {
         return result("CONTINUATION_STARTED", after.observation);
       }
       if (ops.requestWindowStatus(request)) break;
