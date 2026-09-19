@@ -22,14 +22,26 @@ class Element {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function mount(next, options = {}) {
-  const ids = ['summary', 'status', 'scope', 'timestamp', 'rows', 'refresh'];
+  const ids = ['summary', 'status', 'adapter', 'scope', 'timestamp', 'rows', 'refresh'];
   const nodes = Object.fromEntries(ids.map(id => [id, new Element('div')]));
   for (const id of ids) assert.ok(html.includes(`id="${id}"`), `actual HTML missing ${id}`);
   const tabs = options.tabs || Object.freeze({});
-  const config = options.configured === false ? undefined : Object.freeze({instanceId: options.instanceId || INSTANCE});
+  const instanceId = options.instanceId || INSTANCE;
+  const configVersion = options.configVersion || options.version || '0.2.0';
+  const config = options.configured === false ? undefined : Object.freeze({
+    schema: options.configSchema || 'mastermind.web_sol_instance_config.v1',
+    instanceId,
+    nativeHost: options.nativeHost || `com.mastermind.web_sol_surface.${instanceId.slice(0, 24)}`,
+    protocolMajor: options.protocolMajor ?? 1,
+    clientPackageVersion: options.clientPackageVersion || configVersion,
+    nativePackageVersion: options.nativePackageVersion || configVersion,
+    extensionPackageVersion: options.extensionPackageVersion || configVersion,
+    capabilityDigest: options.capabilityDigest || 'b'.repeat(64),
+  });
   let calls = 0, schedulingCalls = 0; const lifecycle = {};
   const received = [];
-  const context = {document: {getElementById(id) { assert.ok(nodes[id]); return nodes[id]; },
+  const context = {MMX_WEB_SOL_INSTANCE: config,
+    document: {getElementById(id) { assert.ok(nodes[id]); return nodes[id]; },
     createElement: tag => new Element(tag)}, chrome: {runtime: {
       getManifest() { return {version: options.version || '0.2.0'}; },
       sendMessage(message) {
@@ -91,6 +103,45 @@ test('installed extension version is visible without changing census semantics',
   const ui = await settled(mount(() => snapshot([]), {version: '0.4.0'}));
   assert.match(ui.nodes.timestamp.textContent, /^Extension 0\.4\.0 · Captured /);
   assert.deepEqual(metrics(ui), ['0', '0/0', '0', '0']);
+});
+test('coherent profile package declaration is visible without claiming live native transport', async () => {
+  const ui = await settled(mount(() => snapshot([]), {
+    version: '0.4.0', configVersion: '0.4.0', capabilityDigest: 'c'.repeat(64),
+  }));
+  assert.doesNotMatch(ui.nodes.adapter.className, /warning|error/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: coherent/);
+  assert.match(ui.nodes.adapter.textContent, /extension 0\.4\.0/);
+  assert.match(ui.nodes.adapter.textContent, /protocol 1/);
+  assert.match(ui.nodes.adapter.textContent, /capability cccccccc…/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
+  assert.doesNotMatch(ui.nodes.adapter.textContent, /instanceId|nativeHost|com\.mastermind/);
+});
+test('package version disagreement is surfaced without pretending the native host was observed', async () => {
+  const ui = await settled(mount(() => snapshot([]), {
+    version: '0.4.0', configVersion: '0.4.0', clientPackageVersion: '0.3.0',
+  }));
+  assert.match(ui.nodes.adapter.className, /warning/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: version mismatch/);
+  assert.match(ui.nodes.adapter.textContent, /manifest 0\.4\.0/);
+  assert.match(ui.nodes.adapter.textContent, /client 0\.3\.0/);
+  assert.match(ui.nodes.adapter.textContent, /native 0\.4\.0/);
+  assert.match(ui.nodes.adapter.textContent, /extension pin 0\.4\.0/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
+});
+test('invalid profile package declaration fails closed without echoing malformed values', async () => {
+  const ui = await settled(mount(() => snapshot([]), {
+    capabilityDigest: 'PRIVATE_SENTINEL',
+  }));
+  assert.match(ui.nodes.adapter.className, /warning/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: invalid/);
+  assert.doesNotMatch(ui.nodes.adapter.textContent, /PRIVATE_SENTINEL/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
+});
+test('missing profile package declaration stays unavailable rather than looking healthy', async () => {
+  const ui = await settled(mount(() => snapshot([], {unconfigured: true}), {configured: false}));
+  assert.match(ui.nodes.adapter.className, /warning/);
+  assert.match(ui.nodes.adapter.textContent, /Profile package declaration: unavailable/);
+  assert.match(ui.nodes.adapter.textContent, /not a live native-host handshake/);
 });
 test('complete inventory with unreachable content probes is visibly degraded and actionable', async () => {
   const row = {...tab(1), discarded: false};
