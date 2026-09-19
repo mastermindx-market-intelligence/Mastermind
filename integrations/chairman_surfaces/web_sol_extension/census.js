@@ -55,6 +55,11 @@
       return null;
     }
   }
+  function observationTime(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(value)) return null;
+    const match = value.match(/T(\d{2}:\d{2}:\d{2})/);
+    return match ? `${match[1]} UTC` : null;
+  }
   function probeWarning(result) {
     if (!Number.isSafeInteger(result.initial_tab_count) || !Array.isArray(result.rows)) return null;
     const failed = result.rows.filter(row => PROBE_FAILURE_STATES.has(row.status));
@@ -111,6 +116,11 @@
       browser.append(element("span", STATES[row.status] || "Unknown"));
       browser.append(element("span", row.selected_in_window === true ? "Selected in its window" :
         row.selected_in_window === false ? "Not selected in its window" : "Window selection unknown", "detail"));
+      if (row.visibility === "VISIBLE" || row.visibility === "HIDDEN") {
+        browser.append(element("span", `Document visibility: ${row.visibility.toLowerCase()}`, "detail"));
+      }
+      const observed = observationTime(row.observed_at);
+      if (observed) browser.append(element("span", `Probe observed: ${observed}`, "detail"));
       if (row.status === "PROBE_UNAVAILABLE") {
         browser.append(element("span", "If this tab predates the current extension load, reload it once and refresh.", "detail"));
       }
