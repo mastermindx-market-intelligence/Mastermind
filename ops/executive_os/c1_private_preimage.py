@@ -1006,7 +1006,8 @@ def _agent_relay_prepared_only(
     ):
         return False
 
-    principal = principal_facts.get("_mastermind_agent_relay", {})
+    principal_name = SERVICE_OWNERS[label][0]
+    principal = principal_facts.get(principal_name, {})
     if principal.get("present") is not True or principal.get("matches") is not True:
         return False
 
@@ -1085,7 +1086,8 @@ def _sol_state_relay_stale_enrolled(
         ):
             return False
 
-    principal = principal_facts.get("_mastermind_sol_relay", {})
+    principal_name = SERVICE_OWNERS[label][0]
+    principal = principal_facts.get(principal_name, {})
     if principal.get("present") is not True or principal.get("matches") is not True:
         return False
 
