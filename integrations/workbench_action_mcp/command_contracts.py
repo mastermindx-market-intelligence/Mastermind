@@ -24,6 +24,7 @@ ARTIFACT_STREAMS = frozenset({"stdout", "stderr"})
 MAX_ARTIFACT_BYTES = 65536
 MAX_ARTIFACT_CHUNK_BYTES = 48 * 1024
 MAX_DIRECT_IMAGE_BYTES = MAX_ARTIFACT_CHUNK_BYTES
+MAX_RELATIVE_PATH_BYTES = 1 << 9
 RECIPE_IDS = frozenset({"canary_checksum", "canary_refuse", "source_fingerprint_png"})
 RECIPE_SHA256 = {
     "canary_checksum": "6a472df0eab211d5c4c28a24522b73a440e30c7aea333305fca1600123a8b90c",
@@ -248,7 +249,7 @@ def derive_artifact_id(
         or type(recipe_id) is not str
         or recipe_id not in RECIPE_IDS
         or type(relative_path) is not str
-        or not 1 <= len(relative_path) <= 512
+        or not 1 <= len(relative_path) <= MAX_RELATIVE_PATH_BYTES
         or "\x00" in relative_path
         or type(preimage_sha256) is not str
         or _HEX64.fullmatch(preimage_sha256) is None
