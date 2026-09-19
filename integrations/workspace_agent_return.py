@@ -49,6 +49,9 @@ from integrations.slack_agent_dialogue.service import (
 RETURN_TICKET_SCHEMA = "mastermind.workspace_agent_return_ticket.v1"
 RETURN_TICKET_PURPOSE = "workspace_candidate_return"
 RETURN_RESULT_SCHEMA = "mastermind.workspace_agent_candidate_return.v1"
+SERVER_NAME = "mastermind-workspace-agent-return"
+SERVER_VERSION = "1.0.0"
+TOOL_NAME = "submit_candidate"
 MAX_RETURN_REF_BYTES = 4096
 MAX_REQUEST_BYTES = 32 * 1024
 MAX_TICKET_TTL_MS = 15 * 60 * 1000
@@ -113,6 +116,65 @@ def _canonical_json(value: Any) -> bytes:
         ).encode("ascii")
     except (TypeError, ValueError, UnicodeError, RecursionError):
         raise WorkspaceReturnError("INVALID_REQUEST") from None
+
+
+def canonical_return_json(value: Any) -> bytes:
+    """Canonical bounded serialization for the one-tool MCP facade."""
+
+    return _canonical_json(value)
+
+
+def tool_spec() -> dict[str, Any]:
+    """Return the immutable model-visible one-tool schema without SDK imports."""
+
+    return {
+        "name": TOOL_NAME,
+        "description": (
+            "Return one bounded untrusted Workspace Agent candidate through an "
+            "already-issued return reference. This writes dialogue transport only; "
+            "it cannot accept the candidate, acknowledge Wake, complete work, "
+            "select a Job/Attempt/Worker, or create/retry a provider run."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "return_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_RETURN_REF_BYTES,
+                },
+                "status": {
+                    "type": "string",
+                    "enum": sorted(_STATUS),
+                },
+                "result": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 900,
+                },
+                "evidence_refs": {
+                    "type": "array",
+                    "maxItems": MAX_EVIDENCE_REFS,
+                    "uniqueItems": True,
+                    "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500,
+                        "pattern": r"^https://(?:github\\.com|linear\\.app)/",
+                    },
+                },
+            },
+            "required": ["return_ref", "status", "result"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "title": TOOL_NAME,
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    }
 
 
 def _b64encode(value: bytes) -> str:
@@ -399,6 +461,15 @@ class WorkspaceCandidateReturnGateway:
         self._utc_now = utc_now
         self._service_call = service_call
 
+    async def call_tool(
+        self, name: str, arguments: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Dispatch only the frozen one-tool semantic surface."""
+
+        if name != TOOL_NAME:
+            return _error("INVALID_REQUEST")
+        return await self.call(arguments)
+
     async def call(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Return one bounded candidate; never retries or accepts it as company truth."""
 
@@ -512,10 +583,15 @@ __all__ = [
     "MAX_TICKET_TTL_MS",
     "RETURN_RESULT_SCHEMA",
     "RETURN_TICKET_SCHEMA",
+    "SERVER_NAME",
+    "SERVER_VERSION",
+    "TOOL_NAME",
     "WorkspaceCandidateReturnGateway",
     "WorkspaceReturnBindingResolver",
     "WorkspaceReturnError",
     "WorkspaceReturnTicket",
     "WorkspaceReturnTicketCodec",
     "binding_digest",
+    "canonical_return_json",
+    "tool_spec",
 ]
