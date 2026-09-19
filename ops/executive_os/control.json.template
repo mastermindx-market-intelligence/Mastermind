@@ -62,8 +62,8 @@
   "worker_provider_home": "/var/db/mastermind-executive/workers/codex-01/provider-home",
   "worker_runs_root": "/var/db/mastermind-executive/jobs/runs",
   "worker_uid": 451,
-  "worker_user": "_mastermind_worker",
   "exact_worker_claim_target": {
     "mode": "disabled"
-  }
+  },
+  "worker_user": "_mastermind_worker"
 }
