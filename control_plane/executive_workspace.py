@@ -9,14 +9,20 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import hashlib
 import os
 import re
+import selectors
 import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path, PurePosixPath
 from typing import Callable, Mapping, Sequence
+
+from common.commission_ref import CommissionRef
 
 
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -225,6 +231,37 @@ class WorkspaceReceipt:
 
 
 @dataclasses.dataclass(frozen=True)
+class CommissionDependencyLimits:
+    max_objects: int
+    max_metadata_bytes: int
+    max_uncompressed_bytes: int
+    max_pack_bytes: int
+
+    def __post_init__(self) -> None:
+        values = (
+            self.max_objects,
+            self.max_metadata_bytes,
+            self.max_uncompressed_bytes,
+            self.max_pack_bytes,
+        )
+        if any(type(value) is not int or value <= 0 for value in values):
+            raise WorkspaceError("commission dependency limits must be positive integers")
+
+
+@dataclasses.dataclass(frozen=True)
+class CommissionDependencyPlan:
+    source_repository: str | Path
+    commission_ref: CommissionRef
+    limits: CommissionDependencyLimits
+
+    def __post_init__(self) -> None:
+        if type(self.commission_ref) is not CommissionRef:
+            raise WorkspaceError("commission dependency requires canonical CommissionRef")
+        if type(self.limits) is not CommissionDependencyLimits:
+            raise WorkspaceError("commission dependency requires exact limits")
+
+
+@dataclasses.dataclass(frozen=True)
 class LinkedWorkspaceReceipt:
     """Custody receipt for a trusted same-principal linked Git worktree.
 
@@ -414,6 +451,134 @@ def _run_bytes(
     return completed.stdout
 
 
+def _run_bytes_with_input(
+    argv: Sequence[str],
+    *,
+    cwd: Path | None,
+    env: dict[str, str],
+    input_bytes: bytes,
+) -> bytes:
+    try:
+        completed = subprocess.run(
+            list(argv),
+            cwd=str(cwd) if cwd is not None else None,
+            env=env,
+            input=input_bytes,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).decode(
+            "utf-8", errors="replace"
+        ).strip()[-1000:]
+        raise WorkspaceError(f"workspace command failed ({completed.returncode}): {detail}")
+    return completed.stdout
+
+
+def _run_bounded_bytes_with_input(
+    argv: Sequence[str],
+    *,
+    cwd: Path | None,
+    env: dict[str, str],
+    input_bytes: bytes,
+    max_stdout_bytes: int,
+    bytes_limit_message: str,
+    max_stdout_lines: int | None = None,
+    lines_limit_message: str | None = None,
+) -> bytes:
+    if type(max_stdout_bytes) is not int or max_stdout_bytes <= 0:
+        raise WorkspaceError("bounded command requires a positive stdout byte limit")
+    if max_stdout_lines is not None and (
+        type(max_stdout_lines) is not int or max_stdout_lines <= 0
+    ):
+        raise WorkspaceError("bounded command requires a positive stdout line limit")
+
+    with tempfile.TemporaryFile() as input_file, tempfile.TemporaryFile() as stderr_file:
+        input_file.write(input_bytes)
+        input_file.seek(0)
+        try:
+            process = subprocess.Popen(
+                list(argv),
+                cwd=str(cwd) if cwd is not None else None,
+                env=env,
+                stdin=input_file,
+                stdout=subprocess.PIPE,
+                stderr=stderr_file,
+            )
+        except OSError as exc:
+            raise WorkspaceError(
+                f"workspace command could not run: {argv[0]}: {exc}"
+            ) from exc
+        if process.stdout is None:  # pragma: no cover - subprocess contract
+            process.kill()
+            process.wait()
+            raise WorkspaceError("workspace command stdout is unavailable")
+
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        deadline = time.monotonic() + 60
+        output = bytearray()
+        line_count = 0
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    process.kill()
+                    process.wait()
+                    raise WorkspaceError(f"workspace command timed out: {argv[0]}")
+                events = selector.select(remaining)
+                if not events:
+                    if process.poll() is not None:
+                        break
+                    continue
+                read_size = min(64 * 1024, max_stdout_bytes - len(output) + 1)
+                chunk = os.read(process.stdout.fileno(), max(1, read_size))
+                if not chunk:
+                    break
+                line_count += chunk.count(b"\n")
+                if (
+                    max_stdout_lines is not None
+                    and line_count > max_stdout_lines
+                ):
+                    process.kill()
+                    process.wait()
+                    raise WorkspaceError(
+                        lines_limit_message or bytes_limit_message
+                    )
+                output.extend(chunk)
+                if len(output) > max_stdout_bytes:
+                    process.kill()
+                    process.wait()
+                    raise WorkspaceError(bytes_limit_message)
+            try:
+                returncode = process.wait(
+                    timeout=max(0.1, deadline - time.monotonic())
+                )
+            except subprocess.TimeoutExpired as exc:
+                process.kill()
+                process.wait()
+                raise WorkspaceError(
+                    f"workspace command timed out: {argv[0]}"
+                ) from exc
+        finally:
+            selector.close()
+            process.stdout.close()
+
+        if returncode != 0:
+            stderr_file.seek(0)
+            detail = stderr_file.read()[-1000:].decode(
+                "utf-8", errors="replace"
+            ).strip()
+            raise WorkspaceError(
+                f"workspace command failed ({returncode}): {detail}"
+            )
+        return bytes(output)
+
+
 def _share_symlink_with_group(path: Path, *, shared_gid: int) -> None:
     """Expose only a symlink's payload to the worker group, never its target."""
 
@@ -484,6 +649,168 @@ def _discard_partial_workspace(destination: Path) -> None:
         pass
 
 
+def _prepare_commission_dependency(
+    destination: Path,
+    *,
+    base_sha: str,
+    plan: CommissionDependencyPlan,
+    env: dict[str, str],
+) -> None:
+    source = Path(plan.source_repository).expanduser().resolve()
+    if not source.is_dir():
+        raise WorkspaceError("commission dependency source is unavailable")
+    ref = plan.commission_ref
+    limits = plan.limits
+    read_env = git_observation_env(env)
+    read_env["GIT_NO_LAZY_FETCH"] = "1"
+    read_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+
+    resolved_commit = _run(
+        ["git", "-C", str(source), "rev-parse", "--verify", f"{ref.commit}^{{commit}}"],
+        cwd=None,
+        env=read_env,
+    )
+    if resolved_commit != ref.commit:
+        raise WorkspaceError("commission dependency commit identity drifted")
+    try:
+        _run(
+            ["git", "-C", str(source), "merge-base", "--is-ancestor", base_sha, ref.commit],
+            cwd=None,
+            env=read_env,
+        )
+    except WorkspaceError as exc:
+        raise WorkspaceError(
+            "commission dependency commit does not descend from assigned base"
+        ) from exc
+    blob_spec = f"{ref.commit}:{ref.path}"
+    if _run(
+        ["git", "-C", str(source), "cat-file", "-t", blob_spec],
+        cwd=None,
+        env=read_env,
+    ) != "blob":
+        raise WorkspaceError("commission dependency path is not a blob")
+    raw_blob_size = _run(
+        ["git", "-C", str(source), "cat-file", "-s", blob_spec],
+        cwd=None,
+        env=read_env,
+    )
+    try:
+        blob_size = int(raw_blob_size)
+    except ValueError as exc:
+        raise WorkspaceError("commission dependency blob size is malformed") from exc
+    if blob_size < 1 or blob_size > limits.max_uncompressed_bytes:
+        raise WorkspaceError("commission dependency bytes exceed limit")
+    content = _run_bytes(
+        ["git", "-C", str(source), "cat-file", "blob", blob_spec],
+        cwd=None,
+        env=read_env,
+    )
+    if hashlib.sha256(content).hexdigest() != ref.content_sha256:
+        raise WorkspaceError("commission dependency digest differs from CommissionRef")
+
+    raw_objects = _run_bounded_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-list",
+            "--objects",
+            "--no-object-names",
+            ref.commit,
+            f"^{base_sha}",
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=limits.max_metadata_bytes,
+        bytes_limit_message="commission dependency metadata exceeds limit",
+        max_stdout_lines=limits.max_objects,
+        lines_limit_message="commission dependency object count exceeds limit",
+    )
+    try:
+        object_ids = tuple(
+            line for line in raw_objects.decode("ascii", errors="strict").splitlines()
+            if line
+        )
+    except UnicodeDecodeError as exc:
+        raise WorkspaceError("commission dependency object metadata is malformed") from exc
+    if not object_ids:
+        return
+
+    check = _run_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "cat-file",
+            "--batch-check=%(objectname) %(objectsize)",
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=("\n".join(object_ids) + "\n").encode("ascii"),
+    ).decode("ascii", errors="strict")
+    total = 0
+    for line in check.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or not fields[1].isdigit():
+            raise WorkspaceError("commission dependency object evidence is malformed")
+        total += int(fields[1])
+    if total > limits.max_uncompressed_bytes:
+        raise WorkspaceError("commission dependency bytes exceed limit")
+
+    refs_before = _run(
+        ["git", "-C", str(destination), "for-each-ref", "--format=%(refname) %(objectname)"],
+        cwd=None,
+        env=read_env,
+    )
+    pack = _run_bounded_bytes_with_input(
+        ["git", "-C", str(source), "pack-objects", "--stdout"],
+        cwd=None,
+        env=read_env,
+        input_bytes=("\n".join(object_ids) + "\n").encode("ascii"),
+        max_stdout_bytes=limits.max_pack_bytes,
+        bytes_limit_message="commission dependency pack exceeds limit",
+    )
+    _run_bytes_with_input(
+        ["git", "-C", str(destination), "index-pack", "--stdin"],
+        cwd=None,
+        env=env,
+        input_bytes=pack,
+    )
+    try:
+        _run(
+            [
+                "git",
+                "-C",
+                str(destination),
+                "fsck",
+                "--connectivity-only",
+                "--no-dangling",
+                ref.commit,
+            ],
+            cwd=None,
+            env=read_env,
+        )
+    except WorkspaceError as exc:
+        raise WorkspaceError(
+            "prepared commission connectivity is incomplete"
+        ) from exc
+    prepared = _run_bytes(
+        ["git", "-C", str(destination), "cat-file", "blob", blob_spec],
+        cwd=None,
+        env=read_env,
+    )
+    if hashlib.sha256(prepared).hexdigest() != ref.content_sha256:
+        raise WorkspaceError("prepared commission bytes differ from CommissionRef")
+    refs_after = _run(
+        ["git", "-C", str(destination), "for-each-ref", "--format=%(refname) %(objectname)"],
+        cwd=None,
+        env=read_env,
+    )
+    if refs_after != refs_before:
+        raise WorkspaceError("commission preparation changed destination refs")
+
+
 def prepare_credentialless_clone(
     source_repository: str | Path,
     workspace_root: str | Path,
@@ -493,6 +820,7 @@ def prepare_credentialless_clone(
     branch: str | None = None,
     shared_gid: int | None = None,
     shared_write_paths: Sequence[str] = (),
+    commission_dependency: CommissionDependencyPlan | None = None,
 ) -> WorkspaceReceipt:
     """Create one independent, no-remote clone beneath ``workspace_root``.
 
@@ -504,6 +832,8 @@ def prepare_credentialless_clone(
         raise WorkspaceError("job_id is unsafe for a workspace name")
     if shared_write_paths and shared_gid is None:
         raise WorkspaceError("shared_write_paths requires shared_gid")
+    if commission_dependency is not None and type(commission_dependency) is not CommissionDependencyPlan:
+        raise WorkspaceError("commission dependency plan is invalid")
     normalized_write_paths: list[PurePosixPath] = []
     for raw in shared_write_paths:
         if (
@@ -567,6 +897,17 @@ def prepare_credentialless_clone(
         git_dir = destination / ".git"
         if actual_base != resolved_base or remaining or not git_dir.is_dir():
             raise WorkspaceError("prepared workspace failed its exact-SHA, no-remote self-check")
+        if commission_dependency is not None:
+            _prepare_commission_dependency(
+                destination,
+                base_sha=resolved_base,
+                plan=commission_dependency,
+                env=env,
+            )
+            if _run(["git", "rev-parse", "HEAD"], cwd=destination, env=env) != resolved_base:
+                raise WorkspaceError("commission preparation moved workspace HEAD")
+            if _run(["git", "remote"], cwd=destination, env=env):
+                raise WorkspaceError("commission preparation introduced a remote")
         if shared_gid is not None:
             for current_root, directory_names, file_names in os.walk(
                 destination, topdown=True, followlinks=False
