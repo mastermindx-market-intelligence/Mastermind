@@ -4,6 +4,17 @@ Studio Direct connects an authorized ChatGPT account to the Mac Studio's existin
 
 The gateway binds to `127.0.0.1:45017`. Its external endpoint is `https://mac-studio.taila6eca1.ts.net:8443/mcp`. Tailscale Funnel8443 is active under the user's explicit authorization; ChatGPT account linking still requires successful OAuth discovery and approval. Existing private Tailscale port 443 and the existing Desktop Commander remote service are separate.
 
+## Mosyle read-only MDM visibility
+
+A private Studio Direct seat can expose cloud MDM status through the existing gateway and Secure MCP Tunnel without creating another MCP server or control plane. When the host has a secure credential file at `~/.local/share/studio-direct-mcp/secrets/mosyle.json` (owned by the gateway user with mode `0600`), the gateway adds exactly two tools:
+
+- `mosyle_fleet_status` — bounded paged inventory/status reads for macOS, iOS/iPadOS, or tvOS.
+- `mosyle_device_status` — status lookup for one exact serial number.
+
+The host credential JSON contains Mosyle API integration fields `accessToken`, `email`, and `password`. Those credentials and the short-lived bearer token stay on the Studio host and are never returned through MCP. The adapter calls only Mosyle `/v2/login` and `/v2/listdevices`, requests a fixed bounded field set, and strips unknown response fields before returning data. No lock, wipe, erase, lost-mode, profile, application-install, or other MDM mutation capability is exposed.
+
+If the credential file is absent, symlinked, owned by another user, or group/world-readable, Mosyle integration stays disabled or fails closed. Web sessions cannot choose another API endpoint, credential path, token, or host.
+
 ## Runtime and account access
 
 The service label is `com.mastermind.studio-direct-mcp`. Installed files and private OAuth state live in `/Users/chriswong/.local/share/studio-direct-mcp`. The backend is pinned to `/Users/chriswong/.local/share/desktop-commander-service/vendor/node_modules/@wonderwhy-er/desktop-commander/dist/index.js`; the new gateway never modifies that engine or its existing remote parent.
