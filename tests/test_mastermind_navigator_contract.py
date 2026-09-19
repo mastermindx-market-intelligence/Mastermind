@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-
+import jsonschema
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -210,7 +210,6 @@ def test_role_profiles_are_closed_and_discover_only_minimal_tool_families() -> N
 
 
 def test_health_schema_is_closed_and_accepts_only_source_attributed_observations() -> None:
-    jsonschema = pytest.importorskip("jsonschema")
     schema = _load("references/capability-health.schema.json")
     jsonschema.Draft202012Validator.check_schema(schema)
 
@@ -429,7 +428,6 @@ def test_state_rules_refuse_contradictory_live_and_classify_explicit_negative_ev
 
 
 def test_health_schema_requires_explicit_overlays_and_nonlive_recovery_fields() -> None:
-    jsonschema = pytest.importorskip("jsonschema")
     schema = _load("references/capability-health.schema.json")
     assert "domain_overlays" in schema["required"]
     validator = jsonschema.Draft202012Validator(schema)
@@ -458,3 +456,158 @@ def test_health_schema_requires_explicit_overlays_and_nonlive_recovery_fields() 
     unavailable["surfaces"][0]["next_probe"] = None
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(unavailable)
+
+
+def test_repository_local_and_web_workspace_installation_planes_do_not_collapse() -> None:
+    fixture = _load("fixtures/capability-health-cases.json")
+    cases = {case["id"]: case for case in fixture["cases"]}
+    assert {
+        "source-built-without-live-canary",
+        "navigator-local-compatibility-install",
+        "navigator-web-workspace-installed-disabled",
+    } <= cases.keys()
+
+    source = cases["source-built-without-live-canary"]["packet"]["surfaces"][0]
+    assert source["implementation_state"] == "BUILT"
+    assert source["installed"] == "UNKNOWN"
+    assert source["enabled"] == "UNKNOWN"
+    assert source["organizationally_authorized"] == "UNKNOWN"
+    assert source["state"] == "BUILT_NOT_PROVEN"
+    assert source["evidence"][0]["source_type"] == "repository_source"
+
+    local = cases["navigator-local-compatibility-install"]["packet"]["surfaces"][0]
+    assert local["installed"] == "YES"
+    assert local["enabled"] == "YES"
+    assert local["organizationally_authorized"] == "UNKNOWN"
+    assert local["proven_live"] == "NO"
+    assert local["state"] == "BUILT_NOT_PROVEN"
+    assert local["binding"]["host_ref"] == "disposable-local-codex-home"
+    assert "Web workspace" in local["blocker"]
+
+    workspace = cases["navigator-web-workspace-installed-disabled"]["packet"]["surfaces"][0]
+    assert workspace["installed"] == "YES"
+    assert workspace["enabled"] == "NO"
+    assert workspace["callable"] == "NO"
+    assert workspace["proven_live"] == "NO"
+    assert workspace["state"] == "UNAVAILABLE"
+    assert workspace["binding"]["project_ref"] == "business-workspace-canary"
+
+    rules = _load("references/capability-state-rules.json")
+    for case_id in (
+        "source-built-without-live-canary",
+        "navigator-local-compatibility-install",
+        "navigator-web-workspace-installed-disabled",
+    ):
+        case = cases[case_id]
+        surface = case["packet"]["surfaces"][0]
+        assert _derive_state(surface, rules) == case["expected_state"]
+
+
+def test_health_schema_rejects_every_contradictory_proven_live_packet() -> None:
+    schema = _load("references/capability-health.schema.json")
+    jsonschema.Draft202012Validator.check_schema(schema)
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    live = _materialize_health_packet(fixture["cases"][0]["packet"])
+    validator.validate(live)
+
+    mutations = (
+        ("implementation_state", "SPEC_ONLY"),
+        ("usable_scope", "PARTIAL"),
+        ("binding_current", "NO"),
+        ("installed", "NO"),
+        ("enabled", "NO"),
+        ("authenticated_or_connected", "NO"),
+        ("callable", "NO"),
+        ("organizationally_authorized", "NO"),
+        ("proven_live", "NO"),
+    )
+    for field, value in mutations:
+        hostile = copy.deepcopy(live)
+        hostile["surfaces"][0][field] = value
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(hostile)
+
+    unbound = copy.deepcopy(live)
+    unbound["surfaces"][0]["binding"] = {
+        "host_ref": None,
+        "project_ref": None,
+        "session_ref": None,
+        "runtime_generation": None,
+        "source_sha": None,
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(unbound)
+
+
+def test_workbench_cases_fence_attended_and_worker_generations() -> None:
+    health = _load("fixtures/capability-health-cases.json")
+    by_id = {case["id"]: case for case in health["cases"]}
+    expected = {
+        "workbench-attended-missing-session-generation": "RuntimeBinding",
+        "workbench-worker-missing-attempt-generation": "Executive OS Job/Attempt/Worker",
+    }
+    for case_id, owner_phrase in expected.items():
+        case = by_id[case_id]
+        surface = case["packet"]["surfaces"][0]
+        assert surface["capability_class"] == "selected_project_action"
+        assert surface["binding_current"] in {"NO", "UNKNOWN"}
+        assert surface["state"] in {"UNAVAILABLE", "UNKNOWN"}
+        assert surface["proven_live"] == "NO"
+        assert owner_phrase in surface["next_probe"]
+
+    routes = _load("fixtures/fresh-session-routing-cases.json")
+    selected = next(
+        case for case in routes["cases"]
+        if case["id"] == "selected-project-action-to-workbench"
+    )
+    assert "owner-admitted execution mode" in selected["owner_native_action"]
+    assert "exact current session or Executive Job/Attempt/Worker generation" in selected["owner_native_action"]
+
+
+def test_domain_overlay_visibility_requires_declared_overlay_and_authorization_evidence() -> None:
+    fixture = _load("fixtures/capability-health-cases.json")
+    profiles = _load("references/role-profiles.json")
+    policy = profiles["overlay_visibility_policy"]
+    assert policy["missing_or_non_yes"] == "SUPPRESS_AND_DO_NOT_LOAD_SCHEMA"
+
+    cases = {case["id"]: case for case in fixture["overlay_filter_cases"]}
+    assert set(cases) == {
+        "domain-design-request-without-authorized-overlay",
+        "domain-design-request-with-authorized-overlay",
+    }
+
+    for composition in cases.values():
+        profile = profiles["profiles"][composition["profile"]]
+        allowed_routes = set(profile["default_routes"])
+        requested = composition["requested_route"]
+        authorization = composition["overlay_authorization_evidence"].get(requested)
+        overlay_allowed = (
+            requested in composition["domain_overlays"]
+            and isinstance(authorization, dict)
+            and authorization.get("organizationally_authorized") == "YES"
+            and bool(authorization.get("artifact_identity"))
+        )
+        if overlay_allowed:
+            allowed_routes.add(requested)
+        visible = [
+            surface["surface_id"]
+            for surface in composition["source_surfaces"]
+            if surface["capability_class"] in allowed_routes
+        ]
+        suppressed = [
+            surface["surface_id"]
+            for surface in composition["source_surfaces"]
+            if surface["capability_class"] not in allowed_routes
+        ]
+        assert visible == composition["expected_visible_surface_ids"]
+        assert suppressed == composition["expected_suppressed_surface_ids"]
+        expected_loads = [composition["expected_selected_tool_family"]] if overlay_allowed else []
+        assert composition["load_schemas_for"] == expected_loads
+
+
+def test_skill_requires_authorized_overlay_before_visibility_or_schema_load() -> None:
+    skill = (PACKAGE / "skills/navigate-mastermind-universe/SKILL.md").read_text(encoding="utf-8")
+    assert "domain_overlays includes the route" in skill
+    assert "organizationally_authorized = YES" in skill
+    assert "suppress the overlay and load no schema" in skill

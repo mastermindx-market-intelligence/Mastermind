@@ -318,6 +318,92 @@
           },
           "then": {
             "properties": {
+              "implementation_state": {
+                "const": "BUILT"
+              },
+              "usable_scope": {
+                "const": "FULL"
+              },
+              "binding_current": {
+                "const": "YES"
+              },
+              "installed": {
+                "const": "YES"
+              },
+              "enabled": {
+                "const": "YES"
+              },
+              "authenticated_or_connected": {
+                "const": "YES"
+              },
+              "callable": {
+                "const": "YES"
+              },
+              "organizationally_authorized": {
+                "const": "YES"
+              },
+              "proven_live": {
+                "const": "YES"
+              },
+              "binding": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "host_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "host_ref"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "project_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "project_ref"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "session_ref": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "session_ref"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "runtime_generation": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "runtime_generation"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "source_sha": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "source_sha"
+                    ]
+                  }
+                ]
+              },
               "blocker": {
                 "type": "null"
               },

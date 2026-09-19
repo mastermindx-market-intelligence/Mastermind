@@ -84,6 +84,15 @@
       "grants_authority": false
     }
   },
+  "overlay_visibility_policy": {
+    "required_conditions": [
+      "requested route is listed in domain_overlays",
+      "owner-native authorization evidence records organizationally_authorized = YES",
+      "authorization evidence carries a non-empty artifact_identity"
+    ],
+    "missing_or_non_yes": "SUPPRESS_AND_DO_NOT_LOAD_SCHEMA",
+    "successful_activation": "ADD_ONLY_REQUESTED_OVERLAY_AND_LOAD_ONLY_ITS_MINIMAL_TOOL_FAMILY"
+  },
   "health_dimensions": [
     "installed",
     "enabled",

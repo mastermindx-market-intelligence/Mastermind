@@ -28,6 +28,8 @@ The package-local catalog fragment and fixtures are validation evidence, not ins
 
 Use the explicit task and current authority context to select exactly one core profile: `web_ceo_core`, `native_builder_operator`, or `browser_provider_operator`. Add a domain overlay only for an explicit task need plus current authorization. A role label never upgrades authority.
 
+A domain route becomes visible only when domain_overlays includes the route and owner-native evidence records organizationally_authorized = YES with a non-empty evidence identity. Otherwise suppress the overlay and load no schema.
+
 Do not infer effective capability from a product, plugin, or connector name. A plugin name is not evidence that a surface is installed, enabled, authenticated or connected, callable, organizationally authorized, or `PROVEN_LIVE`.
 
 ## Compose role-filtered health
