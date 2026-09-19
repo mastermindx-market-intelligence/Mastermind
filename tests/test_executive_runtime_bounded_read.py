@@ -71,19 +71,19 @@ def test_bounded_queries_put_sentinel_limits_in_sqlite(tmp_path, monkeypatch):
 
     normalized = [" ".join(sql.split()) for sql in traces]
     assert any(
-        "WHERE parent_job_id IS NULL AND root_job_id=job_id" in sql
+        "WITH RECURSIVE bounded_root_ids" in sql
         and f"LIMIT {er.BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS + 1}" in sql
         for sql in normalized
     )
     assert any(
-        "WHERE root_job_id=" in sql
-        and "job_id<>" in sql
-        and f"LIMIT {er.BOUNDED_RUNTIME_ROOT_MAX_CHILDREN + 1}" in sql
+        "WHERE (root_job_id=" in sql
+        and "ORDER BY depth,created_at_ms,job_id" in sql
+        and f"LIMIT {er.BOUNDED_RUNTIME_ROOT_MAX_CHILDREN + 2}" in sql
         for sql in normalized
     )
     assert any(
         "FROM attempts" in sql
-        and "WHERE job_id=" in sql
+        and "job_id IN" in sql
         and f"LIMIT {er.BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS + 1}" in sql
         for sql in normalized
     )
