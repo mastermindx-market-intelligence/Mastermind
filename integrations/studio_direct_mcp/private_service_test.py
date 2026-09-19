@@ -185,6 +185,7 @@ def _seal_runtime(account: str = "test-account", recorder=None):
 def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     """Recreate one exact historical layout; never include newly staged modules."""
     config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    config.pop("paperDesign", None)
     if not typed_git:
         config.pop("gitPublish", None)
     roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
@@ -192,7 +193,9 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     manifest["version"] = 1
     for key in ("nodeHash", "backendHash", "dependencyTreeHash"):
         manifest.pop(key, None)
-    removed = ("output-budget.mjs",) if typed_git else ("output-budget.mjs", "git-publish.mjs")
+    removed = ("paper-design.mjs", "output-budget.mjs") if typed_git else (
+        "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
+    )
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -221,6 +224,7 @@ class TestIdentity(unittest.TestCase):
                 "gateway.mjs",
                 "output-budget.mjs",
                 "git-publish.mjs",
+                "paper-design.mjs",
                 "private-tunnel-auth.mjs",
                 "private-tunnel-gateway.mjs",
                 "package.json",
@@ -257,7 +261,9 @@ class TestIdentity(unittest.TestCase):
         legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V1}
         self.assertTrue(svc._valid_manifest({**base, "files": current}, "test-account", _label_for("test-account")))
         self.assertTrue(svc._valid_manifest({**base, "files": legacy}, "test-account", _label_for("test-account")))
-        typed_legacy = {name: digest for name in svc.STAGE_FILES if name != "output-budget.mjs"}
+        immediate_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V3}
+        self.assertTrue(svc._valid_manifest({**base, "files": immediate_legacy}, "test-account", _label_for("test-account")))
+        typed_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V2}
         self.assertTrue(svc._valid_manifest({**base, "files": typed_legacy}, "test-account", _label_for("test-account")))
         self.assertNotIn("output-budget.mjs", svc.LEGACY_STAGE_FILES_V1)
         self.assertNotIn("git-publish.mjs", svc.LEGACY_STAGE_FILES_V1)
@@ -423,6 +429,20 @@ class TestBuildConfig(unittest.TestCase):
             self.assertNotIn("branch", config["gitPublish"])
             self.assertNotIn("remote", config["gitPublish"])
             self.assertNotIn("credential", config["gitPublish"])
+            paper_runtime = home / ".local" / "share" / "mastermind-paper" / "runtime" / "v1"
+            self.assertEqual(
+                config["paperDesign"],
+                {
+                    "enabled": True,
+                    "pythonPath": str(paper_runtime / "venv" / "bin" / "python"),
+                    "bridgePath": str(paper_runtime / "source" / "bridge.py"),
+                    "bridgeSha256": svc.PAPER_BRIDGE_SHA256,
+                    "commandTimeoutMs": 70_000,
+                },
+            )
+            self.assertNotIn("fileId", config["paperDesign"])
+            self.assertNotIn("account", config["paperDesign"])
+            self.assertNotIn("token", config["paperDesign"])
 
 
 class TestBuildPlist(unittest.TestCase):

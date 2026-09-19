@@ -45,6 +45,13 @@ TYPED_GIT_SOURCE_REPOSITORY_REL = Path("Documents/GitHub/Mastermind")
 TYPED_GIT_BINARY = "/usr/bin/git"
 TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
 
+# Paper Desktop capability is a gateway-local consumer of the separately reviewed
+# guarded adapter in PR #585. The private gateway never accepts these paths or
+# hashes from ChatGPT.
+PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v1")
+PAPER_BRIDGE_SHA256 = "94329a2813e37f1081e1be48aacf371b8f1b23505ec609cc6e8d453554cf8fa0"
+PAPER_COMMAND_TIMEOUT_MS = 70_000
+
 # CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
 
@@ -59,20 +66,27 @@ STAGE_FILES = (
     "gateway.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
+    "paper-design.mjs",
     "private-tunnel-auth.mjs",
     "private-tunnel-gateway.mjs",
     "package.json",
     "package-lock.json",
 )
 
-# Version-1 installs created before typed Git did not stage git-publish.mjs.
-# Accept only that exact historical set (or the current set) so the canonical
-# installer can stop and upgrade those known installs without accepting an
-# arbitrary manifest shape.
-LEGACY_STAGE_FILES_V2 = tuple(name for name in STAGE_FILES if name != "output-budget.mjs")
+# Historical installs are admitted only through exact known file sets. The
+# immediately preceding v0.1.5 install has every current file except the new
+# Paper capability module; earlier generations also predate output paging and
+# typed Git.
+LEGACY_STAGE_FILES_V3 = tuple(name for name in STAGE_FILES if name != "paper-design.mjs")
+LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
 LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
 KNOWN_MANIFEST_FILESETS = frozenset(
-    (frozenset(STAGE_FILES), frozenset(LEGACY_STAGE_FILES_V2), frozenset(LEGACY_STAGE_FILES_V1))
+    (
+        frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V3),
+        frozenset(LEGACY_STAGE_FILES_V2),
+        frozenset(LEGACY_STAGE_FILES_V1),
+    )
 )
 
 MANIFEST_VERSION = 2
@@ -415,6 +429,17 @@ def _typed_git_config(user_root: Path) -> dict:
     }
 
 
+def _paper_design_config(user_root: Path) -> dict:
+    runtime = user_root / PAPER_RUNTIME_REL
+    return {
+        "enabled": True,
+        "pythonPath": str(runtime / "venv" / "bin" / "python"),
+        "bridgePath": str(runtime / "source" / "bridge.py"),
+        "bridgeSha256": PAPER_BRIDGE_SHA256,
+        "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
+    }
+
+
 def _build_config(
     account: str,
     host: str,
@@ -440,6 +465,7 @@ def _build_config(
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "reclaimIdleGraceMs": 30_000,
         "gitPublish": _typed_git_config(user_root),
+        "paperDesign": _paper_design_config(user_root),
     }
 
 
