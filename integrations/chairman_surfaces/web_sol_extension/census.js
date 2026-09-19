@@ -84,7 +84,7 @@
       raw.schema === "mastermind.web_sol_instance_config.v1" &&
       typeof raw.instanceId === "string" && /^[0-9a-f]{64}$/.test(raw.instanceId) &&
       raw.nativeHost === `com.mastermind.web_sol_surface.${raw.instanceId.slice(0, 24)}` &&
-      Number.isSafeInteger(raw.protocolMajor) && raw.protocolMajor >= 1 &&
+      raw.protocolMajor === 1 &&
       validPackageVersion(raw.clientPackageVersion) &&
       validPackageVersion(raw.nativePackageVersion) &&
       validPackageVersion(raw.extensionPackageVersion) &&
