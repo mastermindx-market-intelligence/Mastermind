@@ -94,6 +94,7 @@ import {
   STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL,
   STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL,
   STUDIO_GIT_PUBLISH_TOOLS,
+  STUDIO_WEB_COMMISSION_MATERIALIZE_TOOL,
   createGitPublisher,
   resolveGitPublishConfig,
   toolResult as gitToolResult,
@@ -878,7 +879,7 @@ class GatewaySession {
         capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
-          'studio_ping and any configured studio_git_* tools are answered by the gateway; ' +
+          'studio_ping and any configured studio_git_* / studio_web_commission_* tools are answered by the gateway; ' +
           'all remaining tools are proxied to the backend.',
       },
     );
@@ -894,6 +895,12 @@ class GatewaySession {
         const localTools = [{ ...STUDIO_PING_TOOL }];
         if (session.gitPublisher) {
           localTools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
+          // Commission materialization needs the optional host-side Craft
+          // compiler, so it is advertised only where that dependency is
+          // actually installed.
+          if (session.gitPublisher.commissionEnabled) {
+            localTools.push({ ...STUDIO_WEB_COMMISSION_MATERIALIZE_TOOL });
+          }
         }
         const backendNames = new Set(tools.map((tool) => tool.name));
         for (const localTool of localTools) {
@@ -961,18 +968,23 @@ class GatewaySession {
       return result;
     }
 
+    const commissionToolEnabled = Boolean(this.gitPublisher?.commissionEnabled) &&
+      name === STUDIO_WEB_COMMISSION_MATERIALIZE_TOOL.name;
     if (this.gitPublisher &&
-        (name === STUDIO_GIT_PUBLISH_STATUS_TOOL.name ||
+        (commissionToolEnabled ||
+         name === STUDIO_GIT_PUBLISH_STATUS_TOOL.name ||
          name === STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL.name ||
          name === STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.name)) {
       this.bumpTool(name);
       try {
         const args = request?.params?.arguments ?? {};
-        const data = name === STUDIO_GIT_PUBLISH_STATUS_TOOL.name
-          ? await this.gitPublisher.status(args)
-          : name === STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL.name
-            ? await this.gitPublisher.commit(args)
-            : await this.gitPublisher.push(args);
+        const data = commissionToolEnabled
+          ? await this.gitPublisher.materializeCommission(args)
+          : name === STUDIO_GIT_PUBLISH_STATUS_TOOL.name
+            ? await this.gitPublisher.status(args)
+            : name === STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL.name
+              ? await this.gitPublisher.commit(args)
+              : await this.gitPublisher.push(args);
         const isError = data?.status === 'REFUSED' || data?.status === 'PARTIAL' || data?.effect_state === 'EFFECT_UNKNOWN';
         if (data?.effect_state === 'EFFECT_UNKNOWN') this.taint('typed git mutation effect unknown');
         log(isError ? 'warn' : 'info', 'tool_call', {

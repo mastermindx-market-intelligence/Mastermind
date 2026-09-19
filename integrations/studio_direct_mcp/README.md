@@ -8,7 +8,7 @@ The gateway binds to `127.0.0.1:45017`. Its external endpoint is `https://mac-st
 
 The service label is `com.mastermind.studio-direct-mcp`. Installed files and private OAuth state live in `/Users/chriswong/.local/share/studio-direct-mcp`. The backend is pinned to `/Users/chriswong/.local/share/desktop-commander-service/vendor/node_modules/@wonderwhy-er/desktop-commander/dist/index.js`; the new gateway never modifies that engine or its existing remote parent.
 
-Each MCP session receives its own stdio backend child. The local tool surface has the Desktop Commander catalog plus `studio_ping`; when the bounded typed-Git publisher is configured, it also adds `studio_git_publish_status`, `studio_git_commit_current_changes`, and `studio_git_push_current_branch`. These tools can access files and run processes with the Mac user's permissions. OAuth approval grants `studio.control`; it is not a narrower filesystem sandbox.
+Each MCP session receives its own stdio backend child. The local tool surface has the Desktop Commander catalog plus `studio_ping`; when the bounded typed-Git publisher is configured, it also adds `studio_git_publish_status`, `studio_git_commit_current_changes`, and `studio_git_push_current_branch`, plus `studio_web_commission_materialize` where the host commission compiler is installed. These tools can access files and run processes with the Mac user's permissions. OAuth approval grants `studio.control`; it is not a narrower filesystem sandbox.
 
 OAuth uses public clients, PKCE S256, an exact `/mcp` resource audience, single-use one-minute codes, 15-minute bearer tokens, and rotating seven-day refresh tokens. Every connection requires an exact local approval. An operator label identifies the approved connection; it does not establish a verified ChatGPT email identity. No ChatGPT password, account cookie, or OpenAI API key is collected by this gateway. Tokens are hashed in mode-0600 state with serialized atomic updates. Local revocation invalidates tokens and unredeemed codes. Each request revalidates its token and binds its MCP session to the approved principal and client.
 
@@ -30,6 +30,39 @@ node /Users/chriswong/.local/share/studio-direct-mcp/auth.mjs \
   --state-dir /Users/chriswong/.local/share/studio-direct-mcp/state \
   revoke PRINCIPAL_ID
 ```
+
+## Typed Web publication
+
+The typed publication plane exists so an attended Web operation can publish a commission artifact without pushing a rendered document or a heredoc through a generic process tool. The journey is:
+
+```text
+compact commission request
+  -> studio_web_commission_materialize   (host compiler renders research/executive_commissions/COMMISSION.md)
+  -> studio_git_commit_current_changes   (fenced by the exact expected local HEAD)
+  -> studio_git_push_current_branch      (exact non-force ref push, exact remote SHA readback)
+```
+
+Every destination is host-resolved. The caller supplies an `operation_id` and, for materialization, one compact `mastermind.craft_commission_request.v1` object of at most 16384 serialized bytes. The repository, remote, workspace path and `sol/web-*` branch come from the canonical `mmx-workspace` registration; the commission path is the fixed `research/executive_commissions/COMMISSION.md` expected by the trusted resolver. There is no caller-selected repository, remote, branch, path, force option, shell command, provider, model or account anywhere on this surface.
+
+`studio_web_commission_materialize` is an adapter, not a compiler. It invokes the incumbent Mastermind Craft commission compiler (`research/worker_craft/mastermind-craft/scripts/brief.py`) over `argv` with the compact request staged as a private bounded file outside the workspace, then refuses the result unless the compiler's declared `commission_sha256` is the SHA-256 of the exact bytes it returned and the compiler reports no execution authority and no provider, model or account selection. The bytes are staged and renamed into place, then read back and hashed again before the call reports `APPLIED`. Identical existing bytes report `ALREADY_APPLIED` without rewriting, so repeating the call after an uncertain result reconciles by exact digest readback instead of blind retry.
+
+Configure it under `gitPublish` alongside the typed-Git keys:
+
+```json
+{
+  "gitPublish": {
+    "enabled": true,
+    "workspaceCli": "/ABSOLUTE/PATH/mmx-workspace",
+    "gitBinary": "/usr/bin/git",
+    "sourceRepository": "/ABSOLUTE/PATH/Mastermind",
+    "allowedRemoteUrls": ["https://github.com/OWNER/REPO.git"],
+    "commissionCompiler": "/ABSOLUTE/PATH/Mastermind/research/worker_craft/mastermind-craft/scripts/brief.py",
+    "commissionCompilerInterpreter": "/usr/bin/python3"
+  }
+}
+```
+
+The compiler is an optional host dependency. Omitting `commissionCompiler` and `commissionCompilerInterpreter` leaves the typed-Git plane fully usable and simply does not advertise the commission tool. That compiler is still unprotected on its own PR stack, so `git-publish.test.mjs` proves this adapter against its frozen process contract through `fixtures/commission-compiler.mjs`, and its real-compiler test skips while the compiler is absent from the checked-out base rather than vendoring a copy of it.
 
 ## Failure behavior
 

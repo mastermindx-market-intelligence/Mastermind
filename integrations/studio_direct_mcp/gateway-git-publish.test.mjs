@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -14,7 +15,9 @@ import { startGateway } from './gateway.mjs';
 const execFile = promisify(execFileCallback);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(HERE, 'fixtures', 'backend.mjs');
+const COMPILER_FIXTURE = path.join(HERE, 'fixtures', 'commission-compiler.mjs');
 const GIT = '/usr/bin/git';
+const COMMISSION_PATH = 'research/executive_commissions/COMMISSION.md';
 
 async function run(file, args, options = {}) {
   return execFile(file, args, { encoding: 'utf8', maxBuffer: 1024 * 1024, ...options });
@@ -233,6 +236,184 @@ test('backend tool-name collision fails closed rather than shadowing either tool
       () => c.client.listTools(),
       /collides with gateway-owned tool|Internal error|MCP error/i,
     );
+  } finally {
+    await closeAll([f.root, gw, c]);
+  }
+});
+
+async function withCommissionCompiler(f, mode = 'ok') {
+  const compiler = path.join(f.root, `compiler-${mode}.mjs`);
+  await writeFile(
+    compiler,
+    `process.env.STUB_COMMISSION_MODE = ${JSON.stringify(mode)};\n` +
+    `await import(${JSON.stringify(pathToFileURL(COMPILER_FIXTURE).href)});\n`,
+  );
+  return {
+    ...f.gitPublish,
+    commissionCompiler: compiler,
+    commissionCompilerInterpreter: process.execPath,
+    commissionTimeoutMs: 20_000,
+  };
+}
+
+function compactCommission() {
+  return {
+    schema_version: 'mastermind.craft_commission_request.v1',
+    role: 'backend',
+    authority_ref: 'gateway.session2.typed-web-publication',
+    source: {
+      base: { repository: 'mastermindx-market-intelligence/Mastermind', commit: 'b'.repeat(40) },
+      governing: [{
+        repository: 'mastermindx-market-intelligence/Mastermind',
+        commit: 'b'.repeat(40),
+        path: 'docs/sol_skills/INDEX.md',
+      }],
+    },
+    outcome: {
+      objective: 'Publish one bounded commission artifact through the typed Web publication plane.',
+      why: 'The Web CEO must publish without a generic shell command.',
+      user_journey: 'Compact intent in, canonical commission artifact out.',
+      machine_outcome: 'Deterministic commission bytes with a proved digest.',
+    },
+    scope: { write_paths: ['research/executive_commissions'], non_goals: ['Do not add a second compiler.'] },
+    inputs: ['This compact request and the repository-owned Craft method files.'],
+    data: {
+      time: 'Exact commit identities.',
+      missing: 'Unknown admission stays unknown.',
+      corrections: 'A changed request produces a new digest.',
+      rights: 'Repository-owned method text only.',
+    },
+    method: {
+      deterministic: ['Validate and render.'],
+      model: ['Model judgment stays inside the bounded worker method.'],
+      implementation_order: ['Validate, compile, publish.'],
+    },
+    deliverables: ['One canonical COMMISSION.md.'],
+    acceptance: ['Published bytes hash to the declared digest.'],
+    failure: {
+      refusals: ['Refuse caller-selected repository, remote, branch or path.'],
+      stop_conditions: ['Stop on EFFECT_UNKNOWN until the carrier is reconciled.'],
+    },
+    constraints: ['No execution authority.'],
+    continuation: {
+      record_owner: 'GitHub owns implementation and evidence.',
+      next_action: 'Typed commit and typed exact-ref push.',
+    },
+  };
+}
+
+test('commission materialization is advertised only where the host compiler is installed', async () => {
+  const bare = await makePublisherFixture();
+  const bareGw = await boot({ stateDir: bare.stateDir, gitPublish: bare.gitPublish });
+  const bareClient = await connect(bareGw.gw);
+  try {
+    const names = (await bareClient.client.listTools()).tools.map((tool) => tool.name);
+    assert.ok(names.includes('studio_git_publish_status'), 'the typed Git plane stays fully usable');
+    assert.equal(names.includes('studio_web_commission_materialize'), false);
+
+    // A call to the unadvertised name must not be answered locally; it falls
+    // through to the backend, which does not implement it.
+    const proxied = await bareClient.client.callTool({
+      name: 'studio_web_commission_materialize',
+      arguments: { operation_id: bare.operationId, commission: compactCommission() },
+    });
+    assert.equal(proxied.isError, true);
+    assert.equal(proxied.structuredContent?.schema, undefined);
+  } finally {
+    await closeAll([bare.root, bareGw.gw, bareClient]);
+  }
+
+  const f = await makePublisherFixture();
+  const gitPublish = await withCommissionCompiler(f);
+  const { gw } = await boot({ stateDir: f.stateDir, gitPublish });
+  const c = await connect(gw);
+  try {
+    const tool = (await c.client.listTools()).tools.find((item) => item.name === 'studio_web_commission_materialize');
+    assert.ok(tool);
+    assert.equal(tool.annotations.readOnlyHint, false);
+    assert.equal(tool.annotations.destructiveHint, true);
+    assert.equal(tool.annotations.idempotentHint, true);
+    assert.equal(tool.annotations.openWorldHint, false);
+    assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ['commission', 'operation_id']);
+  } finally {
+    await closeAll([f.root, gw, c]);
+  }
+});
+
+test('gateway publishes the canonical commission locally and never reaches the backend', async () => {
+  const f = await makePublisherFixture();
+  const gitPublish = await withCommissionCompiler(f);
+  const { gw } = await boot({ stateDir: f.stateDir, gitPublish });
+  const c = await connect(gw);
+  try {
+    await c.client.listTools();
+    const backendBefore = gw.stats().requests.backendOps;
+
+    const materialized = await c.client.callTool({
+      name: 'studio_web_commission_materialize',
+      arguments: { operation_id: f.operationId, commission: compactCommission() },
+    });
+    assert.equal(materialized.isError, undefined);
+    const data = materialized.structuredContent;
+    assert.equal(data.schema, 'mastermind.studio_web_commission_result.v1');
+    assert.equal(data.effect_state, 'APPLIED');
+    assert.equal(data.commission_path, COMMISSION_PATH);
+    assert.equal(data.local_head_sha, f.head);
+    assert.equal(gw.stats().requests.backendOps, backendBefore,
+      'commission materialization must not hit Desktop Commander backend');
+
+    const published = await readFile(path.join(f.workspacePath, COMMISSION_PATH));
+    assert.equal(createHash('sha256').update(published).digest('hex'), data.commission_sha256);
+
+    const committed = await c.client.callTool({
+      name: 'studio_git_commit_current_changes',
+      arguments: {
+        operation_id: f.operationId,
+        expected_head_sha: data.local_head_sha,
+        message: 'chore(web): publish commission artifact',
+      },
+    });
+    assert.equal(committed.isError, undefined);
+    const commitHead = committed.structuredContent.commit_head_sha;
+
+    const pushed = await c.client.callTool({
+      name: 'studio_git_push_current_branch',
+      arguments: { operation_id: f.operationId, expected_head_sha: commitHead },
+    });
+    assert.equal(pushed.isError, undefined);
+    assert.equal(pushed.structuredContent.remote_head_sha, commitHead);
+    assert.equal(gw.stats().requests.backendOps, backendBefore);
+
+    const { stdout } = await run(GIT, ['show', `${commitHead}:${COMMISSION_PATH}`], { cwd: f.remote });
+    assert.equal(createHash('sha256').update(Buffer.from(stdout, 'utf8')).digest('hex'), data.commission_sha256);
+  } finally {
+    await closeAll([f.root, gw, c]);
+  }
+});
+
+test('a commission tool failure is reported as a typed error without tainting reclaim on a refusal', async () => {
+  const f = await makePublisherFixture();
+  const gitPublish = await withCommissionCompiler(f, 'refuse');
+  const { gw } = await boot({ stateDir: f.stateDir, gitPublish });
+  const c = await connect(gw);
+  try {
+    await c.client.listTools();
+    const result = await c.client.callTool({
+      name: 'studio_web_commission_materialize',
+      arguments: { operation_id: f.operationId, commission: compactCommission() },
+    });
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.code, 'COMMISSION_COMPILER_REFUSED');
+    assert.equal(result.structuredContent.effect_state, 'NOT_APPLIED');
+    assert.equal(result.structuredContent.compiler_refusal, 'commission.fields');
+
+    const invalid = await c.client.callTool({
+      name: 'studio_web_commission_materialize',
+      arguments: { operation_id: f.operationId, commission: { schema_version: 'wrong' } },
+    });
+    assert.equal(invalid.isError, true);
+    assert.equal(invalid.structuredContent.code, 'TYPED_GIT_PRECHECK_REFUSED');
+    assert.equal(invalid.structuredContent.effect_state, 'NOT_APPLIED');
   } finally {
     await closeAll([f.root, gw, c]);
   }

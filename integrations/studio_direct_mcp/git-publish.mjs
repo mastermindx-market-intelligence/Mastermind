@@ -1,20 +1,53 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { mkdtemp, realpath as realpathDefault, rm } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { mkdir, mkdtemp, open, realpath as realpathDefault, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 const execFileDefault = promisify(execFileCallback);
 
 const OPERATION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
 const BRANCH_RE = /^sol\/web-[A-Za-z0-9._-]+$/;
 const ALLOWED_LANE = 'web';
 const MAX_STDIO_BYTES = 1024 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
 const DEFAULT_PUSH_TIMEOUT_MS = 60_000;
 const RESOLVED_CONFIGS = new WeakSet();
+
+// Canonical commission convention expected by the trusted resolver. These are
+// fixed host constants: no caller ever selects a repository, branch or path.
+const COMMISSION_DIR_SEGMENTS = Object.freeze(['research', 'executive_commissions']);
+const COMMISSION_FILE_NAME = 'COMMISSION.md';
+const COMMISSION_RELATIVE_PATH = [...COMMISSION_DIR_SEGMENTS, COMMISSION_FILE_NAME].join('/');
+
+// Frozen contract consumed from the incumbent Mastermind Craft brief compiler
+// (`research/worker_craft/mastermind-craft/scripts/brief.py`). That compiler
+// remains the sole owner of compact-request validation and commission
+// rendering; this adapter only feeds it and fences where its bytes land.
+const COMMISSION_REQUEST_SCHEMA = 'mastermind.craft_commission_request.v1';
+const COMMISSION_COMPILATION_SCHEMA = 'mastermind.craft_commission_compilation.v1';
+const COMMISSION_REQUEST_FIELDS = Object.freeze([
+  'schema_version', 'role', 'authority_ref', 'source', 'outcome', 'scope', 'inputs',
+  'data', 'method', 'deliverables', 'acceptance', 'failure', 'constraints', 'continuation',
+]);
+// Mirrors the compiler's own MAX_COMMISSION_INPUT_BYTES so an oversized compact
+// request is refused before anything is written to disk.
+const MAX_COMMISSION_INPUT_BYTES = 16_384;
+const MAX_COMMISSION_OUTPUT_BYTES = 2 * 1024 * 1024;
+const DEFAULT_COMMISSION_TIMEOUT_MS = 30_000;
+// The compiler's refusal tokens are a closed `field.reason` vocabulary that by
+// construction carries no caller values or filesystem paths.
+const REFUSAL_TOKEN_RE = /^[A-Za-z][A-Za-z0-9_.]{0,127}$/;
+const SELECTION_ASSERTIONS = Object.freeze([
+  ['execution_authority', false],
+  ['provider_selection', 'NOT_PERFORMED'],
+  ['model_selection', 'NOT_PERFORMED'],
+  ['account_selection', 'NOT_PERFORMED'],
+]);
 
 export const STUDIO_GIT_PUBLISH_STATUS_TOOL = Object.freeze({
   name: 'studio_git_publish_status',
@@ -128,6 +161,51 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
   _meta: { 'private-studio-mcp/gateway': true, 'private-studio-mcp/typed-git': true },
 });
 
+export const STUDIO_WEB_COMMISSION_MATERIALIZE_TOOL = Object.freeze({
+  name: 'studio_web_commission_materialize',
+  title: 'Studio Web Commission Materialize',
+  description:
+    'Materialize the canonical commission artifact research/executive_commissions/COMMISSION.md inside one ' +
+    'existing Mastermind attended Web workspace from a compact commission request. The host resolves the ' +
+    'workspace and sol/web-* branch from canonical mmx-workspace registration, and the host-side Mastermind ' +
+    'Craft compiler expands the compact request into the complete commission from repository-owned method ' +
+    'files. The caller supplies only the operation id and the bounded compact request: the worker transcript, ' +
+    'the rendered commission body, shell commands, heredocs, repository, remote, branch, path and force ' +
+    'options are all refused. It performs no provider, model, account, credential or host selection, creates ' +
+    'no commit and contacts no remote. Identical existing bytes report ALREADY_APPLIED without rewriting, so ' +
+    'repeating the call after an uncertain result reconciles by exact digest readback rather than blind retry.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      operation_id: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 256,
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$',
+      },
+      commission: {
+        type: 'object',
+        description:
+          'One compact mastermind.craft_commission_request.v1 object, at most 16384 serialized bytes. ' +
+          'The Mastermind Craft compiler owns this schema and refuses unknown, incomplete or ' +
+          'routing-bearing fields; this tool never re-interprets or rewrites it.',
+        properties: { schema_version: { const: COMMISSION_REQUEST_SCHEMA } },
+        required: [...COMMISSION_REQUEST_FIELDS],
+      },
+    },
+    required: ['operation_id', 'commission'],
+    additionalProperties: false,
+  },
+  annotations: {
+    title: 'Studio Web Commission Materialize',
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  _meta: { 'private-studio-mcp/gateway': true, 'private-studio-mcp/typed-git': true },
+});
+
 export const STUDIO_GIT_PUBLISH_TOOLS = Object.freeze([
   STUDIO_GIT_PUBLISH_STATUS_TOOL,
   STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL,
@@ -166,6 +244,7 @@ export function resolveGitPublishConfig(value) {
     new Set([
       'enabled', 'workspaceCli', 'gitBinary', 'sourceRepository', 'allowedRemoteUrls',
       'commandTimeoutMs', 'pushTimeoutMs',
+      'commissionCompiler', 'commissionCompilerInterpreter', 'commissionTimeoutMs',
     ]),
     'config.gitPublish',
   );
@@ -186,6 +265,23 @@ export function resolveGitPublishConfig(value) {
     }
     normalizedRemotes.push(remote);
   }
+  // The Craft commission compiler is an optional host dependency. While it is
+  // unprotected, an installation that omits it keeps the typed Git plane fully
+  // usable and simply does not advertise commission materialization; nothing
+  // here vendors or re-implements that compiler.
+  const wantsCommission = value.commissionCompiler !== undefined || value.commissionCompilerInterpreter !== undefined;
+  if (!wantsCommission && value.commissionTimeoutMs !== undefined) {
+    throw new TypeError(
+      'config.gitPublish.commissionTimeoutMs requires commissionCompiler and commissionCompilerInterpreter');
+  }
+  const commission = wantsCommission
+    ? Object.freeze({
+      compiler: requireAbsoluteString(value.commissionCompiler, 'config.gitPublish.commissionCompiler'),
+      interpreter: requireAbsoluteString(value.commissionCompilerInterpreter, 'config.gitPublish.commissionCompilerInterpreter'),
+      timeoutMs: clampTimeout(value.commissionTimeoutMs, DEFAULT_COMMISSION_TIMEOUT_MS, 'config.gitPublish.commissionTimeoutMs'),
+    })
+    : null;
+
   const resolved = Object.freeze({
     enabled: true,
     workspaceCli: requireAbsoluteString(value.workspaceCli, 'config.gitPublish.workspaceCli'),
@@ -195,6 +291,7 @@ export function resolveGitPublishConfig(value) {
     lane: ALLOWED_LANE,
     commandTimeoutMs: clampTimeout(value.commandTimeoutMs, DEFAULT_COMMAND_TIMEOUT_MS, 'config.gitPublish.commandTimeoutMs'),
     pushTimeoutMs: clampTimeout(value.pushTimeoutMs, DEFAULT_PUSH_TIMEOUT_MS, 'config.gitPublish.pushTimeoutMs'),
+    commission,
   });
   RESOLVED_CONFIGS.add(resolved);
   return resolved;
@@ -223,6 +320,73 @@ function validateCommitMessage(value) {
   return text;
 }
 
+/**
+ * Bound the compact request and pin the exact compiler entry contract. The
+ * Craft compiler owns every field-level rule; duplicating them here would
+ * create a second compiler, which this adapter must not do.
+ */
+function serializeCompactCommission(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('commission must be a compact commission request object');
+  }
+  if (value.schema_version !== COMMISSION_REQUEST_SCHEMA) {
+    throw new TypeError('commission.schema_version is not the supported compact commission request schema');
+  }
+  let serialized;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new TypeError('commission is not serializable');
+  }
+  if (typeof serialized !== 'string') throw new TypeError('commission is not serializable');
+  const bytes = Buffer.byteLength(serialized, 'utf8');
+  if (bytes < 2 || bytes > MAX_COMMISSION_INPUT_BYTES) {
+    throw new TypeError('commission is outside the compact commission request size boundary');
+  }
+  return serialized;
+}
+
+function compilerRefusalToken(error) {
+  const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
+  const match = stderr.match(/^BRIEF_REFUSED (\S+)/m);
+  const token = match?.[1];
+  return token && REFUSAL_TOKEN_RE.test(token) ? token : null;
+}
+
+function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
+ * Read an existing commission artifact without following a symlink, so a
+ * planted link inside the workspace can never redirect the readback proof.
+ */
+async function readRegularFile(filePath) {
+  const handle = await open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new Error('commission path is not a regular file');
+    if (stats.size > MAX_COMMISSION_OUTPUT_BYTES) throw new Error('commission file exceeds the supported size');
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function writeNewFile(filePath, bytes) {
+  const handle = await open(
+    filePath,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+    0o644,
+  );
+  try {
+    await handle.writeFile(bytes);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 function parseJson(text, label) {
   let parsed;
   try {
@@ -243,6 +407,13 @@ function actionRef(operationId, branch, head) {
   return createHash('sha256')
     .update('mastermind.studio_git_push_current_branch.v1\0')
     .update(operationId).update('\0').update(branch).update('\0').update(head)
+    .digest('hex');
+}
+
+function commissionActionRef(operationId, branch, commissionSha) {
+  return createHash('sha256')
+    .update('mastermind.studio_web_commission_materialize.v1\0')
+    .update(operationId).update('\0').update(branch).update('\0').update(commissionSha)
     .digest('hex');
 }
 
@@ -273,11 +444,11 @@ export function createGitPublisher(config, dependencies = {}) {
   const realpath = dependencies.realpath ?? realpathDefault;
   const remove = dependencies.rm ?? rm;
 
-  async function run(file, args, { cwd, timeoutMs = cfg.commandTimeoutMs, envExtra = {} } = {}) {
+  async function run(file, args, { cwd, timeoutMs = cfg.commandTimeoutMs, envExtra = {}, maxBuffer = MAX_STDIO_BYTES } = {}) {
     return execFile(file, args, {
       cwd,
       timeout: timeoutMs,
-      maxBuffer: MAX_STDIO_BYTES,
+      maxBuffer,
       encoding: 'utf8',
       env: {
         PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
@@ -377,6 +548,208 @@ export function createGitPublisher(config, dependencies = {}) {
       schema: 'mastermind.studio_git_publish_status.v1',
       ...publicStatus(await workspace(args.operation_id)),
     };
+  }
+
+  /**
+   * Compile one compact commission request through the incumbent host-side
+   * Mastermind Craft compiler and place the exact compiled bytes at the
+   * canonical commission path inside the already-fenced attended Web
+   * workspace. This is an adapter, not a second compiler and not a commission
+   * truth store: Craft owns the compact schema and the rendered bytes, the
+   * mmx-workspace registration owns repository/branch/workspace identity, and
+   * the caller selects none of it.
+   */
+  async function materializeCommission(args) {
+    if (!args || typeof args !== 'object' || Array.isArray(args) ||
+        Object.keys(args).some((key) => !['operation_id', 'commission'].includes(key))) {
+      throw new TypeError('studio_web_commission_materialize arguments are invalid');
+    }
+    if (!cfg.commission) throw new TypeError('commission materialization is not configured');
+    const operationId = validateOperationId(args.operation_id);
+    const compact = serializeCompactCommission(args.commission);
+    const before = await workspace(operationId, { observeRemote: false });
+
+    const scratch = await mkdtemp(path.join(tmpdir(), 'studio-commission-'));
+    let compiled;
+    try {
+      const requestPath = path.join(scratch, 'commission-request.json');
+      await writeFile(requestPath, compact, { encoding: 'utf8', mode: 0o600 });
+      let stdout;
+      try {
+        // argv only. The compact request travels as a private bounded file, so
+        // no commission content ever passes through a shell or a heredoc.
+        ({ stdout } = await run(
+          cfg.commission.interpreter,
+          [cfg.commission.compiler, 'compile-commission', requestPath, '--format', 'json'],
+          {
+            cwd: scratch,
+            timeoutMs: cfg.commission.timeoutMs,
+            maxBuffer: MAX_COMMISSION_OUTPUT_BYTES,
+            envExtra: { PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' },
+          },
+        ));
+      } catch (error) {
+        const token = compilerRefusalToken(error);
+        return {
+          schema: 'mastermind.studio_web_commission_result.v1',
+          status: 'REFUSED',
+          effect_state: 'NOT_APPLIED',
+          code: 'COMMISSION_COMPILER_REFUSED',
+          operation_id: operationId,
+          branch: before.branch,
+          commission_path: COMMISSION_RELATIVE_PATH,
+          ...(token ? { compiler_refusal: token } : {}),
+        };
+      }
+      compiled = parseJson(stdout, 'craft commission compiler');
+    } finally {
+      // No effect has been admitted yet, so a scratch cleanup failure may still
+      // fail this call normally.
+      await remove(scratch, { recursive: true, force: true });
+    }
+
+    if (!compiled || typeof compiled !== 'object' || Array.isArray(compiled) ||
+        compiled.schema_version !== COMMISSION_COMPILATION_SCHEMA) {
+      throw new Error('craft commission compiler returned an unsupported result schema');
+    }
+    for (const [field, expected] of SELECTION_ASSERTIONS) {
+      if (compiled[field] !== expected) {
+        throw new Error('craft commission compiler reported a selection outside the publication boundary');
+      }
+    }
+    const markdown = compiled.instructions_markdown;
+    if (typeof markdown !== 'string' || markdown.length === 0) {
+      throw new Error('craft commission compiler returned no commission bytes');
+    }
+    const declared = compiled.commission_sha256;
+    if (typeof declared !== 'string' || !SHA256_RE.test(declared)) {
+      throw new Error('craft commission compiler returned an invalid commission digest');
+    }
+    const bytes = Buffer.from(markdown, 'utf8');
+    if (bytes.byteLength > MAX_COMMISSION_OUTPUT_BYTES) {
+      throw new Error('compiled commission exceeds the supported artifact size');
+    }
+    // The digest the compiler publishes must describe the exact bytes it
+    // returned, or its receipt cannot be used as publication proof.
+    if (sha256(bytes) !== declared) {
+      throw new Error('craft commission digest does not match the compiled commission bytes');
+    }
+
+    const ref = commissionActionRef(operationId, before.branch, declared);
+    // before.workspacePath is already fully resolved, so a symlinked segment on
+    // the canonical commission path shows up as a mismatch here. Each segment is
+    // checked as it is created, so a redirected ancestor is caught before the
+    // next segment is created through it.
+    let directory = before.workspacePath;
+    for (const segment of COMMISSION_DIR_SEGMENTS) {
+      directory = path.join(directory, segment);
+      try {
+        await mkdir(directory);
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error;
+      }
+      if (await realpath(directory) !== directory) {
+        throw new Error('commission directory escapes the attended Web workspace');
+      }
+    }
+    const target = path.join(directory, COMMISSION_FILE_NAME);
+
+    async function observe(state) {
+      let observed = null;
+      try {
+        observed = await workspace(operationId, { observeRemote: false });
+      } catch {
+        // A failed workspace readback cannot retract an already-proved effect.
+      }
+      return {
+        schema: 'mastermind.studio_web_commission_result.v1',
+        ...state,
+        action_ref: ref,
+        operation_id: operationId,
+        branch: before.branch,
+        commission_path: COMMISSION_RELATIVE_PATH,
+        commission_sha256: declared,
+        commission_bytes: bytes.byteLength,
+        ...(observed ? { local_head_sha: observed.localHead, clean: observed.clean } : {}),
+      };
+    }
+
+    let existing = null;
+    try {
+      existing = await readRegularFile(target);
+    } catch {
+      // Absent, unreadable or symlinked: treat as not yet materialized. The
+      // fenced rename below replaces whatever entry is currently there.
+    }
+    if (existing && sha256(existing) === declared) {
+      return observe({ status: 'OK', effect_state: 'APPLIED', code: 'ALREADY_APPLIED', written: false });
+    }
+
+    const staged = path.join(directory, `.studio-commission-${randomUUID()}.tmp`);
+    let renameAttempted = false;
+    try {
+      await writeNewFile(staged, bytes);
+      renameAttempted = true;
+      // rename(2) replaces the destination entry atomically and never follows a
+      // symlink at the destination, so the artifact is all-or-nothing.
+      await rename(staged, target);
+    } catch {
+      let stray = true;
+      try {
+        await unlink(staged);
+        stray = false;
+      } catch {
+        // The staged file may never have been created, or may be unremovable.
+        try {
+          await readRegularFile(staged);
+        } catch {
+          stray = false;
+        }
+      }
+      let observedBytes = null;
+      let readbackFailed = false;
+      try {
+        observedBytes = await readRegularFile(target);
+      } catch {
+        readbackFailed = true;
+      }
+      if (observedBytes && sha256(observedBytes) === declared) {
+        // Either the rename landed and only its response was lost, or the exact
+        // artifact was already present. Both are a proved applied effect.
+        return observe({
+          status: 'OK',
+          effect_state: 'APPLIED',
+          code: renameAttempted ? 'APPLIED_AFTER_AMBIGUOUS_WRITE_RETURN' : 'ALREADY_APPLIED',
+          written: false,
+        });
+      }
+      if (readbackFailed && renameAttempted) {
+        // The rename may have run and the destination cannot be observed, so the
+        // effect stays unknown. Reconcile with a repeat call; never blind-retry.
+        return observe({ status: 'UNKNOWN', effect_state: 'EFFECT_UNKNOWN', code: 'COMMISSION_WRITE_UNCERTAIN', written: false });
+      }
+      // Either staging failed before any rename, or the observed artifact is not
+      // this one. The canonical artifact is provably not this commission. Only a
+      // staged remnant, if any, still needs a human.
+      return observe({
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: stray ? 'COMMISSION_WRITE_FAILED_STRAY_STAGED_FILE' : 'COMMISSION_WRITE_FAILED',
+        written: false,
+        ...(stray ? { stray_staged_path: path.posix.join(...COMMISSION_DIR_SEGMENTS, path.basename(staged)) } : {}),
+      });
+    }
+
+    let observedBytes;
+    try {
+      observedBytes = await readRegularFile(target);
+    } catch {
+      return observe({ status: 'PARTIAL', effect_state: 'APPLIED', code: 'APPLIED_READBACK_FAILED', written: true });
+    }
+    if (sha256(observedBytes) !== declared) {
+      return observe({ status: 'PARTIAL', effect_state: 'APPLIED', code: 'APPLIED_BUT_SUPERSEDED', written: true });
+    }
+    return observe({ status: 'OK', effect_state: 'APPLIED', code: 'APPLIED', written: true });
   }
 
   async function commit(args) {
@@ -633,7 +1006,13 @@ export function createGitPublisher(config, dependencies = {}) {
     };
   }
 
-  return Object.freeze({ status, commit, push });
+  return Object.freeze({
+    status,
+    commit,
+    push,
+    materializeCommission,
+    commissionEnabled: Boolean(cfg.commission),
+  });
 }
 
 export function toolResult(value, isError = false) {
