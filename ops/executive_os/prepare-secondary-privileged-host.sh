@@ -133,11 +133,8 @@ trap cleanup_on_failure EXIT
 # disabling or booting out a central control plane; that would hide a role error.
 assert_central_absent
 
+[ -d "$SOURCE_REPO" ] && [ ! -L "$SOURCE_REPO" ] || refuse "source repo must be a direct directory"
 [ -d "$SOURCE_REPO/.git" ] && [ ! -L "$SOURCE_REPO/.git" ] || refuse "source repo must be a direct Git checkout"
-SOURCE_REPO_REAL="$(cd "$SOURCE_REPO" && /bin/pwd -P)"
-[ "$SOURCE_REPO_REAL" = "$SCRIPT_SOURCE_REPO" ] || refuse "script and source repo must be the same checkout"
-[ "$(/usr/bin/git -C "$SOURCE_REPO" rev-parse HEAD)" = "$EXPECTED_SHA" ] || refuse "source HEAD differs from expected SHA"
-[ -z "$('/usr/bin/git' -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=all)" ] || refuse "source repo is not clean"
 SOURCE_PARENT="$(cd "$SOURCE_REPO/.." && /bin/pwd -P)"
 [ "$(/usr/bin/stat -f '%u:%g' "$SOURCE_PARENT")" = "0:0" ] || refuse "source parent must be root:wheel"
 [ -z "$(/usr/bin/find "$SOURCE_PARENT" -maxdepth 0 -perm +022 -print -quit)" ] || refuse "source parent is group/other writable"
@@ -146,6 +143,12 @@ SOURCE_PARENT="$(cd "$SOURCE_REPO/.." && /bin/pwd -P)"
 [ -z "$(/usr/bin/find "$SOURCE_REPO" -type f -links +1 -print -quit)" ] || refuse "source checkout contains a hard-linked file"
 case "$(/usr/bin/stat -f '%Sp' "$SOURCE_PARENT")" in *+) refuse "source parent has a filesystem ACL" ;; esac
 [ -z "$(/usr/bin/find "$SOURCE_REPO" ! -type l -exec /usr/bin/stat -f '%Sp' {} \; | /usr/bin/awk '/\+/{print "ACL"; exit}')" ] || refuse "source checkout contains a filesystem ACL on a non-symlink object"
+
+# Only after filesystem custody is immutable may root invoke Git or helpers from it.
+SOURCE_REPO_REAL="$(cd "$SOURCE_REPO" && /bin/pwd -P)"
+[ "$SOURCE_REPO_REAL" = "$SCRIPT_SOURCE_REPO" ] || refuse "script and source repo must be the same checkout"
+[ "$(/usr/bin/git -C "$SOURCE_REPO" rev-parse HEAD)" = "$EXPECTED_SHA" ] || refuse "source HEAD differs from expected SHA"
+[ -z "$('/usr/bin/git' -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=all)" ] || refuse "source repo is not clean"
 [ -f "$SOURCE_POLICY" ] && [ ! -L "$SOURCE_POLICY" ] || refuse "source policy helper is unavailable"
 [ -x "$PYTHON_PROVISIONER" ] && [ ! -L "$PYTHON_PROVISIONER" ] || refuse "Python runtime verifier is unavailable"
 
