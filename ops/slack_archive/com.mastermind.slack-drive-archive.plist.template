@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mastermind.slack-drive-archive</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>__REPO_ROOT__/scripts/slack_drive_archive.py</string>
+    <string>--slack-token-file</string>
+    <string>__SECRETS_DIR__/slack_archive_user_token</string>
+    <string>--google-oauth-file</string>
+    <string>__SECRETS_DIR__/google_drive_oauth.json</string>
+    <string>--lookback-days</string>
+    <string>100</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO_ROOT__</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/slack-drive-archive.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/slack-drive-archive.err.log</string>
+</dict>
+</plist>
