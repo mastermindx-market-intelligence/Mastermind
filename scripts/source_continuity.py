@@ -175,12 +175,13 @@ class _HTTPRepresentation:
 class _ConditionalObservation:
     url: str
     etag: str
-    roster_semantics: object
+    semantics: object
 
 
 # A changed HTTP 200 is semantically revalidatable only for the open-PR roster
-# pages used by the collision census. Every other endpoint keeps the original
-# unconditional changed-representation refusal required by #346.
+# pages used by the collision census and this invocation's exact subject PR.
+# Every other endpoint keeps the original unconditional changed-representation
+# refusal required by #346.
 _UNPROVABLE = object()
 
 
@@ -251,9 +252,52 @@ def _open_pull_roster_semantics(url: object, payload: object) -> object:
     return tuple(sorted(rows))
 
 
+def _subject_pr_identity(payload: object) -> tuple[object, ...] | None:
+    """Strict closed shape for changed subject-PR semantic revalidation."""
+
+    if not isinstance(payload, dict):
+        return None
+    if type(payload.get("draft")) is not bool:
+        return None
+    labels = payload.get("labels")
+    if not isinstance(labels, list):
+        return None
+    for label in labels:
+        if not isinstance(label, dict):
+            return None
+        if not isinstance(label.get("name"), str):
+            return None
+    return _pr_identity(payload)
+
+
+def _conditional_semantics(
+    url: object,
+    payload: object,
+    *,
+    subject_pull_url: str | None,
+) -> object:
+    """Project only the two changed representations this invocation may re-prove."""
+
+    roster = _open_pull_roster_semantics(url, payload)
+    if roster is not _UNPROVABLE:
+        return ("open_pull_roster", roster)
+    if not isinstance(subject_pull_url, str) or url != subject_pull_url:
+        return _UNPROVABLE
+    identity = _subject_pr_identity(payload)
+    if identity is None:
+        return _UNPROVABLE
+    return ("subject_pull", identity)
+
+
 class _BoundedHTTPGet:
-    def __init__(self, transport: HTTPGet) -> None:
+    def __init__(
+        self,
+        transport: HTTPGet,
+        *,
+        subject_pull_url: str | None = None,
+    ) -> None:
         self._transport = transport
+        self._subject_pull_url = subject_pull_url
         self._lock = Lock()
         self._calls = 0
         self._bytes = 0
@@ -348,13 +392,17 @@ class _BoundedHTTPGet:
                 raise _RemoteProbeError()
             representation = payload
             self._account_payload(representation.payload)
-            roster_semantics = _open_pull_roster_semantics(url, representation.payload)
+            semantics = _conditional_semantics(
+                url,
+                representation.payload,
+                subject_pull_url=self._subject_pull_url,
+            )
             with self._lock:
                 self._conditional_observations.append(
                     _ConditionalObservation(
                         url=url,
                         etag=representation.etag,
-                        roster_semantics=roster_semantics,
+                        semantics=semantics,
                     )
                 )
             return representation.payload
@@ -404,17 +452,21 @@ class _BoundedHTTPGet:
                     raise _RemoteProbeError()
                 continue
             if payload.not_modified is False:
-                # Account every changed body before deciding. Only an open-PR roster
-                # page may survive changed representation, and only with identical
-                # collision-roster semantics. All other endpoints refuse here.
+                # Account every changed body before deciding. Only the open-PR
+                # roster and this invocation's exact subject-PR endpoint may survive,
+                # and only when their closed canonical projections are identical.
                 self._account_payload(payload.payload)
                 with self._lock:
                     self._semantic_revalidations.append(observation.url)
-                if observation.roster_semantics is _UNPROVABLE:
+                if observation.semantics is _UNPROVABLE:
                     return False
                 if (
-                    _open_pull_roster_semantics(observation.url, payload.payload)
-                    != observation.roster_semantics
+                    _conditional_semantics(
+                        observation.url,
+                        payload.payload,
+                        subject_pull_url=self._subject_pull_url,
+                    )
+                    != observation.semantics
                 ):
                     return False
                 continue
@@ -2077,7 +2129,12 @@ def main(
         return _emit(_refusal(RefusalCode.AUTH_UNAVAILABLE, 2))
 
     try:
-        bounded_get = _BoundedHTTPGet(http_get)
+        bounded_get = _BoundedHTTPGet(
+            http_get,
+            subject_pull_url=(
+                f"{_API_ROOT}/repos/{request.repository}/pulls/{request.pr_number}"
+            ),
+        )
         remote_prefix = _probe_remote_prefix(bounded_get, token, request)
         if isinstance(remote_prefix, SourceContinuityRefusal):
             return _emit(remote_prefix)
