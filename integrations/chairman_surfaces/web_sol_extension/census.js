@@ -38,7 +38,9 @@
   }
   function metric(value, label) {
     const node = element("div", "", "metric");
-    node.append(element("strong", Number.isSafeInteger(value) ? String(value) : "—"), element("span", label));
+    const display = Number.isSafeInteger(value) ? String(value) :
+      typeof value === "string" && /^\d+\/\d+$/.test(value) ? value : "—";
+    node.append(element("strong", display), element("span", label));
     return node;
   }
   function clearSnapshot() {
@@ -68,9 +70,9 @@
     const hasInventory = Number.isSafeInteger(result.initial_tab_count);
     byId("summary").replaceChildren(
       metric(result.initial_tab_count, "Tabs in initial query"),
+      metric(hasInventory ? `${result.probed_tab_count}/${result.initial_tab_count}` : null, "Document probes"),
       metric(hasInventory ? result.generation_cue_count : null, "Generation cues"),
       metric(hasInventory ? result.unknown_cue_count : null, "Unknown cue state"),
-      metric(hasInventory ? result.duplicate_tab_count : null, "Extra conversation views"),
     );
     const status = byId("status");
     const probeWarningText = probeWarning(result);
@@ -81,7 +83,9 @@
     const scope = "Normal ChatGPT tabs in this profile only · " + (hasInventory
       ? `${result.probed_tab_count}/${result.initial_tab_count} document probes sampled · ${result.unique_conversation_count} distinct observed conversation locators`
       : "Inventory unavailable");
-    byId("scope").textContent = scope + (result.excluded_private_count ? ` · ${result.excluded_private_count} private tabs excluded` : "") +
+    byId("scope").textContent = scope +
+      (result.duplicate_tab_count ? ` · ${result.duplicate_tab_count} extra conversation view${result.duplicate_tab_count === 1 ? "" : "s"}` : "") +
+      (result.excluded_private_count ? ` · ${result.excluded_private_count} private tabs excluded` : "") +
       (result.omitted_tab_count ? ` · ${result.omitted_tab_count} returned entries omitted` : "") +
       (result.unobserved_added_count ? ` · ${result.unobserved_added_count} new tabs not sampled` : "");
     const when = typeof result.completed_at === "string" && /^\d{4}-\d{2}-\d{2}T/.test(result.completed_at)
