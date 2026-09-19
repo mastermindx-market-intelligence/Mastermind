@@ -1,0 +1,15 @@
+{
+  "schema": "mastermind.navigator_catalog_fragment.v1",
+  "plugin": "mastermind-navigator",
+  "package_path": "plugins/mastermind-navigator",
+  "manifest_path": "plugins/mastermind-navigator/.codex-plugin/plugin.json",
+  "skills": [
+    "navigate-mastermind-universe"
+  ],
+  "capabilities": [
+    "Read"
+  ],
+  "source_state": "SOURCE_CANDIDATE",
+  "installation_state": "NOT_INSTALLED",
+  "shared_owner_action": "ADMIT_PACKAGE_AND_CATALOG_FRAGMENT"
+}

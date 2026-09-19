@@ -1,0 +1,190 @@
+{
+  "schema": "mastermind.navigator_owner_routing.v1",
+  "routes": [
+    {
+      "capability_class": "lifecycle",
+      "canonical_owner": "Executive OS",
+      "minimal_tool_family": "executive-os",
+      "owner_native_probe": "Read the current Executive Job/Attempt/Event through the existing Executive surface.",
+      "binding_requirements": [
+        "current Job or Attempt identity",
+        "current authority record"
+      ],
+      "forbidden_substitutions": [
+        "Agent OS as lifecycle truth",
+        "Slack message as execution"
+      ],
+      "static_liveness_claim": false
+    },
+    {
+      "capability_class": "organizational_continuity",
+      "canonical_owner": "Agent OS",
+      "minimal_tool_family": "agent-os",
+      "owner_native_probe": "Read the current workstream, decision, discovery, or handoff from Agent OS.",
+      "binding_requirements": [
+        "current work reference",
+        "current record revision"
+      ],
+      "forbidden_substitutions": [
+        "chat transcript as durable organization truth",
+        "Linear projection as canonical decision"
+      ],
+      "static_liveness_claim": false
+    },
+    {
+      "capability_class": "source_pr_ci",
+      "canonical_owner": "GitHub",
+      "minimal_tool_family": "github",
+      "owner_native_probe": "Read the protected branch, exact source path, PR, review, or CI record from GitHub.",
+      "binding_requirements": [
+        "repository identity",
+        "exact branch, commit, PR, or run identity"
+      ],
+      "forbidden_substitutions": [
+        "local stale checkout as protected truth",
+        "green prose as CI evidence"
+      ],
+      "static_liveness_claim": false
+    },
+    {
+      "capability_class": "selected_project_action",
+      "canonical_owner": "Workbench",
+      "minimal_tool_family": "workbench",
+      "owner_native_probe": "Discover the selected project and call only the current Workbench capability required by the action.",
+      "binding_requirements": [
+        "selected project identity",
+        "current project binding",
+        "current action authorization"
+      ],
+      "forbidden_substitutions": [
+        "arbitrary filesystem path",
+        "local shell as selected-project authority"
+      ],
+      "static_liveness_claim": false,
+      "read_fallback_owner": "Workbench Read",
+      "action_requires_separate_proof": true,
+      "action_binding_requirements": [
+        "owner-admitted execution mode",
+        "authenticated subject or approved native context",
+        "exact current session generation or Executive Job/Attempt/Worker generation",
+        "owner-issued target context",
+        "current policy and capability generation",
+        "expiry and revocation state",
+        "current selected-project binding"
+      ],
+      "attended_mode_owner": "current session and RuntimeBinding owners",
+      "worker_mode_owner": "Executive OS Job/Attempt/Worker"
+    },
+    {
+      "capability_class": "local_machine_process",
+      "canonical_owner": "Studio Direct / existing fleet owner",
+      "minimal_tool_family": "studio-direct",
+      "owner_native_probe": "Read the exact host/process binding and use the existing host or fleet owner for the bounded local operation.",
+      "binding_requirements": [
+        "host identity",
+        "process or workspace identity",
+        "current host authorization"
+      ],
+      "forbidden_substitutions": [
+        "assumed local host",
+        "new fleet scheduler"
+      ],
+      "static_liveness_claim": false
+    },
+    {
+      "capability_class": "worker_browser",
+      "canonical_owner": "Worker Browser",
+      "minimal_tool_family": "worker-browser",
+      "owner_native_probe": "Read Worker Browser health and invoke only its admitted browser operation on the bound worker target.",
+      "binding_requirements": [
+        "worker identity",
+        "browser generation",
+        "target binding"
+      ],
+      "forbidden_substitutions": [
+        "generic browser controller",
+        "Chairman managed browser profile"
+      ],
+      "static_liveness_claim": false
+    },
+    {
+      "capability_class": "exact_chatgpt_actuation",
+      "canonical_owner": "Web-Sol + RuntimeBinding",
+      "minimal_tool_family": "web-sol-runtime-binding",
+      "owner_native_probe": "Resolve the exact current RuntimeBinding and then use the admitted Web-Sol action for that target only.",
+      "binding_requirements": [
+        "authenticated subject",
+        "exact conversation or session identity",
+        "current RuntimeBinding generation",
+        "owner-issued target context",
+        "current authorization"
+      ],
+      "forbidden_substitutions": [
+        "newest tab",
+        "conversation title or recency",
+        "generic prompt sender"
+      ],
+      "static_liveness_claim": false
+    },
+    {
+      "capability_class": "domain_deploy",
+      "canonical_owner": "domain owner",
+      "minimal_tool_family": "domain-deploy-owner",
+      "owner_native_probe": "Discover the deployment owner for the named target, then load only that owner's bounded surface.",
+      "binding_requirements": [
+        "named deployment target",
+        "current domain authorization"
+      ],
+      "forbidden_substitutions": [
+        "generic Mastermind deployment MCP",
+        "unrelated provider"
+      ],
+      "static_liveness_claim": false
+    },
+    {
+      "capability_class": "domain_data",
+      "canonical_owner": "domain owner",
+      "minimal_tool_family": "domain-data-owner",
+      "owner_native_probe": "Discover the data owner for the named system, then load only that owner's bounded surface.",
+      "binding_requirements": [
+        "named data system",
+        "current domain authorization"
+      ],
+      "forbidden_substitutions": [
+        "generic database superuser",
+        "unrelated provider"
+      ],
+      "static_liveness_claim": false
+    },
+    {
+      "capability_class": "domain_design",
+      "canonical_owner": "domain owner",
+      "minimal_tool_family": "domain-design-owner",
+      "owner_native_probe": "Discover the design owner for the named artifact, then load only that owner's bounded surface.",
+      "binding_requirements": [
+        "named design artifact or project",
+        "current domain authorization"
+      ],
+      "forbidden_substitutions": [
+        "generic design controller",
+        "unrelated provider"
+      ],
+      "static_liveness_claim": false
+    },
+    {
+      "capability_class": "domain_comms",
+      "canonical_owner": "domain owner",
+      "minimal_tool_family": "domain-comms-owner",
+      "owner_native_probe": "Discover the communications owner for the named channel or mailbox, then load only that owner's bounded surface.",
+      "binding_requirements": [
+        "named communications target",
+        "current domain authorization"
+      ],
+      "forbidden_substitutions": [
+        "generic message sender",
+        "unrelated provider"
+      ],
+      "static_liveness_claim": false
+    }
+  ]
+}

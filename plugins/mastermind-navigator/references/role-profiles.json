@@ -1,0 +1,96 @@
+{
+  "schema": "mastermind.navigator_role_profiles.v1",
+  "schema_loading_policy": "DISCOVER_MINIMAL_TOOL_FAMILY_ONLY",
+  "package_name_is_capability_evidence": false,
+  "load_every_connector_by_default": false,
+  "profiles": {
+    "web_ceo_core": {
+      "description": "Fresh Web CEO orientation and owner-native reads.",
+      "default_routes": [
+        "lifecycle",
+        "organizational_continuity",
+        "source_pr_ci",
+        "selected_project_action",
+        "local_machine_process",
+        "worker_browser",
+        "exact_chatgpt_actuation"
+      ],
+      "on_demand_routes": [
+        "domain_deploy",
+        "domain_data",
+        "domain_design",
+        "domain_comms"
+      ],
+      "authority_source": "existing owner records only"
+    },
+    "native_builder_operator": {
+      "description": "Bound native source and selected-project execution.",
+      "default_routes": [
+        "lifecycle",
+        "organizational_continuity",
+        "source_pr_ci",
+        "selected_project_action",
+        "local_machine_process"
+      ],
+      "on_demand_routes": [
+        "worker_browser",
+        "exact_chatgpt_actuation",
+        "domain_deploy",
+        "domain_data",
+        "domain_design",
+        "domain_comms"
+      ],
+      "authority_source": "existing owner records only"
+    },
+    "browser_provider_operator": {
+      "description": "Exact provider/browser observation and admitted actuation.",
+      "default_routes": [
+        "lifecycle",
+        "organizational_continuity",
+        "local_machine_process",
+        "worker_browser",
+        "exact_chatgpt_actuation"
+      ],
+      "on_demand_routes": [
+        "source_pr_ci",
+        "selected_project_action",
+        "domain_deploy",
+        "domain_data",
+        "domain_design",
+        "domain_comms"
+      ],
+      "authority_source": "existing owner records only"
+    }
+  },
+  "domain_overlays": {
+    "domain_deploy": {
+      "route": "domain_deploy",
+      "activation": "explicit task need plus current authorization",
+      "grants_authority": false
+    },
+    "domain_data": {
+      "route": "domain_data",
+      "activation": "explicit task need plus current authorization",
+      "grants_authority": false
+    },
+    "domain_design": {
+      "route": "domain_design",
+      "activation": "explicit task need plus current authorization",
+      "grants_authority": false
+    },
+    "domain_comms": {
+      "route": "domain_comms",
+      "activation": "explicit task need plus current authorization",
+      "grants_authority": false
+    }
+  },
+  "health_dimensions": [
+    "installed",
+    "enabled",
+    "authenticated_or_connected",
+    "callable",
+    "organizationally_authorized",
+    "proven_live"
+  ],
+  "health_observation_does_not_load_schema": true
+}
