@@ -201,7 +201,7 @@ def _all_job_ids(acquisition: Any, *, limit: int = 17) -> list[str]:
         cursor = page.next_cursor
 
 
-def test_bounded_acquisition_filters_exact_root_ids_attempts_and_counts(tmp_path):
+def test_bounded_acquisition_filters_exact_root_ids_and_attempts(tmp_path):
     runtime = _runtime(tmp_path)
     root = runtime.jobs.create_job("root")
     child = runtime.jobs.create_job("child", parent_job_id=root.job_id)
@@ -220,10 +220,6 @@ def test_bounded_acquisition_filters_exact_root_ids_attempts_and_counts(tmp_path
         attempts = acquisition.list_attempts(
             limit=10, job_ids=[grandchild.job_id, unrelated.job_id]
         )
-        job_counts = acquisition.job_status_counts(root_job_id=root.job_id)
-        attempt_counts = acquisition.attempt_status_counts(
-            job_ids=[grandchild.job_id, unrelated.job_id]
-        )
 
     assert isinstance(tree.items, tuple)
     assert [job.job_id for job in tree.items] == [
@@ -239,17 +235,13 @@ def test_bounded_acquisition_filters_exact_root_ids_attempts_and_counts(tmp_path
         [root.job_id, unrelated.job_id]
     )
     assert [attempt.job_id for attempt in attempts.items] == [grandchild.job_id]
-    assert job_counts.total == 3
-    assert job_counts.by_status[JobStatus.RUNNING.value] == 1
-    assert job_counts.by_status[JobStatus.QUEUED.value] == 2
-    assert attempt_counts.total == 1
-    assert attempt_counts.by_status[AttemptStatus.CLAIMED.value] == 1
 
 
 def test_limits_filters_and_query_modes_fail_closed(tmp_path):
     runtime = _runtime(tmp_path)
     job = runtime.jobs.create_job("one")
     maximum = executive_runtime.MAX_RUNTIME_ACQUISITION_LIMIT
+    assert maximum == 512
 
     with runtime.bounded_acquisition() as acquisition:
         for invalid in (True, 0, -1, maximum + 1):
@@ -263,6 +255,24 @@ def test_limits_filters_and_query_modes_fail_closed(tmp_path):
             acquisition.list_jobs(
                 limit=1, root_job_id=job.job_id, job_ids=[job.job_id]
             )
+        statements: list[str] = []
+        connection = acquisition._connection
+        assert isinstance(connection, sqlite3.Connection)
+        connection.set_trace_callback(statements.append)
+        try:
+            with pytest.raises(
+                StateConflict, match="cannot combine root_job_id and statuses"
+            ):
+                acquisition.list_jobs(
+                    limit=1,
+                    root_job_id=job.job_id,
+                    statuses=[JobStatus.QUEUED],
+                )
+        finally:
+            connection.set_trace_callback(None)
+        assert [
+            " ".join(statement.upper().split()) for statement in statements
+        ] == ["PRAGMA DATABASE_LIST"]
         with pytest.raises(StateConflict, match="roots_only"):
             acquisition.list_jobs(
                 limit=1, roots_only=True, statuses=[JobStatus.QUEUED]
@@ -392,28 +402,14 @@ def test_corrupt_row_outside_window_is_not_decoded_or_claimed_inspected(
     assert decoded[-1] == corrupt_id
 
 
-def test_status_counts_do_not_decode_job_or_attempt_payloads(tmp_path, monkeypatch):
+def test_bounded_acquisition_excludes_population_unbounded_status_aggregates(
+    tmp_path,
+):
     runtime = _runtime(tmp_path)
-    _register_default(runtime)
-    job = runtime.jobs.create_job("counted")
-    lease = runtime.attempts.claim_job(job.job_id)
-    assert lease is not None
-
-    def forbidden(_row):
-        raise AssertionError("payload decoder was called by aggregate")
-
-    monkeypatch.setattr(executive_runtime, "_job_from_row", forbidden)
-    monkeypatch.setattr(executive_runtime, "_attempt_from_row", forbidden)
     with runtime.bounded_acquisition() as acquisition:
-        jobs = acquisition.job_status_counts()
-        attempts = acquisition.attempt_status_counts()
-
-    assert jobs.total == 1
-    assert jobs.by_status[JobStatus.RUNNING.value] == 1
-    assert set(jobs.by_status) == {status.value for status in JobStatus}
-    assert attempts.total == 1
-    assert attempts.by_status[AttemptStatus.CLAIMED.value] == 1
-    assert set(attempts.by_status) == {status.value for status in AttemptStatus}
+        assert not hasattr(acquisition, "job_status_counts")
+        assert not hasattr(acquisition, "attempt_status_counts")
+    assert "RuntimeStatusCounts" not in executive_runtime.__all__
 
 
 def test_existing_point_and_per_job_attempt_reads_remain_compatible(tmp_path):
@@ -672,10 +668,8 @@ def test_bounded_acquisition_operates_through_read_only_runtime(tmp_path):
 
     with reader.bounded_acquisition() as acquisition:
         page = acquisition.list_jobs(limit=1, job_ids=[job.job_id])
-        counts = acquisition.job_status_counts(job_ids=[job.job_id])
 
     assert page.items == (job,)
-    assert counts.total == 1
     with pytest.raises(StateConflict, match="read-only store"):
         reader.jobs.create_job("forbidden mutation")
 
@@ -715,18 +709,15 @@ def test_bounded_acquisition_composes_with_runtime_read_binding(tmp_path):
         with runtime.bounded_acquisition() as acquisition:
             roots = acquisition.list_jobs(limit=5, roots_only=True)
             tree = acquisition.list_jobs(limit=5, root_job_id=root.job_id)
-            counts = acquisition.job_status_counts(root_job_id=root.job_id)
             return {
                 "roots": [job.job_id for job in roots.items],
                 "tree": [job.job_id for job in tree.items],
-                "total": counts.total,
             }
 
     result = Runtime.read_bound(tmp_path, binding=binding, reader=read)
     assert result == {
         "roots": [root.job_id],
         "tree": [root.job_id, child.job_id],
-        "total": 2,
     }
     assert namespace.entries == namespace.exits == 1
 

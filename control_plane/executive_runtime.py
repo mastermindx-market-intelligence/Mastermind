@@ -137,7 +137,7 @@ OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION = (
 )
 DEFAULT_LEASE_SECONDS = 60
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
-MAX_RUNTIME_ACQUISITION_LIMIT = 512
+MAX_RUNTIME_ACQUISITION_LIMIT = 2**9
 _MAX_RUNTIME_ACQUISITION_FILTER_IDS = 128
 _MAX_RUNTIME_ACQUISITION_IDENTIFIER_LENGTH = 128
 _MAX_RUNTIME_ACQUISITION_CURSOR_LENGTH = 4_096
@@ -1239,14 +1239,6 @@ class BoundedAttemptPage:
 
     items: tuple[Attempt, ...]
     next_cursor: str | None
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class RuntimeStatusCounts:
-    """Aggregate status counts computed by SQLite without payload decoding."""
-
-    total: int
-    by_status: dict[str, int]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -4226,6 +4218,12 @@ class BoundedRuntimeAcquisition:
                 "bounded acquisition roots_only does not accept a status filter"
             )
 
+        if normalized_root is not None and normalized_statuses is not None:
+            raise StateConflict(
+                "bounded acquisition Job query cannot combine "
+                "root_job_id and statuses"
+            )
+
         if normalized_root is not None:
             mode = "root"
         elif normalized_ids is not None:
@@ -4604,110 +4602,6 @@ class BoundedRuntimeAcquisition:
                 kind="attempts", query=query, position=next_position
             )
         return BoundedAttemptPage(items=items, next_cursor=next_cursor)
-
-    def _status_counts(
-        self,
-        *,
-        table: str,
-        enum_type: type[Enum],
-        clauses: Sequence[str],
-        parameters: Sequence[Any],
-    ) -> RuntimeStatusCounts:
-        self._require_open()
-        if table not in {"jobs", "attempts"}:
-            raise AssertionError("unknown bounded acquisition aggregate")
-        sql = f"SELECT status,COUNT(*) AS row_count FROM {table}"
-        if clauses:
-            sql += " WHERE " + " AND ".join(f"({clause})" for clause in clauses)
-        sql += " GROUP BY status"
-        rows = self._connection.execute(sql, parameters).fetchall()
-        counts = {str(status.value): 0 for status in enum_type}
-        total = 0
-        for row in rows:
-            status = str(row["status"])
-            if status not in counts:
-                raise PersistenceError(
-                    f"bounded {table} aggregate found an unknown status"
-                )
-            count = int(row["row_count"])
-            if count < 0:
-                raise PersistenceError(
-                    f"bounded {table} aggregate returned a negative count"
-                )
-            counts[status] = count
-            total += count
-        return RuntimeStatusCounts(total=total, by_status=counts)
-
-    def job_status_counts(
-        self,
-        *,
-        root_job_id: str | None = None,
-        job_ids: Sequence[str] | None = None,
-        roots_only: bool = False,
-    ) -> RuntimeStatusCounts:
-        """Count Job statuses in SQL without decoding any Job payload."""
-
-        self._require_open()
-        if type(roots_only) is not bool:
-            raise StateConflict("bounded acquisition roots_only must be boolean")
-        normalized_root = (
-            _bounded_acquisition_identifier(root_job_id, name="root_job_id")
-            if root_job_id is not None
-            else None
-        )
-        normalized_ids = _bounded_acquisition_identifiers(job_ids, name="Job")
-        if sum((normalized_root is not None, normalized_ids is not None, roots_only)) > 1:
-            raise StateConflict(
-                "bounded acquisition Job aggregate modes are mutually exclusive"
-            )
-        clauses: list[str] = []
-        parameters: list[Any] = []
-        if normalized_root is not None:
-            self._validate_root(normalized_root)
-            clauses.append("root_job_id=?")
-            parameters.append(normalized_root)
-        elif normalized_ids is not None:
-            clauses.append(
-                "job_id IN ("
-                + _bounded_acquisition_placeholders(normalized_ids)
-                + ")"
-            )
-            parameters.extend(normalized_ids)
-        elif roots_only:
-            clauses.extend(
-                ("job_id=root_job_id", "parent_job_id IS NULL", "depth=0")
-            )
-        return self._status_counts(
-            table="jobs",
-            enum_type=JobStatus,
-            clauses=clauses,
-            parameters=parameters,
-        )
-
-    def attempt_status_counts(
-        self,
-        *,
-        job_ids: Sequence[str] | None = None,
-    ) -> RuntimeStatusCounts:
-        """Count Attempt statuses in SQL without decoding any Attempt payload."""
-
-        self._require_open()
-        normalized_ids = _bounded_acquisition_identifiers(job_ids, name="Job")
-        clauses: list[str] = []
-        parameters: list[Any] = []
-        if normalized_ids is not None:
-            clauses.append(
-                "job_id IN ("
-                + _bounded_acquisition_placeholders(normalized_ids)
-                + ")"
-            )
-            parameters.extend(normalized_ids)
-        return self._status_counts(
-            table="attempts",
-            enum_type=AttemptStatus,
-            clauses=clauses,
-            parameters=parameters,
-        )
 
 
 def _authorize_job_row(row: sqlite3.Row):
@@ -19825,7 +19719,6 @@ __all__ = [
     "Runtime",
     "RuntimeProofError",
     "RuntimeStore",
-    "RuntimeStatusCounts",
     "SCHEMA_VERSION",
     "StateConflict",
     "HOST_EXECUTION_BINDING_V2",
