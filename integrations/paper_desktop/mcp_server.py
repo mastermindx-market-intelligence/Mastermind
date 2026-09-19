@@ -68,7 +68,7 @@ def build_server(allow_write=False):
             """Mutate the explicitly approved active Paper design. Never auto-retry this action.
 
             Caller must have current write permission and exclusive design-task ownership.
-            Native file export and delete_nodes are intentionally not permitted.
+            File creation/open transitions, native exports, node deletion and token deletion are intentionally not permitted.
             """
             return await asyncio.to_thread(run, "edit", tool=tool, arguments=arguments,
                                            expected_snapshot=expected_snapshot,

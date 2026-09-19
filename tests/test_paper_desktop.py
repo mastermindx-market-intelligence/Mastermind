@@ -74,7 +74,8 @@ class CoreTests(unittest.TestCase):
         self.tmp.cleanup()
     def call(self, action="edit", **kwargs):
         params = dict(tool="create_artboard", arguments={}, expected_snapshot=b.digest(INFO),
-                      operation_id="paper-proof-1", allow_write=True, client=self.client, lock_root=self.root)
+                      operation_id="paper-proof-1", allow_write=True, client=self.client, lock_root=self.root,
+                      _server_pin=None, _catalog_pin=None)
         params.update(kwargs)
         return b.execute(action, **params)
     def test_write_requires_opt_in(self):
@@ -129,6 +130,24 @@ class CoreTests(unittest.TestCase):
         result["content"][1]["text"] = json.dumps(dict(PAPER_0511_DETAIL, fileName="Other"))
         with self.assertRaisesRegex(b.Refusal, "DOCUMENT_SCHEMA_UNVERIFIED"):
             b.basic_object(result)
+
+    def test_paper_0511_duplicate_conflicting_detail_refuses(self):
+        result = copy.deepcopy(PAPER_0511_RESULT)
+        result["content"].append({"type": "text", "text": json.dumps(dict(PAPER_0511_DETAIL, nodeCount=99))})
+        with self.assertRaisesRegex(b.Refusal, "DOCUMENT_SCHEMA_UNVERIFIED"):
+            b.basic_object(result)
+
+    def test_write_refuses_unreviewed_catalog_before_dispatch(self):
+        self.client.info = {"fileId": "file-a", "artboards": []}
+        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+            self.call(expected_snapshot=b.digest(self.client.info), arguments={"fileId": "file-a"}, _catalog_pin="0" * 64)
+        self.assertNotIn("create_artboard", self.client.calls)
+
+    def test_write_refuses_unreviewed_server_before_dispatch(self):
+        self.client.info = {"fileId": "file-a", "artboards": []}
+        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+            self.call(expected_snapshot=b.digest(self.client.info), arguments={"fileId": "file-a"}, _server_pin=("paper-desktop", "0.5.11"))
+        self.assertNotIn("create_artboard", self.client.calls)
 
     def test_current_safe_tool_classes(self):
         for name in ["list_files", "find_nodes", "get_tokens",
@@ -214,6 +233,11 @@ class CoreTests(unittest.TestCase):
         receipt = install.stage(dest, sys.executable)
         self.assertFalse(receipt["provider_homes_modified"])
         self.assertFalse(receipt["executive_production_armed"])
+        self.assertTrue(receipt["client_enrollment"]["codex"]["project_trust_required"])
+        enrollment = (dest / "ENROLLMENT.md").read_text()
+        self.assertIn('trust_level = "trusted"', enrollment)
+        self.assertIn("codex login status", enrollment)
+        self.assertIn("claude mcp list", enrollment)
         with self.assertRaises(ValueError):
             install.stage(dest, sys.executable)
     def test_sse_matching_response(self):

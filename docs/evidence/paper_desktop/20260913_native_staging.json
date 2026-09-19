@@ -83,7 +83,7 @@
     ]
   },
   "unchanged": [
-    "provider account homes",
+    "provider account credentials (Codex workspace trust was added, but no credential value was read or changed)",
     "live worker processes",
     "Executive capability registry and production gates",
     "Figma designs and billing",
@@ -92,9 +92,33 @@
   "remaining": [
     "exact-head hosted CI",
     "independent semantic review",
+    "Codex reauthentication and one native Codex Paper canary",
+    "Claude project-MCP approval and one native Claude Paper canary",
     "sealed Executive worker grant",
     "fresh ChatGPT Web session repeat",
     "Business/Enterprise/Edu custom full-MCP app enrollment if first-class ChatGPT write is desired",
     "one real Mastermind design-to-code/browser proof before Figma retirement"
-  ]
+  ],
+  "live_client_enrollment": {
+    "codex": {
+      "workspace_trust": "APPLIED_TO_EXACT_ISOLATED_WORKSPACE",
+      "user_config_backup": "/Users/chriswong/.codex/config.toml.pre-paper-20260918",
+      "mcp_list": "mastermindPaper enabled; guarded stdio adapter visible",
+      "provider_auth": "BLOCKED_INVALID_REFRESH_TOKEN_401",
+      "exact_human_gate": "codex logout; codex login; repeat read-only canary"
+    },
+    "claude": {
+      "mcp_list": "mastermindPaper visible",
+      "project_mcp_state": "PENDING_APPROVAL",
+      "exact_human_gate": "launch interactive claude in isolated workspace and approve mastermindPaper; repeat canary"
+    }
+  },
+  "schema_write_pin": {
+    "server": [
+      "paper-desktop",
+      "0.5.11"
+    ],
+    "catalog_sha256": "e295e78106615d4058f47f18b661c97b1832231ae77164c534ee42df62a11519",
+    "behavior": "read/catalog may inspect drift; every bridge edit refuses UPSTREAM_SCHEMA_UNREVIEWED unless both exact pins match"
+  }
 }

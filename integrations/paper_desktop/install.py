@@ -25,6 +25,28 @@ def configs(python: str, server: str, allow_write: bool):
     }
 
 
+def enrollment_text(workspace: Path) -> str:
+    project = json.dumps(str(workspace))
+    return (
+        "# Paper client enrollment\n\n"
+        "The staged client files are inert until each client trusts/approves this workspace.\n"
+        "Do not weaken global sandboxing or auto-approve unrelated MCP servers.\n\n"
+        "## Codex\n\n"
+        "Project-local .codex/config.toml is loaded only for trusted projects. Add this exact\n"
+        "workspace entry to the user-level ~/.codex/config.toml after inspecting the workspace:\n\n"
+        "    [projects." + project + "]\n"
+        "    trust_level = \"trusted\"\n\n"
+        "Then run codex mcp list from this workspace. If Codex itself cannot authenticate,\n"
+        "run codex login status; a stale stored login is repaired by codex logout followed\n"
+        "by an interactive codex login. Authentication is a user/account ceremony, not an\n"
+        "MCP bridge permission.\n\n"
+        "## Claude Code\n\n"
+        "Run claude mcp list from this workspace. A project MCP may show Pending approval;\n"
+        "launch interactive claude in this workspace and approve only mastermindPaper.\n\n"
+        "Re-run each client MCP list after approval. A listed server proves configuration\n"
+        "visibility, not a successful Paper read/edit or Executive worker grant.\n"
+    )
+
 def stage(destination: Path, python: str, allow_write=False):
     if not Path(python).is_absolute() or not Path(python).is_file():
         raise ValueError("An existing absolute Python executable is required")
@@ -75,11 +97,16 @@ def stage(destination: Path, python: str, allow_write=False):
             link = workspace / namespace / "skills" / "paper-design-workflow"
             link.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             link.symlink_to("../../../skills/paper-design-workflow", target_is_directory=True)
+    enrollment = destination / "ENROLLMENT.md"
+    enrollment.write_text(enrollment_text(workspace))
+    enrollment.chmod(0o600)
     receipt = {"state": "STAGED_NOT_ENROLLED", "path": str(destination), "allow_write": allow_write,
                "sdk_installed_by_this_script": False, "provider_homes_modified": False,
                "executive_production_armed": False,
+               "client_enrollment": {"codex": {"project_trust_required": True, "verify": "codex mcp list"},
+                                     "claude": {"project_mcp_approval_required": True, "verify": "claude mcp list"}},
                "sha256": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
-               "next_action": "Install the pinned SDK in a dedicated environment; register exact generated configs in authorized clients; inspect Paper."}
+               "next_action": "Follow ENROLLMENT.md in an authorized client, then inspect Paper; provider login/approval stays a human gate."}
     (destination / "INSTALLATION.json").write_text(json.dumps(receipt, indent=2) + "\n")
     (destination / "INSTALLATION.json").chmod(0o600)
     return receipt

@@ -104,6 +104,12 @@ Native clients must open/trust the new workspace and approve the MCP connection
 according to their own rules. Do not automatically trust a workspace, disable
 sandboxing or enable arbitrary tools across all worker accounts.
 
+The staged install now emits `ENROLLMENT.md` with exact per-client gates. Codex
+loads project `.codex/config.toml` only after the exact workspace is marked trusted
+in the user-level Codex config. Claude Code separately requires project-MCP approval.
+Neither ceremony is performed by `install.py`; both remain visible account/client
+authorization boundaries.
+
 ## Deterministic behavior and limits
 
 `status` observes server/document; `catalog` discovers real upstream input schemas;
@@ -221,4 +227,23 @@ read/write/screenshot/JSX substrate, not fleet production or visual product qual
 A first-class ChatGPT full-MCP write app remains behind OpenAI's current
 Business/Enterprise/Edu developer-mode gate and Secure MCP Tunnel. Existing
 authorized RDC remains the web-to-native carrier for this session.
+
+### Observed local-client enrollment
+
+The authorized Mac Mini now has an explicit Codex trust entry for only the isolated
+Paper workspace; the previous user config was preserved as
+`~/.codex/config.toml.pre-paper-20260918`. From that workspace, `codex mcp list`
+shows `mastermindPaper` enabled and points at the guarded stdio adapter. A real
+`codex exec` attempt then stopped at a distinct provider-authentication gate:
+the stored ChatGPT refresh token is invalid (HTTP 401). The MCP configuration itself
+is visible; exact human recovery is `codex logout` followed by interactive
+`codex login`, then repeat the read-only Paper canary.
+
+Claude Code independently sees `mastermindPaper` from the same workspace but reports
+`Pending approval (run claude to approve)`. That approval is intentionally not bypassed.
+Launch interactive Claude in the isolated workspace and approve only that project MCP,
+then repeat the same Paper inspection canary.
+
+These two account/client ceremonies are the remaining native-human gates; they are
+not reasons to create additional Paper user accounts or another MCP gateway.
 

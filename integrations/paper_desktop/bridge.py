@@ -24,6 +24,8 @@ VERSION = "0.1.0"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 512 * 1024
+SUPPORTED_SERVER = ("paper-desktop", "0.5.11")
+SUPPORTED_CATALOG_SHA256 = "e295e78106615d4058f47f18b661c97b1832231ae77164c534ee42df62a11519"
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
     "get_tree_summary", "get_screenshot", "get_jsx", "get_computed_styles",
@@ -282,9 +284,10 @@ def basic_object(result):
     if details:
         names = {value["fileName"] for value in details}
         pages = {(value.get("pageId"), value["pageName"]) for value in details}
-        if len(names) != 1 or len(pages) != 1:
+        detail_variants = {encode(value) for value in details}
+        if len(names) != 1 or len(pages) != 1 or len(detail_variants) != 1:
             raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED", "get_basic_info returned conflicting document detail.")
-        info = dict(max(details, key=lambda value: len(value)))
+        info = dict(details[0])
         stable_names = {name for _, name in stable if name}
         if stable_names and (len(stable_names) != 1 or info["fileName"] not in stable_names):
             raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED", "File header and document detail disagree.")
@@ -343,10 +346,22 @@ def same_document(identity, info):
     return (info.get("fileName") == identity["file"] and info.get("pageName") == identity["page"]
             and any(isinstance(b, dict) and b.get("id") == identity["anchor"] for b in info.get("artboards", [])))
 
+def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
+                   catalog_pin=SUPPORTED_CATALOG_SHA256):
+    server = client.server if isinstance(client.server, dict) else {}
+    actual = {"server_name": server.get("name"), "server_version": server.get("version"),
+              "catalog_sha256": digest(catalog)}
+    server_ok = server_pin is None or (actual["server_name"] == server_pin[0] and actual["server_version"] == server_pin[1])
+    catalog_ok = catalog_pin is None or actual["catalog_sha256"] == catalog_pin
+    return {**actual, "accepted_for_write": bool(server_ok and catalog_ok),
+            "expected_server": list(server_pin) if server_pin else None,
+            "expected_catalog_sha256": catalog_pin}
+
 
 def execute(action: str, *, tool: str | None = None, arguments: dict | None = None,
             expected_snapshot: str | None = None, operation_id: str | None = None,
-            allow_write=False, client=None, lock_root=None):
+            allow_write=False, client=None, lock_root=None,
+            _server_pin=SUPPORTED_SERVER, _catalog_pin=SUPPORTED_CATALOG_SHA256):
     """One serialized operation. Snapshot hash is a drift guard, NOT authorization.
 
     Local edits outside this adapter can race; no transaction/isolation claim is made.
@@ -377,11 +392,14 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             return {"state": "CONNECTED", "server": client.server, "endpoint": ENDPOINT,
                     "document": snapshot(client), "quota_remaining": None, "plan": "UNKNOWN"}
         catalog = client.catalog()
+        schema = schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
         if action == "catalog":
             return {"server": client.server, "tools": [dict(catalog[n], bridge_access=("read" if n in READ_TOOLS else "edit"))
                     for n in sorted(catalog) if n in READ_TOOLS | EDIT_TOOLS],
                     "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS),
-                    "catalog_sha256": digest(catalog)}
+                    "catalog_sha256": schema["catalog_sha256"], "write_schema": schema}
+        if editing and not schema["accepted_for_write"]:
+            raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server/catalog changed; inspect read-only and review a new exact pin before editing.")
         if tool not in catalog:
             raise Refusal("TOOL_NOT_AVAILABLE")
         before = snapshot(client) if editing or expected_snapshot else None
