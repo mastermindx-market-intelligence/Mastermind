@@ -395,7 +395,7 @@ def _runtime_and_job(
     return runtime, job.job_id, workspace
 
 
-def _supervisor(runtime: Runtime, tmp_path: Path, adapter: FakeAdapter) -> ExecutiveSupervisor:
+def _supervisor(runtime: Runtime, tmp_path: Path, adapter: FakeAdapter, **kwargs) -> ExecutiveSupervisor:
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir(mode=0o700, exist_ok=True)
     adapter.provider_home = codex_home
@@ -424,6 +424,7 @@ def _supervisor(runtime: Runtime, tmp_path: Path, adapter: FakeAdapter) -> Execu
         },
         require_complete_launch_attestation=True,
         instance_id="supervisor-fixture",
+        **kwargs,
     )
 
 
@@ -1170,3 +1171,166 @@ def test_invalid_provider_result_with_ambient_pid_fails_job_not_containment(
     seal = json.loads(Path(receipt.assignment_seal_receipt_path or "").read_text())
     assert seal["passed"] is True
     assert seal["uid_sweep"]["ambient_pids"] == [88688]
+
+
+class Hf1bResultAdapter(FakeAdapter):
+    """No provider process; writes only the existing fixture run-output files."""
+    def __init__(self, inspector, runtime, work):
+        super().__init__(inspector)
+        self.runtime, self.work, self.start_count = runtime, work, 0
+        self.entered, self.continue_start = None, None
+
+    async def start(self, spec):
+        self.start_count += 1
+        if self.entered is not None:
+            self.entered.set()
+            await self.continue_start.wait()
+        from dataclasses import replace
+        ref = await super().start(spec)
+        self.ref = replace(ref, provider_session_id="thread-fixture", session_id=ref.pid,
+                           effective_uid=os.geteuid(), effective_gid=os.getegid(),
+                           real_uid=os.geteuid(), real_gid=os.getegid())
+        return self.ref
+
+    def launch_attestation(self, ref):
+        receipt = super().launch_attestation(ref)
+        uid, gid = os.geteuid(), os.getegid()
+        receipt["worker_identity"] = {
+            "requested_user": self.spec.worker_user, "observed_user": self.spec.worker_user,
+            "expected_uid": uid, "expected_gid": gid, "effective_uid": uid,
+            "effective_gid": gid, "real_uid": uid, "real_gid": gid,
+        }
+        info = self.provider_home.stat()
+        receipt["provider_home_identity"] = {
+            "path": str(self.provider_home.resolve()), "device": info.st_dev,
+            "inode": info.st_ino, "uid": info.st_uid, "gid": info.st_gid,
+            "mode": stat.S_IMODE(info.st_mode), "mtime_ns": info.st_mtime_ns,
+        }
+        return receipt
+
+    async def collect_result(self, ref):
+        job = self.runtime.jobs.get_job(self.work.job_id)
+        output = {
+            "schema_version": "mastermind.executive_orchestration_result/v1",
+            "job_id": job.job_id, "run_id": self.spec.run_id,
+            "worker_id": self.spec.worker_id, "role": "work", "status": "COMPLETED",
+            "role_result": {"schema_version": "mastermind.work_result/v1",
+                "root_job_id": job.root_job_id, "plan_attempt_id": job.plan_attempt_id,
+                "plan_digest": job.plan_digest, "plan_step_id": job.plan_step_id,
+                "repair_round": job.repair_round, "artifacts": [], "evidence_digests": []},
+            "summary": "One bounded fixture read completed.", "current_state": "done",
+            "next_actions": [], "errors": [], "validations": [],
+        }
+        result_bytes = json.dumps(output, sort_keys=True, separators=(",", ":")).encode()
+        Path(ref.result_path).write_bytes(result_bytes)
+        result = WorkerResult(job_id=job.job_id, run_id=self.spec.run_id,
+            worker_id=self.spec.worker_id, status=WorkerRunStatus.SUCCEEDED,
+            structured_output=output, artifact_manifest=(), git_manifest={}, usage={},
+            provider_session_id="thread-fixture", exit_code=0, started_at=ref.started_at,
+            finished_at="2026-08-11T00:00:01+00:00", error=None)
+        return CollectionReceipt(process_ref=ref, result=result,
+            stdout_sha256=hashlib.sha256(Path(ref.stdout_path).read_bytes()).hexdigest(),
+            stderr_sha256=hashlib.sha256(Path(ref.stderr_path).read_bytes()).hexdigest(),
+            result_sha256=hashlib.sha256(result_bytes).hexdigest())
+
+
+def _hf1b_supervisor_fixture(tmp_path, *, revalidate=lambda: None):
+    from test_executive_os_sqlite import _hf1b_claim_fixture, _hf1b_issue
+    runtime, root, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue(definition, observation, revalidate=revalidate)
+    adapter = Hf1bResultAdapter(FakeInspector(), runtime, work)
+    supervisor = _supervisor(runtime, tmp_path, adapter,
+        exact_target_provider=lambda job_id: target if job_id == work.job_id else None)
+    # macOS temp directories inherit wheel; the fixture worker/home must agree.
+    os.chown(adapter.provider_home, -1, os.getegid())
+    return runtime, root, work, command, target, adapter, supervisor
+
+
+def test_hf1b_supervisor_result_reaches_canonical_parent_consumer(tmp_path):
+    from control_plane.executive_coo_cycle import CooCycle
+    runtime, root, work, command, target, adapter, supervisor = _hf1b_supervisor_fixture(tmp_path)
+    async def exercise():
+        active = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        assert adapter.start_count == 1
+        replay = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        assert not replay.claimed_now and adapter.start_count == 1
+        adapter.inspector.live = False
+        finished = await supervisor.finish_job(active)
+        assert finished.job.status is JobStatus.COMPLETED
+        assert finished.attempt.status is AttemptStatus.COMPLETED
+        terminal = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        assert terminal.outcome == "TERMINAL" and adapter.start_count == 1
+        assert runtime.store.get_event_by_command_id(command).payload["exact_worker_target"] == target.evidence()
+        result = CooCycle(runtime).run_once(root.job_id)
+        assert result.action == "HANDOFF_CREATED"
+        return finished
+    finished = asyncio.run(exercise())
+    assert Path(finished.collection_receipt_path).is_file()
+    assert Path(finished.assignment_seal_receipt_path).is_file()
+
+
+def test_hf1b_source_fence_after_claim_fails_same_attempt_without_adapter_entry(tmp_path):
+    def moved():
+        raise SupervisorError("fixture target source moved")
+    runtime, _, work, command, _, adapter, supervisor = _hf1b_supervisor_fixture(tmp_path, revalidate=moved)
+    with pytest.raises(SupervisorError, match="target source moved"):
+        asyncio.run(supervisor.start_cycle_job(work.job_id, command_id=command))
+    assert adapter.start_count == 0
+    attempts = runtime.attempts.list_attempts(work.job_id)
+    assert len(attempts) == 1 and attempts[0].status is AttemptStatus.FAILED
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT held_attempt_id FROM worker_quota_classes WHERE worker_id=? AND quota_class=?", ("worker-a", "default")).fetchone()[0] is None
+    assert runtime.store.get_event_by_command_id(command) is not None
+
+
+def test_hf1b_recovered_claim_does_not_recreate_first_launch_permission(tmp_path):
+    runtime, _, work, command, target, adapter, supervisor = _hf1b_supervisor_fixture(tmp_path)
+    original = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target, lease_owner=supervisor.instance_id)
+    replay = asyncio.run(supervisor.start_cycle_job(work.job_id, command_id=command))
+    assert replay.attempt.attempt_id == original.attempt.attempt_id and not replay.claimed_now
+    assert adapter.start_count == 0
+    assert runtime.attempts.get_attempt(original.attempt.attempt_id).status is AttemptStatus.CLAIMED
+
+
+def test_hf1b_duplicate_delivery_during_adapter_start_leaves_original_live(tmp_path):
+    runtime, _, work, command, _, adapter, supervisor = _hf1b_supervisor_fixture(tmp_path)
+    async def exercise():
+        adapter.entered, adapter.continue_start = asyncio.Event(), asyncio.Event()
+        first = asyncio.create_task(supervisor.start_cycle_job(work.job_id, command_id=command))
+        await asyncio.wait_for(adapter.entered.wait(), timeout=5)
+        second = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        assert not second.claimed_now and adapter.start_count == 1
+        assert second.attempt.status is AttemptStatus.CLAIMED
+        adapter.continue_start.set()
+        active = await asyncio.wait_for(first, timeout=5)
+        assert runtime.attempts.get_attempt(active.lease.attempt.attempt_id).status is AttemptStatus.CHECKPOINTED
+        adapter.inspector.live = False
+        assert (await supervisor.finish_job(active)).job.status is JobStatus.COMPLETED
+    asyncio.run(exercise())
+
+
+def test_hf1b_lost_adapter_response_never_relaunches_on_replay(tmp_path):
+    runtime, _, work, command, _, adapter, supervisor = _hf1b_supervisor_fixture(tmp_path)
+    adapter.ambiguous_start = True
+    with pytest.raises(SupervisorError):
+        asyncio.run(supervisor.start_cycle_job(work.job_id, command_id=command))
+    attempts = runtime.attempts.list_attempts(work.job_id)
+    assert len(attempts) == 1 and adapter.start_count == 1
+    replay = asyncio.run(supervisor.start_cycle_job(work.job_id, command_id=command))
+    assert replay.attempt.attempt_id == attempts[0].attempt_id and adapter.start_count == 1
+
+
+def test_hf1b_disconnected_completion_consumer_cannot_report_completed(tmp_path, monkeypatch):
+    runtime, _, work, command, _, adapter, supervisor = _hf1b_supervisor_fixture(tmp_path)
+    def unavailable(*args, **kwargs):
+        raise StateConflict("fixture canonical completion unavailable")
+    async def exercise():
+        active = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        adapter.inspector.live = False
+        monkeypatch.setattr(runtime.attempts, "complete_attempt", unavailable)
+        with pytest.raises(StateConflict, match="canonical completion unavailable"):
+            await supervisor.finish_job(active)
+        assert runtime.jobs.get_job(work.job_id).status is not JobStatus.COMPLETED
+        replay = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        assert not replay.claimed_now and adapter.start_count == 1
+    asyncio.run(exercise())

@@ -2455,3 +2455,189 @@ def test_attestation_validator_requires_exact_lowercase_commit_identity(
             expected_pid=_EXPECTED_PID,
             inspector=_FakeProcessInspector(),
         )
+
+
+# HF1-B uses the real loader and configuration-bound producer. Native process
+# attestation remains the existing loader; tests inject only its observed result.
+def _hf1b_control_fixture(tmp_path):
+    import hashlib
+    from test_executive_os_sqlite import _hf1b_claim_fixture
+    from scripts import executive_os_phase1c as cli
+    runtime, root, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    raw = {
+        "schema_version": cli.CONTROL_CONFIG_SCHEMA_VERSION,
+        "runtime_root": str(runtime.store.root),
+        "control_socket_path": str(tmp_path / "control.sock"),
+        "launchd_socket_name": "Operator", "worker_broker_socket_path": str(tmp_path / "worker.sock"),
+        "worker_provider_home": str(tmp_path / "worker-home"),
+        "worker_runs_root": str(tmp_path / "runs"), "receipts_root": str(tmp_path / "receipts"),
+        "proof_source_repository": str(tmp_path / "source"),
+        "proof_workspace_root": str(tmp_path / "workspaces"), "proof_base_sha": "a" * 40,
+        "backup_root": str(tmp_path / "backups"), "control_uid": os.geteuid(),
+        "worker_uid": os.geteuid() + 10000, "worker_gid": os.getegid(),
+        "worker_user": "fixture-worker", "shared_run_gid": os.getegid(),
+        "allowed_peer_uids": [os.geteuid()],
+        "secret_canary_receipt_path": str(tmp_path / "canary.json"),
+        "control_environment_attestation_path": str(tmp_path / "attestation.json"),
+        "worker_id": "worker-a", "worker_account_label": "hf1b-fixture-a",
+        "quota_class": "default", "model": "gpt-5.6-sol", "effort": "xhigh", "cost_class": "small",
+        "exact_worker_claim_target": {"mode": "fixed", "definition": definition, "max_age_ms": 30000},
+    }
+    path = tmp_path / "hf1b-control.json"
+    data = json.dumps(raw, sort_keys=True).encode()
+    path.write_bytes(data)
+    path.chmod(0o600)
+    # This result stands in for native process/release observation, not its test.
+    attestation = {"config_sha256": hashlib.sha256(data).hexdigest(),
+                   "process_identity": {"pid": 4242}, "release_commit_sha": "a" * 40}
+    return cli, runtime, root, work, command, raw, path, attestation
+
+
+def _hf1b_bind(cli, raw, path, attestation):
+    binder = getattr(cli, "_bind_exact_worker_target_source", None)
+    assert callable(binder), "HF1-B attested configuration producer is not implemented"
+    return binder(raw, attestation, _producer_capability=cli._CONTROL_TARGET_COMPOSITION,
+                  attestation_loader=lambda: dict(attestation))
+
+
+def test_hf1b_template_target_is_explicitly_disabled():
+    raw = json.loads((OPS / "control.json.template").read_text())
+    assert raw.get("exact_worker_claim_target") == {"mode": "disabled"}
+
+
+def test_hf1b_real_loader_snapshot_binds_first_claim(tmp_path):
+    cli, runtime, _, work, command, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    loaded = cli.load_control_config(path)
+    producer = _hf1b_bind(cli, loaded, path, attestation)
+    target = producer.for_job(work.job_id, now_ms=runtime.store.now_ms())
+    claim = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert claim.claimed_now and claim.attempt.worker_id == "worker-a"
+    evidence = runtime.store.get_event_by_command_id(command).payload["exact_worker_target"]
+    assert evidence["observation"]["source_sha256"] == attestation["config_sha256"]
+    assert evidence["definition"]["job_id"] == work.job_id
+
+
+def test_hf1b_plain_mapping_cannot_replace_loaded_source(tmp_path):
+    cli, _, _, _, _, raw, path, attestation = _hf1b_control_fixture(tmp_path)
+    _hf1b_bind_method = getattr(cli, "_bind_exact_worker_target_source", None)
+    assert callable(_hf1b_bind_method), "HF1-B attested configuration producer is not implemented"
+    with pytest.raises(cli.ServiceError, match="target"):
+        _hf1b_bind(cli, raw, path, attestation)
+
+
+@pytest.mark.parametrize("mutation", ["atomic_replace", "same_inode", "attestation", "raw_target", "raw_broker"])
+def test_hf1b_consumed_snapshot_cannot_be_freshened_by_later_hash(tmp_path, mutation):
+    import hashlib
+    cli, _, _, _, _, raw, path, attestation = _hf1b_control_fixture(tmp_path)
+    loaded = cli.load_control_config(path)
+    if mutation in {"atomic_replace", "same_inode"}:
+        raw["exact_worker_claim_target"]["definition"]["source_generation"] = "changed-generation"
+        data = json.dumps(raw, sort_keys=True).encode()
+        if mutation == "atomic_replace":
+            replacement = path.with_suffix(".replacement")
+            replacement.write_bytes(data)
+            replacement.chmod(0o600)
+            replacement.replace(path)
+        else:
+            path.write_bytes(data)
+        # Attesting the NEW path must never authenticate the earlier object.
+        attestation["config_sha256"] = hashlib.sha256(data).hexdigest()
+    elif mutation == "attestation":
+        attestation["config_sha256"] = "0" * 64
+    elif mutation == "raw_target":
+        loaded["exact_worker_claim_target"]["definition"]["source_generation"] = "caller-changed"
+    else:
+        loaded["worker_broker_socket_path"] = tmp_path / "different-worker.sock"
+    with pytest.raises(cli.ServiceError, match="target"):
+        _hf1b_bind(cli, loaded, path, attestation)
+
+
+@pytest.mark.parametrize("bad", [None, {}, {"mode": "fixed"}, {"mode": "disabled", "fallback": "auto"},
+                                 {"mode": "automatic"}])
+def test_hf1b_malformed_target_config_does_not_enable_default_selection(tmp_path, bad):
+    cli, _, _, _, _, raw, path, _ = _hf1b_control_fixture(tmp_path)
+    raw["exact_worker_claim_target"] = bad
+    path.write_text(json.dumps(raw))
+    with pytest.raises(cli.ServiceError, match="target"):
+        cli.load_control_config(path)
+
+
+def test_hf1b_fixed_broker_worker_mismatch_refuses(tmp_path):
+    cli, _, _, _, _, raw, path, attestation = _hf1b_control_fixture(tmp_path)
+    raw["worker_id"] = "another-broker-worker"
+    path.write_text(json.dumps(raw))
+    with pytest.raises(cli.ServiceError, match="target"):
+        cli.load_control_config(path)
+
+
+def test_hf1b_source_changes_after_binding_refuse_fresh_issue(tmp_path):
+    cli, runtime, _, work, _, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    loaded = cli.load_control_config(path)
+    producer = _hf1b_bind(cli, loaded, path, attestation)
+    path.write_bytes(path.read_bytes() + b" ")
+    with pytest.raises(cli.ServiceError, match="target"):
+        producer.for_job(work.job_id, now_ms=runtime.store.now_ms())
+
+
+def test_hf1b_foreign_job_does_not_fall_through_to_untargeted_mode(tmp_path):
+    cli, runtime, _, _, _, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    producer = _hf1b_bind(cli, cli.load_control_config(path), path, attestation)
+    with pytest.raises(cli.ServiceError, match="target"):
+        producer.for_job("JOB-OTHER", now_ms=runtime.store.now_ms())
+
+
+def test_hf1b_factory_requires_and_consumes_attested_producer(tmp_path, monkeypatch):
+    cli, runtime, _, work, _, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    loaded = cli.load_control_config(path)
+    with pytest.raises(cli.ServiceError, match="target"):
+        cli._service_from_config(loaded)
+    producer = _hf1b_bind(cli, loaded, path, attestation)
+    captured = {}
+    def capture_service(config, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(config=config)
+    monkeypatch.setattr(cli, "activate_launchd_socket", lambda name: object())
+    monkeypatch.setattr(cli, "ExecutiveControlService", capture_service)
+    cli._service_from_config(loaded, exact_target_source=producer)
+    supervisor = captured["supervisor_factory"](runtime)
+    selected = supervisor._exact_target_provider(work.job_id)
+    assert selected.definition["worker_id"] == "worker-a"
+    assert selected.observation["source_sha256"] == attestation["config_sha256"]
+    assert supervisor.adapter is not None
+
+
+def test_hf1b_absent_and_disabled_config_preserve_legacy_composition(tmp_path):
+    cli, _, _, _, _, raw, path, _ = _hf1b_control_fixture(tmp_path)
+    for optional in (None, {"mode": "disabled"}):
+        if optional is None:
+            raw.pop("exact_worker_claim_target", None)
+        else:
+            raw["exact_worker_claim_target"] = optional
+        path.write_text(json.dumps(raw))
+        loaded = cli.load_control_config(path)
+        assert getattr(loaded, "_target_snapshot", None) is None
+
+
+
+def test_hf1b_loaded_source_through_supervisor_returns_consumable_result(tmp_path):
+    import asyncio
+    from test_executive_supervisor import Hf1bResultAdapter, FakeInspector, _supervisor
+    from control_plane.executive_runtime import JobStatus
+    from control_plane.executive_coo_cycle import CooCycle
+    cli, runtime, root, work, command, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    producer = _hf1b_bind(cli, cli.load_control_config(path), path, attestation)
+    adapter = Hf1bResultAdapter(FakeInspector(), runtime, work)
+    supervisor = _supervisor(runtime, tmp_path, adapter,
+        exact_target_provider=lambda job_id: producer.for_job(job_id, now_ms=runtime.store.now_ms()))
+    os.chown(adapter.provider_home, -1, os.getegid())
+    async def exercise():
+        active = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        adapter.inspector.live = False
+        finished = await supervisor.finish_job(active)
+        assert finished.job.status is JobStatus.COMPLETED
+        replay = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        assert replay.outcome == "TERMINAL" and adapter.start_count == 1
+        event = runtime.store.get_event_by_command_id(command)
+        assert event.payload["exact_worker_target"]["observation"]["source_sha256"] == attestation["config_sha256"]
+        assert CooCycle(runtime).run_once(root.job_id).action == "HANDOFF_CREATED"
+    asyncio.run(exercise())
