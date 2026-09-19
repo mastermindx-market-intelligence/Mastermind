@@ -100,7 +100,8 @@ def test_privileged_broker_is_exact_release_bound() -> None:
     assert '"schema": "mastermind.executive_privileged_broker_config.v1"' in text
     assert '"release_root": release_root' in text
     assert '"allowed_peer_uids": sorted({int(control_uid), int(operator_uid)})' in text
-    assert '"timeout_seconds": 600' in text
+    assert '"timeout_seconds": int(broker_timeout)' in text
+    assert 'BROKER_TIMEOUT_SECONDS="$((10 * 60))"' in text
     assert '"broker_version": "1"' in text
     assert '"$RELEASE_ROOT/scripts/executive_os_privileged_broker.py"' in text
     assert 'serve --config "$PRIVILEGED_CONFIG"' in text
@@ -178,3 +179,40 @@ def test_source_trust_allows_repo_symlinks_without_weakening_parent_custody() ->
     assert 'find "$SOURCE_REPO" ! -type l -exec /usr/bin/stat' in text
     assert 'source parent is group/other writable' in text
     assert 'source checkout contains a hard-linked file' in text
+
+
+def test_identity_and_mode_values_are_consumed_without_new_topology_literals() -> None:
+    text = _source()
+    assert 'BOOTSTRAP_SOURCE="$SCRIPT_DIR/bootstrap-host.sh"' in text
+    for key in ("CONTROL_USER", "CONTROL_GROUP", "CONTROL_UID", "CONTROL_GID", "OPS_GROUP", "OPS_GID"):
+        assert f'{key}="$(bootstrap_value {key})"' in text
+    assert 'CONFIG_MODE="400"' in text
+    assert 'LAUNCHER_MODE="555"' in text
+    assert 'PLIST_MODE="644"' in text
+    assert 'SOCKET_MODE_TEXT="0660"' in text
+    assert 'SockPathMode -integer "$SOCKET_MODE_DECIMAL"' in text
+
+
+def test_new_production_script_is_clean_under_d8_identity_token_rules() -> None:
+    import io
+    import tokenize
+
+    flagged: list[str] = []
+    for line in _source().splitlines():
+        if line.lstrip().startswith(("#", "//", "/*", "*/", "* ")):
+            continue
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(line + "\n").readline)
+            for token in tokens:
+                if token.type == tokenize.NUMBER:
+                    try:
+                        value = int(token.string, 0)
+                    except ValueError:
+                        continue
+                    if 400 <= value <= 999:
+                        flagged.append(token.string)
+                elif token.type in {tokenize.NAME, tokenize.STRING} and "_mastermind_" in token.string:
+                    flagged.append(token.string)
+        except (IndentationError, tokenize.TokenError):
+            continue
+    assert flagged == []
