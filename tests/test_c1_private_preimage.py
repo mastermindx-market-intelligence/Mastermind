@@ -1227,6 +1227,131 @@ def test_collect_coherent_older_documents_without_expected_manifest_is_stale():
     assert missing_principals["classification"] == "EFFECT_UNKNOWN"
 
 
+def _stale_prepared_only_agent_relay_fixture(module):
+    stale_sha = "d" * 40
+    filesystem = InstalledFilesystem(module)
+    control = json.loads(filesystem.payloads[module.CONTROL_CONFIG])
+    control.update(
+        {
+            "proof_base_sha": stale_sha,
+            "proof_source_repository": (
+                f"{module.RUNTIME_ROOT}/control/admin-checkout/{stale_sha}"
+            ),
+        }
+    )
+    filesystem.payloads[module.CONTROL_CONFIG] = json.dumps(control).encode()
+
+    stale_root = f"{module.SYSTEM_ROOT}/releases/{stale_sha}"
+    agent_label = "com.mastermind.executive.agent-relay"
+    agent_plist = module.PLISTS[module.LABELS.index(agent_label)]
+    for label, path in zip(module.LABELS, module.PLISTS, strict=True):
+        if label == agent_label:
+            continue
+        value = plistlib.loads(filesystem.payloads[path])
+        value["WorkingDirectory"] = stale_root
+        value["ProgramArguments"] = module.expected_program_arguments(label, stale_sha)
+        filesystem.payloads[path] = plistlib.dumps(value)
+
+    filesystem.payloads.pop(agent_plist)
+    filesystem.present.remove(agent_plist)
+    filesystem.payloads.pop(filesystem.manifest_path)
+    filesystem.present.remove(filesystem.manifest_path)
+    filesystem.present.remove(f"{module.SYSTEM_ROOT}/releases/{SHA}")
+    return filesystem
+
+
+def test_missing_agent_relay_plist_requires_explicit_prepared_only_evidence():
+    module = subject()
+    documents = module.expected_document_fixture(SHA, TREE)
+    agent_plist = module.PLISTS[
+        module.LABELS.index("com.mastermind.executive.agent-relay")
+    ]
+    documents.pop(agent_plist)
+
+    default = module.evaluate_installation(documents, SHA, TREE)
+    assert default["effect_unknown"] is True
+    assert default["matching_installation"] is False
+
+    prepared = module.evaluate_installation(
+        documents, SHA, TREE, agent_relay_prepared_only=True
+    )
+    assert prepared["effect_unknown"] is False
+    assert prepared["matching_installation"] is True
+
+
+def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay():
+    module = subject()
+    filesystem = _stale_prepared_only_agent_relay_fixture(module)
+
+    class PreparedOnlyCommands(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                entries = "".join(
+                    f'    "{label}" => true\n'
+                    for label in module.LABELS
+                    if label != "com.mastermind.executive.agent-relay"
+                )
+                return {
+                    "status": "ok",
+                    "stdout": f"disabled services = {{\n{entries}}}\n",
+                }
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=PreparedOnlyCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-18T23:45:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["state"] == "FACTS"
+    assert receipt["classification"] == "STALE_STOPPED"
+    agent = next(
+        service
+        for service in receipt["facts"]["services"]
+        if service["label"] == "com.mastermind.executive.agent-relay"
+    )
+    assert agent["loaded"] is False
+    assert agent["disabled"] is None
+    assert receipt["mutation_count"] == 0
+
+
+def test_prepared_only_agent_relay_explicitly_enabled_remains_effect_unknown():
+    module = subject()
+    filesystem = _stale_prepared_only_agent_relay_fixture(module)
+
+    class EnabledRelayCommands(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                entries = "".join(
+                    f'    "{label}" => {"false" if label == "com.mastermind.executive.agent-relay" else "true"}\n'
+                    for label in module.LABELS
+                )
+                return {
+                    "status": "ok",
+                    "stdout": f"disabled services = {{\n{entries}}}\n",
+                }
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=EnabledRelayCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-18T23:45:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
 @pytest.mark.parametrize(
     ("exception", "state", "classification"),
     [

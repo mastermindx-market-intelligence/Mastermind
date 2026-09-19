@@ -883,20 +883,34 @@ def expected_document_fixture(release_sha: str, tree_sha: str) -> dict[str, dict
 
 
 def evaluate_installation(
-    documents: dict[str, dict[str, Any]], expected_release_sha: str, expected_tree_sha: str
+    documents: dict[str, dict[str, Any]],
+    expected_release_sha: str,
+    expected_tree_sha: str,
+    *,
+    agent_relay_prepared_only: bool = False,
 ) -> dict[str, bool]:
     required = set(expected_document_fixture(expected_release_sha, expected_tree_sha))
     core = required - {"release_manifest"}
-    if frozenset(documents) not in {frozenset(required), frozenset(core)}:
+    agent_plist = PLISTS[LABELS.index("com.mastermind.executive.agent-relay")]
+    accepted_document_sets = {frozenset(required), frozenset(core)}
+    if agent_relay_prepared_only:
+        accepted_document_sets.update(
+            {
+                frozenset(required - {agent_plist}),
+                frozenset(core - {agent_plist}),
+            }
+        )
+    if frozenset(documents) not in accepted_document_sets:
         return {
             "matching_installation": False,
             "coherent_stale_installation": False,
             "effect_unknown": bool(documents),
         }
     manifest = documents.get("release_manifest")
+    present_plists = [path for path in PLISTS if path in documents]
     release_values = {
         documents[CONTROL_CONFIG].get("proof_base_sha"),
-        *(documents[path].get("release_sha") for path in PLISTS),
+        *(documents[path].get("release_sha") for path in present_plists),
     }
     if manifest is not None:
         release_values.add(manifest.get("commit_sha"))
@@ -935,6 +949,48 @@ def evaluate_installation(
         "coherent_stale_installation": not matching,
         "effect_unknown": False,
     }
+
+
+def _agent_relay_prepared_only(
+    *,
+    metadata: list[dict[str, Any]],
+    principal_facts: dict[str, dict[str, Any]],
+    services: list[dict[str, Any]],
+) -> bool:
+    """Recognize A2's credential-free prepared-only Agent Relay state.
+
+    The host-preparation owner intentionally creates only the fixed service
+    principal and directories. It creates no plist, config, token or socket
+    and does not load or enable the service. That accepted inert state must
+    not make an otherwise coherent stopped Executive installation ambiguous.
+    """
+
+    label = "com.mastermind.executive.agent-relay"
+    plist_path = PLISTS[LABELS.index(label)]
+    metadata_by_path = {item.get("path"): item for item in metadata}
+    required_absent = (
+        plist_path,
+        f"{SYSTEM_ROOT}/config/agent-relay.json",
+        f"{SYSTEM_ROOT}/config/agent-relay.token",
+        "/var/run/mastermind-agent-relay/agent-relay.sock",
+    )
+    if any(
+        metadata_by_path.get(path, {}).get("exists") is not False
+        for path in required_absent
+    ):
+        return False
+
+    principal = principal_facts.get("_mastermind_agent_relay", {})
+    if principal.get("present") is not True or principal.get("matches") is not True:
+        return False
+
+    service = next((item for item in services if item.get("label") == label), None)
+    return bool(
+        service is not None
+        and service.get("active") is False
+        and service.get("loaded") is False
+        and service.get("disabled") is not False
+    )
 
 
 def _valid_agent_arguments(arguments: list[Any], release_sha: str) -> bool:
@@ -1757,7 +1813,6 @@ def _collect_preimage_facts(
             unsafe = True
             reason_codes.add(exc.code)
 
-    installation = evaluate_installation(documents, expected_release_sha, expected_tree_sha)
     principals_match = True
     for name in PRINCIPALS:
         value = principal_facts[name]
@@ -1827,6 +1882,18 @@ def _collect_preimage_facts(
             )
         services.append(service)
 
+    agent_relay_prepared_only = _agent_relay_prepared_only(
+        metadata=metadata,
+        principal_facts=principal_facts,
+        services=services,
+    )
+    installation = evaluate_installation(
+        documents,
+        expected_release_sha,
+        expected_tree_sha,
+        agent_relay_prepared_only=agent_relay_prepared_only,
+    )
+
     release_root_present = next(
         item["exists"] for item in metadata if item["path"] == release_root
     )
@@ -1851,6 +1918,12 @@ def _collect_preimage_facts(
         or any(
             not service["active"]
             and (service["loaded"] or not service["disabled"])
+            and not (
+                agent_relay_prepared_only
+                and service["label"] == "com.mastermind.executive.agent-relay"
+                and service["loaded"] is False
+                and service["disabled"] is None
+            )
             for service in services
         ),
         "surface_present": bool(present)
