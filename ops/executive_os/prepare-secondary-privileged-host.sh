@@ -39,6 +39,11 @@ OPERATOR_USER=""
 OPERATOR_UID=""
 TREE_SHA=""
 RELEASE_ROOT=""
+STAGING=""
+CONFIG_CANDIDATE=""
+ADMIN_CANDIDATE=""
+POWER_CANDIDATE=""
+PLIST_CANDIDATE=""
 BROKER_ARM_MUTATION_STARTED="0"
 COMPLETED="0"
 
@@ -113,6 +118,14 @@ cleanup_on_failure() {
     /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
     /bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
   fi
+  for candidate in "$CONFIG_CANDIDATE" "$ADMIN_CANDIDATE" "$POWER_CANDIDATE" "$PLIST_CANDIDATE"; do
+    if [ -n "$candidate" ] && [ -e "$candidate" ] && [ ! -L "$candidate" ]; then
+      /bin/rm -f -- "$candidate"
+    fi
+  done
+  if [ -n "$STAGING" ] && [ -d "$STAGING" ] && [ ! -L "$STAGING" ]; then
+    /bin/rm -rf -- "$STAGING"
+  fi
 }
 trap cleanup_on_failure EXIT
 
@@ -125,6 +138,14 @@ SOURCE_REPO_REAL="$(cd "$SOURCE_REPO" && /bin/pwd -P)"
 [ "$SOURCE_REPO_REAL" = "$SCRIPT_SOURCE_REPO" ] || refuse "script and source repo must be the same checkout"
 [ "$(/usr/bin/git -C "$SOURCE_REPO" rev-parse HEAD)" = "$EXPECTED_SHA" ] || refuse "source HEAD differs from expected SHA"
 [ -z "$('/usr/bin/git' -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=all)" ] || refuse "source repo is not clean"
+SOURCE_PARENT="$(cd "$SOURCE_REPO/.." && /bin/pwd -P)"
+[ "$(/usr/bin/stat -f '%u:%g' "$SOURCE_PARENT")" = "0:0" ] || refuse "source parent must be root:wheel"
+[ -z "$(/usr/bin/find "$SOURCE_PARENT" -maxdepth 0 -perm +022 -print -quit)" ] || refuse "source parent is group/other writable"
+[ -z "$(/usr/bin/find "$SOURCE_REPO" ! -user root -print -quit)" ] || refuse "source checkout contains a non-root-owned object"
+[ -z "$(/usr/bin/find "$SOURCE_REPO" -perm +022 -print -quit)" ] || refuse "source checkout contains a group/other-writable object"
+[ -z "$(/usr/bin/find "$SOURCE_REPO" -type f -links +1 -print -quit)" ] || refuse "source checkout contains a hard-linked file"
+case "$(/usr/bin/stat -f '%Sp' "$SOURCE_PARENT")" in *+) refuse "source parent has a filesystem ACL" ;; esac
+[ -z "$(/usr/bin/find "$SOURCE_REPO" -exec /usr/bin/stat -f '%Sp' {} \; | /usr/bin/awk '/\+/{print "ACL"; exit}')" ] || refuse "source checkout contains a filesystem ACL"
 [ -f "$SOURCE_POLICY" ] && [ ! -L "$SOURCE_POLICY" ] || refuse "source policy helper is unavailable"
 [ -x "$PYTHON_PROVISIONER" ] && [ ! -L "$PYTHON_PROVISIONER" ] || refuse "Python runtime verifier is unavailable"
 
@@ -160,9 +181,11 @@ if [ ! -e "$RELEASE_ROOT" ] && [ ! -L "$RELEASE_ROOT" ]; then
   /usr/sbin/chown -R root:wheel "$STAGING"
   /bin/chmod -R go-w "$STAGING"
   /bin/chmod 0755 "$STAGING"
+  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" create     --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
+  /usr/sbin/chown root:wheel "$STAGING/.executive-release-manifest.json"
+  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" verify     --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null     || refuse "staged exact release did not verify"
   /bin/mv "$STAGING" "$RELEASE_ROOT"
-  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" create     --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-  /usr/sbin/chown root:wheel "$RELEASE_ROOT/.executive-release-manifest.json"
+  STAGING=""
 else
   [ -d "$RELEASE_ROOT" ] && [ ! -L "$RELEASE_ROOT" ] || refuse "existing release path is ambiguous"
 fi
