@@ -3366,6 +3366,11 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         hard-coded control label and control plist; nothing is caller-selected.
         """
         release = SYSTEM_ROOT / "releases" / expected_sha
+        self._run_fixed(
+            ["/bin/launchctl", "enable", f"system/{CONTROL_LABEL}"],
+            cwd=release,
+            timeout=45.0,
+        )
         if self._loaded(CONTROL_LABEL):
             self._run_fixed(
                 ["/bin/launchctl", "kickstart", "-k", f"system/{CONTROL_LABEL}"],

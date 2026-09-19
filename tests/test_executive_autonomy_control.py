@@ -3555,6 +3555,41 @@ def test_the_real_submit_ceo_intent_sink_admits_only_the_transaction_produced_st
     assert "ceo_submit_sink_eligible" not in service_source
 
 
+def test_ceo_submit_control_boundary_enables_only_control_before_bootstrap(monkeypatch):
+    """A disabled control override must not strand the control-only CEO-submit reconcile."""
+
+    host = control.ProductionCeoSubmitHost()
+    ledger: list[list[str]] = []
+    probes = {"count": 0}
+
+    def fake_run(cmd, **kw):
+        argv = list(cmd)
+        ledger.append(argv)
+        if argv[:2] == ["/bin/launchctl", "print"]:
+            probes["count"] += 1
+            return mock.Mock(returncode=1 if probes["count"] == 1 else 0)
+        return mock.Mock(returncode=0)
+
+    monkeypatch.setattr(control.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        control.ProductionCeoSubmitHost,
+        "_require_control_plist_safe",
+        staticmethod(lambda: None),
+        raising=False,
+    )
+
+    host.reconcile_control_service(SHA)
+
+    non_probes = [argv for argv in ledger if argv[:2] != ["/bin/launchctl", "print"]]
+    assert non_probes == [
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+        ["/bin/launchctl", "bootstrap", "system", os.fspath(control.CONTROL_PLIST)],
+    ]
+    joined = "\n".join(" ".join(argv) for argv in ledger)
+    assert control.WORKER_LABEL not in joined
+    assert os.fspath(control.WORKER_PLIST) not in joined
+
+
 def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundary(
     monkeypatch,
 ):
@@ -3614,7 +3649,8 @@ def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundar
     absent = drive(control_loaded=False)
     assert_control_only(absent)
     assert non_probes(absent) == [
-        ["/bin/launchctl", "bootstrap", "system", os.fspath(control.CONTROL_PLIST)]
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+        ["/bin/launchctl", "bootstrap", "system", os.fspath(control.CONTROL_PLIST)],
     ]
 
     # PRESENT: the control label is loaded, so the boundary kickstarts it. This
@@ -3623,7 +3659,8 @@ def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundar
     present = drive(control_loaded=True)
     assert_control_only(present)
     assert non_probes(present) == [
-        ["/bin/launchctl", "kickstart", "-k", f"system/{control.CONTROL_LABEL}"]
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+        ["/bin/launchctl", "kickstart", "-k", f"system/{control.CONTROL_LABEL}"],
     ]
 
     for ledger in (absent, present):
@@ -3699,7 +3736,10 @@ def test_ceo_submit_control_boundary_refuses_when_the_launchd_call_does_not_regi
 
     assert host._active_transaction is None
     verbs = [argv for argv in ledger if argv[:2] != ["/bin/launchctl", "print"]]
-    assert verbs == [expected_argv], case
+    assert verbs == [
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+        expected_argv,
+    ], case
     # The read-back ran strictly AFTER the launchd verb: the refusal is the
     # read-back's, never a skipped call.
     assert ledger.index(expected_argv) < len(ledger) - 1
@@ -3726,6 +3766,7 @@ def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecy
         "CONTROL_LABEL",
         "cwd=release",
         "_require_control_plist_safe",
+        "enable",
     ):
         assert token in boundary
 
