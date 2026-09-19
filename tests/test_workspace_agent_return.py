@@ -232,8 +232,12 @@ class CandidateReturnGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(service.calls), 1)
         socket_path, request = service.calls[0]
         self.assertEqual(socket_path, SOCKET)
-        self.assertEqual(request["version"], "agent-dialogue-control.v2")
+        self.assertEqual(request["version"], "mastermind.agent_dialogue_control.v2")
         self.assertEqual(request["operation"], "send_message")
+        self.assertEqual(
+            request["args"]["send_protocol"],
+            "mastermind.agent_dialogue_exact_send.v1",
+        )
         self.assertEqual(request["args"]["thread_ts"], current.thread_ts)
         context = request["args"]["context"]
         message = request["args"]["message"]
