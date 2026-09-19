@@ -267,3 +267,49 @@ def test_web_endpoints_portfolio_aware(iso, monkeypatch):
 def autonomous_submit(args):
     from brain import autonomous_mcp
     return autonomous_mcp.submit_book.handler(args)
+
+
+@pytest.mark.parametrize("brain_ok, file_written, expect_decided", [
+    (True, False, False),    # false-green result, no effect: the book is NOT advanced
+    (False, True, True),     # non-success result, effect present: the effect decides, not ok
+])
+def test_run_autonomous_decides_on_submission_effect_not_brain_ok(
+    iso, monkeypatch, brain_ok, file_written, expect_decided
+):
+    """The book job never reads brain["ok"] on the execution path (#538 consumer law).
+
+    ``decided`` comes only from the submission file the submit_book tool writes.  A green result
+    without an effect cannot advance execution, and a failed-tool result never asserts the write
+    was NOT applied: if the file is there, it is the decision.  The Brain runs exactly once.
+    """
+    prices = {"NVDA": 210.0, "SPY": 740.0}
+    monkeypatch.setattr(paper_account, "_current_price", lambda t: prices.get(t))
+    from bot import autonomous, settle
+    monkeypatch.setattr(settle, "is_open", lambda pid: True)
+    from brain import autonomous_mcp, codex_bridge
+    runs = []
+
+    def fake_brain(asof, inaugural):
+        runs.append(asof)
+        if file_written:
+            autonomous_mcp.submission_path().parent.mkdir(parents=True, exist_ok=True)
+            autonomous_mcp.submission_path().write_text(json.dumps({
+                "holdings": [{"ticker": "NVDA", "weight": 0.4, "rationale": "AI leadership"}],
+                "summary": "single", "gross": 0.4,
+            }))
+        return {
+            "ok": brain_ok, "text": "x", "cost_usd": 0.0, "model": "gpt-5.6-sol",
+            "tools_used": ["mcp__desk__submit_book"],
+            "error": None if brain_ok else codex_bridge.WRITE_TOOL_FAILURE_ERROR,
+        }
+
+    monkeypatch.setattr(autonomous, "_run_brain", fake_brain)
+    out = autonomous.run_autonomous(asof="2026-06-21", armed=True)
+    assert runs == ["2026-06-21"]
+    assert out["brain"]["ok"] is brain_ok
+    assert out["decided"] is expect_decided
+    if expect_decided:
+        assert {t["ticker"] for t in out["executed"]} == {"NVDA"}
+    else:
+        assert out.get("executed") in (None, [])
+        assert out["target_status"] == "rejected_no_submission"
