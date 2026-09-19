@@ -473,6 +473,7 @@ __all__ = [
 _CENSUS_SOURCE_KINDS = (
     ("manifest.json", "extension_manifest"),
     ("background.js", "extension_background"),
+    ("semantic_ack_core.js", "extension_semantic_ack_core"),
     ("content.js", "extension_content"),
     ("continuation_core.js", "extension_continuation_core"),
     ("census.html", "extension_census_html"),
@@ -512,7 +513,8 @@ def _validate_census_manifest(payload: bytes, release: WebSolRelease) -> None:
                 or manifest["host_permissions"] != origins
                 or manifest["background"] != {"service_worker": "background.js"}
                 or manifest["content_scripts"] != [{"matches": origins,
-                    "js": ["content.js"], "run_at": "document_idle"}]):
+                    "js": ["semantic_ack_core.js", "content.js"],
+                    "run_at": "document_idle"}]):
             raise ValueError("unsupported_manifest")
         action = manifest["action"]
         if (not isinstance(action, dict) or set(action) != {"default_title", "default_popup"}

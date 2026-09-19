@@ -23,10 +23,10 @@ def _exact_kwargs(lease):
         "binding_generation": current.binding_generation,
         "session_alias": current.session_alias,
         "nudge_id": NUDGE,
-        "opaque_ids": ("WAKE-" + "d" * 32, "WAKE-" + "d" * 32 + ":A1"),
+        "obligation_ids": ("WAKE-" + "d" * 32, "WAKE-" + "f" * 32),
     }
 
-def _client(submitter):
+def _client(submitter, observer=lambda *_args, **_kwargs: {"status": "CONTINUATION_ACK_PENDING"}):
     row = binding()
     lease = runtime_lease(row)
     return (
@@ -34,6 +34,7 @@ def _client(submitter):
             row,
             lease,
             submitter=submitter,
+            observer=observer,
             now=lambda: NOW,
             nonce_factory=lambda: "wake-nonce-00000000000001",
         ),
@@ -59,8 +60,10 @@ def test_exact_wake_maps_to_one_fixed_continuation_without_result_body():
     assert kwargs["operation_key"] == f"web-sol-wake:{NUDGE}"
     assert kwargs["issued_at"] == "2026-09-18T22:00:00Z"
     assert kwargs["expires_at"] == "2026-09-18T22:00:30Z"
+    assert kwargs["wake_obligation_ids"] == _exact_kwargs(lease)["obligation_ids"]
     assert set(kwargs) == {
-        "operation_key", "turn_id", "issued_at", "expires_at", "nonce"
+        "operation_key", "turn_id", "wake_obligation_ids",
+        "issued_at", "expires_at", "nonce"
     }
     rendered = repr(calls)
     assert "role_result" not in rendered
@@ -109,6 +112,39 @@ def test_native_uncertainty_is_not_downgraded_to_no_effect():
     client, lease = _client(submitter)
     with pytest.raises(WakeEffectUnknownError, match="remains unknown"):
         asyncio.run(client.deliver_wake(**_exact_kwargs(lease)))
+
+
+def test_exact_completed_turn_builds_transient_semantic_projection():
+    calls = []
+
+    def observer(row, lease, **kwargs):
+        calls.append((row, lease, kwargs))
+        return {
+            "status": "CONTINUATION_ACKNOWLEDGED",
+            "provider_native_turn_id": "assistant-turn-current-001",
+            "acknowledged_obligation_ids": list(kwargs["wake_obligation_ids"]),
+            "terminal_ack_trailer": True,
+        }
+
+    client, lease = _client(
+        lambda *_args, **_kwargs: {"status": "CONTINUATION_STARTED"},
+        observer=observer,
+    )
+    observed = asyncio.run(client.observe_wake_ack(**_exact_kwargs(lease)))
+    assert observed.runtime_binding_lease is lease
+    assert observed.projection.provider_native_turn_id == "assistant-turn-current-001"
+    assert observed.projection.obligation_ids == _exact_kwargs(lease)["obligation_ids"]
+    assert calls[0][2]["nudge_id"] == NUDGE
+    assert calls[0][2]["wake_obligation_ids"] == _exact_kwargs(lease)["obligation_ids"]
+
+
+def test_pending_semantic_ack_is_read_only_hold():
+    client, lease = _client(
+        lambda *_args, **_kwargs: {"status": "CONTINUATION_STARTED"},
+        observer=lambda *_args, **_kwargs: {"status": "CONTINUATION_ACK_PENDING"},
+    )
+    with pytest.raises(WakePreSubmitError, match="not ready"):
+        asyncio.run(client.observe_wake_ack(**_exact_kwargs(lease)))
 
 
 def test_reconcile_never_infers_prior_browser_effect():

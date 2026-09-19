@@ -2,7 +2,7 @@
 
 (() => {
   const ACTION_SCHEMA = "mastermind.web_sol_surface_action.v1";
-  const DIRECTIVE_DIGEST = "cde0de54629786dcd6c0ee3b169558cf050de48b828a4da15cbd2d881c66afd9";
+  const DIRECTIVE_DIGEST = "55cca851529f53f89ade6a2abb43880513fcd189dfcda50237ec1369640a06c5";
   const MESSAGE_KIND = "MMX_WEB_SOL_SUBMIT_CONTINUATION";
   const RESULT_SCHEMA = "mastermind.web_sol_continuation_submit_result.v1";
   const MAX_EFFECTS = 256;
@@ -11,6 +11,7 @@
   const CORRELATION_KEYS = Object.freeze([
     "turn_id", "directive_digest", "session_alias", "runtime_binding_id",
     "runtime_binding_generation", "runtime_binding_fingerprint",
+    "wake_obligation_ids", "wake_obligation_digest",
   ]);
   const REQUEST_KEYS = new Set([
     "schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
@@ -34,7 +35,7 @@
 
   function validRequest(request) {
     if (!exactKeys(request, REQUEST_KEYS) || request.schema !== ACTION_SCHEMA) return false;
-    if (request.action !== "SUBMIT_CONTINUATION") return false;
+    if (!["SUBMIT_CONTINUATION", "OBSERVE_CONTINUATION_ACK"].includes(request.action)) return false;
     if (!isHex64(request.conversation_fingerprint) || !isHex64(request.binding_fingerprint)) return false;
     if (typeof request.binding_id !== "string" ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.binding_id)) return false;
@@ -50,8 +51,14 @@
         !/^bind-wsx-[0-9a-f]{48}$/.test(request.runtime_binding_id)) return false;
     if (!Number.isSafeInteger(request.runtime_binding_generation) ||
         request.runtime_binding_generation < 1) return false;
+    const ids = request.wake_obligation_ids;
     return request.directive_digest === DIRECTIVE_DIGEST &&
       isHex64(request.runtime_binding_fingerprint) &&
+      Array.isArray(ids) && ids.length > 0 && ids.length <= 32 &&
+      ids.every((item) => typeof item === "string" && /^WAKE-[0-9a-f]{32}$/.test(item)) &&
+      ids.every((item, index) => index === 0 || ids[index - 1] < item) &&
+      isHex64(request.wake_obligation_digest) &&
+      (request.action !== "OBSERVE_CONTINUATION_ACK" || /^NUDGE-[0-9a-f]{32}$/.test(request.turn_id)) &&
       typeof request.issued_at === "string" && typeof request.expires_at === "string";
   }
 
@@ -71,7 +78,7 @@
   }
 
   async function handle(request, ops) {
-    if (!validRequest(request) || !ops) {
+    if (!validRequest(request) || request.action !== "SUBMIT_CONTINUATION" || !ops) {
       return result("CONTINUATION_SUBMIT_EFFECT_UNKNOWN", ops?.unknownObservation?.());
     }
     if (effects.some((row) => row.nonce === request.nonce || row.turn_id === request.turn_id) ||
@@ -106,6 +113,8 @@
         runtime_binding_id: request.runtime_binding_id,
         runtime_binding_generation: request.runtime_binding_generation,
         runtime_binding_fingerprint: request.runtime_binding_fingerprint,
+        wake_obligation_ids: [...request.wake_obligation_ids],
+        wake_obligation_digest: request.wake_obligation_digest,
       });
     } catch (_error) {
       return result("CONTINUATION_SUBMIT_EFFECT_UNKNOWN", before.observation);

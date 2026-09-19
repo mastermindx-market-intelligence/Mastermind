@@ -21,6 +21,8 @@ CONVERSATION_FINGERPRINT = "b" * 64
 BOOT_ONE = "runtime-boot-nonce-000000000001"
 BOOT_TWO = "runtime-boot-nonce-000000000002"
 TURN_ID = "ohf-turn-runtime-bound-0001"
+WAKE_IDS = ("WAKE-" + "a" * 32,)
+WAKE_DIGEST = protocol.wake_obligation_digest(WAKE_IDS)
 NONCE = "runtime-bound-nonce-00000001"
 OPERATION = "web-sol-exact-continuation-return-r3-20260918-sol-001"
 
@@ -112,6 +114,8 @@ def continuation_request(
         "runtime_binding_id": current.runtime_binding.binding_id,
         "runtime_binding_generation": current.runtime_binding.binding_generation,
         "runtime_binding_fingerprint": current.runtime_binding_fingerprint,
+        "wake_obligation_ids": list(WAKE_IDS),
+        "wake_obligation_digest": WAKE_DIGEST,
     }
     value.update(overrides)
     return value
@@ -152,6 +156,8 @@ def continuation_receipt(request: dict, status: str) -> dict:
         "runtime_binding_id": request["runtime_binding_id"],
         "runtime_binding_generation": request["runtime_binding_generation"],
         "runtime_binding_fingerprint": request["runtime_binding_fingerprint"],
+        "wake_obligation_ids": request["wake_obligation_ids"],
+        "wake_obligation_digest": request["wake_obligation_digest"],
     }
 
 
@@ -213,7 +219,7 @@ def collected_census_receipt(binding: dict) -> dict:
 
 
 def test_runtime_bound_continuation_is_package_generation_four_and_closed() -> None:
-    assert protocol.WEB_SOL_PACKAGE_VERSION == "0.4.0"
+    assert protocol.WEB_SOL_PACKAGE_VERSION == "0.5.0"
     accepted = protocol.validate_request(continuation_request())
     assert accepted["runtime_binding_generation"] == 1
     assert accepted["session_alias"] == "EXECUTIVE-CEO-A"
@@ -308,6 +314,7 @@ def test_stale_runtime_binding_refuses_before_continuation_action_frame(monkeypa
             stale,
             operation_key=OPERATION,
             turn_id=TURN_ID,
+            wake_obligation_ids=WAKE_IDS,
             issued_at=issued,
             expires_at=expires,
             nonce=NONCE,
@@ -337,6 +344,7 @@ def test_current_runtime_binding_submits_exactly_once_and_correlates_receipt(mon
         current,
         operation_key=OPERATION,
         turn_id=TURN_ID,
+        wake_obligation_ids=WAKE_IDS,
         issued_at=issued,
         expires_at=expires,
         nonce=NONCE,
@@ -399,6 +407,7 @@ def test_continuation_api_has_no_caller_text_url_selector_or_retry() -> None:
         "runtime_binding_lease",
         "operation_key",
         "turn_id",
+        "wake_obligation_ids",
         "issued_at",
         "expires_at",
         "nonce",

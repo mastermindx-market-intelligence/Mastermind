@@ -23,6 +23,8 @@ BACKGROUND = ROOT / "integrations/chairman_surfaces/web_sol_extension/background
 HEX_A = "a" * 64
 HEX_B = "b" * 64
 TURN_ID = "ohf-turn-r2-0001"
+WAKE_IDS = ("WAKE-" + "a" * 32,)
+WAKE_DIGEST = wsp.wake_obligation_digest(WAKE_IDS)
 NONCE = "continuation-nonce-00000001"
 OPERATION = "web-sol-session-runtime-r2-20260916-sol-001"
 
@@ -106,6 +108,8 @@ def request(**overrides) -> dict:
         "runtime_binding_id": lease.runtime_binding.binding_id,
         "runtime_binding_generation": lease.runtime_binding.binding_generation,
         "runtime_binding_fingerprint": lease.runtime_binding_fingerprint,
+        "wake_obligation_ids": list(WAKE_IDS),
+        "wake_obligation_digest": WAKE_DIGEST,
     }
     value.update(overrides)
     return value
@@ -144,11 +148,13 @@ def receipt(req: dict, status: str, *, generation_state: str = "idle") -> dict:
         "runtime_binding_id": req["runtime_binding_id"],
         "runtime_binding_generation": req["runtime_binding_generation"],
         "runtime_binding_fingerprint": req["runtime_binding_fingerprint"],
+        "wake_obligation_ids": req["wake_obligation_ids"],
+        "wake_obligation_digest": req["wake_obligation_digest"],
     }
 
 
 def test_continuation_action_is_a_new_advertised_package_generation():
-    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.4.0"
+    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.5.0"
     assert "SUBMIT_CONTINUATION" in {item.value for item in wsp.SurfaceAction}
     assert len(wsp.CONTINUATION_DIRECTIVE_DIGEST) == 64
     assert "Continue the same logical responsibility." in wsp.CONTINUATION_DIRECTIVE_TEXT
@@ -212,6 +218,7 @@ def test_client_exposes_only_fixed_semantic_continuation_not_generic_text(monkey
         "runtime_binding_lease",
         "operation_key",
         "turn_id",
+        "wake_obligation_ids",
         "issued_at",
         "expires_at",
         "nonce",
@@ -243,6 +250,7 @@ def test_client_exposes_only_fixed_semantic_continuation_not_generic_text(monkey
         runtime_lease(row),
         operation_key=OPERATION,
         turn_id=TURN_ID,
+        wake_obligation_ids=WAKE_IDS,
         issued_at="2026-09-16T20:00:00Z",
         expires_at="2026-09-16T20:00:30Z",
         nonce=NONCE,
@@ -324,11 +332,15 @@ const {webcrypto, createHash} = require('node:crypto');
   const request={kind:'MMX_WEB_SOL_SUBMIT_CONTINUATION',expected_conversation_fingerprint:fp,
     turn_id:'ohf-turn-r2-0001',directive_digest:vm.runInContext('CONTINUATION_DIRECTIVE_DIGEST',context),
     session_alias:'EXECUTIVE-CEO-A',runtime_binding_id:'bind-wsx-'+ 'c'.repeat(48),
-    runtime_binding_generation:1,runtime_binding_fingerprint:'d'.repeat(64)};
+    runtime_binding_generation:1,runtime_binding_fingerprint:'d'.repeat(64),
+    wake_obligation_ids:['WAKE-'+ 'a'.repeat(32)],
+    wake_obligation_digest:'277016348d4e5720093a82a9c63a128cca067db825cf7d5ffbed5c59c3d5d314'};
   const result=await context.submitContinuation(request);
   if(scenario==='success'){
     assert.equal(result.effect,'SUBMIT_TRIGGERED');assert.equal(clicks,1);assert.equal(dispatched>0,true);
-    assert.equal(text,vm.runInContext('CONTINUATION_DIRECTIVE_TEXT',context));
+    assert.equal(text.startsWith(vm.runInContext('CONTINUATION_DIRECTIVE_TEXT',context)),true);
+    assert.equal(text.includes('MASTERMIND_WAKE_ACK <WAKE-ID>'),true);
+    assert.equal(text.endsWith('MASTERMIND_WAKE_NUDGE '+request.turn_id+'\nMASTERMIND_WAKE_SET '+request.wake_obligation_digest),true);
   } else if(scenario==='no-composer'||scenario==='no-send') {
     assert.equal(result.effect,'NOT_SUBMITTED');assert.equal(clicks,0);assert.equal(text,'');
   } else if(scenario==='click-throws') {
@@ -374,7 +386,9 @@ const {webcrypto} = require('node:crypto');
       turn_id:message.turn_id,directive_digest:message.directive_digest,
       session_alias:message.session_alias,runtime_binding_id:message.runtime_binding_id,
       runtime_binding_generation:message.runtime_binding_generation,
-      runtime_binding_fingerprint:message.runtime_binding_fingerprint,effect:'SUBMIT_TRIGGERED'};
+      runtime_binding_fingerprint:message.runtime_binding_fingerprint,
+      wake_obligation_ids:message.wake_obligation_ids,
+      wake_obligation_digest:message.wake_obligation_digest,effect:'SUBMIT_TRIGGERED'};
    }
    throw Error('unexpected message');
   },update:async()=>({id:7,windowId:10,active:true}),onUpdated:event(),onMoved:event(),onAttached:event(),onDetached:event(),onReplaced:event(),onRemoved:event()};
@@ -388,7 +402,8 @@ const {webcrypto} = require('node:crypto');
   binding_fingerprint:B,action:'SUBMIT_CONTINUATION',operation_key:'web-sol-r2-fixture',issued_at:new Date().toISOString(),
   expires_at:new Date(Date.now()+30000).toISOString(),nonce:'continuation-nonce-00000001',turn_id:'ohf-turn-r2-0001',directive_digest:D,
   session_alias:'EXECUTIVE-CEO-A',runtime_binding_id:'bind-wsx-'+ 'c'.repeat(48),runtime_binding_generation:1,
-  runtime_binding_fingerprint:'d'.repeat(64)};
+  runtime_binding_fingerprint:'d'.repeat(64),wake_obligation_ids:['WAKE-'+ 'a'.repeat(32)],
+  wake_obligation_digest:'277016348d4e5720093a82a9c63a128cca067db825cf7d5ffbed5c59c3d5d314'};
  const first=await context.handleSubmitContinuation(req);
  if(scenario==='started')assert.equal(first.status,'CONTINUATION_STARTED');
  else assert.equal(first.status,'CONTINUATION_SUBMIT_EFFECT_UNKNOWN');

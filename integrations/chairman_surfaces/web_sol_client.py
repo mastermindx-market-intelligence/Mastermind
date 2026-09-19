@@ -7,6 +7,7 @@ already selected one exact reviewed binding.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 import hashlib
 import json
 from pathlib import Path
@@ -119,6 +120,8 @@ def _request(
     obligation_digest: str | None = None,
     turn_id: str | None = None,
     runtime_binding_lease: wrb.WebSolRuntimeBindingLease | None = None,
+    wake_obligation_ids: Sequence[str] | None = None,
+    wake_obligation_digest: str | None = None,
 ) -> dict[str, Any]:
     accepted = _accepted_binding(binding)
     request = {
@@ -140,9 +143,16 @@ def _request(
                 "obligation_digest": obligation_digest,
             }
         )
-    if action == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+    if action in {
+        wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
+        wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
+    }:
         if not isinstance(runtime_binding_lease, wrb.WebSolRuntimeBindingLease):
             raise WebSolExtensionError("runtime_binding_required")
+        obligation_ids = tuple(wake_obligation_ids or ())
+        canonical_digest = wsp.wake_obligation_digest(obligation_ids)
+        if wake_obligation_digest not in (None, canonical_digest):
+            raise WebSolExtensionError("wake_obligation_digest_mismatch")
         request["conversation_fingerprint"] = (
             runtime_binding_lease.target.conversation_fingerprint
         )
@@ -158,6 +168,8 @@ def _request(
                 "runtime_binding_fingerprint": (
                     runtime_binding_lease.runtime_binding_fingerprint
                 ),
+                "wake_obligation_ids": list(obligation_ids),
+                "wake_obligation_digest": canonical_digest,
             }
         )
     return wsp.validate_request(request)
@@ -357,6 +369,8 @@ def _transport_failure_code(
         return "typed_reentry_effect_unknown"
     if sent and action == "SUBMIT_CONTINUATION":
         return "continuation_submit_effect_unknown"
+    if action == "OBSERVE_CONTINUATION_ACK":
+        return "semantic_ack_unavailable"
     if action == "CENSUS":
         return "census_unavailable"
     if sent:
@@ -457,6 +471,8 @@ def _untrusted_receipt_code(action: str, default: str) -> str:
         return "typed_reentry_effect_unknown"
     if action == "SUBMIT_CONTINUATION":
         return "continuation_submit_effect_unknown"
+    if action == "OBSERVE_CONTINUATION_ACK":
+        return "semantic_ack_invalid"
     return default
 
 
@@ -473,6 +489,8 @@ def _invoke(
     obligation_digest: str | None = None,
     turn_id: str | None = None,
     runtime_binding_lease: wrb.WebSolRuntimeBindingLease | None = None,
+    wake_obligation_ids: Sequence[str] | None = None,
+    wake_obligation_digest: str | None = None,
 ) -> dict[str, Any]:
     request = _request(
         binding,
@@ -486,6 +504,8 @@ def _invoke(
         obligation_digest=obligation_digest,
         turn_id=turn_id,
         runtime_binding_lease=runtime_binding_lease,
+        wake_obligation_ids=wake_obligation_ids,
+        wake_obligation_digest=wake_obligation_digest,
     )
     try:
         instance_id = wsi.adapter_instance_id(binding)
@@ -494,7 +514,10 @@ def _invoke(
         raise WebSolExtensionError(exc.code) from exc
 
     before_action = None
-    if action == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+    if action in {
+        wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
+        wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
+    }:
         assert runtime_binding_lease is not None
         if runtime_binding_lease.target.adapter_instance_id != instance_id:
             raise WebSolExtensionError("runtime_binding_target_mismatch")
@@ -547,7 +570,10 @@ def _invoke(
     ]
     if action == wsp.SurfaceAction.TYPED_REENTRY.value:
         match_fields.extend(("operation_id", "result_digest", "obligation_digest"))
-    if action == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+    if action in {
+        wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
+        wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
+    }:
         match_fields.extend(
             (
                 "turn_id",
@@ -556,6 +582,8 @@ def _invoke(
                 "runtime_binding_id",
                 "runtime_binding_generation",
                 "runtime_binding_fingerprint",
+                "wake_obligation_ids",
+                "wake_obligation_digest",
             )
         )
     for field in match_fields:
@@ -638,6 +666,7 @@ def submit_continuation_via_extension(
     *,
     operation_key: str,
     turn_id: str,
+    wake_obligation_ids: Sequence[str],
     issued_at: str,
     expires_at: str,
     nonce: str,
@@ -655,6 +684,33 @@ def submit_continuation_via_extension(
         operation_key=operation_key,
         turn_id=turn_id,
         runtime_binding_lease=runtime_binding_lease,
+        wake_obligation_ids=wake_obligation_ids,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        nonce=nonce,
+    )
+
+
+def observe_continuation_ack_via_extension(
+    binding: dict[str, Any],
+    runtime_binding_lease: wrb.WebSolRuntimeBindingLease,
+    *,
+    operation_key: str,
+    nudge_id: str,
+    wake_obligation_ids: Sequence[str],
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Read one exact completed target-turn ACK without a provider mutation."""
+
+    return _invoke(
+        binding,
+        action="OBSERVE_CONTINUATION_ACK",
+        operation_key=operation_key,
+        turn_id=nudge_id,
+        runtime_binding_lease=runtime_binding_lease,
+        wake_obligation_ids=wake_obligation_ids,
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,

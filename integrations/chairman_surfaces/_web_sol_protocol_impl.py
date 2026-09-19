@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
+from control_plane.operator_harness_contract import ATTENTION_TURN_INSTRUCTION
+
 PROBE_SCHEMA = "mastermind.web_sol_surface_probe.v1"
 ACTION_SCHEMA = "mastermind.web_sol_surface_action.v1"
 RECEIPT_SCHEMA = "mastermind.web_sol_surface_receipt.v1"
@@ -23,7 +25,7 @@ HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1"
 INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1"
 TRANSPORT_CAPABILITY_SCHEMA = "mastermind.web_sol_transport_capabilities.v1"
 TRANSPORT_PROTOCOL_MAJOR = 1
-WEB_SOL_PACKAGE_VERSION = "0.4.0"
+WEB_SOL_PACKAGE_VERSION = "0.5.0"
 MAX_ACTION_TTL_SECONDS = 60
 ALLOWED_FUTURE_SKEW_SECONDS = 5
 CONTINUATION_DIRECTIVE_TEXT = (
@@ -33,6 +35,8 @@ CONTINUATION_DIRECTIVE_TEXT = (
     "Do not restart completed work.\n"
     "Recover any open reciprocal worker dialogue before creating replacement work.\n"
     "Advance the highest-leverage unfinished critical-path capability within the existing authorized scope."
+    "\n\n"
+    + ATTENTION_TURN_INSTRUCTION
 )
 CONTINUATION_DIRECTIVE_DIGEST = hashlib.sha256(
     CONTINUATION_DIRECTIVE_TEXT.encode("utf-8")
@@ -48,6 +52,7 @@ class SurfaceAction(str, Enum):
     FOREGROUND = "FOREGROUND"
     TYPED_REENTRY = "TYPED_REENTRY"
     SUBMIT_CONTINUATION = "SUBMIT_CONTINUATION"
+    OBSERVE_CONTINUATION_ACK = "OBSERVE_CONTINUATION_ACK"
 
 
 class ReceiptStatus(str, Enum):
@@ -61,6 +66,9 @@ class ReceiptStatus(str, Enum):
     CONTINUATION_NOT_SUBMITTED = "CONTINUATION_NOT_SUBMITTED"
     CONTINUATION_SUBMIT_EFFECT_UNKNOWN = "CONTINUATION_SUBMIT_EFFECT_UNKNOWN"
     CONTINUATION_STARTED = "CONTINUATION_STARTED"
+    CONTINUATION_ACKNOWLEDGED = "CONTINUATION_ACKNOWLEDGED"
+    CONTINUATION_ACK_PENDING = "CONTINUATION_ACK_PENDING"
+    CONTINUATION_ACK_REFUSED = "CONTINUATION_ACK_REFUSED"
     TARGET_NOT_FOUND = "TARGET_NOT_FOUND"
     TARGET_CHANGED = "TARGET_CHANGED"
     AUTH_REQUIRED = "AUTH_REQUIRED"
@@ -92,15 +100,20 @@ _TYPED_REENTRY_PAYLOAD_KEYS = frozenset({
     "obligation_digest",
 })
 _TYPED_REENTRY_KEYS = _REQUEST_KEYS | _TYPED_REENTRY_PAYLOAD_KEYS
-_SUBMIT_CONTINUATION_PAYLOAD_KEYS = frozenset({
+_CONTINUATION_IDENTITY_PAYLOAD_KEYS = frozenset({
     "turn_id",
     "directive_digest",
     "session_alias",
     "runtime_binding_id",
     "runtime_binding_generation",
     "runtime_binding_fingerprint",
+    "wake_obligation_ids",
+    "wake_obligation_digest",
 })
+_SUBMIT_CONTINUATION_PAYLOAD_KEYS = _CONTINUATION_IDENTITY_PAYLOAD_KEYS
+_OBSERVE_CONTINUATION_ACK_PAYLOAD_KEYS = _CONTINUATION_IDENTITY_PAYLOAD_KEYS
 _SUBMIT_CONTINUATION_KEYS = _REQUEST_KEYS | _SUBMIT_CONTINUATION_PAYLOAD_KEYS
+_OBSERVE_CONTINUATION_ACK_KEYS = _REQUEST_KEYS | _OBSERVE_CONTINUATION_ACK_PAYLOAD_KEYS
 _RECEIPT_KEYS = frozenset(
     {
         "schema",
@@ -117,6 +130,14 @@ _RECEIPT_KEYS = frozenset(
 )
 _TYPED_REENTRY_RECEIPT_KEYS = _RECEIPT_KEYS | _TYPED_REENTRY_PAYLOAD_KEYS
 _SUBMIT_CONTINUATION_RECEIPT_KEYS = _RECEIPT_KEYS | _SUBMIT_CONTINUATION_PAYLOAD_KEYS
+_SEMANTIC_ACK_RESULT_KEYS = frozenset({
+    "provider_native_turn_id",
+    "acknowledged_obligation_ids",
+    "terminal_ack_trailer",
+})
+_OBSERVE_CONTINUATION_ACK_RECEIPT_KEYS = (
+    _RECEIPT_KEYS | _OBSERVE_CONTINUATION_ACK_PAYLOAD_KEYS | _SEMANTIC_ACK_RESULT_KEYS
+)
 _PROBE_KEYS = frozenset(
     {
         "schema",
@@ -176,6 +197,8 @@ _FORBIDDEN_KEYS = frozenset(
     }
 )
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_WAKE_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}$")
+_NUDGE_ID_RE = re.compile(r"^NUDGE-[0-9a-f]{32}$")
 _TURN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 _SESSION_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 _RUNTIME_BINDING_ID_RE = re.compile(r"^bind-wsx-[0-9a-f]{48}$")
@@ -190,6 +213,7 @@ _MAX_OPERATION_KEY = 256
 _MIN_NONCE = 16
 _MAX_NONCE = 128
 _MAX_PACKAGE_VERSION = 64
+_MAX_WAKE_OBLIGATIONS = 32
 
 
 def _error(path: str, message: str) -> WebSolProtocolError:
@@ -285,6 +309,42 @@ def _require_nullable_nonce(value: Any, path: str) -> None:
 def _require_turn_id(value: Any, path: str) -> None:
     if not isinstance(value, str) or _TURN_ID_RE.fullmatch(value) is None:
         raise _error(path, "must be a bounded opaque turn identity")
+
+
+def _require_nudge_id(value: Any, path: str) -> None:
+    if not isinstance(value, str) or _NUDGE_ID_RE.fullmatch(value) is None:
+        raise _error(path, "must be a canonical Wake nudge identity")
+
+
+def _canonical_wake_obligation_ids(value: Any, path: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or not value:
+        raise _error(path, "must be a non-empty canonical Wake identity list")
+    ids = tuple(value)
+    if len(ids) > _MAX_WAKE_OBLIGATIONS:
+        raise _error(path, "exceeds the Wake identity count ceiling")
+    if any(not isinstance(item, str) or _WAKE_ID_RE.fullmatch(item) is None for item in ids):
+        raise _error(path, "contains a malformed Wake identity")
+    if ids != tuple(sorted(set(ids))):
+        raise _error(path, "must be unique and canonical sorted order")
+    return ids
+
+
+def wake_obligation_digest(obligation_ids: Any) -> str:
+    ids = _canonical_wake_obligation_ids(obligation_ids, "$.wake_obligation_ids")
+    document = {
+        "schema": "mastermind.web_sol_wake_obligation_set.v1",
+        "obligation_ids": list(ids),
+    }
+    payload = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _validate_wake_obligation_set(value: dict[str, Any]) -> tuple[str, ...]:
+    ids = _canonical_wake_obligation_ids(value["wake_obligation_ids"], "$.wake_obligation_ids")
+    _require_hex64(value["wake_obligation_digest"], "$.wake_obligation_digest")
+    if value["wake_obligation_digest"] != wake_obligation_digest(ids):
+        raise _error("$.wake_obligation_digest", "does not match the canonical Wake identity set")
+    return ids
 
 
 def _require_session_alias(value: Any, path: str) -> None:
@@ -460,7 +520,8 @@ def _require_action(value: Any, path: str) -> SurfaceAction:
     except (ValueError, TypeError) as exc:
         raise _error(
             path,
-            "must be INSPECT, FOREGROUND, TYPED_REENTRY, or SUBMIT_CONTINUATION",
+            "must be INSPECT, FOREGROUND, TYPED_REENTRY, SUBMIT_CONTINUATION, "
+            "or OBSERVE_CONTINUATION_ACK",
         ) from exc
 
 
@@ -487,35 +548,29 @@ def _validate_identity_fields(
             if field not in value:
                 raise _error(f"$.{field}", "required for TYPED_REENTRY")
             _require_hex64(value[field], f"$.{field}")
-    if action is SurfaceAction.SUBMIT_CONTINUATION:
-        if "turn_id" not in value:
-            raise _error("$.turn_id", "required for SUBMIT_CONTINUATION")
-        if "directive_digest" not in value:
-            raise _error("$.directive_digest", "required for SUBMIT_CONTINUATION")
-        _require_turn_id(value["turn_id"], "$.turn_id")
+    if action in {
+        SurfaceAction.SUBMIT_CONTINUATION,
+        SurfaceAction.OBSERVE_CONTINUATION_ACK,
+    }:
+        action_name = action.value
+        for field in _CONTINUATION_IDENTITY_PAYLOAD_KEYS:
+            if field not in value:
+                raise _error(f"$.{field}", f"required for {action_name}")
+        if action is SurfaceAction.OBSERVE_CONTINUATION_ACK:
+            _require_nudge_id(value["turn_id"], "$.turn_id")
+        else:
+            _require_turn_id(value["turn_id"], "$.turn_id")
         _require_hex64(value["directive_digest"], "$.directive_digest")
         if value["directive_digest"] != CONTINUATION_DIRECTIVE_DIGEST:
             raise _error("$.directive_digest", "does not match the fixed continuation directive")
-        for field in (
-            "session_alias",
-            "runtime_binding_id",
-            "runtime_binding_generation",
-            "runtime_binding_fingerprint",
-        ):
-            if field not in value:
-                raise _error(f"$.{field}", "required for SUBMIT_CONTINUATION")
         _require_session_alias(value["session_alias"], "$.session_alias")
-        _require_runtime_binding_id(
-            value["runtime_binding_id"], "$.runtime_binding_id"
-        )
+        _require_runtime_binding_id(value["runtime_binding_id"], "$.runtime_binding_id")
         _require_runtime_binding_generation(
             value["runtime_binding_generation"],
             "$.runtime_binding_generation",
         )
-        _require_hex64(
-            value["runtime_binding_fingerprint"],
-            "$.runtime_binding_fingerprint",
-        )
+        _require_hex64(value["runtime_binding_fingerprint"], "$.runtime_binding_fingerprint")
+        _validate_wake_obligation_set(value)
     return action
 
 
@@ -591,6 +646,8 @@ def validate_request(value: dict[str, Any]) -> dict[str, Any]:
         request_keys = _TYPED_REENTRY_KEYS
     elif action == SurfaceAction.SUBMIT_CONTINUATION.value:
         request_keys = _SUBMIT_CONTINUATION_KEYS
+    elif action == SurfaceAction.OBSERVE_CONTINUATION_ACK.value:
+        request_keys = _OBSERVE_CONTINUATION_ACK_KEYS
     else:
         request_keys = _REQUEST_KEYS
     request = _require_exact_keys(value, request_keys, "$")
@@ -635,11 +692,42 @@ def _require_probe_truth(condition: bool, path: str, message: str) -> None:
         raise _error(path, message)
 
 
+def _validate_semantic_ack_result(
+    receipt: dict[str, Any],
+    status: ReceiptStatus,
+) -> None:
+    provider_turn = receipt["provider_native_turn_id"]
+    acknowledged = receipt["acknowledged_obligation_ids"]
+    trailer = receipt["terminal_ack_trailer"]
+    _require_strict_bool(trailer, "$.terminal_ack_trailer")
+    if status is ReceiptStatus.CONTINUATION_ACKNOWLEDGED:
+        _require_turn_id(provider_turn, "$.provider_native_turn_id")
+        ids = _canonical_wake_obligation_ids(
+            acknowledged,
+            "$.acknowledged_obligation_ids",
+        )
+        if ids != tuple(receipt["wake_obligation_ids"]):
+            raise _error(
+                "$.acknowledged_obligation_ids",
+                "must exactly match the requested Wake identity set",
+            )
+        if trailer is not True:
+            raise _error("$.terminal_ack_trailer", "must be true for acknowledged ACK")
+        return
+    if provider_turn is not None:
+        raise _error("$.provider_native_turn_id", "must be null without acknowledged ACK")
+    if acknowledged != []:
+        raise _error("$.acknowledged_obligation_ids", "must be empty without acknowledged ACK")
+    if trailer is not False:
+        raise _error("$.terminal_ack_trailer", "must be false without acknowledged ACK")
+
+
 def _validate_receipt_semantics(
     *,
     action: SurfaceAction,
     status: ReceiptStatus,
     probe: dict[str, Any],
+    receipt: dict[str, Any],
 ) -> None:
     if status is ReceiptStatus.INSPECTED:
         _require_probe_truth(
@@ -807,6 +895,35 @@ def _validate_receipt_semantics(
         )
         return
 
+    if status in {
+        ReceiptStatus.CONTINUATION_ACKNOWLEDGED,
+        ReceiptStatus.CONTINUATION_ACK_PENDING,
+        ReceiptStatus.CONTINUATION_ACK_REFUSED,
+    }:
+        _require_probe_truth(
+            action is SurfaceAction.OBSERVE_CONTINUATION_ACK,
+            "$.status",
+            "semantic ACK status requires OBSERVE_CONTINUATION_ACK action",
+        )
+        _validate_semantic_ack_result(receipt, status)
+        if status is ReceiptStatus.CONTINUATION_ACKNOWLEDGED:
+            _require_probe_truth(
+                probe["target_present"] and probe["exact_conversation_loaded"],
+                "$.observation.exact_conversation_loaded",
+                "acknowledged ACK requires the exact target to remain loaded",
+            )
+            _require_probe_truth(
+                probe["auth_required"] is not True,
+                "$.observation.auth_required",
+                "must not require auth for acknowledged ACK",
+            )
+            _require_probe_truth(
+                probe["provider_error_present"] is not True,
+                "$.observation.provider_error_present",
+                "must not report provider error for acknowledged ACK",
+            )
+        return
+
     if status is ReceiptStatus.TARGET_NOT_FOUND:
         _require_probe_truth(
             not probe["target_present"],
@@ -848,6 +965,8 @@ def validate_receipt(value: dict[str, Any]) -> dict[str, Any]:
         receipt_keys = _TYPED_REENTRY_RECEIPT_KEYS
     elif action == SurfaceAction.SUBMIT_CONTINUATION.value:
         receipt_keys = _SUBMIT_CONTINUATION_RECEIPT_KEYS
+    elif action == SurfaceAction.OBSERVE_CONTINUATION_ACK.value:
+        receipt_keys = _OBSERVE_CONTINUATION_ACK_RECEIPT_KEYS
     else:
         receipt_keys = _RECEIPT_KEYS
     receipt = _require_exact_keys(value, receipt_keys, "$")
@@ -859,5 +978,7 @@ def validate_receipt(value: dict[str, Any]) -> dict[str, Any]:
     except (ValueError, TypeError) as exc:
         raise _error("$.status", "unknown receipt status") from exc
     probe = _validate_probe(receipt["observation"])
-    _validate_receipt_semantics(action=action, status=status, probe=probe)
+    _validate_receipt_semantics(
+        action=action, status=status, probe=probe, receipt=receipt
+    )
     return copy.deepcopy(receipt)

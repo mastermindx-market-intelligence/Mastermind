@@ -37,11 +37,13 @@ const vm = require('node:vm');
     expires_at: new Date(Date.now() + 30000).toISOString(),
     nonce: `continuation-nonce-${scenario}-00000001`,
     turn_id: `ohf-turn-r3-${scenario}-0001`,
-    directive_digest: 'cde0de54629786dcd6c0ee3b169558cf050de48b828a4da15cbd2d881c66afd9',
+    directive_digest: '55cca851529f53f89ade6a2abb43880513fcd189dfcda50237ec1369640a06c5',
     session_alias: 'EXECUTIVE-CEO-A',
     runtime_binding_id: 'bind-wsx-' + 'c'.repeat(48),
     runtime_binding_generation: 1,
     runtime_binding_fingerprint: 'd'.repeat(64),
+    wake_obligation_ids: ['WAKE-' + 'a'.repeat(32)],
+    wake_obligation_digest: '277016348d4e5720093a82a9c63a128cca067db825cf7d5ffbed5c59c3d5d314',
   };
   let probes = 0;
   let sends = 0;
@@ -75,6 +77,8 @@ const vm = require('node:vm');
         runtime_binding_id: message.runtime_binding_id,
         runtime_binding_generation: message.runtime_binding_generation,
         runtime_binding_fingerprint: message.runtime_binding_fingerprint,
+        wake_obligation_ids: message.wake_obligation_ids,
+        wake_obligation_digest: message.wake_obligation_digest,
         effect: 'SUBMIT_TRIGGERED',
       };
     },

@@ -487,6 +487,8 @@ def _timeout_code(request: dict[str, Any]) -> str:
         return "typed_reentry_timeout"
     if request.get("action") == "SUBMIT_CONTINUATION":
         return "continuation_submit_effect_unknown"
+    if request.get("action") == "OBSERVE_CONTINUATION_ACK":
+        return "semantic_ack_timeout"
     return "census_timeout" if request.get("schema") == census.REQUEST_SCHEMA else "inspect_timeout"
 
 
@@ -496,7 +498,10 @@ def _receipt_match_fields(request: dict[str, Any]) -> tuple[str, ...]:
     fields = list(_MATCH_FIELDS)
     if request.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
         fields.extend(("operation_id", "result_digest", "obligation_digest"))
-    if request.get("action") == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+    if request.get("action") in {
+        wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
+        wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
+    }:
         fields.extend(
             (
                 "turn_id",
@@ -505,6 +510,8 @@ def _receipt_match_fields(request: dict[str, Any]) -> tuple[str, ...]:
                 "runtime_binding_id",
                 "runtime_binding_generation",
                 "runtime_binding_fingerprint",
+                "wake_obligation_ids",
+                "wake_obligation_digest",
             )
         )
     return tuple(fields)
@@ -527,6 +534,8 @@ def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
         return "typed_reentry_effect_unknown"
     if request.get("action") == "SUBMIT_CONTINUATION":
         return "continuation_submit_effect_unknown"
+    if request.get("action") == "OBSERVE_CONTINUATION_ACK":
+        return "semantic_ack_invalid"
     return default
 
 
@@ -546,7 +555,10 @@ def _require_current_runtime_binding(
     expected_instance_id: str | None,
     boot_nonce: str | None,
 ) -> None:
-    if request.get("action") != wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+    if request.get("action") not in {
+        wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
+        wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
+    }:
         return
     if expected_instance_id is None or boot_nonce is None:
         raise NativeHostError("runtime_binding_context_missing")

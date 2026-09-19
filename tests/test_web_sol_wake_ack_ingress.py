@@ -78,6 +78,7 @@ def test_web_sol_ack_projection_is_closed_and_model_claim_stays_ids_only() -> No
         "native_handle",
         "runtime_binding_fingerprint",
         "conversation_fingerprint",
+        "provider_native_turn_id",
         "nudge_id",
         "obligation_ids",
         "terminal_ack_trailer",
@@ -225,6 +226,7 @@ def _fixture(
         native_handle=str(binding.native_handle),
         runtime_binding_fingerprint=lease.runtime_binding_fingerprint,
         conversation_fingerprint=lease.target.conversation_fingerprint,
+        provider_native_turn_id="assistant-turn-current-001",
         nudge_id=nudge_id,
         obligation_ids=tuple(sorted(ids)),
         terminal_ack_trailer=True,
@@ -276,6 +278,7 @@ def test_exact_web_sol_delivery_persists_one_ack_and_identical_replay_is_idempot
         "native_handle",
         "conversation_fingerprint",
         "runtime_binding_fingerprint",
+        "provider_native_turn_id",
         "nudge_id",
     ):
         assert forbidden not in payload
@@ -458,6 +461,7 @@ def test_missing_member_delivery_refuses_the_entire_coalesced_ack(tmp_path) -> N
         ("native_handle", "browser-tab-from-model"),
         ("runtime_binding_fingerprint", "not-a-digest"),
         ("conversation_fingerprint", "not-a-digest"),
+        ("provider_native_turn_id", "bad turn with spaces"),
         ("terminal_ack_trailer", False),
     ],
 )
@@ -474,6 +478,7 @@ def test_trusted_web_sol_projection_refuses_unsealed_or_non_web_evidence(
         "native_handle": "wsx-runtime-" + "b" * 16,
         "runtime_binding_fingerprint": "c" * 64,
         "conversation_fingerprint": "d" * 64,
+        "provider_native_turn_id": "assistant-turn-current-001",
         "nudge_id": "NUDGE-" + "e" * 32,
         "obligation_ids": (_OID_A,),
         "terminal_ack_trailer": True,

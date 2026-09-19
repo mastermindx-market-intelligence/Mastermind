@@ -7,10 +7,16 @@ from datetime import datetime, timedelta, timezone
 import secrets
 from typing import Any
 
+from control_plane.wake_ack_ingress import TrustedWebSolWakeAckProjection
 from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
-from integrations.executive_wake.chatgpt_gui import ChatGPTGuiWakeDeliveryObservation
+from control_plane.wake_ledger import NUDGE_ID_RE
+from integrations.executive_wake.chatgpt_gui import (
+    ChatGPTGuiWakeAckObservation,
+    ChatGPTGuiWakeDeliveryObservation,
+)
 
 from . import web_sol_client as web_client
+from . import web_sol_protocol as wsp
 from . import web_sol_runtime_binding as wrb
 
 
@@ -23,6 +29,7 @@ class WebSolWakeClient:
         runtime_binding_lease: wrb.WebSolRuntimeBindingLease,
         *,
         submitter: Callable[..., dict[str, Any]] = web_client.submit_continuation_via_extension,
+        observer: Callable[..., dict[str, Any]] = web_client.observe_continuation_ack_via_extension,
         now: Callable[[], datetime] | None = None,
         nonce_factory: Callable[[], str] | None = None,
     ) -> None:
@@ -32,9 +39,12 @@ class WebSolWakeClient:
             raise ValueError("Web-Sol Wake client requires a RuntimeBinding lease")
         if not callable(submitter):
             raise ValueError("Web-Sol Wake client submitter must be callable")
+        if not callable(observer):
+            raise ValueError("Web-Sol Wake client observer must be callable")
         self._navigation_binding = dict(navigation_binding)
         self._lease = runtime_binding_lease
         self._submitter = submitter
+        self._observer = observer
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._nonce_factory = nonce_factory or (lambda: secrets.token_urlsafe(24))
 
@@ -46,7 +56,7 @@ class WebSolWakeClient:
         binding_generation: int,
         session_alias: str,
         nudge_id: str,
-        opaque_ids: Sequence[str],
+        obligation_ids: Sequence[str],
     ) -> None:
         current = self._lease.runtime_binding
         if (
@@ -56,8 +66,14 @@ class WebSolWakeClient:
             or session_alias != current.session_alias
         ):
             raise WakePreSubmitError("Web-Sol RuntimeBinding no longer matches the Wake")
-        if not nudge_id.startswith("NUDGE-") or not opaque_ids:
-            raise WakePreSubmitError("Web-Sol Wake correlation identity is invalid")
+        if NUDGE_ID_RE.fullmatch(str(nudge_id or "")) is None:
+            raise WakePreSubmitError("Web-Sol Wake nudge identity is invalid")
+        try:
+            wsp.wake_obligation_digest(tuple(obligation_ids))
+        except Exception as exc:
+            raise WakePreSubmitError(
+                "Web-Sol Wake obligation identities are invalid"
+            ) from exc
 
     async def deliver_wake(
         self,
@@ -67,7 +83,7 @@ class WebSolWakeClient:
         binding_generation: int,
         session_alias: str,
         nudge_id: str,
-        opaque_ids: Sequence[str],
+        obligation_ids: Sequence[str],
     ) -> ChatGPTGuiWakeDeliveryObservation:
         self._require_exact_wake(
             native_handle=native_handle,
@@ -75,7 +91,7 @@ class WebSolWakeClient:
             binding_generation=binding_generation,
             session_alias=session_alias,
             nudge_id=nudge_id,
-            opaque_ids=opaque_ids,
+            obligation_ids=obligation_ids,
         )
         issued = self._now().astimezone(timezone.utc).replace(microsecond=0)
         expires = issued + timedelta(seconds=30)
@@ -87,6 +103,7 @@ class WebSolWakeClient:
                 self._lease,
                 operation_key=f"web-sol-wake:{nudge_id}",
                 turn_id=nudge_id,
+                wake_obligation_ids=tuple(obligation_ids),
                 issued_at=issued.isoformat().replace("+00:00", "Z"),
                 expires_at=expires.isoformat().replace("+00:00", "Z"),
                 nonce=nonce,
@@ -118,6 +135,83 @@ class WebSolWakeClient:
         if status == "CONTINUATION_SUBMIT_EFFECT_UNKNOWN":
             raise WakeEffectUnknownError("Web-Sol continuation submission may have taken effect")
         raise WakeEffectUnknownError("Web-Sol returned an unrecognized continuation state")
+
+    async def observe_wake_ack(
+        self,
+        *,
+        native_handle: str,
+        binding_id: str,
+        binding_generation: int,
+        session_alias: str,
+        nudge_id: str,
+        obligation_ids: Sequence[str],
+    ) -> ChatGPTGuiWakeAckObservation:
+        """Read one exact completed-turn ACK; never submit or retry provider work."""
+
+        self._require_exact_wake(
+            native_handle=native_handle,
+            binding_id=binding_id,
+            binding_generation=binding_generation,
+            session_alias=session_alias,
+            nudge_id=nudge_id,
+            obligation_ids=obligation_ids,
+        )
+        issued = self._now().astimezone(timezone.utc).replace(microsecond=0)
+        expires = issued + timedelta(seconds=30)
+        try:
+            receipt = await asyncio.to_thread(
+                self._observer,
+                self._navigation_binding,
+                self._lease,
+                operation_key=f"web-sol-wake-ack:{nudge_id}",
+                nudge_id=nudge_id,
+                wake_obligation_ids=tuple(obligation_ids),
+                issued_at=issued.isoformat().replace("+00:00", "Z"),
+                expires_at=expires.isoformat().replace("+00:00", "Z"),
+                nonce=self._nonce_factory(),
+            )
+        except web_client.WebSolExtensionError as exc:
+            raise WakePreSubmitError(
+                f"Web-Sol semantic ACK observation refused: {exc.code}"
+            ) from exc
+        except Exception as exc:
+            raise WakePreSubmitError(
+                "Web-Sol semantic ACK observation is unavailable"
+            ) from exc
+        status = receipt.get("status") if isinstance(receipt, dict) else None
+        if status != "CONTINUATION_ACKNOWLEDGED":
+            if status in {
+                "CONTINUATION_ACK_PENDING",
+                "CONTINUATION_ACK_REFUSED",
+            }:
+                raise WakePreSubmitError(
+                    f"Web-Sol semantic ACK is not ready: {status}"
+                )
+            raise WakePreSubmitError(
+                "Web-Sol semantic ACK returned an unrecognized state"
+            )
+        current = self._lease.runtime_binding
+        projection = TrustedWebSolWakeAckProjection(
+            session_alias=current.session_alias,
+            reasoning_surface=current.reasoning_surface,
+            binding_id=current.binding_id,
+            binding_generation=current.binding_generation,
+            native_handle=current.native_handle,
+            runtime_binding_fingerprint=self._lease.runtime_binding_fingerprint,
+            conversation_fingerprint=self._lease.target.conversation_fingerprint,
+            provider_native_turn_id=str(receipt.get("provider_native_turn_id") or ""),
+            nudge_id=nudge_id,
+            obligation_ids=tuple(receipt.get("acknowledged_obligation_ids") or ()),
+            terminal_ack_trailer=receipt.get("terminal_ack_trailer") is True,
+        )
+        if projection.obligation_ids != tuple(obligation_ids):
+            raise WakePreSubmitError(
+                "Web-Sol semantic ACK obligation set does not match the delivered Wake"
+            )
+        return ChatGPTGuiWakeAckObservation(
+            projection=projection,
+            runtime_binding_lease=self._lease,
+        )
 
     async def reconcile_wake(self, **_kwargs) -> ChatGPTGuiWakeDeliveryObservation:
         raise WakeEffectUnknownError(

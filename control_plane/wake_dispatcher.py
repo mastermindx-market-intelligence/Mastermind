@@ -19,8 +19,11 @@ from typing import Mapping, Protocol, Sequence, runtime_checkable
 from common.redaction import sanitize_external_text
 from control_plane.session_targets import RuntimeBinding, SessionTargetRegistry, WakeRoute
 from control_plane.wake_ack_ingress import (
+    TrustedWebSolWakeAckProjection,
     TrustedWorkerWakeAckProjection,
     WakeAckClaim,
+    WakeAckIngressError,
+    acknowledge_consumed_web_sol_wakes,
     acknowledge_consumed_wakes,
 )
 from control_plane.wake_events import (
@@ -309,11 +312,34 @@ class TransportReceipt:
 
 
 @dataclasses.dataclass(frozen=True)
+class WebSolWakeAckCompletion:
+    """Transient exact-session Web-Sol ACK plus its detached live proof."""
+
+    projection: TrustedWebSolWakeAckProjection
+    runtime_binding_lease: object = dataclasses.field(repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.projection, TrustedWebSolWakeAckProjection):
+            raise WakeDispatchError(
+                "Web-Sol ACK completion requires a trusted typed projection"
+            )
+        if self.runtime_binding_lease is None:
+            raise WakeDispatchError(
+                "Web-Sol ACK completion requires the detached RuntimeBinding lease"
+            )
+
+
+WakeAckCompletionProjection = (
+    TrustedWorkerWakeAckProjection | WebSolWakeAckCompletion
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class WakeTransportCompletion:
     """Transient non-wire transport result; the projection is never receipt data."""
 
     receipt: TransportReceipt
-    target_ack_projection: TrustedWorkerWakeAckProjection | None = dataclasses.field(
+    target_ack_projection: WakeAckCompletionProjection | None = dataclasses.field(
         default=None,
         repr=False,
     )
@@ -323,7 +349,10 @@ class WakeTransportCompletion:
             raise WakeDispatchError("Wake transport completion requires a receipt")
         projection = self.target_ack_projection
         if projection is not None:
-            if not isinstance(projection, TrustedWorkerWakeAckProjection):
+            if not isinstance(
+                projection,
+                (TrustedWorkerWakeAckProjection, WebSolWakeAckCompletion),
+            ):
                 raise WakeDispatchError(
                     "Wake transport completion ACK projection must be trusted and typed"
                 )
@@ -335,7 +364,7 @@ class WakeTransportCompletion:
 
 def normalize_transport_completion(
     value: TransportReceipt | WakeTransportCompletion,
-) -> tuple[TransportReceipt, TrustedWorkerWakeAckProjection | None]:
+) -> tuple[TransportReceipt, WakeAckCompletionProjection | None]:
     if isinstance(value, TransportReceipt):
         return value, None
     if isinstance(value, WakeTransportCompletion):
@@ -839,6 +868,53 @@ def _reconciliation_required(
     )
 
 
+def _projection_obligation_ids(
+    projection: WakeAckCompletionProjection,
+) -> tuple[str, ...]:
+    if isinstance(projection, TrustedWorkerWakeAckProjection):
+        return projection.obligation_ids
+    if isinstance(projection, WebSolWakeAckCompletion):
+        return projection.projection.obligation_ids
+    raise WakeDispatchError("Wake ACK projection type is unsupported")
+
+
+def _projection_nudge_id(projection: WakeAckCompletionProjection) -> str:
+    if isinstance(projection, TrustedWorkerWakeAckProjection):
+        return projection.nudge_id
+    if isinstance(projection, WebSolWakeAckCompletion):
+        return projection.projection.nudge_id
+    raise WakeDispatchError("Wake ACK projection type is unsupported")
+
+
+def _acknowledge_target_projection(
+    repo: WakeLedgerRepository,
+    projection: WakeAckCompletionProjection,
+    *,
+    target_registry: SessionTargetRegistry | None,
+) -> None:
+    if isinstance(projection, TrustedWorkerWakeAckProjection):
+        if target_registry is None:
+            raise WakeDispatchError(
+                "worker Wake ACK projection requires the current SessionTargetRegistry"
+            )
+        acknowledge_consumed_wakes(
+            repo.runtime,
+            target_registry,
+            claim=WakeAckClaim(projection.obligation_ids),
+            trusted=projection,
+        )
+        return
+    if isinstance(projection, WebSolWakeAckCompletion):
+        acknowledge_consumed_web_sol_wakes(
+            repo.runtime,
+            claim=WakeAckClaim(projection.projection.obligation_ids),
+            trusted=projection.projection,
+            lease=projection.runtime_binding_lease,
+        )
+        return
+    raise WakeDispatchError("Wake ACK projection type is unsupported")
+
+
 def _persist_transport_result(
     repo: WakeLedgerRepository,
     pairs: Sequence[tuple[WakeObligation, WakeRoute]],
@@ -846,7 +922,7 @@ def _persist_transport_result(
     nudge_attempt: NudgeAttempt,
     descriptor: WakeTransportDescriptor,
     transport: TransportReceipt,
-    target_ack_projection: TrustedWorkerWakeAckProjection | None,
+    target_ack_projection: WakeAckCompletionProjection | None,
     target_registry: SessionTargetRegistry | None,
 ) -> PersistedNudgeResult:
     attempts = nudge_attempt.attempts
@@ -866,15 +942,10 @@ def _persist_transport_result(
             raise WakeDispatchError(
                 "Wake ACK projection requires newly persisted DELIVERED evidence"
             )
-        if target_registry is None:
-            raise WakeDispatchError(
-                "Wake ACK projection requires the current SessionTargetRegistry"
-            )
-        acknowledge_consumed_wakes(
-            repo.runtime,
-            target_registry,
-            claim=WakeAckClaim(target_ack_projection.obligation_ids),
-            trusted=target_ack_projection,
+        _acknowledge_target_projection(
+            repo,
+            target_ack_projection,
+            target_registry=target_registry,
         )
     receipts: list[WakeReceipt] = []
     for attempt, (obligation, route) in zip(attempts, pairs, strict=True):
@@ -1069,7 +1140,7 @@ async def dispatch_persisted_nudge(
         return _reconciliation_required(nudge_attempt)
 
     wake = _nudge_from(attempts, binding=binding, first_route=first_route)
-    target_ack_projection: TrustedWorkerWakeAckProjection | None = None
+    target_ack_projection: WakeAckCompletionProjection | None = None
     try:
         raw_completion = await dispatcher.nudge(wake)
         raw_transport, target_ack_projection = normalize_transport_completion(
@@ -1108,91 +1179,127 @@ async def reconcile_persisted_delivered_ack(
     *,
     dispatcher: WakeDispatcher,
     binding: RuntimeBinding,
-    target_registry: SessionTargetRegistry,
+    target_registry: SessionTargetRegistry | None = None,
     descriptor: WakeTransportDescriptor | None = None,
 ) -> PersistedDeliveredAckResult:
-    """Drain one already-delivered provider ACK without resending the Wake."""
+    """Drain one delivered nudge group's ACK without resending provider work."""
 
     hold = lambda reason: PersistedDeliveredAckResult(
         PersistedDeliveredAckState.HOLD, reason
     )
     if (
         not isinstance(repo, WakeLedgerRepository)
-        or len(pairs) != 1
+        or not pairs
         or not isinstance(binding, RuntimeBinding)
-        or not isinstance(target_registry, SessionTargetRegistry)
     ):
         return hold("ACK_RECONCILIATION_REFUSED")
-    obligation, route = pairs[0]
-    if route.obligation_id != obligation.obligation_id:
-        return hold("ACK_ROUTE_REFUSED")
-    records = tuple(item.record for item in repo.list_records(obligation.obligation_id))
-    try:
-        assert_causal(records)
-    except Exception:
-        return hold("ACK_HISTORY_REFUSED")
-    attempts = tuple(record for record in records if record.phase is LedgerPhase.DELIVERY_ATTEMPT)
-    phases = tuple(record.phase for record in records)
-    if (
-        phases.count(LedgerPhase.WAKE_REQUESTED) != 1
-        or len(attempts) != 1
-        or phases.count(LedgerPhase.DELIVERED) != 1
-        or LedgerPhase.FAILED in phases
-        or LedgerPhase.TARGET_UNAVAILABLE in phases
-    ):
-        return hold("ACK_HISTORY_INELIGIBLE")
-    try:
-        nudge_attempt = _load_persisted_nudge(repo, attempts[0])
+    obligation_ids = tuple(
+        obligation.obligation_id for obligation, _route in pairs
+    )
+    if len(obligation_ids) != len(set(obligation_ids)):
+        return hold("ACK_DUPLICATE_OBLIGATION_REFUSED")
+
+    attempt_records: list[WakeLedgerRecord] = []
+    already_recorded: list[bool] = []
+    for obligation, route in pairs:
+        if route.obligation_id != obligation.obligation_id:
+            return hold("ACK_ROUTE_REFUSED")
+        records = tuple(
+            item.record for item in repo.list_records(obligation.obligation_id)
+        )
+        try:
+            assert_causal(records)
+        except Exception:
+            return hold("ACK_HISTORY_REFUSED")
+        attempts = tuple(
+            record
+            for record in records
+            if record.phase is LedgerPhase.DELIVERY_ATTEMPT
+        )
+        phases = tuple(record.phase for record in records)
         if (
-            len(nudge_attempt.attempts) != 1
-            or nudge_attempt.obligation_ids != (obligation.obligation_id,)
-            or not nudge_attempt.attempts[0].matches_route(route)
+            phases.count(LedgerPhase.WAKE_REQUESTED) != 1
+            or len(attempts) != 1
+            or phases.count(LedgerPhase.DELIVERED) != 1
+            or LedgerPhase.FAILED in phases
+            or LedgerPhase.TARGET_UNAVAILABLE in phases
         ):
-            return hold("ACK_NUDGE_IDENTITY_REFUSED")
-        if (
+            return hold("ACK_HISTORY_INELIGIBLE")
+        attempt_records.append(attempts[0])
+        already_recorded.append(
             LedgerPhase.TARGET_ACKNOWLEDGED in phases
             or LedgerPhase.SOURCE_RESOLVED in phases
-        ):
+        )
+
+    try:
+        nudge_attempt = _load_persisted_nudge(repo, attempt_records[0])
+        attempts_by_obligation = {
+            attempt.obligation_id: attempt for attempt in nudge_attempt.attempts
+        }
+        if set(attempts_by_obligation) != set(obligation_ids):
+            return hold("ACK_NUDGE_IDENTITY_REFUSED")
+        for obligation, route in pairs:
+            attempt = attempts_by_obligation.get(obligation.obligation_id)
+            if attempt is None or not attempt.matches_route(route):
+                return hold("ACK_NUDGE_IDENTITY_REFUSED")
+        ordered_attempts = tuple(
+            attempts_by_obligation[obligation.obligation_id]
+            for obligation, _route in pairs
+        )
+        nudge_attempt = _nudge_attempt_from(ordered_attempts)
+        first_route = pairs[0][1]
+        coalesce_nudge([route for _obligation, route in pairs])
+        if all(already_recorded):
             return PersistedDeliveredAckResult(
                 PersistedDeliveredAckState.RECORDED, "ACK_ALREADY_RECORDED"
             )
-        resolved_descriptor = descriptor or _descriptor(route.wake_transport)
-        _assert_binding_ready(binding, route, resolved_descriptor)
-        if str(getattr(dispatcher, "transport_id", "") or "") != route.wake_transport:
+        if any(already_recorded):
+            return hold("ACK_GROUP_PARTIAL")
+        resolved_descriptor = descriptor or _descriptor(first_route.wake_transport)
+        _assert_binding_ready(binding, first_route, resolved_descriptor)
+        if str(getattr(dispatcher, "transport_id", "") or "") != first_route.wake_transport:
             return hold("ACK_DISPATCHER_REFUSED")
         wake = _nudge_from(
-            nudge_attempt.attempts, binding=binding, first_route=route
+            nudge_attempt.attempts,
+            binding=binding,
+            first_route=first_route,
         )
-        reconcile = getattr(dispatcher, "reconcile", None)
+        reconcile = getattr(dispatcher, "reconcile_delivered_ack", None)
+        if not callable(reconcile):
+            reconcile = getattr(dispatcher, "reconcile", None)
         if not callable(reconcile):
             return hold("ACK_PROVIDER_UNAVAILABLE")
         raw = await reconcile(wake)
         raw_receipt, projection = normalize_transport_completion(raw)
         receipt = authenticate_transport_receipt(
-            raw_receipt, expected_nudge_id=wake.nudge_id
+            raw_receipt,
+            expected_nudge_id=wake.nudge_id,
         )
         if receipt.outcome is not TransportOutcome.DELIVERED or projection is None:
             return hold("ACK_PROJECTION_UNAVAILABLE")
+        expected_ids = tuple(sorted(obligation_ids))
         if (
-            projection.nudge_id != wake.nudge_id
-            or projection.obligation_ids != (obligation.obligation_id,)
+            _projection_nudge_id(projection) != wake.nudge_id
+            or _projection_obligation_ids(projection) != expected_ids
         ):
             return hold("ACK_PROJECTION_REFUSED")
-        acknowledge_consumed_wakes(
-            repo.runtime,
-            target_registry,
-            claim=WakeAckClaim((obligation.obligation_id,)),
-            trusted=projection,
+        _acknowledge_target_projection(
+            repo,
+            projection,
+            target_registry=target_registry,
         )
     except WakePreSubmitError:
         return hold("ACK_PROVIDER_UNAVAILABLE")
+    except (WakeAckIngressError, WakeDispatchError, ValueError):
+        return hold("ACK_PROJECTION_REFUSED")
     except Exception:
         return PersistedDeliveredAckResult(
             PersistedDeliveredAckState.EFFECT_UNKNOWN,
             "ACK_EFFECT_UNKNOWN",
         )
     return PersistedDeliveredAckResult(
-        PersistedDeliveredAckState.RECORDED, "ACK_RECORDED"
+        PersistedDeliveredAckState.RECORDED,
+        "ACK_RECORDED",
     )
 
 
@@ -1462,6 +1569,7 @@ __all__ = [
     "WakeReceipt",
     "WakeTransportDescriptor",
     "WakeTransportCompletion",
+    "WebSolWakeAckCompletion",
     "already_delivered_receipt",
     "authenticate_receipt",
     "authenticate_transport_receipt",

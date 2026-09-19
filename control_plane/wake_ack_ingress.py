@@ -385,6 +385,7 @@ WEB_SOL_WAKE_TRANSPORT = "chatgpt-gui"
 
 _WEB_SOL_NATIVE_HANDLE_RE = re.compile(r"^wsx-runtime-[0-9a-f]{16}$")
 _WEB_SOL_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_WEB_SOL_PROVIDER_TURN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -404,6 +405,7 @@ class TrustedWebSolWakeAckProjection:
     native_handle: str
     runtime_binding_fingerprint: str
     conversation_fingerprint: str
+    provider_native_turn_id: str
     nudge_id: str
     obligation_ids: tuple[str, ...]
     terminal_ack_trailer: bool
@@ -429,6 +431,10 @@ class TrustedWebSolWakeAckProjection:
         for name in ("runtime_binding_fingerprint", "conversation_fingerprint"):
             if _WEB_SOL_DIGEST_RE.fullmatch(str(getattr(self, name) or "")) is None:
                 raise WakeAckIngressError(f"{name} is not a canonical digest")
+        if _WEB_SOL_PROVIDER_TURN_RE.fullmatch(
+            str(self.provider_native_turn_id or "")
+        ) is None:
+            raise WakeAckIngressError("provider_native_turn_id is malformed")
         if NUDGE_ID_RE.fullmatch(str(self.nudge_id or "")) is None:
             raise WakeAckIngressError("nudge_id is malformed")
         ids = tuple(self.obligation_ids)
