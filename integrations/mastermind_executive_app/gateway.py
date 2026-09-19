@@ -481,11 +481,19 @@ class CeoIngressClient:
 
 
 class CeoIngressReadGateway:
-    """Network-only access to the installed control process's four readers."""
+    """Network-only access to one statically admitted installed read profile."""
+
+    _READ_TOOL_NAMES = READ_TOOL_NAMES
+    _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
 
     def __init__(self, socket_path: Path | str, client: CeoIngressClient) -> None:
         self._socket_path = socket_path
         self._client = client
+
+    def _validate_arguments(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        from integrations.executive_mcp.schemas import validate_tool_arguments
+
+        return validate_tool_arguments(name, arguments)
 
     async def aclose(self) -> None:
         # Each request owns and closes its socket. No local state to drain.
@@ -494,14 +502,14 @@ class CeoIngressReadGateway:
     async def call(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         from datetime import datetime, timezone
         from integrations.executive_mcp.schemas import (
-            GatewayError, RESULT_SCHEMA, ServerMode, error_envelope, validate_tool_arguments,
+            GatewayError, RESULT_SCHEMA, ServerMode, error_envelope,
         )
         try:
-            if name not in READ_TOOL_NAMES:
+            if name not in self._READ_TOOL_NAMES:
                 raise GatewayError("authority_refused", "installed reader is read-only")
-            validated = validate_tool_arguments(name, arguments)
+            validated = self._validate_arguments(name, arguments)
             response = await self._client.send_frame(self._socket_path, {
-                "schema": ceo_ingress.APP_READ_SCHEMA,
+                "schema": self._READ_SCHEMA,
                 "tool": name, "arguments": validated,
             })
             result = response.result
@@ -516,6 +524,26 @@ class CeoIngressReadGateway:
                 generated_at=datetime.now(timezone.utc).isoformat(),
                 code=exc.code, message=exc.message,
             )
+
+
+class WebCeoCeoIngressReadGateway(CeoIngressReadGateway):
+    """Versioned Web-CEO installed reader; legacy v1 remains unchanged."""
+
+    _READ_TOOL_NAMES = (
+        "executive_state",
+        "executive_inbox",
+        "executive_job",
+        "executive_fabric",
+        "ceo_intent_status",
+    )
+    _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V2
+
+    def _validate_arguments(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        from integrations.executive_mcp.web_ceo import (
+            validate_web_ceo_tool_arguments,
+        )
+
+        return validate_web_ceo_tool_arguments(name, arguments)
 
 
 async def observe_ingress_grounding(

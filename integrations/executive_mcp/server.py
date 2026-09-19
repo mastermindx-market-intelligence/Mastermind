@@ -64,7 +64,7 @@ from integrations.executive_mcp.schemas import (
     validate_tool_arguments,
 )
 
-__all__ = ["build_executive_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_mcp_server", "build_tools", "run_stdio"]
+__all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "run_stdio"]
 
 _E1_READ_NAMES = tuple(path.rsplit("/", 1)[-1] for path in sorted(E1_READ_PATHS))
 _E1_ENVELOPE_FIELDS = frozenset(
@@ -101,7 +101,9 @@ def _e1_error(settings: Any, tool: str, code: str, message: str) -> dict[str, An
     )
 
 
-def _is_e1_envelope(payload: Any, tool: str) -> bool:
+def _is_e1_envelope(
+    payload: Any, tool: str, server_version: str = SERVER_VERSION
+) -> bool:
     """Recognize only the fixed read-profile result shape from the inner app."""
 
     if not isinstance(payload, dict) or set(payload) != _E1_ENVELOPE_FIELDS:
@@ -114,7 +116,7 @@ def _is_e1_envelope(payload: Any, tool: str) -> bool:
         payload["schema"] != RESULT_SCHEMA
         or payload["tool"] != tool
         or type(payload["ok"]) is not bool
-        or payload["server_version"] != SERVER_VERSION
+        or payload["server_version"] != server_version
         or payload["mode"] != ServerMode.READONLY.value
         or not isinstance(payload["generated_at"], str)
         or not isinstance(payload["grounding"], dict)
@@ -372,8 +374,17 @@ def _executive_outcome(payload: Any, request_ref: str, status_code: int) -> bool
     )
 
 
-def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
-    """Expose the frozen five tools through the existing authenticated App.
+def _build_profile_mcp_app(
+    settings: Any,
+    *,
+    audit_sink: Any,
+    profile_server_name: str,
+    profile_server_version: str,
+    profile_tools: tuple[mcp_types.Tool, ...],
+    profile_validator: Any,
+    profile_create_app: Any,
+) -> Any:
+    """Compose one compile-time selected MCP profile over the existing App.
 
     This is a stateless transport composition, not a new admission service.
     Submit and status use only the App's dedicated CeoIngress client. Every
@@ -382,7 +393,7 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     """
     from control_plane.ceo_request import app_request_ref
     from integrations.mastermind_executive_app.app import (
-        _metadata_policy_and_path, _outcome_response, create_app,
+        _metadata_policy_and_path, _outcome_response,
     )
     from integrations.mastermind_executive_app.admission import (
         AdmissionOutcome, STATUS_EFFECT_UNKNOWN,
@@ -392,7 +403,7 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     )
 
     if settings.read_only:
-        raise ValueError("five-tool MCP refuses read-only app settings")
+        raise ValueError("authenticated Executive MCP refuses read-only app settings")
     _, metadata_path = _metadata_policy_and_path(settings.policies)
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
@@ -409,8 +420,8 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     ))
     # Reuse the bounded ASGI seam. Its generic failure body is never evidence
     # of no effect: all unrecognized submit replies become same-request UNKNOWN.
-    inner_app = BoundedE1App(create_app(configured))
-    server: Server = Server(SERVER_NAME, version=SERVER_VERSION)
+    inner_app = BoundedE1App(profile_create_app(configured))
+    server: Server = Server(profile_server_name, version=profile_server_version)
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
         policy = (
             configured.policies.submit
@@ -423,7 +434,7 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
             "meta": {"securitySchemes": schemes},
         })
 
-    tools = tuple(authenticated_tool(tool) for tool in build_tools())
+    tools = tuple(authenticated_tool(tool) for tool in profile_tools)
 
     @server.list_tools()
     async def list_tools() -> list[mcp_types.Tool]:
@@ -443,15 +454,20 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
             _meta={"mcp/www_authenticate": [challenge]} if challenge else None,
         )
 
+    def profile_error(tool: str, code: str, message: str) -> dict[str, Any]:
+        payload = _e1_error(configured, tool, code, message)
+        payload["server_version"] = profile_server_version
+        return payload
+
     @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> mcp_types.CallToolResult:
         request = server.request_context.request
         if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
             raise ValueError("current unambiguous MCP authorization is unavailable")
         try:
-            validated = validate_tool_arguments(name, arguments)
+            validated = profile_validator(name, arguments)
         except GatewayError as exc:
-            return result(_e1_error(configured, name, exc.code, exc.message))
+            return result(profile_error(name, exc.code, exc.message))
         is_submit = name == "submit_ceo_intent"
         request_ref = app_request_ref(validated["operation_key"]) if is_submit else None
         try:
@@ -486,17 +502,19 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
                 )
                 if not preflight_error and not _executive_outcome(payload, request_ref, response.status_code):
                     payload = unknown(request_ref)
-            elif response.status_code != 200 or not _is_e1_envelope(payload, name):
-                payload = _e1_error(configured, name, "backend_unavailable", "Executive response is unavailable")
+            elif response.status_code != 200 or not _is_e1_envelope(
+                payload, name, profile_server_version
+            ):
+                payload = profile_error(name, "backend_unavailable", "Executive response is unavailable")
         except Exception:
-            payload = unknown(request_ref) if is_submit else _e1_error(
-                configured, name, "backend_unavailable", "Executive response is unavailable")
+            payload = unknown(request_ref) if is_submit else profile_error(
+                name, "backend_unavailable", "Executive response is unavailable")
         reply = result(payload)
         # Bound the actual escaped MCP result, reserving room for the maximum
         # admitted request id and JSON-RPC envelope, not only the inner JSON.
         if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
-            reply = result(unknown(request_ref) if is_submit else _e1_error(
-                configured, name, "output_too_large", "Executive response exceeds the transport budget"))
+            reply = result(unknown(request_ref) if is_submit else profile_error(
+                name, "output_too_large", "Executive response exceeds the transport budget"))
         return reply
 
     manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True,
@@ -533,6 +551,43 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     return _DuplicateAuthorizationGuard(outer_app,
         fenced_app=_ExecutivePathFence(outer_app, metadata_path))
 
+
+def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+    """Legacy BSC-E1 five-tool composition; public contract remains frozen."""
+
+    from integrations.mastermind_executive_app.app import create_app
+
+    return _build_profile_mcp_app(
+        settings,
+        audit_sink=audit_sink,
+        profile_server_name=SERVER_NAME,
+        profile_server_version=SERVER_VERSION,
+        profile_tools=tuple(build_tools()),
+        profile_validator=validate_tool_arguments,
+        profile_create_app=create_app,
+    )
+
+
+def build_web_ceo_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+    """Versioned six-tool Web-CEO composition over the same App/CeoIngress owners."""
+
+    from integrations.executive_mcp.web_ceo import (
+        WEB_CEO_SERVER_NAME,
+        WEB_CEO_SERVER_VERSION,
+        validate_web_ceo_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.app import create_web_ceo_app
+
+    return _build_profile_mcp_app(
+        settings,
+        audit_sink=audit_sink,
+        profile_server_name=WEB_CEO_SERVER_NAME,
+        profile_server_version=WEB_CEO_SERVER_VERSION,
+        profile_tools=tuple(build_web_ceo_tools()),
+        profile_validator=validate_web_ceo_tool_arguments,
+        profile_create_app=create_web_ceo_app,
+    )
+
 def build_tools() -> list[mcp_types.Tool]:
     """The static five-tool advertisement, built from the reviewed table.
 
@@ -549,6 +604,22 @@ def build_tools() -> list[mcp_types.Tool]:
             annotations=mcp_types.ToolAnnotations(**spec.annotations),
         )
         for spec in TOOL_SPECS
+    ]
+
+
+def build_web_ceo_tools() -> list[mcp_types.Tool]:
+    """Static Web-CEO v1 advertisement; legacy build_tools stays five-tool."""
+
+    from integrations.executive_mcp.web_ceo import WEB_CEO_TOOL_SPECS
+
+    return [
+        mcp_types.Tool(
+            name=spec.name,
+            description=spec.description,
+            inputSchema=spec.input_schema,
+            annotations=mcp_types.ToolAnnotations(**spec.annotations),
+        )
+        for spec in WEB_CEO_TOOL_SPECS
     ]
 
 
