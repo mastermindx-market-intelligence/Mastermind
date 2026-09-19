@@ -62,7 +62,7 @@ Configure it under `gitPublish` alongside the typed-Git keys:
 }
 ```
 
-The compiler is an optional host dependency. Omitting `commissionCompiler` and `commissionCompilerInterpreter` leaves the typed-Git plane fully usable and simply does not advertise the commission tool. That compiler is still unprotected on its own PR stack, so `git-publish.test.mjs` proves this adapter against its frozen process contract through `fixtures/commission-compiler.mjs`, and its real-compiler test skips while the compiler is absent from the checked-out base rather than vendoring a copy of it.
+The compiler is an optional host dependency. Omitting `commissionCompiler` and `commissionCompilerInterpreter` leaves the typed-Git plane fully usable and simply does not advertise the commission tool. The private installer wires these two keys automatically when the compiler is actually present in the same checkout the typed-Git plane already publishes from and an absolute `python3` exists, so an installation that predates the compiler offers no tool that cannot run, and re-staging picks it up once it lands. That compiler is still unprotected on its own PR stack, so `git-publish.test.mjs` proves this adapter against its frozen process contract through `fixtures/commission-compiler.mjs`, and its real-compiler test skips while the compiler is absent from the checked-out base rather than vendoring a copy of it.
 
 ## Failure behavior
 

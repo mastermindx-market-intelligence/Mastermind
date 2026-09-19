@@ -403,6 +403,56 @@ class TestBuildConfig(unittest.TestCase):
             self.assertNotIn("remote", config["gitPublish"])
             self.assertNotIn("credential", config["gitPublish"])
 
+    def test_commission_compiler_is_absent_until_it_is_installed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir(parents=True)
+            config = svc._build_config(
+                "test-account", "127.0.0.1", 45018,
+                home / "node", home / "backend.js", home / "state", home,
+            )
+            for key in (
+                "commissionCompiler",
+                "commissionCompilerInterpreter",
+                "commissionTimeoutMs",
+            ):
+                self.assertNotIn(key, config["gitPublish"])
+
+    def test_commission_compiler_is_wired_from_the_published_checkout(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            source = home / svc.TYPED_GIT_SOURCE_REPOSITORY_REL
+            compiler = source / svc.TYPED_GIT_COMMISSION_COMPILER_REL
+            compiler.parent.mkdir(parents=True)
+            compiler.write_text("# host commission compiler\n")
+            config = svc._build_config(
+                "test-account", "127.0.0.1", 45018,
+                home / "node", home / "backend.js", home / "state", home,
+            )
+            git_publish = config["gitPublish"]
+            interpreters = [
+                path
+                for path in svc.TYPED_GIT_COMMISSION_INTERPRETERS
+                if Path(path).is_file()
+            ]
+            if not interpreters:
+                self.assertNotIn("commissionCompiler", git_publish)
+                return
+            self.assertEqual(git_publish["commissionCompiler"], str(compiler))
+            self.assertEqual(
+                git_publish["commissionCompilerInterpreter"], interpreters[0]
+            )
+            self.assertEqual(git_publish["commissionTimeoutMs"], 30_000)
+            # The compiler is read out of the same checkout the typed Git plane
+            # already publishes from; it is never a separate caller-named path.
+            self.assertTrue(
+                Path(git_publish["commissionCompiler"]).is_relative_to(
+                    Path(git_publish["sourceRepository"])
+                )
+            )
+            for key in ("branch", "remote", "credential", "provider", "model", "account"):
+                self.assertNotIn(key, git_publish)
+
 
 class TestBuildPlist(unittest.TestCase):
     def test_plist_invokes_private_adapter(self):

@@ -42,6 +42,15 @@ MAX_SESSIONS = 64
 TYPED_GIT_WORKSPACE_CLI_REL = Path(".local/bin/mmx-workspace")
 TYPED_GIT_SOURCE_REPOSITORY_REL = Path("Documents/GitHub/Mastermind")
 TYPED_GIT_BINARY = "/usr/bin/git"
+TYPED_GIT_COMMISSION_COMPILER_REL = Path(
+    "research/worker_craft/mastermind-craft/scripts/brief.py"
+)
+TYPED_GIT_COMMISSION_INTERPRETERS = (
+    "/usr/bin/python3",
+    "/opt/homebrew/bin/python3",
+    "/usr/local/bin/python3",
+)
+TYPED_GIT_COMMISSION_TIMEOUT_MS = 30_000
 TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
 
 # CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
@@ -295,15 +304,42 @@ def _build_runtime_roots(account: str) -> dict:
     }
 
 
+def _commission_compiler_config(source_repository: Path) -> dict:
+    """Wire the host commission compiler only where it is actually installed.
+
+    The compiler lives in the same checkout the typed Git plane already
+    publishes from, and it is still unprotected. An installation that predates
+    it keeps the full typed Git plane and simply does not advertise commission
+    materialization, rather than offering a tool that cannot run. Re-staging
+    picks the compiler up once it lands.
+    """
+    compiler = source_repository / TYPED_GIT_COMMISSION_COMPILER_REL
+    if not compiler.is_file():
+        return {}
+    interpreter = next(
+        (path for path in TYPED_GIT_COMMISSION_INTERPRETERS if Path(path).is_file()),
+        None,
+    )
+    if interpreter is None:
+        return {}
+    return {
+        "commissionCompiler": str(compiler),
+        "commissionCompilerInterpreter": interpreter,
+        "commissionTimeoutMs": TYPED_GIT_COMMISSION_TIMEOUT_MS,
+    }
+
+
 def _typed_git_config(user_root: Path) -> dict:
+    source_repository = user_root / TYPED_GIT_SOURCE_REPOSITORY_REL
     return {
         "enabled": True,
         "workspaceCli": str(user_root / TYPED_GIT_WORKSPACE_CLI_REL),
         "gitBinary": TYPED_GIT_BINARY,
-        "sourceRepository": str(user_root / TYPED_GIT_SOURCE_REPOSITORY_REL),
+        "sourceRepository": str(source_repository),
         "allowedRemoteUrls": [TYPED_GIT_REMOTE_URL],
         "commandTimeoutMs": 15_000,
         "pushTimeoutMs": 60_000,
+        **_commission_compiler_config(source_repository),
     }
 
 
