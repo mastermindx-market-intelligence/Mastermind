@@ -85,8 +85,15 @@ read-only #829-compatible observation already proves AC `sleep=0` and currently
 fails on `autorestart=0`. Source acceptance does not authorize direct
 worktree/root execution: production proof still requires this exact source to be
 merged, installed through the existing exact-release privileged-broker owner,
-then invoked non-root through `mmx-admin`, followed by a fresh #829 read-only
-preflight.
+then invoked non-root through the fixed
+`scripts/mmx_secondary_host_power.py --request-id <stable-id>` ceremony
+client, followed by a fresh #829 read-only preflight.
+
+That narrow ceremony client deliberately reuses the incumbent
+`scripts/mmx_admin.py` one-send transport and trusted effect-response
+classifier instead of editing or duplicating that shared client. This keeps the
+power wave path-disjoint from the active job-bound-readiness carrier that owns
+the current `mmx-admin` refactor.
 
 The MacBook remains a later candidate; charger-only `sleep=0` preserves its
 battery sleep policy.
@@ -109,4 +116,6 @@ Source acceptance requires:
 
 Real capability proof requires the mini's fresh #829 projection to change from
 its current power-policy failure to a passing power predicate after one
-receipt-backed invocation through the installed privileged broker.
+receipt-backed invocation through the installed privileged broker. Transport
+failure is attempted once only; a returned `EFFECT_UNKNOWN` remains exit 75
+and must be reconciled by the existing status owner before any later mutation.
