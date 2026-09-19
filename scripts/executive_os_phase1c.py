@@ -342,9 +342,20 @@ def _integer(value: Any, name: str) -> int:
     return value
 
 
-def load_control_config(path: str | Path) -> dict[str, Any]:
-    """Load the exact secret-free, root-owned production composition contract."""
+def load_control_config(
+    path: str | Path, *, enforce_current_uid: bool = True
+) -> dict[str, Any]:
+    """Load the exact secret-free, root-owned production composition contract.
 
+    The service path keeps the default live-UID check.  A root-only credential
+    interlock may request static validation so it can prove the configured
+    control UID without impersonating that UID or weakening service startup.
+    """
+
+    if type(enforce_current_uid) is not bool:
+        raise ServiceError("control config UID enforcement selector must be boolean")
+    if not enforce_current_uid and os.geteuid() != 0:
+        raise ServiceError("static control config validation requires root")
     config = _private_json(Path(path), label="Executive control config", root_owned=True)
     if config.get("schema_version") != CONTROL_CONFIG_SCHEMA_VERSION:
         raise ServiceError("unsupported Executive control config schema")
@@ -502,7 +513,7 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError(
                 "control config dialogue_wake_retry_policy is invalid"
             ) from exc
-    if config["control_uid"] != os.geteuid():
+    if enforce_current_uid and config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
         raise ServiceError("worker_uid must differ from control_uid")
