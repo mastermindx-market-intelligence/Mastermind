@@ -1458,3 +1458,76 @@ def test_artifact_reader_refuses_symlink_and_hardlink_substitution(
         assert caught.value.code == "ARTIFACT_UNAVAILABLE"
     finally:
         harness.close()
+
+
+
+def test_artifact_expiry_during_owner_qualification_releases_no_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command()
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        real_qualified = command_port._qualified_evidence
+        calls = 0
+
+        def expire_after_qualification(store, command):
+            nonlocal calls
+            calls += 1
+            observed = real_qualified(store, command)
+            if calls == 1:
+                harness.clock = descriptor["expires_at_ms"]
+            return observed
+
+        monkeypatch.setattr(
+            command_port, "_qualified_evidence", expire_after_qualification
+        )
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(
+                harness.read_artifact(
+                    harness.caller,
+                    {
+                        "artifact_ref": descriptor["artifact_ref"],
+                        "offset": 0,
+                        "max_bytes": 64,
+                    },
+                )
+            )
+        assert caught.value.code == "ARTIFACT_EXPIRED"
+        assert calls == 1
+    finally:
+        harness.close()
+
+
+def test_artifact_expiry_across_await_boundary_releases_no_content(
+    tmp_path: Path,
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command()
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        original_run_io = harness.run_io
+
+        async def expiring_run_io(operation):
+            observed = await original_run_io(operation)
+            harness.clock = descriptor["expires_at_ms"]
+            return observed
+
+        harness.run_io = expiring_run_io
+        harness._open_port()
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(
+                harness.read_artifact(
+                    harness.caller,
+                    {
+                        "artifact_ref": descriptor["artifact_ref"],
+                        "offset": 0,
+                        "max_bytes": 64,
+                    },
+                )
+            )
+        assert caught.value.code == "ARTIFACT_EXPIRED"
+    finally:
+        harness.close()

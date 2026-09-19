@@ -1587,6 +1587,8 @@ def create_command_port(
             _prepared, final = artifact_binding_for(caller, reference)
             if _binding_key(final) != initial_key:
                 raise ProjectActionRefused("ARTIFACT_BINDING_CHANGED")
+            if _now(clock_ms) >= reference.expires_at_ms:
+                raise ProjectActionRefused("ARTIFACT_EXPIRED")
             response = {
                 "status": "OK",
                 "artifact_id": artifact_id,
@@ -1612,7 +1614,10 @@ def create_command_port(
         if not inspect.isawaitable(pending):
             raise ProjectActionRefused("ARTIFACT_UNAVAILABLE")
         try:
-            return await pending
+            observed = await pending
+            if _now(clock_ms) >= reference.expires_at_ms:
+                raise ProjectActionRefused("ARTIFACT_EXPIRED")
+            return observed
         except asyncio.CancelledError:
             raise
         except ProjectActionRefused:

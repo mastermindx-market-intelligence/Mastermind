@@ -110,6 +110,7 @@ MAX_TIMEOUT_SECONDS = 60.0
 MAX_ACTION_TTL_MS = 5 * 60 * 1000
 MAX_ARGUMENT_BYTES = 65536
 MAX_RESULT_BYTES = 131072
+MAX_CHANNEL_IDENTIFIER_BYTES = 1 << 9
 _AUDIT_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,95}$")
 # Deliberately the same closed input/output schemas as the OAuth adapter so the
 # two entry points can never drift; the private names are the single source.
@@ -176,7 +177,7 @@ _COMMAND_PREPARE_OUTPUT = _closed_schema(
             "type": "string",
             "enum": sorted(RECIPE_SHA256),
         },
-        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": MAX_RELATIVE_PATH_BYTES},
         "preimage_sha256": _HEX64_SCHEMA,
         "source_identity": {
             "type": "string",
@@ -270,7 +271,7 @@ _ARTIFACT_PRODUCER_SCHEMA = _closed_schema(
 )
 _ARTIFACT_SOURCE_SCHEMA = _closed_schema(
     {
-        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": MAX_RELATIVE_PATH_BYTES},
         "preimage_sha256": _HEX64_SCHEMA,
         "source_identity": {
             "type": "string",
@@ -432,7 +433,7 @@ _COMMAND_EFFECT_OUTPUT = _closed_schema(
             "type": "string",
             "enum": sorted(RECIPE_SHA256),
         },
-        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": MAX_RELATIVE_PATH_BYTES},
         "preimage_sha256": _HEX64_SCHEMA,
         "cleanup_state": {"type": "string", "enum": ["CLEAN", "UNCERTAIN"]},
         "exit_code": {"type": "integer", "minimum": -(2**31), "maximum": 2**31 - 1},
@@ -644,7 +645,7 @@ def _bounded_process_deadline(value: object) -> float:
 
 
 def _channel_identifier(value: object) -> str:
-    if type(value) is not str or not value or len(value) > 512:
+    if type(value) is not str or not value or len(value) > MAX_CHANNEL_IDENTIFIER_BYTES:
         _refuse()
     if any(ord(character) <= 32 or ord(character) == 127 for character in value):
         _refuse()
