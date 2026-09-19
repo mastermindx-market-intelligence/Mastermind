@@ -281,7 +281,11 @@ test('positive generation and disagreeing duplicate cues reach the real controll
   assert.deepEqual(metrics(ui), ['2', '2/2', '1', '0']);
   assert.match(ui.nodes.rows.children[0].textContent, /Cue present/);
   assert.match(ui.nodes.rows.children[1].textContent, /No cue observed/);
-  for (const row of ui.nodes.rows.children) assert.match(row.textContent, /Cue observations differ/);
+  for (const row of ui.nodes.rows.children) {
+    assert.match(row.textContent, /Cue observations differ/);
+    assert.match(row.textContent, /Document visibility: visible/);
+    assert.match(row.textContent, /Probe observed: \d{2}:\d{2}:\d{2} UTC/);
+  }
 });
 test('controller schedules no retry timer on failure, settlement, or manual recovery', async () => {
   let fail = true;
