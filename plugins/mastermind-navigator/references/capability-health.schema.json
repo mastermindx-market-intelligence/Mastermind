@@ -119,6 +119,21 @@
         },
         "source_sha": {
           "$ref": "#/$defs/nullableRef"
+        },
+        "execution_mode": {
+          "enum": [
+            "ATTENDED_WEB_OPERATOR",
+            "NATIVE_OPERATOR",
+            "BOUNDED_WORKER",
+            "NOT_APPLICABLE",
+            null
+          ]
+        },
+        "authority_ref": {
+          "$ref": "#/$defs/nullableRef"
+        },
+        "authority_generation": {
+          "$ref": "#/$defs/nullableRef"
         }
       }
     },
@@ -499,6 +514,609 @@
           "then": {
             "$ref": "#/$defs/stateRuleUnknown"
           }
+        },
+        {
+          "x-navigator-generated": "route-binding",
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PROVEN_LIVE"
+              },
+              "capability_class": {
+                "const": "source_pr_ci"
+              }
+            },
+            "required": [
+              "state",
+              "capability_class"
+            ]
+          },
+          "then": {
+            "properties": {
+              "binding": {
+                "$ref": "#/$defs/bindingSourcePrCi"
+              }
+            },
+            "required": [
+              "binding"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "route-binding",
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PROVEN_LIVE"
+              },
+              "capability_class": {
+                "const": "selected_project_action"
+              }
+            },
+            "required": [
+              "state",
+              "capability_class"
+            ]
+          },
+          "then": {
+            "properties": {
+              "binding": {
+                "$ref": "#/$defs/bindingSelectedProjectAction"
+              }
+            },
+            "required": [
+              "binding"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "route-binding",
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PROVEN_LIVE"
+              },
+              "capability_class": {
+                "const": "local_machine_process"
+              }
+            },
+            "required": [
+              "state",
+              "capability_class"
+            ]
+          },
+          "then": {
+            "properties": {
+              "binding": {
+                "$ref": "#/$defs/bindingLocalMachineProcess"
+              }
+            },
+            "required": [
+              "binding"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "route-binding",
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PROVEN_LIVE"
+              },
+              "capability_class": {
+                "const": "worker_browser"
+              }
+            },
+            "required": [
+              "state",
+              "capability_class"
+            ]
+          },
+          "then": {
+            "properties": {
+              "binding": {
+                "$ref": "#/$defs/bindingWorkerBrowser"
+              }
+            },
+            "required": [
+              "binding"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "route-binding",
+          "if": {
+            "properties": {
+              "state": {
+                "const": "PROVEN_LIVE"
+              },
+              "capability_class": {
+                "const": "exact_chatgpt_actuation"
+              }
+            },
+            "required": [
+              "state",
+              "capability_class"
+            ]
+          },
+          "then": {
+            "properties": {
+              "binding": {
+                "$ref": "#/$defs/bindingExactChatgptActuation"
+              }
+            },
+            "required": [
+              "binding"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "evidence-coverage",
+          "if": {
+            "properties": {
+              "implementation_state": {
+                "enum": [
+                  "BUILT",
+                  "SPEC_ONLY",
+                  "NOT_BUILT"
+                ]
+              }
+            },
+            "required": [
+              "implementation_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "implementation_state"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "evidence-coverage",
+          "if": {
+            "properties": {
+              "usable_scope": {
+                "enum": [
+                  "FULL",
+                  "PARTIAL",
+                  "NONE"
+                ]
+              }
+            },
+            "required": [
+              "usable_scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "usable_scope"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "evidence-coverage",
+          "if": {
+            "properties": {
+              "binding_current": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "binding_current"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "binding_current"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "evidence-coverage",
+          "if": {
+            "properties": {
+              "installed": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "installed"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "installed"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "evidence-coverage",
+          "if": {
+            "properties": {
+              "enabled": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "enabled"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "evidence-coverage",
+          "if": {
+            "properties": {
+              "authenticated_or_connected": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "authenticated_or_connected"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "authenticated_or_connected"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "evidence-coverage",
+          "if": {
+            "properties": {
+              "callable": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "callable"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "callable"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "evidence-coverage",
+          "if": {
+            "properties": {
+              "organizationally_authorized": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "organizationally_authorized"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "organizationally_authorized"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "evidence-coverage",
+          "if": {
+            "properties": {
+              "proven_live": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "proven_live"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "proven_live"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "owner-native-positive-evidence",
+          "if": {
+            "properties": {
+              "organizationally_authorized": {
+                "const": "YES"
+              }
+            },
+            "required": [
+              "organizationally_authorized"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "organizationally_authorized"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "owner-native-positive-evidence",
+          "if": {
+            "properties": {
+              "proven_live": {
+                "const": "YES"
+              }
+            },
+            "required": [
+              "proven_live"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "proven_live"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
         }
       ]
     },
@@ -859,6 +1477,152 @@
         "capability_class",
         "organizationally_authorized",
         "evidence"
+      ]
+    },
+    "bindingSelectedProjectAction": {
+      "anyOf": [
+        {
+          "properties": {
+            "execution_mode": {
+              "enum": [
+                "ATTENDED_WEB_OPERATOR",
+                "NATIVE_OPERATOR"
+              ]
+            },
+            "project_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "session_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runtime_generation": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority_generation": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "execution_mode",
+            "project_ref",
+            "session_ref",
+            "runtime_generation",
+            "authority_ref",
+            "authority_generation"
+          ]
+        },
+        {
+          "properties": {
+            "execution_mode": {
+              "const": "BOUNDED_WORKER"
+            },
+            "project_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority_generation": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "execution_mode",
+            "project_ref",
+            "authority_ref",
+            "authority_generation"
+          ]
+        }
+      ]
+    },
+    "bindingExactChatgptActuation": {
+      "properties": {
+        "session_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime_generation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "session_ref",
+        "runtime_generation",
+        "authority_ref"
+      ]
+    },
+    "bindingLocalMachineProcess": {
+      "properties": {
+        "host_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "host_ref",
+        "authority_ref"
+      ]
+    },
+    "bindingWorkerBrowser": {
+      "properties": {
+        "host_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime_generation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "host_ref",
+        "session_ref",
+        "runtime_generation",
+        "authority_ref"
+      ]
+    },
+    "bindingSourcePrCi": {
+      "properties": {
+        "project_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_sha": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "project_ref",
+        "source_sha"
       ]
     }
   },

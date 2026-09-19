@@ -567,6 +567,105 @@ def test_health_schema_rejects_state_labels_that_disagree_with_ordered_rules() -
             with pytest.raises(jsonschema.ValidationError):
                 validator.validate(hostile)
 
+
+def test_proven_live_requires_route_specific_bindings() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    live = _materialize_health_packet(fixture["cases"][0]["packet"])
+
+    def packet_for(capability_class: str, owner: str, family: str) -> dict[str, object]:
+        packet = copy.deepcopy(live)
+        surface = packet["surfaces"][0]
+        surface["capability_class"] = capability_class
+        surface["canonical_owner"] = owner
+        surface["minimal_tool_family"] = family
+        surface["binding"] = {
+            "host_ref": None,
+            "project_ref": "bound-project",
+            "session_ref": None,
+            "runtime_generation": None,
+            "source_sha": None,
+        }
+        return packet
+
+    attended = packet_for("selected_project_action", "Workbench", "workbench")
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(attended)
+    attended["surfaces"][0]["binding"].update({
+        "execution_mode": "ATTENDED_WEB_OPERATOR",
+        "session_ref": "conversation-1",
+        "runtime_generation": "runtime-generation-1",
+        "authority_ref": "runtime-binding:conversation-1",
+        "authority_generation": "policy-generation-1",
+    })
+    validator.validate(attended)
+
+    worker = packet_for("selected_project_action", "Workbench", "workbench")
+    worker["surfaces"][0]["binding"].update({
+        "execution_mode": "BOUNDED_WORKER",
+        "authority_ref": "JOB:1/ATTEMPT:1/WORKER:1",
+        "authority_generation": "worker-generation-1",
+    })
+    validator.validate(worker)
+
+    chatgpt = packet_for("exact_chatgpt_actuation", "Web-Sol + RuntimeBinding", "web-sol-runtime-binding")
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(chatgpt)
+    chatgpt["surfaces"][0]["binding"].update({
+        "session_ref": "conversation-1",
+        "runtime_generation": "runtime-generation-1",
+        "authority_ref": "runtime-binding:conversation-1",
+    })
+    validator.validate(chatgpt)
+
+    local = packet_for("local_machine_process", "Studio Direct / existing fleet owner", "studio-direct")
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(local)
+    local["surfaces"][0]["binding"].update({
+        "host_ref": "studio-primary",
+        "authority_ref": "process:bounded-1",
+    })
+    validator.validate(local)
+
+    browser = packet_for("worker_browser", "Worker Browser", "worker-browser")
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(browser)
+    browser["surfaces"][0]["binding"].update({
+        "host_ref": "worker-host-1",
+        "session_ref": "worker-browser-1",
+        "runtime_generation": "browser-generation-1",
+        "authority_ref": "browser-target-1",
+    })
+    validator.validate(browser)
+
+
+def test_known_health_dimensions_require_supporting_surface_evidence() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    live = _materialize_health_packet(fixture["cases"][0]["packet"])
+    dimensions = {
+        "implementation_state",
+        "usable_scope",
+        "binding_current",
+        "installed",
+        "enabled",
+        "authenticated_or_connected",
+        "callable",
+        "organizationally_authorized",
+        "proven_live",
+    }
+    validator.validate(live)
+    for dimension in dimensions:
+        hostile = copy.deepcopy(live)
+        for evidence in hostile["surfaces"][0]["evidence"]:
+            evidence["supports_dimensions"] = [
+                item for item in evidence["supports_dimensions"] if item != dimension
+            ]
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(hostile)
+
 def test_workbench_cases_fence_attended_and_worker_generations() -> None:
     health = _load("fixtures/capability-health-cases.json")
     by_id = {case["id"]: case for case in health["cases"]}

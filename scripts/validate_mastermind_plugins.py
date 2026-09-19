@@ -337,10 +337,10 @@ NAVIGATOR_TRUTH_MARKERS = (
     "`EFFECT_UNKNOWN`",
 )
 NAVIGATOR_CONTENT_DIGESTS = {
-    "fixtures/capability-health-cases.json": "1568753b7c97ef0623ccdbbc6d32ed485c827c53507557610f5fc22031c02f97",
+    "fixtures/capability-health-cases.json": "88b2e7db41b9f7dcf909f566f5971920f8d09e9978ea2ce8b5881320408087ed",
     "fixtures/fresh-session-routing-cases.json": "37e186f85529b4970ec53d6a424ed76eb819fed936b40f65883904edb19ce103",
     "references/boot-sources.json": "c30da8f3962ca421f8227ed0111e7da06825523ed3eea16399f6b7b863081e04",
-    "references/capability-health.schema.json": "e18ba90a023eaab55bc5c4bacd5bc133d40b431be2175462bad02ef42a23c6af",
+    "references/capability-health.schema.json": "e1416ddfcb6eab01cfb8fe8a89617528d5c051886d4317b5c7d1f9a81d58105e",
     "references/capability-state-rules.json": "998545d336d9a262dd65a2d2a3cb65429d5ad7638b8a8c3085e798d3ae779c56",
     "references/catalog.fragment.json": "9de4f15734520939dab7f7a0dfb2b12f72669f4753e87f6b566af238d15e459e",
     "references/navigator-boundary.md": "042a79b897d435d679792fe0e2b50916daedc011eb831f03ac93373219a5678d",

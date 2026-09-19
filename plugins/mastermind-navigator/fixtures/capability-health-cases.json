@@ -492,7 +492,10 @@
               "project_ref": "selected-project",
               "session_ref": null,
               "runtime_generation": null,
-              "source_sha": null
+              "source_sha": null,
+              "execution_mode": "ATTENDED_WEB_OPERATOR",
+              "authority_ref": null,
+              "authority_generation": null
             },
             "blocker": "The attended Web action lacks an exact current session generation.",
             "next_probe": "Read RuntimeBinding for the exact attended conversation and current generation before any Workbench action."
@@ -578,7 +581,10 @@
               "project_ref": "selected-project",
               "session_ref": null,
               "runtime_generation": null,
-              "source_sha": null
+              "source_sha": null,
+              "execution_mode": "BOUNDED_WORKER",
+              "authority_ref": null,
+              "authority_generation": null
             },
             "blocker": "The provider worker has no admitted Executive worker generation for this action.",
             "next_probe": "Read the current Executive OS Job/Attempt/Worker generation and authorization; do not fall back to attended mode."
