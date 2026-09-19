@@ -246,6 +246,11 @@ class RemoteWorkerBrokerFleetTest(unittest.IsolatedAsyncioTestCase):
                 worker_gid=458,
             )
 
+    def test_endpoint_canary_binding_is_immutable_after_construction(self) -> None:
+        endpoint = _endpoint("alibaba-token-01", 458)
+        with self.assertRaises(TypeError):
+            endpoint.secret_canary_verdict["passed"] = False  # type: ignore[index]
+
     def test_restart_controller_uses_persisted_worker_id(self) -> None:
         fleet = self._fleet()
         attempt = types.SimpleNamespace(

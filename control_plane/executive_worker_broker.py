@@ -36,6 +36,7 @@ import time
 import uuid
 from collections import OrderedDict
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from common.redaction import sanitize_external_text
@@ -3930,7 +3931,7 @@ class RemoteWorkerBrokerEndpoint:
         object.__setattr__(
             self,
             "secret_canary_verdict",
-            dict(self.secret_canary_verdict),
+            MappingProxyType(dict(self.secret_canary_verdict)),
         )
 
     def bind_launch_spec(self, spec: WorkerLaunchSpec) -> WorkerLaunchSpec:
