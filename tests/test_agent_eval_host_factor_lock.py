@@ -129,6 +129,17 @@ def test_same_host_and_boot_evidence_generation_is_verified() -> None:
     assert set(result) == {"scope", "host_ref", "boot_ref", "left", "right"}
 
 
+def test_same_finalized_run_cannot_satisfy_both_sides() -> None:
+    scenario, config_a, _config_b, experiment = _graph()
+    snapshot = _snapshot()
+    run = _finalized_run(scenario, config_a, experiment, arm_id="arm_a", snapshot=snapshot)
+
+    with pytest.raises(ContractError) as excinfo:
+        host_factor_lock.verify_host_factor_evidence_lock(run, snapshot, run, snapshot)
+
+    assert "HOST_FACTOR_RUN_DUPLICATE" in _codes(excinfo)
+
+
 def test_host_mismatch_refuses_evidence_lock() -> None:
     scenario, config_a, config_b, experiment = _graph()
     left_snapshot = _snapshot()

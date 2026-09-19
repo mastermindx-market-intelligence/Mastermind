@@ -58,16 +58,16 @@ adoption and the outstanding independent review remain separate release gates.
 
 ## User and machine journey
 
-An evidence consumer explicitly invokes the outer bridge with two finalized run
-receipts and their exact snapshot mappings. The bridge checks each run's existing
+An evidence consumer explicitly invokes the outer bridge with two distinct finalized
+run receipts and their exact snapshot mappings. The bridge checks each run's existing
 immutable digest, uses the Executive contract to validate/canonicalize snapshots,
 checks that each run binds exactly one copy of its snapshot digest, and compares
 opaque host and boot references. It returns the existing bounded evidence-only
 verdict or existing structured refusal; it writes nothing and starts nothing.
 
-Missing, malformed, duplicated, tampered or mismatched evidence never defaults
-to equality. Untrusted snapshot values are not echoed in the bridge's public
-error message. Later correction creates new canonical evidence; it does not
+Missing, malformed, duplicated, tampered or mismatched evidence, including a
+repeated finalized run identity on both sides, never defaults to equality.
+Untrusted snapshot values are not echoed in the bridge's public error message. Later correction creates new canonical evidence; it does not
 rewrite a finalized run or re-age an observation. Snapshot validity is structural
 and content-addressed: it is not proof of origin or process execution location.
 
@@ -76,8 +76,9 @@ and content-addressed: it is not proof of origin or process execution location.
 1. Add failing boundary/closure/scope regressions before moving production code.
 2. Relocate the bridge and its test import; preserve all existing verdict semantics.
 3. Add the exact per-wave paths; preserve unconditional core and forbidden-path guards.
-4. Run all existing and added factor-lock tests, evaluator-core tests and owner
-   host-contract tests. Check the real committed delta, not a mocked empty diff.
+4. Run all existing and added factor-lock tests, including a repeated-run-identity
+   refusal, evaluator-core tests and owner host-contract tests. Check the real
+   committed delta, not a mocked empty diff.
 5. Demonstrate that removing wave admission, restoring a forbidden core import,
    or adding ambient observation is caught by the intended tests.
 6. Check current-base material compatibility and integrated source. Publish only
@@ -125,3 +126,18 @@ ambient environment read. Original bytes were restored in all cases and the
 against the recovered candidate proves the relocated algorithm/imports are
 unchanged except for the module documentation. Full hosted CI, current-base
 release proof, independent review and shared-owner adoption remain separate.
+
+## Repeated-run identity repair — 2026-09-19
+
+Exact prior head `a5ad195e224cacb364862e4987f669b2bb3f261e` accepted the
+same immutable finalized run as both comparison sides and returned
+`HOST_FACTOR_EVIDENCE_LOCK_VERIFIED`. The added regression was RED there with
+`DID NOT RAISE ContractError`. The bounded repair rejects equal `run_id` values
+with `HOST_FACTOR_RUN_DUPLICATE` after each side's existing run/snapshot binding
+has validated and before host/boot equality can return success.
+
+The repaired branch worktree passes the 16 focused host-factor tests and all 788
+selected Agent Evaluation plus pure Executive host-contract tests. Python compile
+and `git diff --check` pass. This is source evidence only; current-base integrated
+execution, fresh hosted checks, independent review and shared-owner adoption
+remain separate gates.

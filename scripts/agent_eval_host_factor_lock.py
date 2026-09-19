@@ -138,6 +138,13 @@ def verify_host_factor_evidence_lock(
     left = _bound_host_evidence(left_run, left_snapshot, side="left")
     right = _bound_host_evidence(right_run, right_snapshot, side="right")
 
+    if left["run_id"] == right["run_id"]:
+        _refuse(
+            "$.runs",
+            "HOST_FACTOR_RUN_DUPLICATE",
+            "host-factor evidence lock requires two distinct finalized runs",
+        )
+
     defects: list[ContractDefect] = []
     if left["host_ref"] != right["host_ref"]:
         defects.append(
