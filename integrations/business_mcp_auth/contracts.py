@@ -18,6 +18,7 @@ from urllib.parse import SplitResult, urlsplit
 
 AUTH_POLICY_SCHEMA = "mastermind.business_mcp_auth_policy.v1"
 AUTH_AUDIT_SCHEMA = "mastermind.business_mcp_auth_audit.v1"
+CHANNEL_AUDIT_SCHEMA = "mastermind.business_mcp_auth_channel_audit.v1"
 
 POLICY_KEYS = frozenset(
     {
@@ -133,6 +134,25 @@ class AuthAuditEvent:
     policy_id: str
     code: str
     accepted: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class ChannelAuditEvent:
+    """Bounded fixed-channel admission fact for a non-OAuth entry point.
+
+    A tunnel association authenticates one host-selected channel, never a
+    cryptographically attested end user.  The event therefore carries only
+    closed identifiers and digests: no action token, path, patch content,
+    credential, or provider payload.
+    """
+
+    schema: str
+    policy_id: str
+    code: str
+    accepted: bool
+    channel_ref: str
+    tool: str
+    action_digest: str | None
 
 
 class AuthAuditSink(Protocol):
@@ -407,12 +427,14 @@ def validate_resource_policy(value: object) -> ResourcePolicy:
 __all__ = [
     "AUTH_AUDIT_SCHEMA",
     "AUTH_POLICY_SCHEMA",
+    "CHANNEL_AUDIT_SCHEMA",
     "NON_AUTHORIZING_OAUTH_SCOPES",
     "POLICY_KEYS",
     "AuthAuditEvent",
     "AuthAuditSink",
     "AuthError",
     "AuthErrorCode",
+    "ChannelAuditEvent",
     "ResourcePolicy",
     "VerifiedPrincipal",
     "load_resource_policy",

@@ -529,7 +529,8 @@ class ExecutiveMcpGateway:
         return [
             "mode=fixture: executive_job and ceo_intent_status read the temporary "
             "fixture runtime, while executive_state and executive_inbox project the "
-            "reviewed repository checkout"
+            "reviewed repository checkout; the fixture lane is BUILT_NOT_PROVEN, "
+            "not live"
         ]
 
     def _executive_state(self) -> tuple[dict[str, Any], dict[str, Any], list[str]]:

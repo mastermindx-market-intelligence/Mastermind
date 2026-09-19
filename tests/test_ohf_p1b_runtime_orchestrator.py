@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 from control_plane.executive_operator_harness_port import (
     ExecutiveOperatorHarnessPort,
 )
+from control_plane.executive_runtime import RuntimeStore
 from control_plane.executive_runtime import (
     AttemptStatus,
     JobStatus,
@@ -22,6 +24,7 @@ from control_plane.operator_harness_contract import (
     AuthRealmFact,
     CandidateResult,
     CapabilityManifest,
+    CheckpointObservation,
     EventCursor,
     LaunchDecision,
     NativeHelperPolicy,
@@ -66,8 +69,9 @@ class _Clock:
         self.value += seconds * 1000
 
 
-def _runtime_lease(tmp_path):
-    runtime = Runtime.at(tmp_path)
+def _runtime_lease(tmp_path, clock=None):
+    clock = clock or _Clock()
+    runtime = Runtime.at(tmp_path, clock=clock, lease_seconds=2)
     runtime.workers.register_worker(
         "worker-01", provider="openai-codex", account_label="one", worker_type="test"
     )
@@ -132,7 +136,7 @@ def test_expired_ohf_takeover_preserves_authority_and_recovers_lawful_shapes(
                 fence_generation=old.attempt.fence_generation,
                 lease_token=old.lease_token,
             )
-    clock.advance(3)
+    clock.advance(240)
     runtime.attempts.reconcile_expired()
     current = runtime.attempts.get_attempt(old.attempt.attempt_id)
     assert current is not None and current.status in {
@@ -241,6 +245,8 @@ class FakeAdapter:
         self.process_number = 100
         self.reconcile_observation: ReconcileObservation | None = None
         self.stop_observation: ReconcileObservation | None = None
+        self.checkpoint_calls = 0
+        self.fail_checkpoint = False
 
     def validate_requested_profile(self, requested):
         self.calls.append("validate")
@@ -302,6 +308,17 @@ class FakeAdapter:
     def cancel(self, generation, *, reason, operation_id):
         self.calls.append("cancel")
         return self._dead(generation, ProviderWriterState.UNKNOWN)
+
+    def checkpoint(self, generation, *, operation_id):
+        self.checkpoint_calls += 1
+        if self.fail_checkpoint:
+            raise RuntimeError("injected checkpoint crash")
+        return CheckpointObservation(
+            {
+                "summary": "checkpoint",
+                "current_state": f"checkpoint-{self.checkpoint_calls}",
+            }
+        )
 
     def reconcile(self, generation):
         self.calls.append("reconcile")
@@ -433,6 +450,206 @@ def test_real_runtime_end_to_end_orders_events_and_keeps_candidate_non_authorita
         ).fetchone()
     assert tuple(generation) == (generation["ended_at_ms"], 0, "RELEASED")
     assert generation["ended_at_ms"] is not None
+
+
+def test_real_port_checkpoint_restarts_and_commits_next_sequence(tmp_path) -> None:
+    clock = _Clock()
+    runtime, job, lease = _runtime_lease(tmp_path, clock=clock)
+    profile = _profile(lease)
+    adapter = FakeAdapter(profile)
+    port, orchestrator = _orchestrator(runtime, lease, adapter)
+    session = orchestrator.start_attempt(
+        attempt_id=lease.attempt.attempt_id,
+        requested=profile,
+        operation_id=_op("checkpoint-start"),
+    )
+
+    first = orchestrator.checkpoint(
+        session, operation_id=_op("checkpoint-1")
+    )
+    database = tmp_path / "data" / "control_plane" / "executive.sqlite3"
+    restarted = Runtime.from_store(
+        RuntimeStore(tmp_path, database_path=database)
+    )
+    restarted_attempt = restarted.attempts.get_attempt(lease.attempt.attempt_id)
+    assert restarted_attempt is not None
+    assert restarted_attempt.checkpoint_sequence == 1
+    restarted_job = restarted.jobs.get_job(job.job_id)
+    assert restarted_job is not None
+    assert restarted_job.checkpoint["current_state"] == "checkpoint-1"
+    with restarted.store.read() as connection:
+        stored = connection.execute(
+            "SELECT checkpoint_json FROM attempts WHERE attempt_id=?",
+            (lease.attempt.attempt_id,),
+        ).fetchone()
+    assert stored is not None
+    assert json.loads(str(stored["checkpoint_json"])) == restarted_job.checkpoint
+    clock.advance(240)
+    restarted.attempts.reconcile_expired()
+    restarted = Runtime.from_store(
+        RuntimeStore(
+            tmp_path,
+            clock=clock,
+            lease_seconds=2,
+            database_path=database,
+        )
+    )
+
+    restarted_lease = restarted.attempts.takeover_expired_operator_harness(
+        lease.attempt.attempt_id,
+        expected_fence_generation=restarted.attempts.get_attempt(
+            lease.attempt.attempt_id
+        ).fence_generation,
+        lease_owner="restart-recovery",
+        lease_seconds=30,
+    )
+    restarted_port = ExecutiveOperatorHarnessPort(restarted, restarted_lease)
+    second = CheckpointObservation(
+        {"summary": "restart", "current_state": "restart-2"}
+    )
+    second_operation = _op("checkpoint-2")
+    restarted_port.begin_operator_checkpoint(
+        lease.attempt.attempt_id, session.generation, second_operation
+    )
+    restarted_port.apply_operator_checkpoint(
+        lease.attempt.attempt_id,
+        session.generation,
+        second_operation,
+        second,
+    )
+    final_attempt = restarted.attempts.get_attempt(lease.attempt.attempt_id)
+    assert final_attempt is not None
+    assert final_attempt.checkpoint_sequence == 2
+    assert (
+        restarted.jobs.get_job(job.job_id).checkpoint["current_state"]
+        == "restart-2"
+    )
+
+
+def test_stale_checkpoint_intent_cannot_apply_after_generation_advance(tmp_path) -> None:
+    clock = _Clock()
+    runtime, _job, lease = _runtime_lease(tmp_path, clock=clock)
+    profile = _profile(lease)
+    adapter = FakeAdapter(profile)
+    port, orchestrator = _orchestrator(runtime, lease, adapter)
+    session = orchestrator.start_attempt(
+        attempt_id=lease.attempt.attempt_id,
+        requested=profile,
+        operation_id=_op("stale-generation-start"),
+    )
+    stale_operation = _op("stale-generation-checkpoint")
+    runtime.operator_harness.reserve_checkpoint_operation(
+        generation=session.generation,
+        operation_id=stale_operation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    runtime.operator_harness.record_reconcile_observation(
+        generation=session.generation,
+        observation=ReconcileObservation(
+            process_liveness=ProcessLiveness.PROVEN_DEAD,
+            observed_process=ProcessIdentityObservation(
+                adapter.process_number,
+                adapter.process_number,
+                f"start-{adapter.process_number}",
+                "boot",
+            ),
+            provider_session_reachable=True,
+            provider_writer_state=ProviderWriterState.RELEASED,
+            observed_provider_session_id="S1",
+        ),
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    clock.advance(240_000)
+    runtime.attempts.reconcile_expired()
+    runtime = Runtime.from_store(
+        RuntimeStore(
+            tmp_path,
+            clock=clock,
+            database_path=tmp_path / "data" / "control_plane" / "executive.sqlite3",
+        )
+    )
+    replacement = runtime.attempts.takeover_expired_operator_harness(
+        lease.attempt.attempt_id,
+        expected_fence_generation=lease.attempt.fence_generation,
+        lease_owner="stale-generation-recovery",
+        lease_seconds=30,
+    )
+    assert replacement.lease_token is not None
+    successor = runtime.operator_harness.reserve_same_epoch_resume(
+        epoch=session.epoch,
+        old_generation=session.generation,
+        operation_id=_op("stale-generation-resume"),
+        fence_generation=replacement.attempt.fence_generation,
+        lease_token=replacement.lease_token,
+    )
+    assert successor.generation_number == session.generation.generation_number + 1
+
+    with pytest.raises(
+        StateConflict,
+        match=r"^checkpoint operation result does not match INTENT$",
+    ):
+        runtime.operator_harness.apply_checkpoint_operation(
+            generation=successor,
+            operation_id=stale_operation,
+            observation=CheckpointObservation(
+                {"summary": "checkpoint", "current_state": "stale"}
+            ),
+            fence_generation=replacement.attempt.fence_generation,
+            lease_token=replacement.lease_token,
+        )
+
+    attempt = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert attempt is not None and attempt.checkpoint_sequence == 0
+    with runtime.store.read() as connection:
+        checkpoint_events = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CHECKPOINTED'",
+        ).fetchone()[0]
+    assert checkpoint_events == 0
+
+
+def test_real_checkpoint_effect_unknown_blocks_apply_and_replay(tmp_path) -> None:
+    clock = _Clock()
+    runtime, _job, lease = _runtime_lease(tmp_path, clock=clock)
+    profile = _profile(lease)
+    adapter = FakeAdapter(profile)
+    adapter.fail_checkpoint = True
+    _, orchestrator = _orchestrator(runtime, lease, adapter)
+    session = orchestrator.start_attempt(
+        attempt_id=lease.attempt.attempt_id,
+        requested=profile,
+        operation_id=_op("unknown-checkpoint-start"),
+    )
+    operation = _op("unknown-checkpoint")
+
+    with pytest.raises(OperatorEffectUnknown):
+        orchestrator.checkpoint(session, operation_id=operation)
+
+    effect = runtime.events.get_event_by_command_id(
+        operation_receipt_command_id(operation, OperationReceiptKind.EFFECT_UNKNOWN)
+    )
+    assert effect is not None and effect.payload["phase"] == "checkpoint"
+    attempt = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert attempt is not None and attempt.checkpoint_sequence == 0
+    with runtime.store.read() as connection:
+        checkpointed = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CHECKPOINTED'"
+        ).fetchone()[0]
+    assert checkpointed == 0
+    with pytest.raises(OperatorEffectUnknown):
+        orchestrator.checkpoint(session, operation_id=operation)
+    assert adapter.checkpoint_calls == 1
+    with pytest.raises(StateConflict, match="operation cannot have both"):
+        runtime.operator_harness.apply_checkpoint_operation(
+            generation=session.generation,
+            operation_id=operation,
+            observation=CheckpointObservation(
+                {"summary": "late", "current_state": "unknown"}
+            ),
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        )
 
 
 def test_real_runtime_refuses_before_provider_when_intent_cannot_commit(

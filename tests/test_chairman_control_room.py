@@ -840,6 +840,93 @@ def test_falsifier_runtime_jobs_none_degrades_named_attention_jobs_survive(
     assert alpha["executive"]["joined_by"] == "ceo_intent_provenance"
 
 
+def test_control_room_heterogeneous_pair_degrades_by_name_and_never_claims_live(
+    boot_packet,
+    inbox,
+    active_builds,
+    agent_os_state,
+    bindings,
+    monkeypatch,
+):
+    runtime_jobs = [
+        {
+            "job_id": "JOB-HF1Q-CODEX",
+            "status": "RUNNING",
+            "workstream": "WS:HF1Q-HERMETIC-PAIR",
+        },
+        {
+            "job_id": "JOB-HF1Q-CLAUDE",
+            "status": "RUNNING",
+            "workstream": "WS:HF1Q-HERMETIC-PAIR",
+        },
+    ]
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("compose_control_room must not perform I/O")
+
+    monkeypatch.setattr("builtins.open", _boom)
+    monkeypatch.setattr(Path, "open", _boom)
+    degraded = ccr.compose_control_room(
+        inbox=inbox,
+        boot_packet=boot_packet,
+        active_builds=active_builds,
+        agent_os_state=None,
+        runtime_jobs=None,
+        bindings=bindings,
+        generated_at="2026-09-14T00:00:00Z",
+    )
+    assert any(
+        entry.startswith("agent_os_state: unavailable")
+        and "BUILT_NOT_PROVEN" in entry
+        and "not live" in entry
+        for entry in degraded["degraded"]
+    ), degraded["degraded"]
+    assert any(
+        entry.startswith("executive_runtime: unavailable")
+        and "BUILT_NOT_PROVEN" in entry
+        and "not live" in entry
+        for entry in degraded["degraded"]
+    ), degraded["degraded"]
+
+    surviving = ccr.compose_control_room(
+        inbox=inbox,
+        boot_packet=boot_packet,
+        active_builds=active_builds,
+        agent_os_state=agent_os_state,
+        runtime_jobs=runtime_jobs,
+        bindings=bindings,
+        generated_at="2026-09-14T00:00:00Z",
+    )
+    pair = next(
+        card
+        for card in surviving["work"]
+        if card["work_ref"] == "WS:HF1Q-HERMETIC-PAIR"
+    )
+    assert [job["job_id"] for job in pair["executive"]["jobs"]] == [
+        "JOB-HF1Q-CLAUDE",
+        "JOB-HF1Q-CODEX",
+    ]
+    assert all(job["status"] == "RUNNING" for job in pair["executive"]["jobs"])
+
+    def _walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                lowered = str(key).lower()
+                assert "combined" not in lowered, key
+                assert "overall" not in lowered, key
+                _walk(value)
+            return
+        if isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(degraded)
+    _walk(surviving)
+    lowered = json.dumps([degraded, surviving]).lower()
+    assert "proven_live" not in lowered
+    assert '"live"' not in lowered
+
+
 # ---------------------------------------------------------------------------
 # falsifier 13 — determinism, including under shuffled input list order
 # ---------------------------------------------------------------------------

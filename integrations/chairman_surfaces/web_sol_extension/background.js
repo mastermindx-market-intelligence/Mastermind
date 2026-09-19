@@ -13,7 +13,7 @@ const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
 const PACKAGE_VERSION = "0.2.0";
-const EXPECTED_CAPABILITY_DIGEST = "7bb800e54488f056cf14ed30e6083583bbff021b3695e1ca6b3c61d463905f12";
+const EXPECTED_CAPABILITY_DIGEST = "89a0dcb05a6c1c31000f841671e6cbf6c29a69dd73ed9726c8b5b99535485e50";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
@@ -34,6 +34,7 @@ const ACTION_KEYS = new Set([
   "schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
   "action", "operation_key", "issued_at", "expires_at", "nonce",
 ]);
+const TYPED_REENTRY_KEYS = new Set([...ACTION_KEYS, "operation_id", "result_digest", "obligation_digest"]);
 const INSTANCE_CONFIG_KEYS = new Set([
   "schema", "instanceId", "nativeHost", "protocolMajor",
   "clientPackageVersion", "nativePackageVersion", "extensionPackageVersion",
@@ -115,6 +116,7 @@ function validProbeEvent(event) {
 function validActionRequest(request) {
   if (!exactKeys(request, ACTION_KEYS) || request.schema !== ACTION_SCHEMA) return false;
   if (request.action !== "INSPECT" && request.action !== "FOREGROUND") return false;
+  if (request.action === "TYPED_REENTRY") return false;
   if (!isHex64(request.conversation_fingerprint) || !isHex64(request.binding_fingerprint)) return false;
   if (typeof request.binding_id !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.binding_id)) return false;
@@ -123,6 +125,18 @@ function validActionRequest(request) {
   if (typeof request.nonce !== "string" || request.nonce.length < 16 ||
       request.nonce.length > 128 || /\s/.test(request.nonce)) return false;
   return typeof request.issued_at === "string" && typeof request.expires_at === "string";
+}
+
+function validTypedReentryRequest(request) {
+  if (!exactKeys(request, TYPED_REENTRY_KEYS) || request.schema !== ACTION_SCHEMA) return false;
+  if (request.action !== "TYPED_REENTRY") return false;
+  const foreground = {};
+  for (const key of ["schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
+    "operation_key", "issued_at", "expires_at", "nonce"]) foreground[key] = request[key];
+  foreground.action = "FOREGROUND";
+  if (!validActionRequest(foreground)) return false;
+  return isHex64(request.operation_id) && isHex64(request.result_digest) &&
+    isHex64(request.obligation_digest);
 }
 
 function requestWindowStatus(request, nowMs = Date.now()) {
@@ -177,13 +191,19 @@ function unknownObservation() {
 }
 
 function receipt(request, status, observation) {
-  return {
+  const result = {
     schema: RECEIPT_SCHEMA, binding_id: request.binding_id,
     conversation_fingerprint: request.conversation_fingerprint,
     binding_fingerprint: request.binding_fingerprint,
     action: request.action, operation_key: request.operation_key, nonce: request.nonce,
     status, observed_at: new Date().toISOString(), observation,
   };
+  if (request.action === "TYPED_REENTRY") {
+    result.operation_id = request.operation_id;
+    result.result_digest = request.result_digest;
+    result.obligation_digest = request.obligation_digest;
+  }
+  return result;
 }
 
 function foregroundEffectUnknown(request, observation) {
@@ -311,6 +331,35 @@ async function handleForeground(request) {
   return receipt(request, "FOREGROUNDED_VERIFIED", after.observation);
 }
 
+const typedReentryEffects = [];
+
+function typedReentryBlocker(request, status = "TYPED_REENTRY_BLOCKED") {
+  return receipt(request, status, unknownObservation());
+}
+
+async function handleTypedReentry(request) {
+  if (typedReentryEffects.some((effect) => effect.nonce === request.nonce)) {
+    return typedReentryBlocker(request);
+  }
+  const resolved = resolveExactTarget(request.conversation_fingerprint);
+  if (resolved.status) return typedReentryBlocker(request, resolved.status);
+  const before = await freshProbe(resolved.tabId, request.conversation_fingerprint);
+  if (!before || before.conversation_fingerprint !== request.conversation_fingerprint) {
+    return receipt(request, "CONVERSATION_CLOSED", unknownObservation());
+  }
+  if (before.observation.composer_available !== true || before.observation.generation_state !== "idle") {
+    return receipt(request, "NOT_CONSUMED", before.observation);
+  }
+  const result = await handleForeground(request);
+  if (result.status !== "FOREGROUNDED_VERIFIED") return typedReentryBlocker(request);
+  typedReentryEffects.push({
+    conversation_fingerprint: request.conversation_fingerprint,
+    operation_id: request.operation_id,
+    nonce: request.nonce,
+  });
+  return receipt(request, "CONSUMED", result.observation);
+}
+
 const CENSUS_REQUEST_SCHEMA = "mastermind.web_sol_census_request.v1";
 const CENSUS_RECEIPT_SCHEMA = "mastermind.web_sol_census_receipt.v1";
 const CENSUS_HEADERS = Object.freeze(["schema", "scope", "adapter_instance_id", "started_at", "completed_at",
@@ -388,7 +437,8 @@ function validCensusPopup(event, sender) {
 
 async function handleNativeRequest(request, port) {
   if (request && request.schema === CENSUS_REQUEST_SCHEMA) return handleCensusRequest(request, port);
-  if (!validActionRequest(request)) return;
+  const typedReentry = validTypedReentryRequest(request);
+  if (!typedReentry && !validActionRequest(request)) return;
   const accepted = Object.freeze({...request});
   const windowStatus = requestWindowStatus(accepted);
   if (windowStatus) {
@@ -397,8 +447,10 @@ async function handleNativeRequest(request, port) {
   }
   const result = accepted.action === "INSPECT"
     ? await handleInspect(accepted)
-    : accepted.action === "FOREGROUND" ? await handleForeground(accepted) : null;
+    : accepted.action === "FOREGROUND" ? await handleForeground(accepted)
+    : typedReentry ? await handleTypedReentry(accepted) : null;
   if (result) port.postMessage(result);
+  return result;
 }
 
 function randomChallengeNonce() {

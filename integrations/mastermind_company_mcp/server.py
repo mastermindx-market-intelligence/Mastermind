@@ -12,6 +12,12 @@ from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
 from integrations.mastermind_company_mcp.adapter import CompanyDialogueGateway
+from integrations.mastermind_company_mcp.consultation import (
+    COMPANY_CONSULTATION_SERVER_NAME,
+    COMPANY_CONSULTATION_SERVER_VERSION,
+    COMPANY_CONSULTATION_TOOL_SPECS,
+    canonical_company_consultation_json,
+)
 from integrations.mastermind_company_mcp.schemas import (
     SERVER_NAME,
     SERVER_VERSION,
@@ -57,6 +63,48 @@ def build_mcp_server(gateway: CompanyDialogueGateway) -> Server:
     return server
 
 
+def build_company_consultation_tools() -> list[mcp_types.Tool]:
+    """Build the static four-tool distinct consultation generation."""
+
+    return [
+        mcp_types.Tool(
+            name=spec.name,
+            description=spec.description,
+            inputSchema=spec.input_schema,
+            annotations=mcp_types.ToolAnnotations(**spec.annotations),
+        )
+        for spec in COMPANY_CONSULTATION_TOOL_SPECS
+    ]
+
+
+def build_company_consultation_mcp_server(gateway: Any) -> Server:
+    """Register only list/call handlers for the distinct consultation facet."""
+
+    server: Server = Server(
+        COMPANY_CONSULTATION_SERVER_NAME,
+        version=COMPANY_CONSULTATION_SERVER_VERSION,
+    )
+    tools = build_company_consultation_tools()
+
+    @server.list_tools()
+    async def list_company_consultation_tools() -> list[mcp_types.Tool]:
+        return list(tools)
+
+    @server.call_tool()
+    async def call_company_consultation_tool(
+        name: str, arguments: dict[str, Any] | None
+    ) -> list[Any]:
+        envelope = await gateway.call(name, arguments or {})
+        return [
+            mcp_types.TextContent(
+                type="text",
+                text=canonical_company_consultation_json(envelope).decode("utf-8"),
+            )
+        ]
+
+    return server
+
+
 def initialization_options(server: Server) -> InitializationOptions:
     """Build tools-only MCP initialization options."""
 
@@ -66,4 +114,10 @@ def initialization_options(server: Server) -> InitializationOptions:
     )
 
 
-__all__ = ["build_mcp_server", "build_tools", "initialization_options"]
+__all__ = [
+    "build_company_consultation_mcp_server",
+    "build_company_consultation_tools",
+    "build_mcp_server",
+    "build_tools",
+    "initialization_options",
+]

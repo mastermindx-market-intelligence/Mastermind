@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+from dataclasses import replace
 
 import pytest
 
-from control_plane.executive_runtime import Runtime, StateConflict
+from control_plane.executive_runtime import (
+    OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+    OrchestrationDispatchOutcome,
+    Runtime,
+    RuntimeStore,
+    StateConflict,
+    _json_dumps,
+    _json_loads,
+)
 from control_plane.operator_harness_contract import (
-    AuthRealmRequirement,
     AuthRealmFact,
+    AuthRealmRequirement,
     CapabilityManifest,
     CandidateResult,
+    CheckpointObservation,
     EventCursor,
     NativeHelperPolicy,
     NormalizedEvent,
@@ -25,8 +36,13 @@ from control_plane.operator_harness_contract import (
     ReconcileObservation,
     RequestedExecutionProfile,
     TurnRef,
+    TurnStartObservation,
     WorkspaceIdentity,
     operation_receipt_command_id,
+)
+from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
+from control_plane.executive_orchestration_principal import (
+    OperatorPrincipalObservation,
 )
 
 
@@ -79,6 +95,506 @@ def _attestation(profile):
     )
 
 
+def _started(tmp_path):
+    runtime, lease = _lease(tmp_path)
+    harness = runtime.operator_harness
+    profile = _profile(lease)
+    sealed = harness.seal_operator_harness_attempt(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        requested=profile,
+    )
+    operation = OperationId("ohf-op:checkpoint-fixture-start")
+    epoch, generation = harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=lease.lease_token,
+        operation_id=operation,
+    )
+    harness.bind_start_result(
+        epoch=epoch,
+        generation=generation,
+        operation_id=operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=lease.lease_token,
+        provider_session_id="S1",
+        process=ProcessIdentityObservation(101, 101, "start", "boot"),
+    )
+    return runtime, lease, epoch, generation
+
+
+def _checkpoint(candidate):
+    return CheckpointObservation(
+        {"summary": "checkpoint", "current_state": candidate}
+    )
+
+
+def _commit(runtime, lease, generation, suffix, candidate="first"):
+    harness = runtime.operator_harness
+    operation = OperationId(f"ohf-op:{suffix}")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=operation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    return harness.apply_checkpoint_operation(
+        generation=generation,
+        operation_id=operation,
+        observation=_checkpoint(candidate),
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+
+
+def _raw_generation(generation, *, number=None, worker=None):
+    return replace(
+        generation,
+        generation_number=generation.generation_number
+        if number is None
+        else number,
+        worker_id=generation.worker_id if worker is None else worker,
+    )
+
+
+def test_cctx0_checkpoint_generation_ownership_is_exact(tmp_path):
+    runtime, lease, _epoch, generation = _started(tmp_path)
+    harness = runtime.operator_harness
+    wrong_number = _raw_generation(generation, number=2)
+    wrong_worker = _raw_generation(generation, worker="intruder")
+    for bad in (wrong_number, wrong_worker):
+        with pytest.raises(
+            StateConflict,
+            match=r"^OHF epoch/generation refs are not exactly owned by the lease$",
+        ):
+            harness.reserve_checkpoint_operation(
+                generation=bad,
+                operation_id=OperationId(
+                    f"ohf-op:reserve-{bad.generation_number}-{bad.worker_id}"
+                ),
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token,
+            )
+    for bad in (wrong_number, wrong_worker):
+        operation = OperationId(
+            f"ohf-op:apply-{bad.generation_number}-{bad.worker_id}"
+        )
+        with pytest.raises(
+            StateConflict,
+            match=r"^OHF epoch/generation refs are not exactly owned by the lease$",
+        ):
+            harness.apply_checkpoint_operation(
+                generation=bad,
+                operation_id=operation,
+                observation=_checkpoint("bad"),
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token,
+            )
+    writer_operation = OperationId("ohf-op:checkpoint-writer-held")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=writer_operation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE process_generations SET executive_writer_held=0 WHERE process_generation_id=?",
+            (generation.process_generation_id,),
+        )
+    for call in (
+        lambda: harness.reserve_checkpoint_operation(
+            generation=generation,
+            operation_id=OperationId("ohf-op:checkpoint-writer-reserve"),
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        ),
+        lambda: harness.apply_checkpoint_operation(
+            generation=generation,
+            operation_id=writer_operation,
+            observation=_checkpoint("writer"),
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        ),
+    ):
+        with pytest.raises(StateConflict, match="OHF epoch/generation refs"):
+            call()
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE process_generations SET executive_writer_held=1 WHERE process_generation_id=?",
+            (generation.process_generation_id,),
+        )
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE harness_session_epochs SET state='TERMINAL' WHERE session_epoch_id=?",
+            (generation.session_epoch_id,),
+        )
+    for call in (
+        lambda: harness.reserve_checkpoint_operation(
+            generation=generation,
+            operation_id=OperationId("ohf-op:cctx-terminal-reserve"),
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        ),
+        lambda: harness.apply_checkpoint_operation(
+            generation=generation,
+            operation_id=writer_operation,
+            observation=_checkpoint("terminal"),
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        ),
+    ):
+        with pytest.raises(StateConflict, match="OHF epoch/generation refs"):
+            call()
+    for fence, token in (
+        (lease.attempt.fence_generation + 1, lease.lease_token),
+        (lease.attempt.fence_generation, "wrong-token"),
+    ):
+        with pytest.raises(StateConflict):
+            harness.reserve_checkpoint_operation(
+                generation=generation,
+                operation_id=OperationId(
+                    f"ohf-op:fence-{fence}-{bool(token == 'wrong-token')}"
+                ),
+                fence_generation=fence,
+                lease_token=token,
+            )
+
+
+def test_cctx0_checkpoint_sequence_is_monotonic_and_intents_are_stale_closed(tmp_path):
+    runtime, lease, _epoch, generation = _started(tmp_path)
+    harness = runtime.operator_harness
+    first = _commit(runtime, lease, generation, "checkpoint-1", "candidate-1")
+    assert first.checkpoint["current_state"] == "candidate-1"
+    stale = OperationId("ohf-op:checkpoint-stale")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=stale,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    second = _commit(runtime, lease, generation, "checkpoint-2", "candidate-2")
+    assert second.checkpoint["current_state"] == "candidate-2"
+    with pytest.raises(StateConflict, match="does not match INTENT"):
+        harness.apply_checkpoint_operation(
+            generation=generation,
+            operation_id=stale,
+            observation=_checkpoint("late"),
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        )
+    attempt = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert attempt is not None
+    assert attempt.checkpoint_sequence == 2
+    with runtime.store.read() as connection:
+        stored_attempt = connection.execute(
+            "SELECT checkpoint_json FROM attempts WHERE attempt_id=?",
+            (lease.attempt.attempt_id,),
+        ).fetchone()
+    assert stored_attempt is not None
+    assert stored_attempt["checkpoint_json"] == _json_dumps(second.checkpoint)
+    events = runtime.events.list_events(job_id=str(lease.attempt.job_id))
+    payloads = [
+        event.payload["checkpoint_sequence"]
+        for event in events
+        if event.event_type == "JOB_CHECKPOINTED"
+    ]
+    assert payloads == [1, 2]
+
+
+def test_cctx0_checkpoint_operation_replay_is_idempotent(tmp_path):
+    runtime, lease, _epoch, generation = _started(tmp_path)
+    harness = runtime.operator_harness
+    operation = OperationId("ohf-op:checkpoint-replay")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=operation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    observation = _checkpoint("replay")
+    first = harness.apply_checkpoint_operation(
+        generation=generation,
+        operation_id=operation,
+        observation=observation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    second = harness.apply_checkpoint_operation(
+        generation=generation,
+        operation_id=operation,
+        observation=observation,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    assert second == first
+    with pytest.raises(StateConflict, match="checkpoint operation INTENT preconditions failed"):
+        harness.reserve_checkpoint_operation(
+            generation=generation,
+            operation_id=operation,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        )
+    with pytest.raises(StateConflict, match="does not match INTENT"):
+        harness.apply_checkpoint_operation(
+            generation=generation,
+            operation_id=OperationId("ohf-op:checkpoint-no-intent"),
+            observation=observation,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        )
+    with runtime.store.read() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CHECKPOINTED'"
+        ).fetchone()[0]
+    assert count == 1
+
+
+def test_cctx0_checkpoint_survives_runtime_restart_and_preserves_intent(tmp_path):
+    runtime, lease, _epoch, generation = _started(tmp_path)
+    harness = runtime.operator_harness
+    _commit(runtime, lease, generation, "restart-1", "restart-candidate-1")
+    pending = OperationId("ohf-op:restart-pending")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=pending,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    database = tmp_path / "data" / "control_plane" / "executive.sqlite3"
+    restarted = Runtime.from_store(
+        RuntimeStore(tmp_path, database_path=database)
+    )
+    attempt = restarted.attempts.get_attempt(lease.attempt.attempt_id)
+    assert attempt is not None and attempt.checkpoint_sequence == 1
+    job = restarted.jobs.get_job(str(lease.attempt.job_id))
+    assert job is not None
+    assert job.checkpoint["current_state"] == "restart-candidate-1"
+    with restarted.store.read() as connection:
+        stored = connection.execute(
+            "SELECT checkpoint_json FROM attempts WHERE attempt_id=?",
+            (lease.attempt.attempt_id,),
+        ).fetchone()
+    assert stored is not None
+    assert _json_loads(stored["checkpoint_json"], fallback={}) == job.checkpoint
+    applied = restarted.operator_harness.apply_checkpoint_operation(
+        generation=generation,
+        operation_id=pending,
+        observation=_checkpoint("restart-candidate-2"),
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    assert applied.checkpoint["current_state"] == "restart-candidate-2"
+
+
+def _orchestration_checkpoint_fixture(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-a",
+        provider="codex",
+        account_label="worker-a@company",
+        worker_type="mock",
+        capabilities=["read", "research"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "capabilities": ["read", "research"],
+                "cost_class": "small",
+            }
+        },
+    )
+    receipt = submit_intent(
+        runtime,
+        {
+            "schema": INTENT_SCHEMA_V2,
+            "intent_id": "CEO-CCTX0-D7",
+            "actor": "ceo-sol",
+            "objective": "CCTX0 generation-bound checkpoint fence",
+            "department": "executive-infrastructure",
+            "priority": 9,
+            "grounding": {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+            "execution_contract": {
+                "requested_authorities": ["READ"],
+                "attempt_limit": 2,
+            },
+            "intent_kind": "executive_coo_cycle",
+            "business_impact": "material",
+        },
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1"
+        ),
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    assert dispatch.lease_token is not None
+    harness = runtime.operator_harness
+
+    class DispatchLease:
+        attempt = dispatch.attempt
+
+    profile = _profile(DispatchLease())
+    sealed = harness.seal_operator_harness_attempt(
+        dispatch.attempt.attempt_id,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+    )
+    start = OperationId("ohf-op:cctx0-d7-start")
+    epoch, generation = harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        operation_id=start,
+    )
+    process = ProcessIdentityObservation(2101, 2101, "cctx0-start", "boot")
+    harness.bind_start_result(
+        epoch=epoch,
+        generation=generation,
+        operation_id=start,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        provider_session_id="S1",
+        process=process,
+    )
+    principal = OperatorPrincipalObservation(
+        attempt_id=sealed.attempt_id,
+        worker_id=sealed.worker_id,
+        process_generation_id=generation.process_generation_id,
+        provider_session_id="S1",
+        process_identity={
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        },
+        os_principal_name="fixture-principal",
+        os_principal_uid=os.getuid(),
+        provider_home_identity={
+            "path": "/tmp/cctx0-codex-home",
+            "device": 1,
+            "inode": 2,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "mode": 0o700,
+        },
+        observed_at_ms=runtime.store.now_ms(),
+    )
+    harness.seal_attestation(
+        generation=generation,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+        attestation=_attestation(profile),
+        principal_observation=principal,
+    )
+    turn = harness.reserve_turn(
+        epoch=epoch,
+        generation=generation,
+        operation_id=OperationId("ohf-op:cctx0-d7-turn"),
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    harness.acknowledge_turn(
+        turn=turn,
+        operation_id=OperationId("ohf-op:cctx0-d7-turn"),
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        observation=TurnStartObservation("native-cctx0", True),
+    )
+    checkpoint_operation = OperationId("ohf-op:cctx0-d7-checkpoint")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=checkpoint_operation,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    harness.apply_checkpoint_operation(
+        generation=generation,
+        operation_id=checkpoint_operation,
+        observation=_checkpoint("d7"),
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    harness.record_reconcile_observation(
+        generation=generation,
+        observation=ReconcileObservation(
+            process_liveness=ProcessLiveness.PROVEN_DEAD,
+            observed_process=process,
+            provider_session_reachable=True,
+            provider_writer_state=ProviderWriterState.RELEASED,
+            observed_provider_session_id="S1",
+        ),
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    return runtime, dispatch
+
+
+def test_cctx0_checkpoint_closes_g1_and_legacy_refusal_remains(tmp_path):
+    runtime, dispatch = _orchestration_checkpoint_fixture(tmp_path)
+    assert dispatch.lease_token is not None
+    start = runtime.events.get_event_by_command_id("ohf-op:cctx0-d7-start")
+    assert start is not None
+    epoch, generation = runtime.operator_harness.generation_refs(
+        str(start.payload.get("process_generation_id") or "")
+    )
+    with pytest.raises(
+        StateConflict,
+        match="orchestration G1 recovery was closed by durable work evidence",
+    ):
+        runtime.operator_harness.reserve_same_epoch_resume(
+            epoch=epoch,
+            old_generation=generation,
+            operation_id=OperationId("ohf-op:cctx0-d7-resume"),
+            fence_generation=dispatch.attempt.fence_generation,
+            lease_token=dispatch.lease_token,
+        )
+    with runtime.store.read() as connection:
+        checkpoint_events = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CHECKPOINTED'",
+        ).fetchone()[0]
+    assert checkpoint_events == 1
+    checkpoint_operation = OperationId("ohf-op:cctx0-d7-checkpoint")
+    applied = runtime.events.get_event_by_command_id(
+        operation_receipt_command_id(
+            checkpoint_operation, OperationReceiptKind.APPLIED
+        )
+    )
+    assert applied is not None
+    assert (
+        applied.payload["schema_version"]
+        == OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION
+    )
+    assert applied.payload["checkpoint_sequence"] == 1
+    checkpoint_event = runtime.events.list_events(
+        job_id=str(dispatch.attempt.job_id)
+    )
+    assert any(
+        event.event_type == "JOB_CHECKPOINTED"
+        and event.payload == {"checkpoint_sequence": 1}
+        for event in checkpoint_event
+    )
+    with pytest.raises(
+        StateConflict,
+        match="orchestration OHF checkpoints require a generation-bound API",
+    ):
+        runtime.attempts.checkpoint_attempt(
+            dispatch.attempt.attempt_id,
+            fence_generation=dispatch.attempt.fence_generation,
+            lease_token=dispatch.lease_token,
+            payload={"legacy": "refused"},
+        )
+
+
 def test_tx1_to_tx5_is_event_plane_only_and_never_uses_legacy_identity(tmp_path):
     runtime, lease = _lease(tmp_path)
     harness = runtime.operator_harness
@@ -92,7 +608,7 @@ def test_tx1_to_tx5_is_event_plane_only_and_never_uses_legacy_identity(tmp_path)
     assert sealed.execution_mode == "OPERATOR_HARNESS"
     epoch, generation = harness.reserve_start(
         sealed.attempt_id,
-        fence_generation=sealed.fence_generation,
+        fence_generation=lease.attempt.fence_generation,
         lease_token=lease.lease_token,
         operation_id=OperationId("ohf-op:start-1"),
     )

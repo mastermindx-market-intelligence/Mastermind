@@ -32,6 +32,11 @@ from integrations.business_mcp_auth.metadata import (
     www_authenticate,
 )
 from integrations.mastermind_secretary_mcp.server import SecretaryGroundingContractServer
+from integrations.mastermind_steward_app.live_window import (
+    LiveWindowConfig,
+    LiveWindowDispatch,
+    live_window_reader,
+)
 from integrations.mastermind_steward_app.server import REQUIRED_SCOPE, build_mcp_server
 
 __all__ = ["build_authenticated_app"]
@@ -406,6 +411,7 @@ def build_authenticated_app(
     policy: ResourcePolicy,
     token_verifier: MastermindTokenVerifier,
     allowed_origins: Sequence[str] = ("https://chatgpt.com",),
+    live_window: LiveWindowConfig | None = None,
 ) -> Starlette:
     """Build one stateless A1-authenticated, read-only Steward MCP app."""
 
@@ -477,7 +483,24 @@ def build_authenticated_app(
             methods=["POST"],
         ),
     ]
-    middleware = [
+    middleware = []
+    if live_window is not None:
+        # One optional exact-path mount on the existing host; any refusal here
+        # happens before the Steward stack is assembled.
+        window_reader, window_path = live_window_reader(
+            live_window,
+            steward_resource=policy.resource,
+            reserved_paths=(resource_path, metadata_path, "/healthz", "/readyz"),
+        )
+        middleware.append(
+            Middleware(
+                LiveWindowDispatch,
+                reader=window_reader,
+                path=window_path,
+                canonical_raw_path=_canonical_raw_path,
+            )
+        )
+    middleware += [
         Middleware(_StewardTransportGuard,
             resource_path=resource_path,
             metadata_path=metadata_path,

@@ -292,6 +292,17 @@ class AppServerStopProof:
     termination_outcome: str
 
 
+@dataclass(frozen=True, slots=True)
+class ObserverFault:
+    """Bounded metadata for an observer-local extraction failure."""
+
+    operation: str
+    exception_type: str
+
+
+MAX_OBSERVER_FAULTS = 16
+
+
 class AppServerClient:
     """Line-delimited JSON-RPC client.  Codex omits the jsonrpc header on the wire."""
 
@@ -325,6 +336,8 @@ class AppServerClient:
         self.start_new_session = start_new_session
         self._private_pgid: int | None = None
         self.last_termination_outcome: str | None = None
+        self.visible_projection = None
+        self.observer_faults: tuple[ObserverFault, ...] = ()
 
     def start(self) -> None:
         self.proc = subprocess.Popen(
@@ -370,6 +383,8 @@ class AppServerClient:
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError:
+                if self.visible_projection is not None:
+                    self.visible_projection.record_parser_failure()
                 with self._notification_condition:
                     raw_pending = bool(self._raw_responses)
                 if raw_pending:
@@ -378,6 +393,20 @@ class AppServerClient:
                 self._stdout.put({"_malformed": True, "raw": redact_text(line)})
                 continue
             if isinstance(payload, dict):
+                prebind_request_id: int | None = None
+                if self.visible_projection is not None:
+                    try:
+                        prebind_request_id = (
+                            self.visible_projection.active_prebind_request_id()
+                        )
+                        self.visible_projection.prebind_frame(
+                            prebind_request_id,
+                            method=payload.get("method"),
+                            params=payload.get("params"),
+                        )
+                    except Exception as exc:
+                        prebind_request_id = None
+                        self._record_observer_fault("prebind_frame", exc)
                 with self._notification_condition:
                     response_id = payload.get("id")
                     raw_target = (
@@ -418,6 +447,14 @@ class AppServerClient:
                     else:
                         self.notifications.append(observed)
                         self._notification_condition.notify_all()
+                if self.visible_projection is not None:
+                    try:
+                        self.visible_projection.publish_demultiplexed(
+                            prebind_request_id,
+                            payload=payload,
+                        )
+                    except Exception as exc:
+                        self._record_observer_fault("publish_demultiplexed", exc)
         with self._notification_condition:
             self._transport_closed = True
             for target in self._responses.values():
@@ -425,6 +462,10 @@ class AppServerClient:
             for target in self._raw_responses.values():
                 target.put(None)
             self._notification_condition.notify_all()
+
+    def _record_observer_fault(self, operation: str, exc: Exception) -> None:
+        fault = ObserverFault(operation, type(exc).__name__)
+        self.observer_faults = (*self.observer_faults, fault)[-MAX_OBSERVER_FAULTS:]
 
     def _compromise_transport(self) -> None:
         """Fail every waiter without retaining or echoing a compromised frame."""
@@ -495,12 +536,16 @@ class AppServerClient:
             try:
                 payload = response_queue.get(timeout=timeout)
             except queue.Empty as exc:
+                if self.visible_projection is not None:
+                    self.visible_projection.drop_prebind("response_timeout")
                 raise JsonRpcError(f"timeout waiting for {method}") from exc
             if payload is None:
                 raise JsonRpcError(f"app-server exited before answering {method}")
             if payload.get("_transport_failure"):
                 raise JsonRpcError("app-server transport compromised")
             if "error" in payload:
+                if self.visible_projection is not None:
+                    self.visible_projection.drop_prebind("response_error")
                 raise JsonRpcError(
                     redact_text(
                         str(
@@ -513,8 +558,23 @@ class AppServerClient:
             result = payload.get("result")
             return result if isinstance(result, dict) else {"value": result}
         finally:
+            if isinstance(payload, dict) and payload.get("_transport_failure"):
+                if self.visible_projection is not None:
+                    self.visible_projection.drop_prebind("transport_failure")
+            if self.visible_projection is not None:
+                self.visible_projection.drop_expired_prebind()
             with self._notification_condition:
                 self._responses.pop(request_id, None)
+
+    def arm_prebind(self, request_id: int | None) -> None:
+        if request_id is None or request_id != self._next_id:
+            return
+        if self.visible_projection is not None:
+            self.visible_projection.arm_prebind(request_id)
+
+    def next_request_id(self) -> int:
+        with self._notification_condition:
+            return self._next_id
 
     def request_raw_turn_page(
         self,

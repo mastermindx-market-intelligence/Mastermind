@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import struct
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -28,6 +29,7 @@ def host():
 
 
 def valid_request(action: str = "INSPECT") -> dict:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
     return {
         "schema": wsp.ACTION_SCHEMA,
         "binding_id": "11111111-1111-4111-8111-111111111111",
@@ -35,10 +37,33 @@ def valid_request(action: str = "INSPECT") -> dict:
         "binding_fingerprint": HEX_B,
         "action": action,
         "operation_key": "web-sol-surface-adapter-s0s1-20260829-sol-001",
-        "issued_at": "2026-08-29T05:00:00Z",
-        "expires_at": "2026-08-29T05:00:30Z",
+        "issued_at": now.isoformat().replace("+00:00", "Z"),
+        "expires_at": (now + timedelta(seconds=30)).isoformat().replace("+00:00", "Z"),
         "nonce": "nonce-0000000000000001",
     }
+
+
+def typed_reentry_request(**overrides) -> dict:
+    request = valid_request("TYPED_REENTRY")
+    request.update(
+        {
+            "operation_id": "e" * 64,
+            "result_digest": "c" * 64,
+            "obligation_digest": "d" * 64,
+        }
+    )
+    request.update(overrides)
+    return request
+
+
+def fresh_typed_reentry_request(**overrides) -> dict:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    request = typed_reentry_request(
+        issued_at=now.isoformat().replace("+00:00", "Z"),
+        expires_at=(now + timedelta(seconds=30)).isoformat().replace("+00:00", "Z"),
+        **overrides,
+    )
+    return request
 
 
 def observation(*, exact: bool = True) -> dict:
@@ -63,7 +88,7 @@ def valid_receipt(request: dict, *, status: str | None = None) -> dict:
             if request["action"] == "FOREGROUND"
             else "INSPECTED"
         )
-    return {
+    result = {
         "schema": wsp.RECEIPT_SCHEMA,
         "binding_id": request["binding_id"],
         "conversation_fingerprint": request["conversation_fingerprint"],
@@ -75,6 +100,15 @@ def valid_receipt(request: dict, *, status: str | None = None) -> dict:
         "observed_at": "2026-08-29T05:00:01Z",
         "observation": observation(),
     }
+    if request["action"] == "TYPED_REENTRY":
+        result.update(
+            {
+                "operation_id": request["operation_id"],
+                "result_digest": request["result_digest"],
+                "obligation_digest": request["obligation_digest"],
+            }
+        )
+    return result
 
 
 def test_module_is_initially_missing_red():
@@ -212,6 +246,185 @@ def test_forward_ignores_bounded_probe_event_and_accepts_one_exact_receipt():
     )
     assert writes == [request]
     assert result == receipt
+
+
+@pytest.fixture(autouse=True)
+def clear_typed_reentry_ledger():
+    native_module = host()
+    native_module._TYPED_REENTRY_NONCES.clear()
+    yield
+    native_module._TYPED_REENTRY_NONCES.clear()
+
+def test_typed_reentry_forwards_one_closed_request_and_closed_conversation_receipt():
+    module = host()
+    request = fresh_typed_reentry_request()
+    receipt = valid_receipt(request, status="CONVERSATION_CLOSED")
+    receipt["observation"] = observation(exact=False)
+    writes: list[dict] = []
+
+    result = module.forward_request(
+        request,
+        write_chrome=writes.append,
+        read_chrome=lambda _timeout: receipt,
+        timeout_seconds=1.0,
+    )
+    assert writes == [request]
+    assert result == receipt
+
+
+def test_typed_reentry_expired_request_has_zero_host_side_effects():
+    module = host()
+    request = typed_reentry_request(
+        issued_at="2000-01-01T00:00:00Z",
+        expires_at="2000-01-01T00:00:30Z",
+    )
+    writes: list[dict] = []
+
+    with pytest.raises(wsp.WebSolProtocolError, match="expired"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: None,
+            timeout_seconds=1.0,
+        )
+    assert writes == []
+    assert module._TYPED_REENTRY_NONCES.isdisjoint({request["nonce"]})
+
+
+def test_typed_reentry_timeout_after_write_remains_non_retryable():
+    module = host()
+    request = fresh_typed_reentry_request(nonce="timeout-nonce-0000000001")
+    writes: list[dict] = []
+
+    with pytest.raises(module.NativeHostError, match="typed_reentry_timeout"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: None,
+            timeout_seconds=0.01,
+        )
+    with pytest.raises(module.NativeHostError, match="nonce_reused"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: None,
+            timeout_seconds=0.01,
+        )
+    assert len(writes) == 1
+    assert request["nonce"] in module._TYPED_REENTRY_NONCES
+
+
+def test_typed_reentry_nonce_ledger_is_explicitly_bounded_and_refuses_closed():
+    module = host()
+    original_limit = module.MAX_TYPED_REENTRY_NONCES
+    module.MAX_TYPED_REENTRY_NONCES = 1
+    writes: list[dict] = []
+
+    def forward(nonce: str):
+        request = fresh_typed_reentry_request(nonce=nonce)
+        return module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: valid_receipt(request, status="CONSUMED"),
+            timeout_seconds=1.0,
+        )
+
+    forward("ledger-nonce-0000000001")
+    request = fresh_typed_reentry_request(nonce="ledger-nonce-0000000002")
+    with pytest.raises(wsp.WebSolProtocolError, match="nonce ledger full") as caught:
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: None,
+            timeout_seconds=1.0,
+        )
+    assert str(caught.value).startswith("$.nonce:")
+    assert len(writes) == 1
+    assert len(module._TYPED_REENTRY_NONCES) == 1
+    module.MAX_TYPED_REENTRY_NONCES = original_limit
+
+
+def test_typed_reentry_native_documents_validate_and_nonce_is_reused():
+    module = host()
+    request = fresh_typed_reentry_request()
+    writes: list[dict] = []
+
+    module.forward_request(
+        request,
+        write_chrome=writes.append,
+        read_chrome=lambda _timeout: valid_receipt(request, status="CONSUMED"),
+        timeout_seconds=1.0,
+    )
+    with pytest.raises(module.NativeHostError, match="nonce_reused"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: valid_receipt(request, status="CONSUMED"),
+            timeout_seconds=1.0,
+        )
+    assert len(writes) == 1
+    assert request["nonce"] in module._TYPED_REENTRY_NONCES
+
+
+def test_typed_reentry_duplicate_nonce_is_refused_before_transport_or_retry():
+    module = host()
+    request = fresh_typed_reentry_request()
+    writes: list[dict] = []
+
+    module.forward_request(
+        request,
+        write_chrome=writes.append,
+        read_chrome=lambda _timeout: valid_receipt(request, status="CONSUMED"),
+        timeout_seconds=1.0,
+    )
+    with pytest.raises(module.NativeHostError, match="nonce_reused") as caught:
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: valid_receipt(request, status="CONSUMED"),
+            timeout_seconds=1.0,
+        )
+    assert caught.value.code == "nonce_reused"
+    assert len(writes) == 1
+
+
+def test_typed_reentry_timeout_after_write_never_retries_the_same_nonce():
+    module = host()
+    request = fresh_typed_reentry_request(nonce="timeout-nonce-0000000001")
+    writes: list[dict] = []
+
+    with pytest.raises(module.NativeHostError, match="typed_reentry_timeout"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: None,
+            timeout_seconds=0.01,
+        )
+    with pytest.raises(module.NativeHostError, match="nonce_reused"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: None,
+            timeout_seconds=0.01,
+        )
+    assert len(writes) == 1
+
+
+def test_typed_reentry_fingerprint_mismatch_receipt_never_retries():
+    module = host()
+    request = fresh_typed_reentry_request()
+    receipt = valid_receipt(request, status="CONSUMED")
+    receipt["conversation_fingerprint"] = "e" * 64
+    writes: list[dict] = []
+
+    with pytest.raises(module.NativeHostError, match="typed_reentry_effect_unknown"):
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: receipt,
+            timeout_seconds=1.0,
+        )
+    assert len(writes) == 1
 
 
 @pytest.mark.parametrize(

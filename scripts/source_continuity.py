@@ -13,6 +13,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from http import HTTPStatus
 import json
 import math
 import os
@@ -21,6 +22,11 @@ import re
 import stat
 import subprocess
 import sys
+
+# This read-only adapter audits ignored/untracked repository state. Prevent its
+# own repository imports from creating bytecode dirt before that audit runs.
+sys.dont_write_bytecode = True
+
 from threading import Lock
 from time import monotonic
 from typing import Callable, Mapping, Sequence
@@ -34,6 +40,8 @@ if str(ROOT) not in sys.path:
 
 from control_plane.source_continuity import (  # noqa: E402
     BranchEffectDependency,
+    BranchRuleFact,
+    BypassActorFact,
     CollisionState,
     ExternalEffectEvidence,
     ExternalEffectState,
@@ -42,11 +50,16 @@ from control_plane.source_continuity import (  # noqa: E402
     RefusalCode,
     RemoteGitFacts,
     RemotePathEntry,
+    RulesetFact,
     SourceContinuityRefusal,
     SourceContinuityRequest,
+    WriterGateFacts,
+    WriterGateRequest,
     canonical_json,
     request_is_valid,
     verify_source_continuity,
+    verify_technical_writer_gate,
+    writer_gate_request_is_valid,
 )
 
 _GIT = "/usr/bin/git"
@@ -61,11 +74,11 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 10
 _MAX_FOREIGN_FILE_PAGES = 30
 _FOREIGN_PR_WORKERS = 4
-_MAX_COLLISION_PRS = 256
+_MAX_COLLISION_PRS = 4 * _PAGE_SIZE
 # One invocation-local cooperative budget spans both observations, not hard preemption.
-_MAX_HTTP_CALLS = 640
-_HTTP_READ_BUDGET_SECONDS = 180.0
-_MAX_HTTP_NORMALIZED_BYTES = 32 * 1024 * 1024
+_MAX_HTTP_CALLS = 1152
+_HTTP_READ_BUDGET_SECONDS = 300.0
+_MAX_HTTP_NORMALIZED_BYTES = 96 * 1024 * 1024
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _HOLD_LABELS = frozenset({"hold", "hold-for-sol", "hold_for_sol"})
@@ -128,6 +141,25 @@ class _RemoteProbeError(Exception):
     pass
 
 
+class _RemoteResourceMissing(_RemoteProbeError):
+    """A 404 on an endpoint whose absence is itself a lawful observation.
+
+    Subclasses `_RemoteProbeError` so every existing caller keeps failing
+    closed unchanged; only an explicit optional readback may read it as
+    absence. Transports signal it by the marker attribute, not by class
+    identity, so an injected transport can raise its own type.
+    """
+
+    source_continuity_resource_missing = True
+
+
+_MISSING = object()
+
+
+def _is_resource_missing(error: BaseException) -> bool:
+    return getattr(error, "source_continuity_resource_missing", False) is True
+
+
 class _ReadBudgetExceeded(Exception):
     pass
 
@@ -143,6 +175,80 @@ class _HTTPRepresentation:
 class _ConditionalObservation:
     url: str
     etag: str
+    roster_semantics: object
+
+
+# A changed HTTP 200 is semantically revalidatable only for the open-PR roster
+# pages used by the collision census. Every other endpoint keeps the original
+# unconditional changed-representation refusal required by #346.
+_UNPROVABLE = object()
+
+
+def _open_pull_roster_semantics(url: object, payload: object) -> object:
+    if not isinstance(url, str) or not url.startswith(_API_ROOT + "/repos/"):
+        return _UNPROVABLE
+    path, separator, query = url.partition("?")
+    if separator != "?":
+        return _UNPROVABLE
+    segments = path[len(_API_ROOT) + 1 :].split("/")
+    if len(segments) != 4 or segments[0] != "repos" or segments[3] != "pulls":
+        return _UNPROVABLE
+
+    pairs: list[tuple[str, str]] = []
+    for raw_part in query.split("&"):
+        key, equals, value = raw_part.partition("=")
+        if equals != "=" or not key:
+            return _UNPROVABLE
+        pairs.append((key, value))
+    if len(pairs) != 3 or len({key for key, _ in pairs}) != 3:
+        return _UNPROVABLE
+    params = dict(pairs)
+    page = params.get("page")
+    if (
+        params.get("state") != "open"
+        or params.get("per_page") != str(_PAGE_SIZE)
+        or page is None
+        or not page.isdigit()
+        or int(page) <= 0
+        or int(page) > _MAX_PAGES
+    ):
+        return _UNPROVABLE
+
+    if not isinstance(payload, list) or len(payload) > _PAGE_SIZE:
+        return _UNPROVABLE
+    rows: list[tuple[int, str, str, str, str]] = []
+    seen_numbers: set[int] = set()
+    for row in payload:
+        if not isinstance(row, dict):
+            return _UNPROVABLE
+        number = row.get("number")
+        head = row.get("head")
+        base = row.get("base")
+        if type(number) is not int or number <= 0 or number in seen_numbers:
+            return _UNPROVABLE
+        if not isinstance(head, dict) or not isinstance(base, dict):
+            return _UNPROVABLE
+        head_repo = head.get("repo")
+        base_repo = base.get("repo")
+        if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
+            return _UNPROVABLE
+        head_sha = head.get("sha")
+        base_sha = base.get("sha")
+        head_repository = head_repo.get("full_name")
+        base_repository = base_repo.get("full_name")
+        if (
+            not _is_sha(head_sha)
+            or not _is_sha(base_sha)
+            or not _is_safe_repository(head_repository)
+            or not _is_safe_repository(base_repository)
+        ):
+            return _UNPROVABLE
+        state = row.get("state")
+        if state is not None and state != "open":
+            return _UNPROVABLE
+        seen_numbers.add(number)
+        rows.append((number, head_sha, head_repository, base_sha, base_repository))
+    return tuple(sorted(rows))
 
 
 class _BoundedHTTPGet:
@@ -152,6 +258,8 @@ class _BoundedHTTPGet:
         self._calls = 0
         self._bytes = 0
         self._conditional_observations: list[_ConditionalObservation] = []
+        self._semantic_revalidations: list[str] = []
+        self._missing_observations: list[str] = []
         self.parallel_safe = (
             transport is _stdlib_http_get
             or getattr(transport, "_source_continuity_parallel_safe", False) is True
@@ -240,20 +348,43 @@ class _BoundedHTTPGet:
                 raise _RemoteProbeError()
             representation = payload
             self._account_payload(representation.payload)
+            roster_semantics = _open_pull_roster_semantics(url, representation.payload)
             with self._lock:
                 self._conditional_observations.append(
-                    _ConditionalObservation(url=url, etag=representation.etag)
+                    _ConditionalObservation(
+                        url=url,
+                        etag=representation.etag,
+                        roster_semantics=roster_semantics,
+                    )
                 )
             return representation.payload
 
         self._account_payload(payload)
         return payload
 
+    def get_optional(self, url: str, *, token: str, timeout: float) -> object:
+        """GET a resource that may lawfully be absent.
+
+        Only an absence the transport marks as such becomes `_MISSING`; every
+        other failure propagates and fails closed. The absence is recorded so
+        a resource that appears mid-proof is caught as a change.
+        """
+
+        try:
+            return self(url, token=token, timeout=timeout)
+        except Exception as error:
+            if not _is_resource_missing(error):
+                raise
+        with self._lock:
+            self._missing_observations.append(url)
+        return _MISSING
+
     def validate_unchanged(self, *, token: str) -> bool:
         if not self.conditional_validation_available:
             raise _RemoteProbeError()
         with self._lock:
             observations = tuple(self._conditional_observations)
+            absences = tuple(self._missing_observations)
         for observation in observations:
             call_timeout = self._admit_call(_HTTP_TIMEOUT_SECONDS)
             payload = self._transport(
@@ -273,9 +404,32 @@ class _BoundedHTTPGet:
                     raise _RemoteProbeError()
                 continue
             if payload.not_modified is False:
+                # Account every changed body before deciding. Only an open-PR roster
+                # page may survive changed representation, and only with identical
+                # collision-roster semantics. All other endpoints refuse here.
                 self._account_payload(payload.payload)
-                return False
+                with self._lock:
+                    self._semantic_revalidations.append(observation.url)
+                if observation.roster_semantics is _UNPROVABLE:
+                    return False
+                if (
+                    _open_pull_roster_semantics(observation.url, payload.payload)
+                    != observation.roster_semantics
+                ):
+                    return False
+                continue
             raise _RemoteProbeError()
+        for url in absences:
+            call_timeout = self._admit_call(_HTTP_TIMEOUT_SECONDS)
+            try:
+                payload = self._transport(url, token=token, timeout=call_timeout)
+            except Exception as error:
+                if _is_resource_missing(error):
+                    continue
+                raise
+            if isinstance(payload, _HTTPRepresentation):
+                self._account_payload(payload.payload)
+            return False
         return True
 
 
@@ -497,6 +651,8 @@ def _stdlib_http_get(
             return _HTTPRepresentation(payload=None, etag=etag, not_modified=True)
         if exc.code in {401, 403}:
             raise _AuthProbeError() from None
+        if exc.code == HTTPStatus.NOT_FOUND:
+            raise _RemoteResourceMissing() from None
         raise _RemoteProbeError() from None
     except (URLError, TimeoutError, OSError):
         raise _RemoteProbeError() from None
@@ -522,8 +678,40 @@ def _api(http_get: HTTPGet, token: str, endpoint: str) -> object:
     )
 
 
+def _api_optional(http_get: HTTPGet, token: str, endpoint: str) -> object:
+    """Read an endpoint whose absence is a lawful observation, else `_MISSING`."""
+
+    if not isinstance(endpoint, str) or endpoint.startswith(("http://", "https://")):
+        raise _RemoteProbeError()
+    url = f"{_API_ROOT}/{endpoint}"
+    optional = getattr(http_get, "get_optional", None)
+    if optional is not None:
+        return optional(url, token=token, timeout=_HTTP_TIMEOUT_SECONDS)
+    try:
+        return http_get(url, token=token, timeout=_HTTP_TIMEOUT_SECONDS)
+    except Exception as error:
+        if not _is_resource_missing(error):
+            raise
+    return _MISSING
+
+
 def _branch_endpoint(repository: str, branch: str) -> str:
     return f"repos/{repository}/branches/{quote(branch, safe='')}"
+
+
+def _branch_protection_endpoint(repository: str, branch: str) -> str:
+    return f"repos/{repository}/branches/{quote(branch, safe='')}/protection"
+
+
+def _branch_rules_endpoint(repository: str, branch: str) -> str:
+    return f"repos/{repository}/rules/branches/{quote(branch, safe='')}"
+
+
+def _ruleset_endpoint(repository: str, source_type: str, ruleset_id: int) -> str:
+    if source_type == "Repository":
+        return f"repos/{repository}/rulesets/{ruleset_id}"
+    organization = repository.split("/", 1)[0]
+    return f"orgs/{organization}/rulesets/{ruleset_id}"
 
 
 def _pull_files_endpoint(repository: str, pr_number: int, page: int) -> str:
@@ -1626,6 +1814,192 @@ def _remote_still_matches(
     return None
 
 
+def _is_github_id(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= 2_147_483_647
+
+
+def _parse_branch_rules(payload: object) -> tuple[BranchRuleFact, ...]:
+    if not isinstance(payload, list):
+        raise _RemoteProbeError()
+    rules: list[BranchRuleFact] = []
+    for row in payload:
+        if not isinstance(row, dict):
+            raise _RemoteProbeError()
+        rule_type = row.get("type")
+        ruleset_id = row.get("ruleset_id")
+        source_type = row.get("ruleset_source_type")
+        if (
+            not isinstance(rule_type, str)
+            or not rule_type
+            or not _is_github_id(ruleset_id)
+            or not isinstance(source_type, str)
+            or not source_type
+        ):
+            raise _RemoteProbeError()
+        rules.append(
+            BranchRuleFact(
+                rule_type=rule_type,
+                ruleset_id=ruleset_id,
+                ruleset_source_type=source_type,
+            )
+        )
+    return tuple(rules)
+
+
+def _parse_ruleset(payload: object, ruleset_id: int, source_type: str) -> RulesetFact:
+    if not isinstance(payload, dict):
+        raise _RemoteProbeError()
+    enforcement = payload.get("enforcement")
+    actors = payload.get("bypass_actors")
+    if (
+        payload.get("id") != ruleset_id
+        or payload.get("source_type") != source_type
+        or not isinstance(enforcement, str)
+        or not isinstance(actors, list)
+    ):
+        raise _RemoteProbeError()
+    parsed: list[BypassActorFact] = []
+    for actor in actors:
+        if not isinstance(actor, dict):
+            raise _RemoteProbeError()
+        actor_type = actor.get("actor_type")
+        bypass_mode = actor.get("bypass_mode")
+        actor_id = actor.get("actor_id")
+        if (
+            not isinstance(actor_type, str)
+            or not isinstance(bypass_mode, str)
+            or not (actor_id is None or _is_github_id(actor_id))
+        ):
+            raise _RemoteProbeError()
+        parsed.append(
+            BypassActorFact(actor_type=actor_type, actor_id=actor_id, bypass_mode=bypass_mode)
+        )
+    return RulesetFact(
+        ruleset_id=ruleset_id,
+        source_type=source_type,
+        enforcement=enforcement,
+        bypass_actors=tuple(parsed),
+    )
+
+
+def _probe_writer_gate_facts(
+    http_get: HTTPGet,
+    token: str,
+    request: WriterGateRequest,
+) -> WriterGateFacts | SourceContinuityRefusal:
+    branch_payload = _api(
+        http_get,
+        token,
+        _branch_endpoint(request.repository, request.branch),
+    )
+    if not isinstance(branch_payload, dict):
+        raise _RemoteProbeError()
+    branch_commit = branch_payload.get("commit")
+    # The summary `protected` flag covers branch protections *or* rulesets, so
+    # it is only a shape check here. Classic protection is its own readback.
+    summary_protected = branch_payload.get("protected")
+    if (
+        not isinstance(branch_commit, dict)
+        or not _is_sha(branch_commit.get("sha"))
+        or type(summary_protected) is not bool
+    ):
+        raise _RemoteProbeError()
+
+    protection = _api_optional(
+        http_get,
+        token,
+        _branch_protection_endpoint(request.repository, request.branch),
+    )
+    if protection is _MISSING:
+        legacy_branch_protected = False
+    elif isinstance(protection, dict):
+        legacy_branch_protected = True
+    else:
+        raise _RemoteProbeError()
+
+    rules = _parse_branch_rules(
+        _api(http_get, token, _branch_rules_endpoint(request.repository, request.branch))
+    )
+    referenced: dict[int, str] = {}
+    for rule in rules:
+        # Preserve every active applicable rule. The pure verifier owns the
+        # closed semantics and fails unknown future types unavailable rather
+        # than letting the adapter silently erase them.
+        if rule.ruleset_source_type not in {"Repository", "Organization"}:
+            return _refusal(RefusalCode.REMOTE_FACTS_INVALID, 2)
+        if referenced.setdefault(rule.ruleset_id, rule.ruleset_source_type) != rule.ruleset_source_type:
+            return _refusal(RefusalCode.REMOTE_FACTS_INVALID, 2)
+
+    rulesets = tuple(
+        _parse_ruleset(
+            _api(http_get, token, _ruleset_endpoint(request.repository, source_type, ruleset_id)),
+            ruleset_id,
+            source_type,
+        )
+        for ruleset_id, source_type in sorted(referenced.items())
+    )
+    return WriterGateFacts(
+        repository=request.repository,
+        branch=request.branch,
+        branch_head_sha=branch_commit["sha"],
+        legacy_branch_protected=legacy_branch_protected,
+        branch_rules=rules,
+        rulesets=rulesets,
+        readback_complete=True,
+    )
+
+
+def _run_writer_gate(
+    args: argparse.Namespace,
+    *,
+    http_get: HTTPGet,
+    environ: Mapping[str, str],
+    clock: Clock,
+) -> int:
+    try:
+        request = WriterGateRequest(
+            operation_key=args.operation_key,
+            repository=args.repository,
+            branch=args.branch,
+            accepted_integration_id=args.accepted_integration_id,
+            verified_at=clock(),
+        )
+    except Exception:
+        return _emit(_refusal(RefusalCode.INVALID_REQUEST, 2))
+    if not writer_gate_request_is_valid(request):
+        return _emit(_refusal(RefusalCode.INVALID_REQUEST, 2))
+
+    token = environ.get("GITHUB_TOKEN")
+    if not isinstance(token, str) or not token:
+        return _emit(_refusal(RefusalCode.AUTH_UNAVAILABLE, 2))
+
+    try:
+        bounded_get = _BoundedHTTPGet(http_get)
+        first = _probe_writer_gate_facts(bounded_get, token, request)
+        if isinstance(first, SourceContinuityRefusal):
+            return _emit(first)
+        result = verify_technical_writer_gate(request, first)
+        if getattr(bounded_get, "conditional_validation_available", False) is True:
+            unchanged = bounded_get.validate_unchanged(token=token)
+        else:
+            second = _probe_writer_gate_facts(bounded_get, token, request)
+            if isinstance(second, SourceContinuityRefusal):
+                return _emit(second)
+            unchanged = second == first
+        if not unchanged:
+            result = _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+        bounded_get.check()
+    except _ReadBudgetExceeded:
+        result = _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+    except _AuthProbeError:
+        result = _refusal(RefusalCode.AUTH_UNAVAILABLE, 2)
+    except _RemoteProbeError:
+        result = _refusal(RefusalCode.REMOTE_PROBE_FAILED, 2)
+    except Exception:
+        result = _refusal(RefusalCode.PROBE_INTERNAL_ERROR, 2)
+    return _emit(result)
+
+
 def _build_parser() -> _SafeArgumentParser:
     parser = _SafeArgumentParser(add_help=False)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1650,6 +2024,11 @@ def _build_parser() -> _SafeArgumentParser:
         choices=tuple(item.value for item in BranchEffectDependency),
     )
     verify.add_argument("--external-effect-evidence-fingerprint", required=True)
+    writer_gate = subparsers.add_parser("writer-gate", add_help=False)
+    writer_gate.add_argument("--operation-key", required=True)
+    writer_gate.add_argument("--repository", required=True)
+    writer_gate.add_argument("--branch", required=True)
+    writer_gate.add_argument("--accepted-integration-id", type=int, default=None)
     return parser
 
 
@@ -1663,6 +2042,12 @@ def main(
 ) -> int:
     try:
         args = _build_parser().parse_args(list(argv) if argv is not None else None)
+    except (Exception, SystemExit):
+        return _emit(_refusal(RefusalCode.INVALID_REQUEST, 2))
+    if args.command == "writer-gate":
+        return _run_writer_gate(args, http_get=http_get, environ=environ, clock=clock)
+
+    try:
         workspace = args.workspace
         if not isinstance(workspace, str) or not Path(workspace).is_absolute():
             raise ValueError("invalid workspace")
