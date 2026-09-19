@@ -61,7 +61,8 @@
     if (!failed.length) return null;
     const measured = Number.isSafeInteger(result.probed_tab_count) ? result.probed_tab_count : 0;
     const total = result.initial_tab_count;
-    if (failed.length === result.rows.length && failed.every(row => row.status === "PROBE_UNAVAILABLE")) {
+    if (result.rows.length === total && failed.length === result.rows.length &&
+        failed.every(row => row.status === "PROBE_UNAVAILABLE")) {
       return `Document probes unreachable (${measured}/${total}). If this extension was just installed or updated, reload one affected ChatGPT tab and refresh this snapshot.`;
     }
     return `Document probe coverage degraded (${measured}/${total}); ${failed.length} tab${failed.length === 1 ? "" : "s"} could not be sampled. Unknown cue state is not evidence that those chats are idle.`;
