@@ -1,6 +1,6 @@
 ---
 name: paper-design-workflow
-description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind local adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. Works with native MCP clients or ChatGPT Web through an authorized Remote Desktop Commander connection. Requires Paper Desktop running with the intended file open; setup, login and worker grants remain separate gates.
+description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind local adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. Works with native MCP clients or ChatGPT Web through the existing Studio Direct private MCP tunnel; Remote Desktop Commander remains a diagnostic/local-ops carrier, not a second Paper gateway. Requires Paper Desktop running with the intended file open; setup, login and worker grants remain separate gates.
 ---
 
 # Paper design workflow
@@ -12,10 +12,15 @@ Do not assume a sandbox file is on a Mac or treat an installation as a worker gr
 The runtime lives in an approved local install; discover its `INSTALLATION.json`
 rather than inventing a path. Read `references/connection.md` for both carriers.
 
-For web: discover Remote Desktop Commander schemas, list devices, select the
-intended authorized Mac and ping it. Use its process tools for the fixed bridge
-CLI and native file reader for returned PNG/JPEG paths. Keep one operation on its
-carrier. A timeout never proves the edit stopped or authorizes failover.
+For ChatGPT Web: prefer the existing Studio Direct gateway-owned
+`paper_inspect`, `paper_catalog`, `paper_read` and `paper_edit` tools when
+they are present. They invoke the same host-pinned guarded adapter and preserve
+native MCP image blocks. Do not public-tunnel Paper's raw loopback endpoint and do
+not create a second Paper gateway. Remote Desktop Commander may be used for
+authorized host diagnosis/install work or for a specifically assigned legacy
+session, but it is not the normal product carrier after Studio Direct enrollment.
+Keep one logical mutation on its carrier. A timeout never proves the edit stopped
+or authorizes failover.
 
 For native MCP: use `paper_inspect`, `paper_catalog`, `paper_read`, `paper_edit` only
 as exposed and approved in the current client. No tool discovery is permission.

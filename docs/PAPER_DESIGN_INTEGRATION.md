@@ -20,16 +20,18 @@ Local Claude/Codex/Cursor/OpenCode/VS Code client -> approved project-scoped MCP
 configuration -> `mcp_server.py` (official MCP SDK, stdio) -> `bridge.py` ->
 Paper's fixed loopback MCP `http://127.0.0.1:29979/mcp`.
 
-ChatGPT Web -> existing authorized Remote Desktop Commander -> same `bridge.py`
-CLI on the selected Mac -> same Paper endpoint. Images are saved to a private
-artifact directory and read with Remote Desktop Commander's native image reader.
-This uses the installed transport, not a second public gateway or new auth system.
-It works only in sessions/accounts with that app, device authorization and tool permission.
+ChatGPT Web -> existing Studio Direct private Secure MCP Tunnel -> Studio Direct
+gateway-owned `paper_inspect` / `paper_catalog` / `paper_read` / `paper_edit`
+tools -> the SAME SHA-pinned `bridge.py` -> Paper's fixed loopback endpoint.
+Screenshots remain native MCP image blocks. The Web caller cannot provide an
+arbitrary host path, Paper endpoint, account or credential.
 
-Optional dedicated ChatGPT app -> official OpenAI Secure MCP Tunnel -> the SAME
-stdio adapter. Enrollment is a separate admin/account action. Do not expose the
-raw unauthenticated Paper port through a public tunnel, add another OAuth service,
-or put design tools into Executive OS's bounded CEO-admission API.
+Studio Direct is the existing Web gateway/auth/transport owner; Paper does not get a
+second public gateway. Remote Desktop Commander remains an authorized local-ops and
+diagnostic carrier and supplied the original native proof, but is no longer the
+normal product path once a Studio Direct seat is Paper-enabled. Do not expose the raw
+unauthenticated Paper port through a public tunnel, add another OAuth service, or put
+design tools into Executive OS's bounded CEO-admission API.
 
 No MCP tool is disguised as read-only to bypass client write permissions.
 `paper_edit` is explicitly modifying/destructive/non-idempotent; it exists only
@@ -170,8 +172,9 @@ code output is a starting point, not automatic tested production implementation.
 1. Exact source runtime installed without changing other worker homes.
 2. Native MCP initialize/list and real CLI read against Paper after login/file-open.
 3. Approved scratch edit, screenshot, JSX extraction; no wrong-document changes.
-4. Fresh ChatGPT Web session runs the same journey through authorized RDC and sees
-   the image (or uses an enrolled dedicated MCP app with honest write annotations).
+4. Fresh ChatGPT Web session runs the same journey through a Paper-enabled Studio
+   Direct seat and receives the native MCP image/JSX result. Tunnel health alone is
+   not the design-journey proof.
 5. Existing capability registry attests a bounded worker; no second control plane.
 6. One real product design-to-code/browser journey before Figma retirement.
 
