@@ -164,3 +164,27 @@ def test_observer_extraction_fault_does_not_escape_receiver_demux(monkeypatch):
         laboratory.ObserverFault("publish_demultiplexed", "RuntimeError"),
     )
     assert projection._viewers_by_turn == {}
+
+
+def test_request_preserves_typed_send_failure_before_payload_exists(monkeypatch):
+    client = AppServerClient([], env={}, cwd=Path("."))
+
+    def fail_send(_message):
+        raise JsonRpcError("sentinel send failure")
+
+    monkeypatch.setattr(client, "_send", fail_send)
+
+    with pytest.raises(JsonRpcError, match="sentinel send failure"):
+        client.request("account/read", timeout=0.01)
+
+    assert client._responses == {}
+
+
+def test_request_preserves_typed_timeout_before_payload_exists(monkeypatch):
+    client = AppServerClient([], env={}, cwd=Path("."))
+    monkeypatch.setattr(client, "_send", lambda _message: None)
+
+    with pytest.raises(JsonRpcError, match="timeout waiting for account/read"):
+        client.request("account/read", timeout=0.001)
+
+    assert client._responses == {}
