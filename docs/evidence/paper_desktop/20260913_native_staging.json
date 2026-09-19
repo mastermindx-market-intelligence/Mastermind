@@ -1,82 +1,100 @@
 {
-  "observed_on": "2026-09-13",
+  "observed_on": "2026-09-18",
   "capability_state": "PARTIAL",
   "production_accepted": false,
-  "procedure_commit": "9ed16bf0fcc5b47e870350ff2413ff5c8c73b447",
+  "procedure_commit": "55473bb43c3ae1908f53ddd4ccfe724643dd6c69",
   "native_host": "admins-Mini-652.ts.net lan",
   "device_id": "37db60bd-f84d-4521-ae9e-47c575d9ba86",
   "app": {
-    "version": "0.5.9",
+    "version": "0.5.11",
     "path": "/Users/chriswong/Applications/Paper.app",
+    "previous_app_preserved": "/Users/chriswong/Applications/Paper.app.prev-0.5.9",
     "download_url": "https://download.paper.design/mac/dmg/arm64",
-    "dmg_sha256": "d87988c92d12cac6b549900bd3725a3d8fff958635743c25eeaff81dc804b7fa",
+    "dmg_sha256": "03a027b2b1bc1df2e54f8db3d4cd5c1c404bf56994926113efe223e0b2a27079",
     "codesign": "valid on disk; satisfies Designated Requirement",
     "gatekeeper": "accepted; Notarized Developer ID",
     "signer": "Stephen Haney (PA579U484X)",
-    "launch_requested": true,
-    "process_observed": 47503,
     "listener_observed": "127.0.0.1:29979"
   },
   "install_root": "/Users/chriswong/.local/share/mastermind-paper/paper-20260913-sol01/workbench",
-  "workspace": "/Users/chriswong/.local/share/mastermind-paper/paper-20260913-sol01/workbench/workspace",
   "python": "3.14.6",
   "mcp_sdk": "1.30.0",
   "runtime_sha256": {
-    "bridge.py": "ecceea22a6d756ef7d100cd8fad7a4b4ff18f0d06c82f63e8e48cc9c6adcc221",
+    "bridge.py": "cd34f98c1647ba52f392fb93aa9d7aed24eb39aac90d7de75bce39021444740d",
     "mcp_server.py": "294e699d6da31b56a114003257e6a361b83cfd7844c546d172eb51276d83a6a8",
     "requirements-mcp.txt": "4fe75062c5d424bbc86a8cd58c63ab19aeffe4f0a0e100022252c8032e12ee5b"
   },
-  "native_sdk_handshake": {
-    "passed": true,
-    "server_name": "mastermind-paper",
-    "server_version": "1.30.0",
-    "read_only_tools": [
-      "paper_inspect",
-      "paper_catalog",
-      "paper_read"
+  "paper_0511_compatibility": {
+    "server_name": "paper-desktop",
+    "live_version": "0.5.11",
+    "original_failure": "DOCUMENT_SCHEMA_UNVERIFIED on compact structured file header",
+    "repair": "reconcile agreeing stable file header + rich detail; exact fileId required on stable-ID edits",
+    "catalog_sha256": "e295e78106615d4058f47f18b661c97b1832231ae77164c534ee42df62a11519",
+    "pure_guard_tests": "PASS"
+  },
+  "live_design_canary": {
+    "scratch_file_id_persisted_in_repo": false,
+    "create_artboard": {
+      "operation_id": "paper-live-canary-20260918-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    "write_html": {
+      "operation_id": "paper-live-canary-20260918-02",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    "screenshot": {
+      "state": "OBSERVED",
+      "artifact_sha256": "d200166b831f154bcef7e59883c0193225961ed73b52c17b83d445a7fd195200"
+    },
+    "jsx": {
+      "state": "OBSERVED",
+      "contains_heading": "Native design tooling is live.",
+      "format": "inline-styles"
+    },
+    "finish_working": {
+      "operation_id": "paper-live-canary-20260918-03",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    "effect_unknown_count": 0,
+    "replayed_operations": 0
+  },
+  "access_policy": {
+    "read_tools_added": [
+      "list_files",
+      "find_nodes",
+      "get_tokens",
+      "list_comment_threads",
+      "get_comment_thread",
+      "list_comment_thread_authors"
     ],
-    "write_tools": [
-      "paper_inspect",
-      "paper_catalog",
-      "paper_read",
-      "paper_edit"
+    "guarded_edit_tools_added": [
+      "create_page",
+      "create_tokens",
+      "set_tokens",
+      "set_comment_thread_status"
     ],
-    "read_only_capture_sha256": "0b97c9a9c06fccb45bc8eca80a7bd5b0d005025aa8f62e04c9b8790643bf0292",
-    "write_capture_sha256": "96a5f967148c6408ecfe9f15a3ff59153bcd713be23bf1e4fbc932f02fcb6122",
-    "capture_digest_is_not_an_executive_grant": true
+    "additionally_refused": [
+      "token deletion",
+      "create_file",
+      "open_file",
+      "delete_nodes",
+      "export",
+      "export_combined_pdf"
+    ]
   },
-  "paper_initialization": {
-    "http_status": 500,
-    "error": "server_error",
-    "error_description": "Could not find Paper. Is it running?",
-    "login_state": "UNKNOWN",
-    "file_loaded": "NOT_PROVEN",
-    "successful_design_reads": 0,
-    "design_mutations": 0
-  },
-  "validation": {
-    "synthetic_core_tests_passed": 24,
-    "native_sdk_initial_failure": "Postponed local CallToolResult annotation was not in module globals",
-    "repair": "Evaluate annotations at function definition; both real stdio handshakes then passed"
-  },
-  "native_receipts": [
-    "native-dependencies.txt",
-    "native-sdk-proof.json",
-    "workbench/INSTALLATION.json"
-  ],
   "unchanged": [
     "provider account homes",
     "live worker processes",
     "Executive capability registry and production gates",
-    "Figma designs and billing"
+    "Figma designs and billing",
+    "Paper paid-plan state"
   ],
-  "not_performed": [
-    "Paper login",
-    "subscription purchase",
-    "dedicated ChatGPT app publication",
+  "remaining": [
+    "exact-head hosted CI",
+    "independent semantic review",
     "sealed Executive worker grant",
-    "Paper scratch edit/screenshot/JSX proof",
-    "production browser proof"
-  ],
-  "next_action": "Open the intended Paper scratch file through normal UI after account login as needed, then inspect via the installed bridge; preserve this carrier and stop on ambiguous edit effects."
+    "fresh ChatGPT Web session repeat",
+    "Business/Enterprise/Edu custom full-MCP app enrollment if first-class ChatGPT write is desired",
+    "one real Mastermind design-to-code/browser proof before Figma retirement"
+  ]
 }

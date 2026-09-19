@@ -7,7 +7,7 @@ without buying a plan. The useful end-state is brief -> editable Paper design ->
 screenshot/review -> JSX -> integrated, browser-proven product, not merely an MCP entry.
 
 Procedure source: Mastermind protected master
-`9ed16bf0fcc5b47e870350ff2413ff5c8c73b447`, Sol Skillpack 1.0.1 / bootstrap 1.
+`55473bb43c3ae1908f53ddd4ccfe724643dd6c69`, Sol Skillpack 1.0.1 / bootstrap 1.
 Paper official plugin reference: `paper-design/agent-plugins` at
 `f6d4f13343dd924fabaadd0898725f1b8718459d`.
 No production lifecycle, queue, identity, credential or authentication store is added.
@@ -34,6 +34,28 @@ or put design tools into Executive OS's bounded CEO-admission API.
 No MCP tool is disguised as read-only to bypass client write permissions.
 `paper_edit` is explicitly modifying/destructive/non-idempotent; it exists only
 when the local server is started with `--allow-write`.
+
+## Team/account and seat model - 2026-09-18
+
+Use **one real signed-in Paper editor identity as the agent execution seat**, not
+one Paper user account per ChatGPT/local agent. Agents are software clients behind
+the governed bridge; they do not need Paper member identities merely to call MCP.
+Paper's current Terms prohibit password/account sharing, false identities, creating
+accounts for someone else, and holding more than one account at a time. Do not
+accept pending agent-email invitations into fabricated Paper user accounts.
+
+Human collaborators should use their own real member identities. Paper currently
+makes unlimited editors/viewers free on the Free team. On Pro, billing is explicitly
+per editor seat while viewers remain free, so separate agent-editor memberships
+would create unnecessary paid seats. Pro advertises 1M MCP tool calls/week, but its
+public pricing page does not state whether that allowance is pooled per team or
+measured per editor; keep quota scope UNKNOWN until Paper exposes it authoritatively.
+
+Paper 0.5.11 supports multiple desktop tabs, and Paper's August 2026 build log says
+agents may work across multiple open files, including background tabs. That makes a
+single real execution seat compatible with multiple governed agent workflows without
+credential sharing between fake Paper members. Our bridge still serializes modifying
+calls on one desktop until stronger multi-file isolation is explicitly proven.
 
 ## Existing harness integration boundary
 
@@ -71,11 +93,12 @@ than overwrite. It creates runtime files, actual isolated project configurations
 and `INSTALLATION.json`. This receipt is installation evidence, not runtime authority.
 
 Launch Paper, sign in through its normal UI, and open the intended design file.
-No paid plan is needed for initial smoke proof. If `get_basic_info` lacks a stable
-file ID, the adapter requires an existing artboard anchor; create one starter
-artboard manually in the intended scratch file. Unrecognized response shapes fail
-closed as `DOCUMENT_SCHEMA_UNVERIFIED`, not a guessed target. A live schema capture
-must precede any compatibility adaptation.
+No paid plan is needed for initial smoke proof. Paper 0.5.11 returns a compact
+structured file header plus a richer JSON text block from `get_basic_info`; the
+adapter merges them only when file identities/names agree, preserving provider file
+ID plus page/artboard state. Every stable-ID edit must also pass that exact `fileId`.
+Legacy artboard-anchor fallback remains fail-closed for older supported shapes.
+Unknown/conflicting shapes still refuse as `DOCUMENT_SCHEMA_UNVERIFIED`.
 
 Native clients must open/trust the new workspace and approve the MCP connection
 according to their own rules. Do not automatically trust a workspace, disable
@@ -86,8 +109,12 @@ sandboxing or enable arbitrary tools across all worker accounts.
 `status` observes server/document; `catalog` discovers real upstream input schemas;
 `read` allows the documented inspection/screenshot/JSX tools; `edit` requires an
 explicit opt-in, operation ID and immediately compared basic-info snapshot hash.
-Paper validates its current input schema. Unknown tools, native path-writing export
-and node deletion are excluded. Image artifacts accept only PNG/JPEG into an
+Paper validates its current input schema. Safe Paper 0.5.11 reads additionally include file listing, node search, tokens and
+comment inspection. Guarded edits additionally cover page creation, token create/
+update and comment-resolution state; token deletion is explicitly refused.
+Cross-team `create_file`, document-transition `open_file`, native path-writing
+exports and consequential node deletion remain excluded until they have their own
+bounded transition/effect contract. Image artifacts accept only PNG/JPEG into an
 explicit private output directory, content-addressed and never overwritten.
 
 A snapshot is NOT a revision, identity credential, authorization or full content
@@ -158,30 +185,40 @@ staging into PROVEN_LIVE. Continue at the first unmet item, retaining this carri
 - https://modelcontextprotocol.io/specification/2025-03-26/basic/transports - HTTP/SSE/session rules.
 - https://pypi.org/project/mcp/1.30.0/ - pinned official SDK maintenance line.
 
-## Observed native staging - 2026-09-13
+## Observed native proof - 2026-09-18
 
-This candidate is PARTIAL / BUILT_NOT_PROVEN for design operations, not accepted
-production. The reachable Mac Mini now has Paper 0.5.9 installed and launched from
-`~/Applications/Paper.app`; code signature and Apple notarization passed. An
-isolated Python 3.14.6 / MCP 1.30.0 environment and real project-scoped workspace
-exist at `~/.local/share/mastermind-paper/paper-20260913-sol01/workbench/workspace`.
-No provider home, live worker, billing, Figma file or Executive gate was changed.
+Overall capability remains **PARTIAL** because sealed Executive worker enrollment,
+fresh-session repeat and one real product design-to-code/browser journey are still
+owed. The local Paper design path on the authorized Mac Mini is now proven live.
 
-Actual stdio initialization/list-tools passed for both read-only (3 tools) and
-write-capable (4 tools) modes, with correct write annotations. The native probe
-found and fixed a postponed local type-annotation error that syntax/unit tests
-could not prove. Reproduce the SDK check with `smoke_sdk.py` in the pinned venv.
+Paper was upgraded in place on the same carrier from 0.5.9 to signed/notarized
+**0.5.11**; the prior application is retained as `Paper.app.prev-0.5.9`.
+The official ARM64 DMG SHA-256 is
+`03a027b2b1bc1df2e54f8db3d4cd5c1c404bf56994926113efe223e0b2a27079`.
+Paper 0.5.11 listened on 127.0.0.1:29979 and a scratch file was created/opened
+through the normal Paper UI.
 
-Paper is listening on 127.0.0.1:29979 but its own initialize endpoint returns
-HTTP 500: `Could not find Paper. Is it running?`. A usable editor file is not
-proven; login state is UNKNOWN, not diagnosed from the HTTP error. No design was
-read or changed. Open the intended file through normal Paper UI after login as
-needed, then resume with the installed CLI `status`. Native receipts and exact
-hashes are in `docs/evidence/paper_desktop/20260913_native_staging.json`.
+The live 0.5.11 wire exposed a compact structured file header and a richer detail
+block. That falsified the original parser assumption and produced
+`DOCUMENT_SCHEMA_UNVERIFIED` despite a valid stable file ID. The same installed
+bridge was repaired to reconcile agreeing shapes, preserve page/artboard state, and
+require an exact file ID on every stable-ID edit.
 
-The Mac Studio answered initially, then its remote commands/pings timed out. It
-was not modified; no modifying operation was retried or failed over. This is a
-separate, authorized Mac Mini staging, not a claim that Studio worker routing
-has been enrolled. No paid plan, public tunnel or standalone ChatGPT app was
-created. The existing RDC route executed the real native adapter from this web
-session, but successful visual design use and a fresh-session repeat remain due.
+Live canary effects on the scratch file were all observed on this original carrier:
+a 900x560 artboard was created, incremental Inter typography was written, a JPEG
+screenshot was returned and saved privately, JSX was extracted from the same
+artboard, and Paper's required `finish_working_on_nodes` call returned OK.
+No edit returned `EFFECT_UNKNOWN`; no operation was replayed. Screenshot SHA-256:
+`d200166b831f154bcef7e59883c0193225961ed73b52c17b83d445a7fd195200`.
+The JSX read contains "Native design tooling is live." with the expected dimensions,
+Inter typography and colors.
+
+Installed SHA-256 after hardening:
+`bridge.py=cd34f98c1647ba52f392fb93aa9d7aed24eb39aac90d7de75bce39021444740d`;
+wrapper/server and requirement pins are unchanged. This proves the local
+read/write/screenshot/JSX substrate, not fleet production or visual product quality.
+
+A first-class ChatGPT full-MCP write app remains behind OpenAI's current
+Business/Enterprise/Edu developer-mode gate and Secure MCP Tunnel. Existing
+authorized RDC remains the web-to-native carrier for this session.
+

@@ -27,11 +27,14 @@ MAX_REQUEST = 512 * 1024
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
     "get_tree_summary", "get_screenshot", "get_jsx", "get_computed_styles",
-    "get_fill_image", "get_font_family_info", "get_guide",
+    "get_fill_image", "get_font_family_info", "get_guide", "list_files",
+    "find_nodes", "get_tokens", "list_comment_threads", "get_comment_thread",
+    "list_comment_thread_authors",
 })
 EDIT_TOOLS = frozenset({
     "create_artboard", "write_html", "set_text_content", "rename_nodes",
     "duplicate_nodes", "move_nodes", "update_styles", "finish_working_on_nodes",
+    "create_page", "create_tokens", "set_tokens", "set_comment_thread_status",
 })
 # Native export can write arbitrary host paths; delete can destroy a whole document.
 # Neither is exposed. Screenshots/JSX use explicit private artifact saving instead.
@@ -231,28 +234,85 @@ class PaperClient:
         return self.rpc("tools/call", {"name": name, "arguments": arguments})
 
 
+def _basic_candidates(result):
+    values = []
+    structured = result.get("structuredContent")
+    if isinstance(structured, dict):
+        values.append(structured)
+    for block in result.get("content", []):
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        try:
+            value = load_json(block.get("text", ""))
+        except Refusal:
+            continue
+        if isinstance(value, dict):
+            values.append(value)
+    return values
+
+
+def _stable_file(value):
+    file_id = value.get("fileId") or value.get("documentId")
+    file_name = value.get("fileName")
+    nested = value.get("file")
+    if not file_id and isinstance(nested, dict):
+        file_id = nested.get("id")
+        if not file_name:
+            file_name = nested.get("name")
+    if isinstance(file_id, str) and file_id:
+        return file_id, file_name if isinstance(file_name, str) and file_name else None
+    return None
+
+
 def basic_object(result):
     if result.get("isError"):
         raise Refusal("DOCUMENT_UNAVAILABLE")
-    value = result.get("structuredContent")
-    if isinstance(value, dict):
-        return value
-    for block in result.get("content", []):
-        if block.get("type") == "text":
-            try:
-                value = load_json(block.get("text", ""))
-            except Refusal:
-                continue
-            if isinstance(value, dict):
-                return value
-    raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED", "get_basic_info must return a JSON object; do not guess fields.")
+    values = _basic_candidates(result)
+    if not values:
+        raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED", "get_basic_info must return a JSON object; do not guess fields.")
+    stable = [item for item in (_stable_file(value) for value in values) if item]
+    file_ids = {item[0] for item in stable}
+    if len(file_ids) > 1:
+        raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED", "get_basic_info returned conflicting file identities.")
+    file_id = next(iter(file_ids), None)
+    details = [value for value in values
+               if isinstance(value.get("fileName"), str) and value.get("fileName")
+               and isinstance(value.get("pageName"), str) and value.get("pageName")
+               and isinstance(value.get("artboards"), list)]
+    if details:
+        names = {value["fileName"] for value in details}
+        pages = {(value.get("pageId"), value["pageName"]) for value in details}
+        if len(names) != 1 or len(pages) != 1:
+            raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED", "get_basic_info returned conflicting document detail.")
+        info = dict(max(details, key=lambda value: len(value)))
+        stable_names = {name for _, name in stable if name}
+        if stable_names and (len(stable_names) != 1 or info["fileName"] not in stable_names):
+            raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED", "File header and document detail disagree.")
+        if file_id:
+            info["fileId"] = file_id
+        hashes = [value.get("contentHash") for value in values if isinstance(value.get("contentHash"), dict)]
+        if hashes:
+            encoded = {encode(value) for value in hashes}
+            if len(encoded) != 1:
+                raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED", "get_basic_info returned conflicting content hashes.")
+            info["contentHash"] = hashes[0]
+        return info
+    if file_id:
+        info = dict(values[0])
+        info["fileId"] = file_id
+        if stable[0][1] and not info.get("fileName"):
+            info["fileName"] = stable[0][1]
+        return info
+    raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED", "get_basic_info returned no supported document identity.")
 
 
 def document_identity(info):
-    # These are supported wire shapes, not inferred identifiers. Unknown shape refuses.
     file_id = info.get("fileId") or info.get("documentId")
+    nested = info.get("file")
+    if not file_id and isinstance(nested, dict):
+        file_id = nested.get("id")
     if isinstance(file_id, str) and file_id:
-        return {"kind": "file-id", "id": file_id, "page": info.get("pageId", info.get("pageName"))}
+        return {"kind": "file-id", "id": file_id}
     name, page, boards = info.get("fileName"), info.get("pageName"), info.get("artboards")
     if not isinstance(name, str) or not name or not isinstance(page, str) or not isinstance(boards, list):
         raise Refusal("DOCUMENT_SCHEMA_UNVERIFIED")
@@ -275,7 +335,11 @@ def snapshot(client):
 
 def same_document(identity, info):
     if identity["kind"] == "file-id":
-        return document_identity(info) == identity
+        try:
+            current = document_identity(info)
+        except Refusal:
+            return False
+        return current.get("kind") == "file-id" and current.get("id") == identity["id"]
     return (info.get("fileName") == identity["file"] and info.get("pageName") == identity["page"]
             and any(isinstance(b, dict) and b.get("id") == identity["anchor"] for b in info.get("artboards", [])))
 
@@ -325,6 +389,16 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             raise Refusal("DOCUMENT_CHANGED", "Read the current document before deciding on a new edit.")
         if editing and not before["write_binding_ready"]:
             raise Refusal(before["binding_error"] or "DOCUMENT_BINDING_REQUIRED")
+        if editing and before["identity"]["kind"] == "file-id":
+            supplied_file = arguments.get("fileId")
+            if supplied_file is None:
+                raise Refusal("FILE_ID_REQUIRED", "Pass the exact inspected Paper file ID for every edit.")
+            if supplied_file != before["identity"]["id"]:
+                raise Refusal("FILE_ID_MISMATCH", "Edit target does not match the inspected Paper file.")
+        if editing and tool == "set_tokens":
+            updates = arguments.get("tokens")
+            if isinstance(updates, list) and any(isinstance(item, dict) and item.get("delete") is True for item in updates):
+                raise Refusal("TOKEN_DELETE_NOT_ALLOWED", "Delete tokens only through an explicitly reviewed destructive workflow.")
         # Paper validates its current input schema. A dispatched tool error may be partial.
         try:
             result = client.call(tool, arguments)
