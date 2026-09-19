@@ -131,11 +131,20 @@ function validTurnId(value) {
 function validSubmitContinuationRequest(request) {
   const keys = [
     "kind", "expected_conversation_fingerprint", "turn_id", "directive_digest",
+    "session_alias", "runtime_binding_id", "runtime_binding_generation",
+    "runtime_binding_fingerprint",
   ];
   return exactKeys(request, keys) && request.kind === CONTINUATION_SUBMIT_KIND &&
     typeof request.expected_conversation_fingerprint === "string" &&
     /^[0-9a-f]{64}$/.test(request.expected_conversation_fingerprint) &&
-    validTurnId(request.turn_id) && request.directive_digest === CONTINUATION_DIRECTIVE_DIGEST;
+    validTurnId(request.turn_id) && validTurnId(request.session_alias) &&
+    typeof request.runtime_binding_id === "string" &&
+    /^bind-wsx-[0-9a-f]{48}$/.test(request.runtime_binding_id) &&
+    Number.isSafeInteger(request.runtime_binding_generation) &&
+    request.runtime_binding_generation >= 1 &&
+    typeof request.runtime_binding_fingerprint === "string" &&
+    /^[0-9a-f]{64}$/.test(request.runtime_binding_fingerprint) &&
+    request.directive_digest === CONTINUATION_DIRECTIVE_DIGEST;
 }
 
 function continuationResult(request, effect) {
@@ -144,6 +153,10 @@ function continuationResult(request, effect) {
     conversation_fingerprint: request.expected_conversation_fingerprint,
     turn_id: request.turn_id,
     directive_digest: request.directive_digest,
+    session_alias: request.session_alias,
+    runtime_binding_id: request.runtime_binding_id,
+    runtime_binding_generation: request.runtime_binding_generation,
+    runtime_binding_fingerprint: request.runtime_binding_fingerprint,
     effect,
   };
 }

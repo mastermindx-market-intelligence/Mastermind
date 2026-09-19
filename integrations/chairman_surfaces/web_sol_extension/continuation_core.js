@@ -6,13 +6,17 @@
   const MESSAGE_KIND = "MMX_WEB_SOL_SUBMIT_CONTINUATION";
   const RESULT_SCHEMA = "mastermind.web_sol_continuation_submit_result.v1";
   const MAX_EFFECTS = 256;
+  const CORRELATION_KEYS = Object.freeze([
+    "turn_id", "directive_digest", "session_alias", "runtime_binding_id",
+    "runtime_binding_generation", "runtime_binding_fingerprint",
+  ]);
   const REQUEST_KEYS = new Set([
     "schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
-    "action", "operation_key", "issued_at", "expires_at", "nonce", "turn_id",
-    "directive_digest",
+    "action", "operation_key", "issued_at", "expires_at", "nonce",
+    ...CORRELATION_KEYS,
   ]);
   const RESULT_KEYS = new Set([
-    "schema", "conversation_fingerprint", "turn_id", "directive_digest", "effect",
+    "schema", "conversation_fingerprint", "effect", ...CORRELATION_KEYS,
   ]);
   const effects = [];
 
@@ -38,7 +42,14 @@
         request.nonce.length > 128 || /\s/.test(request.nonce)) return false;
     if (typeof request.turn_id !== "string" ||
         !/^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$/.test(request.turn_id)) return false;
+    if (typeof request.session_alias !== "string" ||
+        !/^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$/.test(request.session_alias)) return false;
+    if (typeof request.runtime_binding_id !== "string" ||
+        !/^bind-wsx-[0-9a-f]{48}$/.test(request.runtime_binding_id)) return false;
+    if (!Number.isSafeInteger(request.runtime_binding_generation) ||
+        request.runtime_binding_generation < 1) return false;
     return request.directive_digest === DIRECTIVE_DIGEST &&
+      isHex64(request.runtime_binding_fingerprint) &&
       typeof request.issued_at === "string" && typeof request.expires_at === "string";
   }
 
@@ -46,6 +57,10 @@
     return exactKeys(value, RESULT_KEYS) && value.schema === RESULT_SCHEMA &&
       value.conversation_fingerprint === request.conversation_fingerprint &&
       value.turn_id === request.turn_id && value.directive_digest === request.directive_digest &&
+      value.session_alias === request.session_alias &&
+      value.runtime_binding_id === request.runtime_binding_id &&
+      value.runtime_binding_generation === request.runtime_binding_generation &&
+      value.runtime_binding_fingerprint === request.runtime_binding_fingerprint &&
       ["NOT_SUBMITTED", "SUBMIT_TRIGGERED", "SUBMIT_EFFECT_UNKNOWN"].includes(value.effect);
   }
 
@@ -83,6 +98,10 @@
         expected_conversation_fingerprint: request.conversation_fingerprint,
         turn_id: request.turn_id,
         directive_digest: request.directive_digest,
+        session_alias: request.session_alias,
+        runtime_binding_id: request.runtime_binding_id,
+        runtime_binding_generation: request.runtime_binding_generation,
+        runtime_binding_fingerprint: request.runtime_binding_fingerprint,
       });
     } catch (_error) {
       return result("CONTINUATION_SUBMIT_EFFECT_UNKNOWN", before.observation);
@@ -109,5 +128,5 @@
     );
   }
 
-  globalThis.MMXWebSolContinuation = Object.freeze({validRequest, handle});
+  globalThis.MMXWebSolContinuation = Object.freeze({validRequest, handle, correlationKeys: CORRELATION_KEYS});
 })();

@@ -26,6 +26,7 @@ from typing import Any, Callable
 from . import web_sol_instance as wsi
 from . import web_sol_protocol as wsp
 from . import web_sol_census_protocol as census
+from . import web_sol_runtime_binding as wrb
 
 NATIVE_HOST_NAME = "com.mastermind.web_sol_surface"
 EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
@@ -496,7 +497,16 @@ def _receipt_match_fields(request: dict[str, Any]) -> tuple[str, ...]:
     if request.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
         fields.extend(("operation_id", "result_digest", "obligation_digest"))
     if request.get("action") == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
-        fields.extend(("turn_id", "directive_digest"))
+        fields.extend(
+            (
+                "turn_id",
+                "directive_digest",
+                "session_alias",
+                "runtime_binding_id",
+                "runtime_binding_generation",
+                "runtime_binding_fingerprint",
+            )
+        )
     return tuple(fields)
 
 
@@ -530,6 +540,34 @@ def _validate_timeout_seconds(timeout_seconds: float) -> float:
     return float(timeout_seconds)
 
 
+def _require_current_runtime_binding(
+    request: dict[str, Any],
+    *,
+    expected_instance_id: str | None,
+    boot_nonce: str | None,
+) -> None:
+    if request.get("action") != wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+        return
+    if expected_instance_id is None or boot_nonce is None:
+        raise NativeHostError("runtime_binding_context_missing")
+    try:
+        current = wrb.derive_runtime_binding_wire(
+            adapter_instance_id=expected_instance_id,
+            conversation_fingerprint=request["conversation_fingerprint"],
+            session_alias=request["session_alias"],
+            boot_nonce=boot_nonce,
+        )
+    except (KeyError, wrb.WebSolRuntimeBindingError) as exc:
+        raise NativeHostError("runtime_binding_stale") from exc
+    for field in (
+        "runtime_binding_id",
+        "runtime_binding_generation",
+        "runtime_binding_fingerprint",
+    ):
+        if request[field] != current[field]:
+            raise NativeHostError("runtime_binding_stale")
+
+
 def forward_request(
     request: dict[str, Any],
     *,
@@ -538,6 +576,8 @@ def forward_request(
     timeout_seconds: float,
     deadline: Deadline | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    expected_instance_id: str | None = None,
+    boot_nonce: str | None = None,
 ) -> dict[str, Any]:
     """Forward one exact action once and wait for its matching receipt."""
 
@@ -546,6 +586,11 @@ def forward_request(
     accepted = census.validate_census_window(request) if is_census else wsp.validate_request(request)
     if not is_census:
         accepted = wsp.validate_action_window(accepted, now=datetime.now(timezone.utc))
+        _require_current_runtime_binding(
+            accepted,
+            expected_instance_id=expected_instance_id,
+            boot_nonce=boot_nonce,
+        )
     if (
         accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value
         and accepted["nonce"] in _TYPED_REENTRY_NONCES
@@ -869,6 +914,8 @@ def _serve_client(
                 timeout_seconds=timeout,
                 deadline=deadline,
                 monotonic=monotonic,
+                expected_instance_id=expected_instance_id,
+                boot_nonce=boot_nonce,
             )
             write_frame(
                 writer,

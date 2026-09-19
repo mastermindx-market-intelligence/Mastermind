@@ -23,7 +23,7 @@ HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1"
 INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1"
 TRANSPORT_CAPABILITY_SCHEMA = "mastermind.web_sol_transport_capabilities.v1"
 TRANSPORT_PROTOCOL_MAJOR = 1
-WEB_SOL_PACKAGE_VERSION = "0.3.0"
+WEB_SOL_PACKAGE_VERSION = "0.4.0"
 MAX_ACTION_TTL_SECONDS = 60
 ALLOWED_FUTURE_SKEW_SECONDS = 5
 CONTINUATION_DIRECTIVE_TEXT = (
@@ -95,6 +95,10 @@ _TYPED_REENTRY_KEYS = _REQUEST_KEYS | _TYPED_REENTRY_PAYLOAD_KEYS
 _SUBMIT_CONTINUATION_PAYLOAD_KEYS = frozenset({
     "turn_id",
     "directive_digest",
+    "session_alias",
+    "runtime_binding_id",
+    "runtime_binding_generation",
+    "runtime_binding_fingerprint",
 })
 _SUBMIT_CONTINUATION_KEYS = _REQUEST_KEYS | _SUBMIT_CONTINUATION_PAYLOAD_KEYS
 _RECEIPT_KEYS = frozenset(
@@ -173,6 +177,8 @@ _FORBIDDEN_KEYS = frozenset(
 )
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _TURN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
+_SESSION_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
+_RUNTIME_BINDING_ID_RE = re.compile(r"^bind-wsx-[0-9a-f]{48}$")
 _SEMVER_RE = re.compile(
     r"^(?:0|[1-9][0-9]*)\."
     r"(?:0|[1-9][0-9]*)\."
@@ -279,6 +285,21 @@ def _require_nullable_nonce(value: Any, path: str) -> None:
 def _require_turn_id(value: Any, path: str) -> None:
     if not isinstance(value, str) or _TURN_ID_RE.fullmatch(value) is None:
         raise _error(path, "must be a bounded opaque turn identity")
+
+
+def _require_session_alias(value: Any, path: str) -> None:
+    if not isinstance(value, str) or _SESSION_ALIAS_RE.fullmatch(value) is None:
+        raise _error(path, "must be a bounded opaque session alias")
+
+
+def _require_runtime_binding_id(value: Any, path: str) -> None:
+    if not isinstance(value, str) or _RUNTIME_BINDING_ID_RE.fullmatch(value) is None:
+        raise _error(path, "must be a canonical Web-Sol RuntimeBinding identity")
+
+
+def _require_runtime_binding_generation(value: Any, path: str) -> None:
+    if type(value) is not int or not 1 <= value <= 9007199254740991:
+        raise _error(path, "must be a positive safe integer")
 
 
 def _require_package_version(value: Any, path: str) -> None:
@@ -475,6 +496,26 @@ def _validate_identity_fields(
         _require_hex64(value["directive_digest"], "$.directive_digest")
         if value["directive_digest"] != CONTINUATION_DIRECTIVE_DIGEST:
             raise _error("$.directive_digest", "does not match the fixed continuation directive")
+        for field in (
+            "session_alias",
+            "runtime_binding_id",
+            "runtime_binding_generation",
+            "runtime_binding_fingerprint",
+        ):
+            if field not in value:
+                raise _error(f"$.{field}", "required for SUBMIT_CONTINUATION")
+        _require_session_alias(value["session_alias"], "$.session_alias")
+        _require_runtime_binding_id(
+            value["runtime_binding_id"], "$.runtime_binding_id"
+        )
+        _require_runtime_binding_generation(
+            value["runtime_binding_generation"],
+            "$.runtime_binding_generation",
+        )
+        _require_hex64(
+            value["runtime_binding_fingerprint"],
+            "$.runtime_binding_fingerprint",
+        )
     return action
 
 

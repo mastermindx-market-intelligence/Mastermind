@@ -36,7 +36,7 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
 
     assert manifest["manifest_version"] == 3
     assert manifest["name"] == "Mastermind Web Sol Surface Adapter"
-    assert manifest["version"] == "0.3.0"
+    assert manifest["version"] == "0.4.0"
     assert set(manifest["host_permissions"]) == CHATGPT_MATCHES
 
     permissions = set(manifest.get("permissions", []))

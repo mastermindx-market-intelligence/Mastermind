@@ -32,6 +32,8 @@ _BINDING_FINGERPRINT_SCHEMA = "mastermind.web_sol_runtime_binding_fingerprint.v1
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _BINDING_ID_PREFIX = "bind-wsx-"
 _NATIVE_HANDLE_PREFIX = "wsx-runtime-"
+_RUNTIME_REASONING_SURFACE = "chatgpt-sol"
+_SESSION_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 
 
 class WebSolRuntimeBindingError(ValueError):
@@ -237,30 +239,100 @@ def exact_target_from_census(
     )
 
 
+def _accepted_session_alias(value: Any) -> str:
+    if not isinstance(value, str) or _SESSION_ALIAS_RE.fullmatch(value) is None:
+        _refuse("session_alias_invalid")
+    return value
+
+
 def _accepted_logical_target(value: Any) -> SessionTarget:
     if (
         not isinstance(value, SessionTarget)
         or value.target_seat != "ceo"
-        or value.reasoning_surface != "chatgpt-sol"
-        or not isinstance(value.session_alias, str)
-        or not value.session_alias
+        or value.reasoning_surface != _RUNTIME_REASONING_SURFACE
     ):
         _refuse("logical_target_mismatch")
+    _accepted_session_alias(value.session_alias)
     return value
 
 
 def _binding_projection_document(
-    target: ExactWebSolTarget,
-    logical_target: SessionTarget,
     *,
+    adapter_instance_id: str,
+    conversation_fingerprint: str,
+    session_alias: str,
     boot_nonce: str,
 ) -> dict[str, Any]:
     return {
         "schema": _BINDING_SCHEMA,
-        "session_alias": logical_target.session_alias,
-        "reasoning_surface": logical_target.reasoning_surface,
-        "target": target.identity_document(),
+        "adapter_instance_id": adapter_instance_id,
+        "conversation_fingerprint": conversation_fingerprint,
+        "session_alias": session_alias,
+        "reasoning_surface": _RUNTIME_REASONING_SURFACE,
         "boot_nonce": boot_nonce,
+    }
+
+
+def _runtime_binding_fingerprint_values(
+    *,
+    adapter_instance_id: str,
+    conversation_fingerprint: str,
+    session_alias: str,
+    runtime_binding_id: str,
+    runtime_binding_generation: int,
+) -> str:
+    return _digest(
+        {
+            "schema": _BINDING_FINGERPRINT_SCHEMA,
+            "adapter_instance_id": adapter_instance_id,
+            "conversation_fingerprint": conversation_fingerprint,
+            "session_alias": session_alias,
+            "reasoning_surface": _RUNTIME_REASONING_SURFACE,
+            "runtime_binding_id": runtime_binding_id,
+            "runtime_binding_generation": runtime_binding_generation,
+        }
+    )
+
+
+def derive_runtime_binding_wire(
+    *,
+    adapter_instance_id: str,
+    conversation_fingerprint: str,
+    session_alias: str,
+    boot_nonce: str,
+) -> dict[str, Any]:
+    """Derive the host-verifiable boot-bound RuntimeBinding wire identity."""
+
+    try:
+        instance.validate_instance_id(adapter_instance_id)
+    except instance.WebSolInstanceError:
+        _refuse("adapter_instance_invalid")
+    if not _hex64(conversation_fingerprint):
+        _refuse("conversation_fingerprint_invalid")
+    alias = _accepted_session_alias(session_alias)
+    boot = _transport_nonce(boot_nonce)
+    digest = _digest(
+        _binding_projection_document(
+            adapter_instance_id=adapter_instance_id,
+            conversation_fingerprint=conversation_fingerprint,
+            session_alias=alias,
+            boot_nonce=boot,
+        )
+    )
+    binding_id = f"{_BINDING_ID_PREFIX}{digest[:48]}"
+    generation = 1
+    return {
+        "session_alias": alias,
+        "runtime_binding_id": binding_id,
+        "runtime_binding_generation": generation,
+        "runtime_binding_fingerprint": _runtime_binding_fingerprint_values(
+            adapter_instance_id=adapter_instance_id,
+            conversation_fingerprint=conversation_fingerprint,
+            session_alias=alias,
+            runtime_binding_id=binding_id,
+            runtime_binding_generation=generation,
+        ),
+        "native_handle": f"{_NATIVE_HANDLE_PREFIX}{digest[48:]}",
     }
 
 
@@ -272,7 +344,7 @@ def project_runtime_binding(
 ) -> RuntimeBinding:
     """Project one current native-host life onto the existing RuntimeBinding.
 
-    Generation is one within this immutable boot-bound identity.  Restarting
+    Generation is one within this immutable boot-bound identity. Restarting
     the native host changes ``binding_id`` itself, so a later generation-one
     projection cannot ABA-match the prior life.
     """
@@ -280,17 +352,19 @@ def project_runtime_binding(
     if not isinstance(target, ExactWebSolTarget):
         _refuse("exact_target_invalid")
     logical = _accepted_logical_target(logical_target)
-    boot = _transport_nonce(boot_nonce)
-    digest = _digest(
-        _binding_projection_document(target, logical, boot_nonce=boot)
+    wire = derive_runtime_binding_wire(
+        adapter_instance_id=target.adapter_instance_id,
+        conversation_fingerprint=target.conversation_fingerprint,
+        session_alias=logical.session_alias,
+        boot_nonce=boot_nonce,
     )
     return RuntimeBinding(
-        session_alias=logical.session_alias,
-        binding_id=f"{_BINDING_ID_PREFIX}{digest[:48]}",
-        binding_generation=1,
-        native_handle=f"{_NATIVE_HANDLE_PREFIX}{digest[48:]}",
+        session_alias=wire["session_alias"],
+        binding_id=wire["runtime_binding_id"],
+        binding_generation=wire["runtime_binding_generation"],
+        native_handle=wire["native_handle"],
         account_label=target.seat_ref,
-        reasoning_surface=logical.reasoning_surface,
+        reasoning_surface=_RUNTIME_REASONING_SURFACE,
     )
 
 
@@ -298,29 +372,52 @@ def runtime_binding_fingerprint(
     binding: RuntimeBinding,
     target: ExactWebSolTarget,
 ) -> str:
-    """Return closed correlation identity for one projected binding/target."""
+    """Return host-verifiable closed correlation for one binding/target."""
 
     if not isinstance(binding, RuntimeBinding) or not isinstance(
         target, ExactWebSolTarget
     ):
         _refuse("runtime_binding_invalid")
-    return _digest(
-        {
-            "schema": _BINDING_FINGERPRINT_SCHEMA,
-            "session_alias": binding.session_alias,
-            "binding_id": binding.binding_id,
-            "binding_generation": binding.binding_generation,
-            "native_handle": binding.native_handle,
-            "account_label": binding.account_label,
-            "reasoning_surface": binding.reasoning_surface,
-            "target": target.identity_document(),
-        }
+    if (
+        binding.reasoning_surface != _RUNTIME_REASONING_SURFACE
+        or binding.account_label != target.seat_ref
+        or type(binding.binding_generation) is not int
+        or binding.binding_generation < 1
+    ):
+        _refuse("runtime_binding_invalid")
+    _accepted_session_alias(binding.session_alias)
+    return _runtime_binding_fingerprint_values(
+        adapter_instance_id=target.adapter_instance_id,
+        conversation_fingerprint=target.conversation_fingerprint,
+        session_alias=binding.session_alias,
+        runtime_binding_id=binding.binding_id,
+        runtime_binding_generation=binding.binding_generation,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class WebSolRuntimeBindingLease:
+    """One detached exact target plus its current boot-bound RuntimeBinding."""
+
+    target: ExactWebSolTarget
+    runtime_binding: RuntimeBinding
+    runtime_binding_fingerprint: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.target, ExactWebSolTarget) or not isinstance(
+            self.runtime_binding, RuntimeBinding
+        ):
+            _refuse("runtime_binding_lease_invalid")
+        expected = runtime_binding_fingerprint(self.runtime_binding, self.target)
+        if self.runtime_binding_fingerprint != expected:
+            _refuse("runtime_binding_lease_invalid")
 
 
 __all__ = [
     "ExactWebSolTarget",
     "WebSolRuntimeBindingError",
+    "WebSolRuntimeBindingLease",
+    "derive_runtime_binding_wire",
     "exact_target_from_census",
     "project_runtime_binding",
     "runtime_binding_fingerprint",

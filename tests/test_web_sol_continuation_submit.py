@@ -10,8 +10,11 @@ import subprocess
 import pytest
 
 from control_plane import surface_bindings as sb
+from control_plane.session_targets import SessionTarget
 from integrations.chairman_surfaces import web_sol_client as client
+from integrations.chairman_surfaces import web_sol_instance as wsi
 from integrations.chairman_surfaces import web_sol_protocol as wsp
+from integrations.chairman_surfaces import web_sol_runtime_binding as wrb
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,8 +44,52 @@ def binding() -> dict:
     )
 
 
+RUNTIME_BOOT = "runtime-boot-nonce-r2-fixture-0001"
+SESSION_ALIAS = "EXECUTIVE-CEO-A"
+
+
+def runtime_lease(
+    row: dict | None = None,
+    *,
+    boot_nonce: str = RUNTIME_BOOT,
+) -> wrb.WebSolRuntimeBindingLease:
+    navigation = row or binding()
+    target = wrb.ExactWebSolTarget(
+        adapter_instance_id=wsi.adapter_instance_id(navigation),
+        seat_ref=navigation["seat_ref"],
+        env_manager=navigation["locator"]["env_manager"],
+        folder_id=navigation["locator"].get("folder_id"),
+        profile_id=navigation["locator"]["profile_id"],
+        conversation_fingerprint=HEX_A,
+        census_digest="c" * 64,
+    )
+    logical = SessionTarget(
+        session_alias=SESSION_ALIAS,
+        target_seat="ceo",
+        reasoning_surface="chatgpt-sol",
+        wake_transport="chatgpt-gui",
+        allowed_transports=("chatgpt-gui",),
+        workstream="executive",
+        target_enabled=True,
+    )
+    projected = wrb.project_runtime_binding(
+        target,
+        logical,
+        boot_nonce=boot_nonce,
+    )
+    return wrb.WebSolRuntimeBindingLease(
+        target=target,
+        runtime_binding=projected,
+        runtime_binding_fingerprint=wrb.runtime_binding_fingerprint(
+            projected,
+            target,
+        ),
+    )
+
+
 def request(**overrides) -> dict:
     now = datetime.now(timezone.utc).replace(microsecond=0)
+    lease = runtime_lease()
     value = {
         "schema": wsp.ACTION_SCHEMA,
         "binding_id": "11111111-1111-4111-8111-111111111111",
@@ -55,6 +102,10 @@ def request(**overrides) -> dict:
         "nonce": NONCE,
         "turn_id": TURN_ID,
         "directive_digest": wsp.CONTINUATION_DIRECTIVE_DIGEST,
+        "session_alias": lease.runtime_binding.session_alias,
+        "runtime_binding_id": lease.runtime_binding.binding_id,
+        "runtime_binding_generation": lease.runtime_binding.binding_generation,
+        "runtime_binding_fingerprint": lease.runtime_binding_fingerprint,
     }
     value.update(overrides)
     return value
@@ -89,11 +140,15 @@ def receipt(req: dict, status: str, *, generation_state: str = "idle") -> dict:
         "observation": observation(generation_state=generation_state),
         "turn_id": req["turn_id"],
         "directive_digest": req["directive_digest"],
+        "session_alias": req["session_alias"],
+        "runtime_binding_id": req["runtime_binding_id"],
+        "runtime_binding_generation": req["runtime_binding_generation"],
+        "runtime_binding_fingerprint": req["runtime_binding_fingerprint"],
     }
 
 
 def test_continuation_action_is_a_new_advertised_package_generation():
-    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.3.0"
+    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.4.0"
     assert "SUBMIT_CONTINUATION" in {item.value for item in wsp.SurfaceAction}
     assert len(wsp.CONTINUATION_DIRECTIVE_DIGEST) == 64
     assert "Continue the same logical responsibility." in wsp.CONTINUATION_DIRECTIVE_TEXT
@@ -154,6 +209,7 @@ def test_client_exposes_only_fixed_semantic_continuation_not_generic_text(monkey
     signature = inspect.signature(client.submit_continuation_via_extension)
     assert list(signature.parameters) == [
         "binding",
+        "runtime_binding_lease",
         "operation_key",
         "turn_id",
         "issued_at",
@@ -165,13 +221,26 @@ def test_client_exposes_only_fixed_semantic_continuation_not_generic_text(monkey
 
     seen = []
 
-    def exchange(req, *, path, expected_instance_id):
+    def exchange(
+        req,
+        *,
+        path,
+        expected_instance_id,
+        on_handshake=None,
+        before_action=None,
+    ):
+        handshake = {"boot_nonce": RUNTIME_BOOT}
+        if on_handshake is not None:
+            on_handshake(handshake)
+        if before_action is not None:
+            before_action(handshake)
         seen.append(req)
         return receipt(req, "CONTINUATION_STARTED", generation_state="active")
 
     monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
     result = client.submit_continuation_via_extension(
         row,
+        runtime_lease(row),
         operation_key=OPERATION,
         turn_id=TURN_ID,
         issued_at="2026-09-16T20:00:00Z",
@@ -201,6 +270,8 @@ def test_native_host_fences_same_turn_even_if_caller_changes_nonce():
             first, "CONTINUATION_STARTED", generation_state="active"
         ),
         timeout_seconds=1.0,
+        expected_instance_id=runtime_lease().target.adapter_instance_id,
+        boot_nonce=RUNTIME_BOOT,
     )
     assert result["status"] == "CONTINUATION_STARTED"
     second = request(nonce="continuation-nonce-00000002")
@@ -210,6 +281,8 @@ def test_native_host_fences_same_turn_even_if_caller_changes_nonce():
             write_chrome=writes.append,
             read_chrome=lambda _timeout: None,
             timeout_seconds=1.0,
+            expected_instance_id=runtime_lease().target.adapter_instance_id,
+            boot_nonce=RUNTIME_BOOT,
         )
     assert writes == [first]
 
@@ -249,7 +322,9 @@ const {webcrypto, createHash} = require('node:crypto');
     chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:()=>{}}}});
   vm.runInContext(source,context,{filename:'content.js'});
   const request={kind:'MMX_WEB_SOL_SUBMIT_CONTINUATION',expected_conversation_fingerprint:fp,
-    turn_id:'ohf-turn-r2-0001',directive_digest:vm.runInContext('CONTINUATION_DIRECTIVE_DIGEST',context)};
+    turn_id:'ohf-turn-r2-0001',directive_digest:vm.runInContext('CONTINUATION_DIRECTIVE_DIGEST',context),
+    session_alias:'EXECUTIVE-CEO-A',runtime_binding_id:'bind-wsx-'+ 'c'.repeat(48),
+    runtime_binding_generation:1,runtime_binding_fingerprint:'d'.repeat(64)};
   const result=await context.submitContinuation(request);
   if(scenario==='success'){
     assert.equal(result.effect,'SUBMIT_TRIGGERED');assert.equal(clicks,1);assert.equal(dispatched>0,true);
@@ -296,7 +371,10 @@ const {webcrypto} = require('node:crypto');
    if(message.kind==='MMX_WEB_SOL_SUBMIT_CONTINUATION'){
     submitCalls++; if(scenario==='started')generation='active';
     return {schema:'mastermind.web_sol_continuation_submit_result.v1',conversation_fingerprint:A,
-      turn_id:message.turn_id,directive_digest:message.directive_digest,effect:'SUBMIT_TRIGGERED'};
+      turn_id:message.turn_id,directive_digest:message.directive_digest,
+      session_alias:message.session_alias,runtime_binding_id:message.runtime_binding_id,
+      runtime_binding_generation:message.runtime_binding_generation,
+      runtime_binding_fingerprint:message.runtime_binding_fingerprint,effect:'SUBMIT_TRIGGERED'};
    }
    throw Error('unexpected message');
   },update:async()=>({id:7,windowId:10,active:true}),onUpdated:event(),onMoved:event(),onAttached:event(),onDetached:event(),onReplaced:event(),onRemoved:event()};
@@ -308,7 +386,9 @@ const {webcrypto} = require('node:crypto');
  context.recordProbe(probe(),{id:'ext',frameId:0,tab:{id:7,windowId:10}});
  const req={schema:'mastermind.web_sol_surface_action.v1',binding_id:'11111111-1111-4111-8111-111111111111',conversation_fingerprint:A,
   binding_fingerprint:B,action:'SUBMIT_CONTINUATION',operation_key:'web-sol-r2-fixture',issued_at:new Date().toISOString(),
-  expires_at:new Date(Date.now()+30000).toISOString(),nonce:'continuation-nonce-00000001',turn_id:'ohf-turn-r2-0001',directive_digest:D};
+  expires_at:new Date(Date.now()+30000).toISOString(),nonce:'continuation-nonce-00000001',turn_id:'ohf-turn-r2-0001',directive_digest:D,
+  session_alias:'EXECUTIVE-CEO-A',runtime_binding_id:'bind-wsx-'+ 'c'.repeat(48),runtime_binding_generation:1,
+  runtime_binding_fingerprint:'d'.repeat(64)};
  const first=await context.handleSubmitContinuation(req);
  if(scenario==='started')assert.equal(first.status,'CONTINUATION_STARTED');
  else assert.equal(first.status,'CONTINUATION_SUBMIT_EFFECT_UNKNOWN');

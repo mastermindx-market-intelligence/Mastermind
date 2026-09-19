@@ -14,8 +14,8 @@ const HELLO_SCHEMA = "mastermind.web_sol_transport_hello.v1";
 const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
-const PACKAGE_VERSION = "0.3.0";
-const EXPECTED_CAPABILITY_DIGEST = "8aea42a362cf25d0a5e3a9ebfd7f4ded649af0b456b67a6f0ea952f85691c04a";
+const PACKAGE_VERSION = "0.4.0";
+const EXPECTED_CAPABILITY_DIGEST = "d9fba04ca5045c3f5261c50ebd2a2d1fc60204e2d8662a9aa31e08a7bd79e6e0";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
@@ -204,8 +204,9 @@ function receipt(request, status, observation) {
     result.result_digest = request.result_digest;
     result.obligation_digest = request.obligation_digest;
   }
-  if (request.action === "SUBMIT_CONTINUATION") Object.assign(result, {
-    turn_id: request.turn_id, directive_digest: request.directive_digest});
+  if (request.action === "SUBMIT_CONTINUATION") {
+    for (const key of K.correlationKeys) result[key] = request[key];
+  }
   return result;
 }
 

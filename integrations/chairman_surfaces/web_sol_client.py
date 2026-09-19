@@ -18,10 +18,12 @@ from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
 from control_plane import surface_bindings as sb
+from control_plane.session_targets import SessionTarget
 from . import web_sol_instance as wsi
 from . import web_sol_native_host as native
 from . import web_sol_protocol as wsp
 from . import web_sol_census_protocol as census
+from . import web_sol_runtime_binding as wrb
 
 SOCKET_TIMEOUT_SECONDS = 5.0
 _CHATGPT_CANONICAL_HOST = "chatgpt.com"
@@ -116,6 +118,7 @@ def _request(
     result_digest: str | None = None,
     obligation_digest: str | None = None,
     turn_id: str | None = None,
+    runtime_binding_lease: wrb.WebSolRuntimeBindingLease | None = None,
 ) -> dict[str, Any]:
     accepted = _accepted_binding(binding)
     request = {
@@ -138,10 +141,23 @@ def _request(
             }
         )
     if action == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+        if not isinstance(runtime_binding_lease, wrb.WebSolRuntimeBindingLease):
+            raise WebSolExtensionError("runtime_binding_required")
+        request["conversation_fingerprint"] = (
+            runtime_binding_lease.target.conversation_fingerprint
+        )
         request.update(
             {
                 "turn_id": turn_id,
                 "directive_digest": wsp.CONTINUATION_DIRECTIVE_DIGEST,
+                "session_alias": runtime_binding_lease.runtime_binding.session_alias,
+                "runtime_binding_id": runtime_binding_lease.runtime_binding.binding_id,
+                "runtime_binding_generation": (
+                    runtime_binding_lease.runtime_binding.binding_generation
+                ),
+                "runtime_binding_fingerprint": (
+                    runtime_binding_lease.runtime_binding_fingerprint
+                ),
             }
         )
     return wsp.validate_request(request)
@@ -355,6 +371,8 @@ def _exchange_web_sol_socket(
     expected_instance_id: str,
     challenge_factory: Callable[[], str] | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    on_handshake: Callable[[dict[str, Any]], None] | None = None,
+    before_action: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     is_census = request.get("schema") == census.REQUEST_SCHEMA
     if is_census:
@@ -377,11 +395,15 @@ def _exchange_web_sol_socket(
             }
             if challenge_factory is not None:
                 handshake_kwargs["challenge_factory"] = challenge_factory
-            _complete_transport_handshake(
+            handshake = _complete_transport_handshake(
                 reader,
                 writer,
                 **handshake_kwargs,
             )
+            if on_handshake is not None:
+                on_handshake(handshake)
+            if before_action is not None:
+                before_action(handshake)
             action_writer = _FrameWriteProgress(
                 writer,
                 expected_bytes=len(native.encode_frame(request)),
@@ -450,6 +472,7 @@ def _invoke(
     result_digest: str | None = None,
     obligation_digest: str | None = None,
     turn_id: str | None = None,
+    runtime_binding_lease: wrb.WebSolRuntimeBindingLease | None = None,
 ) -> dict[str, Any]:
     request = _request(
         binding,
@@ -462,18 +485,48 @@ def _invoke(
         result_digest=result_digest,
         obligation_digest=obligation_digest,
         turn_id=turn_id,
+        runtime_binding_lease=runtime_binding_lease,
     )
     try:
         instance_id = wsi.adapter_instance_id(binding)
         path = wsi.socket_path(instance_id)
     except wsi.WebSolInstanceError as exc:
         raise WebSolExtensionError(exc.code) from exc
+
+    before_action = None
+    if action == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+        assert runtime_binding_lease is not None
+        if runtime_binding_lease.target.adapter_instance_id != instance_id:
+            raise WebSolExtensionError("runtime_binding_target_mismatch")
+
+        def require_current_runtime_binding(handshake: dict[str, Any]) -> None:
+            try:
+                current = wrb.derive_runtime_binding_wire(
+                    adapter_instance_id=instance_id,
+                    conversation_fingerprint=request["conversation_fingerprint"],
+                    session_alias=request["session_alias"],
+                    boot_nonce=handshake["boot_nonce"],
+                )
+            except (KeyError, wrb.WebSolRuntimeBindingError) as exc:
+                raise WebSolExtensionError("runtime_binding_stale") from exc
+            for field in (
+                "runtime_binding_id",
+                "runtime_binding_generation",
+                "runtime_binding_fingerprint",
+            ):
+                if request[field] != current[field]:
+                    raise WebSolExtensionError("runtime_binding_stale")
+
+        before_action = require_current_runtime_binding
+
+    exchange_kwargs: dict[str, Any] = {
+        "path": path,
+        "expected_instance_id": instance_id,
+    }
+    if before_action is not None:
+        exchange_kwargs["before_action"] = before_action
     try:
-        receipt = _exchange_web_sol_socket(
-            request,
-            path=path,
-            expected_instance_id=instance_id,
-        )
+        receipt = _exchange_web_sol_socket(request, **exchange_kwargs)
     except WebSolExtensionError:
         raise
     except native.NativeHostError as exc:
@@ -495,7 +548,16 @@ def _invoke(
     if action == wsp.SurfaceAction.TYPED_REENTRY.value:
         match_fields.extend(("operation_id", "result_digest", "obligation_digest"))
     if action == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
-        match_fields.extend(("turn_id", "directive_digest"))
+        match_fields.extend(
+            (
+                "turn_id",
+                "directive_digest",
+                "session_alias",
+                "runtime_binding_id",
+                "runtime_binding_generation",
+                "runtime_binding_fingerprint",
+            )
+        )
     for field in match_fields:
         if accepted[field] != request[field]:
             raise WebSolExtensionError(
@@ -572,6 +634,7 @@ def typed_reentry_via_extension(
 
 def submit_continuation_via_extension(
     binding: dict[str, Any],
+    runtime_binding_lease: wrb.WebSolRuntimeBindingLease,
     *,
     operation_key: str,
     turn_id: str,
@@ -591,6 +654,7 @@ def submit_continuation_via_extension(
         action="SUBMIT_CONTINUATION",
         operation_key=operation_key,
         turn_id=turn_id,
+        runtime_binding_lease=runtime_binding_lease,
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,
@@ -624,3 +688,70 @@ def census_via_extension(
     if any(receipt[field] != request[field] for field in census.IDENTITY_FIELDS):
         raise WebSolExtensionError("receipt_identity_mismatch")
     return receipt
+
+
+def acquire_runtime_binding_via_extension(
+    binding: dict[str, Any],
+    logical_target: SessionTarget,
+    *,
+    operation_key: str,
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> wrb.WebSolRuntimeBindingLease:
+    """Acquire one exact RuntimeBinding through a no-mutation profile census."""
+
+    accepted = _accepted_binding(binding)
+    try:
+        instance_id = wsi.adapter_instance_id(accepted)
+        path = wsi.socket_path(instance_id)
+    except wsi.WebSolInstanceError as exc:
+        raise WebSolExtensionError("invalid_binding") from exc
+    request = census.validate_census_window(
+        {
+            "schema": census.REQUEST_SCHEMA,
+            "adapter_instance_id": instance_id,
+            "operation_key": operation_key,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "nonce": nonce,
+        }
+    )
+    handshake: dict[str, Any] = {}
+
+    def capture_transport(value: dict[str, Any]) -> None:
+        handshake.update(value)
+
+    response = _exchange_web_sol_socket(
+        request,
+        path=path,
+        expected_instance_id=instance_id,
+        on_handshake=capture_transport,
+    )
+    try:
+        receipt = census.validate_census_receipt(response)
+        if any(
+            receipt[field] != request[field]
+            for field in census.IDENTITY_FIELDS
+        ):
+            raise WebSolExtensionError("receipt_identity_mismatch")
+        target = wrb.exact_target_from_census(accepted, receipt)
+        projected = wrb.project_runtime_binding(
+            target,
+            logical_target,
+            boot_nonce=handshake["boot_nonce"],
+        )
+        return wrb.WebSolRuntimeBindingLease(
+            target=target,
+            runtime_binding=projected,
+            runtime_binding_fingerprint=wrb.runtime_binding_fingerprint(
+                projected,
+                target,
+            ),
+        )
+    except WebSolExtensionError:
+        raise
+    except wsp.WebSolProtocolError as exc:
+        raise WebSolExtensionError("invalid_census_value") from exc
+    except (KeyError, wrb.WebSolRuntimeBindingError) as exc:
+        raise WebSolExtensionError("runtime_binding_unavailable") from exc
