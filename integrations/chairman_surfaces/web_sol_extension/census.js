@@ -32,6 +32,7 @@
     "clientPackageVersion", "nativePackageVersion", "extensionPackageVersion",
     "capabilityDigest",
   ]);
+  const EXPECTED_EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko";
   let busy = false;
   let generation = 0;
   if (globalThis.addEventListener) globalThis.addEventListener("pagehide", () => {generation++; clearSnapshot();});
@@ -80,6 +81,7 @@
       return;
     }
     const structurallyValid =
+      chrome.runtime.id === EXPECTED_EXTENSION_ID &&
       exactKeys(raw, INSTANCE_CONFIG_KEYS) &&
       raw.schema === "mastermind.web_sol_instance_config.v1" &&
       typeof raw.instanceId === "string" && /^[0-9a-f]{64}$/.test(raw.instanceId) &&
