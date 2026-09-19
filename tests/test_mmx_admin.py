@@ -213,6 +213,29 @@ def test_main_status_terminal_exit_code_is_zero_regardless_of_stored_outcome(mon
     assert json.loads(captured.out) == response
 
 
+def test_main_power_effect_unknown_exit_code_is_75(monkeypatch, capsys) -> None:
+    response = {
+        "schema": "mastermind.executive_privileged_action_response.v1",
+        "ok": False,
+        "error": "EFFECT_UNKNOWN",
+        "detail": "privileged child reported action-level effect uncertainty",
+    }
+    monkeypatch.setattr(mmx_admin, "send_request", lambda *_a, **_k: response)
+
+    rc = mmx_admin.main(
+        [
+            "executive.host.prepare_secondary_power_policy",
+            "--request-id",
+            "req-power-unknown",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 75
+    assert "request_id=req-power-unknown" in captured.err
+    assert json.loads(captured.out) == response
+
+
 def test_main_status_effect_unknown_exit_code_is_75(monkeypatch) -> None:
     response = {
         "schema": "mastermind.executive_privileged_action_response.v1",
