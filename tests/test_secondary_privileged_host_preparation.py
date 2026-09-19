@@ -149,13 +149,15 @@ def test_success_claim_is_bounded_to_power_remediation_readiness() -> None:
 def test_root_helpers_are_not_invoked_from_a_mutable_checkout() -> None:
     text = _source()
     source_trust = text.index('SOURCE_PARENT="$(cd "$SOURCE_REPO/.."')
+    first_git = text.index('/usr/bin/git -C "$SOURCE_REPO" rev-parse HEAD')
     runtime_verify = text.index('"$PYTHON_PROVISIONER" --verify-only')
     policy_verify = text.index('"$PYTHON_BINARY" -I -S -B "$SOURCE_POLICY"')
-    assert source_trust < runtime_verify < policy_verify
+    assert source_trust < first_git < runtime_verify < policy_verify
     assert 'source checkout contains a non-root-owned non-symlink object' in text
     assert 'source checkout contains a group/other-writable non-symlink object' in text
     assert 'source checkout contains a hard-linked file' in text
     assert 'source checkout contains a filesystem ACL on a non-symlink object' in text
+    assert 'source repo must be a direct directory' in text
 
 
 def test_release_manifest_is_created_and_verified_before_atomic_publish() -> None:
