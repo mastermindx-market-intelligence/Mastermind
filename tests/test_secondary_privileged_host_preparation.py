@@ -152,10 +152,10 @@ def test_root_helpers_are_not_invoked_from_a_mutable_checkout() -> None:
     runtime_verify = text.index('"$PYTHON_PROVISIONER" --verify-only')
     policy_verify = text.index('"$PYTHON_BINARY" -I -S -B "$SOURCE_POLICY"')
     assert source_trust < runtime_verify < policy_verify
-    assert 'source checkout contains a non-root-owned object' in text
-    assert 'source checkout contains a group/other-writable object' in text
+    assert 'source checkout contains a non-root-owned non-symlink object' in text
+    assert 'source checkout contains a group/other-writable non-symlink object' in text
     assert 'source checkout contains a hard-linked file' in text
-    assert 'source checkout contains a filesystem ACL' in text
+    assert 'source checkout contains a filesystem ACL on a non-symlink object' in text
 
 
 def test_release_manifest_is_created_and_verified_before_atomic_publish() -> None:
@@ -167,3 +167,12 @@ def test_release_manifest_is_created_and_verified_before_atomic_publish() -> Non
     assert '$RELEASE_ROOT/ops/executive_os/release_manifest.py" create' not in text
     cleanup = text.split('cleanup_on_failure() {', 1)[1].split('}\ntrap', 1)[0]
     assert '/bin/rm -rf -- "$STAGING"' in cleanup
+
+
+def test_source_trust_allows_repo_symlinks_without_weakening_parent_custody() -> None:
+    text = _source()
+    assert 'find "$SOURCE_REPO" ! -type l ! -user root' in text
+    assert 'find "$SOURCE_REPO" ! -type l -perm +022' in text
+    assert 'find "$SOURCE_REPO" ! -type l -exec /usr/bin/stat' in text
+    assert 'source parent is group/other writable' in text
+    assert 'source checkout contains a hard-linked file' in text
