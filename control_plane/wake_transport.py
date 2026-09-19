@@ -1,5 +1,3 @@
-[Reading 91 lines from start (total: 91 lines, 0 remaining)]
-
 """Canonical wake-transport descriptors — one implementation-state authority.
 
 ``target_enabled`` lives on the session target.  ``transport_implemented``
@@ -47,8 +45,8 @@ class WakeTransportDescriptor:
 
 
 #: Descriptor construction is the single reviewed implementation-state source.
-#: Reviewed implementations currently include Codex App Server and the Web-Sol
-#: ChatGPT GUI adapter. Other transports remain false until their proof gates pass.
+#: PR3 implements only Codex App Server here; Claude remains false until a real
+#: installed-host preflight proves the exact native-resume contract.
 WAKE_TRANSPORT_DESCRIPTORS: dict[str, WakeTransportDescriptor] = {
     name: WakeTransportDescriptor(
         transport_id=name,
