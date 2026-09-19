@@ -70,7 +70,7 @@ def test_post_write_readback_must_exactly_satisfy_fleet_predicates(stdout: str) 
             return _completed(command)
         return _completed(command, stdout=stdout)
 
-    with pytest.raises(power.SecondaryHostPowerPolicyError):
+    with pytest.raises(power.SecondaryHostPowerPolicyEffectUnknown):
         power.prepare_secondary_host_power_policy(runner=runner, euid=0)
 
 
@@ -81,7 +81,7 @@ def test_failed_mutation_never_attempts_success_readback() -> None:
         calls.append(command)
         return _completed(command, rc=1)
 
-    with pytest.raises(power.SecondaryHostPowerPolicyError):
+    with pytest.raises(power.SecondaryHostPowerPolicyEffectUnknown):
         power.prepare_secondary_host_power_policy(runner=runner, euid=0)
     assert calls == [power.PMSET_SET_COMMAND]
 
@@ -92,7 +92,7 @@ def test_readback_failure_refuses() -> None:
             return _completed(command)
         return _completed(command, rc=1)
 
-    with pytest.raises(power.SecondaryHostPowerPolicyError):
+    with pytest.raises(power.SecondaryHostPowerPolicyEffectUnknown):
         power.prepare_secondary_host_power_policy(runner=runner, euid=0)
 
 
