@@ -204,7 +204,7 @@ _PROVISION_REQUIRED_KEYS_BASE = frozenset({
     "schema", "vendor", "profile_id", "origin_policy", "disposable_ack",
 })
 _MAX_PROVISION_BYTES = 64 * 1024
-CHAIRMAN_SEAT_REFS = frozenset({"chatgpt1", "chatgpt2", "chatgpt3"})
+CHAIRMAN_SEAT_REFS = frozenset({"chatgpt1", "chatgpt2", "chatgpt3", "chatgpt4"})
 BINDINGS_CENSUS_MAX_AGE_SECONDS = 24 * 60 * 60
 _CURRENT_ENVIRONMENT_CENSUS_MAX_ROWS = 1000
 _CURRENT_ENVIRONMENT_SNAPSHOT_SEAL = object()
