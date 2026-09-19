@@ -45,6 +45,14 @@
     byId("rows").replaceChildren(); byId("summary").replaceChildren();
     byId("scope").textContent = ""; byId("timestamp").textContent = "";
   }
+  function extensionVersion() {
+    try {
+      const manifest = chrome.runtime.getManifest?.();
+      return manifest && typeof manifest.version === "string" && manifest.version ? manifest.version : null;
+    } catch (_) {
+      return null;
+    }
+  }
   function probeWarning(result) {
     if (!Number.isSafeInteger(result.initial_tab_count) || !Array.isArray(result.rows)) return null;
     const failed = result.rows.filter(row => PROBE_FAILURE_STATES.has(row.status));
@@ -78,7 +86,8 @@
       (result.unobserved_added_count ? ` · ${result.unobserved_added_count} new tabs not sampled` : "");
     const when = typeof result.completed_at === "string" && /^\d{4}-\d{2}-\d{2}T/.test(result.completed_at)
       ? result.completed_at.replace("T", " ").replace("Z", " UTC") : "Time unavailable";
-    byId("timestamp").textContent = `${hasInventory ? "Captured" : "Attempted"} ${when} · ${result.duration_ms} ms · Refresh to resample`;
+    const version = extensionVersion();
+    byId("timestamp").textContent = `${version ? `Extension ${version} · ` : ""}${hasInventory ? "Captured" : "Attempted"} ${when} · ${result.duration_ms} ms · Refresh to resample`;
     const rows = byId("rows"); rows.replaceChildren();
     for (const row of result.rows) {
       const tr = document.createElement("tr");
