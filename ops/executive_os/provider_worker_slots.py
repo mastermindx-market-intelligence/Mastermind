@@ -92,8 +92,6 @@ class SubscriptionWorkerSlot:
     worker_gid: int
     provider_home: Path
     worker_config: Path
-    account_label: str
-    capacity_capability_id: str
     admission_state: str = "HELD_FOR_REAL_CANARY"
 
     def public_descriptor(self) -> dict[str, Any]:
@@ -105,8 +103,6 @@ class SubscriptionWorkerSlot:
             "worker_user": self.worker_user,
             "worker_uid": self.worker_uid,
             "worker_gid": self.worker_gid,
-            "account_label": self.account_label,
-            "capacity_capability_id": self.capacity_capability_id,
             "admission_state": self.admission_state,
         }
 
@@ -160,8 +156,18 @@ _SUBSCRIPTION_SLOTS = (
         worker_gid=458,
         provider_home=RUNTIME_WORKER_ROOT / "alibaba-token-01" / "provider-home",
         worker_config=SYSTEM_CONFIG_ROOT / "worker-alibaba-token-01.json",
-        account_label="alibaba-token-plan-personal-01",
-        capacity_capability_id="alibaba_token_plan_account",
+    ),
+    SubscriptionWorkerSlot(
+        slot_id="minimax-token-01",
+        provider="minimax",
+        profile_id="minimax-token-plan",
+        harness_binding_id="minimax-token-plan.codex-responses",
+        worker_user="_mastermind_minimax_01",
+        worker_group="_mastermind_minimax_01",
+        worker_uid=459,
+        worker_gid=459,
+        provider_home=RUNTIME_WORKER_ROOT / "minimax-token-01" / "provider-home",
+        worker_config=SYSTEM_CONFIG_ROOT / "worker-minimax-token-01.json",
     ),
 )
 
@@ -249,37 +255,65 @@ def validate_subscription_slots(
     rows: Sequence[SubscriptionWorkerSlot],
 ) -> tuple[SubscriptionWorkerSlot, ...]:
     catalog = tuple(rows)
-    if tuple(row.slot_id for row in catalog) != ("alibaba-token-01",):
+    expected = {
+        "alibaba-token-01": {
+            "provider": "alibaba",
+            "profile_id": "alibaba-token-plan-personal",
+            "harness_binding_id": "alibaba-token-plan-personal.codex-responses",
+            "worker_user": "_mastermind_alibaba_01",
+            "worker_uid": 458,
+        },
+        "minimax-token-01": {
+            "provider": "minimax",
+            "profile_id": "minimax-token-plan",
+            "harness_binding_id": "minimax-token-plan.codex-responses",
+            "worker_user": "_mastermind_minimax_01",
+            "worker_uid": 459,
+        },
+    }
+    if tuple(row.slot_id for row in catalog) != tuple(expected):
         raise SlotCatalogError("subscription_slot_inventory_invalid")
     for field in (
-        "slot_id", "worker_user", "worker_group", "worker_uid", "worker_gid",
-        "provider_home", "worker_config", "account_label", "capacity_capability_id",
+        "slot_id",
+        "provider",
+        "profile_id",
+        "harness_binding_id",
+        "worker_user",
+        "worker_group",
+        "worker_uid",
+        "worker_gid",
+        "provider_home",
+        "worker_config",
     ):
         _unique(catalog, field)
-    row = catalog[0]
-    if (
-        _SUBSCRIPTION_SLOT_ID_RE.fullmatch(row.slot_id) is None
-        or row.provider != "alibaba"
-        or row.profile_id != "alibaba-token-plan-personal"
-        or row.harness_binding_id != "alibaba-token-plan-personal.codex-responses"
-        or _WORKER_USER_RE.fullmatch(row.worker_user) is None
-        or row.worker_group != row.worker_user
-        or row.worker_uid != 458
-        or row.worker_gid != 458
-        or row.provider_home != RUNTIME_WORKER_ROOT / row.slot_id / "provider-home"
-        or row.worker_config != SYSTEM_CONFIG_ROOT / "worker-alibaba-token-01.json"
-        or row.account_label != "alibaba-token-plan-personal-01"
-        or row.capacity_capability_id != "alibaba_token_plan_account"
-        or row.admission_state != "HELD_FOR_REAL_CANARY"
-    ):
-        raise SlotCatalogError("subscription_slot_invalid")
+
     legacy = all_slots()
-    if row.worker_uid in {450, 452, 457} | {slot.worker_uid for slot in legacy}:
-        raise SlotCatalogError("subscription_worker_uid_collision")
-    if row.worker_gid in {450, 452, 457} | {slot.worker_gid for slot in legacy}:
-        raise SlotCatalogError("subscription_worker_gid_collision")
-    if row.provider_home in {slot.provider_home for slot in legacy}:
-        raise SlotCatalogError("subscription_provider_home_collision")
+    reserved_uids = {450, 452, 457} | {slot.worker_uid for slot in legacy}
+    reserved_gids = {450, 452, 457} | {slot.worker_gid for slot in legacy}
+    legacy_homes = {slot.provider_home for slot in legacy}
+    for row in catalog:
+        wanted = expected[row.slot_id]
+        if (
+            _SUBSCRIPTION_SLOT_ID_RE.fullmatch(row.slot_id) is None
+            or row.provider != wanted["provider"]
+            or row.profile_id != wanted["profile_id"]
+            or row.harness_binding_id != wanted["harness_binding_id"]
+            or row.worker_user != wanted["worker_user"]
+            or _WORKER_USER_RE.fullmatch(row.worker_user) is None
+            or row.worker_group != row.worker_user
+            or row.worker_uid != wanted["worker_uid"]
+            or row.worker_gid != wanted["worker_uid"]
+            or row.provider_home != RUNTIME_WORKER_ROOT / row.slot_id / "provider-home"
+            or row.worker_config != SYSTEM_CONFIG_ROOT / f"worker-{row.slot_id}.json"
+            or row.admission_state != "HELD_FOR_REAL_CANARY"
+        ):
+            raise SlotCatalogError("subscription_slot_invalid")
+        if row.worker_uid in reserved_uids:
+            raise SlotCatalogError("subscription_worker_uid_collision")
+        if row.worker_gid in reserved_gids:
+            raise SlotCatalogError("subscription_worker_gid_collision")
+        if row.provider_home in legacy_homes:
+            raise SlotCatalogError("subscription_provider_home_collision")
     return catalog
 
 

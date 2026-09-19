@@ -19,39 +19,55 @@ class SubscriptionWorkerSlotsTest(unittest.TestCase):
             (451, 454, 455, 456),
         )
 
-    def test_alibaba_candidate_is_held_and_collision_free(self) -> None:
+    def test_subscription_candidates_are_held_and_collision_free(self) -> None:
         catalog = slots.subscription_slots()
-        self.assertEqual(len(catalog), 1)
-        row = catalog[0]
-        self.assertEqual(row.slot_id, "alibaba-token-01")
-        self.assertEqual(row.provider, "alibaba")
-        self.assertEqual(row.worker_uid, 458)
-        self.assertEqual(row.worker_gid, 458)
-        self.assertEqual(row.admission_state, "HELD_FOR_REAL_CANARY")
+        self.assertEqual(
+            tuple((row.slot_id, row.provider, row.worker_uid) for row in catalog),
+            (
+                ("alibaba-token-01", "alibaba", 458),
+                ("minimax-token-01", "minimax", 459),
+            ),
+        )
         legacy = slots.all_slots()
-        self.assertNotIn(row.worker_uid, {slot.worker_uid for slot in legacy})
-        self.assertNotIn(row.worker_gid, {slot.worker_gid for slot in legacy})
-        self.assertNotIn(row.provider_home, {slot.provider_home for slot in legacy})
+        for row in catalog:
+            self.assertEqual(row.worker_gid, row.worker_uid)
+            self.assertEqual(row.admission_state, "HELD_FOR_REAL_CANARY")
+            self.assertNotIn(row.worker_uid, {slot.worker_uid for slot in legacy})
+            self.assertNotIn(row.worker_gid, {slot.worker_gid for slot in legacy})
+            self.assertNotIn(row.provider_home, {slot.provider_home for slot in legacy})
 
-    def test_candidate_points_to_reviewed_disarmed_binding(self) -> None:
-        row = slots.get_subscription_slot("alibaba-token-01")
-        binding = get_binding(row.harness_binding_id)
-        self.assertEqual(binding.profile_id, row.profile_id)
-        self.assertEqual(binding.provider, row.provider)
-        self.assertEqual(binding.adapter_id, "codex-cli")
-        self.assertEqual(binding.implementation_state, "BUILT_NOT_PROVEN")
-        self.assertFalse(binding.autonomous_allowed)
+    def test_candidates_point_to_reviewed_disarmed_bindings(self) -> None:
+        for row in slots.subscription_slots():
+            with self.subTest(slot_id=row.slot_id):
+                binding = get_binding(row.harness_binding_id)
+                self.assertEqual(binding.profile_id, row.profile_id)
+                self.assertEqual(binding.provider, row.provider)
+                self.assertEqual(binding.adapter_id, "codex-cli")
+                self.assertEqual(binding.implementation_state, "BUILT_NOT_PROVEN")
+                self.assertFalse(binding.autonomous_allowed)
 
-    def test_public_descriptor_has_no_secret_or_host_paths(self) -> None:
-        rendered = json.dumps(slots.subscription_slots()[0].public_descriptor())
+    def test_public_descriptors_have_no_secret_host_or_capacity_identity(self) -> None:
+        rendered = json.dumps(
+            [row.public_descriptor() for row in slots.subscription_slots()]
+        )
         for forbidden in (
-            "provider_home", "worker_config", "credential", "api_key", "token-plan.ap",
-            "/var/db/", "/Library/", "@", "auth.json",
+            "provider_home",
+            "worker_config",
+            "credential",
+            "api_key",
+            "capacity_capability_id",
+            "account_label",
+            "token-plan.ap",
+            "/var/db/",
+            "/Library/",
+            "@",
+            "auth.json",
         ):
             self.assertNotIn(forbidden, rendered)
 
     def test_mutations_cannot_alias_existing_principals_or_binding(self) -> None:
-        row = slots.subscription_slots()[0]
+        catalog = list(slots.subscription_slots())
+        row = catalog[0]
         for mutated in (
             replace(row, worker_uid=451),
             replace(row, worker_gid=457),
@@ -59,8 +75,10 @@ class SubscriptionWorkerSlotsTest(unittest.TestCase):
             replace(row, admission_state="READY"),
         ):
             with self.subTest(mutated=mutated):
+                candidate = list(catalog)
+                candidate[0] = mutated
                 with self.assertRaises(slots.SlotCatalogError):
-                    slots.validate_subscription_slots((mutated,))
+                    slots.validate_subscription_slots(candidate)
 
     def test_unknown_subscription_slot_refuses_without_fallback(self) -> None:
         with self.assertRaisesRegex(

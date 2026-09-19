@@ -26,7 +26,7 @@ import stat
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from control_plane.worker_execution_contract import (
@@ -34,7 +34,6 @@ from control_plane.worker_execution_contract import (
     CollectionReceipt,
     ProcessInspector,
     ValidationReceipt,
-    WorkerLaunchIdentity,
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRunStatus,
@@ -531,7 +530,6 @@ class ExecutiveSupervisor:
         heartbeat_interval_seconds: float | None = None,
         inspector: ProcessInspector | None = None,
         process_controller: PersistedProcessController | None = None,
-        worker_identity_resolver: Callable[[str], WorkerLaunchIdentity] | None = None,
         validation_timeout_seconds: float = 300.0,
         instance_id: str | None = None,
     ) -> None:
@@ -558,7 +556,6 @@ class ExecutiveSupervisor:
         self.worker_gid = int(worker_gid) if worker_gid is not None else None
         self.shared_run_gid = int(shared_run_gid) if shared_run_gid is not None else None
         self.secret_canary_verdict = dict(secret_canary_verdict or {})
-        self.worker_identity_resolver = worker_identity_resolver
         self.require_complete_launch_attestation = bool(
             require_complete_launch_attestation
         )
@@ -584,25 +581,6 @@ class ExecutiveSupervisor:
         if job is None:
             raise SupervisorError(f"job {job_id!r} does not exist")
         return job
-
-    def _worker_launch_identity(self, worker_id: str) -> WorkerLaunchIdentity:
-        if self.worker_identity_resolver is None:
-            return WorkerLaunchIdentity(
-                worker_id=worker_id,
-                worker_user=self.worker_user,
-                worker_uid=self.worker_uid,
-                worker_gid=self.worker_gid,
-                secret_canary_verdict=self.secret_canary_verdict,
-            )
-        try:
-            identity = self.worker_identity_resolver(worker_id)
-        except Exception as exc:
-            raise SupervisorError(
-                f"claimed worker {worker_id!r} has no reviewed transport identity"
-            ) from exc
-        if not isinstance(identity, WorkerLaunchIdentity) or identity.worker_id != worker_id:
-            raise SupervisorError("worker transport identity does not match the claimed worker")
-        return identity
 
     @staticmethod
     def _revalidate_authority(job: Job, attempt: Attempt) -> None:
@@ -929,7 +907,6 @@ class ExecutiveSupervisor:
             raise SupervisorError("real worker job requires an assigned isolated worktree")
         model = quota.model or str(job.constraints.get("model") or "gpt-5.6-sol")
         effort = quota.effort or str(job.constraints.get("effort") or "xhigh")
-        worker_identity = self._worker_launch_identity(attempt.worker_id)
         workspace = Path(job.worktree).resolve(strict=True)
         run_dir = self._run_dir(attempt.attempt_id).resolve(strict=True)
         (
@@ -964,7 +941,7 @@ class ExecutiveSupervisor:
             ),
             model=model,
             reasoning_effort=effort,
-            worker_user=worker_identity.worker_user,
+            worker_user=self.worker_user,
             expected_base_sha=str(job.constraints.get("base_sha") or "") or None,
             allowed_artifact_paths=tuple(
                 effective_grant["write_paths"]
@@ -976,10 +953,10 @@ class ExecutiveSupervisor:
             isolation_manifest=isolation_manifest,
             isolation_manifest_sha256=isolation_manifest_sha256,
             forbidden_paths=(self.runtime.store.path,),
-            expected_worker_uid=worker_identity.worker_uid,
-            expected_worker_gid=worker_identity.worker_gid,
+            expected_worker_uid=self.worker_uid,
+            expected_worker_gid=self.worker_gid,
             shared_run_gid=self.shared_run_gid,
-            secret_canary_verdict=worker_identity.secret_canary_verdict,
+            secret_canary_verdict=self.secret_canary_verdict,
             require_secret_canary=self.require_complete_launch_attestation,
             **spec_kwargs,
         )

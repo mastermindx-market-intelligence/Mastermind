@@ -200,38 +200,6 @@ class WorkerLaunchSpec:
 
 
 @dataclasses.dataclass(frozen=True)
-class WorkerLaunchIdentity:
-    """Control-owned principal facts for one already-selected worker transport."""
-
-    worker_id: str
-    worker_user: str
-    worker_uid: int | None
-    worker_gid: int | None
-    secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        worker_id = str(self.worker_id or "").strip()
-        worker_user = str(self.worker_user or "").strip()
-        if not worker_id or any(character.isspace() for character in worker_id):
-            raise ValueError("worker launch identity has invalid worker_id")
-        if not worker_user or any(character.isspace() for character in worker_user):
-            raise ValueError("worker launch identity has invalid worker_user")
-        for field_name in ("worker_uid", "worker_gid"):
-            value = getattr(self, field_name)
-            if value is not None and (type(value) is not int or value <= 0):
-                raise ValueError(f"worker launch identity has invalid {field_name}")
-        if (self.worker_uid is None) != (self.worker_gid is None):
-            raise ValueError("worker launch identity UID/GID must be supplied together")
-        object.__setattr__(self, "worker_id", worker_id)
-        object.__setattr__(self, "worker_user", worker_user)
-        object.__setattr__(
-            self,
-            "secret_canary_verdict",
-            _freeze(self.secret_canary_verdict),
-        )
-
-
-@dataclasses.dataclass(frozen=True)
 class WorkerProcessRef:
     run_id: str
     pid: int
@@ -342,7 +310,6 @@ __all__ = [
     "LaunchAttestation",
     "ProcessInspector",
     "ValidationReceipt",
-    "WorkerLaunchIdentity",
     "WorkerLaunchSpec",
     "WorkerProcessRef",
     "WorkerResult",

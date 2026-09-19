@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import types
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from control_plane.executive_worker_broker import (
@@ -13,7 +14,6 @@ from control_plane.executive_worker_broker import (
 )
 from control_plane.worker_execution_contract import (
     BinaryAttestation,
-    WorkerLaunchIdentity,
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRunStatus,
@@ -77,9 +77,12 @@ class _FakeAdapter:
         self.pid = pid
         self.fail_start = fail_start
         self.calls: list[tuple] = []
+        self.start_specs: list[WorkerLaunchSpec] = []
+        self.validation_specs: list[WorkerLaunchSpec] = []
         self.inspector = object()
 
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+        self.start_specs.append(spec)
         self.calls.append(("start", spec.run_id, spec.worker_id))
         if self.fail_start:
             raise RuntimeError("ambiguous fixture start")
@@ -116,6 +119,7 @@ class _FakeAdapter:
         *,
         timeout_seconds: float = 300.0,
     ):
+        self.validation_specs.append(spec)
         self.calls.append(("validate", spec.run_id, tuple(argv), timeout_seconds))
         return (self.name, "validate", spec.run_id)
 
@@ -145,13 +149,10 @@ def _endpoint(worker_id: str, uid: int) -> RemoteWorkerBrokerEndpoint:
     return RemoteWorkerBrokerEndpoint(
         worker_id=worker_id,
         client=WorkerBrokerClient(Path(f"/tmp/{worker_id}.sock")),
-        identity=WorkerLaunchIdentity(
-            worker_id=worker_id,
-            worker_user=f"_mastermind_{worker_id.replace('-', '_')}",
-            worker_uid=uid,
-            worker_gid=uid,
-            secret_canary_verdict={"passed": True, "worker_id": worker_id},
-        ),
+        worker_user=f"_mastermind_{worker_id.replace('-', '_')}",
+        worker_uid=uid,
+        worker_gid=uid,
+        secret_canary_verdict={"passed": True, "worker_id": worker_id},
     )
 
 
@@ -178,11 +179,23 @@ class RemoteWorkerBrokerFleetTest(unittest.IsolatedAsyncioTestCase):
         spec = _spec("run-1", "alibaba-token-01")
         ref = await fleet.start(spec)
         self.assertEqual(ref.pid, 202)
+        bound = self.adapters["alibaba-token-01"].start_specs[0]
+        self.assertEqual(bound.worker_user, "_mastermind_alibaba_token_01")
+        self.assertEqual(bound.expected_worker_uid, 458)
+        self.assertEqual(bound.expected_worker_gid, 458)
+        self.assertEqual(dict(bound.secret_canary_verdict)["worker_id"], "alibaba-token-01")
+        self.assertEqual(spec.worker_user, "mastermind-worker")
+        self.assertIsNone(spec.expected_worker_uid)
+        self.assertIsNone(spec.expected_worker_gid)
         self.assertEqual(await fleet.status(ref), WorkerRunStatus.RUNNING)
         self.assertEqual(await fleet.collect_result(ref), ("alibaba", "collect", "run-1"))
         self.assertEqual(
             await fleet.run_validation_argv(spec, ("/usr/bin/true",)),
             ("alibaba", "validate", "run-1"),
+        )
+        self.assertEqual(
+            self.adapters["alibaba-token-01"].validation_specs,
+            [bound],
         )
         self.assertEqual(
             await fleet.cancel(ref, "fixture"),
@@ -213,6 +226,25 @@ class RemoteWorkerBrokerFleetTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(BrokerStateError, "already bound"):
             await fleet.start(_spec("run-fixed", "codex-01"))
         self.assertFalse(self.adapters["codex-01"].calls)
+
+    async def test_validation_refuses_launch_spec_drift(self) -> None:
+        fleet = self._fleet()
+        spec = _spec("run-drift", "alibaba-token-01")
+        await fleet.start(spec)
+        changed = replace(spec, prompt="changed after start")
+        with self.assertRaisesRegex(BrokerStateError, "differs from the spec bound"):
+            await fleet.run_validation_argv(changed, ("/usr/bin/true",))
+        self.assertFalse(self.adapters["alibaba-token-01"].validation_specs)
+
+    def test_endpoint_refuses_invalid_principal_identity(self) -> None:
+        with self.assertRaisesRegex(WorkerBrokerError, "invalid worker_uid"):
+            RemoteWorkerBrokerEndpoint(
+                worker_id="alibaba-token-01",
+                client=WorkerBrokerClient(Path("/tmp/alibaba.sock")),
+                worker_user="_mastermind_alibaba_01",
+                worker_uid=0,
+                worker_gid=458,
+            )
 
     def test_restart_controller_uses_persisted_worker_id(self) -> None:
         fleet = self._fleet()
