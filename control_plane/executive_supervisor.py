@@ -26,7 +26,7 @@ import stat
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from control_plane.worker_execution_contract import (
@@ -56,6 +56,8 @@ from control_plane.executive_runtime import (
     JobPayload,
     JobStatus,
     OrchestrationDispatchOutcome,
+    ExactWorkerClaimTarget,
+    _require_exact_worker_target,
     Runtime,
     RuntimeProofError,
     StateConflict,
@@ -532,8 +534,12 @@ class ExecutiveSupervisor:
         process_controller: PersistedProcessController | None = None,
         validation_timeout_seconds: float = 300.0,
         instance_id: str | None = None,
+        exact_target_provider: Callable[[str], ExactWorkerClaimTarget | None] | None = None,
     ) -> None:
         self.runtime = runtime
+        if exact_target_provider is not None and not callable(exact_target_provider):
+            raise SupervisorError("exact worker target provider must be callable")
+        self._exact_target_provider = exact_target_provider
         self.adapter = adapter
         self.runs_root = (
             Path(runs_root).resolve()
@@ -1154,33 +1160,38 @@ class ExecutiveSupervisor:
     async def start_cycle_job(
         self, job_id: str, *, command_id: str
     ) -> ActiveRun | OrchestrationDispatchOutcome:
-        """Claim exactly ``job_id`` under ``command_id`` and launch it once.
-
-        Replaying an already active/terminal dispatch returns the immutable
-        command-bound outcome.  It never scans or claims another queued Job.
-        """
-
+        """Use the existing exact child claim; replay never reissues a target."""
+        target = (
+            self._exact_target_provider(job_id)
+            if self._exact_target_provider is not None else None
+        )
+        if target is not None:
+            target = _require_exact_worker_target(target)
         outcome = self.runtime.attempts.dispatch_cycle_job(
             job_id,
             command_id=command_id,
             lease_owner=self.instance_id,
+            **({"exact_target": target} if target is not None else {}),
         )
         if outcome is None:
             raise SupervisorError(f"no eligible worker capacity for {job_id}")
-        if outcome.outcome == "TERMINAL" or outcome.attempt.status is not AttemptStatus.CLAIMED:
+        if (
+            (target is not None and not outcome.claimed_now)
+            or outcome.outcome == "TERMINAL"
+            or outcome.attempt.status is not AttemptStatus.CLAIMED
+        ):
             return outcome
         if outcome.lease_token is None:  # pragma: no cover - dataclass invariant
             raise SupervisorError("active cycle dispatch lost its lease token")
         return await self._start_claimed_job(
             job_id,
-            AttemptLease(
-                attempt=outcome.attempt,
-                lease_token=outcome.lease_token,
-            ),
+            AttemptLease(attempt=outcome.attempt, lease_token=outcome.lease_token),
+            **({"exact_target": target} if target is not None else {}),
         )
 
     async def _start_claimed_job(
-        self, job_id: str, lease: AttemptLease
+        self, job_id: str, lease: AttemptLease, *,
+        exact_target: ExactWorkerClaimTarget | None = None,
     ) -> ActiveRun:
         """Launch one already claimed exact Job and persist its principal."""
 
@@ -1197,6 +1208,9 @@ class ExecutiveSupervisor:
                 effective_grant=effective_grant,
             )
             spec = self._launch_spec(job, lease, schema_path, effective_grant)
+            if exact_target is not None:
+                exact_target.revalidate_source()
+                self.runtime.attempts._validate_exact_target_launch(exact_target, lease)
             start_invoked = True
             process_ref = await self.adapter.start(spec)
             launch_metadata = self._launch_metadata(
