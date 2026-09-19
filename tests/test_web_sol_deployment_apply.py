@@ -10,6 +10,7 @@ import pytest
 
 from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import web_sol_deployment as deployment
+from integrations.chairman_surfaces import web_sol_protocol as wsp
 from integrations.chairman_surfaces import web_sol_deployment_apply as applier
 
 
@@ -35,7 +36,7 @@ def _bundle(tmp_path: Path) -> tuple[deployment.DeploymentBundle, Path]:
     install_root = tmp_path / "install"
     install_root.mkdir(mode=0o700)
     release = deployment.WebSolRelease(
-        package_version="0.2.0",
+        package_version=wsp.WEB_SOL_PACKAGE_VERSION,
         source_commit="a" * 40,
         repository_root=tmp_path / "repo",
         python_executable=Path(sys.executable),
@@ -893,7 +894,7 @@ def test_complete_census1_bundle_applies_reads_back_and_rolls_back(
     install_root = tmp_path / "census-install"
     install_root.mkdir(mode=0o700)
     release = deployment.WebSolRelease(
-        package_version="0.2.0",
+        package_version=wsp.WEB_SOL_PACKAGE_VERSION,
         source_commit="c" * 40,
         repository_root=tmp_path / "repo",
         python_executable=Path(sys.executable),
@@ -909,6 +910,7 @@ def test_complete_census1_bundle_applies_reads_back_and_rolls_back(
         "manifest.json",
         "background.js",
         "content.js",
+        "continuation_core.js",
         "census.html",
         "census.css",
         "census_core.js",
@@ -926,7 +928,7 @@ def test_complete_census1_bundle_applies_reads_back_and_rolls_back(
         expected_source_digests=expected,
     )
     assert len(bundle_seed.artifacts) == 3
-    assert len(bundle.artifacts) == 10
+    assert len(bundle.artifacts) == 11
     prepared = applier.prepare_deployment(
         bundle,
         deployment.plan_deployment(bundle, {}),
@@ -938,9 +940,9 @@ def test_complete_census1_bundle_applies_reads_back_and_rolls_back(
 
     applied = applier.apply_deployment(prepared)
 
-    assert applied.public_receipt["target_count"] == 10
-    assert applier.verify_applied_deployment(applied)["target_count"] == 10
-    assert applier.rollback_deployment(applied)["removed_count"] == 10
+    assert applied.public_receipt["target_count"] == 11
+    assert applier.verify_applied_deployment(applied)["target_count"] == 11
+    assert applier.rollback_deployment(applied)["removed_count"] == 11
     assert list(install_root.rglob("*")) == []
 
 

@@ -58,6 +58,10 @@ WAKE_TRANSPORT_DESCRIPTORS["codex-app-server"] = dataclasses.replace(
     WAKE_TRANSPORT_DESCRIPTORS["codex-app-server"],
     transport_implemented=True,
 )
+WAKE_TRANSPORT_DESCRIPTORS["chatgpt-gui"] = dataclasses.replace(
+    WAKE_TRANSPORT_DESCRIPTORS["chatgpt-gui"],
+    transport_implemented=True,
+)
 
 
 def wake_transport_descriptor(transport_id: str) -> WakeTransportDescriptor:

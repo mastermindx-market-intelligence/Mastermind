@@ -39,9 +39,9 @@ const config = {
     ? `com.mastermind.web_sol_surface.${"b".repeat(24)}`
     : EXPECTED_HOST,
   protocolMajor: 1,
-  clientPackageVersion: "0.2.0",
-  nativePackageVersion: "0.2.0",
-  extensionPackageVersion: "0.2.0",
+  clientPackageVersion: "0.4.0",
+  nativePackageVersion: "0.4.0",
+  extensionPackageVersion: "0.4.0",
   capabilityDigest,
 };
 
