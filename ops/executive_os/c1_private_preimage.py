@@ -888,6 +888,7 @@ def evaluate_installation(
     expected_tree_sha: str,
     *,
     agent_relay_prepared_only: bool = False,
+    sol_state_relay_stale_enrolled: bool = False,
 ) -> dict[str, bool]:
     required = set(expected_document_fixture(expected_release_sha, expected_tree_sha))
     core = required - {"release_manifest"}
@@ -907,10 +908,21 @@ def evaluate_installation(
             "effect_unknown": bool(documents),
         }
     manifest = documents.get("release_manifest")
+    sol_state_relay_plist = PLISTS[
+        LABELS.index("com.mastermind.executive.sol-state-relay")
+    ]
     present_plists = [path for path in PLISTS if path in documents]
+    core_plists = [
+        path
+        for path in present_plists
+        if not (
+            sol_state_relay_stale_enrolled
+            and path == sol_state_relay_plist
+        )
+    ]
     release_values = {
         documents[CONTROL_CONFIG].get("proof_base_sha"),
-        *(documents[path].get("release_sha") for path in present_plists),
+        *(documents[path].get("release_sha") for path in core_plists),
     }
     if manifest is not None:
         release_values.add(manifest.get("commit_sha"))
@@ -944,6 +956,12 @@ def evaluate_installation(
             "effect_unknown": True,
         }
     matching = installed_sha == expected_release_sha and installed_tree == expected_tree_sha
+    if matching and sol_state_relay_stale_enrolled:
+        return {
+            "matching_installation": False,
+            "coherent_stale_installation": True,
+            "effect_unknown": False,
+        }
     return {
         "matching_installation": matching,
         "coherent_stale_installation": not matching,
@@ -990,6 +1008,86 @@ def _agent_relay_prepared_only(
         and service.get("active") is False
         and service.get("loaded") is False
         and service.get("disabled") is not False
+    )
+
+
+def _sol_state_relay_stale_enrolled(
+    *,
+    metadata: list[dict[str, Any]],
+    principal_facts: dict[str, dict[str, Any]],
+    services: list[dict[str, Any]],
+    documents: dict[str, dict[str, Any]],
+) -> bool:
+    """Recognize one stopped enrolled C1 Relay awaiting release rebind.
+
+    The Executive installer deliberately disables and boots out the SOL_STATE
+    Relay across a core generation replacement without owning its credential,
+    config, or enrollment.  A prior-release Relay is therefore an admitted
+    install preimage only when the core is itself one coherent generation and
+    the enrolled Relay is fully present, exact-metadata, explicitly disabled
+    and unloaded.  This is an install-safety classification only; it never
+    makes the Relay current or eligible for activation.
+    """
+
+    label = "com.mastermind.executive.sol-state-relay"
+    plist_path = PLISTS[LABELS.index(label)]
+    relay_document = documents.get(plist_path)
+    if not isinstance(relay_document, dict):
+        return False
+    relay_sha = relay_document.get("release_sha")
+    if not isinstance(relay_sha, str) or _SHA_RE.fullmatch(relay_sha) is None:
+        return False
+
+    core_release_values = {
+        documents.get(CONTROL_CONFIG, {}).get("proof_base_sha"),
+        *(
+            documents.get(path, {}).get("release_sha")
+            for path in (
+                PLISTS[LABELS.index("com.mastermind.executive.control")],
+                PLISTS[LABELS.index("com.mastermind.executive.worker.codex")],
+                PLISTS[LABELS.index("com.mastermind.executive.backup")],
+            )
+        ),
+    }
+    if (
+        len(core_release_values) != 1
+        or None in core_release_values
+        or any(
+            not isinstance(value, str) or _SHA_RE.fullmatch(value) is None
+            for value in core_release_values
+        )
+    ):
+        return False
+    core_sha = next(iter(core_release_values))
+    if relay_sha == core_sha:
+        return False
+
+    metadata_by_path = {item.get("path"): item for item in metadata}
+    required_files = (
+        plist_path,
+        f"{SYSTEM_ROOT}/config/sol-state-relay.json",
+        f"{SYSTEM_ROOT}/config/sol-state-relay.token",
+    )
+    for path in required_files:
+        item = metadata_by_path.get(path)
+        if (
+            not isinstance(item, dict)
+            or item.get("exists") is not True
+            or _metadata_is_unsafe(item)
+        ):
+            return False
+
+    principal = principal_facts.get("_mastermind_sol_relay", {})
+    if principal.get("present") is not True or principal.get("matches") is not True:
+        return False
+
+    service = next((item for item in services if item.get("label") == label), None)
+    return bool(
+        service is not None
+        and service.get("owned") is True
+        and service.get("active") is False
+        and service.get("loaded") is False
+        and service.get("disabled") is True
     )
 
 
@@ -1887,11 +1985,18 @@ def _collect_preimage_facts(
         principal_facts=principal_facts,
         services=services,
     )
+    sol_state_relay_stale_enrolled = _sol_state_relay_stale_enrolled(
+        metadata=metadata,
+        principal_facts=principal_facts,
+        services=services,
+        documents=documents,
+    )
     installation = evaluate_installation(
         documents,
         expected_release_sha,
         expected_tree_sha,
         agent_relay_prepared_only=agent_relay_prepared_only,
+        sol_state_relay_stale_enrolled=sol_state_relay_stale_enrolled,
     )
 
     release_root_present = next(

@@ -180,9 +180,29 @@ surface, all four principals, and every service. A residual socket, principal,
 partial document set, generic launchctl error, or unrecognized launchd state
 cannot become clean absence. `STALE_STOPPED` also requires all four expected
 principals to be present and matching; stale documents with missing principals
-remain `EFFECT_UNKNOWN`. Validated stale release identities are compared
-internally but emitted only as `release_matches: false`; rejected schema,
-principal, path, and provenance values never enter a receipt.
+remain `EFFECT_UNKNOWN`.
+
+One bounded auxiliary-generation exception is part of `STALE_STOPPED`: the
+already-enrolled C1 SOL_STATE Relay may remain on one older immutable release
+while the stopped Executive core is one coherent generation. This is admitted
+only when the Relay plist is itself a valid closed Relay document, its exact
+config and token metadata are both present and safe, the Relay principal
+matches, and the Relay is explicitly disabled and unloaded. The core release is
+derived independently from `control.json` plus the control/worker/backup
+plists; a mixed core never becomes stale-safe. The credential-free
+prepared-only Agent Relay state may coexist under its own stricter absence
+predicate. Any enabled/loaded SOL_STATE Relay, missing config/token, unsafe
+metadata, foreign/malformed plist, or additional generation disagreement
+remains `EFFECT_UNKNOWN`.
+
+This exception is install-safety evidence only. It does not make the C1 Relay
+current, enrolled for the new release, or activation-ready. After a core release
+replacement, the existing C1 enrollment owner must complete its separately
+reviewed stopped-only release rebind before Relay activation.
+
+Validated stale release identities are compared internally but emitted only as
+`release_matches: false`; rejected schema, principal, path, and provenance
+values never enter a receipt.
 
 Exit codes describe receipt transport only:
 

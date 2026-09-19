@@ -1352,6 +1352,147 @@ def test_prepared_only_agent_relay_explicitly_enabled_remains_effect_unknown():
     assert receipt["mutation_count"] == 0
 
 
+def _stale_core_with_enrolled_sol_state_relay_fixture(module):
+    filesystem = _stale_prepared_only_agent_relay_fixture(module)
+    relay_sha = "c" * 40
+    relay_label = "com.mastermind.executive.sol-state-relay"
+    relay_path = module.PLISTS[module.LABELS.index(relay_label)]
+    value = plistlib.loads(filesystem.payloads[relay_path])
+    relay_root = f"{module.SYSTEM_ROOT}/releases/{relay_sha}"
+    value["WorkingDirectory"] = relay_root
+    value["ProgramArguments"] = module.expected_program_arguments(
+        relay_label, relay_sha
+    )
+    filesystem.payloads[relay_path] = plistlib.dumps(value)
+
+    relay_config = f"{module.SYSTEM_ROOT}/config/sol-state-relay.json"
+    relay_token = f"{module.SYSTEM_ROOT}/config/sol-state-relay.token"
+    filesystem.present.update({relay_config, relay_token})
+    filesystem.metadata_overrides[relay_config] = metadata_fixture(
+        uid=0, gid=452, mode=0o440
+    )
+    filesystem.metadata_overrides[relay_token] = metadata_fixture(
+        uid=452, gid=452, mode=0o400
+    )
+    return filesystem
+
+
+def test_stale_enrolled_sol_state_relay_allows_coherent_stopped_core():
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+
+    assert receipt["state"] == "FACTS"
+    assert receipt["classification"] == "STALE_STOPPED"
+    relay = next(
+        service
+        for service in receipt["facts"]["services"]
+        if service["label"] == "com.mastermind.executive.sol-state-relay"
+    )
+    assert relay["active"] is False
+    assert relay["loaded"] is False
+    assert relay["disabled"] is True
+    assert receipt["mutation_count"] == 0
+
+
+def test_stale_sol_state_relay_explicitly_enabled_remains_effect_unknown():
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+
+    class EnabledSolStateRelay(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                entries = "".join(
+                    f'    "{label}" => {"false" if label == "com.mastermind.executive.sol-state-relay" else "true"}\n'
+                    for label in module.LABELS
+                )
+                return {
+                    "status": "ok",
+                    "stdout": f"disabled services = {{\n{entries}}}\n",
+                }
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=EnabledSolStateRelay(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
+@pytest.mark.parametrize("missing", ("config", "token"))
+def test_stale_sol_state_relay_requires_complete_enrollment_metadata(missing):
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+    path = (
+        f"{module.SYSTEM_ROOT}/config/sol-state-relay.json"
+        if missing == "config"
+        else f"{module.SYSTEM_ROOT}/config/sol-state-relay.token"
+    )
+    filesystem.present.remove(path)
+    filesystem.metadata_overrides.pop(path, None)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
+def test_stale_sol_state_relay_does_not_hide_a_mixed_core_generation():
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+    worker_label = "com.mastermind.executive.worker.codex"
+    worker_path = module.PLISTS[module.LABELS.index(worker_label)]
+    value = plistlib.loads(filesystem.payloads[worker_path])
+    foreign_sha = "b" * 40
+    value["WorkingDirectory"] = f"{module.SYSTEM_ROOT}/releases/{foreign_sha}"
+    value["ProgramArguments"] = module.expected_program_arguments(
+        worker_label, foreign_sha
+    )
+    filesystem.payloads[worker_path] = plistlib.dumps(value)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
 @pytest.mark.parametrize(
     ("exception", "state", "classification"),
     [
