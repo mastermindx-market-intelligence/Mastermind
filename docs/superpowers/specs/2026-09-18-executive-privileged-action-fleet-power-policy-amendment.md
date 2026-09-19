@@ -42,9 +42,12 @@ load-bearing #829 predicates:
 - `sleep == 0`;
 - `autorestart == 1`.
 
-The helper consumes the existing strict `pmset -g custom` parser owned by
-`ops/executive_os/host_recovery_readiness.py`. It emits only a bounded,
-secret-free receipt. It never emits raw `pmset` output.
+The helper is deliberately standard-library-only so the fixed privileged action
+does not depend on the wider Mastermind import graph on a newly enrolled Mac. Its
+narrow parser copies only the accepted numeric section/setting grammar needed to
+prove these two AC postconditions. The authoritative full readiness decision
+remains #829 / `host_recovery_readiness.py` after the effect. The helper emits
+only a bounded, secret-free receipt and never emits raw `pmset` output.
 
 The `-c` scope is deliberate: this capability prepares an always-available
 secondary fleet host while leaving battery power policy unchanged on portable
@@ -57,13 +60,20 @@ content-addressed by its stable request id before effect. Transport loss after
 admission remains `EFFECT_UNKNOWN`; the caller uses the existing status path
 and never retries or fails over blindly.
 
+For this action only, helper exit `75` is the reserved action-level
+`EFFECT_UNKNOWN` signal. The broker converts that exact action/exit pair into
+its existing in-flight unknown state and writes no terminal FAILED receipt.
+Other actions retain the incumbent rule that an ordinary nonzero child exit is
+terminal `FAILED`.
+
 The helper:
 - refuses when not running as root;
 - has no CLI arguments;
 - uses absolute `pmset` paths, a closed environment, no shell and bounded time/output;
-- refuses if the mutation command fails;
-- refuses if post-write observation is unavailable, malformed or does not prove
-  both required predicates.
+- returns action-level `EFFECT_UNKNOWN` if the mutation command starts but
+  fails, times out, or otherwise cannot prove no effect;
+- returns action-level `EFFECT_UNKNOWN` if post-write observation is
+  unavailable, malformed or does not prove both required predicates.
 
 This is not a generic power-management capability, installer, host selector,
 scheduler, retry plane or second privileged broker.
@@ -88,10 +98,14 @@ Source acceptance requires:
 2. caller-argument refusal;
 3. root-before-effect refusal;
 4. mutation-before-readback ordering;
-5. failure on wrong/missing postconditions;
-6. existing six actions remain backward compatible;
-7. broker/client receipt correlation and `EFFECT_UNKNOWN` behavior unchanged;
-8. hosted owning tests and repository gates pass.
+5. wrong/missing postconditions become the existing broker `EFFECT_UNKNOWN`
+   state, not a terminal failed effect;
+6. the helper is independently manifest-verified by production broker trust
+   before the broker serves effects;
+7. existing six actions remain backward compatible and their exit semantics do
+   not change;
+8. broker/client receipt correlation and no-retry behavior remain intact;
+9. hosted owning tests and repository gates pass.
 
 Real capability proof requires the mini's fresh #829 projection to change from
 its current power-policy failure to a passing power predicate after one
