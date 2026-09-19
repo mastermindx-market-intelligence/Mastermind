@@ -67,12 +67,43 @@ def _broker(tmp_path: Path, executor=None) -> PrivilegedActionBroker:
     )
 
 
+def test_trusted_effect_paths_cover_every_root_actuator() -> None:
+    assert broker_module._TRUSTED_EFFECT_PATHS == (
+        "ops/executive_os/service-control.sh",
+        "ops/executive_os/provision-worker-auth.sh",
+        "ops/executive_os/secondary_host_power_policy.py",
+    )
+
+
 def test_peer_uid_must_be_allowlisted_before_spawn(tmp_path: Path) -> None:
     executor = FakeExecutor()
     broker = _broker(tmp_path, executor)
     with pytest.raises(PeerAuthorizationError):
         broker.handle(_raw(), peer_uid=502)
     assert executor.calls == []
+
+
+def test_power_policy_action_uses_existing_receipt_and_replay_owner(tmp_path: Path) -> None:
+    executor = FakeExecutor(stdout=b'{"autorestart":1,"scope":"charger","sleep":0}\n')
+    broker = _broker(tmp_path, executor)
+
+    first = broker.handle(
+        _raw("executive.host.prepare_secondary_power_policy", "req-power-001"),
+        peer_uid=501,
+    )
+    second = broker.handle(
+        _raw("executive.host.prepare_secondary_power_policy", "req-power-001"),
+        peer_uid=501,
+    )
+
+    assert first == second
+    assert first["effect_class"] == "HOST_POWER_POLICY"
+    assert first["action"] == "executive.host.prepare_secondary_power_policy"
+    assert first["outcome"] == "SUCCEEDED"
+    assert len(executor.calls) == 1
+    argv = executor.calls[0][0]
+    assert argv[:4] == ("/usr/bin/python3", "-I", "-S", "-B")
+    assert argv[4].endswith("/ops/executive_os/secondary_host_power_policy.py")
 
 
 def test_success_persists_terminal_receipt_and_replays_without_second_spawn(tmp_path: Path) -> None:
