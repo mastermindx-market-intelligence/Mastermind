@@ -30,6 +30,7 @@ def _config(tmp_path: Path) -> object:
     return canary.ProviderCanaryConfig(
         canary_id="canary-aaaaaaaaaaaa",
         worker_user="_mastermind_worker",
+        worker_group="_mastermind_worker",
         worker_uid=451,
         worker_gid=451,
         provider_home=tmp_path / "provider-home",
@@ -315,21 +316,24 @@ def test_production_config_is_derived_from_exact_worker_slot() -> None:
         operator_home=canary.LIVE_OPERATOR_HOME,
         slot_id="codex-pro-03",
     )
-    assert (company.worker_user, company.worker_uid, company.worker_gid) == (
-        "_mastermind_worker",
-        451,
-        451,
-    )
-    assert (first.worker_user, first.worker_uid, first.worker_gid) == (
-        "_mastermind_codex_01",
-        454,
-        454,
-    )
-    assert (third.worker_user, third.worker_uid, third.worker_gid) == (
-        "_mastermind_codex_03",
-        456,
-        456,
-    )
+    assert (
+        company.worker_user,
+        company.worker_group,
+        company.worker_uid,
+        company.worker_gid,
+    ) == ("_mastermind_worker", "_mastermind_worker", 451, 451)
+    assert (
+        first.worker_user,
+        first.worker_group,
+        first.worker_uid,
+        first.worker_gid,
+    ) == ("_mastermind_codex_01", "_mastermind_codex_01", 454, 454)
+    assert (
+        third.worker_user,
+        third.worker_group,
+        third.worker_uid,
+        third.worker_gid,
+    ) == ("_mastermind_codex_03", "_mastermind_codex_03", 456, 456)
     assert str(first.provider_home).endswith(
         "/workers/codex-pro-01/provider-home"
     )
@@ -540,3 +544,236 @@ def test_root_cleanup_removes_worker_owned_probe(
     child.mkdir(mode=0o700)
     canary.cleanup_live_probe_root(probe)
     assert probe.exists() is False
+
+
+
+@pytest.mark.parametrize(
+    ("slot_id", "provider", "model", "realm_id", "worker_user", "numeric_id"),
+    (
+        (
+            "alibaba-token-01",
+            "alibaba",
+            "qwen3.8-max",
+            "alibaba-token-plan-sg",
+            "_mastermind_alibaba_01",
+            459,
+        ),
+        (
+            "minimax-token-01",
+            "minimax",
+            "MiniMax-M3",
+            "minimax-token-plan",
+            "_mastermind_minimax_01",
+            460,
+        ),
+    ),
+)
+def test_subscription_config_resolves_exact_reviewed_codex_realm(
+    tmp_path: Path,
+    slot_id: str,
+    provider: str,
+    model: str,
+    realm_id: str,
+    worker_user: str,
+    numeric_id: int,
+) -> None:
+    probe = tmp_path / slot_id
+    probe.mkdir()
+    config = canary.subscription_production_config(
+        probe_root=probe,
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id=slot_id,
+    )
+    assert config.subscription_slot_id == slot_id
+    assert config.provider_alias == provider
+    assert config.model == model
+    assert config.provider_realm_id == realm_id
+    assert config.harness_binding_id.endswith(".codex-responses")
+    assert config.worker_user == config.worker_group == worker_user
+    assert (config.worker_uid, config.worker_gid) == (numeric_id, numeric_id)
+
+
+def test_subscription_probe_is_secret_free_but_contains_reviewed_provider_config(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "probe"
+    probe.mkdir()
+    config = dataclasses.replace(
+        canary.subscription_production_config(
+            probe_root=probe,
+            operator_home=canary.LIVE_OPERATOR_HOME,
+            slot_id="alibaba-token-01",
+        ),
+        canary_id="canary-bbbbbbbbbbbb",
+        provider_home=tmp_path / "provider-home",
+    )
+    invocation = canary.prepare_probe(config)
+    rendered = "\0".join(invocation.argv)
+    assert 'model_provider="mastermind_alibaba_token_plan_sg"' in rendered
+    assert 'base_url="https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"' in rendered
+    assert 'env_key="ALIBABA_TOKEN_PLAN_KEY"' in rendered
+    assert "ALIBABA_TOKEN_PLAN_KEY" not in invocation.env
+    assert "opaque-subscription-secret" not in rendered
+    assert "opaque-subscription-secret" not in json.dumps(invocation.env)
+    assert "ALIBABA_TOKEN_PLAN_KEY" not in next(
+        item for item in invocation.argv if item.startswith("shell_environment_policy=")
+    )
+    canary._scrub_probe_secrets(invocation)
+
+
+def test_subscription_live_runner_injects_secret_only_in_exec_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probe = tmp_path / "probe"
+    probe.mkdir()
+    config = dataclasses.replace(
+        canary.subscription_production_config(
+            probe_root=probe,
+            operator_home=canary.LIVE_OPERATOR_HOME,
+            slot_id="minimax-token-01",
+        ),
+        canary_id="canary-cccccccccccc",
+        provider_home=tmp_path / "provider-home",
+    )
+    invocation = canary.prepare_probe(config)
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_args: None)
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", lambda *_args: None)
+    monkeypatch.setattr(
+        canary,
+        "provider_home_credential_loader",
+        lambda *_args, **_kwargs: (lambda: "opaque-subscription-secret"),
+    )
+
+    def fake_run(argv, **kwargs):
+        observed["argv"] = tuple(argv)
+        observed["env"] = dict(kwargs["env"])
+        observed["preexec_fn"] = kwargs["preexec_fn"]
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=_completed_stdout(),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(canary.subprocess, "run", fake_run)
+    result = canary.subscription_live_worker_runner(config, invocation)
+    assert result.exit_code == 0
+    assert observed["env"]["MINIMAX_TOKEN_PLAN_KEY"] == "opaque-subscription-secret"
+    assert "opaque-subscription-secret" not in "\0".join(observed["argv"])
+    assert "MINIMAX_TOKEN_PLAN_KEY" not in invocation.env
+    assert callable(observed["preexec_fn"])
+    canary._scrub_probe_secrets(invocation)
+
+
+def test_subscription_receipt_is_attributed_and_cannot_masquerade_as_native_readiness(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "probe"
+    probe.mkdir()
+    config = dataclasses.replace(
+        canary.subscription_production_config(
+            probe_root=probe,
+            operator_home=canary.LIVE_OPERATOR_HOME,
+            slot_id="alibaba-token-01",
+        ),
+        canary_id="canary-dddddddddddd",
+        provider_home=tmp_path / "provider-home",
+    )
+
+    def runner(invocation: canary.CodexInvocation) -> canary.CodexRunResult:
+        invocation.result_path.write_text('{"ok": true}', encoding="utf-8")
+        return canary.CodexRunResult(
+            exit_code=0, stdout=_completed_stdout(), stderr=b"", timed_out=False
+        )
+
+    receipt = canary.run_subscription_canary(
+        config,
+        runner=runner,
+        binary_sha256="b" * 64,
+        observed_version="0.147.0",
+    )
+    assert receipt["schema_version"] == canary.SUBSCRIPTION_SCHEMA_VERSION
+    assert receipt["slot_id"] == "alibaba-token-01"
+    assert receipt["provider"] == "alibaba"
+    assert receipt["profile_id"] == "alibaba-token-plan-personal"
+    assert receipt["harness_binding_id"] == "alibaba-token-plan-personal.codex-responses"
+    assert receipt["provider_realm_id"] == "alibaba-token-plan-sg"
+    assert receipt["execution_mode"] == "interactive_canary"
+    assert receipt["autonomous_allowed"] is False
+    assert receipt["passed"] is True
+    assert receipt["inference_canary"]["schema_version"] == canary.SCHEMA_VERSION
+    assert receipt["inference_canary"]["model"] == "qwen3.8-max"
+    assert "opaque-subscription-secret" not in json.dumps(receipt)
+
+
+def test_native_live_runner_uses_exact_slot_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = dataclasses.replace(
+        _config(tmp_path),
+        worker_user="_mastermind_codex_02",
+        worker_group="_mastermind_codex_02",
+        worker_uid=455,
+        worker_gid=455,
+    )
+    invocation = canary.prepare_probe(config)
+    observed: dict[str, tuple[str, ...]] = {}
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_args: None)
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", lambda *_args: None)
+
+    def fake_runner(inner, *, timeout_seconds):
+        observed["argv"] = inner.argv
+        return canary.CodexRunResult(0, b"", b"", timed_out=False)
+
+    monkeypatch.setattr(canary, "subprocess_runner", fake_runner)
+    canary.live_worker_runner(config, invocation)
+    argv = observed["argv"]
+    group_index = argv.index("-g") + 1
+    assert argv[group_index] == "_mastermind_codex_02"
+    canary._scrub_probe_secrets(invocation)
+
+
+def test_parser_requires_explicit_subscription_slot_mode() -> None:
+    parser = canary._parser()
+    assert parser.parse_args([]).slot_id is None
+    assert parser.parse_args([]).subscription_slot_id is None
+    assert parser.parse_args(["--slot-id", "codex-pro-01"]).slot_id == "codex-pro-01"
+    assert (
+        parser.parse_args(["--subscription-slot-id", "alibaba-token-01"]).subscription_slot_id
+        == "alibaba-token-01"
+    )
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "--slot-id",
+                "codex-01",
+                "--subscription-slot-id",
+                "alibaba-token-01",
+            ]
+        )
+
+
+def test_subscription_config_cannot_cross_bind_slot_realm_or_model(tmp_path: Path) -> None:
+    probe = tmp_path / "probe-cross"
+    probe.mkdir()
+    config = canary.subscription_production_config(
+        probe_root=probe,
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id="alibaba-token-01",
+    )
+    mutations = (
+        dataclasses.replace(config, provider_realm_id="minimax-token-plan"),
+        dataclasses.replace(config, provider_alias="minimax"),
+        dataclasses.replace(config, model="MiniMax-M3"),
+        dataclasses.replace(config, worker_uid=460, worker_gid=460),
+        dataclasses.replace(
+            config,
+            harness_binding_id="minimax-token-plan.codex-responses",
+        ),
+    )
+    for mutated in mutations:
+        with pytest.raises(canary.ProviderCanaryError) as refused:
+            canary._provider_realm(mutated)
+        assert refused.value.code == "configuration_invalid"
