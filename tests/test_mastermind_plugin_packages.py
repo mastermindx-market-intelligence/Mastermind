@@ -1043,7 +1043,7 @@ def test_closed_json_scalar_alias_sweep_refuses_every_mutation(tmp_path: Path) -
             )
             for numeric in aliases:
                 mutations.append((path, text, index, numeric))
-    assert len(mutations) == 261
+    assert len(mutations) == 264
 
     for path, original, index, numeric in mutations:
         matches = list(re.finditer(r"\b(?:true|false)\b", original))
@@ -1197,3 +1197,23 @@ def test_validator_rejects_nontrigger_skill_description(tmp_path: Path) -> None:
     path.write_text("\n".join(lines) + "\n")
     result = validate_repository(tmp_path)
     assert "INVALID_SKILL_DESCRIPTION" in {error["code"] for error in result["errors"]}
+
+
+@pytest.mark.parametrize("field", ("description", "shortDescription", "longDescription"))
+def test_navigator_manifest_truth_bearing_descriptions_are_closed(
+    tmp_path: Path, field: str
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-navigator/.codex-plugin/plugin.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if field == "description":
+        manifest[field] = "Changed Navigator package description with no authority claim."
+    else:
+        manifest["interface"][field] = (
+            "Changed Navigator interface description that remains non-empty, intentionally "
+            "longer than eighty characters, and carries no authority claim."
+        )
+    _write_json(path, manifest)
+
+    codes = _codes_without_exception(tmp_path)
+    assert "NAVIGATOR_CONTENT_CONTRACT_MISMATCH" in codes

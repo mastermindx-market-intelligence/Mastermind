@@ -1,19 +1,174 @@
 {
   "schema": "mastermind.navigator_capability_state_rules.v1",
-  "dimensions": ["installed","enabled","authenticated_or_connected","callable","organizationally_authorized","proven_live"],
+  "dimensions": [
+    "installed",
+    "enabled",
+    "authenticated_or_connected",
+    "callable",
+    "organizationally_authorized",
+    "proven_live"
+  ],
   "unknown_never_promotes": true,
   "package_name_never_promotes": true,
   "ordered_rules": [
-    {"state":"PROVEN_LIVE","when":{"all":[{"field":"installed","equals":"YES"},{"field":"enabled","equals":"YES"},{"field":"authenticated_or_connected","equals":"YES"},{"field":"callable","equals":"YES"},{"field":"organizationally_authorized","equals":"YES"},{"field":"proven_live","equals":"YES"},{"field":"binding_current","equals":"YES"}]}},
-    {"state":"UNAVAILABLE","when":{"any":[{"field":"installed","equals":"NO"},{"field":"enabled","equals":"NO"},{"field":"callable","equals":"NO"},{"field":"organizationally_authorized","equals":"NO"}]}},
-    {"state":"BUILT_NOT_PROVEN","when":{"all":[{"field":"implementation_state","equals":"BUILT"},{"field":"usable_scope","equals":"UNKNOWN"},{"field":"proven_live","equals":"NO"}]}},
-    {"state":"DEGRADED","when":{"all":[{"field":"usable_scope","equals":"PARTIAL"}],"none":[{"field":"installed","equals":"NO"},{"field":"enabled","equals":"NO"},{"field":"callable","equals":"NO"},{"field":"organizationally_authorized","equals":"NO"}]}},
-    {"state":"UNKNOWN","when":{}}
+    {
+      "state": "PROVEN_LIVE",
+      "when": {
+        "all": [
+          {
+            "field": "implementation_state",
+            "equals": "BUILT"
+          },
+          {
+            "field": "usable_scope",
+            "equals": "FULL"
+          },
+          {
+            "field": "installed",
+            "equals": "YES"
+          },
+          {
+            "field": "enabled",
+            "equals": "YES"
+          },
+          {
+            "field": "authenticated_or_connected",
+            "equals": "YES"
+          },
+          {
+            "field": "callable",
+            "equals": "YES"
+          },
+          {
+            "field": "organizationally_authorized",
+            "equals": "YES"
+          },
+          {
+            "field": "proven_live",
+            "equals": "YES"
+          },
+          {
+            "field": "binding_current",
+            "equals": "YES"
+          }
+        ]
+      }
+    },
+    {
+      "state": "UNAVAILABLE",
+      "when": {
+        "any": [
+          {
+            "field": "implementation_state",
+            "equals": "NOT_BUILT"
+          },
+          {
+            "field": "usable_scope",
+            "equals": "NONE"
+          },
+          {
+            "field": "installed",
+            "equals": "NO"
+          },
+          {
+            "field": "enabled",
+            "equals": "NO"
+          },
+          {
+            "field": "authenticated_or_connected",
+            "equals": "NO"
+          },
+          {
+            "field": "callable",
+            "equals": "NO"
+          },
+          {
+            "field": "organizationally_authorized",
+            "equals": "NO"
+          },
+          {
+            "field": "binding_current",
+            "equals": "NO"
+          }
+        ]
+      }
+    },
+    {
+      "state": "BUILT_NOT_PROVEN",
+      "when": {
+        "all": [
+          {
+            "field": "implementation_state",
+            "equals": "BUILT"
+          },
+          {
+            "field": "proven_live",
+            "equals": "NO"
+          }
+        ],
+        "any": [
+          {
+            "field": "usable_scope",
+            "equals": "FULL"
+          },
+          {
+            "field": "usable_scope",
+            "equals": "UNKNOWN"
+          }
+        ]
+      }
+    },
+    {
+      "state": "DEGRADED",
+      "when": {
+        "all": [
+          {
+            "field": "implementation_state",
+            "equals": "BUILT"
+          },
+          {
+            "field": "usable_scope",
+            "equals": "PARTIAL"
+          }
+        ],
+        "none": [
+          {
+            "field": "installed",
+            "equals": "NO"
+          },
+          {
+            "field": "enabled",
+            "equals": "NO"
+          },
+          {
+            "field": "authenticated_or_connected",
+            "equals": "NO"
+          },
+          {
+            "field": "callable",
+            "equals": "NO"
+          },
+          {
+            "field": "organizationally_authorized",
+            "equals": "NO"
+          },
+          {
+            "field": "binding_current",
+            "equals": "NO"
+          }
+        ]
+      }
+    },
+    {
+      "state": "UNKNOWN",
+      "when": {}
+    }
   ],
   "notes": [
-    "PROVEN_LIVE is target-, generation-, and evidence-scoped; it never propagates by plugin name.",
-    "UNAVAILABLE is explicit negative evidence for the requested operation, not mere absence.",
-    "DEGRADED means a bounded partial path remains usable and its limitation is named.",
+    "PROVEN_LIVE requires BUILT implementation, FULL usable scope, a current binding, and exact YES evidence for every effective-capability gate.",
+    "UNAVAILABLE requires explicit negative owner evidence for implementation, usable scope, installation, enablement, connection, callability, authorization, or binding currentness.",
+    "BUILT_NOT_PROVEN means built source or component evidence exists without accepted live proof for the exact target epoch.",
+    "DEGRADED means a bounded partial path remains usable, with no explicit negative gate, and its limitation is named.",
     "UNKNOWN is the fail-closed default when decisive owner-native evidence is missing."
   ]
 }

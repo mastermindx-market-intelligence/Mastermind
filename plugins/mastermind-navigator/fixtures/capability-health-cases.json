@@ -83,7 +83,8 @@
           }
         ],
         "selected_surface_id": "github-source",
-        "suppressed_surface_ids": []
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
       }
     },
     {
@@ -168,7 +169,8 @@
           }
         ],
         "selected_surface_id": null,
-        "suppressed_surface_ids": []
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
       }
     },
     {
@@ -253,7 +255,8 @@
           }
         ],
         "selected_surface_id": null,
-        "suppressed_surface_ids": []
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
       }
     },
     {
@@ -338,7 +341,8 @@
           }
         ],
         "selected_surface_id": "studio-direct",
-        "suppressed_surface_ids": []
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
       }
     },
     {
@@ -423,7 +427,8 @@
           }
         ],
         "selected_surface_id": null,
-        "suppressed_surface_ids": []
+        "suppressed_surface_ids": [],
+        "domain_overlays": []
       }
     }
   ],

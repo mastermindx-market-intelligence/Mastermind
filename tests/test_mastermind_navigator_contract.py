@@ -408,3 +408,53 @@ def test_package_contains_no_lifecycle_permission_registry_or_static_live_claim(
         "No omnipotent Mastermind MCP",
     ):
         assert phrase in boundary
+
+
+def test_state_rules_refuse_contradictory_live_and_classify_explicit_negative_evidence() -> None:
+    rules = _load("references/capability-state-rules.json")
+    fixture = _load("fixtures/capability-health-cases.json")
+    live = copy.deepcopy(fixture["cases"][0]["packet"]["surfaces"][0])
+
+    cases = (
+        ({"implementation_state": "SPEC_ONLY"}, "UNKNOWN"),
+        ({"usable_scope": "NONE"}, "UNAVAILABLE"),
+        ({"authenticated_or_connected": "NO"}, "UNAVAILABLE"),
+        ({"binding_current": "NO"}, "UNAVAILABLE"),
+        ({"proven_live": "NO"}, "BUILT_NOT_PROVEN"),
+    )
+    for mutation, expected in cases:
+        facts = copy.deepcopy(live)
+        facts.update(mutation)
+        assert _derive_state(facts, rules) == expected, mutation
+
+
+def test_health_schema_requires_explicit_overlays_and_nonlive_recovery_fields() -> None:
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = _load("references/capability-health.schema.json")
+    assert "domain_overlays" in schema["required"]
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+
+    live = _materialize_health_packet(fixture["cases"][0]["packet"])
+    assert live["domain_overlays"] == []
+    validator.validate(live)
+
+    missing_overlay = copy.deepcopy(live)
+    missing_overlay.pop("domain_overlays")
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(missing_overlay)
+
+    invalid_overlay = copy.deepcopy(live)
+    invalid_overlay["domain_overlays"] = ["domain_unknown"]
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(invalid_overlay)
+
+    unavailable = _materialize_health_packet(fixture["cases"][1]["packet"])
+    unavailable["surfaces"][0]["blocker"] = None
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(unavailable)
+
+    unavailable = _materialize_health_packet(fixture["cases"][1]["packet"])
+    unavailable["surfaces"][0]["next_probe"] = None
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(unavailable)

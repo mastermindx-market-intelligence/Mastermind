@@ -337,11 +337,11 @@ NAVIGATOR_TRUTH_MARKERS = (
     "`EFFECT_UNKNOWN`",
 )
 NAVIGATOR_CONTENT_DIGESTS = {
-    "fixtures/capability-health-cases.json": "cc8e036dadb47e56e3019d7b8ebffe64145c4344de97614edf91b6f4888b4dfd",
+    "fixtures/capability-health-cases.json": "06f425c51e45d99ed0e6b387a590e79e216fb3b038415162dc78f1c5c273fb5d",
     "fixtures/fresh-session-routing-cases.json": "715dbd4c5a81c997916e95e8bda60d58fe716f2d0ffc397f002e72c16eab7235",
     "references/boot-sources.json": "c30da8f3962ca421f8227ed0111e7da06825523ed3eea16399f6b7b863081e04",
-    "references/capability-health.schema.json": "c649d2d7278cce53155f26c5878fb67a9bd2c392b83513263a2c0e8f87f4918c",
-    "references/capability-state-rules.json": "b963a93f01eec7b31e357d23326ea97067ce3f7c392aac15f74575ae88af0abc",
+    "references/capability-health.schema.json": "a4621d7bfeb482041058d8e0b524f262b1d3c0608cc4a94c4f9dc1ffb86b7bb0",
+    "references/capability-state-rules.json": "998545d336d9a262dd65a2d2a3cb65429d5ad7638b8a8c3085e798d3ae779c56",
     "references/catalog.fragment.json": "9de4f15734520939dab7f7a0dfb2b12f72669f4753e87f6b566af238d15e459e",
     "references/navigator-boundary.md": "042a79b897d435d679792fe0e2b50916daedc011eb831f03ac93373219a5678d",
     "references/owner-routing.json": "e45d2bf5a223cd5425029ae073f52244f13cc95c1bca6a4fdabb04781a075d43",
@@ -931,6 +931,15 @@ def _validate_manifest(
             errors.append(_error(root, path, "INVALID_MANIFEST", f"interface {field} must be non-empty text"))
     if isinstance(interface["longDescription"], str) and len(interface["longDescription"]) < 80:
         errors.append(_error(root, path, "INVALID_MANIFEST", "interface longDescription must be at least 80 characters"))
+    if plugin == "mastermind-navigator" and not _strict_json_contract_equal(manifest, expected):
+        errors.append(
+            _error(
+                root,
+                path,
+                "NAVIGATOR_CONTENT_CONTRACT_MISMATCH",
+                "Navigator manifest truth-bearing content differs from the closed contract",
+            )
+        )
     if plugin == "mastermind-cortex":
         cortex_text_fields = (
             (manifest["description"], expected["description"]),
