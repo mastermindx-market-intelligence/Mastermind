@@ -23,6 +23,7 @@ from control_plane.worker_execution_contract import (
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
+    WorkerRecoveryBinding,
     WorkerProcessRef,
     WorkerRunStatus,
 )
@@ -230,6 +231,10 @@ class WorkerExecutionAdapter(Protocol):
     inspector: ProcessInspector
 
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef: ...
+
+    def reattach(
+        self, spec: WorkerLaunchSpec, binding: WorkerRecoveryBinding
+    ) -> WorkerProcessRef: ...
 
     async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus: ...
 
