@@ -1,4 +1,4 @@
-"""Proposed narrow subject-PR revalidation; this file is evidence, not protected source."""
+"""Subject-PR semantic revalidation regressions."""
 from __future__ import annotations
 
 import copy
@@ -68,6 +68,30 @@ def test_subject_pr_changed_200_with_same_canonical_identity_does_not_starve() -
     ],
 )
 def test_subject_pr_source_or_hold_identity_movement_still_refuses(mutator) -> None:
+    module = sf._module()
+    changed = copy.deepcopy(sf._target_pr_payload())
+    mutator(changed)
+    transport = sf.SemanticRevalidationTransport(
+        module,
+        {sf.TARGET_PULL_URL: sf._target_pr_payload()},
+        changed={sf.TARGET_PULL_URL: changed},
+    )
+    bounded = _bounded(module, transport)
+
+    assert bounded.validate_unchanged(token=sf.TOKEN) is False
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda row: row.update(labels="malformed"),
+        lambda row: (
+            row.update(draft="malformed"),
+            row.update(labels=[{"name": "hold"}]),
+        ),
+    ],
+)
+def test_subject_pr_malformed_hold_projection_still_refuses(mutator) -> None:
     module = sf._module()
     changed = copy.deepcopy(sf._target_pr_payload())
     mutator(changed)

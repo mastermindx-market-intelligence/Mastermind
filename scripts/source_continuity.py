@@ -179,8 +179,9 @@ class _ConditionalObservation:
 
 
 # A changed HTTP 200 is semantically revalidatable only for the open-PR roster
-# pages used by the collision census. Every other endpoint keeps the original
-# unconditional changed-representation refusal required by #346.
+# pages used by the collision census and this invocation's exact subject PR.
+# Every other endpoint keeps the original unconditional changed-representation
+# refusal required by #346.
 _UNPROVABLE = object()
 
 
@@ -251,6 +252,24 @@ def _open_pull_roster_semantics(url: object, payload: object) -> object:
     return tuple(sorted(rows))
 
 
+def _subject_pr_identity(payload: object) -> tuple[object, ...] | None:
+    """Strict closed shape for changed subject-PR semantic revalidation."""
+
+    if not isinstance(payload, dict):
+        return None
+    if type(payload.get("draft")) is not bool:
+        return None
+    labels = payload.get("labels")
+    if not isinstance(labels, list):
+        return None
+    for label in labels:
+        if not isinstance(label, dict):
+            return None
+        if not isinstance(label.get("name"), str):
+            return None
+    return _pr_identity(payload)
+
+
 def _conditional_semantics(
     url: object,
     payload: object,
@@ -264,7 +283,7 @@ def _conditional_semantics(
         return ("open_pull_roster", roster)
     if not isinstance(subject_pull_url, str) or url != subject_pull_url:
         return _UNPROVABLE
-    identity = _pr_identity(payload)
+    identity = _subject_pr_identity(payload)
     if identity is None:
         return _UNPROVABLE
     return ("subject_pull", identity)
