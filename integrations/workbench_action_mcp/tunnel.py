@@ -18,6 +18,8 @@ supply the channel, lease, key, or any location bound here.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import dataclasses
 import hashlib
 import json
@@ -68,8 +70,12 @@ from .app import (
 )
 from .contracts import ActionTokenCodec
 from .command_contracts import (
+    ARTIFACT_MEDIA_TYPES,
+    MAX_ARTIFACT_BYTES,
+    MAX_ARTIFACT_CHUNK_BYTES,
     MAX_PAGE_BYTES as MAX_COMMAND_PAGE_BYTES,
     MAX_PAGE_LINES as MAX_COMMAND_PAGE_LINES,
+    MAX_RELATIVE_PATH_BYTES,
     MAX_PROCESS_DEADLINE_S,
     RECIPE_SHA256,
     CommandHostBinding,
@@ -97,13 +103,14 @@ from .service import ShutdownOutcome, shutdown_exit_code
 TUNNEL_SCHEMA = "mastermind.workbench_action_tunnel.v1"
 TUNNEL_RECEIPT_SCHEMA = "mastermind.workbench_action_tunnel_receipt.v1"
 SERVER_NAME = "Mastermind Workbench Action Tunnel"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.0"
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_CONCURRENCY = 8
 MAX_TIMEOUT_SECONDS = 60.0
 MAX_ACTION_TTL_MS = 5 * 60 * 1000
 MAX_ARGUMENT_BYTES = 65536
 MAX_RESULT_BYTES = 131072
+MAX_CHANNEL_IDENTIFIER_BYTES = 1 << 9
 _AUDIT_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,95}$")
 # Deliberately the same closed input/output schemas as the OAuth adapter so the
 # two entry points can never drift; the private names are the single source.
@@ -114,11 +121,13 @@ _EFFECT_OUTPUT = _EFFECT_OUTPUT_SCHEMA
 PREPARE_COMMAND_TOOL = "prepare_project_command"
 RUN_COMMAND_TOOL = "run_project_command"
 READ_ACTION_RESULT_TOOL = "read_action_result"
+READ_ACTION_ARTIFACT_TOOL = "read_action_artifact"
 RECONCILE_ACTION_TOOL = "reconcile_action"
 COMMAND_TOOL_NAMES = (
     PREPARE_COMMAND_TOOL,
     RUN_COMMAND_TOOL,
     READ_ACTION_RESULT_TOOL,
+    READ_ACTION_ARTIFACT_TOOL,
     RECONCILE_ACTION_TOOL,
 )
 _KNOWN_TUNNEL_TOOLS = frozenset(
@@ -148,10 +157,10 @@ _REFERENCE_SCHEMA = {"type": "string", "minLength": 1, "maxLength": 256}
 _COMMAND_PREPARE_INPUT = _closed_schema(
     {
         "project_ref": _REFERENCE_SCHEMA,
-        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": MAX_RELATIVE_PATH_BYTES},
         "recipe_id": {
             "type": "string",
-            "enum": ["canary_checksum", "canary_refuse"],
+            "enum": sorted(RECIPE_SHA256),
         },
         "expected_sha256": _HEX64_SCHEMA,
     },
@@ -166,9 +175,9 @@ _COMMAND_PREPARE_OUTPUT = _closed_schema(
         "operation_ref": _REFERENCE_SCHEMA,
         "recipe_id": {
             "type": "string",
-            "enum": ["canary_checksum", "canary_refuse"],
+            "enum": sorted(RECIPE_SHA256),
         },
-        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": MAX_RELATIVE_PATH_BYTES},
         "preimage_sha256": _HEX64_SCHEMA,
         "source_identity": {
             "type": "string",
@@ -215,6 +224,184 @@ _COMMAND_READ_INPUT = _closed_schema(
     },
     ("action_ref", "stream"),
 )
+
+_ARTIFACT_READ_INPUT = _closed_schema(
+    {
+        "artifact_ref": {"type": "string", "minLength": 1, "maxLength": 65536},
+        "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": MAX_ARTIFACT_BYTES,
+        },
+        "max_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": MAX_ARTIFACT_CHUNK_BYTES,
+        },
+    },
+    ("artifact_ref",),
+)
+_ARTIFACT_PRODUCER_SCHEMA = _closed_schema(
+    {
+        "kind": {"const": "workbench_action"},
+        "action_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "recipe_id": {"type": "string", "enum": sorted(RECIPE_SHA256)},
+        "project_ref": _REFERENCE_SCHEMA,
+        "context_ref": _REFERENCE_SCHEMA,
+        "responsibility_ref": _REFERENCE_SCHEMA,
+        "operation_ref": _REFERENCE_SCHEMA,
+        "owner_ref": _REFERENCE_SCHEMA,
+        "generation": _REFERENCE_SCHEMA,
+        "host_id": _HEX64_SCHEMA,
+        "boot_session_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    },
+    (
+        "kind",
+        "action_id",
+        "recipe_id",
+        "project_ref",
+        "context_ref",
+        "responsibility_ref",
+        "operation_ref",
+        "owner_ref",
+        "generation",
+        "host_id",
+        "boot_session_id",
+    ),
+)
+_ARTIFACT_SOURCE_SCHEMA = _closed_schema(
+    {
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": MAX_RELATIVE_PATH_BYTES},
+        "preimage_sha256": _HEX64_SCHEMA,
+        "source_identity": {
+            "type": "string",
+            "pattern": "^[0-9]+(:[0-9]+){8}$",
+        },
+    },
+    ("relative_path", "preimage_sha256", "source_identity"),
+)
+_ARTIFACT_TRANSFER_SCHEMA = _closed_schema(
+    {
+        "maximum_artifact_bytes": {"const": MAX_ARTIFACT_BYTES},
+        "maximum_chunk_bytes": {"const": MAX_ARTIFACT_CHUNK_BYTES},
+        "direct_view_supported": {"type": "boolean"},
+    },
+    ("maximum_artifact_bytes", "maximum_chunk_bytes", "direct_view_supported"),
+)
+_ARTIFACT_DESCRIPTOR_SCHEMA = _closed_schema(
+    {
+        "schema": {"const": "mastermind.workbench_action_artifact_descriptor.v1"},
+        "artifact_id": _HEX64_SCHEMA,
+        "artifact_ref": {"type": "string", "minLength": 1, "maxLength": 65536},
+        "owner": {"const": "mastermind.workbench_action"},
+        "stream": {"type": "string", "enum": ["stdout", "stderr"]},
+        "media_type": {"type": "string", "enum": sorted(ARTIFACT_MEDIA_TYPES)},
+        "byte_length": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": MAX_ARTIFACT_BYTES,
+        },
+        "sha256": _HEX64_SCHEMA,
+        "truncated": {"type": "boolean"},
+        "size_state": {
+            "type": "string",
+            "enum": ["empty", "complete", "retained_prefix"],
+        },
+        "producer": _ARTIFACT_PRODUCER_SCHEMA,
+        "source": _ARTIFACT_SOURCE_SCHEMA,
+        "transfer": _ARTIFACT_TRANSFER_SCHEMA,
+        "issued_at_ms": {"type": "integer", "minimum": 0},
+        "expires_at_ms": {"type": "integer", "minimum": 0},
+    },
+    (
+        "schema",
+        "artifact_id",
+        "artifact_ref",
+        "owner",
+        "stream",
+        "media_type",
+        "byte_length",
+        "sha256",
+        "truncated",
+        "size_state",
+        "producer",
+        "source",
+        "transfer",
+        "issued_at_ms",
+        "expires_at_ms",
+    ),
+)
+_ARTIFACT_READ_OUTPUT = _closed_schema(
+    {
+        "status": {"const": "OK"},
+        "artifact_id": _HEX64_SCHEMA,
+        "owner": {"const": "mastermind.workbench_action"},
+        "stream": {"type": "string", "enum": ["stdout", "stderr"]},
+        "media_type": {"type": "string", "enum": sorted(ARTIFACT_MEDIA_TYPES)},
+        "byte_length": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": MAX_ARTIFACT_BYTES,
+        },
+        "sha256": _HEX64_SCHEMA,
+        "truncated": {"type": "boolean"},
+        "size_state": {
+            "type": "string",
+            "enum": ["empty", "complete", "retained_prefix"],
+        },
+        "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": MAX_ARTIFACT_BYTES,
+        },
+        "returned_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": MAX_ARTIFACT_CHUNK_BYTES,
+        },
+        "next_offset": {
+            "anyOf": [
+                {"type": "null"},
+                {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": MAX_ARTIFACT_BYTES,
+                },
+            ]
+        },
+        "chunk_sha256": _HEX64_SCHEMA,
+        "content_kind": {"type": "string", "enum": ["text", "image", "blob"]},
+        "text": {"type": "string", "maxLength": MAX_ARTIFACT_CHUNK_BYTES},
+        "producer": _ARTIFACT_PRODUCER_SCHEMA,
+        "source": _ARTIFACT_SOURCE_SCHEMA,
+    },
+    (
+        "status",
+        "artifact_id",
+        "owner",
+        "stream",
+        "media_type",
+        "byte_length",
+        "sha256",
+        "truncated",
+        "size_state",
+        "offset",
+        "returned_bytes",
+        "next_offset",
+        "chunk_sha256",
+        "content_kind",
+        "producer",
+        "source",
+    ),
+)
+_ARTIFACT_READ_OUTPUT["allOf"] = [
+    {
+        "if": {"properties": {"content_kind": {"const": "text"}}},
+        "then": {"required": ["text"]},
+        "else": {"not": {"required": ["text"]}},
+    }
+]
+
 _PROCESS_IDENTITY_SCHEMA = _closed_schema(
     {
         "pid": {"type": "integer", "minimum": 1},
@@ -244,9 +431,9 @@ _COMMAND_EFFECT_OUTPUT = _closed_schema(
         "project_ref": _REFERENCE_SCHEMA,
         "recipe_id": {
             "type": "string",
-            "enum": ["canary_checksum", "canary_refuse"],
+            "enum": sorted(RECIPE_SHA256),
         },
-        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": MAX_RELATIVE_PATH_BYTES},
         "preimage_sha256": _HEX64_SCHEMA,
         "cleanup_state": {"type": "string", "enum": ["CLEAN", "UNCERTAIN"]},
         "exit_code": {"type": "integer", "minimum": -(2**31), "maximum": 2**31 - 1},
@@ -257,6 +444,12 @@ _COMMAND_EFFECT_OUTPUT = _closed_schema(
         "truncated": {"type": "boolean"},
         "process_identity": _PROCESS_IDENTITY_SCHEMA,
         "timed_out": {"type": "boolean"},
+        "artifacts": {
+            "type": "array",
+            "prefixItems": [_ARTIFACT_DESCRIPTOR_SCHEMA, _ARTIFACT_DESCRIPTOR_SCHEMA],
+            "minItems": 2,
+            "maxItems": 2,
+        },
     },
     (
         "status",
@@ -282,6 +475,7 @@ _COMMAND_EFFECT_OUTPUT["allOf"] = [
                 "truncated",
                 "process_identity",
                 "timed_out",
+                "artifacts",
             ]
         },
     }
@@ -451,7 +645,7 @@ def _bounded_process_deadline(value: object) -> float:
 
 
 def _channel_identifier(value: object) -> str:
-    if type(value) is not str or not value or len(value) > 512:
+    if type(value) is not str or not value or len(value) > MAX_CHANNEL_IDENTIFIER_BYTES:
         _refuse()
     if any(ord(character) <= 32 or ord(character) == 127 for character in value):
         _refuse()
@@ -988,6 +1182,7 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         prepare_project_command,
         run_project_command,
         read_action_result,
+        read_action_artifact,
         reconcile_action,
     ) = create_command_port(
         resolve_binding=runtime.resolve_binding,
@@ -1014,12 +1209,14 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
         PREPARE_COMMAND_TOOL: Draft202012Validator(_COMMAND_PREPARE_INPUT),
         RUN_COMMAND_TOOL: Draft202012Validator(_COMMAND_ACTION_REF_INPUT),
         READ_ACTION_RESULT_TOOL: Draft202012Validator(_COMMAND_READ_INPUT),
+        READ_ACTION_ARTIFACT_TOOL: Draft202012Validator(_ARTIFACT_READ_INPUT),
         RECONCILE_ACTION_TOOL: Draft202012Validator(_COMMAND_ACTION_REF_INPUT),
     }
     command_output_validators = {
         PREPARE_COMMAND_TOOL: Draft202012Validator(_COMMAND_PREPARE_OUTPUT),
         RUN_COMMAND_TOOL: Draft202012Validator(_COMMAND_EFFECT_OUTPUT),
         READ_ACTION_RESULT_TOOL: Draft202012Validator(_COMMAND_READ_OUTPUT),
+        READ_ACTION_ARTIFACT_TOOL: Draft202012Validator(_ARTIFACT_READ_OUTPUT),
         RECONCILE_ACTION_TOOL: Draft202012Validator(_COMMAND_EFFECT_OUTPUT),
     }
 
@@ -1174,11 +1371,31 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
             Tool(
                 name=READ_ACTION_RESULT_TOOL,
                 description=(
-                    "Read one bounded page of retained stdout or stderr from a "
-                    "completed command action without starting a process."
+                    "Read one bounded UTF-8 text page of retained stdout or stderr "
+                    "from a completed command action without starting a process. "
+                    "Binary streams refuse this text representation; use "
+                    "read_action_artifact for exact binary bytes."
                 ),
                 inputSchema=_COMMAND_READ_INPUT,
                 outputSchema=_COMMAND_READ_OUTPUT,
+                annotations=ToolAnnotations(
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+            Tool(
+                name=READ_ACTION_ARTIFACT_TOOL,
+                description=(
+                    "Read one exact bounded byte range from a qualified Workbench "
+                    "Action artifact by its signed owner reference. The caller cannot "
+                    "select a host path, root, media type, or artifact slot. UTF-8 "
+                    "text is returned natively as text; approved binary content is "
+                    "returned as lossless MCP image or blob content."
+                ),
+                inputSchema=_ARTIFACT_READ_INPUT,
+                outputSchema=_ARTIFACT_READ_OUTPUT,
                 annotations=ToolAnnotations(
                     readOnlyHint=True,
                     destructiveHint=False,
@@ -1214,7 +1431,9 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
                 read_input_validators[name].validate(request)
             elif name in COMMAND_TOOL_NAMES:
                 command_input_validators[name].validate(request)
-                if name != PREPARE_COMMAND_TOOL:
+                if name == READ_ACTION_ARTIFACT_TOOL:
+                    action_digest = _action_digest(request["artifact_ref"])
+                elif name != PREPARE_COMMAND_TOOL:
                     action_digest = _action_digest(request["action_ref"])
             elif name == PREPARE_TOOL:
                 prepare_validator.validate(request)
@@ -1275,6 +1494,8 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
                 observed = await run_project_command(caller, request["action_ref"])
             elif name == READ_ACTION_RESULT_TOOL:
                 observed = await read_action_result(caller, request)
+            elif name == READ_ACTION_ARTIFACT_TOOL:
+                observed = await read_action_artifact(caller, request)
             elif name == RECONCILE_ACTION_TOOL:
                 observed = await reconcile_action(caller, request["action_ref"])
             elif name == PREPARE_TOOL:
@@ -1312,7 +1533,11 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
             )
         try:
             data = _snapshot(dict(observed), MAX_RESULT_BYTES)
-            if name in READ_TOOL_NAMES:
+            binary_payload: str | None = None
+            if name == READ_ACTION_ARTIFACT_TOOL:
+                binary_payload = data.pop("_payload_base64", None)
+                command_output_validators[name].validate(data)
+            elif name in READ_TOOL_NAMES:
                 read_output_validators[name].validate(data)
             elif name in COMMAND_TOOL_NAMES:
                 command_output_validators[name].validate(data)
@@ -1320,13 +1545,60 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
                 prepare_output_validator.validate(data)
             else:
                 effect_output_validator.validate(data)
-            result = CallToolResult(
-                content=[
+
+            if name == READ_ACTION_ARTIFACT_TOOL:
+                content_kind = data["content_kind"]
+                if content_kind == "text":
+                    raw_chunk = data["text"].encode("utf-8", errors="strict")
+                    content = [TextContent(type="text", text=data["text"])]
+                else:
+                    if type(binary_payload) is not str:
+                        raise ValueError("binary artifact payload unavailable")
+                    try:
+                        raw_chunk = base64.b64decode(
+                            binary_payload.encode("ascii"), validate=True
+                        )
+                    except (UnicodeError, binascii.Error) as error:
+                        raise ValueError("binary artifact payload invalid") from error
+                    if content_kind == "image":
+                        content = [
+                            mcp_types.ImageContent(
+                                type="image",
+                                data=binary_payload,
+                                mimeType=data["media_type"],
+                            )
+                        ]
+                    else:
+                        content = [
+                            mcp_types.EmbeddedResource(
+                                type="resource",
+                                resource=mcp_types.BlobResourceContents(
+                                    uri=(
+                                        "mastermind-artifact://sha256/"
+                                        f"{data['artifact_id']}?offset={data['offset']}"
+                                    ),
+                                    mimeType=data["media_type"],
+                                    blob=binary_payload,
+                                ),
+                            )
+                        ]
+                if (
+                    len(raw_chunk) != data["returned_bytes"]
+                    or hashlib.sha256(raw_chunk).hexdigest()
+                    != data["chunk_sha256"]
+                ):
+                    raise ValueError("artifact chunk verification failed")
+            else:
+                content = [
                     TextContent(
                         type="text",
-                        text=json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+                        text=json.dumps(
+                            data, ensure_ascii=False, separators=(",", ":")
+                        ),
                     )
-                ],
+                ]
+            result = CallToolResult(
+                content=content,
                 structuredContent=data,
                 isError=False,
             )

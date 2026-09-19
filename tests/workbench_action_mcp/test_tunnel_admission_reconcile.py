@@ -585,7 +585,7 @@ def test_run_reconcile_stays_unknown_after_an_accepted_run_admission(
     assert os.listdir(carrier.artifact) == []
 
 
-def test_ten_tool_inventory_and_effect_vocabulary_are_unchanged(carrier: Carrier) -> None:
+def test_eleven_tool_inventory_and_effect_vocabulary_are_closed(carrier: Carrier) -> None:
     async def inventory(server):
         return await _tools(server)
 
@@ -600,6 +600,7 @@ def test_ten_tool_inventory_and_effect_vocabulary_are_unchanged(carrier: Carrier
         "prepare_project_command",
         "run_project_command",
         "read_action_result",
+        "read_action_artifact",
         "reconcile_action",
     }
     by_name = {tool.name: tool for tool in tools}

@@ -2,30 +2,33 @@
 
 Status: **BUILT_NOT_PROVEN / RUNNABLE LOCAL SOURCE / NOT INSTALLED / C1 PERSONAL CANARY PENDING**.
 
-Operation: `web-ceo-workbench-action-f0-20260913-sol-001`.
+Base operation: `web-ceo-workbench-action-f0-20260913-sol-001`.
 
-This source composes bounded protected Read, attended text-patch operations, and two pinned command recipes in one fixed-channel runtime. It exists so an authorized Web CEO can inspect an allowed file, preview and apply one exact replacement, run a checksum or intentional-refusal canary, and retrieve retained results without receiving a generic filesystem, shell, host, credential, Git publication, browser, or administrator tool.
+Artifact Return extension: `web-ceo-artifact-return-f0-20260918-sol-001`.
+
+This source composes bounded protected Read, attended text-patch operations, three pinned command recipes, and exact owner-bound artifact return in one fixed-channel runtime. It exists so an authorized Web CEO can inspect an allowed file, preview and apply one exact replacement, run checksum, intentional-refusal, or deterministic PNG source-fingerprint canaries, and consume retained text or binary output without receiving a generic filesystem, shell, host, credential, Git publication, browser, or administrator tool.
 
 It does **not** make a Web CEO autonomous, install a ChatGPT app, create an Executive Job/Attempt/Worker, grant branch ownership, commit/push/merge source, select provider accounts, or bypass ChatGPT platform safety. Source tests prove the implementation boundary only; they do not prove that a particular ChatGPT model/mode will dispatch the modifying tool.
 
 ## Tool surface
 
-The attended fixed-channel MCP surface contains exactly ten tools:
+The attended fixed-channel MCP surface contains exactly eleven tools:
 
 | Tool | Effect | Input authority |
 |---|---|---|
-| `workspace_manifest` | read-only | no model-selected authority; reports the current fixed project binding and ten-tool `attended_workbench_f0` source capability as `BUILT_NOT_PROVEN` |
+| `workspace_manifest` | read-only | no model-selected authority; reports the current fixed project binding and eleven-tool `attended_workbench_f0` source capability as `BUILT_NOT_PROVEN` |
 | `read_project_file` | read-only | one allowed relative path plus bounded line paging and optional expected preimage |
 | `preview_text_replace` | read-only | one allowed relative path, required preimage, and one exact in-memory replacement; never persists |
 | `prepare_text_patch` | read-only | selected project ref, relative path, `CREATE` or one unique-text `REPLACE`, expected preimage for replacement |
 | `commit_text_patch` | modifying | **only** the short-lived signed `action_ref` returned by preparation |
 | `reconcile_text_patch` | read-only | the original signed `action_ref`; never creates or replays another action |
-| `prepare_project_command` | read-only | selected project ref, allowed relative path, exact preimage, and one of two pinned recipe IDs; starts no process |
+| `prepare_project_command` | read-only | selected project ref, allowed relative path, exact preimage, and one of three pinned recipe IDs; starts no process |
 | `run_project_command` | process start | **only** the short-lived signed `action_ref` returned by command preparation |
-| `read_action_result` | read-only | original command action ref plus bounded stream/line/page selectors; never starts or replays a process |
+| `read_action_result` | read-only | original command action ref plus bounded UTF-8 stream/line/page selectors; never starts or replays a process |
+| `read_action_artifact` | read-only | signed owner-issued artifact ref plus byte offset and length only; no path, root, slot, media-type, or host selector |
 | `reconcile_action` | read-only | original command action ref; classifies retained evidence without spawning |
 
-The annotations are truthful. The three Read tools, both prepare tools, both reconcile tools, and result paging are read-only. `commit_text_patch` and `run_project_command` are advertised as modifying/destructive, idempotent for the *same prepared action*, and closed-world. The standalone Read profile's `preview_project_command` is not exposed here because its preview recipes are not this executable profile's reviewed command contract.
+The annotations are truthful. The three Read tools, both prepare tools, both reconcile tools, result paging, and exact artifact reading are read-only. `commit_text_patch` and `run_project_command` are advertised as modifying/destructive, idempotent for the *same prepared action*, and closed-world. The standalone Read profile's `preview_project_command` is not exposed here because its preview recipes are not this executable profile's reviewed command contract.
 
 `workspace_manifest` validates authority through the borrowed Read manifest call, then labels the complete envelope and data as `attended_workbench_f0` with `mutation_allowed=true`. Its effects are `file_write=true`, `process_start=true`, `network_call=false`, and `durable_prepare=false`. Preparation is a stateless, short-lived signed reference; it is not a durable queue, ledger, or pending action. Individual Read and preview results retain the borrowed `pro_read_prepare` profile with `mutation_allowed=false`.
 
@@ -33,7 +36,7 @@ The model never supplies an absolute root, machine, worktree, branch, account, c
 
 ## Owner-bound action
 
-One runtime owns one already-authorized selected project descriptor. The ten-tool stdio profile derives authority from the host-selected Secure MCP Tunnel channel. The separate three-tool HTTP patch profile uses the existing Business JWT/OAuth policy. Both use an internal `workbench.action` lease scope; this is not the tunnel client's `main` channel name or the ChatGPT app's `noAuth` setting. The owner-issued lease binds:
+One runtime owns one already-authorized selected project descriptor. The eleven-tool stdio profile derives authority from the host-selected Secure MCP Tunnel channel. The separate three-tool HTTP patch profile uses the existing Business JWT/OAuth policy. Both use an internal `workbench.action` lease scope; this is not the tunnel client's `main` channel name or the ChatGPT app's `noAuth` setting. The owner-issued lease binds:
 
 - pseudonymous channel subject/client references, or the verified OAuth subject/client for the HTTP profile;
 - project, attended context, responsibility, operation, owner and capability generation;
@@ -60,11 +63,22 @@ Commit and reconcile also return `cleanup_state: CLEAN | UNCERTAIN`. This report
 
 Same-action replay requires matching qualified evidence and postimage to return `APPLIED` without issuing a second write. A matching postimage alone is insufficient. Changed/foreign source is not overwritten intentionally; it returns or reconciles to `EFFECT_UNKNOWN`. A lost client response is never permission to prepare another action or fail over to another actuator.
 
-Command execution accepts only `canary_checksum` and `canary_refuse`, each bound to a source-pinned SHA-256 recipe. The host pins an absolute Python executable and its SHA-256, the recipe root, and a deadline of at most 15 seconds. The child receives a closed environment and descriptor-bound project/file inputs. Exit `0` and intentional exit `7` are completed MCP results, not transport failures. Stdout/stderr are retained in the same Action artifact store and paged without replay. Process identity, cleanup state, and effect state remain separate facts.
+Command execution accepts only `canary_checksum`, `canary_refuse`, and `source_fingerprint_png`, each bound to a source-pinned SHA-256 recipe. The PNG recipe independently verifies the descriptor-held input preimage and emits one deterministic `image/png` source-integrity diagnostic without network, ambient environment, an output path, or a third-party dependency. The host pins an absolute Python executable and its SHA-256, the recipe root, and a deadline of at most 15 seconds. The child receives a closed environment and descriptor-bound project/file inputs. Exit `0` and intentional exit `7` are completed MCP results, not transport failures. Stdout/stderr are retained in the same Action artifact store and paged or returned as exact bytes without replay. Process identity, cleanup state, and effect state remain separate facts.
 
-Command input is limited to 65,536 bytes; each retained output stream is limited to 65,536 bytes. A result page contains at most 128 lines and 8,192 UTF-8 bytes. The configured process deadline must be greater than zero and no more than 15 seconds.
+Command input is limited to 65,536 bytes; each retained output stream is limited to 65,536 bytes. A result page contains at most 128 lines and 8,192 UTF-8 bytes. An artifact transfer chunk contains at most 49,152 raw bytes so the base64/MCP envelope remains beneath the fixed 262,144-byte wire ceiling. The configured process deadline must be greater than zero and no more than 15 seconds.
 
 F0 depends on the owner-issued project binding to exclude concurrent authorized writers. It does not claim a kernel-level compare-and-swap primitive against an uncooperative process that mutates the same path in the final filesystem publication window. Production admission therefore requires an isolated or otherwise writer-fenced disposable workspace for the first canary, and a stronger local-source fence before any unattended mutation claim.
+
+
+## Exact artifact return
+
+Workbench Action remains the sole byte owner. A qualified command result now projects one immutable descriptor for each retained stream. The descriptor carries an `artifact_id`, short-lived signed `artifact_ref`, media type, retained byte length, SHA-256, truncation/size state, Action/process/source provenance, transfer ceilings, and explicit issue/expiry times. `artifact_id` binds the action, project, generation, recipe, relative source label, source preimage and inode identity, output slot, media type, byte length, digest, and truncation state. Renewing an artifact reference changes its expiry-bearing token but not that immutable identity.
+
+`read_action_artifact` accepts only `{artifact_ref, offset?, max_bytes?}`. The signed reference fixes the caller/channel, project/context/responsibility/operation/owner/generation, root and artifact-store identities, source, recipe, stream, media type, byte length, digest and truncation state. The caller cannot substitute an absolute path, traversal, symlink target, credential file, arbitrary machine root, alternate output slot, or media type. Every read re-resolves the live channel/project lease, re-qualifies the original command result, reads through the incumbent no-follow artifact store, verifies length and SHA-256, rereads the exact slot, and reauthorizes before releasing content. Expired references return `ARTIFACT_EXPIRED`; revocation/generation movement returns `ARTIFACT_BINDING_CHANGED`; a removed, replaced, mutated, symlinked, hard-linked, or otherwise unqualified artifact returns `ARTIFACT_UNAVAILABLE`. There is no result cache, so missing bytes are never reconstructed from an earlier response.
+
+UTF-8 artifacts use byte offsets but are returned only on code-point boundaries; a range that starts inside a code point or cannot fit one complete code point is refused. `read_action_result` remains a UTF-8 text pager and returns `ARTIFACT_TEXT_UNSUPPORTED` for a binary stream without changing the Action's known effect or cleanup truth. Successful, non-truncated PNG stdout must also pass bounded PNG structure and CRC validation before it is advertised or returned as MCP `ImageContent`; refusal, partial, malformed, or truncated PNG-recipe stdout is retained as `application/octet-stream` and returned only through the blob path. Other binary ranges are returned as `BlobResourceContents`; binary bytes never pass through text decoding. Base64 is only the MCP wire encoding and is verified against the returned raw-byte count and chunk SHA-256 before release. A producer stream that reached its retention ceiling is explicitly `retained_prefix`; its digest and length never pretend to describe unavailable producer bytes.
+
+This adds no artifact database, lifecycle table, URL bucket, public listener, arbitrary file reader, or second evidence store. Executive Job/Attempt lineage may later carry these opaque descriptors where that owner genuinely has a join, but Executive OS does not become the byte store.
 
 ## Platform-dispatch receipt
 
@@ -136,7 +150,7 @@ Example without secrets:
 
 Status: **BUILT_NOT_PROVEN / TRANSPORT SEAM ONLY / NOT INSTALLED / NOT ENROLLED**.
 
-The HTTP/OAuth service above stays exactly as it is. The tunnel entry point is a second composition of the *same* runtime: one host-selected Secure MCP Tunnel channel → one stdio child (`scripts/mastermind_workbench_action_stdio.py`) → `WorkbenchActionRuntime.open_channel(...)` → the existing text patch port, borrowed Read port, and closed command port. It exists so a tunnel-terminated client can reach the ten-tool attended surface without a second authentication service being invented on this path.
+The HTTP/OAuth service above stays exactly as it is. The tunnel entry point is a second composition of the *same* runtime: one host-selected Secure MCP Tunnel channel → one stdio child (`scripts/mastermind_workbench_action_stdio.py`) → `WorkbenchActionRuntime.open_channel(...)` → the existing text patch port, borrowed Read port, and closed command port. It exists so a tunnel-terminated client can reach the eleven-tool attended surface without a second authentication service being invented on this path.
 
 The borrowed Read port opens no root and owns no executor, lease, audit sink, descriptor, or cache. Every callback re-resolves the current channel/project binding and maps its exact root descriptor identity, context, owner, generation, allowed paths, expiry, and committed baseline into a `ReadScope`. Its synchronous operation executes through the same runtime `run_io` used by patch work. Read-port refusals become closed MCP errors with `isError=true`.
 
@@ -144,7 +158,7 @@ The borrowed Read port opens no root and owns no executor, lease, audit sink, de
 
 **Durable channel admission.** Every recognized tool call persists one `ChannelAuditEvent` (`mastermind.business_mcp_auth_channel_audit.v1`) in the same `auth-audit.jsonl` mechanics (same descriptor/lock/append/fsync/poison/close discipline; the OAuth event encoding is unchanged byte-for-byte) **before** dispatch; an audit failure blocks the effect (`CHANNEL_AUDIT_UNAVAILABLE`). The event carries only `accepted`, `code` (`accepted` | `channel_refused` | `request_refused`), the sink's `policy_id`, `schema`, opaque `channel_ref`, the fixed `tool` name, and an optional `action_digest` (SHA-256 of the action reference — never the token itself). No path, patch content, or credential is ever audited. Unknown tool names are not channel admissions and are not audited.
 
-**Pre-dispatch refusal reconciliation.** The durable admission ledger is also the only evidence that lets a reconcile classify an action with no artifact at all as `NOT_APPLIED`. Artifact absence alone stays `EFFECT_UNKNOWN` (an admitted commit/run may have been lost before its claim). The sink reads its own named ledger back through the same continuity proof an append uses (owned identity, owned size, owner lock, every line re-encoded byte-for-byte through the exact event encoders) and the tunnel classifies the rows for the exact action digest: `NOT_APPLIED` requires at least one `channel_refused` row for the matching modifying tool (`commit_text_patch` for `reconcile_text_patch`, `run_project_command` for `reconcile_action` / `read_action_result`) under this channel and policy identity, **no** accepted row for any modifying tool for that digest from any channel, an artifact store that still reports the action unclaimed, and (for patches) a source that still reads as never patched (`REPLACE` at its exact preimage, `CREATE` target absent). Any accepted modifying admission — including one the port later refused for expiry or preimage mismatch, which is not durably distinguishable from a loss before claim — a torn, foreign, off-policy or off-channel row, a rotated audit policy over the same ledger, identity or size drift of the named file, a moved-on source, or any ledger read failure keeps the action `EFFECT_UNKNOWN`. The ledger is consulted last, after artifact and source observation, so a modifying call admitted during the reconcile is seen. The read never appends, never poisons the sink, and never reopens admission; reconcile remains read-only, so the classification is re-derived from durable evidence on every call and survives restarts. The OAuth adapter composes the same ports without a ledger reader and is unchanged. This adds no ledger, queue, retry owner, action identity, or tool; the ten-tool inventory is unchanged and `reconcile_action` now shares the common `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN` vocabulary.
+**Pre-dispatch refusal reconciliation.** The durable admission ledger is also the only evidence that lets a reconcile classify an action with no artifact at all as `NOT_APPLIED`. Artifact absence alone stays `EFFECT_UNKNOWN` (an admitted commit/run may have been lost before its claim). The sink reads its own named ledger back through the same continuity proof an append uses (owned identity, owned size, owner lock, every line re-encoded byte-for-byte through the exact event encoders) and the tunnel classifies the rows for the exact action digest: `NOT_APPLIED` requires at least one `channel_refused` row for the matching modifying tool (`commit_text_patch` for `reconcile_text_patch`, `run_project_command` for `reconcile_action` / `read_action_result`) under this channel and policy identity, **no** accepted row for any modifying tool for that digest from any channel, an artifact store that still reports the action unclaimed, and (for patches) a source that still reads as never patched (`REPLACE` at its exact preimage, `CREATE` target absent). Any accepted modifying admission — including one the port later refused for expiry or preimage mismatch, which is not durably distinguishable from a loss before claim — a torn, foreign, off-policy or off-channel row, a rotated audit policy over the same ledger, identity or size drift of the named file, a moved-on source, or any ledger read failure keeps the action `EFFECT_UNKNOWN`. The ledger is consulted last, after artifact and source observation, so a modifying call admitted during the reconcile is seen. The read never appends, never poisons the sink, and never reopens admission; reconcile remains read-only, so the classification is re-derived from durable evidence on every call and survives restarts. The OAuth adapter composes the same ports without a ledger reader and is unchanged. This adds no ledger, queue, retry owner, or modifying action identity. Artifact Return adds one read-only tool while `reconcile_action` retains the common `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN` vocabulary.
 
 **Configuration.** The closed document is `mastermind.workbench_action_tunnel.v1`, loaded with the same secure acquisition pattern as the loopback service (absolute same-euid paths, duplicate-key rejection, exact schema, `O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC`, `nlink=1`, regular-file/final identity re-check, bounded bytes; `0600` 64-hex-char action key; root/audit directories same-owner and not group/world-writable). Example without secrets:
 
@@ -200,11 +214,11 @@ The initial rollout retains its already assigned external-SSD helper worktree; t
 
 The real canary must use a disposable writer-fenced project and the actual intended ChatGPT app/tunnel/channel binding. It must prove, in order:
 
-1. app connection and `tools/list` exposes exactly the final reviewed ten-tool bounded inventory for that installed generation;
+1. app connection and `tools/list` exposes exactly the final reviewed eleven-tool bounded inventory for that installed generation;
 2. `prepare_text_patch` reaches the service and returns `PREPARED` with zero source effect;
 3. `commit_text_patch(action_ref)` reaches the service and returns/reads back `APPLIED`;
-4. prepare/run `canary_checksum` completes with actual exit `0`, and `canary_refuse` completes with actual exit `7` while remaining an MCP success;
-5. `read_action_result` pages all retained lines and `reconcile_action` observes the same action without a second spawn;
+4. prepare/run `canary_checksum` completes with actual exit `0`, `canary_refuse` completes with actual exit `7` while remaining an MCP success, and `source_fingerprint_png` emits a deterministic PNG;
+5. `read_action_result` pages all retained UTF-8 lines, `read_action_artifact` reconstructs exact text ranges and renders the exact PNG bytes with matching length/SHA-256, and `reconcile_action` observes the same actions without a second spawn;
 6. replaying the same prepared patch action produces no second write;
 7. simulated/lost responses are recovered with the appropriate reconcile tool, never replayed blindly;
 8. an outside-allowlist, stale-preimage, unknown-recipe, or model-supplied environment/executable request is refused with zero unauthorized source effect;
