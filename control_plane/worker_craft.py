@@ -1,9 +1,14 @@
-"""Role-specific Mastermind Craft prompt materialization for common workers.
+"""Role-specific Craft composition before existing worker/provider effects.
 
-This module adds working method, not authority.  It wraps an existing
-WorkerExecutionAdapter without creating a lifecycle, queue, retry path, provider
-home, capability registry, or result contract.  The wrapped adapter remains the
-owner of process/provider effects.
+This module adds working method and commission authoring only.  It never wraps,
+registers, selects, replaces, or starts a WorkerExecutionAdapter.  Callers keep the
+already reviewed/bound adapter object and may pass a materialized WorkerLaunchSpec to
+that exact adapter immediately before start.
+
+The compact commission seam executes the existing checked-in Craft brief compiler from
+research/worker_craft; it is an adapter to that incumbent compiler, not a second
+compiler, lifecycle, queue, retry path, provider selector, credential store, or
+publication owner.
 """
 from __future__ import annotations
 
@@ -14,24 +19,20 @@ import os
 import re
 import stat
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
-from control_plane.worker_adapter import WorkerExecutionAdapter
-from control_plane.worker_execution_contract import (
-    CancelReceipt,
-    CollectionReceipt,
-    ValidationReceipt,
-    WorkerLaunchSpec,
-    WorkerProcessRef,
-)
+from control_plane.worker_execution_contract import WorkerLaunchSpec
+
 
 CRAFT_PROMPT_SCHEMA_VERSION = "mastermind.worker_craft_prompt/v1"
 CRAFT_JOB_PACKET_SCHEMA = "mastermind.executive_job_packet/v1"
+CRAFT_COMMISSION_OUTPUT_SCHEMA = "mastermind.craft_commission_compilation.v1"
 CRAFT_DELIVERY_MODE = "prompt_method"
 CRAFT_BEGIN = "<<<MASTERMIND_CRAFT_METHOD_V1>>>"
 CRAFT_END = "<<<END_MASTERMIND_CRAFT_METHOD_V1>>>"
 MAX_CRAFT_SOURCE_BYTES = 64 * 1024
 MAX_CRAFTED_PROMPT_BYTES = 512 * 1024
+MAX_COMMISSION_BYTES = 512 * 1024
 DEFAULT_CRAFT_ROOT = (
     Path(__file__).resolve().parent.parent
     / "research"
@@ -53,7 +54,7 @@ _ROLE_RE = re.compile(r"[a-z][a-z0-9-]{0,31}\Z")
 
 
 class CraftPromptError(ValueError):
-    """Craft source, role selection, or prompt composition refused."""
+    """Craft source, role selection, prompt composition, or commission refusal."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -74,6 +75,27 @@ class CraftPromptApplication:
     receipt: CraftMethodReceipt
     original_prompt_sha256: str
     crafted_prompt_sha256: str
+
+
+@dataclasses.dataclass(frozen=True)
+class CraftLaunchMaterialization:
+    """Pure pre-start result; the provider adapter is intentionally absent."""
+
+    launch_spec: WorkerLaunchSpec
+    application: CraftPromptApplication
+
+
+@dataclasses.dataclass(frozen=True)
+class CraftCommissionMaterialization:
+    """Exact compiler bytes and authoring digests; no runtime/provider identity."""
+
+    role: str
+    commission_bytes: bytes
+    commission_sha256: str
+    compact_input_sha256: str
+    normalized_brief_sha256: str
+    method_sha256: str
+    compiler_sha256: str
 
 
 def _sha256(data: bytes) -> str:
@@ -203,7 +225,10 @@ def _read_source(root: Path, relative: str) -> tuple[str, str]:
             raise CraftPromptError("craft_source_changed")
         data = bytearray()
         while len(data) <= MAX_CRAFT_SOURCE_BYTES:
-            chunk = os.read(descriptor, min(65536, MAX_CRAFT_SOURCE_BYTES + 1 - len(data)))
+            chunk = os.read(
+                descriptor,
+                min(65536, MAX_CRAFT_SOURCE_BYTES + 1 - len(data)),
+            )
             if not chunk:
                 break
             data.extend(chunk)
@@ -235,7 +260,7 @@ def load_craft_method(
     skill_text, skill_digest = _read_source(package_root, "SKILL.md")
     common_text, common_digest = _read_source(package_root, "references/common.md")
     role_text, role_digest = _read_source(package_root, _ROLE_FILES[selected])
-    del skill_text  # identity-bearing entrypoint; prompt method loads common + one role only.
+    del skill_text
     projection = {
         "schema_version": CRAFT_PROMPT_SCHEMA_VERSION,
         "role": selected,
@@ -319,86 +344,117 @@ def apply_craft_to_prompt(
     return crafted, application
 
 
-class CraftWorkerAdapter:
-    """Transparent common-worker adapter that adds one exact Craft method."""
+def materialize_launch_spec(
+    spec: WorkerLaunchSpec,
+    *,
+    fixed_role: str | None = None,
+    root: Path | str = DEFAULT_CRAFT_ROOT,
+) -> CraftLaunchMaterialization:
+    """Return a prompt-enriched spec without touching or representing an adapter."""
 
-    def __init__(
-        self,
-        adapter: WorkerExecutionAdapter,
-        *,
-        role: str | None = None,
-        craft_root: Path | str = DEFAULT_CRAFT_ROOT,
-    ) -> None:
-        if not isinstance(adapter, WorkerExecutionAdapter):
-            raise TypeError("CraftWorkerAdapter requires a WorkerExecutionAdapter")
-        self._adapter = adapter
-        self.inspector = adapter.inspector
-        self._role = _validated_role(role) if role is not None else None
-        self._craft_root = Path(craft_root)
-        self._specs: dict[str, WorkerLaunchSpec] = {}
-        self._applications: dict[str, CraftPromptApplication] = {}
+    if not isinstance(spec, WorkerLaunchSpec):
+        raise TypeError("materialize_launch_spec requires WorkerLaunchSpec")
+    crafted, application = apply_craft_to_prompt(
+        spec.prompt,
+        fixed_role=fixed_role,
+        root=root,
+    )
+    return CraftLaunchMaterialization(
+        launch_spec=dataclasses.replace(spec, prompt=crafted),
+        application=application,
+    )
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._adapter, name)
 
-    def _materialize(self, spec: WorkerLaunchSpec) -> tuple[WorkerLaunchSpec, CraftPromptApplication]:
-        crafted, application = apply_craft_to_prompt(
-            spec.prompt,
-            fixed_role=self._role,
-            root=self._craft_root,
-        )
-        return dataclasses.replace(spec, prompt=crafted), application
+def _load_commission_compiler(
+    root: Path | str,
+) -> tuple[dict[str, Any], str]:
+    package_root = _root(root)
+    source_text, compiler_digest = _read_source(package_root, "scripts/brief.py")
+    filename = str(package_root / "scripts" / "brief.py")
+    namespace: dict[str, Any] = {
+        "__file__": filename,
+        "__name__": "_mastermind_craft_brief_compiler",
+    }
+    try:
+        code = compile(source_text, filename, "exec")
+        exec(code, namespace)
+    except Exception as exc:
+        raise CraftPromptError("craft_commission_compiler_unavailable") from exc
+    compile_fn = namespace.get("compile_commission")
+    brief_error = namespace.get("BriefError")
+    if (
+        not callable(compile_fn)
+        or not isinstance(brief_error, type)
+        or not issubclass(brief_error, Exception)
+    ):
+        raise CraftPromptError("craft_commission_compiler_contract_invalid")
+    return namespace, compiler_digest
 
-    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
-        if spec.run_id in self._specs:
-            raise CraftPromptError("craft_run_already_materialized")
-        transformed, application = self._materialize(spec)
-        self._specs[spec.run_id] = transformed
-        self._applications[spec.run_id] = application
-        try:
-            return await self._adapter.start(transformed)
-        except BaseException:
-            # Preserve the materialization identity for same-run reconciliation;
-            # provider start may already have had an effect.
-            raise
 
-    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
-        return await self._adapter.collect_result(ref)
+def materialize_worker_commission(
+    request: dict[str, Any],
+    *,
+    root: Path | str = DEFAULT_CRAFT_ROOT,
+) -> CraftCommissionMaterialization:
+    """Invoke the incumbent Craft compiler and return exact immutable commission bytes."""
 
-    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt:
-        return await self._adapter.cancel(ref, reason)
-
-    async def run_validation_argv(
-        self,
-        spec: WorkerLaunchSpec,
-        argv: Sequence[str],
-        *,
-        timeout_seconds: float = 300.0,
-    ) -> ValidationReceipt:
-        transformed = self._specs.get(spec.run_id)
-        application = self._applications.get(spec.run_id)
-        if transformed is None or application is None:
-            transformed, application = self._materialize(spec)
-        else:
-            expected_original = dataclasses.replace(transformed, prompt=spec.prompt)
-            if expected_original != spec:
-                raise CraftPromptError("craft_launch_spec_drifted")
-            _text, current = load_craft_method(
-                application.receipt.role, root=self._craft_root
-            )
-            if current.method_digest != application.receipt.method_digest:
-                raise CraftPromptError("craft_source_drifted_after_start")
-        return await self._adapter.run_validation_argv(
-            transformed,
-            argv,
-            timeout_seconds=timeout_seconds,
-        )
-
-    def craft_application(self, run_id: str) -> CraftPromptApplication:
-        try:
-            return self._applications[run_id]
-        except KeyError as exc:
-            raise CraftPromptError("craft_run_unknown") from exc
+    if type(request) is not dict:
+        raise CraftPromptError("craft_commission_request_invalid")
+    package_root = _root(root)
+    namespace, compiler_digest = _load_commission_compiler(package_root)
+    compile_fn = namespace["compile_commission"]
+    brief_error = namespace["BriefError"]
+    try:
+        result = compile_fn(request, method_root=package_root / "references")
+    except brief_error as exc:
+        raise CraftPromptError("craft_commission_refused:" + str(exc)) from exc
+    if not isinstance(result, dict):
+        raise CraftPromptError("craft_commission_compiler_contract_invalid")
+    if (
+        result.get("schema_version") != CRAFT_COMMISSION_OUTPUT_SCHEMA
+        or result.get("execution_authority") is not False
+        or result.get("runtime_admission") != "NOT_REQUESTED"
+        or result.get("source_verification") != "NOT_PERFORMED"
+        or result.get("provider_selection") != "NOT_PERFORMED"
+        or result.get("model_selection") != "NOT_PERFORMED"
+        or result.get("account_selection") != "NOT_PERFORMED"
+    ):
+        raise CraftPromptError("craft_commission_compiler_contract_invalid")
+    markdown = result.get("instructions_markdown")
+    if not isinstance(markdown, str):
+        raise CraftPromptError("craft_commission_compiler_contract_invalid")
+    try:
+        content = markdown.encode("utf-8")
+    except UnicodeError as exc:
+        raise CraftPromptError("craft_commission_encoding_invalid") from exc
+    if not content or len(content) > MAX_COMMISSION_BYTES:
+        raise CraftPromptError("craft_commission_size_invalid")
+    digest = _sha256(content)
+    if result.get("commission_sha256") != digest:
+        raise CraftPromptError("craft_commission_digest_mismatch")
+    required_digests = (
+        "compact_input_sha256",
+        "normalized_brief_sha256",
+        "method_sha256",
+    )
+    if any(
+        not isinstance(result.get(field), str)
+        or re.fullmatch(r"[0-9a-f]{64}", result[field]) is None
+        for field in required_digests
+    ):
+        raise CraftPromptError("craft_commission_compiler_contract_invalid")
+    role = result.get("role")
+    if not isinstance(role, str) or role not in _ROLE_FILES:
+        raise CraftPromptError("craft_commission_compiler_contract_invalid")
+    return CraftCommissionMaterialization(
+        role=role,
+        commission_bytes=content,
+        commission_sha256=digest,
+        compact_input_sha256=result["compact_input_sha256"],
+        normalized_brief_sha256=result["normalized_brief_sha256"],
+        method_sha256=result["method_sha256"],
+        compiler_sha256=compiler_digest,
+    )
 
 
 __all__ = [
@@ -406,12 +462,15 @@ __all__ = [
     "CRAFT_DELIVERY_MODE",
     "CRAFT_END",
     "CRAFT_PROMPT_SCHEMA_VERSION",
+    "CraftCommissionMaterialization",
+    "CraftLaunchMaterialization",
     "CraftMethodReceipt",
     "CraftPromptApplication",
     "CraftPromptError",
-    "CraftWorkerAdapter",
     "apply_craft_to_prompt",
     "extract_job_packet",
     "load_craft_method",
+    "materialize_launch_spec",
+    "materialize_worker_commission",
     "resolve_craft_role",
 ]
