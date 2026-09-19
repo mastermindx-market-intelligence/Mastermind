@@ -213,6 +213,35 @@ def test_stale_inflight_different_request_hash_is_conflict(tmp_path: Path) -> No
     assert executor.calls == []
 
 
+def test_power_policy_reserved_exit_75_preserves_effect_unknown_marker(tmp_path: Path) -> None:
+    executor = FakeExecutor(returncode=75, stderr=b"secondary-host power policy effect unknown\n")
+    broker = _broker(tmp_path, executor)
+    raw = _raw("executive.host.prepare_secondary_power_policy", "req-power-unknown")
+
+    with pytest.raises(EffectUnknownError, match="action-level effect uncertainty"):
+        broker.handle(raw, peer_uid=501)
+
+    assert len(executor.calls) == 1
+    assert broker.inflight_path("req-power-unknown").is_file()
+    assert not broker.receipt_path("req-power-unknown").exists()
+    projection = broker.query_status(
+        {"schema": STATUS_REQUEST_SCHEMA, "request_id": "req-power-unknown"},
+        peer_uid=501,
+    )
+    assert projection["status"] == "EFFECT_UNKNOWN"
+
+
+def test_non_power_exit_75_remains_terminal_failed(tmp_path: Path) -> None:
+    executor = FakeExecutor(returncode=75)
+    broker = _broker(tmp_path, executor)
+
+    receipt = broker.handle(_raw("executive.services.start", "req-service-75"), peer_uid=501)
+
+    assert receipt["outcome"] == "FAILED"
+    assert receipt["exit_code"] == 75
+    assert not broker.inflight_path("req-service-75").exists()
+
+
 def test_nonzero_child_is_failed_and_external_text_is_bounded_and_redacted(tmp_path: Path) -> None:
     secret = "sk-ant-" + "x" * 40
     executor = FakeExecutor(returncode=65, stderr=("bad credential " + secret + "\n").encode())
