@@ -116,7 +116,8 @@
         "source_sha",
         "authenticated_subject_ref",
         "expires_at",
-        "revocation_state"
+        "revocation_state",
+        "expiry_state"
       ],
       "properties": {
         "host_ref": {
@@ -182,6 +183,14 @@
           "enum": [
             "ACTIVE",
             "REVOKED",
+            "UNKNOWN",
+            null
+          ]
+        },
+        "expiry_state": {
+          "enum": [
+            "ACTIVE",
+            "EXPIRED",
             "UNKNOWN",
             null
           ]
@@ -1982,6 +1991,9 @@
             "authenticated_subject_ref": {
               "type": "string",
               "minLength": 1
+            },
+            "expiry_state": {
+              "const": "ACTIVE"
             }
           },
           "required": [
@@ -1994,7 +2006,8 @@
             "runtime_generation",
             "expires_at",
             "revocation_state",
-            "authenticated_subject_ref"
+            "authenticated_subject_ref",
+            "expiry_state"
           ]
         },
         {
@@ -2031,6 +2044,9 @@
             },
             "revocation_state": {
               "const": "ACTIVE"
+            },
+            "expiry_state": {
+              "const": "ACTIVE"
             }
           },
           "required": [
@@ -2042,7 +2058,8 @@
             "session_ref",
             "runtime_generation",
             "expires_at",
-            "revocation_state"
+            "revocation_state",
+            "expiry_state"
           ]
         },
         {
@@ -2071,6 +2088,9 @@
             },
             "revocation_state": {
               "const": "ACTIVE"
+            },
+            "expiry_state": {
+              "const": "ACTIVE"
             }
           },
           "required": [
@@ -2080,7 +2100,8 @@
             "authority_ref",
             "authority_generation",
             "expires_at",
-            "revocation_state"
+            "revocation_state",
+            "expiry_state"
           ]
         }
       ]

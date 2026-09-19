@@ -599,6 +599,7 @@ def test_proven_live_requires_route_specific_bindings() -> None:
             "authenticated_subject_ref": None,
             "expires_at": None,
             "revocation_state": "UNKNOWN",
+            "expiry_state": "UNKNOWN",
         }
         return packet
 
@@ -615,6 +616,7 @@ def test_proven_live_requires_route_specific_bindings() -> None:
         "authenticated_subject_ref": "subject:approved-user",
         "expires_at": "2026-09-19T23:59:59Z",
         "revocation_state": "ACTIVE",
+        "expiry_state": "ACTIVE",
     })
     validator.validate(attended)
 
@@ -634,6 +636,7 @@ def test_proven_live_requires_route_specific_bindings() -> None:
         "authority_ref": "native-session-context:native-session-1",
         "expires_at": "2026-09-19T23:59:59Z",
         "revocation_state": "ACTIVE",
+        "expiry_state": "ACTIVE",
     })
     validator.validate(native)
 
@@ -645,6 +648,7 @@ def test_proven_live_requires_route_specific_bindings() -> None:
         "authority_generation": "worker-generation-1",
         "expires_at": "2026-09-19T23:59:59Z",
         "revocation_state": "ACTIVE",
+        "expiry_state": "ACTIVE",
     })
     validator.validate(worker)
 
@@ -701,6 +705,7 @@ def test_proven_live_requires_lifecycle_continuity_and_domain_target_bindings() 
             "authenticated_subject_ref": None,
             "expires_at": None,
             "revocation_state": "UNKNOWN",
+            "expiry_state": "UNKNOWN",
         }
         return packet
 
@@ -1013,6 +1018,7 @@ def test_live_workbench_and_chatgpt_bindings_require_revocation_and_subject_fact
     attended_surface["binding"].update({
         "expires_at": "2026-09-19T23:59:59Z",
         "revocation_state": "ACTIVE",
+        "expiry_state": "ACTIVE",
     })
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(attended)
@@ -1035,3 +1041,40 @@ def test_live_workbench_and_chatgpt_bindings_require_revocation_and_subject_fact
         validator.validate(chatgpt)
     chatgpt_surface["binding"]["authenticated_subject_ref"] = "subject:approved-user"
     validator.validate(chatgpt)
+
+
+def test_live_workbench_requires_explicit_active_expiry_state() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    packet = _materialize_health_packet(fixture["cases"][0]["packet"])
+    surface = packet["surfaces"][0]
+    surface.update({
+        "capability_class": "selected_project_action",
+        "canonical_owner": "Workbench",
+        "minimal_tool_family": "workbench",
+    })
+    surface["binding"].update({
+        "project_ref": "selected-project",
+        "execution_mode": "ATTENDED_WEB_OPERATOR",
+        "session_ref": "conversation-1",
+        "runtime_generation": "runtime-generation-1",
+        "authority_owner": "RuntimeBinding",
+        "authority_ref": "runtime-binding:conversation-1",
+        "authority_generation": "policy-generation-1",
+        "authenticated_subject_ref": "subject:approved-user",
+        "expires_at": "2026-09-18T00:00:00Z",
+        "revocation_state": "ACTIVE",
+    })
+
+    # A timestamp alone cannot prove that the owner considers the grant unexpired.
+    # The closed live contract must carry the owner-evaluated expiry state.
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(packet)
+
+    surface["binding"]["expiry_state"] = "EXPIRED"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(packet)
+
+    surface["binding"]["expiry_state"] = "ACTIVE"
+    validator.validate(packet)

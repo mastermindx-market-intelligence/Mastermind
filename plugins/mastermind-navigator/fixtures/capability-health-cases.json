@@ -79,7 +79,8 @@
               "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": null,
             "next_probe": null
@@ -168,7 +169,8 @@
               "source_sha": null,
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": "Workbench Action is not callable in the current session.",
             "next_probe": "Use Workbench Read for read-only needs or re-probe the action owner after installation changes."
@@ -247,7 +249,8 @@
               "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": "No current connection, binding, or owner-native canary is available.",
             "next_probe": "Read Worker Browser health for the exact worker and generation."
@@ -332,7 +335,8 @@
               "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": "Web workspace installation, organization authorization, callable fresh-session invocation, and owner-native action are unproven.",
             "next_probe": "After source protection, use the existing Business workspace admin owner for the fixed-commit canary."
@@ -421,7 +425,8 @@
               "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": "Navigator is installed in the Web workspace canary scope but is not enabled or callable for the canary member.",
             "next_probe": "The existing workspace admin owner enables the exact fixed-commit package for the approved canary member and reads back policy."
@@ -513,7 +518,8 @@
               "authority_generation": null,
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": "The attended Web action lacks an exact current session generation.",
             "next_probe": "Read RuntimeBinding for the exact attended conversation and current generation before any Workbench action."
@@ -605,7 +611,8 @@
               "authority_generation": null,
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": "The native action lacks an exact current approved native-session generation.",
             "next_probe": "Read the approved native-session context owner for the exact native session and generation before any Workbench action."
@@ -697,7 +704,8 @@
               "authority_generation": null,
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": "The provider worker has no admitted Executive worker generation for this action.",
             "next_probe": "Read the current Executive OS Job/Attempt/Worker generation and authorization; do not fall back to attended mode."
@@ -786,7 +794,8 @@
               "source_sha": null,
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": "Only the read subset is currently proven.",
             "next_probe": "Probe the exact requested action class through the existing host owner."
@@ -875,7 +884,8 @@
               "source_sha": null,
               "authenticated_subject_ref": null,
               "expires_at": null,
-              "revocation_state": "UNKNOWN"
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
             },
             "blocker": "No owner-native exact target, RuntimeBinding generation, authorization, callability, or canary evidence.",
             "next_probe": "Read the current RuntimeBinding owner for the exact logical target and generation before loading or actuating Web-Sol."
