@@ -614,6 +614,10 @@ test('commission tool metadata refuses every destination and routing selector', 
     'failure', 'inputs', 'method', 'outcome', 'role', 'schema_version', 'scope', 'source',
   ]);
   assert.match(tool.description, /research\/executive_commissions\/COMMISSION\.md/);
+  // The delegation-boundary ruling on this carrier forbids a second Studio
+  // Direct worker-dispatch surface; this tool must keep saying it is not one.
+  assert.match(tool.description, /dispatches nothing, starts no worker, creates no job, attempt, queue or retry state/);
+  assert.match(tool.description, /remains owned by the Mastermind Executive App submit_ceo_intent contract/);
 });
 
 test('compact request materializes the canonical commission without any shell or commission payload in argv', async () => {
@@ -735,9 +739,11 @@ test('compiler refusal is surfaced as a closed token and publishes nothing', asy
 });
 
 test('an untrustworthy compiler result is refused before anything reaches the workspace', async () => {
-  for (const mode of ['digest_mismatch', 'selected_provider', 'granted_authority', 'wrong_schema', 'no_markdown', 'invalid_json']) {
-    const f = await fixture();
-    try {
+  const f = await fixture();
+  try {
+    // One workspace across every adversarial mode: each must refuse before any
+    // write, so the workspace has to stay pristine through the whole sequence.
+    for (const mode of ['digest_mismatch', 'selected_provider', 'granted_authority', 'wrong_schema', 'no_markdown', 'invalid_json']) {
       const publisher = createGitPublisher(await withCommission(f, mode));
       await assert.rejects(
         () => publisher.materializeCommission({ operation_id: f.operationId, commission: compactCommission() }),
@@ -747,9 +753,9 @@ test('an untrustworthy compiler result is refused before anything reaches the wo
       await assert.rejects(() => readFile(path.join(f.workspace, COMMISSION_PATH)), /ENOENT/, mode);
       const { stdout } = await git(f.workspace, 'status', '--porcelain=v1', '--untracked-files=all');
       assert.equal(stdout, '', `${mode} must leave the workspace clean`);
-    } finally {
-      await f.cleanup();
     }
+  } finally {
+    await f.cleanup();
   }
 });
 

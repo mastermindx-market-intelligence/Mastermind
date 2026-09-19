@@ -502,8 +502,12 @@ test('a session id from one account listener is unknown on another account liste
 });
 
 test('timeout answers EFFECT_UNKNOWN once, refuses the retry, and never replays', async () => {
+  // The budget must be comfortably longer than lazy backend readiness, or a
+  // loaded machine can spend it inside ensureBackend() and surface a truthful
+  // deterministic readiness timeout instead of the tool-call EFFECT_UNKNOWN
+  // this test is about. 1500ms matches the equivalent gateway.test.mjs budgets.
   const { gw, markerPath, effectLog } = await bootTunnel(
-    'acct-a', { requestTimeoutMs: 300 }, { FIXTURE_NEVER: '1' });
+    'acct-a', { requestTimeoutMs: 1500 }, { FIXTURE_NEVER: '1' });
   const client = newClient();
   const transport = await connect(client, gw.url);
   const sid = transport.sessionId;

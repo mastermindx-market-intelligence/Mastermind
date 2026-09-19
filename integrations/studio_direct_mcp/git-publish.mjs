@@ -174,8 +174,11 @@ export const STUDIO_WEB_COMMISSION_MATERIALIZE_TOOL = Object.freeze({
     'Craft compiler expands the compact request into the complete commission from repository-owned method ' +
     'files. The caller supplies only the operation id and the bounded compact request: the worker transcript, ' +
     'the rendered commission body, shell commands, heredocs, repository, remote, branch, path and force ' +
-    'options are all refused. It performs no provider, model, account, credential or host selection, creates ' +
-    'no commit and contacts no remote. Identical existing bytes report ALREADY_APPLIED without rewriting, so ' +
+    'options are all refused. This is a Git publication path, not a delegation surface: it dispatches nothing, ' +
+    'starts no worker, creates no job, attempt, queue or retry state, and performs no provider, model, ' +
+    'account, credential or host selection. It creates no commit and contacts no remote. Live Web CEO worker ' +
+    'delegation remains owned by the Mastermind Executive App submit_ceo_intent contract. Identical existing ' +
+    'bytes report ALREADY_APPLIED without rewriting, so ' +
     'repeating the call after an uncertain result reconciles by exact digest readback rather than blind retry.',
   inputSchema: {
     type: 'object',
