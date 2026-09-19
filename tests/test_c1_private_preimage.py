@@ -7,6 +7,7 @@ import os
 import plistlib
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass
 from unittest import mock
 
@@ -405,6 +406,25 @@ def test_cli_refuses_arguments_platform_and_euid_before_collection(monkeypatch, 
     assert module.main(args, _platform="darwin", _euid=501) == 64
     assert capsysbinary.readouterr().out == b""
     assert called is False
+
+
+def test_isolated_cli_describe_bootstraps_repository_import_path():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(repo_root, "ops", "executive_os", "c1_private_preimage.py")
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", script, "--describe"],
+        cwd="/",
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    described = json.loads(completed.stdout)
+    assert described["schema"] == "mastermind.c1_private_preimage/v1"
+    assert described["mutation_count"] == 0
 
 
 def test_describe_is_static_and_does_not_collect(monkeypatch, capsysbinary):

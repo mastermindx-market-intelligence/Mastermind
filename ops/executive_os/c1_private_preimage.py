@@ -24,6 +24,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, NoReturn, Sequence
 
+# The production operator invokes this file directly under Python isolated mode
+# (-I -S -B).  Isolated mode intentionally omits the script's repository root
+# from sys.path, so bind imports to this exact checked-out source tree rather
+# than relying on cwd, PYTHONPATH, user site packages, or an installed package.
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 
