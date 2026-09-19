@@ -19,7 +19,10 @@ ARTIFACT_TOKEN_SCHEMA = "mastermind.workbench_action_artifact.v1"
 ARTIFACT_HMAC_PURPOSE = b"mastermind.workbench_action_artifact.v1"
 TEXT_MEDIA_TYPE = "text/plain; charset=utf-8"
 PNG_MEDIA_TYPE = "image/png"
-ARTIFACT_MEDIA_TYPES = frozenset({TEXT_MEDIA_TYPE, PNG_MEDIA_TYPE})
+BINARY_MEDIA_TYPE = "application/octet-stream"
+ARTIFACT_MEDIA_TYPES = frozenset(
+    {TEXT_MEDIA_TYPE, PNG_MEDIA_TYPE, BINARY_MEDIA_TYPE}
+)
 ARTIFACT_STREAMS = frozenset({"stdout", "stderr"})
 MAX_ARTIFACT_BYTES = 65536
 MAX_ARTIFACT_CHUNK_BYTES = 48 * 1024
@@ -290,13 +293,24 @@ def derive_artifact_id(
     return hashlib.sha256(canonical).hexdigest()
 
 
-def artifact_media_type(recipe_id: str, stream: str) -> str:
+def artifact_media_types(recipe_id: str, stream: str) -> frozenset[str]:
     if stream == "stderr":
-        return TEXT_MEDIA_TYPE
+        return frozenset({TEXT_MEDIA_TYPE})
     if recipe_id in {"canary_checksum", "canary_refuse"}:
-        return TEXT_MEDIA_TYPE
+        return frozenset({TEXT_MEDIA_TYPE})
     if recipe_id == "source_fingerprint_png":
+        return frozenset({PNG_MEDIA_TYPE, BINARY_MEDIA_TYPE})
+    raise ValueError("unsupported artifact recipe stream")
+
+
+def artifact_media_type(recipe_id: str, stream: str) -> str:
+    """Return the successful-output media type for one closed recipe stream."""
+
+    allowed = artifact_media_types(recipe_id, stream)
+    if PNG_MEDIA_TYPE in allowed:
         return PNG_MEDIA_TYPE
+    if TEXT_MEDIA_TYPE in allowed:
+        return TEXT_MEDIA_TYPE
     raise ValueError("unsupported artifact recipe stream")
 
 
@@ -352,7 +366,7 @@ def validate_prepared_artifact(
             sha256=value.sha256,
             truncated=value.truncated,
         )
-        expected_media = artifact_media_type(value.recipe_id, value.stream)
+        allowed_media = artifact_media_types(value.recipe_id, value.stream)
     except ActionContractError:
         raise
     except Exception as error:
@@ -362,7 +376,7 @@ def validate_prepared_artifact(
         or type(value.artifact_id) is not str
         or _HEX64.fullmatch(value.artifact_id) is None
         or value.artifact_id != expected_id
-        or value.media_type != expected_media
+        or value.media_type not in allowed_media
         or type(value.issued_at_ms) is not int
         or type(value.expires_at_ms) is not int
         or value.issued_at_ms < 0
@@ -378,11 +392,13 @@ def validate_prepared_artifact(
 
 __all__ = [
     "artifact_media_type",
+    "artifact_media_types",
     "validate_prepared_artifact",
     "derive_artifact_id",
     "PreparedActionArtifact",
     "TEXT_MEDIA_TYPE",
     "PNG_MEDIA_TYPE",
+    "BINARY_MEDIA_TYPE",
     "MAX_DIRECT_IMAGE_BYTES",
     "MAX_ARTIFACT_CHUNK_BYTES",
     "MAX_ARTIFACT_BYTES",

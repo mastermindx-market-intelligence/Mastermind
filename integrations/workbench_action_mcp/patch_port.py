@@ -81,6 +81,7 @@ class ProjectActionRefused(Exception):
             "ARTIFACT_BINDING_CHANGED",
             "ARTIFACT_UNAVAILABLE",
             "ARTIFACT_RANGE_INVALID",
+            "ARTIFACT_TEXT_UNSUPPORTED",
         }
     )
 

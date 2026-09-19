@@ -1338,6 +1338,111 @@ def test_png_recipe_returns_exact_binary_artifact_without_text_coercion(
 
 
 
+def test_png_recipe_refusal_stdout_is_blob_not_renderable_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe_root = tmp_path / "fixture-recipes"
+    pin = _fixture_recipe(
+        recipe_root,
+        "import os,sys\n"
+        "if os.read(0,1) != b'\\x01': raise SystemExit(125)\n"
+        "os.write(2, b'fingerprint-png-refused\\n')\n"
+        "raise SystemExit(125)\n",
+    )
+    (recipe_root / "canary_checksum.py").rename(
+        recipe_root / "source_fingerprint_png.py"
+    )
+    monkeypatch.setitem(command_port.RECIPE_SHA256, "source_fingerprint_png", pin)
+    harness = Harness(tmp_path / "harness", recipe_root=str(recipe_root))
+    try:
+        prepared = harness.prepare_command("source_fingerprint_png")
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert applied["effect_state"] == "APPLIED"
+        assert applied["exit_code"] == 125
+        descriptor = _artifact_by_stream(applied, "stdout")
+        assert descriptor["byte_length"] == 0
+        assert descriptor["media_type"] == "application/octet-stream"
+        assert descriptor["transfer"]["direct_view_supported"] is False
+
+        page = asyncio.run(
+            harness.read_artifact(
+                harness.caller,
+                {
+                    "artifact_ref": descriptor["artifact_ref"],
+                    "offset": 0,
+                    "max_bytes": 64,
+                },
+            )
+        )
+        assert page["content_kind"] == "blob"
+        assert page["media_type"] == "application/octet-stream"
+        assert base64.b64decode(page["_payload_base64"], validate=True) == b""
+        assert page["returned_bytes"] == 0
+        assert page["next_offset"] is None
+    finally:
+        harness.close()
+
+
+def test_partial_png_stdout_is_blob_even_when_recipe_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe_root = tmp_path / "fixture-recipes"
+    pin = _fixture_recipe(
+        recipe_root,
+        "import os\n"
+        "if os.read(0,1) != b'\\x01': raise SystemExit(125)\n"
+        "os.write(1, b'\\x89PNG\\r\\n\\x1a\\n')\n",
+    )
+    (recipe_root / "canary_checksum.py").rename(
+        recipe_root / "source_fingerprint_png.py"
+    )
+    monkeypatch.setitem(command_port.RECIPE_SHA256, "source_fingerprint_png", pin)
+    harness = Harness(tmp_path / "harness", recipe_root=str(recipe_root))
+    try:
+        prepared = harness.prepare_command("source_fingerprint_png")
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert applied["exit_code"] == 0
+        descriptor = _artifact_by_stream(applied, "stdout")
+        assert descriptor["byte_length"] == 8
+        assert descriptor["media_type"] == "application/octet-stream"
+        assert descriptor["transfer"]["direct_view_supported"] is False
+    finally:
+        harness.close()
+
+
+def test_binary_stdout_text_pager_refuses_without_downgrading_effect_truth(
+    tmp_path: Path,
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command("source_fingerprint_png")
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert applied["effect_state"] == "APPLIED"
+        assert applied["cleanup_state"] == "CLEAN"
+        assert applied["exit_code"] == 0
+
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(
+                harness.read_result(
+                    harness.caller,
+                    {
+                        "action_ref": prepared["action_ref"],
+                        "stream": "stdout",
+                    },
+                )
+            )
+        assert caught.value.code == "ARTIFACT_TEXT_UNSUPPORTED"
+
+        reconciled = asyncio.run(
+            harness.reconcile(harness.caller, prepared["action_ref"])
+        )
+        assert reconciled["effect_state"] == "APPLIED"
+        assert reconciled["cleanup_state"] == "CLEAN"
+        assert reconciled["exit_code"] == 0
+    finally:
+        harness.close()
+
+
 def test_utf8_artifact_ranges_never_split_or_reinterpret_code_points(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

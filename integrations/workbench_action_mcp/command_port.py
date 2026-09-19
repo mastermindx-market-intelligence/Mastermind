@@ -21,6 +21,7 @@ import signal
 import stat
 import subprocess
 import time
+import zlib
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -45,6 +46,7 @@ from .action_artifacts import (
 )
 from .command_contracts import (
     ARTIFACT_TOKEN_SCHEMA,
+    BINARY_MEDIA_TYPE,
     COMMAND_TOKEN_SCHEMA,
     MAX_ARTIFACT_BYTES,
     MAX_ARTIFACT_CHUNK_BYTES,
@@ -646,17 +648,64 @@ def _artifact_source(prepared: PreparedClosedCommand) -> dict[str, Any]:
     }
 
 
+def _complete_png(raw: bytes) -> bool:
+    signature = b"\x89PNG\r\n\x1a\n"
+    if len(raw) < len(signature) + 12 or not raw.startswith(signature):
+        return False
+    offset = len(signature)
+    saw_ihdr = False
+    saw_idat = False
+    while offset + 12 <= len(raw):
+        length = int.from_bytes(raw[offset : offset + 4], "big")
+        end = offset + 12 + length
+        if length > MAX_ARTIFACT_BYTES or end > len(raw):
+            return False
+        kind = raw[offset + 4 : offset + 8]
+        payload = raw[offset + 8 : offset + 8 + length]
+        expected_crc = int.from_bytes(raw[offset + 8 + length : end], "big")
+        if (zlib.crc32(kind + payload) & 0xFFFFFFFF) != expected_crc:
+            return False
+        if kind == b"IHDR":
+            if saw_ihdr or offset != len(signature) or length != 13:
+                return False
+            saw_ihdr = True
+        elif kind == b"IDAT":
+            saw_idat = True
+        elif kind == b"IEND":
+            return length == 0 and end == len(raw) and saw_ihdr and saw_idat
+        offset = end
+    return False
+
+
+def _artifact_media_type(
+    prepared: PreparedClosedCommand,
+    evidence: _QualifiedCommandEvidence,
+    stream: str,
+) -> str:
+    media_type = artifact_media_type(prepared.recipe_id, stream)
+    if media_type != PNG_MEDIA_TYPE:
+        return media_type
+    raw = evidence.stdout if stream == "stdout" else evidence.stderr
+    if (
+        evidence.details["exit_code"] != 0
+        or evidence.details["stdout_truncated"]
+        or not _complete_png(raw)
+    ):
+        return BINARY_MEDIA_TYPE
+    return media_type
+
+
 def _artifact_descriptor(
     prepared: PreparedClosedCommand,
     *,
     stream: str,
     raw: bytes,
     truncated: bool,
+    media_type: str,
     issued_at_ms: int,
     expires_at_ms: int,
     token_codec: ActionTokenCodec,
 ) -> dict[str, Any]:
-    media_type = artifact_media_type(prepared.recipe_id, stream)
     digest = hashlib.sha256(raw).hexdigest()
     artifact_id = derive_artifact_id(
         action_id=prepared.action_id,
@@ -1072,6 +1121,7 @@ def create_command_port(
                 stream="stdout",
                 raw=evidence.stdout,
                 truncated=evidence.details["stdout_truncated"],
+                media_type=_artifact_media_type(prepared, evidence, "stdout"),
                 issued_at_ms=issued_at,
                 expires_at_ms=expires_at,
                 token_codec=token_codec,
@@ -1081,6 +1131,7 @@ def create_command_port(
                 stream="stderr",
                 raw=evidence.stderr,
                 truncated=evidence.details["stderr_truncated"],
+                media_type=_artifact_media_type(prepared, evidence, "stderr"),
                 issued_at_ms=issued_at,
                 expires_at_ms=expires_at,
                 token_codec=token_codec,
@@ -1513,7 +1564,9 @@ def create_command_port(
                 raise ProjectActionRefused("ARTIFACT_UNAVAILABLE")
             raw = evidence.stdout if reference.stream == "stdout" else evidence.stderr
             truncated = evidence.details[f"{reference.stream}_truncated"]
-            media_type = artifact_media_type(prepared.recipe_id, reference.stream)
+            media_type = _artifact_media_type(
+                prepared, evidence, reference.stream
+            )
             digest = hashlib.sha256(raw).hexdigest()
             artifact_id = derive_artifact_id(
                 action_id=prepared.action_id,
@@ -1684,6 +1737,8 @@ def create_command_port(
             receipt = _qualified_result(_live_store(store), prepared)
             if receipt is None or receipt["effect_state"] != "APPLIED":
                 return receipt or unclaimed_receipt(prepared, request["action_ref"])
+            if artifact_media_type(prepared.recipe_id, stream) != TEXT_MEDIA_TYPE:
+                raise ProjectActionRefused("ARTIFACT_TEXT_UNSUPPORTED")
             try:
                 raw = read_action_blob(store, prepared.action_id, stream)
                 if raw is None:

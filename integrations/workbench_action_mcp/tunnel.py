@@ -1371,8 +1371,10 @@ def create_tunnel_action_server(runtime: WorkbenchActionRuntime) -> Server:
             Tool(
                 name=READ_ACTION_RESULT_TOOL,
                 description=(
-                    "Read one bounded page of retained stdout or stderr from a "
-                    "completed command action without starting a process."
+                    "Read one bounded UTF-8 text page of retained stdout or stderr "
+                    "from a completed command action without starting a process. "
+                    "Binary streams refuse this text representation; use "
+                    "read_action_artifact for exact binary bytes."
                 ),
                 inputSchema=_COMMAND_READ_INPUT,
                 outputSchema=_COMMAND_READ_OUTPUT,

@@ -220,10 +220,12 @@ checkout unless the custody owner explicitly supplies another receipt.
 After the tunnel is healthy, create or update one developer-mode Workbench app
 in the intended C1 Personal workspace, choose **Tunnel** as the connection,
 select the dedicated Workbench tunnel, and scan tools. The attended scan must
-show exactly the ten tools above, with only `commit_text_patch` and
+show exactly the eleven tools above, with only `commit_text_patch` and
 `run_project_command` marked modifying. Exercise manifest, bounded read/preview,
-patch create/replace/reconcile, command exits 0/7, retained result paging, and
-same-action reconciliation without replay. The pure local Read launcher remains
+patch create/replace/reconcile, command exits 0/7, UTF-8 retained-result paging,
+exact text/PNG artifact return through `read_action_artifact`, and same-action
+reconciliation without replay. Binary command streams must refuse
+`read_action_result` without downgrading known execution truth. The pure local Read launcher remains
 a separate four-tool profile and is never relabeled as the attended profile.
 
 Do not call the result `PROVEN_LIVE` until the actual C1 Personal account has
