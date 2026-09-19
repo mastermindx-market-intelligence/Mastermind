@@ -26,6 +26,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from common.redaction import sanitize_external_text
 from control_plane.executive_privileged_action import (
     ACTION_EFFECT_CLASS,
+    ACTION_EFFECT_UNKNOWN_EXIT_CODE,
     PrivilegedActionRequest,
     PrivilegedActionStatusRequest,
     STATUS_REQUEST_SCHEMA,
@@ -576,6 +577,12 @@ class PrivilegedActionBroker:
             # An injected executor cannot prove whether its OSError occurred before
             # or after spawn. Preserve the marker and fail closed as effect-unknown.
             raise EffectUnknownError("privileged executor failed after admission; effect is unknown") from exc
+
+        uncertain_exit = ACTION_EFFECT_UNKNOWN_EXIT_CODE.get(request.action)
+        if uncertain_exit is not None and completed.returncode == uncertain_exit:
+            raise EffectUnknownError(
+                "privileged child reported action-level effect uncertainty"
+            )
 
         stdout = bytes(completed.stdout or b"")
         stderr = bytes(completed.stderr or b"")
