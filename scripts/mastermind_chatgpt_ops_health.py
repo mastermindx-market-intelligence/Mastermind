@@ -37,7 +37,8 @@ PERSONAL_ACCOUNTS = ("chatgpt1", "chatgpt2", "chatgpt3", "chatgpt4")
 TUNNEL_RE = re.compile(r"^tunnel_[0-9a-f]{32}$")
 CONTROL_ROOT = Path.home() / ".local" / "share" / "studio-direct-mcp" / "control"
 MAX_PROFILE_BYTES = 64 * 1024
-MAX_HEALTH_REF_BYTES = 512
+MAX_HEALTH_REF_BYTES = 256
+MAX_HEALTH_RESPONSE_BYTES = 256
 
 BUSINESS_SERVICES = (
     {
@@ -189,7 +190,7 @@ def read_tunnel_id(profile: Path) -> str:
 
 def _http_get(url: str) -> int:
     with urllib.request.urlopen(url, timeout=2) as response:
-        response.read(512)
+        response.read(MAX_HEALTH_RESPONSE_BYTES)
         return int(response.status)
 
 
