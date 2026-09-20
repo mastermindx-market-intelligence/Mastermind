@@ -179,6 +179,9 @@ def create_authenticated_return_server(
     selected_policy = validate_resource_policy(policy)
     if selected_policy.required_scopes != (REQUIRED_SCOPE,):
         raise ValueError("Workspace return policy must require exactly mastermind.dialogue.write")
+    if len(selected_policy.allowed_subject_digests) != 1:
+        raise ValueError("Workspace return policy must bind exactly one caller subject")
+    expected_subject = selected_policy.allowed_subject_digests[0]
     if type(token_verifier) is not MastermindTokenVerifier:
         raise TypeError("token_verifier must be MastermindTokenVerifier")
     if MastermindTokenVerifier._validated_composition(token_verifier) != selected_policy:
@@ -239,6 +242,7 @@ def create_authenticated_return_server(
             return _result(_error("INVALID_REQUEST"))
         if (
             not isinstance(access.subject, str)
+            or access.subject != expected_subject
             or not isinstance(access.client_id, str)
             or str(access.resource) != selected_policy.resource
             or tuple(access.scopes) != selected_policy.required_scopes
