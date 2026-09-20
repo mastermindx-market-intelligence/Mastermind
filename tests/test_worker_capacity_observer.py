@@ -78,18 +78,17 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
     binary.chmod(0o555)
 
     canonical_slot = provider_worker_slots.get_slot("codex-pro-01")
+    provider_info = provider_home.lstat()
     slot = dataclasses.replace(
         canonical_slot,
-        worker_uid=os.getuid(),
-        worker_gid=os.getgid(),
+        worker_uid=provider_info.st_uid,
+        worker_gid=provider_info.st_gid,
         worker_user="_mastermind_test",
         worker_group="_mastermind_test",
         provider_home=provider_home,
         readiness_receipt=receipt,
     )
     monkeypatch.setattr(module.worker_slots, "get_slot", lambda slot_id: slot if slot_id == slot.slot_id else None)
-    monkeypatch.setattr(module, "_ROOT_UID", os.getuid())
-    monkeypatch.setattr(module, "_ROOT_GID", os.getgid())
 
     binary_identity = {
         "path": str(binary),
@@ -120,6 +119,9 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
     }
     source_path.write_bytes(_canonical(source))
     source_path.chmod(0o400)
+    source_info = source_path.lstat()
+    monkeypatch.setattr(module, "_ROOT_UID", source_info.st_uid)
+    monkeypatch.setattr(module, "_ROOT_GID", source_info.st_gid)
     binding = WorkerCapacityObserverBinding(
         slot_id=slot.slot_id,
         host_ref=source["host_ref"],
@@ -141,10 +143,19 @@ def _validated_observer(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> Wo
         captured["binary_path"] = path
         return dict(harness.binary_identity)
 
+    auth_identity = provider_readiness.current_auth_identity(
+        harness.slot.auth_path,
+        worker_uid=harness.slot.worker_uid,
+        worker_gid=harness.slot.worker_gid,
+    )
+
     def readiness(path: Path, **kwargs: Any) -> dict[str, Any]:
         captured["receipt_path"] = path
         captured.update(kwargs)
-        return {"codex_binary": dict(harness.binary_identity)}
+        return {
+            "codex_binary": dict(harness.binary_identity),
+            "credential_lstat": dict(auth_identity),
+        }
 
     monkeypatch.setattr(harness.module.provider_readiness, "current_binary_identity", binary_identity)
     monkeypatch.setattr(harness.module.provider_readiness, "validate_receipt_file", readiness)
@@ -189,7 +200,6 @@ def test_observe_emits_one_canonical_current_success_without_sensitive_fields(
         assert forbidden not in rendered
     capture = observer._test_capture  # type: ignore[attr-defined]
     assert capture == {
-        "binary_path": harness.binding.binary_path,
         "receipt_path": harness.slot.readiness_receipt,
         "auth_path": harness.slot.auth_path,
         "binary_path": harness.binding.binary_path,
@@ -277,7 +287,7 @@ def test_source_config_must_be_root_owned_regular_mode_0400(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     observer = _validated_observer(harness, monkeypatch)
-    monkeypatch.setattr(harness.module, "_ROOT_UID", os.getuid() + 1)
+    monkeypatch.setattr(harness.module, "_ROOT_UID", harness.source_path.lstat().st_uid + 1)
 
     with pytest.raises(CapacityObservationError) as raised:
         observer.observe()
@@ -398,3 +408,100 @@ def test_readiness_receipt_must_bind_exact_current_binary(
     with pytest.raises(CapacityObservationError) as raised:
         harness.observer().observe()
     assert raised.value.code == "CAPACITY_OBSERVE_BINARY_UNATTESTED"
+
+
+def test_credential_identity_movement_during_observation_refuses(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = provider_readiness.current_auth_identity(
+        harness.slot.auth_path,
+        worker_uid=harness.slot.worker_uid,
+        worker_gid=harness.slot.worker_gid,
+    )
+    after = dict(before)
+    after["mtime_ns"] += 1
+    identities = iter((before, after))
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "current_auth_identity",
+        lambda *_args, **_kwargs: dict(next(identities)),
+    )
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "current_binary_identity",
+        lambda _path: dict(harness.binary_identity),
+    )
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "validate_receipt_file",
+        lambda *_args, **_kwargs: {
+            "codex_binary": dict(harness.binary_identity),
+            "credential_lstat": dict(before),
+        },
+    )
+
+    with pytest.raises(CapacityObservationError) as raised:
+        harness.observer().observe()
+    assert raised.value.code == "CAPACITY_OBSERVE_CREDENTIAL_METADATA_INVALID"
+
+
+def test_binary_identity_movement_during_observation_refuses(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    after = dict(harness.binary_identity)
+    after["mtime_ns"] += 1
+    identities = iter((harness.binary_identity, after))
+    auth_identity = provider_readiness.current_auth_identity(
+        harness.slot.auth_path,
+        worker_uid=harness.slot.worker_uid,
+        worker_gid=harness.slot.worker_gid,
+    )
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "current_binary_identity",
+        lambda _path: dict(next(identities)),
+    )
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "validate_receipt_file",
+        lambda *_args, **_kwargs: {
+            "codex_binary": dict(harness.binary_identity),
+            "credential_lstat": dict(auth_identity),
+        },
+    )
+
+    with pytest.raises(CapacityObservationError) as raised:
+        harness.observer().observe()
+    assert raised.value.code == "CAPACITY_OBSERVE_BINARY_UNATTESTED"
+
+
+def test_realm_metadata_movement_during_observation_refuses(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    auth_identity = provider_readiness.current_auth_identity(
+        harness.slot.auth_path,
+        worker_uid=harness.slot.worker_uid,
+        worker_gid=harness.slot.worker_gid,
+    )
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "current_binary_identity",
+        lambda _path: dict(harness.binary_identity),
+    )
+
+    def move_realm(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        harness.slot.provider_home.chmod(0o755)
+        return {
+            "codex_binary": dict(harness.binary_identity),
+            "credential_lstat": dict(auth_identity),
+        }
+
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "validate_receipt_file",
+        move_realm,
+    )
+
+    with pytest.raises(CapacityObservationError) as raised:
+        harness.observer().observe()
+    assert raised.value.code == "CAPACITY_OBSERVE_REALM_INVALID"
