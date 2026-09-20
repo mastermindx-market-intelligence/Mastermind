@@ -65,6 +65,7 @@ def _parser() -> argparse.ArgumentParser:
     activation.add_argument("--profile-id", required=True)
     activation.add_argument("--channel-id", required=True)
     activation.add_argument("--agent-version-ref", required=True)
+    activation.add_argument("--return-subject-digest", required=True)
     activation.add_argument("--now-ms", required=True, type=int)
     return parser
 
@@ -96,6 +97,7 @@ def run(argv: list[str]) -> dict[str, Any]:
         profile_id=args.profile_id,
         provider_channel_ref=args.channel_id,
         agent_version_ref=args.agent_version_ref,
+        return_subject_digest=args.return_subject_digest,
         economic_envelope=economic,
     )
     validated = validate_activation_binding(
