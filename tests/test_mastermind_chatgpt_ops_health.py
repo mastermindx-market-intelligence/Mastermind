@@ -79,6 +79,41 @@ class ChatGptOpsHealthTests(unittest.TestCase):
                 "tunnel_2123456789abcdef0123456789abcdef",
             )
 
+    def test_business_profile_refuses_symlink_and_oversize(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target = root / "profile-target.json"
+            target.write_text(json.dumps({
+                "control_plane": {
+                    "tunnel_id": "tunnel_2123456789abcdef0123456789abcdef",
+                },
+            }))
+            link = root / "profile-link.json"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(ValueError, "regular bounded file"):
+                ops.read_tunnel_id(link)
+
+            oversized = root / "oversized.json"
+            oversized.write_text("x" * (ops.MAX_PROFILE_BYTES + 1))
+            with self.assertRaisesRegex(ValueError, "regular bounded file"):
+                ops.read_tunnel_id(oversized)
+
+    def test_health_ref_refuses_symlink_before_http(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target = root / "health-target.url"
+            target.write_text("http://127.0.0.1:9999")
+            link = root / "health-link.url"
+            link.symlink_to(target)
+            called = []
+            live, ready, issues = ops.probe_health_ref(
+                link, lambda url: called.append(url) or 200
+            )
+            self.assertIsNone(live)
+            self.assertIsNone(ready)
+            self.assertEqual(issues, ("HEALTH_REF_UNAVAILABLE",))
+            self.assertEqual(called, [])
+
     def test_health_ref_rejects_non_loopback_before_http(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "health.url"
