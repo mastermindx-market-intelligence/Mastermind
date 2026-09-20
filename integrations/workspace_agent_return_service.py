@@ -218,12 +218,6 @@ def parse_service_config(value: object) -> ServiceConfig:
         _refuse()
     bind_port = _bounded_port(value.get("bind_port"))
     authority = _incoming_authority(value.get("incoming_authority"))
-    try:
-        authority_port = urlsplit("//" + authority).port
-    except ValueError:
-        _refuse()
-    if authority_port != bind_port:
-        _refuse()
     return ServiceConfig(
         schema=SERVICE_SCHEMA,
         policy_file=_absolute_path(value.get("policy_file")),
