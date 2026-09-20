@@ -219,9 +219,9 @@ if [ ! -e "$RELEASE_ROOT" ] && [ ! -L "$RELEASE_ROOT" ]; then
   /usr/sbin/chown -R root:wheel "$STAGING"
   /bin/chmod -R go-w "$STAGING"
   /bin/chmod 0755 "$STAGING"
-  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" create     --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" create     --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
   /usr/sbin/chown root:wheel "$STAGING/.executive-release-manifest.json"
-  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" verify     --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null     || refuse "staged exact release did not verify"
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" verify     --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null     || refuse "staged exact release did not verify"
   /bin/mv "$STAGING" "$RELEASE_ROOT"
   STAGING=""
 else
