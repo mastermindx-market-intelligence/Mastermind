@@ -2302,7 +2302,7 @@ def _open_source_repair_parents(
             # H0 is installed under umask 077. Keep the intermediate
             # capacity-sources boundary owner-only; only its macro child is
             # intentionally traversable/readable.
-            (capacity_sources, 0o700),
+            (capacity_sources, 0o700),  # permission mode
             (source_descriptor, 0o755),
             (generation_descriptor, 0o755),
             (staging_descriptor, 0o700),
