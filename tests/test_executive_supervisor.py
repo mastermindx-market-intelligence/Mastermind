@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import dataclasses
 import hashlib
 import json
 import os
@@ -356,6 +358,7 @@ def _runtime_and_job(
     *,
     clock=None,
     lease_seconds: int = 30,
+    requested_authorities: list[str] | None = None,
 ) -> tuple[Runtime, str, Path]:
     runtime = Runtime.at(tmp_path, clock=clock, lease_seconds=lease_seconds)
     runtime.workers.register_worker(
@@ -378,7 +381,8 @@ def _runtime_and_job(
     job = runtime.jobs.create_job(
         "Create the bounded proof artifact",
         worktree=str(workspace.resolve()),
-        requested_authorities=["READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"],
+        requested_authorities=(requested_authorities if requested_authorities is not None
+                               else ["READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"]),
         allowed_write_paths=["research/proof.md"],
         validation_commands=[["/usr/bin/true"]],
         constraints={
@@ -1170,3 +1174,181 @@ def test_invalid_provider_result_with_ambient_pid_fails_job_not_containment(
     seal = json.loads(Path(receipt.assignment_seal_receipt_path or "").read_text())
     assert seal["passed"] is True
     assert seal["uid_sweep"]["ambient_pids"] == [88688]
+
+
+_P2_AUTHORITY = "REQUEST_WORKER_LOGIN_CHECK"
+
+
+def _p2_grant_fixture(tmp_path):
+    from control_plane.executive_authority import ExecutiveAuthorityPolicy
+
+    runtime, job_id, _ = _runtime_and_job(tmp_path)
+    lease = runtime.attempts.claim_job(job_id, lease_owner="supervisor-fixture")
+    assert lease is not None
+    job = dataclasses.replace(runtime.jobs.get_job(job_id), orchestration_role="work")
+    grant = {
+        "schema_version": "mastermind.executive_effective_grant/v1",
+        "authorities": list(job.requested_authorities),
+        "write_paths": list(job.allowed_write_paths),
+        "validation_argv": copy.deepcopy(job.validation_commands),
+        "policy_sha": lease.attempt.authority_policy_hash,
+        "job_id": job.job_id, "role": job.orchestration_role,
+    }
+    digest = hashlib.sha256(json.dumps(grant, sort_keys=True, separators=(",", ":"),
+                                      ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    attempt = dataclasses.replace(lease.attempt, effective_grant=grant, effective_grant_digest=digest)
+    decision = ExecutiveAuthorityPolicy.load().authorize(
+        job.requested_authorities, worktree=job.worktree,
+        allowed_write_paths=job.allowed_write_paths, validation_commands=job.validation_commands,
+    )
+    return job, attempt, decision
+
+
+@pytest.mark.parametrize("orchestration", [False, True])
+def test_p2_effective_grant_validator_is_policy_and_filesystem_free(tmp_path, monkeypatch, orchestration):
+    from control_plane import executive_supervisor as module
+    from control_plane.executive_authority import ExecutiveAuthorityPolicy
+
+    job, attempt, decision = _p2_grant_fixture(tmp_path)
+    if not orchestration:
+        job = dataclasses.replace(job, orchestration_role=None)
+        attempt = dataclasses.replace(attempt, effective_grant=None, effective_grant_digest=None)
+    expected = copy.deepcopy(attempt.effective_grant)
+    assert ExecutiveSupervisor._effective_grant(job, attempt) == expected
+    validator = getattr(module, "validate_effective_grant", None)
+    assert callable(validator), "missing shared pure effective-grant validator"
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("policy or filesystem work escaped preflight")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(ExecutiveAuthorityPolicy, "load", forbidden)
+        scoped.setattr(Path, "resolve", forbidden)
+        scoped.setattr(Path, "expanduser", forbidden)
+        assert validator(job, attempt, decision) == expected
+    assert attempt.effective_grant == expected
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema_version", "wrong"), ("job_id", "JOB-999"), ("role", "review"),
+    ("policy_sha", "f" * 64), ("authorities", ["SERVICE_CONTROL"]),
+    ("write_paths", ["not-authorized.py"]), ("validation_argv", [["/bin/false"]]),
+    ("extra", True),
+])
+def test_p2_effective_grant_refuses_malformed_or_widened_scope(tmp_path, field, value):
+    from control_plane import executive_supervisor as module
+
+    job, attempt, decision = _p2_grant_fixture(tmp_path)
+    grant = {**attempt.effective_grant, field: value}
+    attempt = dataclasses.replace(attempt, effective_grant=grant)
+    validator = getattr(module, "validate_effective_grant", None)
+    assert callable(validator), "missing shared pure effective-grant validator"
+    with pytest.raises(SupervisorError, match="malformed or widened"):
+        validator(job, attempt, decision)
+    with pytest.raises(SupervisorError, match="malformed or widened"):
+        ExecutiveSupervisor._effective_grant(job, attempt)
+
+
+@pytest.mark.parametrize("fault,expected", [
+    ("digest", "digest drifted"), ("decision-policy", "policy changed"),
+    ("decision-scope", "decision does not match"),
+    ("decision-paths", "decision does not match"),
+    ("decision-validation", "decision does not match"),
+    ("decision-workspace", "decision does not match"), ("role-null", "role-null"),
+])
+def test_p2_effective_grant_refuses_binding_drift(tmp_path, fault, expected):
+    from control_plane import executive_supervisor as module
+
+    job, attempt, decision = _p2_grant_fixture(tmp_path)
+    if fault == "digest":
+        attempt = dataclasses.replace(attempt, effective_grant_digest="0" * 64)
+    elif fault == "decision-policy":
+        decision = dataclasses.replace(decision, policy_sha256="0" * 64)
+    elif fault == "decision-scope":
+        decision = dataclasses.replace(decision, requested=("READ",))
+    elif fault == "decision-paths":
+        decision = dataclasses.replace(decision, allowed_write_paths=("other.py",))
+    elif fault == "decision-validation":
+        decision = dataclasses.replace(decision, validation_commands=(("/bin/false",),))
+    elif fault == "decision-workspace":
+        decision = dataclasses.replace(decision, worktree="/not-the-assigned-workspace")
+    else:
+        job = dataclasses.replace(job, orchestration_role=None)
+    validator = getattr(module, "validate_effective_grant", None)
+    assert callable(validator), "missing shared pure effective-grant validator"
+    with pytest.raises(SupervisorError, match=expected):
+        validator(job, attempt, decision)
+
+
+@pytest.mark.parametrize("from_grant", [False, True])
+def test_p2_controller_authority_hidden_only_from_worker_projections(tmp_path, monkeypatch, from_grant):
+    authorities = ["READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS", _P2_AUTHORITY]
+    runtime, job_id, _ = _runtime_and_job(tmp_path, requested_authorities=authorities)
+    adapter = FakeAdapter(FakeInspector())
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+    active = asyncio.run(supervisor.start_job(job_id))
+    job = runtime.jobs.get_job(job_id)
+    lease = active.lease
+    grant = None
+    if from_grant:
+        job = dataclasses.replace(job, orchestration_role="work")
+        grant = {
+            "schema_version": "mastermind.executive_effective_grant/v1",
+            "authorities": list(job.requested_authorities),
+            "write_paths": list(job.allowed_write_paths),
+            "validation_argv": copy.deepcopy(job.validation_commands),
+            "policy_sha": lease.attempt.authority_policy_hash,
+            "job_id": job.job_id, "role": job.orchestration_role,
+        }
+        digest = hashlib.sha256(json.dumps(grant, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+        lease = dataclasses.replace(lease, attempt=dataclasses.replace(
+            lease.attempt, effective_grant=grant, effective_grant_digest=digest))
+    original = copy.deepcopy(grant)
+    spec = supervisor._launch_spec(job, lease, active.launch_spec.result_schema_path, grant)
+    packet = json.loads(spec.prompt[spec.prompt.index("{"):])
+    assert _P2_AUTHORITY not in packet["authorities"]
+    assert _P2_AUTHORITY not in spec.authorities
+    assert set(packet["authorities"]) == set(authorities) - {_P2_AUTHORITY}
+    assert set(spec.authorities) == set(authorities) - {_P2_AUTHORITY}
+    # The launch already wrote its immutable receipt. This separate projection
+    # probe gets a distinct test-only evidence path, never an overwrite/delete.
+    monkeypatch.setattr(supervisor, "_receipt_path", lambda *args, **kwargs:
+                        tmp_path / "projection-attestation.json")
+    metadata = supervisor._launch_metadata(job=job, lease=lease, spec=spec,
+                                           process_ref=active.process_ref, effective_grant=grant)
+    assert set(metadata["authorities"]) == set(authorities)
+    assert _P2_AUTHORITY in runtime.jobs.get_job(job_id).requested_authorities
+    persisted = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert _P2_AUTHORITY in persisted.launch_metadata["authorities"]
+    assert grant == original
+
+
+@pytest.mark.parametrize("from_grant", [False, True])
+def test_p2_profile_admission_never_uses_worker_projection(tmp_path, monkeypatch, from_grant):
+    from control_plane import executive_supervisor as module
+
+    runtime, job_id, _ = _runtime_and_routed_job(
+        tmp_path, profile_id="sealed.worker.readonly.no-extensions.v1")
+    lease = runtime.attempts.claim_job(job_id, lease_owner="supervisor-fixture")
+    assert lease is not None
+    job = runtime.jobs.get_job(job_id)
+    job = dataclasses.replace(job, requested_authorities=[*job.requested_authorities, _P2_AUTHORITY])
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+    grant = {"authorities": list(job.requested_authorities)} if from_grant else None
+    # A future accidental use of the model projection at admission must fail
+    # this discriminator, even though the two real model projections use it.
+    def forbidden_projection(*args):
+        raise AssertionError("worker projection used for admission")
+    monkeypatch.setattr(module, "worker_visible_authorities", forbidden_projection, raising=False)
+    with pytest.raises(SupervisorError, match="read-only execution profile"):
+        supervisor._validate_execution_profile(job, lease, grant)
+
+
+def test_p2_worker_projection_is_closed_order_preserving_and_nonmutating():
+    from control_plane import executive_supervisor as module
+
+    assert module.CONTROLLER_ONLY_AUTHORITIES == frozenset({_P2_AUTHORITY})
+    original = ["READ", _P2_AUTHORITY, "READ", "RUN_TESTS"]
+    assert module.worker_visible_authorities(original) == ("READ", "READ", "RUN_TESTS")
+    assert original == ["READ", _P2_AUTHORITY, "READ", "RUN_TESTS"]
