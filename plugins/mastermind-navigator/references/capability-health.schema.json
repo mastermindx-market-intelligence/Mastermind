@@ -456,7 +456,7 @@
             {
               "type": "string",
               "minLength": 1,
-              "maxLength": 700
+              "maxLength": 1024
             },
             {
               "type": "null"
@@ -1993,7 +1993,7 @@
               "next_probe": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 700
+                "maxLength": 1024
               }
             },
             "required": [
