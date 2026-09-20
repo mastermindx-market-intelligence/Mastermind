@@ -1271,6 +1271,7 @@
               "enabled",
               "authenticated_or_connected",
               "callable",
+              "proven_live",
               "requested_action_serviceability"
             ]
           }
@@ -1314,6 +1315,7 @@
                   "enabled",
                   "authenticated_or_connected",
                   "callable",
+                  "proven_live",
                   "requested_action_serviceability"
                 ]
               }
