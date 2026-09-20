@@ -68,8 +68,10 @@ class ChatGptOpsHealthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "profile.json"
             p.write_text(json.dumps({
-                "tunnel_id": "tunnel_2123456789abcdef0123456789abcdef",
-                "api_key": "super-secret",
+                "control_plane": {
+                    "tunnel_id": "tunnel_2123456789abcdef0123456789abcdef",
+                    "api_key": "super-secret",
+                },
                 "mcp": {"url": "http://127.0.0.1:9999/mcp"},
             }))
             self.assertEqual(
