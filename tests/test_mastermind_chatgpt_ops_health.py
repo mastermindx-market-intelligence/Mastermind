@@ -9,6 +9,14 @@ from control_plane.sol_ops_health import OpsState
 
 
 class ChatGptOpsHealthTests(unittest.TestCase):
+    def test_direct_entrypoint_bootstraps_repo_root_before_mastermind_import(self):
+        source = Path(ops.__file__).read_text()
+        root_line = source.index("_REPO_ROOT = Path(__file__).resolve().parents[1]")
+        insert_line = source.index("sys.path.insert(0, str(_REPO_ROOT))")
+        import_line = source.index("from control_plane.sol_ops_health import")
+        self.assertLess(root_line, insert_line)
+        self.assertLess(insert_line, import_line)
+
     def test_personal_accounts_are_closed_allowlist(self):
         self.assertEqual(
             ops.PERSONAL_ACCOUNTS,
