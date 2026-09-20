@@ -244,8 +244,14 @@ def trigger_once(
                     "accepted", "ACCEPTED_CORRELATION_UNAVAILABLE"
                 )
             else:
-                body = response.read(MAX_BODY_BYTES + 1)
-                observation = decode_trigger(202, body)
+                try:
+                    body = response.read(MAX_BODY_BYTES + 1)
+                except (OSError, http.client.HTTPException, ValueError, RecursionError):
+                    observation = TriggerObservation(
+                        "accepted", "ACCEPTED_CORRELATION_UNAVAILABLE"
+                    )
+                else:
+                    observation = decode_trigger(202, body)
         else:
             observation = decode_trigger(status, b"")
     except (OSError, http.client.HTTPException, ValueError, RecursionError):
