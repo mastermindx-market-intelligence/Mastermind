@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 from collections.abc import Sequence
 from dataclasses import replace
@@ -86,10 +87,23 @@ def _fables() -> tuple[eps.PlacementCandidateFact, ...]:
     )
 
 
+_CAPACITY_SOURCE_CONTENT = (
+    b'{"schema":"mastermind.provider_capacity_source/v2","generation":7}'
+)
+
+
+def _capacity_source_ref(content: bytes = _CAPACITY_SOURCE_CONTENT) -> str:
+    return f"capacity-source-sha256:{hashlib.sha256(content).hexdigest()}"
+
+
+def _resolved_capacity_sources(content: bytes = _CAPACITY_SOURCE_CONTENT) -> dict[str, bytes]:
+    return {_capacity_source_ref(content): content}
+
+
 def _capacity_source(
     *, owner: SourceOwner = SourceOwner.CAPACITY, freshness: Freshness = Freshness.CURRENT
 ) -> SourceRef:
-    return _source(owner, "capacity-fable-pool-generation-7", freshness)
+    return _source(owner, _capacity_source_ref(), freshness)
 
 
 def _base_tie(candidates=None):
@@ -121,20 +135,32 @@ def test_v2_without_preference_preserves_honest_abstention():
     assert decision.state is eps.SelectionState.TIE_ABSTAINED
     assert decision.preference is None
     assert decision.selected is None
-    assert decision.to_dict()["selection_is_commitment"] is False
+    wire = decision.to_dict()
+    assert {"preference_admissibility", "preference_refusal"} <= set(wire)
+    assert wire["preference_admissibility"] is None
+    assert wire["preference_refusal"] is None
+    assert wire["selection_is_commitment"] is False
 
 
 def test_capacity_preference_resolves_four_fable_tie():
     pref = _preference()
     decision = epp.select_placement_v2(
-        responsibility=_responsibility(), demand=_demand(), candidates=_fables(), preference=pref
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=pref,
+        resolved_capacity_sources=_resolved_capacity_sources(),
     )
     assert decision.state is eps.SelectionState.SELECTED
     assert decision.selected["worker_id"] == "fable-c"
     assert decision.selected["account_label"] == "claude20x-z"
     assert decision.preference.receipt_id == pref.receipt_id
+    assert decision.to_dict()["preference_admissibility"] == "admissible"
+    assert decision.to_dict()["preference_refusal"] is None
     assert decision.to_dict()["selection_is_commitment"] is False
-    assert epp.validate_placement_selection_v2(decision.to_dict()) == decision.to_dict()
+    assert epp.validate_placement_selection_v2(
+        decision.to_dict(), resolved_capacity_sources=_resolved_capacity_sources()
+    ) == decision.to_dict()
 
 
 def test_preference_not_account_label_or_timestamp_heuristic():
@@ -142,7 +168,11 @@ def test_preference_not_account_label_or_timestamp_heuristic():
     # Capacity deliberately prefers fable-c. The resolver follows the receipt only.
     pref = _preference(order=("fable-c", "fable-d", "fable-b", "fable-a"))
     decision = epp.select_placement_v2(
-        responsibility=_responsibility(), demand=_demand(), candidates=_fables(), preference=pref
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=pref,
+        resolved_capacity_sources=_resolved_capacity_sources(),
     )
     assert decision.selected["worker_id"] == "fable-c"
 
@@ -151,10 +181,18 @@ def test_candidate_permutation_is_byte_identical():
     base = _base_tie()
     pref = _preference(base=base)
     first = epp.select_placement_v2(
-        responsibility=_responsibility(), demand=_demand(), candidates=_fables(), preference=pref
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=pref,
+        resolved_capacity_sources=_resolved_capacity_sources(),
     )
     second = epp.select_placement_v2(
-        responsibility=_responsibility(), demand=_demand(), candidates=tuple(reversed(_fables())), preference=pref
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=tuple(reversed(_fables())),
+        preference=pref,
+        resolved_capacity_sources=_resolved_capacity_sources(),
     )
     assert json.dumps(first.to_dict(), sort_keys=True) == json.dumps(second.to_dict(), sort_keys=True)
 
@@ -222,6 +260,136 @@ def test_preference_requires_capacity_owner():
         )
 
 
+def test_preference_requires_exact_content_addressed_capacity_source():
+    with pytest.raises(epp.PlacementPreferenceError, match="content-addressed"):
+        epp.make_capacity_preference(
+            decision=_base_tie(),
+            preference_order=("fable-a", "fable-b", "fable-c", "fable-d"),
+            capacity_source=_source(
+                SourceOwner.CAPACITY, "capacity-fable-pool-generation-7"
+            ),
+            generation=1,
+        )
+
+
+def test_v2_declares_exact_capacity_source_resolution_input():
+    parameters = inspect.signature(epp.select_placement_v2).parameters
+    assert "resolved_capacity_sources" in parameters
+
+
+def test_unresolvable_capacity_source_preserves_v1_abstention():
+    decision = epp.select_placement_v2(
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=_preference(),
+    )
+    assert decision.state is eps.SelectionState.TIE_ABSTAINED
+    assert decision.preference is not None
+    assert decision.selected is None
+    wire = decision.to_dict()
+    assert wire.get("preference_admissibility") == "inadmissible"
+    assert wire.get("preference_refusal") == {
+        "code": "CAPACITY_SOURCE_UNRESOLVED",
+        "source_ref": _capacity_source_ref(),
+    }
+
+
+def test_moved_capacity_source_preserves_v1_abstention():
+    decision = epp.select_placement_v2(
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=_preference(),
+        resolved_capacity_sources={_capacity_source_ref(): b"moved-artifact"},
+    )
+    assert decision.state is eps.SelectionState.TIE_ABSTAINED
+    assert decision.preference is not None
+    assert decision.selected is None
+    wire = decision.to_dict()
+    assert wire.get("preference_admissibility") == "inadmissible"
+    assert wire.get("preference_refusal") == {
+        "code": "CAPACITY_SOURCE_UNRESOLVED",
+        "source_ref": _capacity_source_ref(),
+    }
+
+
+def test_v2_validator_declares_exact_capacity_source_resolution_input():
+    parameters = inspect.signature(epp.validate_placement_selection_v2).parameters
+    assert "resolved_capacity_sources" in parameters
+
+
+def test_inadmissible_v2_wire_round_trips_while_source_is_unresolved():
+    decision = epp.select_placement_v2(
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=_preference(),
+    )
+    wire = decision.to_dict()
+    assert epp.validate_placement_selection_v2(
+        wire, resolved_capacity_sources={}
+    ) == wire
+
+
+def test_inadmissible_v2_wire_refuses_when_source_now_resolves():
+    decision = epp.select_placement_v2(
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=_preference(),
+    )
+    with pytest.raises(epp.PlacementPreferenceError, match="marked admissible"):
+        epp.validate_placement_selection_v2(
+            decision.to_dict(),
+            resolved_capacity_sources=_resolved_capacity_sources(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("code", "STALE"),
+        ("source_ref", _capacity_source_ref(b"other-source")),
+    ],
+)
+def test_inadmissible_v2_wire_rejects_tampered_refusal(field, value):
+    decision = epp.select_placement_v2(
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=_preference(),
+    )
+    wire = copy.deepcopy(decision.to_dict())
+    wire["preference_refusal"][field] = value
+    with pytest.raises(epp.PlacementPreferenceError, match="must name"):
+        epp.validate_placement_selection_v2(
+            wire, resolved_capacity_sources={}
+        )
+
+
+@pytest.mark.parametrize(
+    "resolved_sources",
+    [
+        {},
+        {_capacity_source_ref(): b"moved-artifact"},
+    ],
+)
+def test_v2_wire_refuses_unresolvable_or_moved_capacity_source(resolved_sources):
+    decision = epp.select_placement_v2(
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=_preference(),
+        resolved_capacity_sources=_resolved_capacity_sources(),
+    )
+    assert decision.state is eps.SelectionState.SELECTED
+    with pytest.raises(epp.PlacementPreferenceError, match="resolve exactly"):
+        epp.validate_placement_selection_v2(
+            decision.to_dict(), resolved_capacity_sources=resolved_sources
+        )
+
+
 @pytest.mark.parametrize(
     "order",
     [
@@ -267,17 +435,27 @@ def test_preference_responsibility_mismatch_refuses():
 
 def test_v2_wire_rejects_selected_worker_tampering():
     decision = epp.select_placement_v2(
-        responsibility=_responsibility(), demand=_demand(), candidates=_fables(), preference=_preference()
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=_preference(),
+        resolved_capacity_sources=_resolved_capacity_sources(),
     )
     wire = copy.deepcopy(decision.to_dict())
     wire["selected"]["worker_id"] = "fable-d"
     with pytest.raises(epp.PlacementPreferenceError):
-        epp.validate_placement_selection_v2(wire)
+        epp.validate_placement_selection_v2(
+            wire, resolved_capacity_sources=_resolved_capacity_sources()
+        )
 
 
 def test_v2_wire_rejects_removed_preference_from_resolved_tie():
     decision = epp.select_placement_v2(
-        responsibility=_responsibility(), demand=_demand(), candidates=_fables(), preference=_preference()
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=_fables(),
+        preference=_preference(),
+        resolved_capacity_sources=_resolved_capacity_sources(),
     )
     wire = copy.deepcopy(decision.to_dict())
     wire["preference"] = None
@@ -324,10 +502,13 @@ def test_v2_keeps_the_v1_frozen_candidate_snapshot(field, value):
         demand=_demand(),
         candidates=moving,
         preference=_preference(),
+        resolved_capacity_sources=_resolved_capacity_sources(),
     )
 
     wire = result.to_dict()
-    assert epp.validate_placement_selection_v2(wire) == wire
+    assert epp.validate_placement_selection_v2(
+        wire, resolved_capacity_sources=_resolved_capacity_sources()
+    ) == wire
     assert wire["selected"][field] == getattr(before[2], field)
 
 
@@ -337,8 +518,11 @@ def test_unchanged_tuple_snapshot_remains_valid():
         demand=_demand(),
         candidates=_fables(),
         preference=_preference(),
+        resolved_capacity_sources=_resolved_capacity_sources(),
     )
-    assert epp.validate_placement_selection_v2(result.to_dict()) == result.to_dict()
+    assert epp.validate_placement_selection_v2(
+        result.to_dict(), resolved_capacity_sources=_resolved_capacity_sources()
+    ) == result.to_dict()
 
 
 @pytest.mark.parametrize(

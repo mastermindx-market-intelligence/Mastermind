@@ -35,8 +35,12 @@ from control_plane.executive_steward import Freshness, ResponsibilityFact, Sourc
 
 PREFERENCE_SCHEMA = "mastermind.capacity_placement_preference.v1"
 SELECTION_V2_SCHEMA = "mastermind.executive_placement_selection.v2"
+PREFERENCE_ADMISSIBLE = "admissible"
+PREFERENCE_INADMISSIBLE = "inadmissible"
+CAPACITY_SOURCE_UNRESOLVED = "CAPACITY_SOURCE_UNRESOLVED"
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_CAPACITY_SOURCE_REF_RE = re.compile(r"^capacity-source-sha256:([0-9a-f]{64})$")
 
 
 class PlacementPreferenceError(ValueError):
@@ -86,8 +90,10 @@ def _validate_source(source: SourceRef) -> None:
         raise PlacementPreferenceError("preference source owner must be Capacity")
     if source.freshness is not Freshness.CURRENT:
         raise PlacementPreferenceError("preference source must be current")
-    if _TOKEN_RE.fullmatch(source.ref) is None:
-        raise PlacementPreferenceError("preference source ref must be a bounded opaque token")
+    if _CAPACITY_SOURCE_REF_RE.fullmatch(source.ref) is None:
+        raise PlacementPreferenceError(
+            "preference source ref must be an exact content-addressed Capacity artifact"
+        )
     if source.observed_at is None or _TOKEN_RE.fullmatch(source.observed_at) is None:
         raise PlacementPreferenceError("preference source observed_at must be a bounded opaque token")
 
@@ -182,11 +188,14 @@ _V2_KEYS = frozenset({
     "schema",
     "base_v1",
     "preference",
+    "preference_admissibility",
+    "preference_refusal",
     "state",
     "selected",
     "selected_mode",
     "selection_is_commitment",
 })
+_PREFERENCE_REFUSAL_KEYS = frozenset({"code", "source_ref"})
 
 
 def _source_from_dict(value: object) -> SourceRef:
@@ -236,13 +245,32 @@ def _selection_input_digest_from_wire(value: Mapping[str, Any]) -> str:
     )
 
 
-def validate_placement_selection_v2(value: object) -> dict[str, Any]:
-    """Revalidate the additive v2 wire without reimplementing v1 selection.
+def _capacity_source_resolves_exactly(
+    source: SourceRef, resolved_capacity_sources: Mapping[str, bytes] | None
+) -> bool:
+    """Prove the referenced Capacity artifact is present at its exact content address."""
+    if not isinstance(resolved_capacity_sources, Mapping):
+        return False
+    content = resolved_capacity_sources.get(source.ref)
+    if type(content) is not bytes:
+        return False
+    match = _CAPACITY_SOURCE_REF_RE.fullmatch(source.ref)
+    return match is not None and hashlib.sha256(content).hexdigest() == match.group(1)
 
-    The complete v1 decision is first revalidated/recomputed by its canonical
-    owner.  This layer verifies only the additional Capacity preference and
-    the resulting exact winner projection.
-    """
+
+def _capacity_source_refusal(source: SourceRef) -> dict[str, str]:
+    return {
+        "code": CAPACITY_SOURCE_UNRESOLVED,
+        "source_ref": source.ref,
+    }
+
+
+def validate_placement_selection_v2(
+    value: object,
+    *,
+    resolved_capacity_sources: Mapping[str, bytes] | None = None,
+) -> dict[str, Any]:
+    """Revalidate v2, including exact Capacity-source admissibility."""
     if not isinstance(value, Mapping) or set(value) != _V2_KEYS:
         raise PlacementPreferenceError("placement selection v2 has an invalid closed shape")
     if value["schema"] != SELECTION_V2_SCHEMA:
@@ -257,6 +285,22 @@ def validate_placement_selection_v2(value: object) -> dict[str, Any]:
 
     pref_raw = value["preference"]
     preference = None if pref_raw is None else validate_capacity_preference(pref_raw)
+    admissibility = value["preference_admissibility"]
+    if admissibility not in {None, PREFERENCE_ADMISSIBLE, PREFERENCE_INADMISSIBLE}:
+        raise PlacementPreferenceError("preference_admissibility is invalid")
+    refusal_raw = value["preference_refusal"]
+    if refusal_raw is None:
+        refusal = None
+    elif not isinstance(refusal_raw, Mapping) or set(refusal_raw) != _PREFERENCE_REFUSAL_KEYS:
+        raise PlacementPreferenceError("preference_refusal has an invalid closed shape")
+    elif type(refusal_raw["code"]) is not str or type(refusal_raw["source_ref"]) is not str:
+        raise PlacementPreferenceError("preference_refusal is invalid")
+    else:
+        refusal = {
+            "code": refusal_raw["code"],
+            "source_ref": refusal_raw["source_ref"],
+        }
+
     selected_raw = value["selected"]
     if selected_raw is None:
         selected = None
@@ -273,7 +317,7 @@ def validate_placement_selection_v2(value: object) -> dict[str, Any]:
 
     base_state = SelectionState(base["state"])
     if base_state is not SelectionState.TIE_ABSTAINED:
-        if preference is not None:
+        if preference is not None or admissibility is not None or refusal is not None:
             raise PlacementPreferenceError("preference is invalid when base_v1 did not tie")
         if state is not base_state or selected != base["selected"]:
             raise PlacementPreferenceError("v2 must preserve a non-tied v1 decision")
@@ -282,6 +326,8 @@ def validate_placement_selection_v2(value: object) -> dict[str, Any]:
         if actual_mode != expected_mode:
             raise PlacementPreferenceError("v2 selected_mode must preserve base_v1")
     elif preference is None:
+        if admissibility is not None or refusal is not None:
+            raise PlacementPreferenceError("unresolved v2 tie without a receipt cannot carry preference status")
         if state is not SelectionState.TIE_ABSTAINED or selected is not None or selected_mode is not None:
             raise PlacementPreferenceError("unresolved v2 tie must preserve v1 abstention")
     else:
@@ -292,22 +338,45 @@ def validate_placement_selection_v2(value: object) -> dict[str, Any]:
         tied = tuple(base["tied_worker_ids"])
         if set(preference.preference_order) != set(tied) or len(preference.preference_order) != len(tied):
             raise PlacementPreferenceError("preference does not exactly cover the v1 tie")
-        if state is not SelectionState.SELECTED or selected is None or selected_mode is None:
-            raise PlacementPreferenceError("resolved v2 tie must contain one selection")
-        winner_id = preference.preference_order[0]
-        if selected["worker_id"] != winner_id:
-            raise PlacementPreferenceError("selected worker does not match Capacity preference")
-        matching = [row for row in base["evidence"] if row["worker_id"] == winner_id]
-        if len(matching) != 1 or matching[0]["mode"] != selected_mode.value:
-            raise PlacementPreferenceError("selected mode does not match v1 candidate evidence")
-        for field in ("provider", "account_label", "quota_class", "observed_at_ms"):
-            if selected[field] != matching[0][field]:
-                raise PlacementPreferenceError("selected snapshot does not match v1 candidate evidence")
+        source_resolves = _capacity_source_resolves_exactly(
+            preference.capacity_source, resolved_capacity_sources
+        )
+        if not source_resolves:
+            if admissibility != PREFERENCE_INADMISSIBLE:
+                raise PlacementPreferenceError(
+                    "preference source does not resolve exactly at this seam"
+                )
+            if refusal != _capacity_source_refusal(preference.capacity_source):
+                raise PlacementPreferenceError(
+                    "inadmissible preference must name the unresolved Capacity source"
+                )
+            if state is not SelectionState.TIE_ABSTAINED or selected is not None or selected_mode is not None:
+                raise PlacementPreferenceError(
+                    "inadmissible preference must preserve v1 abstention"
+                )
+        else:
+            if admissibility != PREFERENCE_ADMISSIBLE or refusal is not None:
+                raise PlacementPreferenceError(
+                    "resolved preference must be marked admissible without refusal"
+                )
+            if state is not SelectionState.SELECTED or selected is None or selected_mode is None:
+                raise PlacementPreferenceError("resolved v2 tie must contain one selection")
+            winner_id = preference.preference_order[0]
+            if selected["worker_id"] != winner_id:
+                raise PlacementPreferenceError("selected worker does not match Capacity preference")
+            matching = [row for row in base["evidence"] if row["worker_id"] == winner_id]
+            if len(matching) != 1 or matching[0]["mode"] != selected_mode.value:
+                raise PlacementPreferenceError("selected mode does not match v1 candidate evidence")
+            for field in ("provider", "account_label", "quota_class", "observed_at_ms"):
+                if selected[field] != matching[0][field]:
+                    raise PlacementPreferenceError("selected snapshot does not match v1 candidate evidence")
 
     return {
         "schema": SELECTION_V2_SCHEMA,
         "base_v1": base,
         "preference": None if preference is None else preference.to_dict(),
+        "preference_admissibility": admissibility,
+        "preference_refusal": refusal,
         "state": state.value,
         "selected": selected,
         "selected_mode": None if selected_mode is None else selected_mode.value,
@@ -319,6 +388,8 @@ def validate_placement_selection_v2(value: object) -> dict[str, Any]:
 class PlacementSelectionDecisionV2:
     base_v1: PlacementSelectionDecision
     preference: CapacityPlacementPreference | None
+    preference_admissibility: str | None
+    preference_refusal: Mapping[str, str] | None
     state: SelectionState
     selected: Mapping[str, Any] | None
     selected_mode: PlacementMode | None
@@ -335,12 +406,39 @@ class PlacementSelectionDecisionV2:
             raise PlacementPreferenceError("non-selected v2 decision cannot carry a selected placement")
         if self.preference is not None and not isinstance(self.preference, CapacityPlacementPreference):
             raise TypeError("preference must be CapacityPlacementPreference or None")
+        if self.preference is None:
+            if self.preference_admissibility is not None or self.preference_refusal is not None:
+                raise PlacementPreferenceError(
+                    "preference status requires a Capacity preference receipt"
+                )
+        elif self.preference_admissibility == PREFERENCE_ADMISSIBLE:
+            if self.preference_refusal is not None or self.state is not SelectionState.SELECTED:
+                raise PlacementPreferenceError(
+                    "admissible preference requires one selected placement and no refusal"
+                )
+        elif self.preference_admissibility == PREFERENCE_INADMISSIBLE:
+            if (
+                dict(self.preference_refusal or {})
+                != _capacity_source_refusal(self.preference.capacity_source)
+                or self.state is not SelectionState.TIE_ABSTAINED
+            ):
+                raise PlacementPreferenceError(
+                    "inadmissible preference must name its unresolved source and abstain"
+                )
+        else:
+            raise PlacementPreferenceError(
+                "preference requires admissible or inadmissible disposition"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": SELECTION_V2_SCHEMA,
             "base_v1": self.base_v1.to_dict(),
             "preference": None if self.preference is None else self.preference.to_dict(),
+            "preference_admissibility": self.preference_admissibility,
+            "preference_refusal": (
+                None if self.preference_refusal is None else dict(self.preference_refusal)
+            ),
             "state": self.state.value,
             "selected": None if self.selected is None else dict(self.selected),
             "selected_mode": None if self.selected_mode is None else self.selected_mode.value,
@@ -354,6 +452,7 @@ def select_placement_v2(
     demand: PlacementDemand,
     candidates: Sequence[PlacementCandidateFact],
     preference: CapacityPlacementPreference | None = None,
+    resolved_capacity_sources: Mapping[str, bytes] | None = None,
 ) -> PlacementSelectionDecisionV2:
     """Run v1 unchanged, then resolve only an exact top tie with Capacity evidence."""
     if isinstance(candidates, (str, bytes)) or not isinstance(candidates, Sequence):
@@ -370,6 +469,8 @@ def select_placement_v2(
         return PlacementSelectionDecisionV2(
             base_v1=base,
             preference=None,
+            preference_admissibility=None,
+            preference_refusal=None,
             state=base.state,
             selected=base.selected,
             selected_mode=base.selected_mode,
@@ -378,6 +479,8 @@ def select_placement_v2(
         return PlacementSelectionDecisionV2(
             base_v1=base,
             preference=None,
+            preference_admissibility=None,
+            preference_refusal=None,
             state=base.state,
             selected=None,
             selected_mode=None,
@@ -388,6 +491,18 @@ def select_placement_v2(
         raise PlacementPreferenceError("preference does not bind the current selection inputs")
     if set(preference.preference_order) != set(base.tied_worker_ids):
         raise PlacementPreferenceError("preference no longer covers the exact tied workers")
+    if not _capacity_source_resolves_exactly(
+        preference.capacity_source, resolved_capacity_sources
+    ):
+        return PlacementSelectionDecisionV2(
+            base_v1=base,
+            preference=preference,
+            preference_admissibility=PREFERENCE_INADMISSIBLE,
+            preference_refusal=_capacity_source_refusal(preference.capacity_source),
+            state=SelectionState.TIE_ABSTAINED,
+            selected=None,
+            selected_mode=None,
+        )
 
     winner_id = preference.preference_order[0]
     matches = [candidate for candidate in candidate_tuple if candidate.worker_id == winner_id]
@@ -404,6 +519,8 @@ def select_placement_v2(
     return PlacementSelectionDecisionV2(
         base_v1=base,
         preference=preference,
+        preference_admissibility=PREFERENCE_ADMISSIBLE,
+        preference_refusal=None,
         state=SelectionState.SELECTED,
         selected=selected,
         selected_mode=winner.mode,
@@ -411,7 +528,10 @@ def select_placement_v2(
 
 
 __all__ = [
+    "CAPACITY_SOURCE_UNRESOLVED",
     "CapacityPlacementPreference",
+    "PREFERENCE_ADMISSIBLE",
+    "PREFERENCE_INADMISSIBLE",
     "PlacementPreferenceError",
     "PlacementSelectionDecisionV2",
     "PREFERENCE_SCHEMA",
