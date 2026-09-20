@@ -333,8 +333,11 @@ def snapshot(client):
         bind_error = None
     except Refusal as exc:
         identity, bind_error = None, exc.code
+    if identity is not None and identity.get("kind") != "file-id":
+        bind_error = "FILE_ID_REQUIRED"
     return {"basic_info": info, "identity": identity, "snapshot_sha256": digest(info),
-            "write_binding_ready": identity is not None, "binding_error": bind_error}
+            "write_binding_ready": identity is not None and identity.get("kind") == "file-id",
+            "binding_error": bind_error}
 
 
 def same_document(identity, info):
@@ -408,7 +411,7 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             raise Refusal("DOCUMENT_CHANGED", "Read the current document before deciding on a new edit.")
         if editing and not before["write_binding_ready"]:
             raise Refusal(before["binding_error"] or "DOCUMENT_BINDING_REQUIRED")
-        if editing and before["identity"]["kind"] == "file-id":
+        if editing:
             supplied_file = arguments.get("fileId")
             if supplied_file is None:
                 raise Refusal("FILE_ID_REQUIRED", "Pass the exact inspected Paper file ID for every edit.")

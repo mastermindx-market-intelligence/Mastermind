@@ -27,7 +27,7 @@ def load_local(name, path):
 b = load_local("mastermind_paper_bridge", ROOT / "integrations/paper_desktop/bridge.py")
 install = load_local("mastermind_paper_install", ROOT / "integrations/paper_desktop/install.py")
 
-INFO = {"fileName": "Mastermind scratch", "pageName": "Design", "nodeCount": 1,
+INFO = {"fileId": "file-fixture", "fileName": "Mastermind scratch", "pageName": "Design", "nodeCount": 1,
         "artboards": [{"id": "board-a", "name": "Anchor", "width": 1200, "height": 800}]}
 
 PAPER_0511_HEADER = {"file": {"id": "file-0511", "name": "Mastermind scratch"},
@@ -73,7 +73,7 @@ class CoreTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
     def call(self, action="edit", **kwargs):
-        params = dict(tool="create_artboard", arguments={}, expected_snapshot=b.digest(INFO),
+        params = dict(tool="create_artboard", arguments={"fileId": "file-fixture"}, expected_snapshot=b.digest(INFO),
                       operation_id="paper-proof-1", allow_write=True, client=self.client, lock_root=self.root,
                       _server_pin=None, _catalog_pin=None)
         params.update(kwargs)
@@ -94,9 +94,24 @@ class CoreTests(unittest.TestCase):
             self.call()
         self.assertNotIn("create_artboard", self.client.calls)
     def test_unanchored_document_refuses(self):
-        self.client.info["artboards"] = []
+        self.client.info = {"fileName": "Mastermind scratch", "pageName": "Design",
+                            "nodeCount": 0, "artboards": []}
         with self.assertRaisesRegex(b.Refusal, "DOCUMENT_ANCHOR_REQUIRED"):
-            self.call(expected_snapshot=b.digest(self.client.info))
+            self.call(expected_snapshot=b.digest(self.client.info), arguments={})
+        self.assertNotIn("create_artboard", self.client.calls)
+
+    def test_legacy_artboard_anchor_is_read_only_for_writes(self):
+        self.client.info = {"fileName": "Mastermind scratch", "pageName": "Design",
+                            "nodeCount": 1,
+                            "artboards": [{"id": "board-a", "name": "Anchor",
+                                           "width": 1200, "height": 800}]}
+        before = b.snapshot(self.client)
+        self.assertEqual(before["identity"]["kind"], "artboard-anchor")
+        self.assertFalse(before["write_binding_ready"])
+        with self.assertRaisesRegex(b.Refusal, "FILE_ID_REQUIRED"):
+            self.call(expected_snapshot=before["snapshot_sha256"], arguments={})
+        self.assertNotIn("create_artboard", self.client.calls)
+
     def test_stable_file_id_permits_empty_document(self):
         self.client.info = {"fileId": "file-a", "artboards": []}
         self.assertEqual(
