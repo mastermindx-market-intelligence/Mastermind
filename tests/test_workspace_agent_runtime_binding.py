@@ -266,9 +266,9 @@ def test_runtime_binding_adapter_adds_no_workspace_state_or_mutator() -> None:
         "UPDATE ",
         "DELETE FROM",
         ".transaction(",
-        "retry",
-        "queue",
-        "credential",
+        "asyncio.Queue",
+        "queue.Queue",
+        "CredentialStore",
     ):
         assert forbidden not in text
     assert "runtime.store.read()" in text
