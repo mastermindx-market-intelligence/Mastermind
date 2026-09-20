@@ -31,8 +31,8 @@ CRAFT_DELIVERY_MODE = "prompt_method"
 CRAFT_BEGIN = "<<<MASTERMIND_CRAFT_METHOD_V1>>>"
 CRAFT_END = "<<<END_MASTERMIND_CRAFT_METHOD_V1>>>"
 MAX_CRAFT_SOURCE_BYTES = 64 * 1024
-MAX_CRAFTED_PROMPT_BYTES = 512 * 1024
-MAX_COMMISSION_BYTES = 512 * 1024
+MAX_CRAFTED_PROMPT_BYTES = 1 << 19
+MAX_COMMISSION_BYTES = 1 << 19
 DEFAULT_CRAFT_ROOT = (
     Path(__file__).resolve().parent.parent
     / "research"
@@ -373,7 +373,7 @@ def _load_commission_compiler(
     filename = str(package_root / "scripts" / "brief.py")
     namespace: dict[str, Any] = {
         "__file__": filename,
-        "__name__": "_mastermind_craft_brief_compiler",
+        "__name__": "craft_brief_compiler_runtime",
     }
     try:
         code = compile(source_text, filename, "exec")
