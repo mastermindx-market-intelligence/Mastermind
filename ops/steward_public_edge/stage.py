@@ -178,9 +178,24 @@ def _render_caddy(template: str) -> str:
     return rendered
 
 
+def _reject_symlink_components(path: Path) -> None:
+    if not path.is_absolute():
+        _refuse("OUTPUT_PATH_REFUSED")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        try:
+            info = current.lstat()
+        except OSError:
+            _refuse("OUTPUT_PATH_REFUSED")
+        if stat.S_ISLNK(info.st_mode):
+            _refuse("OUTPUT_PATH_REFUSED")
+
+
 def _safe_output(source: Path, output: Path) -> Path:
     if not output.is_absolute():
         _refuse("OUTPUT_PATH_REFUSED")
+    _reject_symlink_components(output.parent)
     try:
         source_real = source.resolve(strict=True)
         output_real = output.resolve(strict=False)
