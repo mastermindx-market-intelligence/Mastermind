@@ -95,24 +95,30 @@ def test_recovered_post_sigkill_residual_can_settle_without_second_signal(monkey
         P.LIVE, P.RESIDUAL_GROUP, P.RESIDUAL_GROUP, P.RESIDUAL_GROUP, P.ABSENT
     ])
     sent = _signals(monkeypatch)
+    verified = []
+    def verify(_self, state):
+        verified.append(state.ref.run_id)
+        return P.RESIDUAL_GROUP
+    monkeypatch.setattr(
+        cw.CodexWorkerAdapter,
+        "_verify_recovered_residual_continuity",
+        verify,
+    )
     assert asyncio.run(_adapter()._terminate_recovered(_state())) == (True, True, False)
     assert observed[-1] is P.ABSENT
+    assert verified == ["recovery-race"]
     assert sent == [(12345, signal.SIGTERM), (12345, signal.SIGKILL)]
 
 
-def test_recovered_initial_verified_residual_group_gets_one_graceful_signal(
+def test_recovered_initial_residual_without_continuity_never_signals(
     monkeypatch,
 ):
-    observed = _observe_sequence(monkeypatch, [P.RESIDUAL_GROUP, P.ABSENT])
+    _observe_sequence(monkeypatch, [P.RESIDUAL_GROUP, P.ABSENT])
     sent = _signals(monkeypatch)
 
-    assert asyncio.run(_adapter()._terminate_recovered(_state())) == (
-        True,
-        False,
-        False,
-    )
-    assert observed == [P.RESIDUAL_GROUP, P.ABSENT]
-    assert sent == [(12345, signal.SIGTERM)]
+    with pytest.raises(cw.ProcessIdentityError):
+        asyncio.run(_adapter()._terminate_recovered(_state()))
+    assert sent == []
 
 
 @pytest.mark.parametrize("initial", [P.UNKNOWN, P.BOOT_CHANGED, P.IDENTITY_CHANGED])
@@ -422,3 +428,58 @@ def test_recovered_absent_leader_rejects_reused_group_identity(monkeypatch):
     )
 
     assert adapter._observe_recovered_ref(ref) is P.IDENTITY_CHANGED
+
+
+def test_recovered_same_session_group_reuse_has_no_signal_authority(monkeypatch):
+    """A leaderless lookalike group needs exact member continuity before any signal."""
+    ref, values = _identity_fixture()
+    old_member = ref.pid + 31
+    replacement_member = ref.pid + 32
+    adapter = _adapter()
+    state = _state()
+    state.ref = ref
+    # This is the last exact membership witnessed while the durable leader
+    # still anchored the process group.
+    state.group_member_identities = {old_member: "old-child-start"}
+
+    def inspect(pid):
+        if pid == ref.pid:
+            raise cw.ProcessIdentityError("original leader absent")
+        assert pid == replacement_member
+        return SimpleNamespace(
+            **{**values, "start_identity": "replacement-child-start"}
+        )
+
+    object.__setattr__(
+        adapter,
+        "inspector",
+        SimpleNamespace(
+            boot_session_id=lambda: ref.boot_session_id,
+            inspect=inspect,
+        ),
+    )
+    monkeypatch.setattr(
+        cw.os,
+        "kill",
+        lambda *_: (_ for _ in ()).throw(ProcessLookupError()),
+    )
+    monkeypatch.setattr(cw.os, "killpg", lambda *_: None)
+    monkeypatch.setattr(
+        cw,
+        "_run_checked",
+        lambda argv, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=f"{replacement_member} {ref.pgid}\n",
+            stderr="",
+        ),
+    )
+    sent = []
+    monkeypatch.setattr(
+        cw.CodexWorkerAdapter,
+        "_signal_recovered_group",
+        staticmethod(lambda state, value: sent.append(value) or True),
+    )
+
+    with pytest.raises(cw.ProcessIdentityError):
+        asyncio.run(adapter._terminate_recovered(state))
+    assert sent == [], "a lookalike replacement group must never receive a signal"

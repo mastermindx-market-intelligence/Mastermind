@@ -4351,3 +4351,17 @@ def test_duplicate_reattach_is_idempotent_for_the_same_execution(tmp_path: Path)
             except ProcessLookupError:
                 pass
         process.wait(timeout=2)
+
+
+def test_recovery_reattach_anchors_exact_group_members(tmp_path: Path) -> None:
+    """Recovery remembers an exact group witness before leader loss can occur."""
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    try:
+        ref = adapter.reattach(spec, binding)
+        state = adapter._runs[ref.run_id]
+        assert isinstance(state, cw._RecoveredRunState)
+        assert state.group_member_identities[ref.pid] == ref.process_start_identity
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)

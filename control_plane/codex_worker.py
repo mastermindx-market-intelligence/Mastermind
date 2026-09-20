@@ -428,6 +428,7 @@ class _RecoveredRunState:
     sigkill_sent: bool = False
     signal_error: ProcessIdentityError | None = None
     cancel_task: asyncio.Task[CancelReceipt] | None = None
+    group_member_identities: dict[int, str] = dataclasses.field(default_factory=dict)
 
 
 _RunStateLike = _RunState | _RecoveredRunState
@@ -3765,40 +3766,56 @@ class CodexWorkerAdapter:
             return _RecoveredPresence.UNKNOWN
         return _RecoveredPresence.LIVE
 
-    def _observe_recovered_group(self, ref: ProcessRef) -> _RecoveredPresence:
-        """Prove a leaderless group still belongs to the durable execution."""
+    def _snapshot_recovered_group_identity(
+        self, ref: ProcessRef
+    ) -> tuple[_RecoveredPresence, dict[int, str]]:
+        """Observe one process-group generation with exact member identities.
 
+        PGIDs are reusable after a group disappears.  A leaderless group is
+        therefore signal-authoritative only when at least one exact member can
+        be chained to a prior trusted snapshot from this recovered execution.
+        """
+
+        try:
+            boot = self.inspector.boot_session_id()
+        except Exception:
+            return _RecoveredPresence.UNKNOWN, {}
+        if boot != ref.boot_session_id:
+            return _RecoveredPresence.BOOT_CHANGED, {}
         try:
             result = _run_checked(
                 ["/bin/ps", "-axo", "pid=,pgid="],
                 timeout=2.0,
             )
         except Exception:
-            return _RecoveredPresence.UNKNOWN
+            return _RecoveredPresence.UNKNOWN, {}
         if result.returncode != 0 or not result.stdout.strip():
-            return _RecoveredPresence.UNKNOWN
+            return _RecoveredPresence.UNKNOWN, {}
 
         members: list[int] = []
         for raw in result.stdout.splitlines():
             fields = raw.split()
             if len(fields) != 2:
-                return _RecoveredPresence.UNKNOWN
+                return _RecoveredPresence.UNKNOWN, {}
             try:
                 pid, pgid = (int(value) for value in fields)
             except ValueError:
-                return _RecoveredPresence.UNKNOWN
+                return _RecoveredPresence.UNKNOWN, {}
             if pgid == ref.pgid:
                 if pid <= 1:
-                    return _RecoveredPresence.UNKNOWN
+                    return _RecoveredPresence.UNKNOWN, {}
                 members.append(pid)
         if len(members) > 1024:
-            return _RecoveredPresence.UNKNOWN
+            return _RecoveredPresence.UNKNOWN, {}
         if not members:
             group = self._group_presence_for_recovery(ref.pgid)
             return (
-                _RecoveredPresence.ABSENT
-                if group is _RecoveredPresence.ABSENT
-                else _RecoveredPresence.UNKNOWN
+                (
+                    _RecoveredPresence.ABSENT
+                    if group is _RecoveredPresence.ABSENT
+                    else _RecoveredPresence.UNKNOWN
+                ),
+                {},
             )
 
         expected = {
@@ -3810,33 +3827,70 @@ class CodexWorkerAdapter:
             "real_gid": ref.real_gid,
         }
         if any(value is None for value in expected.values()):
-            return _RecoveredPresence.UNKNOWN
+            return _RecoveredPresence.UNKNOWN, {}
+
+        identities: dict[int, str] = {}
+        leader_present = False
         for pid in members:
             try:
                 observed = self.inspector.inspect(pid)
             except Exception:
-                return _RecoveredPresence.UNKNOWN
-            if pid == ref.pid:
-                if (
-                    observed.start_identity != ref.process_start_identity
-                    or any(
-                        getattr(observed, name, None) != value
-                        for name, value in expected.items()
-                    )
-                ):
-                    return _RecoveredPresence.IDENTITY_CHANGED
-                return _RecoveredPresence.UNKNOWN
+                return _RecoveredPresence.UNKNOWN, {}
             if any(
                 getattr(observed, name, None) != value
                 for name, value in expected.items()
             ):
-                return _RecoveredPresence.IDENTITY_CHANGED
+                return _RecoveredPresence.IDENTITY_CHANGED, {}
+            start_identity = getattr(observed, "start_identity", None)
+            if not isinstance(start_identity, str) or not start_identity:
+                return _RecoveredPresence.UNKNOWN, {}
+            if pid == ref.pid:
+                leader_present = True
+                if start_identity != ref.process_start_identity:
+                    return _RecoveredPresence.IDENTITY_CHANGED, {}
+            identities[pid] = start_identity
 
         group = self._group_presence_for_recovery(ref.pgid)
         if group is _RecoveredPresence.ABSENT:
-            return _RecoveredPresence.ABSENT
+            return _RecoveredPresence.ABSENT, {}
         if group is not _RecoveredPresence.LIVE:
+            return _RecoveredPresence.UNKNOWN, {}
+        return (
+            _RecoveredPresence.LIVE
+            if leader_present
+            else _RecoveredPresence.RESIDUAL_GROUP,
+            identities,
+        )
+
+    def _observe_recovered_group(self, ref: ProcessRef) -> _RecoveredPresence:
+        """Classify a leaderless group without granting signal authority."""
+
+        presence, _identities = self._snapshot_recovered_group_identity(ref)
+        # The caller reached this path only after the durable leader was
+        # observed absent. Seeing that exact leader again is contradictory.
+        if presence is _RecoveredPresence.LIVE:
             return _RecoveredPresence.UNKNOWN
+        return presence
+
+    def _verify_recovered_residual_continuity(
+        self, state: _RecoveredRunState
+    ) -> _RecoveredPresence:
+        """Bind a leaderless group to a previously witnessed exact member."""
+
+        presence, current = self._snapshot_recovered_group_identity(state.ref)
+        if presence is not _RecoveredPresence.RESIDUAL_GROUP:
+            return (
+                _RecoveredPresence.IDENTITY_CHANGED
+                if presence is _RecoveredPresence.LIVE
+                else presence
+            )
+        prior = state.group_member_identities
+        if not prior or not any(
+            prior.get(pid) == start_identity
+            for pid, start_identity in current.items()
+        ):
+            return _RecoveredPresence.IDENTITY_CHANGED
+        state.group_member_identities = current
         return _RecoveredPresence.RESIDUAL_GROUP
 
     def _observe_recovered_ref(self, ref: ProcessRef) -> _RecoveredPresence:
@@ -3952,6 +4006,16 @@ class CodexWorkerAdapter:
                 "run is already bound to another execution"
             )
         presence = self._observe_recovered_ref(ref)
+        group_member_identities: dict[int, str] = {}
+        if presence is _RecoveredPresence.LIVE:
+            anchored_presence, group_member_identities = (
+                self._snapshot_recovered_group_identity(ref)
+            )
+            if anchored_presence is _RecoveredPresence.ABSENT:
+                presence = _RecoveredPresence.ABSENT
+                group_member_identities = {}
+            elif anchored_presence is not _RecoveredPresence.LIVE:
+                raise self._recovery_presence_error(anchored_presence)
         if presence not in {
             _RecoveredPresence.LIVE,
             _RecoveredPresence.ABSENT,
@@ -3962,6 +4026,7 @@ class CodexWorkerAdapter:
             ref=ref,
             parser=_JSONLState(),
             baseline=_GitSnapshot(ref.base_sha, b""),
+            group_member_identities=group_member_identities,
         )
         return ref
 
@@ -4049,6 +4114,8 @@ class CodexWorkerAdapter:
                 # the same PGID again.
                 raise state.signal_error
             presence = self._observe_recovered_ref(state.ref)
+            if presence is _RecoveredPresence.RESIDUAL_GROUP:
+                presence = self._verify_recovered_residual_continuity(state)
             if presence is _RecoveredPresence.ABSENT:
                 return (
                     state.signal_sent,
@@ -4088,6 +4155,8 @@ class CodexWorkerAdapter:
                 # verified original group has already disappeared, SIGTERM
                 # succeeded and no SIGKILL may be claimed.
                 presence = self._observe_recovered_ref(state.ref)
+                if presence is _RecoveredPresence.RESIDUAL_GROUP:
+                    presence = self._verify_recovered_residual_continuity(state)
                 if presence is _RecoveredPresence.ABSENT:
                     return (
                         state.signal_sent,
