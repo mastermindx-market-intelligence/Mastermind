@@ -82,6 +82,7 @@ __all__ = [
     "OUTPUT_KEYS",
     "build_attention_demands",
     "project_attention_shadow",
+    "render_chat_snapshot",
     "seat_to_authority",
 ]
 
@@ -578,3 +579,103 @@ def project_attention_shadow(
     if set(doc.keys()) != OUTPUT_KEYS:
         raise RuntimeError("attention shadow document key set is not the closed contract")
     return doc
+
+
+# ---------------------------------------------------------------------------
+# A4 — Chat-native Meta-CEO / Program-CEO consumer
+# ---------------------------------------------------------------------------
+
+
+def render_chat_snapshot(doc: Mapping[str, Any], *, authorities: Sequence[str] = ("CHAIRMAN", "SOL")) -> str:
+    """Render the SAME read-only frontier as compact chat-native context.
+
+    This is context, not an inbox.  It stores nothing, creates no session
+    identity, and confers no action, routing or dispatch authority — acting
+    still passes through the existing authority and runtime gates (F0G §14).
+
+    It is a pure function of the projection ``doc`` produced by
+    :func:`project_attention_shadow`; it never re-reads a source.
+    """
+    frontier = doc["frontier"]
+    coverage = doc["coverage"]
+    items = frontier["items"]
+    by_authority: dict[str, list[Mapping[str, Any]]] = {}
+    for item in items:
+        by_authority.setdefault(item["authority_requirement"], []).append(item)
+    frontier_by_authority = {
+        f["authority_requirement"]: f for f in frontier["authority_frontiers"]
+    }
+
+    lines: list[str] = []
+    confidence = coverage.get("admission_confidence")
+    if confidence != "SOURCED":
+        lines.append(
+            f"!! ADMISSION {confidence} — this frontier is incomplete. An empty "
+            "section below means no source answered, NOT that nothing needs you."
+        )
+        lines.append("")
+
+    def visible(rows: Sequence[Mapping[str, Any]], cls: str) -> list[Mapping[str, Any]]:
+        return [
+            r
+            for r in rows
+            if r["attention_class"] == cls
+            and r["projection_relation"] == "ROOT_VISIBLE"
+        ]
+
+    def render(row: Mapping[str, Any]) -> str:
+        can = row["actor_can_act"]
+        act = "can act now" if can is True else ("BLOCKED" if can is False else "can-act UNKNOWN")
+        detail = f"{row['serviceability']}"
+        if row["serviceability_reasons"]:
+            detail += "(" + ",".join(row["serviceability_reasons"]) + ")"
+        target = row["exact_action_target"] or "no exact target"
+        return (
+            f"    - {row['title']}\n"
+            f"        {row['demand_id']} · {act} · {detail} · {target}\n"
+            f"        why: {', '.join(row['pressure_reasons']) or 'no grounded pressure'}"
+        )
+
+    for authority in authorities:
+        rows = by_authority.get(authority, [])
+        af = frontier_by_authority.get(authority)
+        lines.append(authority)
+        for label, cls in (
+            ("interrupts", "INTERRUPT_NOW"),
+            ("focus_now", "FOCUS_NOW"),
+            ("batch_next", "BATCH_NEXT"),
+        ):
+            shown = visible(rows, cls)
+            lines.append(f"  {label}: {len(shown)}")
+            for row in shown:
+                lines.append(render(row))
+        blocked = [r for r in rows if r["serviceability"] in ("BLOCKED", "UNKNOWN")]
+        lines.append(f"  serviceability_issues: {len(blocked)}")
+        if af:
+            lines.append(
+                f"  concurrent: {af['concurrent_demand']} · "
+                f"feasibility {af['service_feasibility']}"
+            )
+            for receipt in af["feasibility_receipts"]:
+                lines.append(f"      {receipt}")
+        lines.append("")
+
+    waits = [r for r in items if r["attention_class"] == "VALID_WAIT"]
+    autos = [r for r in items if r["attention_class"] == "AUTONOMOUS_CONTINUE"]
+    lines.append("portfolio")
+    lines.append(f"  valid_waits: {len(waits)}")
+    lines.append(f"  autonomous_continue: {len(autos)}")
+    lines.append(f"  fairness_sentinels: {len(frontier['fairness_sentinels'])}")
+    debt = coverage.get("fairness_debt_by_authority") or {}
+    if debt:
+        lines.append(f"  deferred ordinary debt: {debt}")
+    lines.append(
+        f"  source coverage: admitted={coverage['admitted_demands']} "
+        f"visible={coverage['visible_roots']} "
+        f"omitted_with_receipt={coverage['omitted_with_receipt']} "
+        f"authority_unknown={coverage['authority_unknown']} "
+        f"ready_age_unknown={coverage['ready_age_unknown']}"
+    )
+    for reason in doc.get("degraded", []):
+        lines.append(f"  degraded: {reason}")
+    return "\n".join(lines)
