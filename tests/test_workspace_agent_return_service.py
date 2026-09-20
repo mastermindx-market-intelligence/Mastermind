@@ -1,6 +1,7 @@
 """Service composition contracts for Workspace Agent candidate return."""
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import os
@@ -15,6 +16,7 @@ from integrations.workspace_agent_return_service import (
     ServiceState,
     WorkspaceReturnServiceRuntime,
     _secure_ticket_key,
+    _trusted_dialogue_call,
     build_service_app,
     create_runtime,
     is_ready,
@@ -23,6 +25,7 @@ from integrations.workspace_agent_return_service import (
     reserve_loopback_socket,
 )
 from integrations.workspace_agent_return_app import REQUIRED_SCOPE
+from integrations.slack_agent_dialogue.service import DialogueServiceError
 
 
 RESOURCE = "https://workspace-return.example/mcp"
@@ -218,10 +221,51 @@ def test_readiness_is_passive_and_requires_live_dialogue_socket(tmp_path: Path) 
 
     owned = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
+        tmp_path.chmod(0o700)
         owned.bind(str(dialogue))
+        dialogue.chmod(0o600)
         assert is_ready(runtime, state) is True
+
+        dialogue.chmod(0o666)
+        assert is_ready(runtime, state) is False
+
+        dialogue.chmod(0o600)
         state.stopping = True
         assert is_ready(runtime, state) is False
+    finally:
+        owned.close()
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="requires Unix sockets")
+def test_dialogue_effect_refuses_untrusted_local_socket_before_client_io(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import integrations.workspace_agent_return_service as module
+
+    dialogue = tmp_path / "dialogue.sock"
+    tmp_path.chmod(0o700)
+    owned = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    calls = []
+
+    async def fake_call(path, request):
+        calls.append((path, request))
+        return {"ok": True, "result": {}}
+
+    monkeypatch.setattr(module, "call_service", fake_call)
+    try:
+        owned.bind(str(dialogue))
+        dialogue.chmod(0o666)
+        with pytest.raises(DialogueServiceError, match="SERVICE_UNAVAILABLE"):
+            asyncio.run(_trusted_dialogue_call(dialogue, {"request": "x"}))
+        assert calls == []
+
+        dialogue.chmod(0o600)
+        result = asyncio.run(
+            _trusted_dialogue_call(dialogue, {"request": "x"})
+        )
+        assert result == {"ok": True, "result": {}}
+        assert calls == [(dialogue, {"request": "x"})]
     finally:
         owned.close()
 
