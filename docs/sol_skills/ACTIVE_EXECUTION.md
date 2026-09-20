@@ -244,6 +244,14 @@ A missing or denied axis must not be rewritten as another. Technical availabilit
 organizational permission; unknown organizational permission never proves technical absence; and
 `EFFECT_UNKNOWN` remains an effect fact rather than a capability fact.
 
+A worker/COO `BLOCKED` or `DECISION_REQUEST` that rests on a negative capability claim is return
+evidence, not a self-authenticating Chairman/platform gate. Before escalating it, the action-authoritative
+Sol applies this Step 6 against the current generation. If required discovery/preflight evidence is
+missing and the repair is within existing scope, issue the lawful same-carrier `REQUEST_REPAIR` /
+`CONTINUE` edge naming the missing probe; do not make the Chairman say "try again". Escalate only
+after the exact capability/authority/human ceremony is actually proven or another current source law
+requires Chairman judgment.
+
 A listed/online device is not proof its backend can execute. A successful ping is not proof of file,
 process, browser, desktop, or provider-session readiness. Conversely, one degraded connector does not
 make unrelated GitHub/research/file lanes unavailable.

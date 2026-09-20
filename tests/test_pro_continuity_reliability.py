@@ -177,3 +177,16 @@ def test_index_enrolls_closeout_for_verified_incomplete_continuation():
     closeout = raw.split("### `CLOSEOUT.md`", 1)[1].split("\n### ", 1)[0]
     assert "verified `CHECKPOINTED_CONTINUATION`" in closeout
     assert "exact mission-completion state" in closeout
+
+
+def test_negative_worker_capability_blocker_is_not_self_authenticating_human_gate():
+    step6 = section("ACTIVE_EXECUTION.md", "Step 6 — Discover exact action capability, then react to evidence")
+    for clause in (
+        "worker/COO `BLOCKED` or `DECISION_REQUEST`",
+        "return evidence, not a self-authenticating Chairman/platform gate",
+        "action-authoritative Sol applies this Step 6",
+        "same-carrier `REQUEST_REPAIR` / `CONTINUE`",
+        'do not make the Chairman say "try again"',
+        "exact capability/authority/human ceremony is actually proven",
+    ):
+        assert clause in step6
