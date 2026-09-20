@@ -938,3 +938,40 @@ def test_qualification_freezes_one_evidence_snapshot() -> None:
         "load1_milli"
     ] = 999_999
     assert qualified.to_dict() == before
+
+def test_candidate_set_refuses_duplicate_registered_capacity_identity() -> None:
+    inputs = _physical_inputs()
+    source = inputs["worker-z-headroom"]
+    duplicate = inputs["worker-m-usable"]
+    duplicate["registered_join"] = RegisteredCapacityJoin(
+        worker_id="worker-m-usable",
+        quota_class=source["registered_join"].quota_class,
+        provider=source["registered_join"].provider,
+        capacity_join=source["registered_join"].capacity_join,
+    )
+    duplicate["capacity_observation"] = copy.deepcopy(
+        source["capacity_observation"]
+    )
+    duplicate["request"] = copy.deepcopy(source["request"])
+    duplicate["policy"] = copy.deepcopy(source["policy"])
+    duplicate["current_charges"] = copy.deepcopy(source["current_charges"])
+    duplicate["observations"] = copy.deepcopy(source["observations"])
+
+    # Keep both individual qualifications valid while making the duplicate
+    # physical identity produce a different score. The set-level owner must
+    # reject the duplicate rather than rank two views of one capability.
+    snapshot = duplicate["observations"]["host_capacity_evidence"]["snapshot"]
+    snapshot["load1_milli"] = 6_000
+    snapshot["load_ratio_milli"] = 6_000 // snapshot["logical_cpu_count"]
+    duplicate["observations"]["host_capacity_evidence"][
+        "snapshot_sha256"
+    ] = hashlib.sha256(canonical_host_capacity_json(snapshot)).hexdigest()
+
+    qualified = _qualify(inputs)
+    with pytest.raises(ehpp.HostPlacementPreferenceError) as error:
+        ehpp.make_host_capacity_preference(
+            decision=_decision(),
+            candidates=qualified,
+            generation=14,
+        )
+    assert error.value.code == "DUPLICATE_CAPACITY_JOIN"

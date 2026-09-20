@@ -587,6 +587,12 @@ def make_host_capacity_preference(
         or set(worker_ids) != set(tied_ids)
     ):
         _refuse("CANDIDATE_SET_MISMATCH")
+    capacity_identities = tuple(
+        (candidate.host_ref, candidate.capacity_capability_id)
+        for candidate in frozen
+    )
+    if len(set(capacity_identities)) != len(capacity_identities):
+        _refuse("DUPLICATE_CAPACITY_JOIN")
     decision_times = {candidate.decision_time_ms for candidate in frozen}
     if len(decision_times) != 1:
         _refuse("DECISION_TIME_MISMATCH")
