@@ -10,7 +10,8 @@ from control_plane.mission_workspace import SCHEMA, compose_mission_workspace
 
 
 def _inputs(*, candidates=("JOB-1",), state="STARTED", historical=False, status="RUNNING", unjoined=0):
-    return dict(control_room={"schema": "mastermind.chairman_control_room.v1", "generated_at": "2026-09-20T00:00:00Z", "work": [{"work_ref": "WS:ONE", "responsibility_ref": "responsibility:one", "agent_os": {"title": "One", "state": "active", "next_action": "Read"}}], "autonomy": {"cards": [{"responsibility_ref": "responsibility:one", "root_job_candidates": list(candidates), "runtime_root_state": "RESOLVED" if len(candidates) == 1 else "CONFLICT", "accountable_seat": "ceo", "dispatch": {"dispatch_state": state, "historical": historical, "actionable": state == "RETURNED" and not historical}}]}}, fabric_view={"schema": "mastermind.fabric_job_view.v1", "generated_at": "2026-09-20T00:00:00Z", "armed": {"source": "absent"}, "root": {"job_id": "JOB-1", "status": status, "depth": 0, "orchestration_role": "plan", "plan_step_id": None, "result": {"state": "IN_PROGRESS"}, "review": {"required": False, "reviews_job_id": None, "verdict": "NOT_YET"}}, "children": [], "unjoined_job_count": unjoined, "missingness": [], "degraded": [], "capability": {"state": "PARTIAL"}}, work_ref="WS:ONE", root_job_id="JOB-1", source_validity={"state": "CURRENT"}, cache_currentness={"state": "CURRENT"}, source_generation={})
+    validity = {"schema": "mastermind.source_validity.v1", "cards": [{"responsibility_ref": "responsibility:one", "components": {name: {"remaining_ms": 1} for name in ("card", "decision_current", "dispatch")}}]}
+    return dict(control_room={"schema": "mastermind.chairman_control_room.v1", "generated_at": "2026-09-20T00:00:00Z", "work": [{"work_ref": "WS:ONE", "responsibility_ref": "responsibility:one", "agent_os": {"title": "One", "state": "active", "next_action": "Read"}}], "autonomy": {"cards": [{"responsibility_ref": "responsibility:one", "root_job_candidates": list(candidates), "runtime_root_state": "RESOLVED" if len(candidates) == 1 else "CONFLICT", "accountable_seat": "ceo", "dispatch": {"dispatch_state": state, "historical": historical, "actionable": state == "RETURNED" and not historical}}]}}, fabric_view={"schema": "mastermind.fabric_job_view.v1", "generated_at": "2026-09-20T00:00:00Z", "armed": {"source": "absent"}, "root": {"job_id": "JOB-1", "status": status, "depth": 0, "orchestration_role": "plan", "plan_step_id": None, "result": {"state": "IN_PROGRESS"}, "review": {"required": False, "reviews_job_id": None, "verdict": "NOT_YET"}}, "children": [], "unjoined_job_count": unjoined, "missingness": [], "degraded": [], "capability": {"state": "PARTIAL"}}, work_ref="WS:ONE", root_job_id="JOB-1", source_validity=validity, cache_currentness={"state": "CURRENT"}, source_generation={})
 
 
 def test_actual_owner_shape_is_reduced_without_authority_or_mutation():
@@ -39,6 +40,27 @@ def test_stale_start_never_announces_running_and_unknown_arm_is_not_false():
     assert doc["posture"]["value"] == "HISTORICAL_OBSERVATION"
     assert doc["mission"]["armed"]["ceo_submit_armed"] is None
     assert doc["mission"]["submission_availability"] == "UNKNOWN"
+
+
+def test_expired_validity_never_promotes_current_cache_to_running():
+    args = _inputs()
+    args["source_validity"] = {"schema": "mastermind.source_validity.v1", "cards": [
+        {"responsibility_ref": "responsibility:one", "components": {
+            "card": {"remaining_ms": 0}, "decision_current": {"remaining_ms": 0},
+            "dispatch": {"remaining_ms": 0},
+        }}]}
+    doc = compose_mission_workspace(**args)
+    assert doc["read_state"]["state"] != "CURRENT"
+    assert doc["posture"]["value"] != "RUNNING"
+
+
+def test_absent_or_unjoined_fabric_never_claims_complete_zero_children():
+    args = _inputs(); args["fabric_view"] = None
+    assert compose_mission_workspace(**args)["children"]["total_count"] is None
+    args = _inputs(); args["fabric_view"]["unjoined_job_count"] = None
+    doc = compose_mission_workspace(**args)
+    assert doc["children"]["state"] == "INCOMPLETE"
+    assert doc["children"]["total_count"] is None
 
 
 def test_late_or_unsafe_result_fields_do_not_escape_the_allowlist():
