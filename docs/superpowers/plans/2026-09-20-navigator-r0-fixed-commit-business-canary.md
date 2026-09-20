@@ -81,8 +81,9 @@ Before any workspace effect, re-pin current protected Mastermind and require:
 - the protected four-plugin marketplace and Navigator package objects are
   byte-identical to the accepted source generation, or the canary plan is updated
   and independently reviewed before START;
-- PR #868's negative-capability/finalization procedure is accepted/protected when
-  the served session is expected to consume that procedure;
+- PR #868's negative-capability/finalization procedure is accepted/protected; the
+  served canary session must atomically pin that protected Skillpack generation and
+  record the exact procedure commit/blob identity before the fresh-chat proof;
 - exact immutable protected commit selected for marketplace import;
 - no branch or mutable tag source;
 - no `Sync now` during this canary;
@@ -255,7 +256,8 @@ identities, hashes, enums, bounded text, and failure classes.
 
 Record at minimum:
 
-- protected source/procedure commit;
+- protected source/procedure commit plus exact served Skillpack/ACTIVE_EXECUTION
+  identity proving the canary actually consumed the #868 generation;
 - marketplace fixed commit and inventory;
 - plugin policy/install/invocation readbacks;
 - chat identity digest;
@@ -291,7 +293,8 @@ First workspace effect requires a separate action-time Sol START after all of:
 
 - current protected Skillpack compatibility;
 - #859 protected package identity;
-- #868 protected procedure when owed;
+- #868 protected procedure and an exact served-session readback of that Skillpack
+  generation before the fresh-chat proof;
 - exact fixed protected four-plugin commit;
 - workspace/admin/canary/browser binding;
 - complete preimage and isolation census;
