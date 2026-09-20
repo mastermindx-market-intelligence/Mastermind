@@ -186,6 +186,14 @@ autonomy_control_room_projection = _optional_control_plane_module(
     "autonomy_control_room_projection", requires=("executive_steward",)
 )
 
+#: EAF A2 report-only Attention Frontier.  Additive and omittable: the remote
+#: Control Room package does not ship it, so absence degrades by name rather
+#: than breaking composition.
+executive_attention_shadow = _optional_control_plane_module(
+    "executive_attention_shadow",
+    requires=("executive_steward", "executive_attention_frontier"),
+)
+
 #: W3C owns terminal/Wake reconstruction.  The remote Control Room package
 #: intentionally omits this capability and must continue to boot without it,
 #: so the owner is loaded through the existing optional-module fence.  When
@@ -306,7 +314,7 @@ _BINDING_SUMMARY_KEYS = (
 OUTPUT_KEYS = frozenset({
     "schema", "generated_at", "sources", "degraded", "attention", "work",
     "unjoined_open_prs", "unbound_surfaces", "binding_conflicts",
-    "placement_selection", "autonomy",
+    "placement_selection", "autonomy", "attention_frontier",
 })
 
 
@@ -1161,6 +1169,22 @@ def compose_control_room(
             bindings=bindings,
         )
 
+    # EAF A2 — report-only attention frontier over the SAME Steward snapshot the
+    # autonomy projection already built.  It re-reads no source, holds no truth
+    # store of its own and never ranks with a scalar.
+    attention_frontier: dict[str, Any] | None = None
+    if executive_attention_shadow is None:
+        degraded.append("attention_frontier: unavailable (module not shipped)")
+    elif autonomy_control_room_projection is None:
+        degraded.append("attention_frontier: unavailable (steward snapshot not composed)")
+    else:
+        attention_frontier = executive_attention_shadow.project_attention_shadow(
+            autonomy_snapshot,
+            generated_at=generated_at,
+            declared_blockers=autonomy_declared_blockers,
+            source_degraded=tuple(sorted(degraded)),
+        )
+
     doc = {
         "schema": SCHEMA,
         "generated_at": generated_at,
@@ -1186,6 +1210,7 @@ def compose_control_room(
         "binding_conflicts": binding_conflicts,
         "placement_selection": placement_selection_out,
         "autonomy": autonomy,
+        "attention_frontier": attention_frontier,
     }
     assert set(doc.keys()) == OUTPUT_KEYS  # self-check: no "overall" field, closed set
     return doc

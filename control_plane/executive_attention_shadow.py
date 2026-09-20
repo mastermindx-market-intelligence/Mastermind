@@ -236,30 +236,67 @@ def build_attention_demands(
     demands: list[AttentionDemand] = []
     seen_ids: set[str] = set()
 
+    # Admission reads the caller-supplied obligation facts themselves; the
+    # resolver's verdict is consumed alongside them, never instead of them.
+    #
+    # ``get_attention()`` correctly REFUSES to guess and drops any obligation
+    # whose responsibility does not join exactly, reporting a typed issue.  For
+    # the Steward that is right.  For EAF it is fatal: an obligation that the
+    # Inbox/Wake owner genuinely raised is real executive demand, and taking
+    # only ``.data`` would make a live ``ceo_decision_pending`` disappear from
+    # the frontier entirely — the hidden-independent-interrupt failure this
+    # whole program exists to prevent.  An unjoinable obligation is therefore
+    # admitted and marked BLOCKED with a typed identity reason, never deleted.
     attention_result = snapshot.get_attention()
     admission["steward_issue_codes"] = sorted(
         {issue.code for issue in attention_result.issues}
     )
-    obligations: Sequence[AttentionFact] = attention_result.data or ()
-    admission["attention_obligations_seen"] = len(obligations)
+    resolved_ids = {f.attention_id for f in (attention_result.data or ())}
 
-    for fact in obligations:
+    by_attention_id: dict[str, list[AttentionFact]] = {}
+    for fact in snapshot.attention:
+        by_attention_id.setdefault(fact.attention_id, []).append(fact)
+    admission["attention_obligations_seen"] = len(by_attention_id)
+    admission["attention_obligations_unresolved"] = sorted(
+        set(by_attention_id) - resolved_ids
+    )
+
+    for attention_id in sorted(by_attention_id):
+        candidates = by_attention_id[attention_id]
+        fact = candidates[0]
+        identity_conflict = len(candidates) > 1
+        unjoined = attention_id not in resolved_ids
+
         seat = fact.target_seat
-        authority = seat_to_authority(seat)
+        # A conflicted obligation identity cannot ground a seat claim, and
+        # authority never defaults upward on conflict.
+        authority = (
+            AuthorityRequirement.UNKNOWN
+            if identity_conflict
+            else seat_to_authority(seat)
+        )
         ref = fact.responsibility_ref
         runtime, status, codes = _runtime_facts(snapshot, ref, seat)
         blockers, effect_fact, capacity_fact, target_fact = _serviceability_blockers(
             snapshot, ref, seat, runtime, status, codes
         )
-        responsibility_source = _responsibility_source(snapshot, ref)
-        if responsibility_source is None:
-            admission["declined"].append(
-                {
-                    "attention_id": fact.attention_id,
-                    "reason": "no canonical responsibility identity for the obligation",
-                }
+        # Missing responsibility identity degrades serviceability; it never
+        # removes the obligation from the frontier.
+        if _responsibility_source(snapshot, ref) is None or unjoined or identity_conflict:
+            blockers = blockers + (
+                Blocker(
+                    reason=ServiceabilityReason.IDENTITY_CONFLICT
+                    if identity_conflict
+                    else ServiceabilityReason.UNKNOWN_LOAD_BEARING_SOURCE,
+                    source=fact.source,
+                    detail=(
+                        f"attention {attention_id} has {len(candidates)} candidate "
+                        "identities"
+                        if identity_conflict
+                        else f"no exact Agent OS responsibility joins {ref}"
+                    ),
+                ),
             )
-            continue
 
         roots: list[FaninRoot] = []
         if runtime is not None and runtime.root_job_id:
@@ -288,7 +325,7 @@ def build_attention_demands(
                         )
                     )
 
-        demand_id = f"att:{fact.attention_id}"
+        demand_id = f"att:{attention_id}"
         if demand_id in seen_ids:
             continue
         seen_ids.add(demand_id)
@@ -303,7 +340,7 @@ def build_attention_demands(
                 admission_source=fact.source,
                 title=fact.reason,
                 responsibility_ref=ref,
-                authority=Fact(authority, fact.source),
+                authority=Fact(authority, fact.source, conflict=identity_conflict),
                 autonomous_progress=_autonomy_fact(runtime),
                 effect_state=effect_fact,
                 capacity_state=capacity_fact,
