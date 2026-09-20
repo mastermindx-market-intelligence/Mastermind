@@ -163,6 +163,22 @@ ATTEMPT_KEYS = frozenset(
         "has_result", "error_present", "error_class",
     }
 )
+# The reducer consumes this subset of the protected Fabric JOB_CARD_KEYS.  The
+# other job-card fields belong to the execution/review facets and are not
+# reinterpreted through a child row here.
+CONSUMED_JOB_CARD_KEYS = frozenset(
+    {
+        "job_id", "status", "parent_job_id", "root_job_id", "depth",
+        "orchestration_role", "plan_step_id", "attempt_count", "attempt_limit",
+        "current_attempt_id", "latest_attempt",
+    }
+)
+FABRIC_ATTEMPT_CARD_KEYS = frozenset(
+    {
+        "attempt_id", "attempt_number", "status", "started_at", "finished_at",
+        "exit_code", "has_result", "error",
+    }
+)
 PR_KEYS = frozenset({"repo", "number", "url", "title", "branch", "draft", "merge_state"})
 DISAGREEMENT_KEYS = frozenset({"source", "field", "values", "reason"})
 CARRIER_KEYS = frozenset({"state", "reason", "historical", "actionable"})
@@ -184,7 +200,7 @@ _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
 _UTC_TIMESTAMP = re.compile(
     r"^(?P<year>[0-9]{4})-(?P<month>[0-9]{2})-(?P<day>[0-9]{2})"
     r"T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})"
-    r"(?:\.(?P<fraction>[0-9]{1,6}))?Z$"
+    r"(?:\.(?P<fraction>[0-9]{1,6}))?(?P<zone>Z|\+00:00)$"
 )
 _GITHUB_URL = re.compile(r"^https://github\.com/[^/?#]+/[^/?#]+/pull/[1-9][0-9]*$")
 _SECRET_SHAPE = re.compile(
@@ -261,7 +277,7 @@ def _safe_timestamp(value: object) -> str | None:
                      31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
     if day not in range(1, month_lengths[month - 1] + 1):
         return None
-    return text
+    return f"{text[:-6]}Z" if match.group("zone") == "+00:00" else text
 
 
 def _safe_items(value: object) -> tuple[list[str], bool]:
@@ -438,7 +454,8 @@ def _project_attempt(value: object) -> dict[str, Any] | None:
     row = _mapping(value)
     if not row:
         return None
-    error_present = row.get("error") is not None
+    error = row.get("error")
+    error_present = error is not None if error is None or isinstance(error, str) else None
     return {
         "attempt_id": _safe_identifier(row.get("attempt_id")),
         "attempt_number": row.get("attempt_number") if type(row.get("attempt_number")) is int else None,
@@ -446,10 +463,63 @@ def _project_attempt(value: object) -> dict[str, Any] | None:
         "started_at": _safe_timestamp(row.get("started_at")),
         "finished_at": _safe_timestamp(row.get("finished_at")),
         "exit_code": row.get("exit_code") if type(row.get("exit_code")) is int else None,
-        "has_result": row.get("has_result") is True,
+        "has_result": row.get("has_result") if type(row.get("has_result")) is bool else None,
         "error_present": error_present,
-        "error_class": _ERROR_CLASS_WITHHELD if error_present else None,
+        "error_class": _ERROR_CLASS_WITHHELD if error_present is True else None,
     }
+
+
+def _valid_attempt_card(value: object) -> bool:
+    if value is None:
+        return True
+    row = _mapping(value)
+    return (
+        set(row) == FABRIC_ATTEMPT_CARD_KEYS
+        and _safe_identifier(row.get("attempt_id")) is not None
+        and type(row.get("attempt_number")) is int
+        and row["attempt_number"] > 0
+        and _closed_string(row.get("status"), ATTEMPT_STATES) is not None
+        and _safe_timestamp(row.get("started_at")) is not None
+        and (
+            row.get("finished_at") in (None, "")
+            or _safe_timestamp(row.get("finished_at")) is not None
+        )
+        and (row.get("exit_code") is None or type(row.get("exit_code")) is int)
+        and type(row.get("has_result")) is bool
+        and (row.get("error") is None or isinstance(row.get("error"), str))
+    )
+
+
+def _valid_consumed_child_card(value: Mapping[str, Any], resolved_root: str) -> bool:
+    """Validate every Fabric job-card field consumed by the children facet."""
+
+    return (
+        CONSUMED_JOB_CARD_KEYS.issubset(value)
+        and _safe_identifier(value.get("job_id")) is not None
+        and value.get("job_id") != resolved_root
+        and _safe_identifier(value.get("parent_job_id")) is not None
+        and value.get("root_job_id") == resolved_root
+        and _closed_string(value.get("status"), JOB_STATES) is not None
+        and type(value.get("depth")) is int
+        and value["depth"] >= 0
+        and (
+            value.get("orchestration_role") is None
+            or _closed_string(value.get("orchestration_role"), ORCHESTRATION_ROLES) is not None
+        )
+        and (
+            value.get("plan_step_id") is None
+            or _safe_identifier(value.get("plan_step_id")) is not None
+        )
+        and type(value.get("attempt_count")) is int
+        and value["attempt_count"] >= 0
+        and type(value.get("attempt_limit")) is int
+        and value["attempt_limit"] > 0
+        and (
+            value.get("current_attempt_id") is None
+            or _safe_identifier(value.get("current_attempt_id")) is not None
+        )
+        and _valid_attempt_card(value.get("latest_attempt"))
+    )
 
 
 def _project_child(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -559,14 +629,16 @@ def _qualified_current(
         remaining = receipt.get("remaining_ms")
         budget = meta.get("valid_for_ms")
         proof_ref = meta.get("proof_ref")
+        meta_qualified_at = _safe_timestamp(meta.get("qualified_at"))
+        receipt_qualified_at = _safe_timestamp(receipt.get("qualified_at"))
         if (
             meta.get("schema") != AUTONOMY_VALIDITY_SCHEMA
             or meta.get("policy") != AUTONOMY_VALIDITY_POLICY
             or not isinstance(proof_ref, str)
             or _HEX_64.fullmatch(proof_ref) is None
             or receipt.get("proof_ref") != proof_ref
-            or meta.get("qualified_at") != receipt.get("qualified_at")
-            or meta.get("qualified_at") != control_generated_at
+            or meta_qualified_at != receipt_qualified_at
+            or meta_qualified_at != control_generated_at
             or type(budget) is not int
             or budget < 0
             or type(remaining) is not int
@@ -776,6 +848,8 @@ def _children_section(
                 continue
             identity_counts[job_id] = identity_counts.get(job_id, 0) + 1
             candidates.append(value)
+            if not _valid_consumed_child_card(value, resolved_root):
+                invalid = True
     duplicate_ids = {job_id for job_id, count in identity_counts.items() if count > 1}
     if duplicate_ids:
         invalid = True

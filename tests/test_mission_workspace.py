@@ -11,7 +11,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from control_plane.fabric_job_view import compose_fabric_view
+from control_plane.fabric_job_view import (
+    ATTEMPT_CARD_KEYS as OWNER_ATTEMPT_CARD_KEYS,
+    JOB_CARD_KEYS as OWNER_JOB_CARD_KEYS,
+    compose_fabric_view,
+)
 from control_plane.mission_workspace import (
     ACCEPTANCE_KEYS,
     ARM_OUTPUT_KEYS,
@@ -21,11 +25,13 @@ from control_plane.mission_workspace import (
     CHILD_ITEM_KEYS,
     CHILDREN_KEYS,
     COVERAGE_STATES,
+    CONSUMED_JOB_CARD_KEYS,
     DISPATCH_STATES,
     EVIDENCE_FRESHNESS_STATES,
     EVIDENCE_KEYS,
     EVIDENCE_OWNERS,
     EXECUTION_KEYS,
+    FABRIC_ATTEMPT_CARD_KEYS,
     MISSION_KEYS,
     OUTPUT_KEYS,
     POSTURE_KEYS,
@@ -47,6 +53,8 @@ from control_plane.mission_workspace import (
     W3C_KEYS,
     W3C_RECEIPT_KEYS,
     _posture,
+    _qualified_current,
+    _safe_timestamp,
     compose_mission_workspace,
 )
 from tests import test_chairman_control_room_server as control_room_server_tests
@@ -580,7 +588,7 @@ def test_evidence_accepts_only_the_exact_closed_tuple_and_enums():
         "2026-09-20T24:00:00Z",
         "2026-09-20T00:00:60Z",
         "2026-09-20 00:00:00Z",
-        "2026-09-20T00:00:00+00:00",
+        "2026-09-20T00:00:00-07:00",
     ],
 )
 def test_invalid_evidence_timestamp_is_withheld_with_fixed_missingness(bad_timestamp):
@@ -627,6 +635,40 @@ def test_invalid_source_timestamp_is_null_and_generates_fixed_missingness():
         for row in document["missingness"]
     )
     assert "TbadZ" not in json.dumps(document, sort_keys=True)
+
+
+def test_equivalent_utc_forms_are_canonicalized_before_currentness_equality():
+    utc_offset_form = "2026-09-20T00:00:00+00:00"
+    args = _inputs()
+    responsibility = args["control_room"]["autonomy"]["responsibilities"][0]
+    for metadata in responsibility["validity"].values():
+        metadata["qualified_at"] = utc_offset_form
+
+    assert _safe_timestamp(utc_offset_form) == STAMP
+    assert _qualified_current(
+        validity=args["source_validity"],
+        cache=args["cache_currentness"],
+        responsibility=responsibility,
+        responsibility_ref="WS:ONE",
+        root_job_id="JOB-1",
+        control_generated_at=STAMP,
+        autonomy_generated_at=STAMP,
+    ) is True
+
+    args["control_room"]["work"][0]["evidence"] = [
+        {
+            "owner": "EXECUTIVE_OS",
+            "ref": "JOB-1",
+            "field": "root.status",
+            "source_revision": None,
+            "source_time": utc_offset_form,
+            "observed_at": utc_offset_form,
+            "freshness_state": "CURRENT",
+        }
+    ]
+    evidence = compose_mission_workspace(**args)["program"]["evidence"][0]
+    assert evidence["source_time"] == STAMP
+    assert evidence["observed_at"] == STAMP
 
 
 @pytest.mark.parametrize("invalid_evidence", [{"not": "an array"}, [None], "raw diagnostic"])
@@ -779,6 +821,57 @@ def _child_row(job_id="CHILD", *, root_job_id="JOB-1"):
     }
 
 
+def _attempt_row():
+    return {
+        "attempt_id": "ATTEMPT-1",
+        "attempt_number": 1,
+        "status": "RUNNING",
+        "started_at": STAMP,
+        "finished_at": None,
+        "exit_code": None,
+        "has_result": False,
+        "error": None,
+    }
+
+
+def _child_with_attempt():
+    child = _child_row()
+    child.update(
+        attempt_count=1,
+        current_attempt_id="ATTEMPT-1",
+        latest_attempt=_attempt_row(),
+    )
+    return child
+
+
+def _assert_incomplete_children(document, *, expected_job_ids):
+    section = document["children"]
+    assert section["state"] == "PARTIAL"
+    assert section["coverage"] == "INCOMPLETE"
+    assert section["total_count"] is None
+    assert section["overflow_count"] is None
+    assert [row["job_id"] for row in section["items"]] == expected_job_ids
+    assert any(
+        row == {
+            "missingness_class": "DEGRADED",
+            "target_field": "children",
+            "producer_owner": "executive_os",
+            "reason": "source detail withheld",
+        }
+        for row in document["missingness"]
+    )
+
+
+def test_child_input_key_tables_are_bound_to_the_protected_fabric_contract():
+    assert CONSUMED_JOB_CARD_KEYS == {
+        "job_id", "status", "parent_job_id", "root_job_id", "depth",
+        "orchestration_role", "plan_step_id", "attempt_count", "attempt_limit",
+        "current_attempt_id", "latest_attempt",
+    }
+    assert CONSUMED_JOB_CARD_KEYS < OWNER_JOB_CARD_KEYS
+    assert FABRIC_ATTEMPT_CARD_KEYS == OWNER_ATTEMPT_CARD_KEYS
+
+
 @pytest.mark.parametrize("invalid_kind", ["malformed", "duplicate", "wrong_root"])
 def test_invalid_child_identity_rows_are_rejected_without_false_empty_complete(invalid_kind):
     args = _inputs()
@@ -792,13 +885,193 @@ def test_invalid_child_identity_rows_are_rejected_without_false_empty_complete(i
     args["fabric_view"]["children"] = rows
 
     document = compose_mission_workspace(**args)
+    _assert_incomplete_children(document, expected_job_ids=["VALID"])
+
+
+@pytest.mark.parametrize("missing_field", sorted(CONSUMED_JOB_CARD_KEYS))
+def test_every_missing_consumed_child_field_refuses_complete_coverage(missing_field):
+    args = _inputs()
+    child = _child_with_attempt()
+    child.pop(missing_field)
+    args["fabric_view"]["children"] = [child]
+
+    document = compose_mission_workspace(**args)
+    expected_ids = [] if missing_field in {"job_id", "parent_job_id", "root_job_id"} else ["CHILD"]
+    _assert_incomplete_children(document, expected_job_ids=expected_ids)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        pytest.param("status", "BOGUS", id="status-enum"),
+        pytest.param("status", [], id="status-unhashable"),
+        pytest.param("depth", "one", id="depth-string"),
+        pytest.param("depth", True, id="depth-bool"),
+        pytest.param("depth", -1, id="depth-negative"),
+        pytest.param("orchestration_role", "delegate", id="role-enum"),
+        pytest.param("orchestration_role", [], id="role-type"),
+        pytest.param("plan_step_id", [], id="plan-step-type"),
+        pytest.param("plan_step_id", "", id="plan-step-empty"),
+        pytest.param("attempt_count", "one", id="attempt-count-string"),
+        pytest.param("attempt_count", True, id="attempt-count-bool"),
+        pytest.param("attempt_count", -1, id="attempt-count-negative"),
+        pytest.param("attempt_limit", "one", id="attempt-limit-string"),
+        pytest.param("attempt_limit", True, id="attempt-limit-bool"),
+        pytest.param("attempt_limit", 0, id="attempt-limit-nonpositive"),
+        pytest.param("current_attempt_id", [], id="current-attempt-type"),
+        pytest.param("current_attempt_id", "", id="current-attempt-empty"),
+        pytest.param("latest_attempt", [], id="latest-attempt-type"),
+    ],
+)
+def test_invalid_consumed_child_values_preserve_safe_facts_but_refuse_complete_coverage(
+    field, value,
+):
+    args = _inputs()
+    child = _child_with_attempt()
+    child[field] = value
+    args["fabric_view"]["children"] = [child]
+
+    document = compose_mission_workspace(**args)
+    _assert_incomplete_children(document, expected_job_ids=["CHILD"])
+    raw = json.dumps(document, sort_keys=True)
+    assert "BOGUS" not in raw
+    assert "delegate" not in raw
+    assert '"one"' not in raw
+
+
+@pytest.mark.parametrize("missing_field", sorted(FABRIC_ATTEMPT_CARD_KEYS))
+def test_every_missing_latest_attempt_field_refuses_complete_coverage(missing_field):
+    args = _inputs()
+    child = _child_with_attempt()
+    child["latest_attempt"].pop(missing_field)
+    args["fabric_view"]["children"] = [child]
+
+    document = compose_mission_workspace(**args)
+    _assert_incomplete_children(document, expected_job_ids=["CHILD"])
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        pytest.param("attempt_id", "", id="attempt-id-empty"),
+        pytest.param("attempt_id", [], id="attempt-id-type"),
+        pytest.param("attempt_number", "one", id="attempt-number-string"),
+        pytest.param("attempt_number", True, id="attempt-number-bool"),
+        pytest.param("attempt_number", 0, id="attempt-number-nonpositive"),
+        pytest.param("status", "BOGUS", id="attempt-status-enum"),
+        pytest.param("status", [], id="attempt-status-unhashable"),
+        pytest.param("started_at", "TbadZ", id="started-at-invalid"),
+        pytest.param("started_at", "", id="started-at-empty"),
+        pytest.param("started_at", None, id="started-at-null"),
+        pytest.param("finished_at", "TbadZ", id="finished-at-invalid"),
+        pytest.param("finished_at", 1, id="finished-at-type"),
+        pytest.param("exit_code", "one", id="exit-code-string"),
+        pytest.param("exit_code", True, id="exit-code-bool"),
+        pytest.param("has_result", "yes", id="has-result-string"),
+        pytest.param("has_result", 1, id="has-result-int"),
+        pytest.param("has_result", None, id="has-result-null"),
+        pytest.param("error", {}, id="error-mapping"),
+        pytest.param("error", 1, id="error-int"),
+    ],
+)
+def test_invalid_latest_attempt_values_preserve_safe_facts_but_refuse_complete_coverage(
+    field, value,
+):
+    args = _inputs()
+    child = _child_with_attempt()
+    child["latest_attempt"][field] = value
+    args["fabric_view"]["children"] = [child]
+
+    document = compose_mission_workspace(**args)
+    _assert_incomplete_children(document, expected_job_ids=["CHILD"])
+    projected = document["children"]["items"][0]["latest_attempt"]
+    assert projected["attempt_id"] == (
+        None if field == "attempt_id" else "ATTEMPT-1"
+    )
+    raw = json.dumps(document, sort_keys=True)
+    assert "BOGUS" not in raw
+    assert "TbadZ" not in raw
+    assert '"one"' not in raw
+    assert '"yes"' not in raw
+
+
+def test_valid_nullable_child_and_attempt_fields_remain_complete():
+    args = _inputs()
+    without_attempt = _child_row("NO-ATTEMPT")
+    without_attempt["orchestration_role"] = None
+    with_attempt = _child_with_attempt()
+    args["fabric_view"]["children"] = [without_attempt, with_attempt]
+
+    document = compose_mission_workspace(**args)
     section = document["children"]
-    assert section["state"] == "PARTIAL"
-    assert section["coverage"] == "INCOMPLETE"
-    assert section["total_count"] is None
-    assert section["overflow_count"] is None
-    assert [row["job_id"] for row in section["items"]] == ["VALID"]
-    assert any(
+    assert section["state"] == "AVAILABLE"
+    assert section["coverage"] == "COMPLETE"
+    assert section["total_count"] == 2
+    assert section["overflow_count"] == 0
+    assert section["items"][0]["latest_attempt"] is None
+    latest = section["items"][1]["latest_attempt"]
+    assert latest["finished_at"] is None
+    assert latest["exit_code"] is None
+    assert latest["error_present"] is False
+    assert latest["error_class"] is None
+
+
+def test_persisted_runtime_attempt_utc_forms_survive_fabric_and_reducer(tmp_path):
+    """Exercise incumbent Runtime timestamps instead of a synthetic attempt card."""
+
+    from control_plane.executive_runtime import Runtime
+
+    runtime = Runtime.at(tmp_path / "runtime")
+    runtime.workers.register_worker(
+        "worker-01",
+        provider="codex",
+        account_label="primary",
+        worker_type="mock",
+        capabilities=["code"],
+    )
+    root = runtime.jobs.create_job("Persisted root")
+    child = runtime.jobs.create_job("Persisted child", parent_job_id=root.job_id)
+    assert runtime.attempts.claim_job(child.job_id, worker_id="worker-01") is not None
+
+    persisted_root = runtime.jobs.get_job(root.job_id)
+    persisted_child = runtime.jobs.get_job(child.job_id)
+    assert persisted_root is not None
+    assert persisted_child is not None
+    persisted_attempts = runtime.attempts.list_attempts(child.job_id)
+    fabric = compose_fabric_view(
+        root_job_id=root.job_id,
+        root_job=persisted_root,
+        jobs=[persisted_root, persisted_child],
+        attempts_by_job={child.job_id: persisted_attempts},
+        joined_job_ids={root.job_id, child.job_id},
+        runtime_identity={"root": str(tmp_path / "runtime"), "db_present": True},
+        armed={},
+        degraded=[],
+        generated_at=STAMP,
+    )
+    owner_attempt = fabric["children"][0]["latest_attempt"]
+    assert owner_attempt["started_at"].endswith("+00:00")
+    assert owner_attempt["finished_at"] == ""
+
+    args = _inputs()
+    responsibility = args["control_room"]["autonomy"]["responsibilities"][0]
+    responsibility.update(
+        root_job_id=root.job_id,
+        root_job_candidates=[root.job_id],
+    )
+    args["source_validity"]["cards"][0]["root_job_id"] = root.job_id
+    args["root_job_id"] = root.job_id
+    args["fabric_view"] = fabric
+
+    document = compose_mission_workspace(**args)
+    section = document["children"]
+    assert document["read_state"]["state"] == "PARTIAL"
+    assert section["state"] == "AVAILABLE"
+    assert section["coverage"] == "COMPLETE"
+    projected_attempt = section["items"][0]["latest_attempt"]
+    assert projected_attempt["started_at"] == f"{owner_attempt['started_at'][:-6]}Z"
+    assert projected_attempt["finished_at"] is None
+    assert not any(
         row["missingness_class"] == "DEGRADED" and row["target_field"] == "children"
         for row in document["missingness"]
     )
