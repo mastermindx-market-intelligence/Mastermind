@@ -54,7 +54,11 @@ mastermind-navigator
 
 Only Navigator may be callable in the active canary cockpit. Sol, Operator, and
 Cortex are negative controls and must remain disabled/uninstalled/non-installable/
-non-invokable for the canary principal throughout the proof.
+non-invokable for the canary principal throughout the **canary proof window**. For
+an `ABSENT` marketplace import, platform-default `Available` state is a transient
+pre-proof condition only: no canary chat, install, or invocation may begin until one
+bounded `CONTROL_POLICY_RECONCILE` has disabled all three controls and owner-native
+readback proves the negative-control state.
 
 Navigator's package manifest is intentionally a read-only **navigation Skill**
 (`interface.capabilities = ["Read"]`). That package declaration never proves the
@@ -95,6 +99,9 @@ Before any workspace effect, re-pin current protected Mastermind and require:
 - exact immutable protected commit selected for marketplace import;
 - no branch or mutable tag source;
 - no `Sync now` during this canary;
+- platform automatic sync may remain enabled only with the immutable commit selector;
+  every readback must still resolve to the exact accepted commit and zero accepted
+  revision movement;
 - no unexpected app reference, bundled MCP declaration, OAuth dependency, hook,
   agent, credential, or Desktop-only state in Navigator.
 
@@ -149,7 +156,11 @@ never retry through another account, browser, workspace, source selector, or car
 
 ## 6. Four-plugin control policy
 
-After exact fixed-commit import/readback and before Navigator install:
+After exact fixed-commit import/readback and before Navigator install, run at
+most one bounded `CONTROL_POLICY_RECONCILE` when the imported defaults are not
+already correct. A new marketplace may initially expose valid plugins as
+`Available`; that state authorizes no install or invocation and is not accepted
+canary evidence. Then require:
 
 - `mastermind-sol`: Disabled, uninstalled, non-installable, non-invokable.
 - `mastermind-operator`: Disabled, uninstalled, non-installable, non-invokable.
