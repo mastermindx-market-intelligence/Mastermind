@@ -473,7 +473,7 @@ class TestBuildConfig(unittest.TestCase):
             self.assertNotIn("branch", config["gitPublish"])
             self.assertNotIn("remote", config["gitPublish"])
             self.assertNotIn("credential", config["gitPublish"])
-            paper_runtime = home / ".local" / "share" / "mastermind-paper" / "runtime" / "v1"
+            paper_runtime = home / ".local" / "share" / "mastermind-paper" / "runtime" / "v2"
             self.assertEqual(
                 config["paperDesign"],
                 {

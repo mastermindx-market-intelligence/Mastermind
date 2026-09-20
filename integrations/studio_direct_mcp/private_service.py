@@ -48,7 +48,10 @@ TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Maste
 # Paper Desktop capability is a gateway-local consumer of the separately reviewed
 # guarded adapter in PR #585. The private gateway never accepts these paths or
 # hashes from ChatGPT.
-PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v1")
+# Runtime generations are immutable from the perspective of installed seats. A new
+# bridge SHA gets a new directory so one-seat canaries cannot invalidate another
+# seat that still pins the previous bridge bytes.
+PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v2")
 PAPER_BRIDGE_SHA256 = "83e36b0bcd0acabbf5dd6ace5b708e5797a52e7db732e8dbbf848ded781c231d"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
 
