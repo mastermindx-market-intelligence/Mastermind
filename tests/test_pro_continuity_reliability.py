@@ -11,6 +11,9 @@ CORPUS = ROOT / "research/fixtures/pro_continuity_reliability_2026-09-19.json"
 def text(name):
     return (SKILLS / name).read_text(encoding="utf-8")
 
+def repo_text(name):
+    return (ROOT / name).read_text(encoding="utf-8")
+
 def section(name, heading):
     raw = text(name)
     marker = "## " + heading + "\n"
@@ -193,9 +196,9 @@ def test_negative_worker_capability_blocker_is_not_self_authenticating_human_gat
 
 
 def test_pressure_corpus_documentation_matches_seventeen_current_packets():
-    plan = text("docs/superpowers/plans/2026-09-19-pro-continuity-safety.md")
-    spec = text("docs/superpowers/specs/2026-09-19-pro-continuity-safety.md")
-    report = text("research/PRO_CONTINUITY_RELIABILITY_IMPLEMENTATION_2026-09-19.md")
+    plan = repo_text("docs/superpowers/plans/2026-09-19-pro-continuity-safety.md")
+    spec = repo_text("docs/superpowers/specs/2026-09-19-pro-continuity-safety.md")
+    report = repo_text("research/PRO_CONTINUITY_RELIABILITY_IMPLEMENTATION_2026-09-19.md")
     assert "produces 17 exact evaluator packets" in plan
     assert "Seventeen pressure packets" in spec
     assert "Seventeen PCR01–PCR17 packets" in report
