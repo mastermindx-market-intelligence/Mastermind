@@ -2780,6 +2780,99 @@
           "domain_overlays"
         ]
       }
+    },
+    {
+      "x-navigator-generated": "top-level-action-read-matches-surfaces",
+      "if": {
+        "properties": {
+          "requested_action_class": {
+            "const": "READ"
+          }
+        },
+        "required": [
+          "requested_action_class"
+        ]
+      },
+      "then": {
+        "properties": {
+          "surfaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "requested_action_class": {
+                  "const": "READ"
+                }
+              },
+              "required": [
+                "requested_action_class"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "x-navigator-generated": "top-level-action-write-matches-surfaces",
+      "if": {
+        "properties": {
+          "requested_action_class": {
+            "const": "WRITE"
+          }
+        },
+        "required": [
+          "requested_action_class"
+        ]
+      },
+      "then": {
+        "properties": {
+          "surfaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "requested_action_class": {
+                  "const": "WRITE"
+                }
+              },
+              "required": [
+                "requested_action_class"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "x-navigator-generated": "top-level-action-admin-matches-surfaces",
+      "if": {
+        "properties": {
+          "requested_action_class": {
+            "const": "ADMIN"
+          }
+        },
+        "required": [
+          "requested_action_class"
+        ]
+      },
+      "then": {
+        "properties": {
+          "surfaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "requested_action_class": {
+                  "const": "ADMIN"
+                }
+              },
+              "required": [
+                "requested_action_class"
+              ]
+            }
+          }
+        }
+      }
     }
   ]
 }

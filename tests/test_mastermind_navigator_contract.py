@@ -1212,3 +1212,18 @@ def test_binding_or_authority_refusal_does_not_relabel_write_serviceability() ->
         assert surface["binding_current"] == "NO"
     worker = cases["workbench-worker-missing-attempt-generation"]["packet"]["surfaces"][0]
     assert worker["organizationally_authorized"] == "NO"
+
+
+def test_packet_requested_action_class_must_match_every_surface() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    packet = _materialize_health_packet(
+        next(case["packet"] for case in fixture["cases"]
+             if case["id"] == "github-write-unprobed-read-proven")
+    )
+    validator.validate(packet)
+    hostile = copy.deepcopy(packet)
+    hostile["surfaces"][0]["requested_action_class"] = "READ"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(hostile)
