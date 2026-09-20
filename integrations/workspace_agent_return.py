@@ -26,6 +26,8 @@ from typing import Any, Protocol
 from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.slack_agent_dialogue.contract import (
     MAX_EVIDENCE_REFS,
+    MAX_SUMMARY_CHARS,
+    MAX_TEXT_CHARS,
     DialogueContractError,
     validate_body,
     validate_evidence_ref,
@@ -150,7 +152,7 @@ def tool_spec() -> dict[str, Any]:
                 "result": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 900,
+                    "maxLength": MAX_TEXT_CHARS,
                 },
                 "evidence_refs": {
                     "type": "array",
@@ -159,7 +161,7 @@ def tool_spec() -> dict[str, Any]:
                     "items": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 500,
+                        "maxLength": MAX_SUMMARY_CHARS,
                         "pattern": r"^https://(?:github\.com|linear\.app)/",
                     },
                 },
