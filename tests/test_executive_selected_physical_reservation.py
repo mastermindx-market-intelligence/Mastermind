@@ -575,19 +575,22 @@ def test_commit_evaluation_reuses_existing_physical_owner_without_effect() -> No
         decision_time_ms=DECISION_TIME_MS,
     )
 
-    assert result == {
-        "package_id": package.package_id,
-        "selected_worker_id": "worker-z-headroom",
-        "host_ref": HOST_M3,
-        "boot_ref": BOOT_M3,
-        "request": winner_inputs["request"],
-        "reservation": {
-            **result["reservation"],
-            "admitted": True,
-            "code": "RESERVED",
-            "fresh_begin": False,
-        },
+    assert set(result) == {
+        "package_id",
+        "selected_worker_id",
+        "host_ref",
+        "boot_ref",
+        "request",
+        "reservation",
     }
+    assert result["package_id"] == package.package_id
+    assert result["selected_worker_id"] == "worker-z-headroom"
+    assert result["host_ref"] == HOST_M3
+    assert result["boot_ref"] == BOOT_M3
+    assert result["request"] == winner_inputs["request"]
+    assert result["reservation"]["admitted"] is True
+    assert result["reservation"]["code"] == "RESERVED"
+    assert result["reservation"]["fresh_begin"] is False
     assert result["reservation"]["request_fingerprint"] == wire_candidate(
         package, "worker-z-headroom"
     )["request_fingerprint"]
@@ -771,3 +774,89 @@ def test_evaluate_requires_same_resolved_selection_and_artifact() -> None:
             decision_time_ms=DECISION_TIME_MS,
         )
     assert raised.value.code == "SELECTION_MOVED"
+
+
+def _resign_package(value: dict) -> dict:
+    unsigned = copy.deepcopy(value)
+    unsigned.pop("package_id", None)
+    rendered = json.dumps(
+        unsigned,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return {**unsigned, "package_id": hashlib.sha256(rendered).hexdigest()}
+
+
+def test_resigned_capacity_source_tamper_is_not_self_authorizing() -> None:
+    package, *_ = _package()
+    tampered = package.to_dict()
+    tampered["capacity_source"]["generation"] += 1
+    tampered = _resign_package(tampered)
+
+    with pytest.raises(espr.SelectedPhysicalReservationError) as raised:
+        espr.validate_selected_physical_reservation_package(tampered)
+    assert raised.value.code == "PACKAGE_INVALID"
+
+
+def test_resigned_selected_qualification_tamper_is_reproduced_and_refused() -> None:
+    package, *_ = _package()
+    tampered = package.to_dict()
+    tampered["selected_qualification"]["request_fingerprint"] = "f" * 64
+    tampered = _resign_package(tampered)
+
+    with pytest.raises(espr.SelectedPhysicalReservationError) as raised:
+        espr.validate_selected_physical_reservation_package(tampered)
+    assert raised.value.code == "SELECTED_INPUT_MISMATCH"
+
+
+def test_current_capacity_source_movement_refuses_even_before_reservation() -> None:
+    package, _artifact, selection, inputs, qualified = _package()
+    moved_inputs = copy.deepcopy(inputs)
+    snapshot = moved_inputs["worker-a-overloaded"]["observations"]["host_capacity_evidence"]["snapshot"]
+    snapshot["pool_free_bytes"] -= 1
+    moved_inputs["worker-a-overloaded"]["observations"]["host_capacity_evidence"]["snapshot_sha256"] = hashlib.sha256(
+        canonical_host_capacity_json(snapshot)
+    ).hexdigest()
+    moved_qualified = _qualify(moved_inputs)
+    moved_artifact = ehpp.make_host_capacity_preference(
+        decision=selection.base_v1,
+        candidates=moved_qualified,
+        generation=12,
+    )
+    winner_inputs = inputs[package.selected_worker_id]
+
+    with pytest.raises(espr.SelectedPhysicalReservationError) as raised:
+        package.evaluate_for_commit(
+            selection=selection,
+            artifact=moved_artifact,
+            qualified_candidates=qualified,
+            policy=winner_inputs["policy"],
+            current_charges=winner_inputs["current_charges"],
+            observations=winner_inputs["observations"],
+            decision_time_ms=DECISION_TIME_MS,
+        )
+    assert raised.value.code == "CAPACITY_SOURCE_MOVED"
+
+
+def test_candidate_input_order_is_not_a_hidden_preference() -> None:
+    package, artifact, selection, inputs, qualified = _package()
+    winner_inputs = inputs[package.selected_worker_id]
+
+    result = package.evaluate_for_commit(
+        selection=selection,
+        artifact=artifact,
+        qualified_candidates=tuple(reversed(qualified)),
+        policy=winner_inputs["policy"],
+        current_charges=winner_inputs["current_charges"],
+        observations=winner_inputs["observations"],
+        decision_time_ms=DECISION_TIME_MS,
+    )
+    assert result["selected_worker_id"] == "worker-z-headroom"
+
+
+def test_package_constructor_cannot_be_called_without_producer_seal() -> None:
+    with pytest.raises(espr.SelectedPhysicalReservationError) as raised:
+        espr.SelectedPhysicalReservationPackage({}, _seal=object())
+    assert raised.value.code == "UNSEALED_PACKAGE"
