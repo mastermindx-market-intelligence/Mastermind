@@ -41,7 +41,12 @@ def _base_repository(root: Path) -> tuple[Path, str]:
     return root, _git(root, "rev-parse", "HEAD")
 
 
-def _commission_repository(tmp_path: Path, source: Path) -> tuple[Path, str, str]:
+def _commission_repository(
+    tmp_path: Path,
+    source: Path,
+    *,
+    include_unrelated: bool = True,
+) -> tuple[Path, str, str]:
     repo = tmp_path / "commission-source"
     subprocess.run(
         ["git", "clone", "-q", str(source), str(repo)],
@@ -55,7 +60,10 @@ def _commission_repository(tmp_path: Path, source: Path) -> tuple[Path, str, str
     target = repo / "research" / "executive_commissions" / "COMMISSION.md"
     target.parent.mkdir(parents=True)
     target.write_text(brief, encoding="utf-8")
-    (repo / "unrelated.txt").write_text("newer source material\n", encoding="utf-8")
+    if include_unrelated:
+        (repo / "unrelated.txt").write_text(
+            "newer source material\n", encoding="utf-8"
+        )
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "publish commission")
     return repo, _git(repo, "rev-parse", "HEAD"), brief
@@ -492,7 +500,7 @@ def test_acquisition_flag_stays_network_inert_when_exact_delta_is_local(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source, base_sha = _base_repository(tmp_path / "source")
-    commission_source, commission_sha, brief = _commission_repository(tmp_path, source)
+    commission_source, commission_sha, brief = _commission_repository(tmp_path, source, include_unrelated=False)
     plan = _acquiring_plan(commission_source, commission_sha, brief)
 
     def forbid_acquisition(*args, **kwargs):
@@ -518,7 +526,7 @@ def test_missing_delta_acquires_only_in_scrubbed_control_quarantine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source, base_sha = _base_repository(tmp_path / "source")
-    commission_source, commission_sha, brief = _commission_repository(tmp_path, source)
+    commission_source, commission_sha, brief = _commission_repository(tmp_path, source, include_unrelated=False)
     _git(commission_source, "config", "uploadpack.allowFilter", "true")
     plan = _acquiring_plan(source, commission_sha, brief)
     monkeypatch.setattr(
@@ -577,7 +585,7 @@ def test_matching_crash_identity_reconciles_partial_control_construction(
     tmp_path: Path,
 ) -> None:
     source, base_sha = _base_repository(tmp_path / "source")
-    commission_source, commission_sha, brief = _commission_repository(tmp_path, source)
+    commission_source, commission_sha, brief = _commission_repository(tmp_path, source, include_unrelated=False)
     plan = _acquiring_plan(commission_source, commission_sha, brief)
     root = tmp_path / "workspaces"
     root.mkdir(mode=0o700)
@@ -615,7 +623,7 @@ def test_crash_after_workspace_validation_before_commit_remains_recoverable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source, base_sha = _base_repository(tmp_path / "source")
-    commission_source, commission_sha, brief = _commission_repository(tmp_path, source)
+    commission_source, commission_sha, brief = _commission_repository(tmp_path, source, include_unrelated=False)
     _git(commission_source, "config", "uploadpack.allowFilter", "true")
     plan = _acquiring_plan(source, commission_sha, brief)
     monkeypatch.setattr(
@@ -680,7 +688,7 @@ def test_mismatched_crash_identity_refuses_without_deleting_workspace(
     tmp_path: Path,
 ) -> None:
     source, base_sha = _base_repository(tmp_path / "source")
-    commission_source, commission_sha, brief = _commission_repository(tmp_path, source)
+    commission_source, commission_sha, brief = _commission_repository(tmp_path, source, include_unrelated=False)
     plan = _acquiring_plan(commission_source, commission_sha, brief)
     root = tmp_path / "workspaces"
     root.mkdir(mode=0o700)
@@ -712,7 +720,7 @@ def test_acquisition_pack_bound_refuses_and_discards_all_partial_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source, base_sha = _base_repository(tmp_path / "source")
-    commission_source, commission_sha, brief = _commission_repository(tmp_path, source)
+    commission_source, commission_sha, brief = _commission_repository(tmp_path, source, include_unrelated=False)
     _git(commission_source, "config", "uploadpack.allowFilter", "true")
     plan = _acquiring_plan(
         source,
@@ -956,7 +964,7 @@ def test_broken_local_dependency_source_refuses_without_network_acquisition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source, base_sha = _base_repository(tmp_path / "source")
-    commission_source, commission_sha, brief = _commission_repository(tmp_path, source)
+    commission_source, commission_sha, brief = _commission_repository(tmp_path, source, include_unrelated=False)
     broken_source = tmp_path / "not-a-git-repository"
     broken_source.mkdir()
     plan = _acquiring_plan(broken_source, commission_sha, brief)
@@ -982,3 +990,157 @@ def test_broken_local_dependency_source_refuses_without_network_acquisition(
 
     assert acquisition_calls == []
     assert not (tmp_path / "workspaces" / "job-commission-017").exists()
+
+
+def test_canonical_acquisition_refuses_unrelated_post_base_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, base_sha = _base_repository(tmp_path / "source")
+    commission_source, commission_sha, brief = _commission_repository(
+        tmp_path, source
+    )
+    _git(commission_source, "config", "uploadpack.allowFilter", "true")
+    plan = _acquiring_plan(source, commission_sha, brief)
+    monkeypatch.setattr(
+        workspace,
+        "_canonical_commission_remote_url",
+        lambda ref: commission_source.resolve().as_uri(),
+    )
+
+    root = tmp_path / "workspaces"
+    with pytest.raises(
+        workspace.WorkspaceError,
+        match="commission.*source scope",
+    ):
+        workspace.prepare_credentialless_clone(
+            source,
+            root,
+            job_id="JOB-COMMISSION-SCOPE-UNRELATED",
+            base_sha=base_sha,
+            commission_dependency=plan,
+        )
+
+    assert not (root / "job-commission-scope-unrelated").exists()
+    assert not (root / ".commission-acquisition").exists()
+
+
+def test_canonical_acquisition_requires_direct_child_of_assigned_base(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, base_sha = _base_repository(tmp_path / "source")
+    commission_source = tmp_path / "commission-direct-child"
+    subprocess.run(
+        ["git", "clone", "-q", str(source), str(commission_source)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(commission_source, "config", "user.email", "test@example.com")
+    _git(commission_source, "config", "user.name", "Commission Scope Test")
+    _git(commission_source, "config", "uploadpack.allowFilter", "true")
+    target = (
+        commission_source
+        / "research"
+        / "executive_commissions"
+        / "COMMISSION.md"
+    )
+    target.parent.mkdir(parents=True)
+    target.write_text("# Draft\n", encoding="utf-8")
+    _git(commission_source, "add", str(target.relative_to(commission_source)))
+    _git(commission_source, "commit", "-q", "-m", "intermediate commission")
+    brief = "# Final mission\n\nUse only the exact immutable brief.\n"
+    target.write_text(brief, encoding="utf-8")
+    _git(commission_source, "add", str(target.relative_to(commission_source)))
+    _git(commission_source, "commit", "-q", "-m", "final commission")
+    commission_sha = _git(commission_source, "rev-parse", "HEAD")
+    plan = _acquiring_plan(source, commission_sha, brief)
+    monkeypatch.setattr(
+        workspace,
+        "_canonical_commission_remote_url",
+        lambda ref: commission_source.resolve().as_uri(),
+    )
+
+    root = tmp_path / "workspaces"
+    with pytest.raises(
+        workspace.WorkspaceError,
+        match="direct child",
+    ):
+        workspace.prepare_credentialless_clone(
+            source,
+            root,
+            job_id="JOB-COMMISSION-SCOPE-HISTORY",
+            base_sha=base_sha,
+            commission_dependency=plan,
+        )
+
+    assert not (root / "job-commission-scope-history").exists()
+    assert not (root / ".commission-acquisition").exists()
+
+
+def test_canonical_acquisition_requires_regular_commission_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, base_sha = _base_repository(tmp_path / "source")
+    commission_source = tmp_path / "commission-symlink"
+    subprocess.run(
+        ["git", "clone", "-q", str(source), str(commission_source)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(commission_source, "config", "user.email", "test@example.com")
+    _git(commission_source, "config", "user.name", "Commission Scope Test")
+    _git(commission_source, "config", "uploadpack.allowFilter", "true")
+    target = (
+        commission_source
+        / "research"
+        / "executive_commissions"
+        / "COMMISSION.md"
+    )
+    target.parent.mkdir(parents=True)
+    link_value = "README.md"
+    target.symlink_to(link_value)
+    _git(commission_source, "add", str(target.relative_to(commission_source)))
+    _git(commission_source, "commit", "-q", "-m", "symlink commission")
+    commission_sha = _git(commission_source, "rev-parse", "HEAD")
+    plan = workspace.CommissionDependencyPlan(
+        source_repository=source,
+        commission_ref=CommissionRef(
+            repository="mastermindx-market-intelligence/Mastermind",
+            commit=commission_sha,
+            path="research/executive_commissions/COMMISSION.md",
+            content_sha256=hashlib.sha256(link_value.encode()).hexdigest(),
+        ),
+        limits=workspace.CommissionDependencyLimits(
+            max_objects=64,
+            max_metadata_bytes=1 << 16,
+            max_uncompressed_bytes=1 << 20,
+            max_pack_bytes=1 << 20,
+            max_cpu_seconds=5,
+        ),
+        acquire_missing_from_canonical=True,
+    )
+    monkeypatch.setattr(
+        workspace,
+        "_canonical_commission_remote_url",
+        lambda ref: commission_source.resolve().as_uri(),
+    )
+
+    root = tmp_path / "workspaces"
+    with pytest.raises(
+        workspace.WorkspaceError,
+        match="regular file",
+    ):
+        workspace.prepare_credentialless_clone(
+            source,
+            root,
+            job_id="JOB-COMMISSION-SCOPE-SYMLINK",
+            base_sha=base_sha,
+            commission_dependency=plan,
+        )
+
+    assert not (root / "job-commission-scope-symlink").exists()
+    assert not (root / ".commission-acquisition").exists()

@@ -769,6 +769,114 @@ def _canonical_commission_remote_url(ref: CommissionRef) -> str:
     return _CANONICAL_COMMISSION_REMOTE_URL
 
 
+def _require_canonical_commission_source_scope(
+    source: Path,
+    *,
+    base_sha: str,
+    ref: CommissionRef,
+    limits: CommissionDependencyLimits,
+    env: dict[str, str],
+) -> None:
+    """Prove canonical acquisition adds only one regular commission file."""
+
+    read_env = git_observation_env(env)
+    read_env["GIT_NO_LAZY_FETCH"] = "1"
+    read_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+
+    parent_bytes = _run_bounded_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-list",
+            "--parents",
+            "--max-count=1",
+            ref.commit,
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=1 << 10,
+        bytes_limit_message="canonical commission parent evidence exceeds limit",
+        max_stdout_lines=1,
+        lines_limit_message="canonical commission parent evidence is malformed",
+    )
+    try:
+        parent_fields = parent_bytes.decode("ascii", errors="strict").split()
+    except UnicodeDecodeError as exc:
+        raise WorkspaceError(
+            "canonical commission parent evidence is malformed"
+        ) from exc
+    if parent_fields != [ref.commit, base_sha]:
+        raise WorkspaceError(
+            "canonical commission commit must be a direct child of assigned base"
+        )
+
+    changed_bytes = _run_bounded_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--no-renames",
+            base_sha,
+            ref.commit,
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=limits.max_metadata_bytes,
+        bytes_limit_message="canonical commission source scope exceeds limit",
+        max_stdout_lines=2,
+        lines_limit_message="canonical commission source scope exceeds limit",
+    )
+    try:
+        changed_paths = [
+            line
+            for line in changed_bytes.decode("utf-8", errors="strict").splitlines()
+            if line
+        ]
+    except UnicodeDecodeError as exc:
+        raise WorkspaceError(
+            "canonical commission source scope is malformed"
+        ) from exc
+    if changed_paths != [ref.path]:
+        raise WorkspaceError(
+            "canonical commission source scope contains unexpected paths"
+        )
+
+    tree_bytes = _run_bounded_bytes_with_input(
+        ["git", "-C", str(source), "ls-tree", ref.commit, "--", ref.path],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=1 << 10,
+        bytes_limit_message="canonical commission tree evidence exceeds limit",
+        max_stdout_lines=1,
+        lines_limit_message="canonical commission tree evidence is malformed",
+    )
+    try:
+        metadata, separator, raw_path = tree_bytes.rstrip(b"\n").partition(b"\t")
+        mode, kind, _object_id = metadata.split()
+        tree_path = raw_path.decode("utf-8", errors="strict")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise WorkspaceError(
+            "canonical commission tree evidence is malformed"
+        ) from exc
+    if (
+        separator != b"\t"
+        or mode != b"100644"
+        or kind != b"blob"
+        or tree_path != ref.path
+    ):
+        raise WorkspaceError(
+            "canonical commission path must be a regular file"
+        )
+
+
 def _commission_delta_locally_complete(
     source: Path,
     *,
@@ -1533,6 +1641,16 @@ def prepare_credentialless_clone(
                         commission_ref=commission_dependency.commission_ref,
                         limits=commission_dependency.limits,
                     )
+            if commission_dependency.acquire_missing_from_canonical:
+                _require_canonical_commission_source_scope(
+                    Path(dependency_plan.source_repository)
+                    .expanduser()
+                    .resolve(),
+                    base_sha=resolved_base,
+                    ref=commission_dependency.commission_ref,
+                    limits=commission_dependency.limits,
+                    env=env,
+                )
             _prepare_commission_dependency(
                 destination,
                 base_sha=resolved_base,
