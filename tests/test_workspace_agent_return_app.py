@@ -365,7 +365,8 @@ class WorkspaceReturnConstructionTests(unittest.TestCase):
         public.update(kid="fixture-key", alg="RS256", use="sig")
         subject = subject_digest(issuer=ISSUER, subject="workspace-agent-a")
 
-        def policy(scope):
+        def policy(scope, subjects=None):
+            allowed_subjects = [subject] if subjects is None else list(subjects)
             return load_resource_policy(
                 {
                     "schema": "mastermind.business_mcp_auth_policy.v1",
@@ -376,7 +377,7 @@ class WorkspaceReturnConstructionTests(unittest.TestCase):
                     "authorization_servers": [ISSUER],
                     "jwks_uri": ISSUER + "/jwks",
                     "required_scopes": [scope],
-                    "allowed_subject_digests": [subject],
+                    "allowed_subject_digests": allowed_subjects,
                     "allowed_algorithms": ["RS256"],
                     "clock_skew_seconds": 0,
                     "max_token_lifetime_seconds": 3600,
@@ -416,6 +417,30 @@ class WorkspaceReturnConstructionTests(unittest.TestCase):
                 gateway=gateway,
                 policy=good,
                 token_verifier=mismatch_verifier,
+                allowed_hosts=("127.0.0.1",),
+            )
+        second_subject = subject_digest(
+            issuer=ISSUER,
+            subject="workspace-agent-b",
+        )
+        shared_subject_policy = policy(
+            REQUIRED_SCOPE,
+            subjects=[subject, second_subject],
+        )
+        shared_subject_verifier = MastermindTokenVerifier(
+            authenticator=JwtAuthenticator(
+                policy=shared_subject_policy,
+                jwks_cache=Keys(public),
+            ),
+            policy=shared_subject_policy,
+            now=lambda: clock[0],
+            audit_sink=Audit(),
+        )
+        with self.assertRaisesRegex(ValueError, "exactly one caller subject"):
+            create_authenticated_return_server(
+                gateway=gateway,
+                policy=shared_subject_policy,
+                token_verifier=shared_subject_verifier,
                 allowed_hosts=("127.0.0.1",),
             )
         with self.assertRaisesRegex(ValueError, "allowed_hosts"):
