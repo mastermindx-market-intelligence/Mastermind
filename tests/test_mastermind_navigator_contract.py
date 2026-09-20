@@ -1194,3 +1194,21 @@ def test_skill_reuses_cap1_serviceability_without_reimplementing_owner_policy() 
         "does not become the capability registry or recompute CAP1's serviceability law",
     ):
         assert phrase in skill
+
+
+def test_binding_or_authority_refusal_does_not_relabel_write_serviceability() -> None:
+    fixture = _load("fixtures/capability-health-cases.json")
+    cases = {case["id"]: case for case in fixture["cases"]}
+    for case_id in (
+        "workbench-attended-missing-session-generation",
+        "workbench-native-missing-session-generation",
+        "workbench-worker-missing-attempt-generation",
+    ):
+        surface = cases[case_id]["packet"]["surfaces"][0]
+        assert surface["requested_action_class"] == "WRITE"
+        assert surface["requested_action_serviceability"] == "YES"
+        assert surface["callable"] == "YES"
+        assert surface["state"] == "UNAVAILABLE"
+        assert surface["binding_current"] == "NO"
+    worker = cases["workbench-worker-missing-attempt-generation"]["packet"]["surfaces"][0]
+    assert worker["organizationally_authorized"] == "NO"

@@ -583,7 +583,7 @@
             "blocker": "The attended Web action lacks an exact current session generation.",
             "next_probe": "Read RuntimeBinding for the exact attended conversation and current generation before any Workbench action.",
             "requested_action_class": "WRITE",
-            "requested_action_serviceability": "NO"
+            "requested_action_serviceability": "YES"
           }
         ],
         "selected_surface_id": null,
@@ -687,7 +687,7 @@
             "blocker": "The native action lacks an exact current approved native-session generation.",
             "next_probe": "Read the approved native-session context owner for the exact native session and generation before any Workbench action.",
             "requested_action_class": "WRITE",
-            "requested_action_serviceability": "NO"
+            "requested_action_serviceability": "YES"
           }
         ],
         "selected_surface_id": null,
@@ -791,7 +791,7 @@
             "blocker": "The provider worker has no admitted Executive worker generation for this action.",
             "next_probe": "Read the current Executive OS Job/Attempt/Worker generation and authorization; do not fall back to attended mode.",
             "requested_action_class": "WRITE",
-            "requested_action_serviceability": "NO"
+            "requested_action_serviceability": "YES"
           }
         ],
         "selected_surface_id": null,
