@@ -510,6 +510,9 @@ def test_common_worker_adapter_protocol_is_provider_neutral():
         async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
             return None
 
+        def reattach(self, spec, binding):
+            return binding.process_ref
+
     assert isinstance(FakeAdapter(), WorkerExecutionAdapter)
 
 
