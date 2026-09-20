@@ -316,3 +316,87 @@ def test_real_evidence_for_seed_symbols_uses_identity_ties(monkeypatch):
     monkeypatch.setattr(intake, "_LOADERS", {"radar": "_from_radar"})
     monkeypatch.setattr(intake, "_from_radar", lambda: {"NVDA": _rec(0.45), "AMD": _rec(0.45)})
     assert intake.tickers(limit=2, min_score=0.4) == ["AMD", "NVDA"]
+
+
+
+def _transitive_inputs(monkeypatch, *, parent, source="signal"):
+    files = {"basketdata/radar_ticker.json": {
+        "schema": "radar_ticker.v1", "is_context_only": True, "as_of": "2026-09-19",
+        "tickers": [{"ticker": "PROBE", "source": source,
+                     "state": "POSITIVE_DIVERGENCE", "edge_score": 52}],
+    }}
+    if parent is not None:
+        files["altdata/mastermind.json"] = parent
+    monkeypatch.setattr(intake, "_read", lambda rel: files.get(rel))
+    monkeypatch.setattr(intake, "_from_briefing", lambda: ({}, {}, {}))
+    monkeypatch.setattr(intake, "_SIMPLE_SOURCES", ("radar", "altdata"))
+    monkeypatch.setattr(intake, "_LOADERS", {"radar": "_from_radar", "altdata": "_from_altdata"})
+
+
+def _transitive_parent(granted):
+    return {"brain_usable": True, "is_context_only": not granted,
+            "article3": {"granted": granted},
+            "signals": [{"ticker": "PROBE", "signal_score": 90,
+                         "action": "ACCUMULATE", "channels": ["patent_cluster"]}]}
+
+
+def test_refused_altdata_cannot_reenter_through_signal_radar(monkeypatch):
+    _transitive_inputs(monkeypatch, parent=_transitive_parent(False))
+    row = intake.queue(limit=1)[0]
+    assert row["sources"] == ["altdata", "radar"]
+    assert row["candidacy_score"] == 0.0
+    assert row["n_sources"] == 0
+    assert row["score"] == 0.8
+    assert intake.tickers(limit=5, min_score=0.4) == []
+
+
+def test_granted_altdata_and_its_radar_derivative_count_once(monkeypatch):
+    _transitive_inputs(monkeypatch, parent=_transitive_parent(True))
+    row = intake.queue(limit=1)[0]
+    assert row["n_observed_sources"] == 2
+    assert row["n_sources"] == 1
+    assert row["candidacy_score"] == 0.8
+    assert row["score"] == 0.8
+    assert intake.tickers(limit=5, min_score=0.4) == ["PROBE"]
+
+
+def test_signal_radar_without_parent_stays_research_visible(monkeypatch):
+    _transitive_inputs(monkeypatch, parent=None)
+    row = intake.queue(limit=1)[0]
+    assert row["ticker"] == "PROBE" and row["score"] == 0.52
+    assert row["candidacy_score"] == 0.0
+    assert intake.tickers(limit=5) == []
+    q = row["source_qualification"]["radar"]
+    assert q["source_kind"] == "signal"
+    assert q["derived_from"] == ["altdata"]
+    assert q["independent_evidence"] is False
+
+
+def test_signal_radar_cannot_borrow_unrelated_parent_grant(monkeypatch):
+    parent = _transitive_parent(True)
+    parent["signals"] = []
+    _transitive_inputs(monkeypatch, parent=parent)
+    assert intake.queue(limit=1)[0]["score"] == 0.52
+    assert intake.tickers(limit=5) == []
+
+
+def test_basket_attributed_radar_behavior_is_not_changed(monkeypatch):
+    _transitive_inputs(monkeypatch, parent=None, source="basket_attributed")
+    row = intake.queue(limit=1)[0]
+    assert row["score"] == row["candidacy_score"] == 0.52
+    assert row["n_sources"] == 1
+    assert intake.tickers(limit=5, min_score=0.4) == ["PROBE"]
+
+
+def test_transitive_refusal_reaches_actual_conviction_consumer(monkeypatch):
+    from brain import ledger
+    from portfolio import conviction, prophet_feed
+
+    _transitive_inputs(monkeypatch, parent=_transitive_parent(False))
+    monkeypatch.setattr(conviction, "regime_seed", lambda: [])
+    monkeypatch.setattr(conviction, "universe", lambda: [])
+    monkeypatch.setattr(conviction, "nw_universe_scan", lambda: [])
+    monkeypatch.setattr(ledger, "all_theses", lambda: [])
+    monkeypatch.setattr(prophet_feed, "candidate_tickers", lambda: [])
+    assert intake.queue(limit=1)[0]["ticker"] == "PROBE"
+    assert conviction.candidates() == []

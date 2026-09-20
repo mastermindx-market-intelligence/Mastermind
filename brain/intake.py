@@ -29,7 +29,8 @@ log = logging.getLogger(__name__)
 _ROOT = Path(__file__).resolve().parent.parent
 _V = _ROOT / "vendor" / "macro"
 
-# corroboration bonus: each INDEPENDENT engine beyond the first adds this to the base score
+# Existing source-family corroboration bonus; known derivatives add no source.
+# This count is not an estimate of statistically independent economic events.
 _CORROBORATION = 0.08
 # Derived summaries/flags may rank research salience, but cannot masquerade as an
 # independent engine for corroboration breadth.
@@ -233,6 +234,21 @@ def _from_radar() -> dict:
                   "reason": f"radar {state} (edge {r.get('edge_score')})",
                   "lean": 1 if state in _POS_RADAR else -1 if state in _NEG_RADAR else 0,
                   "confidence": None, "falsifier": r.get("note")}
+        if r.get("source") == "signal":
+            # radar_ticker.v1's signal rows transform the same alt-data score.
+            # Keep that interpretation for research, but do not manufacture a
+            # second candidacy source or borrow an unrelated parent grant.
+            out[t]["ranking_eligible"] = False
+            out[t]["independent_evidence"] = False
+            out[t]["qualification"] = {
+                "as_of": d.get("as_of"),
+                "generated_utc": d.get("generated_utc"),
+                "is_context_only": d.get("is_context_only"),
+                "source_kind": "signal",
+                "derived_from": ["altdata"],
+                "independent_evidence": False,
+                "reason": "altdata_derivative_without_independent_admission",
+            }
     return out
 
 
@@ -590,7 +606,8 @@ def build(limit: int | None = 40) -> dict:
         for t, rec in table.items():
             m = merged.setdefault(t, {"ticker": t, "sources": [], "reasons": [],
                                       "_source_scores": {}, "_scores": [],
-                                      "_eligible_sources": [], "lean_votes": [],
+                                      "_eligible_sources": [], "_independent_sources": [],
+                                      "lean_votes": [],
                                       "confidence": None, "falsifier": None,
                                       "source_qualification": {}})
             m["sources"].append(src)
@@ -599,8 +616,11 @@ def build(limit: int | None = 40) -> dict:
             m["_source_scores"][src] = rec.get("score") or 0.0
             # Existing loaders are eligible by default. A producer can explicitly refuse
             # rank/candidacy authority while remaining visible as provenance.
-            eligible = (rec.get("ranking_eligible", True) is True
-                        and src not in _NON_INDEPENDENT_SOURCES)
+            independent = (src not in _NON_INDEPENDENT_SOURCES
+                           and rec.get("independent_evidence", True) is True)
+            if independent:
+                m["_independent_sources"].append(src)
+            eligible = rec.get("ranking_eligible", True) is True and independent
             if eligible:
                 m["_eligible_sources"].append(src)
                 m["_scores"].append(rec.get("score") or 0.0)
@@ -621,22 +641,27 @@ def build(limit: int | None = 40) -> dict:
         observed_sources = set(m["sources"])
         observed = len(observed_sources)
         eligible_sources = set(m["_eligible_sources"])
-        observed_indep = len({s for s in observed_sources if s not in _NON_INDEPENDENT_SOURCES})
+        independent_sources = set(m["_independent_sources"])
+        observed_indep = len(independent_sources)
         indep = len({s for s in eligible_sources if s not in _NON_INDEPENDENT_SOURCES})
 
         # Research salience may use context-only observations: they are useful reasons to
         # investigate. But a fused briefing is an alternate summary of the primitive desks,
         # not another layer to stack on top of them. Build the primitive salience first,
-        # then take the stronger of that or the derived briefing. Divergence is one explicit
+        # then take the strongest primitive or derived summary. Divergence is one explicit
         # flag bonus and is never also counted as a base score.
-        primitive_sources = observed_sources - _NON_INDEPENDENT_SOURCES
+        primitive_sources = independent_sources
         primitive_base = (max(m["_source_scores"].get(s, 0.0) for s in primitive_sources)
                           if primitive_sources else 0.0)
         primitive_salience = min(
             primitive_base + _CORROBORATION * max(observed_indep - 1, 0), 1.0
         )
-        briefing_base = m["_source_scores"].get("briefing", 0.0)
-        research_base = max(primitive_salience, briefing_base)
+        # Briefings and alt-derived Radar interpretations may set relevance,
+        # but cannot also add corroboration to the evidence they summarize.
+        summary_sources = observed_sources - independent_sources - {"divergence"}
+        summary_base = max((m["_source_scores"].get(src, 0.0)
+                            for src in summary_sources), default=0.0)
+        research_base = max(primitive_salience, summary_base)
         score = round(min(
             research_base
             + (_DIVERGENCE_BONUS if "divergence" in observed_sources else 0.0),
