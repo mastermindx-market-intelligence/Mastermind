@@ -56,6 +56,14 @@ Only Navigator may be callable in the active canary cockpit. Sol, Operator, and
 Cortex are negative controls and must remain disabled/uninstalled/non-installable/
 non-invokable for the canary principal throughout the proof.
 
+Navigator's package manifest is intentionally a read-only **navigation Skill**
+(`interface.capabilities = ["Read"]`). That package declaration never proves the
+selected owner surface is read-only. In particular, it must not be used as evidence
+that GitHub WRITE is absent. The canary therefore discriminates two independent
+layers: Navigator itself grants no GitHub mutation authority, while Navigator must
+still discover/preflight an already-authorized GitHub WRITE action family when the
+underlying session exposes it. Conflating those layers is a canary failure.
+
 ## 3. Source dependency and immutable package law
 
 This plan was prepared while PR #859 had exact candidate head:
@@ -229,6 +237,8 @@ stop merely because the session initially had only READ evidence.
 
 The canary explicitly fails if the model says or implies:
 
+- Navigator's own `["Read"]` package capability means the separately owned GitHub
+  surface cannot expose WRITE;
 - GitHub WRITE is unavailable based only on prior READ calls;
 - the Chairman must "try again" before safe discovery;
 - repository write permission itself grants organizational/source-writer authority;
