@@ -23,6 +23,7 @@ from control_plane.wake_ack_ingress import (
     TrustedWorkerWakeAckProjection,
     WakeAckClaim,
     WakeAckIngressError,
+    WebSolWakeAckLeaseError,
     acknowledge_consumed_web_sol_wakes,
     acknowledge_consumed_wakes,
 )
@@ -1294,6 +1295,10 @@ async def reconcile_persisted_delivered_ack(
                 projection,
                 target_registry=target_registry,
             )
+        except WebSolWakeAckLeaseError:
+            # Live-lease validation runs before ACK persistence. Rotation proves
+            # a clean refusal, so read-only reconciliation may safely retry.
+            return hold("ACK_PROJECTION_REFUSED")
         except Exception:
             return PersistedDeliveredAckResult(
                 PersistedDeliveredAckState.EFFECT_UNKNOWN,
