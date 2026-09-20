@@ -248,7 +248,8 @@ def validate_profile(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(output, Mapping):
         _refuse("INVALID_PROFILE")
     output = copy.deepcopy(dict(output))
-    if set(output) not in {_OUTPUT_INPUT_KEYS, _OUTPUT_NORMALIZED_KEYS}:
+    output_keys = frozenset(output)
+    if output_keys not in (_OUTPUT_INPUT_KEYS, _OUTPUT_NORMALIZED_KEYS):
         _refuse("INVALID_PROFILE")
     if (
         "max_result_chars" in output
