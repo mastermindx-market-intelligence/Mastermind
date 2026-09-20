@@ -10,6 +10,8 @@ const HEX64_RE = /^[0-9a-f]{64}$/;
 const MAX_ACCOUNTS = 16;
 const MAX_TOOLS = 256;
 const MAX_PAGES = 16;
+const MAX_MANIFEST_BYTES = 128 * 1024;
+const FAILURE_CODE_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
 const PRIVATE_ROOT = path.join(os.homedir(), '.local', 'share', 'studio-direct-mcp', 'private');
 
 function canonicalize(value) {
@@ -84,6 +86,7 @@ async function readManifest(root, account) {
   const manifestPath = path.join(root, account, 'manifest.json');
   const stat = await lstat(manifestPath);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new TypeError('manifest must be a regular file');
+  if (stat.size > MAX_MANIFEST_BYTES) throw new RangeError('manifest exceeds size limit');
   const parsed = JSON.parse(await readFile(manifestPath, 'utf8'));
   return validateManifest(parsed, account);
 }
@@ -94,10 +97,11 @@ export async function discoverAccounts(root = PRIVATE_ROOT) {
   for (const entry of entries) {
     if (!entry.isDirectory() || !ACCOUNT_RE.test(entry.name)) continue;
     try {
-      await readManifest(root, entry.name);
+      await lstat(path.join(root, entry.name, 'manifest.json'));
       accounts.push(entry.name);
-    } catch {
-      continue;
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
     }
   }
   accounts.sort();
@@ -190,28 +194,65 @@ export function groupContracts(rows) {
   return [...groups.values()].sort((a, b) => a.accounts[0].localeCompare(b.accounts[0]));
 }
 
-export function publicFleetProjection(rows) {
+function normalizeFailures(failures) {
+  if (!Array.isArray(failures)) throw new TypeError('failures must be an array');
+  const normalized = failures.map(failure => {
+    if (!failure || typeof failure !== 'object' || !ACCOUNT_RE.test(failure.account ?? '')) {
+      throw new TypeError('failure row requires account');
+    }
+    if (!FAILURE_CODE_RE.test(failure.code ?? '')) {
+      throw new TypeError('failure row requires closed code');
+    }
+    return {account: failure.account, code: failure.code};
+  }).sort((a, b) => a.account.localeCompare(b.account));
+  if (new Set(normalized.map(row => row.account)).size !== normalized.length) {
+    throw new TypeError('duplicate failure account');
+  }
+  return normalized;
+}
+
+export function publicFleetProjection(rows, failures = []) {
   const sorted = [...rows].sort((a, b) => a.account.localeCompare(b.account));
   for (const row of sorted) assertRow(row);
+  const normalizedFailures = normalizeFailures(failures);
+  const identities = [
+    ...sorted.map(row => row.account),
+    ...normalizedFailures.map(row => row.account),
+  ];
+  if (new Set(identities).size !== identities.length) throw new TypeError('duplicate account');
+  const groups = groupContracts(sorted);
   return {
     schema: SCHEMA,
-    accountCount: sorted.length,
-    contractGroupCount: groupContracts(sorted).length,
+    accountCount: identities.length,
+    observedContractCount: sorted.length,
+    allContractsObserved: identities.length > 0 && normalizedFailures.length === 0,
+    contractGroupCount: groups.length,
     accounts: sorted.map(row => ({
       account: row.account,
       toolCount: row.toolCount,
       invocationDigest: row.invocationDigest,
       publishedDigest: row.publishedDigest,
     })),
-    groups: groupContracts(sorted),
+    failures: normalizedFailures,
+    groups,
   };
 }
 
-export async function buildFleetContractStatus(root = PRIVATE_ROOT) {
-  const accounts = await discoverAccounts(root);
+export async function buildFleetContractStatus(
+  root = PRIVATE_ROOT,
+  {discover = discoverAccounts, probe = probeInstalledAccount} = {},
+) {
+  const accounts = await discover(root);
   const rows = [];
-  for (const account of accounts) rows.push(await probeInstalledAccount(account, root));
-  return publicFleetProjection(rows);
+  const failures = [];
+  for (const account of accounts) {
+    try {
+      rows.push(await probe(account, root));
+    } catch {
+      failures.push({account, code: 'CONTRACT_PROBE_FAILED'});
+    }
+  }
+  return publicFleetProjection(rows, failures);
 }
 
 async function main() {
