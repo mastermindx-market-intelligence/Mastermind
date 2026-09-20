@@ -219,11 +219,21 @@ async def test_missing_client_certificate_never_reaches_broker(tmp_path: Path) -
         except (ssl.SSLError, ConnectionResetError, OSError):
             pass
         else:
-            writer.write(encode_frame(b"{}"))
-            await writer.drain()
-            assert await reader.read() == b""
-            writer.close()
-            await writer.wait_closed()
+            try:
+                # TLS stacks may surface a missing client certificate only after
+                # open_connection() returns.  EOF and transport reset are the
+                # same server-side refusal; neither may reach the broker.
+                writer.write(encode_frame(b"{}"))
+                await writer.drain()
+                assert await reader.read() == b""
+            except (ssl.SSLError, ConnectionResetError, OSError):
+                pass
+            finally:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except (ssl.SSLError, ConnectionResetError, OSError):
+                    pass
         assert calls == 0
     finally:
         await _close_gateway(fixture)
