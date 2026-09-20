@@ -68,6 +68,22 @@ layers: Navigator itself grants no GitHub mutation authority, while Navigator mu
 still discover/preflight an already-authorized GitHub WRITE action family when the
 underlying session exposes it. Conflating those layers is a canary failure.
 
+### Existing Business installation tooling boundary
+
+The protected `integrations/business_sol_installation/**` compiler is an incumbent
+BSC-U1 owner for **Mastermind Sol generation-one app bindings**. Its frozen contract
+expects `mastermind-sol`, Steward + Executive app identities, and the app-bound
+generation-one installation topology. Navigator R0 is deliberately skills-only and
+has no `.app.json`, app binding, OAuth resource, or MCP dependency.
+
+Therefore this canary must **not** feed Navigator into that compiler, fork it, widen
+its `PLUGIN_NAME`, or create a parallel installation-receipt system merely to make
+Navigator fit. Marketplace/plugin policy and user installation are observed through
+the existing ChatGPT Business admin/plugin owner. If Navigator later becomes
+app-bound, that is a separately reviewed package generation and may then consume the
+appropriate existing Business binding owner after its contract is intentionally
+extended.
+
 ## 3. Source dependency and immutable package law
 
 This plan was prepared while PR #859 had exact candidate head:
