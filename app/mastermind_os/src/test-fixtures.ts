@@ -1,5 +1,8 @@
 import realControlRoom from "./fixtures/control-room-b5-c20a3cf8.json";
 import realMission from "./fixtures/mission-workspace-c20a3cf8.json";
+import fabricUnavailableMission from "./fixtures/mission-workspace-bf9540a3-fabric-unavailable.json";
+import nullRoleMission from "./fixtures/mission-workspace-bf9540a3-null-role.json";
+import retainedPartialMission from "./fixtures/mission-workspace-bf9540a3-retained-partial.json";
 
 // Test-only frozen fixtures. Both originate at reducer commit
 // c20a3cf8e6541d894404d6c0f44d0999edd8e142. The Control Room fixture was
@@ -8,6 +11,16 @@ import realMission from "./fixtures/mission-workspace-c20a3cf8.json";
 // chain through the real Fabric Job View composer and compose_mission_workspace.
 export const realControlRoomFixture = () => structuredClone(realControlRoom);
 export const realMissionFixture = () => structuredClone(realMission);
+
+// Additional actual reducer outputs originate at bf9540a3047370b244d9915ed510409368a09209.
+// They cover a missing Fabric owner, a persisted Runtime child with its nullable
+// orchestration role, and a malformed attempt retained as an explicitly degraded
+// known subset. No fixture is imported by the production entry point.
+export const fabricUnavailableMissionFixture = () =>
+  structuredClone(fabricUnavailableMission);
+export const nullRoleMissionFixture = () => structuredClone(nullRoleMission);
+export const retainedPartialMissionFixture = () =>
+  structuredClone(retainedPartialMission);
 
 export function missionFixture(workRef = "WS:ALPHA", root = "JOB-ROOT") {
   const document: any = realMissionFixture();

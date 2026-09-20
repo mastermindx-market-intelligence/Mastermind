@@ -47,19 +47,19 @@ export interface AttemptCard {
   started_at: string | null;
   finished_at: string | null;
   exit_code: number | null;
-  has_result: boolean;
-  error_present: boolean;
+  has_result: boolean | null;
+  error_present: boolean | null;
   error_class: "WITHHELD" | null;
 }
 export interface ChildCard {
   job_id: string;
-  status: (typeof JOB_STATES)[number];
+  status: (typeof JOB_STATES)[number] | null;
   parent_job_id: string;
-  depth: number;
-  orchestration_role: Role;
+  depth: number | null;
+  orchestration_role: Role | null;
   plan_step_id: string | null;
-  attempt_count: number;
-  attempt_limit: number;
+  attempt_count: number | null;
+  attempt_limit: number | null;
   current_attempt_id: string | null;
   latest_attempt: AttemptCard | null;
   worker_id: string | null;
@@ -155,10 +155,10 @@ export interface MissionDocument {
     submission_availability:
       "AVAILABLE" | "UNAVAILABLE_NEW_SUBMISSION" | "UNKNOWN";
     capability: {
-      state: "PROVEN" | "PARTIAL" | "UNSUPPORTED" | "NOT_INSTALLED";
-      installed: boolean;
+      state: "PROVEN" | "PARTIAL" | "UNSUPPORTED" | "NOT_INSTALLED" | null;
+      installed: boolean | null;
       version: string | null;
-      detail: string;
+      detail: string | null;
     };
     evidence: EvidenceRef[];
   };
@@ -660,15 +660,17 @@ function att(v: unknown): v is AttemptCard {
   return (
     exact(v, keys) &&
     (v.attempt_id === null || token(v.attempt_id)) &&
-    nint(v.attempt_number, 0, 1e6) &&
+    nint(v.attempt_number, 1, 1e6) &&
     (v.status === null || oneOf(v.status, ATTEMPT_STATES)) &&
     ntime(v.started_at) &&
     ntime(v.finished_at) &&
     (v.exit_code === null || int(v.exit_code, -255, 255)) &&
-    typeof v.has_result === "boolean" &&
-    typeof v.error_present === "boolean" &&
+    (v.has_result === null || typeof v.has_result === "boolean") &&
+    (v.error_present === null || typeof v.error_present === "boolean") &&
     (v.error_class === null || v.error_class === "WITHHELD") &&
-    (v.error_present ? v.error_class === "WITHHELD" : v.error_class === null)
+    (v.error_present === true
+      ? v.error_class === "WITHHELD"
+      : v.error_class === null)
   );
 }
 function child(v: unknown): v is ChildCard {
@@ -689,13 +691,13 @@ function child(v: unknown): v is ChildCard {
   return (
     exact(v, keys) &&
     job(v.job_id) &&
-    oneOf(v.status, JOB_STATES) &&
+    (v.status === null || oneOf(v.status, JOB_STATES)) &&
     job(v.parent_job_id) &&
-    int(v.depth, 1, 256) &&
-    oneOf(v.orchestration_role, ROLES) &&
+    nint(v.depth, 0, 256) &&
+    (v.orchestration_role === null || oneOf(v.orchestration_role, ROLES)) &&
     ntext(v.plan_step_id, 128) &&
-    int(v.attempt_count, 0, 1e6) &&
-    int(v.attempt_limit, 0, 1e6) &&
+    nint(v.attempt_count, 0, 1e6) &&
+    nint(v.attempt_limit, 1, 1e6) &&
     (v.current_attempt_id === null || token(v.current_attempt_id)) &&
     (v.latest_attempt === null || att(v.latest_attempt)) &&
     ntext(v.worker_id, 128)
@@ -776,17 +778,14 @@ export function decodeMission(
     !ntime(s.fabric_view_generated_at) ||
     !obj(s.source_generation) ||
     !exact(s.source_generation, ["state", "version", "generation"]) ||
-    ![
-      s.source_generation.state,
-      s.source_generation.version,
-      s.source_generation.generation,
-    ].every(
-      (x) =>
-        x === null ||
-        typeof x === "boolean" ||
-        (typeof x === "number" && Number.isFinite(x)) ||
-        text(x, 256),
-    ) ||
+    !oneOf(s.source_generation.state, [
+      "CURRENT",
+      "STALE",
+      "CONFLICT",
+      "UNKNOWN",
+    ] as const) ||
+    !nint(s.source_generation.version, 1) ||
+    !nint(s.source_generation.generation, 1) ||
     !Array.isArray(s.source_coverage) ||
     s.source_coverage.length > 2 ||
     !s.source_coverage.every((x) =>
@@ -902,15 +901,21 @@ export function decodeMission(
     ] as const) ||
     !obj(m.capability) ||
     !exact(m.capability, ["state", "installed", "version", "detail"]) ||
-    !oneOf(m.capability.state, [
-      "PROVEN",
-      "PARTIAL",
-      "UNSUPPORTED",
-      "NOT_INSTALLED",
-    ] as const) ||
-    typeof m.capability.installed !== "boolean" ||
-    !ntext(m.capability.version, 64) ||
-    !text(m.capability.detail, 256) ||
+    !(
+      (m.capability.state === null &&
+        m.capability.installed === null &&
+        m.capability.version === null &&
+        m.capability.detail === null) ||
+      (oneOf(m.capability.state, [
+        "PROVEN",
+        "PARTIAL",
+        "UNSUPPORTED",
+        "NOT_INSTALLED",
+      ] as const) &&
+        typeof m.capability.installed === "boolean" &&
+        ntext(m.capability.version, 64) &&
+        text(m.capability.detail, 256))
+    ) ||
     !evs(m.evidence)
   )
     return null;
@@ -924,8 +929,7 @@ export function decodeMission(
     m.root_job_id === null &&
     m.runtime_root_state === "UNKNOWN" &&
     m.root_job_ambiguous === false &&
-    m.root_job_candidates.length <= 1 &&
-    m.root_job_candidates[0] !== sel.rootJobId;
+    m.root_job_candidates.length <= 1;
   const conflict =
     m.root_job_id === null &&
     m.runtime_root_state === "CONFLICT" &&
@@ -980,7 +984,23 @@ export function decodeMission(
     return null;
   const childItems = value.children.items as ChildCard[],
     childIds = new Set(childItems.map((x) => x.job_id)),
-    childById = new Map(childItems.map((x) => [x.job_id, x]));
+    childById = new Map(childItems.map((x) => [x.job_id, x])),
+    childrenHaveWithheldFacts = childItems.some((x) => {
+      const attempt = x.latest_attempt;
+      return (
+        x.status === null ||
+        x.depth === null ||
+        x.attempt_count === null ||
+        x.attempt_limit === null ||
+        (attempt !== null &&
+          (attempt.attempt_id === null ||
+            attempt.attempt_number === null ||
+            attempt.status === null ||
+            attempt.started_at === null ||
+            attempt.has_result === null ||
+            attempt.error_present === null))
+      );
+    });
   const cyclic = childItems.some((start) => {
     const seen = new Set<string>();
     let current: ChildCard | undefined = start;
@@ -999,14 +1019,21 @@ export function decodeMission(
         x.job_id === sel.rootJobId ||
         x.parent_job_id === x.job_id ||
         (x.parent_job_id !== sel.rootJobId && !childIds.has(x.parent_job_id)) ||
-        x.attempt_count > x.attempt_limit
+        (x.attempt_count !== null &&
+          x.attempt_limit !== null &&
+          x.attempt_count > x.attempt_limit)
       )
         return true;
       const parentDepth =
         x.parent_job_id === sel.rootJobId
           ? 0
           : childById.get(x.parent_job_id)?.depth;
-      return parentDepth === undefined || x.depth !== parentDepth + 1;
+      return (
+        parentDepth === undefined ||
+        (x.depth !== null &&
+          parentDepth !== null &&
+          x.depth !== parentDepth + 1)
+      );
     }) ||
     (!established && childItems.length !== 0) ||
     (value.children.coverage === "COMPLETE" &&
@@ -1207,14 +1234,33 @@ export function decodeMission(
   )
     return null;
   if (
-    ex.state === null &&
-    (r.state === "CURRENT" ||
-      !value.missingness.some(
+    childrenHaveWithheldFacts &&
+    !(
+      value.children.state === "PARTIAL" &&
+      value.children.coverage === "INCOMPLETE" &&
+      (value.children.reason_codes as string[]).includes(
+        "CHILD_ROWS_INVALID",
+      ) &&
+      value.missingness.some(
         (x) =>
           obj(x) &&
           x.missingness_class === "DEGRADED" &&
-          x.target_field === "execution",
-      ))
+          x.target_field === "children" &&
+          x.producer_owner === "executive_os",
+      )
+    )
+  )
+    return null;
+  if (r.state === "CURRENT") return null;
+  if (
+    ex.state === null &&
+    established &&
+    !value.missingness.some(
+      (x) =>
+        obj(x) &&
+        x.missingness_class === "DEGRADED" &&
+        x.target_field === "execution",
+    )
   )
     return null;
   if (
@@ -1510,6 +1556,7 @@ export function programsFromControlRoom(value: unknown): {
         ? "RESOLVED"
         : row.root_job_ambiguous === true ||
             state === "CONFLICT" ||
+            candidates.length > 1 ||
             !candidatesUnique ||
             (job(row.root_job_id) &&
               candidates.length > 0 &&

@@ -10,9 +10,12 @@ import {
 } from "./mission";
 import {
   controlRoomFixture,
+  fabricUnavailableMissionFixture,
   missionFixture,
+  nullRoleMissionFixture,
   realControlRoomFixture,
   realMissionFixture,
+  retainedPartialMissionFixture,
 } from "./test-fixtures";
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -195,6 +198,73 @@ describe("closed mission decoder", () => {
       "UNKNOWN",
     );
   });
+  it("accepts the actual reducer output when the Fabric owner is unavailable", () => {
+    const decoded = decodeMission(fabricUnavailableMissionFixture(), {
+      workRef: "WS:B5",
+      rootJobId: "JOB-B5",
+    });
+    expect(decoded).not.toBeNull();
+    expect(decoded?.mission).toMatchObject({
+      root_job_id: null,
+      root_job_candidates: ["JOB-B5"],
+      root_job_ambiguous: false,
+      runtime_root_state: "UNKNOWN",
+      capability: {
+        state: null,
+        installed: null,
+        version: null,
+        detail: null,
+      },
+    });
+    expect(decoded?.execution.state).toBeNull();
+    expect(decoded?.children).toMatchObject({
+      state: "UNAVAILABLE",
+      coverage: "INCOMPLETE",
+      items: [],
+    });
+  });
+  it("accepts actual owner-nullable and guarded known-subset child projections", () => {
+    const nullRole = decodeMission(nullRoleMissionFixture(), {
+      workRef: "WS:B5",
+      rootJobId: "JOB-001",
+    });
+    expect(nullRole?.children).toMatchObject({
+      state: "AVAILABLE",
+      coverage: "COMPLETE",
+    });
+    expect(nullRole?.children.items[0].orchestration_role).toBeNull();
+
+    const retained = decodeMission(retainedPartialMissionFixture(), {
+      workRef: "WS:B5",
+      rootJobId: "JOB-B5",
+    });
+    expect(retained?.children).toMatchObject({
+      state: "PARTIAL",
+      coverage: "INCOMPLETE",
+      reason_codes: ["CHILD_ROWS_INVALID"],
+    });
+    expect(retained?.children.items[0]).toMatchObject({
+      job_id: "JOB-CHILD",
+      status: null,
+      latest_attempt: { has_result: null },
+    });
+    expect(relationshipsForMission(retained!)).toEqual([
+      {
+        id: "JOB-B5->JOB-CHILD",
+        from: "JOB-B5",
+        to: "JOB-CHILD",
+        kind: "Execution containment",
+      },
+    ]);
+
+    const unguarded: any = retainedPartialMissionFixture();
+    unguarded.missingness = unguarded.missingness.filter(
+      (row: any) => row.target_field !== "children",
+    );
+    expect(
+      decodeMission(unguarded, { workRef: "WS:B5", rootJobId: "JOB-B5" }),
+    ).toBeNull();
+  });
   it("keeps local unavailable state outside the producer contract", () => {
     const local = unavailableMission(selection, "SOURCE_UNAVAILABLE");
     expect(local.kind).toBe("LOCAL_UNAVAILABLE");
@@ -236,6 +306,27 @@ describe("closed mission decoder", () => {
       value: "CONSUMPTION_UNKNOWN",
       rule: "E3",
     });
+  });
+  it.each([
+    ["unknown state", { state: "BANANA", version: null, generation: null }],
+    ["boolean version", { state: "UNKNOWN", version: true, generation: null }],
+    ["zero generation", { state: "STALE", version: 1, generation: 0 }],
+    ["fractional version", { state: "CONFLICT", version: 1.5, generation: 2 }],
+  ])("rejects an invalid source generation %s", (_name, sourceGeneration) => {
+    const raw: any = clone(missionFixture());
+    raw.source.source_generation = sourceGeneration;
+    expect(decodeMission(raw, selection)).toBeNull();
+  });
+  it("treats CURRENT generation as diagnostic and refuses a CURRENT read claim", () => {
+    const raw: any = clone(missionFixture());
+    raw.source.source_generation = {
+      state: "CURRENT",
+      version: 1,
+      generation: 2,
+    };
+    expect(decodeMission(raw, selection)?.read_state.state).toBe("PARTIAL");
+    raw.read_state.state = "CURRENT";
+    expect(decodeMission(raw, selection)).toBeNull();
   });
   it.each([
     "2026-13-01T00:00:00Z",
@@ -417,6 +508,17 @@ describe("actual Control Room shape", () => {
     expect(programsFromControlRoom(raw).programs[0]).toMatchObject({
       rootJobId: null,
       rootState: "CONFLICT",
+    });
+  });
+  it("classifies two distinct candidates as a conflict even if the row says RESOLVED", () => {
+    const raw: any = realControlRoomFixture();
+    raw.autonomy.responsibilities[0].root_job_candidates.push("JOB-OTHER");
+    raw.autonomy.responsibilities[0].root_job_ambiguous = false;
+    raw.autonomy.responsibilities[0].runtime_root_state = "RESOLVED";
+    expect(programsFromControlRoom(raw).programs[0]).toMatchObject({
+      rootJobId: null,
+      rootState: "CONFLICT",
+      rootCandidates: ["JOB-B5", "JOB-OTHER"],
     });
   });
   it("rejects duplicate work references", () => {

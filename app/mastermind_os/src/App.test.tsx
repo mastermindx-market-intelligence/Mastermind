@@ -149,6 +149,16 @@ describe("native and interaction contracts", () => {
     ).toBeTruthy();
     expect(screen.getByText(/UNCONFIGURED \/ BUILT_NOT_PROVEN/)).toBeTruthy();
     expect(screen.getByText("a".repeat(40))).toBeTruthy();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Mission Workspace" }));
+    expect(
+      screen.getByText(
+        "The workspace is not connected. Mission content will appear when an approved source is available.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/cannot pass as a producer document/)).toBeNull();
+    expect(screen.getByText("Technical details")).toBeTruthy();
   });
   it("distinguishes an absent Programs source from a malformed source", async () => {
     render(<App />);

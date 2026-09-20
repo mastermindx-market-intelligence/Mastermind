@@ -568,9 +568,15 @@ export function App() {
         <h2>{active}</h2>
         <State value="UNAVAILABLE" />
         <Empty>
-          {"reason" in mission ? mission.reason : "SOURCE_UNAVAILABLE"}. This
-          local state cannot pass as a producer document.
+          The workspace is not connected. Mission content will appear when an
+          approved source is available.
         </Empty>
+        <details className="reason-details">
+          <summary>Technical details</summary>
+          <code>
+            {"reason" in mission ? mission.reason : "SOURCE_UNAVAILABLE"}
+          </code>
+        </details>
       </section>
     );
   else if (active === "Mission Workspace") content = <Mission d={d} />;

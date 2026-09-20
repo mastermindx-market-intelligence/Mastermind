@@ -306,6 +306,19 @@ code {
 .empty-panel {
   max-width: 760px;
 }
+.reason-details {
+  margin-top: 14px;
+  color: #9daaba;
+  font-size: 12px;
+}
+.reason-details summary {
+  cursor: pointer;
+  color: #c5d0da;
+}
+.reason-details code {
+  display: block;
+  margin-top: 8px;
+}
 .primary,
 .segmented button,
 .programs button,
