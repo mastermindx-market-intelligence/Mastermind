@@ -33,6 +33,7 @@ from integrations.workspace_agent_profiles import (
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG_PATH = ROOT / "config" / "workspace_agents" / "profile_catalog.v1.json"
 NOW = 1789822800000
+RETURN_SUBJECT_DIGEST = "a" * 64
 
 
 def load_catalog():
@@ -252,6 +253,7 @@ class ActivationBindingTests(unittest.TestCase):
             "profile_id": profile_id,
             "provider_channel_ref": "agtch_synthetic123",
             "agent_version_ref": "agent-version-20260919-01",
+            "return_subject_digest": RETURN_SUBJECT_DIGEST,
             "economic_envelope": economic(),
         }
         args.update(changes)
@@ -260,6 +262,7 @@ class ActivationBindingTests(unittest.TestCase):
     def test_activation_freezes_profile_channel_apps_economics_and_non_authority(self):
         binding = self.build()
         self.assertEqual(binding["schema"], ACTIVATION_SCHEMA)
+        self.assertEqual(binding["return_subject_digest"], RETURN_SUBJECT_DIGEST)
         profile = profile_by_id(load_catalog(), "program-continuity-adviser")
         self.assertEqual(binding["profile_digest"], profile_digest(profile))
         self.assertEqual(
@@ -295,11 +298,13 @@ class ActivationBindingTests(unittest.TestCase):
         self.assertFalse(binding["live_source_write_allowed"])
         self.assertFalse(binding["production_release_allowed"])
 
-    def test_activation_refuses_bad_provider_channel_and_version(self):
+    def test_activation_refuses_bad_provider_channel_version_and_return_subject(self):
         with self.assertRaises(WorkspaceProfileError):
             self.build(provider_channel_ref="agt_bad")
         with self.assertRaises(WorkspaceProfileError):
             self.build(agent_version_ref="bad version")
+        with self.assertRaises(WorkspaceProfileError):
+            self.build(return_subject_digest="not-a-subject-digest")
 
     def test_activation_revalidation_catches_any_profile_or_economic_drift(self):
         binding = self.build()
@@ -310,6 +315,9 @@ class ActivationBindingTests(unittest.TestCase):
         app_drift = copy.deepcopy(binding)
         app_drift["app_bindings"].append("mastermind-workbench-read")
         cases.append(app_drift)
+        subject_drift = copy.deepcopy(binding)
+        subject_drift["return_subject_digest"] = "b" * 64
+        cases.append(subject_drift)
         budget_drift = copy.deepcopy(binding)
         budget_drift["economic_envelope"]["usage_cap_quantity"] += 1
         cases.append(budget_drift)
