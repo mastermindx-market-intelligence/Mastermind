@@ -14,6 +14,7 @@ import os
 import re
 import selectors
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -913,10 +914,14 @@ def _run_canonical_acquisition_fetch(
                 stdin=subprocess.DEVNULL,
                 stdout=stdout_file,
                 stderr=stderr_file,
+                start_new_session=True,
             )
             process.wait(timeout=min(60, max(10, limits.max_cpu_seconds + 15)))
         except subprocess.TimeoutExpired as exc:
-            process.kill()
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             process.wait()
             raise WorkspaceError("commission acquisition fetch timed out") from exc
         except OSError as exc:

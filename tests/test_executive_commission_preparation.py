@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import signal
 import subprocess
 from pathlib import Path
 
@@ -837,6 +838,7 @@ def test_acquisition_fetch_uses_native_limits_fixed_remote_and_no_proxy(
     def fake_popen(command, **kwargs):
         captured["command"] = list(command)
         captured["env"] = dict(kwargs["env"])
+        captured["start_new_session"] = kwargs.get("start_new_session")
         return FakeProcess()
 
     monkeypatch.setattr(workspace.subprocess, "Popen", fake_popen)
@@ -884,6 +886,69 @@ def test_acquisition_fetch_uses_native_limits_fixed_remote_and_no_proxy(
     assert "http_proxy" not in fetch_env
     assert fetch_env["GIT_NO_LAZY_FETCH"] == "1"
     assert fetch_env["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert captured["start_new_session"] is True
+
+
+def test_acquisition_timeout_kills_and_reaps_entire_process_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {"waits": []}
+
+    class TimedOutProcess:
+        pid = 42420
+        returncode = None
+
+        def wait(self, timeout=None):
+            captured["waits"].append(timeout)
+            if timeout is not None:
+                raise subprocess.TimeoutExpired("git fetch", timeout)
+            self.returncode = -signal.SIGKILL
+            return self.returncode
+
+        def kill(self):
+            raise AssertionError("timeout must not kill only the parent process")
+
+    def fake_popen(command, **kwargs):
+        captured["start_new_session"] = kwargs.get("start_new_session")
+        return TimedOutProcess()
+
+    killpg_calls: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(workspace.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        workspace.os,
+        "killpg",
+        lambda pgid, value: killpg_calls.append((pgid, value)),
+    )
+    ref = CommissionRef(
+        repository="mastermindx-market-intelligence/Mastermind",
+        commit="1" * 40,
+        path="research/executive_commissions/COMMISSION.md",
+        content_sha256="2" * 64,
+    )
+    limits = workspace.CommissionDependencyLimits(
+        max_objects=16,
+        max_metadata_bytes=4096,
+        max_uncompressed_bytes=8192,
+        max_pack_bytes=16384,
+        max_cpu_seconds=1,
+    )
+
+    with pytest.raises(workspace.WorkspaceError, match="fetch timed out"):
+        workspace._run_canonical_acquisition_fetch(
+            tmp_path,
+            remote_url=(
+                "https://github.com/"
+                "mastermindx-market-intelligence/Mastermind.git"
+            ),
+            ref=ref,
+            limits=limits,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        )
+
+    assert captured["start_new_session"] is True
+    assert killpg_calls == [(42420, signal.SIGKILL)]
+    assert captured["waits"][-1] is None
 
 
 def test_broken_local_dependency_source_refuses_without_network_acquisition(
