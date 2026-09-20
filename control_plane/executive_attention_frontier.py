@@ -577,10 +577,13 @@ def _resolve_authority(
     if fact.conflict:
         # Never default upward on conflict.
         return AuthorityRequirement.UNKNOWN, fact.source, [Issue.AUTHORITY_CONFLICTED]
-    issues: list[Issue] = []
     if fact.source.freshness is not Freshness.CURRENT:
-        issues.append(Issue.AUTHORITY_UNKNOWN)
-    return fact.value, fact.source, issues
+        # A stale or unobserved source may not ground the authority class it
+        # claims.  Reporting the claim while flagging it would let a stale
+        # source assert CHAIRMAN authority — the exact upward default this law
+        # forbids (F0G §3.1 rule 4).
+        return AuthorityRequirement.UNKNOWN, fact.source, [Issue.AUTHORITY_UNKNOWN]
+    return fact.value, fact.source, []
 
 
 # --------------------------------------------------------------------------
@@ -823,8 +826,11 @@ def _derive_serviceability(
         target = demand.action_target.value
         if not isinstance(target, ActionTarget):
             raise TypeError("action_target Fact.value must be ActionTarget")
-        target_value, target_degraded = _service_fact(demand.action_target)
-        if target_degraded:
+        if demand.action_target.conflict:
+            # Conflicting target evidence blocks action outright.
+            reasons.append(ServiceabilityReason.ACTION_TARGET_CONFLICT)
+            blocked = True
+        elif demand.action_target.source.freshness is not Freshness.CURRENT:
             # A stale binding ref is not the current action target.
             reasons.append(ServiceabilityReason.STALE_LOAD_BEARING_SOURCE)
             issues.append(Issue.TARGET_EVIDENCE_UNAVAILABLE)
@@ -1384,9 +1390,7 @@ def compute_attention_frontier(
         fairness_debt[authority_value] = {
             "deferred_ordinary": len(hidden),
             "ready_age_unknown": sum(
-                1 for did in hidden
-                if by_id[did].became_actionable_at is None
-                or _instant(by_id[did].became_actionable_at.value) is None
+                1 for did in hidden if Issue.READY_AGE_UNKNOWN in issues_of[did]
             ),
         }
 
@@ -1400,8 +1404,11 @@ def compute_attention_frontier(
         "authority_unknown": sum(
             1 for a in authority_of.values() if a is AuthorityRequirement.UNKNOWN
         ),
+        # Counts every demand whose ready age is not provable — absent, stale,
+        # conflicted or unparseable — so the summary can never contradict the
+        # per-item issues it summarises.
         "ready_age_unknown": sum(
-            1 for d in ordered if d.became_actionable_at is None
+            1 for did in issues_of if Issue.READY_AGE_UNKNOWN in issues_of[did]
         ),
         "bundles": len(bundles),
     }
