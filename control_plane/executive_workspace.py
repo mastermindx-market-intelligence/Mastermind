@@ -29,6 +29,12 @@ _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _LINKED_OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 _LINKED_LANE_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _EXACT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_CANONICAL_COMMISSION_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+_CANONICAL_COMMISSION_REMOTE_URL = (
+    "https://github.com/mastermindx-market-intelligence/Mastermind.git"
+)
+_COMMISSION_ACQUISITION_REMOTE = "mastermind-commission-acquisition"
+_COMMISSION_ACQUISITION_DIR = ".commission-acquisition"
 LINKED_WORKTREE_LOCK_PREFIX = "mastermind-linked-worktree:v1"
 LAUNCH_CLEAN_STATUS_ARGS = (
     "status",
@@ -236,6 +242,7 @@ class CommissionDependencyLimits:
     max_metadata_bytes: int
     max_uncompressed_bytes: int
     max_pack_bytes: int
+    max_cpu_seconds: int = 15
 
     def __post_init__(self) -> None:
         values = (
@@ -243,6 +250,7 @@ class CommissionDependencyLimits:
             self.max_metadata_bytes,
             self.max_uncompressed_bytes,
             self.max_pack_bytes,
+            self.max_cpu_seconds,
         )
         if any(type(value) is not int or value <= 0 for value in values):
             raise WorkspaceError("commission dependency limits must be positive integers")
@@ -253,12 +261,20 @@ class CommissionDependencyPlan:
     source_repository: str | Path
     commission_ref: CommissionRef
     limits: CommissionDependencyLimits
+    acquire_missing_from_canonical: bool = False
 
     def __post_init__(self) -> None:
         if type(self.commission_ref) is not CommissionRef:
             raise WorkspaceError("commission dependency requires canonical CommissionRef")
         if type(self.limits) is not CommissionDependencyLimits:
             raise WorkspaceError("commission dependency requires exact limits")
+        if type(self.acquire_missing_from_canonical) is not bool:
+            raise WorkspaceError("commission acquisition flag must be boolean")
+        if (
+            self.acquire_missing_from_canonical
+            and self.commission_ref.repository != _CANONICAL_COMMISSION_REPOSITORY
+        ):
+            raise WorkspaceError("commission acquisition repository is not canonical")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -649,6 +665,559 @@ def _discard_partial_workspace(destination: Path) -> None:
         pass
 
 
+def _commission_acquisition_identity(
+    *, job_id: str, base_sha: str, ref: CommissionRef
+) -> bytes:
+    return (
+        "mastermind.executive_commission_acquisition/v1\n"
+        f"job_id={job_id}\n"
+        f"base_sha={base_sha}\n"
+        f"repository={ref.repository}\n"
+        f"commit={ref.commit}\n"
+        f"path={ref.path}\n"
+        f"content_sha256={ref.content_sha256}\n"
+    ).encode("utf-8")
+
+
+def _require_private_control_directory(path: Path, *, label: str) -> None:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise WorkspaceError(f"{label} could not be observed") from exc
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) & 0o077
+    ):
+        raise WorkspaceError(f"{label} is not control-owned and private")
+
+
+def _acquisition_operation_path(root: Path, *, job_id: str) -> Path:
+    return root / _COMMISSION_ACQUISITION_DIR / job_id.lower()
+
+
+def _cleanup_acquisition_operation(operation_path: Path) -> None:
+    parent = operation_path.parent
+    try:
+        if operation_path.is_symlink() or operation_path.is_file():
+            operation_path.unlink()
+        elif operation_path.is_dir():
+            shutil.rmtree(operation_path, ignore_errors=True)
+        if parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+    except OSError:
+        # A synchronous cleanup failure is caught by the caller before
+        # SHARED_HANDOFF.  Crash leftovers are reconciled on the same identity
+        # at the beginning of the next preparation.
+        pass
+
+
+def _reconcile_stale_acquisition(
+    root: Path,
+    destination: Path,
+    *,
+    job_id: str,
+    base_sha: str,
+    ref: CommissionRef,
+) -> None:
+    operation_path = _acquisition_operation_path(root, job_id=job_id)
+    if not os.path.lexists(operation_path):
+        return
+    acquisition_root = operation_path.parent
+    _require_private_control_directory(
+        acquisition_root, label="commission acquisition root"
+    )
+    _require_private_control_directory(
+        operation_path, label="commission acquisition operation"
+    )
+    identity_path = operation_path / "identity"
+    try:
+        observed = identity_path.read_bytes()
+    except OSError as exc:
+        raise WorkspaceError(
+            "commission acquisition crash identity is unavailable"
+        ) from exc
+    expected = _commission_acquisition_identity(
+        job_id=job_id, base_sha=base_sha, ref=ref
+    )
+    if observed != expected:
+        raise WorkspaceError("commission acquisition crash identity drifted")
+
+    # The acquisition operation is removed before STATE B begins.  Therefore a
+    # matching leftover proves any same-name destination is still a partial
+    # STATE A construction from this exact operation, not a handed-off worker
+    # workspace.  Refuse ambiguous path types/ownership rather than deleting.
+    if os.path.lexists(destination):
+        if destination.is_symlink() or not destination.is_dir():
+            raise WorkspaceError(
+                "commission acquisition crash left an ambiguous workspace path"
+            )
+        info = destination.lstat()
+        if info.st_uid != os.geteuid():
+            raise WorkspaceError(
+                "commission acquisition crash workspace is not control-owned"
+            )
+        shutil.rmtree(destination)
+    _cleanup_acquisition_operation(operation_path)
+
+
+def _canonical_commission_remote_url(ref: CommissionRef) -> str:
+    if ref.repository != _CANONICAL_COMMISSION_REPOSITORY:
+        raise WorkspaceError("commission acquisition repository is not canonical")
+    return _CANONICAL_COMMISSION_REMOTE_URL
+
+
+def _commission_delta_locally_complete(
+    source: Path,
+    *,
+    base_sha: str,
+    ref: CommissionRef,
+    limits: CommissionDependencyLimits,
+    env: dict[str, str],
+) -> bool:
+    read_env = git_observation_env(env)
+    read_env["GIT_NO_LAZY_FETCH"] = "1"
+    read_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    status_code, resolved_commit, _stderr = _run_status(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"{ref.commit}^{{commit}}",
+        ],
+        cwd=None,
+        env=read_env,
+    )
+    if status_code == 1:
+        return False
+    if status_code != 0:
+        raise WorkspaceError(
+            "commission dependency local object state is unreadable"
+        )
+    if resolved_commit != ref.commit:
+        raise WorkspaceError("commission dependency commit identity drifted")
+    raw = _run_bounded_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-list",
+            "--objects",
+            "--no-object-names",
+            "--missing=print",
+            ref.commit,
+            f"^{base_sha}",
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=limits.max_metadata_bytes,
+        bytes_limit_message="commission dependency metadata exceeds limit",
+        max_stdout_lines=limits.max_objects,
+        lines_limit_message="commission dependency object count exceeds limit",
+    )
+    try:
+        lines = raw.decode("ascii", errors="strict").splitlines()
+    except UnicodeDecodeError as exc:
+        raise WorkspaceError("commission dependency object metadata is malformed") from exc
+    return not any(line.startswith("?") for line in lines)
+
+
+def _run_canonical_acquisition_fetch(
+    quarantine: Path,
+    *,
+    remote_url: str,
+    ref: CommissionRef,
+    limits: CommissionDependencyLimits,
+    env: dict[str, str],
+) -> None:
+    # Do not use preexec_fn here: this function is called from asyncio.to_thread
+    # in the production service, and preexec_fn is unsafe in a multithreaded
+    # parent.  POSIX sh applies native rlimits in the child before exec instead.
+    file_blocks = max(1, (limits.max_pack_bytes + 511) // 512)
+    shell = (
+        'ulimit -f "$1" || exit 97; '
+        'ulimit -t "$2" || exit 98; '
+        'ulimit -n 64 || exit 99; '
+        'shift 2; exec "$@"'
+    )
+    command = [
+        "/bin/sh",
+        "-c",
+        shell,
+        "mastermind-commission-acquisition",
+        str(file_blocks),
+        str(limits.max_cpu_seconds),
+        "git",
+        "-C",
+        str(quarantine),
+        "-c",
+        "protocol.version=2",
+        "-c",
+        "http.followRedirects=false",
+        "-c",
+        "http.proxy=",
+        "-c",
+        "http.maxRequests=1",
+        "-c",
+        "fetch.unpackLimit=1",
+        "-c",
+        "fetch.writeCommitGraph=false",
+        "-c",
+        "fetch.recurseSubmodules=false",
+        "-c",
+        "maintenance.auto=false",
+        "-c",
+        "gc.auto=0",
+        "-c",
+        "transfer.fsckObjects=true",
+        "-c",
+        "fetch.fsckObjects=true",
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "--no-write-fetch-head",
+        f"--filter=blob:limit={limits.max_uncompressed_bytes}",
+        _COMMISSION_ACQUISITION_REMOTE,
+        ref.commit,
+    ]
+    fetch_env = dict(env)
+    fetch_env["GIT_NO_LAZY_FETCH"] = "1"
+    fetch_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    for proxy_name in (
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ):
+        fetch_env.pop(proxy_name, None)
+    # remote_url is persisted only in the temporary named remote; it is passed
+    # here solely to make the fixed-source binding visible to tests/review.
+    if not remote_url:
+        raise WorkspaceError("commission acquisition remote is unavailable")
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=None,
+                env=fetch_env,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_file,
+                stderr=stderr_file,
+            )
+            process.wait(timeout=min(60, max(10, limits.max_cpu_seconds + 15)))
+        except subprocess.TimeoutExpired as exc:
+            process.kill()
+            process.wait()
+            raise WorkspaceError("commission acquisition fetch timed out") from exc
+        except OSError as exc:
+            raise WorkspaceError("commission acquisition fetch could not start") from exc
+        if process.returncode != 0:
+            stderr_file.seek(0)
+            detail = stderr_file.read()[-1000:].decode(
+                "utf-8", errors="replace"
+            ).strip()
+            raise WorkspaceError(
+                f"commission acquisition fetch failed ({process.returncode}): {detail}"
+            )
+
+
+def _acquire_commission_quarantine(
+    source: Path,
+    root: Path,
+    *,
+    job_id: str,
+    base_sha: str,
+    plan: CommissionDependencyPlan,
+    env: dict[str, str],
+) -> tuple[Path, Path]:
+    ref = plan.commission_ref
+    limits = plan.limits
+    remote_url = _canonical_commission_remote_url(ref)
+    acquisition_root = root / _COMMISSION_ACQUISITION_DIR
+    if os.path.lexists(acquisition_root):
+        _require_private_control_directory(
+            acquisition_root, label="commission acquisition root"
+        )
+    else:
+        acquisition_root.mkdir(mode=0o700)
+        _require_private_control_directory(
+            acquisition_root, label="commission acquisition root"
+        )
+    operation_path = _acquisition_operation_path(root, job_id=job_id)
+    if os.path.lexists(operation_path):
+        raise WorkspaceError("commission acquisition operation was not reconciled")
+    operation_path.mkdir(mode=0o700)
+    identity_path = operation_path / "identity"
+    identity_path.write_bytes(
+        _commission_acquisition_identity(
+            job_id=job_id, base_sha=base_sha, ref=ref
+        )
+    )
+    identity_path.chmod(0o600)
+    quarantine = operation_path / "repository.git"
+
+    try:
+        _run(
+            [
+                "git",
+                "clone",
+                "--bare",
+                "--local",
+                "--no-hardlinks",
+                str(source),
+                str(quarantine),
+            ],
+            cwd=None,
+            env=env,
+        )
+        for remote in [
+            value for value in _run(
+                ["git", "-C", str(quarantine), "remote"], cwd=None, env=env
+            ).splitlines()
+            if value
+        ]:
+            _run(
+                ["git", "-C", str(quarantine), "remote", "remove", remote],
+                cwd=None,
+                env=env,
+            )
+        if _run(["git", "-C", str(quarantine), "remote"], cwd=None, env=env):
+            raise WorkspaceError("commission acquisition seed retained a remote")
+
+        read_env = git_observation_env(env)
+        read_env["GIT_NO_LAZY_FETCH"] = "1"
+        read_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+        resolved_base = _run(
+            ["git", "-C", str(quarantine), "rev-parse", "--verify", f"{base_sha}^{{commit}}"],
+            cwd=None,
+            env=read_env,
+        )
+        if resolved_base != base_sha:
+            raise WorkspaceError("commission acquisition base identity drifted")
+
+        config_path = quarantine / "config"
+        config_preimage = config_path.read_bytes()
+        config_mode = stat.S_IMODE(config_path.lstat().st_mode)
+        refs_before = _run(
+            ["git", "-C", str(quarantine), "for-each-ref", "--format=%(refname) %(objectname)"],
+            cwd=None,
+            env=read_env,
+        )
+        pack_dir = quarantine / "objects" / "pack"
+        before_pack_files = (
+            {path.name for path in pack_dir.iterdir()} if pack_dir.is_dir() else set()
+        )
+
+        _run(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "remote",
+                "add",
+                _COMMISSION_ACQUISITION_REMOTE,
+                remote_url,
+            ],
+            cwd=None,
+            env=env,
+        )
+        try:
+            _run_canonical_acquisition_fetch(
+                quarantine,
+                remote_url=remote_url,
+                ref=ref,
+                limits=limits,
+                env=env,
+            )
+        finally:
+            # Restore the exact pre-acquisition config bytes even if Git added
+            # promisor/filter keys or the fetch failed.
+            config_path.write_bytes(config_preimage)
+            config_path.chmod(config_mode)
+
+        if config_path.read_bytes() != config_preimage:
+            raise WorkspaceError("commission acquisition config was not restored")
+        if _run(["git", "-C", str(quarantine), "remote"], cwd=None, env=read_env):
+            raise WorkspaceError("commission acquisition retained a remote")
+        if (quarantine / "FETCH_HEAD").exists():
+            raise WorkspaceError("commission acquisition wrote FETCH_HEAD")
+        refs_after = _run(
+            ["git", "-C", str(quarantine), "for-each-ref", "--format=%(refname) %(objectname)"],
+            cwd=None,
+            env=read_env,
+        )
+        if refs_after != refs_before:
+            raise WorkspaceError("commission acquisition changed quarantine refs")
+
+        after_pack_files = (
+            {path.name for path in pack_dir.iterdir()} if pack_dir.is_dir() else set()
+        )
+        new_names = after_pack_files - before_pack_files
+        new_pack_paths = [
+            pack_dir / name for name in new_names if name.endswith(".pack")
+        ]
+        if sum(path.stat().st_size for path in new_pack_paths) > limits.max_pack_bytes:
+            raise WorkspaceError("commission acquisition pack exceeds limit")
+        new_index_paths = [
+            pack_dir / name
+            for name in new_names
+            if name.endswith((".idx", ".rev", ".bitmap"))
+        ]
+        if sum(path.stat().st_size for path in new_index_paths) > limits.max_metadata_bytes:
+            raise WorkspaceError("commission acquisition metadata exceeds limit")
+
+        resolved_commit = _run(
+            ["git", "-C", str(quarantine), "rev-parse", "--verify", f"{ref.commit}^{{commit}}"],
+            cwd=None,
+            env=read_env,
+        )
+        if resolved_commit != ref.commit:
+            raise WorkspaceError("commission acquisition commit identity drifted")
+        try:
+            _run(
+                ["git", "-C", str(quarantine), "merge-base", "--is-ancestor", base_sha, ref.commit],
+                cwd=None,
+                env=read_env,
+            )
+        except WorkspaceError as exc:
+            raise WorkspaceError(
+                "commission acquisition commit does not descend from assigned base"
+            ) from exc
+
+        raw_delta = _run_bounded_bytes_with_input(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "rev-list",
+                "--objects",
+                "--no-object-names",
+                "--missing=print",
+                ref.commit,
+                f"^{base_sha}",
+            ],
+            cwd=None,
+            env=read_env,
+            input_bytes=b"",
+            max_stdout_bytes=limits.max_metadata_bytes,
+            bytes_limit_message="commission acquisition metadata exceeds limit",
+            max_stdout_lines=limits.max_objects,
+            lines_limit_message="commission acquisition object count exceeds limit",
+        )
+        try:
+            delta_lines = raw_delta.decode("ascii", errors="strict").splitlines()
+        except UnicodeDecodeError as exc:
+            raise WorkspaceError("commission acquisition object metadata is malformed") from exc
+        if any(line.startswith("?") for line in delta_lines):
+            raise WorkspaceError("commission acquisition closure is incomplete")
+        object_ids = [line for line in delta_lines if line]
+        object_evidence = _run_bytes_with_input(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "cat-file",
+                "--batch-check=%(objectname) %(objectsize)",
+            ],
+            cwd=None,
+            env=read_env,
+            input_bytes=("\n".join(object_ids) + "\n").encode("ascii"),
+        ).decode("ascii", errors="strict")
+        total_uncompressed = 0
+        for line in object_evidence.splitlines():
+            fields = line.split()
+            if len(fields) != 2 or not fields[1].isdigit():
+                raise WorkspaceError(
+                    "commission acquisition object evidence is malformed"
+                )
+            total_uncompressed += int(fields[1])
+        if total_uncompressed > limits.max_uncompressed_bytes:
+            raise WorkspaceError("commission acquisition bytes exceed limit")
+
+        # A trusted local seed may itself be a partial clone.  Successful
+        # acquisition must become an ordinary local object store before it can
+        # feed SHARED_HANDOFF, so scrub every promisor marker, not only markers
+        # created by this fetch.  The no-lazy fsck below proves that removing
+        # those promises did not hide a missing object in C's reachable graph.
+        all_promisor = (
+            list(pack_dir.glob("*.promisor")) if pack_dir.is_dir() else []
+        )
+        for marker in all_promisor:
+            marker.unlink()
+        if any(pack_dir.glob("*.promisor")):
+            raise WorkspaceError("commission acquisition retained promisor markers")
+        promisor_config_status, promisor_config, _promisor_error = _run_status(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "config",
+                "--get-regexp",
+                r"^remote\..*\.(promisor|partialclonefilter)$",
+            ],
+            cwd=None,
+            env=read_env,
+        )
+        if promisor_config_status not in {0, 1}:
+            raise WorkspaceError("commission acquisition promisor config is unreadable")
+        if promisor_config_status == 0 or promisor_config:
+            raise WorkspaceError("commission acquisition retained promisor config")
+
+        # Re-run the exact delta walk only after every promisor marker/config
+        # is gone and lazy fetching is disabled.
+        closed_delta = _run_bounded_bytes_with_input(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "rev-list",
+                "--objects",
+                "--no-object-names",
+                "--missing=print",
+                ref.commit,
+                f"^{base_sha}",
+            ],
+            cwd=None,
+            env=read_env,
+            input_bytes=b"",
+            max_stdout_bytes=limits.max_metadata_bytes,
+            bytes_limit_message="commission acquisition metadata exceeds limit",
+            max_stdout_lines=limits.max_objects,
+            lines_limit_message="commission acquisition object count exceeds limit",
+        )
+        if any(line.startswith(b"?") for line in closed_delta.splitlines()):
+            raise WorkspaceError("commission acquisition closure is incomplete after scrub")
+        try:
+            _run(
+                [
+                    "git",
+                    "-C",
+                    str(quarantine),
+                    "fsck",
+                    "--connectivity-only",
+                    "--no-dangling",
+                    ref.commit,
+                ],
+                cwd=None,
+                env=read_env,
+            )
+        except WorkspaceError as exc:
+            raise WorkspaceError(
+                "commission acquisition connectivity is incomplete after scrub"
+            ) from exc
+        return quarantine, operation_path
+    except BaseException:
+        _cleanup_acquisition_operation(operation_path)
+        raise
+
+
 def _prepare_commission_dependency(
     destination: Path,
     *,
@@ -866,20 +1435,47 @@ def prepare_credentialless_clone(
     destination = (root / safe_job_id.lower()).resolve()
     if destination.parent != root:
         raise WorkspaceError("workspace destination escaped its assigned root")
-    if destination.exists():
-        raise WorkspaceError(f"workspace already exists: {destination}")
 
     selected_branch = branch or f"codex/job-{safe_job_id.lower()}"
     # STATE A — CONTROL_CONSTRUCTION: mutating Git is allowed. Do not wrap
     # clone/checkout/switch/remote-remove in the read-only observation env.
     env = _git_env(root / ".supervisor-home")
-    _run(["git", "-C", str(source), "rev-parse", "--is-inside-work-tree"], cwd=None, env=env)
-    resolved_base = _run(
-        ["git", "-C", str(source), "rev-parse", "--verify", f"{base_sha}^{{commit}}"],
+    _run(
+        ["git", "-C", str(source), "rev-parse", "--is-inside-work-tree"],
         cwd=None,
         env=env,
     )
-    _run(["git", "check-ref-format", "--branch", selected_branch], cwd=source, env=env)
+    resolved_base = _run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-parse",
+            "--verify",
+            f"{base_sha}^{{commit}}",
+        ],
+        cwd=None,
+        env=env,
+    )
+    if (
+        commission_dependency is not None
+        and commission_dependency.acquire_missing_from_canonical
+    ):
+        _reconcile_stale_acquisition(
+            root,
+            destination,
+            job_id=safe_job_id,
+            base_sha=resolved_base,
+            ref=commission_dependency.commission_ref,
+        )
+    if destination.exists():
+        raise WorkspaceError(f"workspace already exists: {destination}")
+    _run(
+        ["git", "check-ref-format", "--branch", selected_branch],
+        cwd=source,
+        env=env,
+    )
+    acquisition_operation: Path | None = None
     try:
         _run(
             ["git", "clone", "--local", "--no-hardlinks", "--no-checkout", str(source), str(destination)],
@@ -898,13 +1494,58 @@ def prepare_credentialless_clone(
         if actual_base != resolved_base or remaining or not git_dir.is_dir():
             raise WorkspaceError("prepared workspace failed its exact-SHA, no-remote self-check")
         if commission_dependency is not None:
+            dependency_plan = commission_dependency
+            if commission_dependency.acquire_missing_from_canonical:
+                dependency_source = Path(
+                    commission_dependency.source_repository
+                ).expanduser().resolve()
+                if not dependency_source.is_dir():
+                    raise WorkspaceError(
+                        "commission dependency source is unavailable"
+                    )
+                if not _commission_delta_locally_complete(
+                    dependency_source,
+                    base_sha=resolved_base,
+                    ref=commission_dependency.commission_ref,
+                    limits=commission_dependency.limits,
+                    env=env,
+                ):
+                    quarantine, acquisition_operation = (
+                        _acquire_commission_quarantine(
+                            dependency_source,
+                            root,
+                            job_id=safe_job_id,
+                            base_sha=resolved_base,
+                            plan=commission_dependency,
+                            env=env,
+                        )
+                    )
+                    dependency_plan = CommissionDependencyPlan(
+                        source_repository=quarantine,
+                        commission_ref=commission_dependency.commission_ref,
+                        limits=commission_dependency.limits,
+                    )
             _prepare_commission_dependency(
                 destination,
                 base_sha=resolved_base,
-                plan=commission_dependency,
+                plan=dependency_plan,
                 env=env,
             )
-            if _run(["git", "rev-parse", "HEAD"], cwd=destination, env=env) != resolved_base:
+            if acquisition_operation is not None:
+                _cleanup_acquisition_operation(acquisition_operation)
+                if os.path.lexists(acquisition_operation):
+                    raise WorkspaceError(
+                        "commission acquisition cleanup did not complete"
+                    )
+                acquisition_operation = None
+            if (
+                _run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=destination,
+                    env=env,
+                )
+                != resolved_base
+            ):
                 raise WorkspaceError("commission preparation moved workspace HEAD")
             if _run(["git", "remote"], cwd=destination, env=env):
                 raise WorkspaceError("commission preparation introduced a remote")
@@ -983,7 +1624,10 @@ def prepare_credentialless_clone(
     except BaseException:
         # Any failure past this point leaves a half-written clone that
         # would block every later attempt for this job ID.  Discard it
-        # and re-raise the real cause unchanged.
+        # and re-raise the real cause unchanged.  Acquisition is also
+        # control-only STATE A state and must never survive into handoff.
+        if acquisition_operation is not None:
+            _cleanup_acquisition_operation(acquisition_operation)
         _discard_partial_workspace(destination)
         raise
     return WorkspaceReceipt(
