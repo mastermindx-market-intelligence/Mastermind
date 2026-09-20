@@ -57,7 +57,7 @@ class Fake:
         if name in b.EDIT_TOOLS:
             self.info["nodeCount"] = self.info.get("nodeCount", 0) + 1
             if self.drift:
-                self.info["fileName"] = "Another file"
+                self.info["fileId"] = "another-file"
             if self.error:
                 raise TimeoutError()
             if self.tool_error:
