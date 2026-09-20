@@ -33,12 +33,44 @@ class Refusal(RuntimeError):
     pass
 
 
+class EffectUnknown(RuntimeError):
+    pass
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
 def _runtime_root(root: Path | None = None) -> Path:
-    return root if root is not None else Path.home() / ".local" / "share" / "mastermind-paper" / "runtime"
+    if root is not None:
+        target = root.absolute()
+        anchor = target.parent
+    else:
+        anchor = Path.home().absolute()
+        target = anchor / ".local" / "share" / "mastermind-paper" / "runtime"
+    # Refuse user-controlled symlink components before creating or reading the
+    # fixed runtime root. Test-only root injection uses its immediate parent as
+    # the trust anchor; production checks every component below the real home.
+    current = anchor
+    try:
+        info = current.lstat()
+    except OSError as exc:
+        raise Refusal("RUNTIME_ROOT_UNSAFE") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise Refusal("RUNTIME_ROOT_UNSAFE")
+    try:
+        relative = target.relative_to(anchor)
+    except ValueError as exc:
+        raise Refusal("RUNTIME_ROOT_UNSAFE") from exc
+    for part in relative.parts:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            raise Refusal("RUNTIME_ROOT_UNSAFE")
+    return target
 
 
 def _require_private_dir(path: Path, *, create: bool = False) -> Path:
@@ -139,7 +171,13 @@ def verify(generation: str, *, root: Path | None = None, _source_dir: Path | Non
         raise Refusal("RUNTIME_DIRECTORY_UNSAFE")
     expected = _expected_hashes(_read_source(_source_dir))
     receipt = _receipt(target)
-    if receipt.get("generation") != generation or receipt.get("source_sha256") != expected:
+    if (
+        receipt.get("generation") != generation
+        or receipt.get("source_sha256") != expected
+        or receipt.get("bridge_sha256") != expected["bridge.py"]
+        or receipt.get("network_install_performed") is not False
+        or receipt.get("production_acceptance") is not False
+    ):
         raise Refusal("GENERATION_COLLISION")
     source = target / "source"
     _require_private_dir(source)
@@ -199,16 +237,26 @@ def stage(generation: str, *, root: Path | None = None, _source_dir: Path | None
             }
             _write_private(tmp / "RUNTIME.json", (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode())
             # Same-root rename makes the complete generation visible atomically.
-            os.rename(tmp, target)
-            root_fd = os.open(root, os.O_RDONLY)
+            # After this commit point any failure is effect-ambiguous: the
+            # generation may already be visible even if durable sync or final
+            # verification cannot complete.
+            committed = False
             try:
-                os.fsync(root_fd)
-            finally:
-                os.close(root_fd)
+                os.rename(tmp, target)
+                committed = True
+                root_fd = os.open(root, os.O_RDONLY)
+                try:
+                    os.fsync(root_fd)
+                finally:
+                    os.close(root_fd)
+                result = verify(generation, root=root, _source_dir=_source_dir)
+            except (Refusal, OSError, subprocess.SubprocessError) as exc:
+                if committed:
+                    raise EffectUnknown("RUNTIME_EFFECT_UNKNOWN") from exc
+                raise
         finally:
             if tmp.exists():
                 shutil.rmtree(tmp)
-        result = verify(generation, root=root, _source_dir=_source_dir)
         result["state"] = "RUNTIME_STAGED"
         return result
 
@@ -222,6 +270,14 @@ def main() -> int:
         result = stage(args.generation) if args.action == "stage" else verify(args.generation)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
+    except EffectUnknown:
+        print(json.dumps({
+            "state": "EFFECT_UNKNOWN",
+            "retry_allowed": False,
+            "generation": args.generation,
+            "reconcile_action": "verify",
+        }))
+        return 3
     except (Refusal, OSError, subprocess.SubprocessError) as exc:
         code = str(exc) if isinstance(exc, Refusal) else "LOCAL_FAILURE"
         print(json.dumps({"state": code, "retry_allowed": False}))

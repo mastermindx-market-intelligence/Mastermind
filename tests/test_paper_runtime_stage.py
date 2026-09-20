@@ -6,6 +6,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -95,6 +96,50 @@ class RuntimeStageTests(unittest.TestCase):
         with stage._stage_lock(self.root):
             with self.assertRaisesRegex(stage.Refusal, "RUNTIME_STAGE_BUSY"):
                 stage.stage("v2", root=self.root, _source_dir=self.source)
+
+    def test_receipt_tamper_refuses_verification(self):
+        stage.stage("v2", root=self.root, _source_dir=self.source)
+        receipt_path = self.root / "v2" / "RUNTIME.json"
+        original = json.loads(receipt_path.read_text())
+        for key, bad in (
+            ("bridge_sha256", "0" * 64),
+            ("network_install_performed", True),
+            ("production_acceptance", True),
+        ):
+            with self.subTest(key=key):
+                tampered = dict(original)
+                tampered[key] = bad
+                receipt_path.write_text(json.dumps(tampered), encoding="utf-8")
+                with self.assertRaisesRegex(stage.Refusal, "GENERATION_COLLISION"):
+                    stage.verify("v2", root=self.root, _source_dir=self.source)
+                receipt_path.write_text(json.dumps(original), encoding="utf-8")
+
+    def test_parent_symlink_runtime_root_refuses_before_write(self):
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        link = Path(self.tmp.name) / "runtime-link"
+        link.symlink_to(outside, target_is_directory=True)
+        escaped_root = link / "runtime"
+        with self.assertRaisesRegex(stage.Refusal, "RUNTIME_ROOT_UNSAFE"):
+            stage.stage("v2", root=escaped_root, _source_dir=self.source)
+        self.assertFalse((outside / "runtime").exists())
+
+    def test_post_rename_sync_failure_is_effect_unknown(self):
+        real_fsync = stage.os.fsync
+
+        def fail_directory_fsync(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError("forced directory fsync failure")
+            return real_fsync(fd)
+
+        with mock.patch.object(stage.os, "fsync", side_effect=fail_directory_fsync):
+            with self.assertRaisesRegex(stage.EffectUnknown, "RUNTIME_EFFECT_UNKNOWN"):
+                stage.stage("v2", root=self.root, _source_dir=self.source)
+        self.assertTrue((self.root / "v2").is_dir())
+        self.assertEqual(
+            stage.verify("v2", root=self.root, _source_dir=self.source)["state"],
+            "RUNTIME_VERIFIED",
+        )
 
     def test_receipt_and_source_are_private_regular_files(self):
         stage.stage("v2", root=self.root, _source_dir=self.source)
