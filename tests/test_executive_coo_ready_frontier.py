@@ -154,10 +154,12 @@ def test_two_live_read_only_children_do_not_starve_third_ready_sibling(tmp_path)
     cycle = CooCycle(runtime, dispatcher=dispatch)
     second = cycle.run_once(root.job_id)
     third = cycle.run_once(root.job_id)
+    reconcile = cycle.run_once(root.job_id)
 
     assert second.selected_job_id == by_step["step-1"].job_id
     assert third.selected_job_id == by_step["step-2"].job_id
-    assert calls == ["step-1", "step-2"]
+    assert reconcile.selected_job_id == by_step["step-0"].job_id
+    assert calls == ["step-1", "step-2", "step-0"]
     assert all(runtime.jobs.get_job(job.job_id).attempt_count == 1 for job in admitted)
 
 
@@ -179,3 +181,93 @@ def test_ready_frontier_refuses_write_capable_sibling(tmp_path):
     assert cycle._is_read_only_frontier_work(candidate)
     assert not cycle._is_read_only_frontier_work(write_candidate)
     assert not cycle._ready_frontier_candidate(write_candidate, [active])
+
+
+def test_ready_frontier_refuses_if_any_active_child_is_write_capable(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, first, second = _admitted_pair(runtime)
+    _start_first(runtime, root.job_id, first.job_id)
+    active = runtime.jobs.get_job(first.job_id)
+    candidate = runtime.jobs.get_job(second.job_id)
+    assert active is not None and candidate is not None
+
+    write_active = dataclasses.replace(
+        active,
+        requested_authorities=["READ", "WRITE_BRANCH"],
+        allowed_write_paths=["control_plane/example.py"],
+    )
+    cycle = CooCycle(runtime, dispatcher=lambda _job, _command: None)
+
+    assert not cycle._ready_frontier_candidate(candidate, [write_active])
+
+
+def test_ready_frontier_refuses_cross_plan_identity(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, first, second = _admitted_pair(runtime)
+    _start_first(runtime, root.job_id, first.job_id)
+    active = runtime.jobs.get_job(first.job_id)
+    candidate = runtime.jobs.get_job(second.job_id)
+    assert active is not None and candidate is not None
+
+    mismatched = dataclasses.replace(active, plan_digest="0" * 64)
+    cycle = CooCycle(runtime, dispatcher=lambda _job, _command: None)
+
+    assert not cycle._ready_frontier_candidate(candidate, [mismatched])
+
+
+def test_ready_frontier_refuses_if_active_quota_no_longer_holds_attempt(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, first, second = _admitted_pair(runtime)
+    started = _start_first(runtime, root.job_id, first.job_id)
+    active = runtime.jobs.get_job(first.job_id)
+    candidate = runtime.jobs.get_job(second.job_id)
+    assert active is not None and candidate is not None
+
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE worker_quota_classes SET status='AVAILABLE', held_attempt_id=NULL "
+            "WHERE worker_id=? AND quota_class=?",
+            (started.attempt.worker_id, started.attempt.quota_class),
+        )
+
+    cycle = CooCycle(runtime, dispatcher=lambda _job, _command: None)
+    assert not cycle._active_attempt_is_current_and_live(active)
+    assert not cycle._ready_frontier_candidate(candidate, [active])
+
+
+def test_ready_frontier_refuses_non_read_authority_without_write_paths(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, first, second = _admitted_pair(runtime)
+    _start_first(runtime, root.job_id, first.job_id)
+    active = runtime.jobs.get_job(first.job_id)
+    candidate = runtime.jobs.get_job(second.job_id)
+    assert active is not None and candidate is not None
+
+    authority_only = dataclasses.replace(
+        candidate,
+        requested_authorities=["READ", "WRITE_BRANCH"],
+    )
+    cycle = CooCycle(runtime, dispatcher=lambda _job, _command: None)
+
+    assert authority_only.allowed_write_paths == []
+    assert not cycle._is_read_only_frontier_work(authority_only)
+    assert not cycle._ready_frontier_candidate(authority_only, [active])
+
+
+def test_ready_frontier_refuses_write_paths_even_with_read_only_authority(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, first, second = _admitted_pair(runtime)
+    _start_first(runtime, root.job_id, first.job_id)
+    active = runtime.jobs.get_job(first.job_id)
+    candidate = runtime.jobs.get_job(second.job_id)
+    assert active is not None and candidate is not None
+
+    path_only = dataclasses.replace(
+        candidate,
+        allowed_write_paths=["control_plane/example.py"],
+    )
+    cycle = CooCycle(runtime, dispatcher=lambda _job, _command: None)
+
+    assert path_only.requested_authorities == ["READ"]
+    assert not cycle._is_read_only_frontier_work(path_only)
+    assert not cycle._ready_frontier_candidate(path_only, [active])
