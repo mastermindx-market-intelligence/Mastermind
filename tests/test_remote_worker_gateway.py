@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from control_plane.executive_worker_broker import BROKER_RESPONSE_SCHEMA_VERSION
-from control_plane.remote_worker_transport import encode_frame
+from control_plane.remote_worker_transport import build_request, encode_frame
 from ops.executive_os.remote_worker_gateway import RemoteWorkerGateway
 from ops.executive_os.remote_worker_gateway_config import (
     REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA,
@@ -19,6 +19,7 @@ from ops.executive_os.remote_worker_gateway_config import (
 )
 from tests.test_remote_worker_transport import (
     HOST_REF,
+    IDENTITY,
     _certificate_fixture,
     _openssl_available,
     _request,
@@ -67,7 +68,11 @@ async def _fake_broker(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
     await writer.wait_closed()
 
 
-async def _gateway_fixture(tmp_path: Path) -> _GatewayFixture:
+async def _gateway_fixture(
+    tmp_path: Path,
+    *,
+    allowed_operations: set[str] | frozenset[str] = frozenset({"status"}),
+) -> _GatewayFixture:
     ca_key, ca_cert, _ = _certificate_fixture(
         tmp_path,
         name="gateway-ca",
@@ -104,7 +109,7 @@ async def _gateway_fixture(tmp_path: Path) -> _GatewayFixture:
         expected_control_fingerprint=_cert_sha256(control_cert),
         broker_socket_path=broker_socket,
         allowed_worker_ids={"WORKER-001"},
-        allowed_operations={"status"},
+        allowed_operations=allowed_operations,
     )
     gateway = RemoteWorkerGateway(config)
     server = await gateway.start_server()
@@ -181,7 +186,7 @@ async def test_loopback_mtls_one_read_request_end_to_end(tmp_path: Path) -> None
     try:
         response = await _exchange(fixture.endpoint, context, _request())
         assert response["outcome"] == "ok"
-        assert response["broker_response"] == {"worker": "RUN-001"}
+        assert response["broker_response"] == {"worker": "ATT-001"}
         assert response["host_ref"] == HOST_REF
         assert response["worker_id"] == "WORKER-001"
         assert response["request_sha256"] == _request()["request_sha256"]
@@ -301,6 +306,45 @@ async def test_closed_request_refusals_never_reach_broker(tmp_path: Path) -> Non
             assert response["outcome"] == "refused"
             assert response["broker_response"] is None
         assert calls == []
+    finally:
+        await _close_gateway(fixture)
+
+
+@pytest.mark.skipif(not _openssl_available(), reason="openssl unavailable")
+async def test_nested_start_assignment_retarget_never_reaches_broker(
+    tmp_path: Path,
+) -> None:
+    fixture = await _gateway_fixture(tmp_path, allowed_operations={"start"})
+    calls = 0
+
+    async def broker_call(*args: object, **kwargs: object) -> dict:
+        nonlocal calls
+        calls += 1
+        return {"should": "not happen"}
+
+    fixture.gateway.broker_call = broker_call
+    context = _client_context(
+        ca=fixture.config.ca_path,
+        cert=fixture.control_cert,
+        key=fixture.control_key,
+    )
+    request = build_request(
+        IDENTITY,
+        "start",
+        {
+            "launch_spec": {
+                "job_id": "JOB-INNER",
+                "run_id": "ATT-INNER",
+                "worker_id": IDENTITY["worker_id"],
+            },
+            "validation_commands": [],
+        },
+    )
+    try:
+        response = await _exchange(fixture.endpoint, context, request)
+        assert response["outcome"] == "refused"
+        assert response["broker_response"] is None
+        assert calls == 0
     finally:
         await _close_gateway(fixture)
 

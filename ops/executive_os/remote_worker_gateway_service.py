@@ -29,6 +29,7 @@ DEFAULT_BROKER_SOCKET_ROOT = Path("/var/run/mastermind-executive")
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_TLS_FILE_BYTES = 1024 * 1024
 _ACCOUNT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
+_GATEWAY_DIRECTORY_MODE = stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP
 
 CONFIG_FIELDS = frozenset(
     {
@@ -137,7 +138,7 @@ def _verify_directory_chain(
             or stat.S_ISLNK(info.st_mode)
             or info.st_uid != expected_owner_uid
             or info.st_gid != expected_group_gid
-            or stat.S_IMODE(info.st_mode) != 0o750
+            or stat.S_IMODE(info.st_mode) != _GATEWAY_DIRECTORY_MODE
         ):
             _refuse("GATEWAY_DIRECTORY_INVALID")
 

@@ -33,7 +33,7 @@ IDENTITY = {
 
 
 def _request(**overrides: object) -> dict:
-    request = build_request(IDENTITY, "status", {"run_id": "RUN-001"})
+    request = build_request(IDENTITY, "status", {"run_id": "ATT-001"})
     request.update(overrides)
     return request
 
@@ -287,6 +287,81 @@ def test_tls_contexts_require_tls_1_3_and_fingerprint(tmp_path: Path) -> None:
     context = build_client_ssl_context(binding)
     assert context.minimum_version == ssl.TLSVersion.TLSv1_3
     assert context.verify_mode == ssl.CERT_REQUIRED
+
+
+@pytest.mark.parametrize(
+    ("operation", "payload"),
+    [
+        (
+            "start",
+            {
+                "launch_spec": {
+                    "job_id": IDENTITY["job_id"],
+                    "run_id": "ATT-OTHER",
+                    "worker_id": IDENTITY["worker_id"],
+                },
+                "validation_commands": [],
+            },
+        ),
+        (
+            "start",
+            {
+                "launch_spec": {
+                    "job_id": "JOB-OTHER",
+                    "run_id": IDENTITY["attempt_id"],
+                    "worker_id": IDENTITY["worker_id"],
+                },
+                "validation_commands": [],
+            },
+        ),
+        (
+            "start",
+            {
+                "launch_spec": {
+                    "job_id": IDENTITY["job_id"],
+                    "run_id": IDENTITY["attempt_id"],
+                    "worker_id": "WORKER-OTHER",
+                },
+                "validation_commands": [],
+            },
+        ),
+        ("status", {"run_id": "ATT-OTHER"}),
+        ("collect", {"run_id": "ATT-OTHER"}),
+        ("cancel", {"run_id": "ATT-OTHER", "reason": "bounded cancel"}),
+        (
+            "validate",
+            {"run_id": "ATT-OTHER", "argv": ["/usr/bin/true"], "timeout_seconds": 1},
+        ),
+    ],
+)
+def test_gateway_request_refuses_nested_assignment_retargeting(
+    operation: str, payload: dict,
+) -> None:
+    request = build_request(IDENTITY, operation, payload)
+    with pytest.raises(TransportValidationError, match="payload"):
+        validate_request(
+            request,
+            expected_host_ref=HOST_REF,
+            allowed_worker_ids={IDENTITY["worker_id"]},
+            allowed_operations={operation},
+        )
+
+def test_matching_start_assignment_identity_is_accepted() -> None:
+    payload = {
+        "launch_spec": {
+            "job_id": IDENTITY["job_id"],
+            "run_id": IDENTITY["attempt_id"],
+            "worker_id": IDENTITY["worker_id"],
+        },
+        "validation_commands": [],
+    }
+    request = build_request(IDENTITY, "start", payload)
+    assert validate_request(
+        request,
+        expected_host_ref=HOST_REF,
+        allowed_worker_ids={IDENTITY["worker_id"]},
+        allowed_operations={"start"},
+    ) == request
 
 
 def test_versioned_broker_operation_round_trips_through_transport() -> None:

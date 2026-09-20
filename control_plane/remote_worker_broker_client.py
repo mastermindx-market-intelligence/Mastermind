@@ -24,6 +24,7 @@ from control_plane.remote_worker_transport import (
     build_client_ssl_context,
     build_request,
     encode_frame,
+    payload_retargets_authority,
     validate_response,
 )
 
@@ -34,7 +35,6 @@ _READ_ONLY_OPERATIONS = frozenset(
         "ohf-materialization-status",
     }
 )
-_BOUND_AUTHORITY_KEYS = frozenset({"host_ref", "job_id", "attempt_id", "worker_id"})
 _BOUND_PAYLOAD_IDENTITY_KEYS = frozenset({"session_epoch_id", "process_generation_id"})
 
 
@@ -92,23 +92,6 @@ class RemoteWorkerBrokerClient:
         observed = hashlib.sha256(certificate).hexdigest()
         return observed == self.binding.expected_server_fingerprint
 
-    def _payload_retargets_authority(self, value: Any) -> bool:
-        if isinstance(value, Mapping):
-            for key, child in value.items():
-                name = str(key)
-                if name in _BOUND_AUTHORITY_KEYS and child != self.identity[name]:
-                    return True
-                if name in _BOUND_PAYLOAD_IDENTITY_KEYS:
-                    expected = self.bound_payload_identity.get(name)
-                    if expected is None or child != expected:
-                        return True
-                if self._payload_retargets_authority(child):
-                    return True
-            return False
-        if isinstance(value, (list, tuple)):
-            return any(self._payload_retargets_authority(child) for child in value)
-        return False
-
     @staticmethod
     def _operation_is_observational(operation: str, payload: Mapping[str, Any]) -> bool:
         if operation == "status":
@@ -154,7 +137,16 @@ class RemoteWorkerBrokerClient:
             raise TransportError("operation_not_allowed", TransportEffect.NO_EFFECT)
         if not isinstance(payload, Mapping):
             raise TransportError("request_invalid", TransportEffect.NO_EFFECT)
-        if self._payload_retargets_authority(payload):
+        try:
+            retargets = payload_retargets_authority(
+                operation,
+                payload,
+                self.identity,
+                bound_payload_identity=self.bound_payload_identity,
+            )
+        except TransportValidationError as exc:
+            raise TransportError("request_invalid", TransportEffect.NO_EFFECT) from exc
+        if retargets:
             raise TransportError("payload_identity_override", TransportEffect.NO_EFFECT)
 
         if timeout_seconds is not None:
