@@ -219,7 +219,7 @@ def test_unit_renderer_refuses_privilege_or_bind_widening(mutation):
             "path /mcp/steward/v1", "path /mcp/*"
         ),
         lambda text: text.replace(
-            "mcp.mastermind-x.com", "control.mastermind-x.com"
+            "@PUBLIC_HOST@", "control.mastermind-x.com"
         ),
         lambda text: text.replace(
             "reverse_proxy 127.0.0.1:8766", "reverse_proxy 0.0.0.0:8766"
