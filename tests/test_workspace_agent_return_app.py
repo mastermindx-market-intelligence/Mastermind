@@ -366,7 +366,7 @@ class WorkspaceReturnConstructionTests(unittest.TestCase):
         subject = subject_digest(issuer=ISSUER, subject="workspace-agent-a")
 
         def policy(scope, subjects=None):
-            allowed_subjects = [subject] if subjects is None else list(subjects)
+            allowed_subjects = [subject] if subjects is None else sorted(subjects)
             return load_resource_policy(
                 {
                     "schema": "mastermind.business_mcp_auth_policy.v1",
