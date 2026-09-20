@@ -9,6 +9,10 @@ import time
 from pathlib import Path
 
 
+ACCOUNT_RE = re.compile(r'[a-z0-9][a-z0-9_-]{0,47}')
+PRIVATE_ROOT = Path.home() / '.local' / 'share' / 'studio-direct-mcp' / 'private'
+
+
 def invoke(helper, action, account):
     command = [sys.executable, str(Path(__file__).with_name(helper)), action,
                '--account', account]
@@ -19,7 +23,7 @@ def invoke(helper, action, account):
 
 
 def operate(action, account):
-    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,47}', account):
+    if not ACCOUNT_RE.fullmatch(account):
         raise ValueError('Account must be a configured account label, such as chatgpt1')
     steps = []
     if action == 'start':
@@ -45,15 +49,59 @@ def operate(action, account):
             'gateway': gateway, 'tunnel': tunnel}
 
 
+def installed_accounts(private_root=None):
+    """Return only account installs owned by the existing private-seat installer."""
+    root = Path(private_root) if private_root is not None else PRIVATE_ROOT
+    if not root.is_dir():
+        return []
+    accounts = []
+    for child in root.iterdir():
+        if (child.is_dir() and ACCOUNT_RE.fullmatch(child.name)
+                and (child / 'manifest.json').is_file()):
+            accounts.append(child.name)
+    return sorted(accounts)
+
+
+def fleet_status(accounts=None):
+    """Aggregate read-only status without adding a fleet lifecycle or bulk action."""
+    selected = installed_accounts() if accounts is None else list(accounts)
+    rows = []
+    ready_count = 0
+    for account in selected:
+        try:
+            row = operate('status', account)
+        except (ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+            row = {'account': account, 'ready': False, 'error': str(error)}
+        rows.append(row)
+        ready_count += int(bool(row.get('ready')))
+    return {
+        'schema': 'mastermind.studio_direct_fleet_status.v1',
+        'action': 'status',
+        'accountCount': len(rows),
+        'readyCount': ready_count,
+        'allReady': bool(rows) and ready_count == len(rows),
+        'accounts': rows,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(prog='studio-direct')
     parser.add_argument('action', choices=['start', 'stop', 'status'], nargs='?', default='status')
-    parser.add_argument('--account', default='chatgpt1')
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument('--account')
+    target.add_argument('--all', action='store_true', help='read status for all installed private seats')
     args = parser.parse_args()
     try:
-        print(json.dumps(operate(args.action, args.account), indent=2))
+        if args.all:
+            if args.action != 'status':
+                raise ValueError('--all is read-only and supports status only')
+            result = fleet_status()
+        else:
+            result = operate(args.action, args.account or 'chatgpt1')
+        print(json.dumps(result, indent=2))
     except (ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
-        print(json.dumps({'account': args.account, 'error': str(error)}), file=sys.stderr)
+        target_name = 'all' if args.all else (args.account or 'chatgpt1')
+        print(json.dumps({'account': target_name, 'error': str(error)}), file=sys.stderr)
         return 1
     return 0
 
