@@ -190,3 +190,15 @@ def test_negative_worker_capability_blocker_is_not_self_authenticating_human_gat
         "exact capability/authority/human ceremony is actually proven",
     ):
         assert clause in step6
+
+
+def test_pressure_corpus_documentation_matches_seventeen_current_packets():
+    plan = text("docs/superpowers/plans/2026-09-19-pro-continuity-safety.md")
+    spec = text("docs/superpowers/specs/2026-09-19-pro-continuity-safety.md")
+    report = text("research/PRO_CONTINUITY_RELIABILITY_IMPLEMENTATION_2026-09-19.md")
+    assert "produces 17 exact evaluator packets" in plan
+    assert "Seventeen pressure packets" in spec
+    assert "Seventeen PCR01–PCR17 packets" in report
+    assert "produces 16 exact evaluator packets" not in plan
+    assert "Sixteen pressure packets" not in spec
+    assert "Sixteen PCR01–PCR16 packets" not in report

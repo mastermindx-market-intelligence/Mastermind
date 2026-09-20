@@ -31,7 +31,7 @@ RED log SHA-256: `5d83feeab36f453d659edc2c3075a4eccccf935235e51436e6a9a9572ddabc
 
 Unchanged bootstrap SHA-256: `1a40ae5fa68893edd02be1ae57e0252d92d5b3240ad2f3a231fe8bfa1c862685`.
 
-Sixteen PCR01–PCR16 packets validate through the existing ScenarioPacket contract. They cover legitimate/illegitimate turn stopping, stale/ambiguous checkpoints, fresh-session custody, output expiry, unknown budgets/tools, relevant/unrelated source drift, research completion boundaries and distinct refusal/limit behavior. They have not been run as native served-model experiments.
+Seventeen PCR01–PCR17 packets validate through the existing ScenarioPacket contract. They cover legitimate/illegitimate turn stopping, stale/ambiguous checkpoints, fresh-session custody, output expiry, unknown budgets/tools, relevant/unrelated source drift, research completion boundaries and distinct refusal/limit behavior. They have not been run as native served-model experiments.
 
 ## Continuation and do-not-redo
 
