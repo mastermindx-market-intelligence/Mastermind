@@ -11,6 +11,7 @@
     "role_profile",
     "domain_overlays",
     "requested_route",
+    "requested_action_class",
     "sources",
     "surfaces",
     "selected_surface_id",
@@ -88,6 +89,13 @@
         "type": "string"
       },
       "uniqueItems": true
+    },
+    "requested_action_class": {
+      "enum": [
+        "READ",
+        "WRITE",
+        "ADMIN"
+      ]
     }
   },
   "$defs": {
@@ -208,7 +216,8 @@
         "observed_at",
         "coverage",
         "claim",
-        "supports_dimensions"
+        "supports_dimensions",
+        "action_classes"
       ],
       "properties": {
         "owner": {
@@ -259,7 +268,20 @@
               "proven_live",
               "binding_current",
               "implementation_state",
-              "usable_scope"
+              "usable_scope",
+              "requested_action_serviceability"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "action_classes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "READ",
+              "WRITE",
+              "ADMIN"
             ]
           },
           "uniqueItems": true
@@ -272,6 +294,8 @@
       "required": [
         "surface_id",
         "capability_class",
+        "requested_action_class",
+        "requested_action_serviceability",
         "canonical_owner",
         "minimal_tool_family",
         "required_for_role",
@@ -388,6 +412,16 @@
             "string",
             "null"
           ]
+        },
+        "requested_action_class": {
+          "enum": [
+            "READ",
+            "WRITE",
+            "ADMIN"
+          ]
+        },
+        "requested_action_serviceability": {
+          "$ref": "#/$defs/dimension"
         }
       },
       "allOf": [
@@ -1586,6 +1620,238 @@
               "evidence"
             ]
           }
+        },
+        {
+          "x-navigator-generated": "requested-action-evidence-coverage",
+          "if": {
+            "properties": {
+              "requested_action_serviceability": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "requested_action_serviceability"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "requested_action_serviceability"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "requested-action-read-binding",
+          "if": {
+            "properties": {
+              "requested_action_class": {
+                "const": "READ"
+              },
+              "requested_action_serviceability": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "requested_action_class",
+              "requested_action_serviceability"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "action_classes": {
+                      "type": "array",
+                      "contains": {
+                        "const": "READ"
+                      },
+                      "minContains": 1
+                    },
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "requested_action_serviceability"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "action_classes",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "requested-action-write-binding",
+          "if": {
+            "properties": {
+              "requested_action_class": {
+                "const": "WRITE"
+              },
+              "requested_action_serviceability": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "requested_action_class",
+              "requested_action_serviceability"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "action_classes": {
+                      "type": "array",
+                      "contains": {
+                        "const": "WRITE"
+                      },
+                      "minContains": 1
+                    },
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "requested_action_serviceability"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "action_classes",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "requested-action-admin-binding",
+          "if": {
+            "properties": {
+              "requested_action_class": {
+                "const": "ADMIN"
+              },
+              "requested_action_serviceability": {
+                "enum": [
+                  "YES",
+                  "NO",
+                  "NOT_APPLICABLE"
+                ]
+              }
+            },
+            "required": [
+              "requested_action_class",
+              "requested_action_serviceability"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "source_type": {
+                      "enum": [
+                        "owner_native",
+                        "observed_call"
+                      ]
+                    },
+                    "action_classes": {
+                      "type": "array",
+                      "contains": {
+                        "const": "ADMIN"
+                      },
+                      "minContains": 1
+                    },
+                    "supports_dimensions": {
+                      "type": "array",
+                      "contains": {
+                        "const": "requested_action_serviceability"
+                      },
+                      "minContains": 1
+                    }
+                  },
+                  "required": [
+                    "source_type",
+                    "action_classes",
+                    "supports_dimensions"
+                  ]
+                },
+                "minContains": 1
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          }
         }
       ]
     },
@@ -1620,6 +1886,9 @@
         },
         "proven_live": {
           "const": "YES"
+        },
+        "requested_action_serviceability": {
+          "const": "YES"
         }
       },
       "required": [
@@ -1631,7 +1900,8 @@
         "authenticated_or_connected",
         "callable",
         "organizationally_authorized",
-        "proven_live"
+        "proven_live",
+        "requested_action_serviceability"
       ]
     },
     "stateRuleUnavailable": {
@@ -1714,6 +1984,16 @@
           },
           "required": [
             "binding_current"
+          ]
+        },
+        {
+          "properties": {
+            "requested_action_serviceability": {
+              "const": "NO"
+            }
+          },
+          "required": [
+            "requested_action_serviceability"
           ]
         }
       ]

@@ -6,7 +6,8 @@
     "authenticated_or_connected",
     "callable",
     "organizationally_authorized",
-    "proven_live"
+    "proven_live",
+    "requested_action_serviceability"
   ],
   "unknown_never_promotes": true,
   "package_name_never_promotes": true,
@@ -45,6 +46,10 @@
           },
           {
             "field": "binding_current",
+            "equals": "YES"
+          },
+          {
+            "field": "requested_action_serviceability",
             "equals": "YES"
           }
         ],
@@ -94,6 +99,10 @@
           },
           {
             "field": "binding_current",
+            "equals": "NO"
+          },
+          {
+            "field": "requested_action_serviceability",
             "equals": "NO"
           }
         ]
@@ -161,6 +170,10 @@
           {
             "field": "binding_current",
             "equals": "NO"
+          },
+          {
+            "field": "requested_action_serviceability",
+            "equals": "NO"
           }
         ]
       }
@@ -175,6 +188,9 @@
     "UNAVAILABLE requires explicit negative owner evidence for implementation, usable scope, installation, enablement, connection, callability, authorization, or binding currentness.",
     "BUILT_NOT_PROVEN means built source or component evidence exists without accepted live proof for the exact target epoch.",
     "DEGRADED means a bounded partial path remains usable, with no explicit negative gate, and its limitation is named.",
-    "UNKNOWN is the fail-closed default when decisive owner-native evidence is missing."
+    "UNKNOWN is the fail-closed default when decisive owner-native evidence is missing.",
+    "Requested action class is closed to READ, WRITE, or ADMIN and is evaluated independently from route-level callability.",
+    "A successful READ observation never establishes WRITE or ADMIN serviceability; an unprobed requested action remains UNKNOWN until owner-native discovery or non-effectful preflight evidence resolves it.",
+    "A requested action may be UNAVAILABLE from requested_action_serviceability=NO only when direct current owner-native or observed-call evidence binds that exact action class."
   ]
 }

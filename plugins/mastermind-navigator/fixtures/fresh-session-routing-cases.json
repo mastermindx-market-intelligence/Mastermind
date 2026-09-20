@@ -11,7 +11,8 @@
         "executive-os"
       ],
       "owner_native_action": "Read the exact current Job/Attempt/Event.",
-      "does_not_claim_live_before_probe": true
+      "does_not_claim_live_before_probe": true,
+      "requested_action_class": "READ"
     },
     {
       "id": "continuity-to-agent-os",
@@ -23,7 +24,8 @@
         "agent-os"
       ],
       "owner_native_action": "Read the current workstream, decision, and handoff records.",
-      "does_not_claim_live_before_probe": true
+      "does_not_claim_live_before_probe": true,
+      "requested_action_class": "READ"
     },
     {
       "id": "source-pr-ci-to-github",
@@ -35,7 +37,8 @@
         "github"
       ],
       "owner_native_action": "Read the protected branch or exact PR/CI record.",
-      "does_not_claim_live_before_probe": true
+      "does_not_claim_live_before_probe": true,
+      "requested_action_class": "READ"
     },
     {
       "id": "selected-project-action-to-workbench",
@@ -47,7 +50,8 @@
         "workbench"
       ],
       "owner_native_action": "Resolve the selected project, require the owner-admitted execution mode and its existing authority owner (RuntimeBinding for attended Web, approved native-session context for native operator, Executive Job/Attempt/Worker for bounded worker), then call the admitted Workbench capability.",
-      "does_not_claim_live_before_probe": true
+      "does_not_claim_live_before_probe": true,
+      "requested_action_class": "WRITE"
     },
     {
       "id": "local-process-to-studio-direct",
@@ -59,7 +63,8 @@
         "studio-direct"
       ],
       "owner_native_action": "Read the bound host/process and invoke the existing local owner.",
-      "does_not_claim_live_before_probe": true
+      "does_not_claim_live_before_probe": true,
+      "requested_action_class": "READ"
     },
     {
       "id": "worker-browser-to-worker-browser",
@@ -71,7 +76,8 @@
         "worker-browser"
       ],
       "owner_native_action": "Read Worker Browser health and invoke one admitted target-bound browser operation.",
-      "does_not_claim_live_before_probe": true
+      "does_not_claim_live_before_probe": true,
+      "requested_action_class": "WRITE"
     },
     {
       "id": "exact-chatgpt-actuation-to-web-sol-runtime-binding",
@@ -83,7 +89,8 @@
         "web-sol-runtime-binding"
       ],
       "owner_native_action": "Resolve the current exact RuntimeBinding before one admitted Web-Sol action.",
-      "does_not_claim_live_before_probe": true
+      "does_not_claim_live_before_probe": true,
+      "requested_action_class": "WRITE"
     },
     {
       "id": "domain-deploy-to-domain-owner",
@@ -97,7 +104,8 @@
       "authorization_gate": "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED",
       "expected_schema_loads_after_authorization": [
         "domain-deploy-owner"
-      ]
+      ],
+      "requested_action_class": "WRITE"
     },
     {
       "id": "domain-data-to-domain-owner",
@@ -111,7 +119,8 @@
       "authorization_gate": "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED",
       "expected_schema_loads_after_authorization": [
         "domain-data-owner"
-      ]
+      ],
+      "requested_action_class": "READ"
     },
     {
       "id": "domain-design-to-domain-owner",
@@ -125,7 +134,8 @@
       "authorization_gate": "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED",
       "expected_schema_loads_after_authorization": [
         "domain-design-owner"
-      ]
+      ],
+      "requested_action_class": "WRITE"
     },
     {
       "id": "domain-comms-to-domain-owner",
@@ -139,7 +149,36 @@
       "authorization_gate": "OWNER_NATIVE_ORGANIZATIONAL_AUTHORIZATION_REQUIRED",
       "expected_schema_loads_after_authorization": [
         "domain-comms-owner"
-      ]
+      ],
+      "requested_action_class": "WRITE"
+    },
+    {
+      "id": "github-write-unprobed-self-resolves",
+      "request": "A GitHub write is required after earlier reads succeeded, but WRITE has not been probed.",
+      "capability_class": "source_pr_ci",
+      "requested_action_class": "WRITE",
+      "expected_owner": "GitHub",
+      "expected_tool_family": "github",
+      "expected_schema_loads": [
+        "github"
+      ],
+      "owner_native_action": "Discover the current GitHub WRITE action family, run a non-mutating repository permission/serviceability preflight when available, then continue to the separate source-writer authority gate without Chairman correction.",
+      "does_not_claim_live_before_probe": true,
+      "expected_disposition": "SELF_PROBE_THEN_CONTINUE_OR_EXACT_BLOCKER"
+    },
+    {
+      "id": "github-write-explicit-preflight-refusal",
+      "request": "A GitHub write is required and the exact current non-mutating WRITE preflight explicitly refuses the repository scope.",
+      "capability_class": "source_pr_ci",
+      "requested_action_class": "WRITE",
+      "expected_owner": "GitHub",
+      "expected_tool_family": "github",
+      "expected_schema_loads": [
+        "github"
+      ],
+      "owner_native_action": "Record the exact WRITE-family discovery and explicit refusal; preserve the exact remaining admin/human ceremony without issuing a dummy mutation or relabeling another axis.",
+      "does_not_claim_live_before_probe": true,
+      "expected_disposition": "UNAVAILABLE_ONLY_AFTER_EXPLICIT_WRITE_PREFLIGHT_REFUSAL"
     }
   ]
 }

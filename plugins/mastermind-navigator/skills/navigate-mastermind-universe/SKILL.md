@@ -34,8 +34,9 @@ Do not infer effective capability from a product, plugin, or connector name. A p
 
 ## Compose role-filtered health
 
+0. Classify the exact requested action class as `READ`, `WRITE`, or `ADMIN` before making any capability claim. Route identity alone is too coarse: a successful READ never proves WRITE or ADMIN serviceability or unavailability.
 1. Consume existing owner-native observations from the sources in `boot-sources.json`; do not edit those owners.
-2. For each relevant surface, record `installed`, `enabled`, `authenticated_or_connected`, `callable`, `organizationally_authorized`, and `proven_live` independently as `YES`, `NO`, `UNKNOWN`, or `NOT_APPLICABLE`.
+2. For each relevant surface, record `requested_action_class` and `requested_action_serviceability` plus `installed`, `enabled`, `authenticated_or_connected`, `callable`, `organizationally_authorized`, and `proven_live` independently as `YES`, `NO`, `UNKNOWN`, or `NOT_APPLICABLE`. Bind any decisive requested-action serviceability evidence to that exact action class.
 3. Record implementation state, usable scope, exact host/project/session/source binding, current generation where applicable, evidence identity, observation time, coverage, blocker, and smallest next probe.
 4. Apply `capability-state-rules.json` in order. `PROVEN_LIVE` requires current target-bound evidence for every required gate. Explicit negative owner evidence may produce `UNAVAILABLE`. A bounded partial path is `DEGRADED`. Built source without a current canary is `BUILT_NOT_PROVEN`. Missing decisive evidence remains `UNKNOWN`.
 5. Validate the projection against `capability-health.schema.json` and filter it to the selected core profile plus the one requested route. Preserve suppressed-surface identities without loading their schemas.
@@ -46,7 +47,7 @@ For user-facing prose, spell the third gate as authenticated or connected. Never
 
 Do not load every connector or tool schema just because it exists. Health observation does not load a tool schema. Discover only the smallest role-appropriate tool family named by the selected owner route. Load a second family only after the first owner-native result proves a concrete dependency.
 
-The discovery call is evidence about that exact surface and moment. It is not a durable registry entry and does not prove another account, host, project, session, action class, or generation.
+The discovery call is evidence about that exact surface and moment. It is not a durable registry entry and does not prove another account, host, project, session, action class, or generation. A READ observation cannot settle a WRITE or ADMIN request; discover/preflight the requested action class itself.
 
 ## Route by canonical owner
 
@@ -69,6 +70,23 @@ The discovery call is evidence about that exact surface and moment. It is not a 
 6. Perform one owner-native action that is useful and within current authority—for example, read the exact protected branch or selected-project identity.
 7. Attach the exact result, binding, state, blocker, and next probe. Do not generalize one successful read into write or production proof.
 
+## Capability self-resolution law
+
+`UNKNOWN` / `UNPROBED` is not `UNAVAILABLE`. When the selected surface names a safe, non-effectful, in-scope `next_probe` that is currently discoverable/callable, execute that probe in the same turn before stopping or escalating.
+
+For the requested action class:
+1. discover only the selected owner-native action family;
+2. use a non-mutating permission/capability/binding preflight when one exists;
+3. record the exact discovery result, permission/preflight result or explicit refusal/error, target/binding scope, and observation generation/epoch;
+4. recompute `requested_action_serviceability` and the health state;
+5. continue the requested action when the technical/resource gate clears, then evaluate organizational/source-writer authority separately.
+
+Never perform a dummy mutation solely to prove capability. If only an effectful probe exists and the actual effect is not yet authorized/safe, keep the capability `UNKNOWN` / `UNPROBED` rather than fabricating `UNAVAILABLE`.
+
+A terminal negative capability claim must name the requested action class, current discovery result, non-effectful preflight/refusal evidence, exhausted safe probe path, exact target/binding scope, and any exact human/admin ceremony still required. Missing evidence means more bounded discovery work exists; it is not a Chairman gate.
+
+Keep four axes separate: technical tool/action exposure; authenticated resource permission; organizational/source-writer authority; and effect state. A denial or unknown on one axis must never be rewritten as another.
+
 ## Effect and ambiguity law
 
 A read refusal proves only that read's response. After any possible modifying effect, use only `NOT_APPLIED`, `APPLIED`, or `EFFECT_UNKNOWN`. `EFFECT_UNKNOWN` requires owner-native reconciliation on the same carrier; never retry, resubmit, or fail over blindly.
@@ -78,16 +96,17 @@ A read refusal proves only that read's response. After any possible modifying ef
 ```text
 protected Mastermind commit and Skillpack compatibility
 selected role profile and explicit overlay, if any
-requested capability class and canonical owner
+requested capability class, requested action class, and canonical owner
 role-filtered surface health:
-  installed | enabled | authenticated_or_connected | callable | organizationally_authorized | proven_live
+  requested_action_serviceability | installed | enabled | authenticated_or_connected | callable | organizationally_authorized | proven_live
   state | exact binding | evidence | blocker | next probe
 minimal tool family loaded
 one owner-native action and exact result
+capability probe receipt when the requested action was initially UNKNOWN/UNPROBED
 suppressed unrelated surfaces
 remaining unknowns and authority ceiling
 ```
 
 ## Stop condition
 
-Stop after one useful owner-native action or the first decisive `UNAVAILABLE`, `UNKNOWN`, stale-binding, authority, or effect-ambiguity gate. Return the exact owner, evidence, blocker, and next probe. Do not ask the Chairman to choose routine routing that current owner records can decide, and do not cross an owner gate by inventing a replacement surface.
+Do not stop merely because the requested action is `UNKNOWN` / `UNPROBED` while a safe, non-effectful, in-scope next probe remains available. Execute the bounded self-resolution loop first. Stop after one useful owner-native action, a decisive evidence-backed `UNAVAILABLE`, an authority/stale-binding/effect-ambiguity gate, or exhaustion of safe probes. Return the exact owner, requested action class, discovery/preflight evidence, blocker, exhausted-or-remaining probe path, and any exact human/admin ceremony. Do not ask the Chairman to choose routine routing or capability discovery that current owner records and safe probes can decide, and do not cross an owner gate by inventing a replacement surface.

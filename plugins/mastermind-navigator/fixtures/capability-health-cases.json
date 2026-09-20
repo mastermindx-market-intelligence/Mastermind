@@ -28,7 +28,11 @@
               "proven_live",
               "binding_current",
               "implementation_state",
-              "usable_scope"
+              "usable_scope",
+              "requested_action_serviceability"
+            ],
+            "action_classes": [
+              "READ"
             ]
           }
         ],
@@ -67,7 +71,11 @@
                   "proven_live",
                   "binding_current",
                   "implementation_state",
-                  "usable_scope"
+                  "usable_scope",
+                  "requested_action_serviceability"
+                ],
+                "action_classes": [
+                  "READ"
                 ]
               }
             ],
@@ -83,12 +91,15 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": null,
-            "next_probe": null
+            "next_probe": null,
+            "requested_action_class": "READ",
+            "requested_action_serviceability": "YES"
           }
         ],
         "selected_surface_id": "github-source",
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "READ"
       }
     },
     {
@@ -118,7 +129,11 @@
               "proven_live",
               "binding_current",
               "implementation_state",
-              "usable_scope"
+              "usable_scope",
+              "requested_action_serviceability"
+            ],
+            "action_classes": [
+              "WRITE"
             ]
           }
         ],
@@ -157,7 +172,11 @@
                   "proven_live",
                   "binding_current",
                   "implementation_state",
-                  "usable_scope"
+                  "usable_scope",
+                  "requested_action_serviceability"
+                ],
+                "action_classes": [
+                  "WRITE"
                 ]
               }
             ],
@@ -173,12 +192,15 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "Workbench Action is not callable in the current session.",
-            "next_probe": "Use Workbench Read for read-only needs or re-probe the action owner after installation changes."
+            "next_probe": "Use Workbench Read for read-only needs or re-probe the action owner after installation changes.",
+            "requested_action_class": "WRITE",
+            "requested_action_serviceability": "NO"
           }
         ],
         "selected_surface_id": null,
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "WRITE"
       }
     },
     {
@@ -204,6 +226,9 @@
               "usable_scope",
               "proven_live",
               "binding_current"
+            ],
+            "action_classes": [
+              "WRITE"
             ]
           }
         ],
@@ -238,6 +263,9 @@
                   "usable_scope",
                   "proven_live",
                   "binding_current"
+                ],
+                "action_classes": [
+                  "WRITE"
                 ]
               }
             ],
@@ -253,12 +281,15 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "No current connection, binding, or owner-native canary is available.",
-            "next_probe": "Read Worker Browser health for the exact worker and generation."
+            "next_probe": "Read Worker Browser health for the exact worker and generation.",
+            "requested_action_class": "WRITE",
+            "requested_action_serviceability": "UNKNOWN"
           }
         ],
         "selected_surface_id": null,
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "WRITE"
       }
     },
     {
@@ -287,6 +318,9 @@
               "implementation_state",
               "usable_scope",
               "proven_live"
+            ],
+            "action_classes": [
+              "READ"
             ]
           }
         ],
@@ -324,6 +358,9 @@
                   "implementation_state",
                   "usable_scope",
                   "proven_live"
+                ],
+                "action_classes": [
+                  "READ"
                 ]
               }
             ],
@@ -339,12 +376,15 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "Web workspace installation, organization authorization, callable fresh-session invocation, and owner-native action are unproven.",
-            "next_probe": "After source protection, use the existing Business workspace admin owner for the fixed-commit canary."
+            "next_probe": "After source protection, use the existing Business workspace admin owner for the fixed-commit canary.",
+            "requested_action_class": "READ",
+            "requested_action_serviceability": "UNKNOWN"
           }
         ],
         "selected_surface_id": null,
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "READ"
       }
     },
     {
@@ -374,7 +414,11 @@
               "proven_live",
               "binding_current",
               "implementation_state",
-              "usable_scope"
+              "usable_scope",
+              "requested_action_serviceability"
+            ],
+            "action_classes": [
+              "READ"
             ]
           }
         ],
@@ -413,7 +457,11 @@
                   "proven_live",
                   "binding_current",
                   "implementation_state",
-                  "usable_scope"
+                  "usable_scope",
+                  "requested_action_serviceability"
+                ],
+                "action_classes": [
+                  "READ"
                 ]
               }
             ],
@@ -429,12 +477,15 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "Navigator is installed in the Web workspace canary scope but is not enabled or callable for the canary member.",
-            "next_probe": "The existing workspace admin owner enables the exact fixed-commit package for the approved canary member and reads back policy."
+            "next_probe": "The existing workspace admin owner enables the exact fixed-commit package for the approved canary member and reads back policy.",
+            "requested_action_class": "READ",
+            "requested_action_serviceability": "NO"
           }
         ],
         "selected_surface_id": null,
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "READ"
       }
     },
     {
@@ -464,7 +515,11 @@
               "proven_live",
               "binding_current",
               "implementation_state",
-              "usable_scope"
+              "usable_scope",
+              "requested_action_serviceability"
+            ],
+            "action_classes": [
+              "WRITE"
             ]
           }
         ],
@@ -503,7 +558,11 @@
                   "proven_live",
                   "binding_current",
                   "implementation_state",
-                  "usable_scope"
+                  "usable_scope",
+                  "requested_action_serviceability"
+                ],
+                "action_classes": [
+                  "WRITE"
                 ]
               }
             ],
@@ -522,12 +581,15 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "The attended Web action lacks an exact current session generation.",
-            "next_probe": "Read RuntimeBinding for the exact attended conversation and current generation before any Workbench action."
+            "next_probe": "Read RuntimeBinding for the exact attended conversation and current generation before any Workbench action.",
+            "requested_action_class": "WRITE",
+            "requested_action_serviceability": "NO"
           }
         ],
         "selected_surface_id": null,
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "WRITE"
       }
     },
     {
@@ -557,7 +619,11 @@
               "proven_live",
               "binding_current",
               "implementation_state",
-              "usable_scope"
+              "usable_scope",
+              "requested_action_serviceability"
+            ],
+            "action_classes": [
+              "WRITE"
             ]
           }
         ],
@@ -596,7 +662,11 @@
                   "proven_live",
                   "binding_current",
                   "implementation_state",
-                  "usable_scope"
+                  "usable_scope",
+                  "requested_action_serviceability"
+                ],
+                "action_classes": [
+                  "WRITE"
                 ]
               }
             ],
@@ -615,12 +685,15 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "The native action lacks an exact current approved native-session generation.",
-            "next_probe": "Read the approved native-session context owner for the exact native session and generation before any Workbench action."
+            "next_probe": "Read the approved native-session context owner for the exact native session and generation before any Workbench action.",
+            "requested_action_class": "WRITE",
+            "requested_action_serviceability": "NO"
           }
         ],
         "selected_surface_id": null,
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "WRITE"
       }
     },
     {
@@ -650,7 +723,11 @@
               "proven_live",
               "binding_current",
               "implementation_state",
-              "usable_scope"
+              "usable_scope",
+              "requested_action_serviceability"
+            ],
+            "action_classes": [
+              "WRITE"
             ]
           }
         ],
@@ -689,7 +766,11 @@
                   "proven_live",
                   "binding_current",
                   "implementation_state",
-                  "usable_scope"
+                  "usable_scope",
+                  "requested_action_serviceability"
+                ],
+                "action_classes": [
+                  "WRITE"
                 ]
               }
             ],
@@ -708,12 +789,15 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "The provider worker has no admitted Executive worker generation for this action.",
-            "next_probe": "Read the current Executive OS Job/Attempt/Worker generation and authorization; do not fall back to attended mode."
+            "next_probe": "Read the current Executive OS Job/Attempt/Worker generation and authorization; do not fall back to attended mode.",
+            "requested_action_class": "WRITE",
+            "requested_action_serviceability": "NO"
           }
         ],
         "selected_surface_id": null,
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "WRITE"
       }
     },
     {
@@ -743,7 +827,11 @@
               "proven_live",
               "binding_current",
               "implementation_state",
-              "usable_scope"
+              "usable_scope",
+              "requested_action_serviceability"
+            ],
+            "action_classes": [
+              "READ"
             ]
           }
         ],
@@ -782,7 +870,11 @@
                   "proven_live",
                   "binding_current",
                   "implementation_state",
-                  "usable_scope"
+                  "usable_scope",
+                  "requested_action_serviceability"
+                ],
+                "action_classes": [
+                  "READ"
                 ]
               }
             ],
@@ -798,12 +890,15 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "Only the read subset is currently proven.",
-            "next_probe": "Probe the exact requested action class through the existing host owner."
+            "next_probe": "Probe the exact requested action class through the existing host owner.",
+            "requested_action_class": "READ",
+            "requested_action_serviceability": "YES"
           }
         ],
         "selected_surface_id": "studio-direct",
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "READ"
       }
     },
     {
@@ -834,6 +929,9 @@
               "binding_current",
               "implementation_state",
               "usable_scope"
+            ],
+            "action_classes": [
+              "WRITE"
             ]
           }
         ],
@@ -873,6 +971,9 @@
                   "binding_current",
                   "implementation_state",
                   "usable_scope"
+                ],
+                "action_classes": [
+                  "WRITE"
                 ]
               }
             ],
@@ -888,12 +989,304 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "No owner-native exact target, RuntimeBinding generation, authorization, callability, or canary evidence.",
-            "next_probe": "Read the current RuntimeBinding owner for the exact logical target and generation before loading or actuating Web-Sol."
+            "next_probe": "Read the current RuntimeBinding owner for the exact logical target and generation before loading or actuating Web-Sol.",
+            "requested_action_class": "WRITE",
+            "requested_action_serviceability": "UNKNOWN"
           }
         ],
         "selected_surface_id": null,
         "suppressed_surface_ids": [],
-        "domain_overlays": []
+        "domain_overlays": [],
+        "requested_action_class": "WRITE"
+      }
+    },
+    {
+      "id": "github-write-unprobed-read-proven",
+      "expected_state": "UNKNOWN",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-20T06:50:00Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "web_ceo_core",
+        "domain_overlays": [],
+        "requested_route": "source_pr_ci",
+        "requested_action_class": "WRITE",
+        "sources": [
+          {
+            "owner": "GitHub",
+            "source_type": "observed_call",
+            "artifact_identity": "github-read-observation-only",
+            "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+            "observed_at": "2026-09-20T06:50:00Z",
+            "coverage": "one exact repository and current action-class observation epoch",
+            "claim": "GitHub reads are proven for the repository; WRITE action exposure and permission have not yet been probed.",
+            "action_classes": [
+              "READ"
+            ],
+            "supports_dimensions": [
+              "implementation_state",
+              "usable_scope",
+              "binding_current",
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "github-write-unprobed",
+            "capability_class": "source_pr_ci",
+            "requested_action_class": "WRITE",
+            "requested_action_serviceability": "UNKNOWN",
+            "canonical_owner": "GitHub",
+            "minimal_tool_family": "github",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "FULL",
+            "binding_current": "YES",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "YES",
+            "callable": "YES",
+            "organizationally_authorized": "UNKNOWN",
+            "proven_live": "UNKNOWN",
+            "state": "UNKNOWN",
+            "evidence": [
+              {
+                "owner": "GitHub",
+                "source_type": "observed_call",
+                "artifact_identity": "github-read-observation-only",
+                "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+                "observed_at": "2026-09-20T06:50:00Z",
+                "coverage": "one exact repository and current action-class observation epoch",
+                "claim": "GitHub reads are proven for the repository; WRITE action exposure and permission have not yet been probed.",
+                "action_classes": [
+                  "READ"
+                ],
+                "supports_dimensions": [
+                  "implementation_state",
+                  "usable_scope",
+                  "binding_current",
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": null,
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
+            },
+            "blocker": "WRITE serviceability is unprobed; successful READ calls do not settle the requested WRITE action.",
+            "next_probe": "Discover the current GitHub WRITE action family and read a non-mutating repository permission/serviceability preflight before any terminal blocker."
+          }
+        ],
+        "selected_surface_id": "github-write-unprobed",
+        "suppressed_surface_ids": []
+      }
+    },
+    {
+      "id": "github-write-preflight-serviceable-auth-unknown",
+      "expected_state": "UNKNOWN",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-20T06:51:00Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "web_ceo_core",
+        "domain_overlays": [],
+        "requested_route": "source_pr_ci",
+        "requested_action_class": "WRITE",
+        "sources": [
+          {
+            "owner": "GitHub",
+            "source_type": "owner_native",
+            "artifact_identity": "github-write-capability-preflight",
+            "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+            "observed_at": "2026-09-20T06:51:00Z",
+            "coverage": "one exact repository and current action-class observation epoch",
+            "claim": "The current GitHub WRITE action family is exposed and the repository permission preflight reports write serviceability; organizational source-writer authority remains separate.",
+            "action_classes": [
+              "WRITE"
+            ],
+            "supports_dimensions": [
+              "implementation_state",
+              "usable_scope",
+              "binding_current",
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "requested_action_serviceability"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "github-write-serviceable",
+            "capability_class": "source_pr_ci",
+            "requested_action_class": "WRITE",
+            "requested_action_serviceability": "YES",
+            "canonical_owner": "GitHub",
+            "minimal_tool_family": "github",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "FULL",
+            "binding_current": "YES",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "YES",
+            "callable": "YES",
+            "organizationally_authorized": "UNKNOWN",
+            "proven_live": "UNKNOWN",
+            "state": "UNKNOWN",
+            "evidence": [
+              {
+                "owner": "GitHub",
+                "source_type": "owner_native",
+                "artifact_identity": "github-write-capability-preflight",
+                "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+                "observed_at": "2026-09-20T06:51:00Z",
+                "coverage": "one exact repository and current action-class observation epoch",
+                "claim": "The current GitHub WRITE action family is exposed and the repository permission preflight reports write serviceability; organizational source-writer authority remains separate.",
+                "action_classes": [
+                  "WRITE"
+                ],
+                "supports_dimensions": [
+                  "implementation_state",
+                  "usable_scope",
+                  "binding_current",
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "requested_action_serviceability"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": null,
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
+            },
+            "blocker": "Technical/resource WRITE serviceability is proven, but organizational/source-writer authority has not yet been established.",
+            "next_probe": "Read the current source-writer/organizational authority owner for this exact operation; do not relabel that gate as tool unavailability."
+          }
+        ],
+        "selected_surface_id": "github-write-serviceable",
+        "suppressed_surface_ids": []
+      }
+    },
+    {
+      "id": "github-write-preflight-refused",
+      "expected_state": "UNAVAILABLE",
+      "packet": {
+        "schema": "mastermind.navigator_capability_health.v1",
+        "generated_at": "2026-09-20T06:52:00Z",
+        "protected_master_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+        "role_profile": "web_ceo_core",
+        "domain_overlays": [],
+        "requested_route": "source_pr_ci",
+        "requested_action_class": "WRITE",
+        "sources": [
+          {
+            "owner": "GitHub",
+            "source_type": "owner_native",
+            "artifact_identity": "github-write-capability-refusal",
+            "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+            "observed_at": "2026-09-20T06:52:00Z",
+            "coverage": "one exact repository and current action-class observation epoch",
+            "claim": "The exact current non-mutating WRITE preflight returned an explicit refusal for this repository scope.",
+            "action_classes": [
+              "WRITE"
+            ],
+            "supports_dimensions": [
+              "implementation_state",
+              "usable_scope",
+              "binding_current",
+              "installed",
+              "enabled",
+              "authenticated_or_connected",
+              "callable",
+              "requested_action_serviceability"
+            ]
+          }
+        ],
+        "surfaces": [
+          {
+            "surface_id": "github-write-refused",
+            "capability_class": "source_pr_ci",
+            "requested_action_class": "WRITE",
+            "requested_action_serviceability": "NO",
+            "canonical_owner": "GitHub",
+            "minimal_tool_family": "github",
+            "required_for_role": true,
+            "implementation_state": "BUILT",
+            "usable_scope": "FULL",
+            "binding_current": "YES",
+            "installed": "YES",
+            "enabled": "YES",
+            "authenticated_or_connected": "YES",
+            "callable": "YES",
+            "organizationally_authorized": "UNKNOWN",
+            "proven_live": "NO",
+            "state": "UNAVAILABLE",
+            "evidence": [
+              {
+                "owner": "GitHub",
+                "source_type": "owner_native",
+                "artifact_identity": "github-write-capability-refusal",
+                "revision": "FIXTURE_PROTECTED_MASTER_SHA",
+                "observed_at": "2026-09-20T06:52:00Z",
+                "coverage": "one exact repository and current action-class observation epoch",
+                "claim": "The exact current non-mutating WRITE preflight returned an explicit refusal for this repository scope.",
+                "action_classes": [
+                  "WRITE"
+                ],
+                "supports_dimensions": [
+                  "implementation_state",
+                  "usable_scope",
+                  "binding_current",
+                  "installed",
+                  "enabled",
+                  "authenticated_or_connected",
+                  "callable",
+                  "requested_action_serviceability"
+                ]
+              }
+            ],
+            "binding": {
+              "host_ref": null,
+              "project_ref": null,
+              "session_ref": null,
+              "runtime_generation": null,
+              "source_sha": "FIXTURE_PROTECTED_MASTER_SHA",
+              "authenticated_subject_ref": null,
+              "expires_at": null,
+              "revocation_state": "UNKNOWN",
+              "expiry_state": "UNKNOWN"
+            },
+            "blocker": "The exact current non-mutating GitHub WRITE preflight explicitly refused this repository scope.",
+            "next_probe": "Wait for a material permission/generation change or follow the exact named admin ceremony; do not retry a dummy mutation."
+          }
+        ],
+        "selected_surface_id": null,
+        "suppressed_surface_ids": []
       }
     }
   ],
@@ -949,7 +1342,8 @@
     "expected_selected_tool_family": "worker-browser",
     "load_schemas_for": [
       "worker-browser"
-    ]
+    ],
+    "requested_action_class": "WRITE"
   },
   "overlay_filter_cases": [
     {
@@ -975,7 +1369,8 @@
         "figma"
       ],
       "expected_selected_tool_family": null,
-      "load_schemas_for": []
+      "load_schemas_for": [],
+      "requested_action_class": "WRITE"
     },
     {
       "id": "domain-design-request-with-authorized-overlay",
@@ -1008,7 +1403,8 @@
       "expected_selected_tool_family": "domain-design-owner",
       "load_schemas_for": [
         "domain-design-owner"
-      ]
+      ],
+      "requested_action_class": "WRITE"
     }
   ]
 }

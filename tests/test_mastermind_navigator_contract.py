@@ -54,6 +54,7 @@ DIMENSIONS = (
     "callable",
     "organizationally_authorized",
     "proven_live",
+    "requested_action_serviceability",
 )
 
 
@@ -531,6 +532,7 @@ def test_health_schema_rejects_every_contradictory_proven_live_packet() -> None:
         ("callable", "NO"),
         ("organizationally_authorized", "NO"),
         ("proven_live", "NO"),
+        ("requested_action_serviceability", "NO"),
     )
     for field, value in mutations:
         hostile = copy.deepcopy(live)
@@ -767,6 +769,7 @@ def test_known_health_dimensions_require_supporting_surface_evidence() -> None:
         "callable",
         "organizationally_authorized",
         "proven_live",
+        "requested_action_serviceability",
     }
     validator.validate(live)
     for dimension in dimensions:
@@ -1078,3 +1081,103 @@ def test_live_workbench_requires_explicit_active_expiry_state() -> None:
 
     surface["binding"]["expiry_state"] = "ACTIVE"
     validator.validate(packet)
+
+
+def test_requested_action_class_is_closed_and_action_specific() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+
+    for case in fixture["cases"]:
+        packet = _materialize_health_packet(case["packet"])
+        validator.validate(packet)
+        assert packet["requested_action_class"] in {"READ", "WRITE", "ADMIN"}
+        for surface in packet["surfaces"]:
+            assert surface["requested_action_class"] == packet["requested_action_class"]
+            assert surface["requested_action_serviceability"] in {
+                "YES", "NO", "UNKNOWN", "NOT_APPLICABLE"
+            }
+
+    unprobed = _materialize_health_packet(
+        next(case["packet"] for case in fixture["cases"]
+             if case["id"] == "github-write-unprobed-read-proven")
+    )
+    surface = unprobed["surfaces"][0]
+    assert surface["requested_action_class"] == "WRITE"
+    assert surface["requested_action_serviceability"] == "UNKNOWN"
+    assert surface["state"] == "UNKNOWN"
+    assert all("WRITE" not in evidence["action_classes"] for evidence in surface["evidence"])
+
+    forged = copy.deepcopy(unprobed)
+    forged_surface = forged["surfaces"][0]
+    forged_surface["requested_action_serviceability"] = "YES"
+    # READ evidence cannot be relabeled as proof of WRITE serviceability.
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(forged)
+
+
+def test_github_write_unprobed_self_resolves_before_negative_claim() -> None:
+    rules = _load("references/capability-state-rules.json")
+    health = _load("fixtures/capability-health-cases.json")
+    cases = {case["id"]: case for case in health["cases"]}
+
+    unprobed = cases["github-write-unprobed-read-proven"]["packet"]["surfaces"][0]
+    positive = cases["github-write-preflight-serviceable-auth-unknown"]["packet"]["surfaces"][0]
+    refused = cases["github-write-preflight-refused"]["packet"]["surfaces"][0]
+
+    assert _derive_state(unprobed, rules) == "UNKNOWN"
+    assert unprobed["requested_action_serviceability"] == "UNKNOWN"
+    assert "READ" in unprobed["evidence"][0]["action_classes"]
+    assert "requested_action_serviceability" not in unprobed["evidence"][0]["supports_dimensions"]
+
+    assert positive["requested_action_serviceability"] == "YES"
+    assert _derive_state(positive, rules) == "UNKNOWN"
+    assert positive["organizationally_authorized"] == "UNKNOWN"
+    assert "WRITE" in positive["evidence"][0]["action_classes"]
+
+    assert refused["requested_action_serviceability"] == "NO"
+    assert _derive_state(refused, rules) == "UNAVAILABLE"
+    assert "WRITE" in refused["evidence"][0]["action_classes"]
+
+
+def test_fresh_session_github_write_incident_requires_self_probe_not_chairman_retry() -> None:
+    fixture = _load("fixtures/fresh-session-routing-cases.json")
+    cases = {case["id"]: case for case in fixture["cases"]}
+
+    positive = cases["github-write-unprobed-self-resolves"]
+    assert positive["requested_action_class"] == "WRITE"
+    assert positive["expected_tool_family"] == "github"
+    assert positive["expected_disposition"] == "SELF_PROBE_THEN_CONTINUE_OR_EXACT_BLOCKER"
+    assert "non-mutating repository permission/serviceability preflight" in positive["owner_native_action"]
+    assert "without Chairman correction" in positive["owner_native_action"]
+
+    negative = cases["github-write-explicit-preflight-refusal"]
+    assert negative["requested_action_class"] == "WRITE"
+    assert negative["expected_disposition"] == "UNAVAILABLE_ONLY_AFTER_EXPLICIT_WRITE_PREFLIGHT_REFUSAL"
+    assert "explicit refusal" in negative["owner_native_action"]
+
+
+def test_skill_treats_resolvable_unknown_as_work_and_separates_capability_axes() -> None:
+    skill = (PACKAGE / "skills/navigate-mastermind-universe/SKILL.md").read_text(encoding="utf-8")
+    for phrase in (
+        "Classify the exact requested action class as `READ`, `WRITE`, or `ADMIN`",
+        "`UNKNOWN` / `UNPROBED` is not `UNAVAILABLE`",
+        "execute that probe in the same turn before stopping or escalating",
+        "Never perform a dummy mutation solely to prove capability",
+        "technical tool/action exposure",
+        "authenticated resource permission",
+        "organizational/source-writer authority",
+        "effect state",
+        "Do not stop merely because the requested action is `UNKNOWN` / `UNPROBED`",
+    ):
+        assert phrase in skill
+    assert "Stop after one useful owner-native action or the first decisive `UNAVAILABLE`, `UNKNOWN`" not in skill
+
+
+def test_proven_live_requires_requested_action_serviceability_yes() -> None:
+    rules = _load("references/capability-state-rules.json")
+    fixture = _load("fixtures/capability-health-cases.json")
+    live = copy.deepcopy(fixture["cases"][0]["packet"]["surfaces"][0])
+    assert _derive_state(live, rules) == "PROVEN_LIVE"
+    live["requested_action_serviceability"] = "UNKNOWN"
+    assert _derive_state(live, rules) == "UNKNOWN"
