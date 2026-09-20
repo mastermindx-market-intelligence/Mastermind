@@ -13,8 +13,8 @@ from control_plane.mission_workspace import SCHEMA, _posture, compose_mission_wo
 
 
 def _inputs(*, candidates=("JOB-1",), state="STARTED", historical=False, status="RUNNING", unjoined=0):
-    validity = {"schema": "mastermind.source_validity.v1", "cards": [{"responsibility_ref": "responsibility:one", "components": {name: {"remaining_ms": 1} for name in ("card", "decision_current", "dispatch")}}]}
-    return dict(control_room={"schema": "mastermind.chairman_control_room.v1", "generated_at": "2026-09-20T00:00:00Z", "work": [{"work_ref": "WS:ONE", "responsibility_ref": "responsibility:one", "agent_os": {"title": "One", "state": "active", "next_action": "Read"}}], "autonomy": {"cards": [{"responsibility_ref": "responsibility:one", "root_job_candidates": list(candidates), "runtime_root_state": "RESOLVED" if len(candidates) == 1 else "CONFLICT", "accountable_seat": "ceo", "dispatch": {"dispatch_state": state, "historical": historical, "actionable": state == "RETURNED" and not historical}}]}}, fabric_view={"schema": "mastermind.fabric_job_view.v1", "generated_at": "2026-09-20T00:00:00Z", "armed": {"source": "absent"}, "root": {"job_id": "JOB-1", "status": status, "depth": 0, "orchestration_role": "plan", "plan_step_id": None, "result": {"state": "IN_PROGRESS"}, "review": {"required": False, "reviews_job_id": None, "verdict": "NOT_YET"}}, "children": [], "unjoined_job_count": unjoined, "missingness": [], "degraded": [], "capability": {"state": "PARTIAL"}}, work_ref="WS:ONE", root_job_id="JOB-1", source_validity=validity, cache_currentness={"state": "CURRENT"}, source_generation={})
+    validity = {"schema": "mastermind.control_room_source_validity.v1", "profile": "test", "publication_seq": 1, "cards": [{"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1", "components": {name: {"remaining_ms": 1} for name in ("card", "dispatch", "owed_open_age")}}]}
+    return dict(control_room={"schema": "mastermind.chairman_control_room.v1", "generated_at": "2026-09-20T00:00:00Z", "work": [{"work_ref": "WS:ONE", "agent_os": {"title": "One", "state": "active", "next_action": "Read"}}], "autonomy": {"responsibilities": [{"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1", "root_job_candidates": list(candidates), "runtime_root_state": "RESOLVED" if len(candidates) == 1 else "CONFLICT", "accountable_seat": "ceo", "dispatch": {"dispatch_state": state, "historical": historical, "actionable": state == "RETURNED" and not historical}}]}}, fabric_view={"schema": "mastermind.fabric_job_view.v1", "generated_at": "2026-09-20T00:00:00Z", "armed": {"source": "absent"}, "root": {"job_id": "JOB-1", "status": status, "depth": 0, "orchestration_role": "plan", "plan_step_id": None, "result": {"state": "IN_PROGRESS"}, "review": {"required": False, "reviews_job_id": None, "verdict": "NOT_YET"}}, "children": [], "unjoined_job_count": unjoined, "missingness": [], "degraded": [], "capability": {"state": "PARTIAL"}}, work_ref="WS:ONE", root_job_id="JOB-1", source_validity=validity, cache_currentness={"state": "fresh", "publication_seq": 1}, source_generation={})
 
 
 def test_actual_owner_shape_is_reduced_without_authority_or_mutation():
@@ -47,9 +47,9 @@ def test_stale_start_never_announces_running_and_unknown_arm_is_not_false():
 
 def test_expired_validity_never_promotes_current_cache_to_running():
     args = _inputs()
-    args["source_validity"] = {"schema": "mastermind.source_validity.v1", "cards": [
-        {"responsibility_ref": "responsibility:one", "components": {
-            "card": {"remaining_ms": 0}, "decision_current": {"remaining_ms": 0},
+    args["source_validity"] = {"schema": "mastermind.control_room_source_validity.v1", "publication_seq": 1, "cards": [
+        {"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1", "components": {
+            "card": {"remaining_ms": 0}, "owed_open_age": {"remaining_ms": 0},
             "dispatch": {"remaining_ms": 0},
         }}]}
     doc = compose_mission_workspace(**args)
@@ -107,6 +107,19 @@ def test_producer_composers_supply_the_real_envelope_shapes():
     control = compose_control_room(inbox=None, boot_packet=None, active_builds=None, agent_os_state=None, runtime_jobs=None, bindings=None, generated_at="2026-09-20T00:00:00Z")
     assert fabric["schema"] == "mastermind.fabric_job_view.v1"
     assert control["schema"] == "mastermind.chairman_control_room.v1"
+
+
+def test_real_control_room_relationship_and_fabric_join_reduce_b5_root():
+    control = compose_control_room(inbox={"schema": "mastermind.executive_inbox.v1", "generated_at": "2026-09-05T00:00:00Z", "attention": [{"attention_id": "A", "kind": "decision", "target": "ceo", "reason": "fixture", "workstream": "WS:B5"}]}, boot_packet=None, active_builds=None, agent_os_state={"schema": "agent_os_state.v1", "generated_at": "2026-09-03T00:00:01Z", "workstreams": [{"key": "B5", "title": "B5", "owner": "ceo-sol", "status": "active"}]}, runtime_jobs=[{"job_id": "JOB-B5", "root_job_id": "JOB-B5", "workstream": "WS:B5"}], bindings=None, generated_at="2026-09-05T00:00:00Z")
+    card = control["autonomy"]["responsibilities"][0]
+    card["dispatch"] = {"dispatch_state": "RETURNED", "historical": False, "actionable": True}
+    job = SimpleNamespace(job_id="JOB-B5", status="RUNNING", parent_job_id=None, root_job_id="JOB-B5", depth=0, orchestration_role="plan", plan_step_id=None, attempt_count=1, attempt_limit=2, current_attempt_id="A", result={}, review_required=False, reviews_job_id=None, repair_round=None, supersedes_job_id=None)
+    fabric = compose_fabric_view(root_job_id="JOB-B5", root_job=job, jobs=[job], attempts_by_job={}, joined_job_ids={"JOB-B5"}, runtime_identity={"db_present": True}, armed={}, degraded=[], generated_at="2026-09-05T00:00:00Z")
+    validity = {"schema": "mastermind.control_room_source_validity.v1", "profile": "test", "publication_seq": 7, "cards": [{"responsibility_ref": "WS:B5", "root_job_id": "JOB-B5", "components": {x: {"remaining_ms": 1} for x in ("card", "dispatch", "owed_open_age")}}]}
+    doc = compose_mission_workspace(control_room=control, fabric_view=fabric, work_ref="WS:B5", root_job_id="JOB-B5", source_validity=validity, cache_currentness={"state": "fresh", "publication_seq": 7}, source_generation={})
+    assert doc["mission"]["root_job_id"] == "JOB-B5"
+    assert doc["principal"]["accountable_seat"] == "ceo"
+    assert doc["transport"]["dispatch_state"] == "RETURNED"
 
 
 def test_posture_terminal_domain_and_synthetic_acceptance_product_path():

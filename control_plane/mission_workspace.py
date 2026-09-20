@@ -44,12 +44,14 @@ def _section(state: str, coverage: str, reasons: list[str], total: int | None, i
 def _project(v: object, keys: tuple[str,...]) -> dict[str,Any] | None:
     row=_map(v)
     return {k:_scalar(row.get(k)) for k in keys} if row else None
-def _valid_now(validity: Mapping[str,Any], cache: Mapping[str,Any], ref: object) -> bool:
-    if cache.get("state") != "CURRENT" or validity.get("schema") != "mastermind.source_validity.v1" or not isinstance(ref,str): return False
-    cards=[x for x in _rows(validity.get("cards")) if x.get("responsibility_ref")==ref]
+def _valid_now(validity: Mapping[str,Any], cache: Mapping[str,Any], ref: object, root: object) -> bool:
+    """Consume the server's paired B5 validity envelope, never an invented enum."""
+    if cache.get("state") != "fresh" or validity.get("schema") != "mastermind.control_room_source_validity.v1" or not isinstance(ref,str) or not isinstance(root,str): return False
+    if cache.get("publication_seq") != validity.get("publication_seq") or type(validity.get("publication_seq")) is not int: return False
+    cards=[x for x in _rows(validity.get("cards")) if x.get("responsibility_ref")==ref and x.get("root_job_id")==root]
     if len(cards)!=1: return False
     c=_map(cards[0].get("components"))
-    return all(type(_map(c.get(x)).get("remaining_ms")) is int and _map(c.get(x))["remaining_ms"]>0 for x in ("card","decision_current","dispatch"))
+    return all(type(_map(c.get(x)).get("remaining_ms")) is int and _map(c.get(x))["remaining_ms"]>0 for x in ("card","dispatch","owed_open_age"))
 def _posture(*, execution:str, dispatch:str, current:bool, conflict:bool, blocker:bool, acceptance:Mapping[str,Any], review:str) -> tuple[str,str]:
     if dispatch=="EFFECT_UNKNOWN": return "EFFECT_UNKNOWN","A1"
     if dispatch=="RUNTIME_BINDING_RECONCILIATION_REQUIRED": return "RECONCILIATION_REQUIRED","B1"
@@ -76,14 +78,14 @@ def compose_mission_workspace(*, control_room: Mapping[str,Any]|None, fabric_vie
     control,fabric,validity,cache=_map(control_room),_map(fabric_view),_map(source_validity),_map(cache_currentness)
     cok,fok=control.get("schema")==_CONTROL,fabric.get("schema")==_FABRIC
     work=next((x for x in _rows(control.get("work")) if x.get("work_ref")==work_ref),{}) if cok else {}
-    ref=work.get("responsibility_ref"); auto=next((x for x in _rows(_map(control.get("autonomy")).get("cards")) if x.get("responsibility_ref")==ref),{}) if isinstance(ref,str) else {}
+    ref=work_ref if work else None; auto=next((x for x in _rows(_map(control.get("autonomy")).get("responsibilities")) if x.get("responsibility_ref")==ref and x.get("root_job_id")==root_job_id),{}) if isinstance(ref,str) else {}
     candidates=sorted({x for x in auto.get("root_job_candidates",()) if isinstance(x,str)}) if isinstance(auto.get("root_job_candidates"),Sequence) else []
     conflict=auto.get("runtime_root_state")=="CONFLICT" or len(candidates)!=1
     resolved=root_job_id if isinstance(root_job_id,str) and root_job_id in candidates and not conflict else None
     root=_map(fabric.get("root")) if fok and resolved else {}
     if root.get("job_id")!=resolved or root.get("parent_job_id") not in (None,""): resolved,root=None,{}
     dispatch=_map(auto.get("dispatch")); ds=dispatch.get("dispatch_state") if dispatch.get("dispatch_state") in _DISPATCH else "UNKNOWN"
-    current=_valid_now(validity,cache,ref) and dispatch.get("historical") is False
+    current=_valid_now(validity,cache,ref,resolved) and dispatch.get("historical") is False
     result,review=_map(root.get("result")),_map(root.get("review")); execution=result.get("state") if result.get("state") in _EXEC else "NOT_STARTED"; verdict=review.get("verdict") if review.get("verdict") in {"approve","reject","NOT_YET"} else "NOT_YET"
     artifacts, artifacts_excluded = _safe_items(result.get("artifacts"))
     next_actions, actions_excluded = _safe_items(result.get("next_actions"))
