@@ -51,6 +51,12 @@ class WorkspaceReturnTargetEpoch:
     attempt_status: AttemptStatus
     fence_generation: int
     worker_status: WorkerStatus
+    harness_session_epoch_id: str
+    harness_generation_number: int
+    harness_provider_session_id: str
+    harness_provider: str
+    harness_account_label: str
+    harness_owner_seat: str
 
 
 TargetReader = Callable[[str], WorkspaceReturnTargetEpoch]
@@ -116,6 +122,9 @@ def _read_current_target(runtime: Any, operation_key: str) -> WorkspaceReturnTar
             or worker.active_job_id != job_id
         ):
             _refuse()
+        harness = runtime.current_harness_binding_source(attempt.attempt_id)
+        if harness.attempt_id != attempt.attempt_id:
+            _refuse()
         return WorkspaceReturnTargetEpoch(
             root_job_id=identity.root_job_id,
             job_id=job_id,
@@ -126,6 +135,12 @@ def _read_current_target(runtime: Any, operation_key: str) -> WorkspaceReturnTar
             attempt_status=attempt.status,
             fence_generation=attempt.fence_generation,
             worker_status=worker.status,
+            harness_session_epoch_id=harness.session_epoch_id,
+            harness_generation_number=harness.generation_number,
+            harness_provider_session_id=harness.provider_session_id,
+            harness_provider=harness.provider,
+            harness_account_label=harness.account_label,
+            harness_owner_seat=harness.owner_seat,
         )
     except WorkspaceReturnError:
         raise
