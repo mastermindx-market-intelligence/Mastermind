@@ -15,6 +15,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from integrations.slack_agent_dialogue.contract import MAX_TEXT_CHARS
+
 CATALOG_SCHEMA = "mastermind.workspace_agent_profile_catalog.v1"
 ECONOMIC_SCHEMA = "mastermind.workspace_agent_economic_envelope.v1"
 ACTIVATION_SCHEMA = "mastermind.workspace_agent_activation_binding.v1"
@@ -78,7 +80,6 @@ _PROFILE_KEYS = frozenset(
 _OUTPUT_KEYS = frozenset(
     {
         "kind",
-        "max_result_chars",
         "allowed_status",
         "evidence_required_when_claiming_external_fact",
         "authority_effect",
@@ -205,7 +206,7 @@ def validate_profile(value: Mapping[str, Any]) -> dict[str, Any]:
     role = _text(raw["role"], maximum=64)
     if role not in _PROFILE_ROLES:
         _refuse("INVALID_PROFILE")
-    mission = _text(raw["mission"], maximum=720)
+    mission = _text(raw["mission"], maximum=MAX_TEXT_CHARS)
     required_inputs = _string_list(
         raw["required_inputs"],
         maximum_items=16,
@@ -239,7 +240,7 @@ def validate_profile(value: Mapping[str, Any]) -> dict[str, Any]:
     instructions = _string_list(
         raw["instructions"],
         maximum_items=16,
-        maximum_chars=640,
+        maximum_chars=MAX_TEXT_CHARS,
         unique=True,
     )
     output = raw["output_contract"]
@@ -251,12 +252,7 @@ def validate_profile(value: Mapping[str, Any]) -> dict[str, Any]:
         _refuse("INVALID_PROFILE")
     if profile_id == "independent-outcome-reviewer" and kind != "review_candidate":
         _refuse("INVALID_PROFILE")
-    max_result_chars = _bounded_int(
-        output["max_result_chars"],
-        minimum=1,
-        maximum=900,
-        code="INVALID_PROFILE",
-    )
+    max_result_chars = MAX_TEXT_CHARS
     if output["allowed_status"] != list(_ALLOWED_STATUS):
         _refuse("INVALID_PROFILE")
     if output["evidence_required_when_claiming_external_fact"] is not True:
