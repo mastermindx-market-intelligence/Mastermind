@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, contextmanager
+from collections.abc import Mapping
 import dataclasses
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -27,6 +28,7 @@ import socket
 import stat
 import sys
 import time
+from typing import Any
 from urllib.parse import urlsplit
 
 from integrations.business_mcp_auth.contracts import (
@@ -43,6 +45,10 @@ from control_plane.executive_runtime import Runtime
 from integrations.workspace_agent_return import (
     WorkspaceCandidateReturnGateway,
     WorkspaceReturnTicketCodec,
+)
+from integrations.slack_agent_dialogue.service import (
+    DialogueServiceError,
+    call_service,
 )
 from integrations.workspace_agent_return_app import (
     REQUIRED_SCOPE,
@@ -367,6 +373,37 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _dialogue_socket_is_trusted(path: Path) -> bool:
+    """Verify the configured local dialogue target before every carrier effect."""
+
+    try:
+        parent = path.parent.lstat()
+        observed = path.lstat()
+    except OSError:
+        return False
+    parent_mode = stat.S_IMODE(parent.st_mode)
+    socket_mode = stat.S_IMODE(observed.st_mode)
+    return bool(
+        stat.S_ISDIR(parent.st_mode)
+        and not stat.S_ISLNK(parent.st_mode)
+        and parent.st_uid == os.geteuid()
+        and parent_mode in {int("700", 8), int("710", 8)}
+        and stat.S_ISSOCK(observed.st_mode)
+        and not stat.S_ISLNK(observed.st_mode)
+        and observed.st_uid == os.geteuid()
+        and socket_mode in {int("600", 8), int("660", 8)}
+    )
+
+
+async def _trusted_dialogue_call(
+    socket_path: Path,
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not _dialogue_socket_is_trusted(Path(socket_path)):
+        raise DialogueServiceError("SERVICE_UNAVAILABLE")
+    return await call_service(socket_path, request)
+
+
 def create_runtime(config: ServiceConfig) -> WorkspaceReturnServiceRuntime:
     """Compose existing owners; perform no provider or Agent Dialogue effect."""
 
@@ -398,6 +435,7 @@ def create_runtime(config: ServiceConfig) -> WorkspaceReturnServiceRuntime:
             socket_path=Path(config.dialogue_socket_path),
             clock_ms=lambda: int(time.time() * 1000),
             utc_now=_utc_now,
+            service_call=_trusted_dialogue_call,
         )
         cache = BoundedJwksCache(
             policy=policy,
@@ -478,11 +516,7 @@ def is_ready(
         or state.server_failed
     ):
         return False
-    try:
-        observed = runtime.dialogue_socket_path.lstat()
-    except OSError:
-        return False
-    return stat.S_ISSOCK(observed.st_mode)
+    return _dialogue_socket_is_trusted(runtime.dialogue_socket_path)
 
 
 def build_service_app(
