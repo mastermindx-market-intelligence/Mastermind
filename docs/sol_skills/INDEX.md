@@ -128,8 +128,7 @@ Use when sources disagree, a modifying response is ambiguous, transport reconnec
 stale, a duplicate appears, or a projection may be false-green.
 
 ### `CLOSEOUT.md`
-Use after a material ruling, accepted implementation/production proof, verified
-`CHECKPOINTED_CONTINUATION`, or substantive operator handoff to update the correct durable homes
+Use after a material ruling, accepted implementation/production proof, verified `CHECKPOINTED_CONTINUATION`, or substantive operator handoff to update the correct durable homes
 and leave the exact mission-completion state and next action recoverable by a new session.
 
 ### `BOOTSTRAP_KERNEL.md`
