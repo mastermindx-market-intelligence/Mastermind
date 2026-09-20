@@ -55,8 +55,14 @@ class WorkspaceReturnTargetEpoch:
 
 TargetReader = Callable[[str], WorkspaceReturnTargetEpoch]
 DialogueSourceReader = Callable[[str], ExecutiveDialogueSource]
+@dataclasses.dataclass(frozen=True, slots=True)
+class WorkspaceReturnPhysicalSource:
+    identity: PhysicalDialogueSourceIdentity
+    source_workstream: str
+
+
 PhysicalSourceReader = Callable[
-    [str, str, str], PhysicalDialogueSourceIdentity
+    [str, str, str], WorkspaceReturnPhysicalSource
 ]
 
 
@@ -147,7 +153,7 @@ def _read_physical_source(
     operation_key: str,
     job_id: str,
     attempt_id: str,
-) -> PhysicalDialogueSourceIdentity:
+) -> WorkspaceReturnPhysicalSource:
     """Read the unique physical dialogue thread already owned by Wake.
 
     Multiple attention events and both supervisor seats may legitimately point
@@ -259,7 +265,13 @@ def _read_physical_source(
         or obligation.attempt_id != attempt_id
     ):
         _refuse()
-    return physical
+    source_workstream = getattr(obligation, "source_workstream", None)
+    if type(source_workstream) is not str or not source_workstream:
+        _refuse()
+    return WorkspaceReturnPhysicalSource(
+        identity=physical,
+        source_workstream=source_workstream,
+    )
 
 
 class ExecutiveWorkspaceReturnBindingResolver:
@@ -292,13 +304,17 @@ class ExecutiveWorkspaceReturnBindingResolver:
         )
 
     def resolve(self, operation_key: str) -> DialogueBinding:
+        expected_job_id = _job_id_from_operation_key(operation_key)
         first = self._target_reader(operation_key)
-        if type(first) is not WorkspaceReturnTargetEpoch:
+        if (
+            type(first) is not WorkspaceReturnTargetEpoch
+            or first.job_id != expected_job_id
+        ):
             _refuse()
 
         try:
             source = self._dialogue_source_reader(first.root_job_id)
-            physical = self._physical_source_reader(
+            physical_source = self._physical_source_reader(
                 operation_key,
                 first.job_id,
                 first.attempt_id,
@@ -310,12 +326,14 @@ class ExecutiveWorkspaceReturnBindingResolver:
 
         if (
             type(source) is not ExecutiveDialogueSource
-            or type(physical) is not PhysicalDialogueSourceIdentity
-            or physical.operation_key != operation_key
-            or physical.candidate.root_job_id != first.root_job_id
-            or physical.candidate.job_id != first.job_id
-            or physical.candidate.attempt_id != first.attempt_id
-            or physical.candidate.worker_id != first.worker_id
+            or type(physical_source) is not WorkspaceReturnPhysicalSource
+            or physical_source.source_workstream != source.work_ref
+            or type(physical_source.identity) is not PhysicalDialogueSourceIdentity
+            or physical_source.identity.operation_key != operation_key
+            or physical_source.identity.candidate.root_job_id != first.root_job_id
+            or physical_source.identity.candidate.job_id != first.job_id
+            or physical_source.identity.candidate.attempt_id != first.attempt_id
+            or physical_source.identity.candidate.worker_id != first.worker_id
         ):
             _refuse()
 
@@ -346,7 +364,7 @@ class ExecutiveWorkspaceReturnBindingResolver:
                 operation_key=operation_key,
                 watch_mode=source.watch_mode,
                 applies_to=applies_to,
-                thread_ts=physical.thread_ts,
+                thread_ts=physical_source.identity.thread_ts,
                 allowed_message_types=_ALLOWED_MESSAGE_TYPES,
                 reply_to_message_key=None,
             )
@@ -356,5 +374,6 @@ class ExecutiveWorkspaceReturnBindingResolver:
 
 __all__ = [
     "ExecutiveWorkspaceReturnBindingResolver",
+    "WorkspaceReturnPhysicalSource",
     "WorkspaceReturnTargetEpoch",
 ]
