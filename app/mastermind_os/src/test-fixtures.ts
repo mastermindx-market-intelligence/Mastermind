@@ -1,8 +1,11 @@
 import realControlRoom from "./fixtures/control-room-b5-c20a3cf8.json";
 import realMission from "./fixtures/mission-workspace-c20a3cf8.json";
+import bothUnavailableMission from "./fixtures/mission-workspace-bf9540a3-both-unavailable.json";
+import controlRoomUnavailableMission from "./fixtures/mission-workspace-bf9540a3-control-room-unavailable.json";
 import fabricUnavailableMission from "./fixtures/mission-workspace-bf9540a3-fabric-unavailable.json";
 import nullRoleMission from "./fixtures/mission-workspace-bf9540a3-null-role.json";
 import retainedPartialMission from "./fixtures/mission-workspace-bf9540a3-retained-partial.json";
+import rootConflictMission from "./fixtures/mission-workspace-bf9540a3-root-conflict.json";
 
 // Test-only frozen fixtures. Both originate at reducer commit
 // c20a3cf8e6541d894404d6c0f44d0999edd8e142. The Control Room fixture was
@@ -13,11 +16,18 @@ export const realControlRoomFixture = () => structuredClone(realControlRoom);
 export const realMissionFixture = () => structuredClone(realMission);
 
 // Additional actual reducer outputs originate at bf9540a3047370b244d9915ed510409368a09209.
-// They cover a missing Fabric owner, a persisted Runtime child with its nullable
-// orchestration role, and a malformed attempt retained as an explicitly degraded
-// known subset. No fixture is imported by the production entry point.
+// Together with the byte-identical normal B5 output above, they cover all seven
+// receipt cases: each missing-owner combination, duplicate-root conflict, a
+// persisted nullable Runtime role, and a malformed attempt retained as an
+// explicitly degraded known subset. Production imports none of these fixtures.
 export const fabricUnavailableMissionFixture = () =>
   structuredClone(fabricUnavailableMission);
+export const controlRoomUnavailableMissionFixture = () =>
+  structuredClone(controlRoomUnavailableMission);
+export const bothUnavailableMissionFixture = () =>
+  structuredClone(bothUnavailableMission);
+export const rootConflictMissionFixture = () =>
+  structuredClone(rootConflictMission);
 export const nullRoleMissionFixture = () => structuredClone(nullRoleMission);
 export const retainedPartialMissionFixture = () =>
   structuredClone(retainedPartialMission);

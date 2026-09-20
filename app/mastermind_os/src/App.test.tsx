@@ -3,7 +3,11 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { controlRoomFixture, missionFixture } from "./test-fixtures";
+import {
+  bothUnavailableMissionFixture,
+  controlRoomFixture,
+  missionFixture,
+} from "./test-fixtures";
 
 const invoke = vi.fn().mockResolvedValue({
   version: "0.1.0",
@@ -220,6 +224,19 @@ describe("native and interaction contracts", () => {
     expect(
       screen.getAllByText(/EXECUTIVE_OS · job:JOB-ROOT · status/).length,
     ).toBeGreaterThan(0);
+  });
+  it("renders a null projection clock as unavailable", async () => {
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:B5", rootJobId: "JOB-B5" },
+      readMission: async () => bothUnavailableMissionFixture(),
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Evidence" }));
+    const label = await screen.findByText("Projection created"),
+      value = label.nextElementSibling;
+    expect(value?.textContent).toBe("Unavailable");
+    expect(value?.querySelector("time")).toBeNull();
   });
   it("labels partial missions without a current qualification claim", async () => {
     window.MastermindMissionHost = {

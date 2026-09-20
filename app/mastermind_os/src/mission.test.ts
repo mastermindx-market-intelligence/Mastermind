@@ -9,6 +9,8 @@ import {
   validateMission,
 } from "./mission";
 import {
+  bothUnavailableMissionFixture,
+  controlRoomUnavailableMissionFixture,
   controlRoomFixture,
   fabricUnavailableMissionFixture,
   missionFixture,
@@ -16,6 +18,7 @@ import {
   realControlRoomFixture,
   realMissionFixture,
   retainedPartialMissionFixture,
+  rootConflictMissionFixture,
 } from "./test-fixtures";
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -222,6 +225,73 @@ describe("closed mission decoder", () => {
       coverage: "INCOMPLETE",
       items: [],
     });
+  });
+  it.each([
+    ["01 control room only", fabricUnavailableMissionFixture, "JOB-B5"],
+    ["02 Fabric only", controlRoomUnavailableMissionFixture, "JOB-B5"],
+    ["03 both unavailable", bothUnavailableMissionFixture, "JOB-B5"],
+    ["04 duplicate root conflict", rootConflictMissionFixture, "JOB-B5"],
+    ["05 normal B5", realMissionFixture, "JOB-B5"],
+    ["06 persisted nullable role", nullRoleMissionFixture, "JOB-001"],
+    ["07 retained malformed child", retainedPartialMissionFixture, "JOB-B5"],
+  ])("accepts actual reducer receipt case %s", (_name, fixture, rootJobId) => {
+    expect(
+      decodeMission(fixture(), { workRef: "WS:B5", rootJobId }),
+    ).not.toBeNull();
+  });
+  it.each([
+    [
+      "claimed coverage",
+      (d: any) => {
+        d.source.source_coverage = ["control_room"];
+      },
+    ],
+    [
+      "owner schema",
+      (d: any) => {
+        d.source.control_room_schema = "mastermind.chairman_control_room.v1";
+      },
+    ],
+    [
+      "owner timestamp",
+      (d: any) => {
+        d.source.control_room_generated_at = "2026-09-20T00:00:00Z";
+      },
+    ],
+    [
+      "partial read",
+      (d: any) => {
+        d.read_state.state = "PARTIAL";
+      },
+    ],
+    [
+      "current read",
+      (d: any) => {
+        d.read_state.state = "CURRENT";
+      },
+    ],
+    [
+      "generation diagnostic",
+      (d: any) => {
+        d.source.source_generation = {
+          state: "STALE",
+          version: 1,
+          generation: 2,
+        };
+      },
+    ],
+    [
+      "usable section",
+      (d: any) => {
+        d.read_state.usable_sections = ["program"];
+      },
+    ],
+  ])("rejects a null projection clock with %s", (_name, mutate) => {
+    const raw: any = bothUnavailableMissionFixture();
+    mutate(raw);
+    expect(
+      decodeMission(raw, { workRef: "WS:B5", rootJobId: "JOB-B5" }),
+    ).toBeNull();
   });
   it("accepts actual owner-nullable and guarded known-subset child projections", () => {
     const nullRole = decodeMission(nullRoleMissionFixture(), {

@@ -97,7 +97,7 @@ export interface RuntimeCard {
 }
 export interface MissionDocument {
   schema: "mastermind.mission_workspace.v1";
-  generated_at: string;
+  generated_at: string | null;
   source: {
     control_room_schema: string | null;
     control_room_generated_at: string | null;
@@ -751,8 +751,7 @@ export function decodeMission(
   if (
     !obj(value) ||
     !exact(value, TOP) ||
-    value.schema !== "mastermind.mission_workspace.v1" ||
-    !time(value.generated_at)
+    value.schema !== "mastermind.mission_workspace.v1"
   )
     return null;
   const s = value.source;
@@ -816,6 +815,19 @@ export function decodeMission(
     new Set(r.usable_sections).size !== r.usable_sections.length
   )
     return null;
+  const nullProjectionClock =
+    value.generated_at === null &&
+    r.state === "UNAVAILABLE" &&
+    r.usable_sections.length === 0 &&
+    s.control_room_schema === null &&
+    s.control_room_generated_at === null &&
+    s.fabric_view_schema === null &&
+    s.fabric_view_generated_at === null &&
+    s.source_coverage.length === 0 &&
+    s.source_generation.state === "UNKNOWN" &&
+    s.source_generation.version === null &&
+    s.source_generation.generation === null;
+  if (!nullProjectionClock && !time(value.generated_at)) return null;
   const p = value.program;
   if (
     !obj(p) ||

@@ -311,7 +311,11 @@ function Evidence({ d }: { d: MissionDocument }) {
         <dl>
           <dt>Projection created</dt>
           <dd>
-            <time>{d.generated_at}</time>
+            {d.generated_at ? (
+              <time dateTime={d.generated_at}>{d.generated_at}</time>
+            ) : (
+              "Unavailable"
+            )}
           </dd>
           <dt>Control Room source</dt>
           <dd>{display(d.source.control_room_generated_at)}</dd>
