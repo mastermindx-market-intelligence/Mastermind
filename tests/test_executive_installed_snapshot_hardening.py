@@ -895,3 +895,148 @@ def test_installed_collector_runs_macro_closure_once_with_cumulative_budget(
     assert packet["mastermind"]["sha"] == source_sha
     assert packet["macro"]["sha"] == macro_sha
     assert packet["macro"]["root"] == str(macro)
+
+
+def _macro_sparse_fixture(tmp_path: Path) -> tuple[Path, str]:
+    macro = tmp_path / "macro-sparse"
+    (macro / "scripts").mkdir(parents=True)
+    (macro / "config").mkdir()
+    (macro / "data/governance").mkdir(parents=True)
+    (macro / "agentos/workstreams").mkdir(parents=True)
+    (macro / "agentos/decisions").mkdir()
+    (macro / "agentos/discoveries").mkdir()
+    (macro / "agentos/handoffs").mkdir()
+    (macro / "research").mkdir()
+    (macro / "data/probe/nested").mkdir(parents=True)
+    (macro / "unrelated").mkdir()
+
+    (macro / "scripts/__init__.py").write_text("", encoding="utf-8")
+    (macro / "scripts/agentos.py").write_text("print('fixture')\n", encoding="utf-8")
+    (macro / "scripts/audit_stranded_work.py").write_text("", encoding="utf-8")
+    (macro / "config/mastermind_programs.yml").write_text(
+        "schema: mastermind_programs.v1\nontology: {lifecycle_states: [active]}\nprograms: {}\n",
+        encoding="utf-8",
+    )
+    (macro / "data/governance/active_builds.json").write_text(
+        '{"schema":"active_builds.v1"}\n', encoding="utf-8",
+    )
+    (macro / "research/evidence.md").write_text("evidence\n", encoding="utf-8")
+    (macro / "data/probe/nested/payload.json").write_text("{}\n", encoding="utf-8")
+    (macro / "unrelated/large.bin").write_bytes(b"x" * 1024)
+    (macro / "agentos/decisions/DEC-ONE.md").write_text("---\nkey: ONE\n---\n", encoding="utf-8")
+    (macro / "agentos/workstreams/WS-SPARSE.md").write_text(
+        """---
+key: SPARSE
+title: Sparse fixture
+objective: Preserve exact read semantics.
+status: active
+program: fixture
+repos: [macro, terminal]
+owner: Sol
+class: build
+blast_radius: reversible
+ambiguity: specified
+owns_paths:
+  - data/probe/**
+  - terminal:site/**
+  - missing/**
+artifacts:
+  - research/evidence.md
+  - terminal:research/external.md
+waves:
+  - id: W0
+    title: Fixture
+    status: in_progress
+next_action: Continue.
+---
+body
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", str(macro)], check=True)
+    _git(macro, "config", "user.email", "test@example.invalid")
+    _git(macro, "config", "user.name", "Test")
+    _git(macro, "add", ".")
+    _git(macro, "commit", "-q", "-m", "fixture")
+    return macro, _git(macro, "rev-parse", "HEAD").stdout.strip()
+
+
+def test_sparse_macro_materialization_preserves_brief_and_path_existence_closure(
+    tmp_path: Path,
+):
+    from integrations.executive_mcp.installed import (
+        _build_macro_materialization_plan,
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+        _materialized_macro_root,
+    )
+
+    macro, head = _macro_sparse_fixture(tmp_path)
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    plan = _build_macro_materialization_plan(
+        macro, runner=_default_packet_runner, env=env, deadline=None,
+    )
+
+    assert plan.head == head
+    assert "scripts/agentos.py" in plan.files
+    assert "agentos/workstreams/WS-SPARSE.md" in plan.files
+    assert "research/evidence.md" in plan.files
+    assert "data/probe" in plan.directories
+    assert "unrelated/large.bin" not in plan.files
+    assert all(not path.startswith("terminal:") for path in plan.files)
+    assert all(not path.startswith("missing") for path in plan.files | plan.directories)
+
+    with _materialized_macro_root(macro, timeout=5.0, plan=plan) as materialized:
+        assert materialized != macro
+        assert (materialized / "scripts/agentos.py").read_text(encoding="utf-8") == "print('fixture')\n"
+        assert (materialized / "research/evidence.md").read_text(encoding="utf-8") == "evidence\n"
+        assert (materialized / "data/probe").is_dir()
+        assert not (materialized / "unrelated/large.bin").exists()
+        assert not (materialized / ".git/index").exists()
+        assert not (materialized / ".git/hooks").exists()
+        assert not (materialized / ".git/logs").exists()
+        assert _git(materialized, "rev-parse", "HEAD").stdout.strip() == head
+        assert _git(
+            materialized, "log", "-1", "--format=%H", "--",
+            "agentos/workstreams/WS-SPARSE.md",
+        ).stdout.strip() == head
+        assert _git(materialized, "worktree", "list", "--porcelain").stdout
+        child_env = _installed_child_env(code_root=macro, macro_root=materialized)
+        observed = _clean_git_snapshot(
+            materialized,
+            runner=_default_packet_runner,
+            env=child_env,
+            label="materialized Macro source",
+            content_scope="macro_brief",
+            include_seal=True,
+            verify_repository_closure=False,
+            admitted_worktree_files=set(plan.files),
+            admitted_worktree_directories=set(plan.directories),
+        )
+        assert observed[0] == head
+
+
+def test_sparse_macro_materialization_refuses_unsupported_path_list_shape(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _build_macro_materialization_plan,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    macro, _head = _macro_sparse_fixture(tmp_path)
+    record = macro / "agentos/workstreams/WS-SPARSE.md"
+    text = record.read_text(encoding="utf-8").replace(
+        "artifacts:\n  - research/evidence.md\n  - terminal:research/external.md\n",
+        "artifacts: {path: research/evidence.md}\n",
+    )
+    record.write_text(text, encoding="utf-8")
+    _git(macro, "add", str(record.relative_to(macro)))
+    _git(macro, "commit", "-q", "-m", "unsupported path list")
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+
+    with pytest.raises(GatewayError, match="path-list frontmatter is unsupported"):
+        _build_macro_materialization_plan(
+            macro, runner=_default_packet_runner, env=env, deadline=None,
+        )
