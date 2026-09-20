@@ -81,6 +81,12 @@ For the requested action class:
 4. recompute `requested_action_serviceability` and the health state;
 5. continue the requested action when the technical/resource gate clears, then evaluate organizational/source-writer authority separately.
 
+When an owner supplies `mastermind.sol_capability_status.v1`, consume it rather than reimplementing
+CAP1 policy: for the exact matching scope, READ may consume `read_serviceable` and WRITE may consume
+`write_serviceable`; ADMIN remains UNKNOWN unless its actual owner supplies action-specific evidence.
+Preserve CAP1 source refs/issues and proof generation. Navigator normalizes that owner fact into the
+role-filtered packet; it does not become the capability registry or recompute CAP1's serviceability law.
+
 Never perform a dummy mutation solely to prove capability. If only an effectful probe exists and the actual effect is not yet authorized/safe, keep the capability `UNKNOWN` / `UNPROBED` rather than fabricating `UNAVAILABLE`.
 
 A terminal negative capability claim must name the requested action class, current discovery result, non-effectful preflight/refusal evidence, exhausted safe probe path, exact target/binding scope, and any exact human/admin ceremony still required. Missing evidence means more bounded discovery work exists; it is not a Chairman gate.

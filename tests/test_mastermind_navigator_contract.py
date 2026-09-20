@@ -1181,3 +1181,16 @@ def test_proven_live_requires_requested_action_serviceability_yes() -> None:
     assert _derive_state(live, rules) == "PROVEN_LIVE"
     live["requested_action_serviceability"] = "UNKNOWN"
     assert _derive_state(live, rules) == "UNKNOWN"
+
+
+def test_skill_reuses_cap1_serviceability_without_reimplementing_owner_policy() -> None:
+    skill = (PACKAGE / "skills/navigate-mastermind-universe/SKILL.md").read_text(encoding="utf-8")
+    for phrase in (
+        "`mastermind.sol_capability_status.v1`",
+        "READ may consume `read_serviceable`",
+        "WRITE may consume `write_serviceable`",
+        "ADMIN remains UNKNOWN",
+        "does not become the capability registry",
+        "does not become the capability registry or recompute CAP1's serviceability law",
+    ):
+        assert phrase in skill
