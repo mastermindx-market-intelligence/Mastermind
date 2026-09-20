@@ -26,6 +26,7 @@ from integrations.workspace_agent_profiles import (
     profile_digest,
     validate_activation_binding,
     validate_economic_envelope,
+    validate_profile,
     validate_profile_catalog,
 )
 
