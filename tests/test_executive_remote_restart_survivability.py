@@ -157,9 +157,14 @@ def _runtime_and_job(
     broker,
     *,
     lease_seconds: int = 30,
+    clock=None,
 ):
     runtime_root = tmp_path / "runtime-state"
-    runtime = Runtime.at(runtime_root, lease_seconds=lease_seconds)
+    runtime = Runtime.at(
+        runtime_root,
+        lease_seconds=lease_seconds,
+        clock=clock,
+    )
     runtime.workers.register_worker(
         "codex-01",
         provider="codex",
@@ -962,6 +967,11 @@ def test_cancelled_restart_renews_lease_before_slow_owner_probe(
 ) -> None:
     """A slow broker status read cannot consume the adopted cancellation lease."""
 
+    clock_state = [1_800_000_000_000]
+
+    def clock() -> int:
+        return clock_state[0]
+
     class SlowFirstPresence:
         def __init__(self, delegate) -> None:
             self.delegate = delegate
@@ -970,7 +980,9 @@ def test_cancelled_restart_renews_lease_before_slow_owner_probe(
         def presence(self, attempt):
             self.calls += 1
             if self.calls == 1:
-                time.sleep(1.1)
+                # Consume more than the original lease's remaining 500 ms
+                # without making the test depend on hosted-runner wall time.
+                clock_state[0] += 600
             return self.delegate.presence(attempt)
 
         def absence_verified(self, attempt) -> bool:
@@ -990,6 +1002,7 @@ def test_cancelled_restart_renews_lease_before_slow_owner_probe(
             tmp_path,
             broker,
             lease_seconds=1,
+            clock=clock,
         )
         pending: asyncio.Task | None = None
         finisher: asyncio.Task | None = None
@@ -1020,9 +1033,17 @@ def test_cancelled_restart_renews_lease_before_slow_owner_probe(
                 await pending
             runtime.jobs.cancel_job(job.job_id)
 
+            # Leave only half of the original lease. Successful restart
+            # adoption must rotate/extend it before the later slow owner probe.
+            clock_state[0] += 500
+
             del active
             del first
-            reopened = Runtime.at(runtime_root, lease_seconds=1)
+            reopened = Runtime.at(
+                runtime_root,
+                lease_seconds=1,
+                clock=clock,
+            )
             restarted = _supervisor_for(
                 reopened,
                 broker,
