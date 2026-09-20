@@ -30,6 +30,10 @@ class WakeAckIngressError(ValueError):
     """A target claim or trusted current-writer projection is not admissible."""
 
 
+class WebSolWakeAckLeaseError(WakeAckIngressError):
+    """The transient Web-Sol projection does not match the current live lease."""
+
+
 @dataclasses.dataclass(frozen=True)
 class WakeAckClaim:
     """The entire model-authored surface: opaque canonical Wake ids only."""
@@ -470,23 +474,23 @@ def _require_exact_web_sol_lease(
     """
 
     if lease is None:
-        raise WakeAckIngressError(
+        raise WebSolWakeAckLeaseError(
             "Web-Sol ACK first persistence requires the current RuntimeBinding lease"
         )
     binding = getattr(lease, "runtime_binding", None)
     target = getattr(lease, "target", None)
     fingerprint = getattr(lease, "runtime_binding_fingerprint", None)
     if binding is None or target is None or not isinstance(fingerprint, str):
-        raise WakeAckIngressError(
+        raise WebSolWakeAckLeaseError(
             "Web-Sol ACK proof is not an accepted RuntimeBinding lease"
         )
     conversation_fingerprint = getattr(target, "conversation_fingerprint", None)
     if not isinstance(conversation_fingerprint, str):
-        raise WakeAckIngressError(
+        raise WebSolWakeAckLeaseError(
             "Web-Sol ACK lease carries no exact conversation fingerprint"
         )
     if getattr(binding, "reasoning_surface", None) != WEB_SOL_REASONING_SURFACE:
-        raise WakeAckIngressError(
+        raise WebSolWakeAckLeaseError(
             "Web-Sol ACK lease is not bound to the Web-Sol reasoning surface"
         )
     if (
@@ -494,19 +498,19 @@ def _require_exact_web_sol_lease(
         or getattr(binding, "binding_id", None) != trusted.binding_id
         or getattr(binding, "binding_generation", None) != trusted.binding_generation
     ):
-        raise WakeAckIngressError(
+        raise WebSolWakeAckLeaseError(
             "trusted Web-Sol binding is not the current RuntimeBinding lease"
         )
     if getattr(binding, "native_handle", None) != trusted.native_handle:
-        raise WakeAckIngressError(
+        raise WebSolWakeAckLeaseError(
             "trusted native handle is not the current Web-Sol host life"
         )
     if fingerprint != trusted.runtime_binding_fingerprint:
-        raise WakeAckIngressError(
+        raise WebSolWakeAckLeaseError(
             "trusted runtime-binding fingerprint is not the current lease fingerprint"
         )
     if conversation_fingerprint != trusted.conversation_fingerprint:
-        raise WakeAckIngressError(
+        raise WebSolWakeAckLeaseError(
             "trusted conversation fingerprint is not the exact leased conversation"
         )
 
@@ -711,6 +715,7 @@ def _reconcile_existing_web_sol_ack(
 __all__ = [
     "TrustedWebSolWakeAckProjection",
     "TrustedWorkerWakeAckProjection",
+    "WebSolWakeAckLeaseError",
     "WakeAckClaim",
     "WakeAckIngressError",
     "WEB_SOL_REASONING_SURFACE",
