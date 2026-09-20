@@ -139,7 +139,7 @@ Before mutation, capture one complete preimage for the target workspace:
 - marketplace repository, root path, immutable revision selector and resolved commit;
 - exact ordered four-plugin inventory and versions;
 - each manifest identity;
-- workspace policy for each plugin;
+- workspace availability/disable state and installation policy for each plugin;
 - canary-principal install state and install affordance for each plugin;
 - invocation affordance for each plugin;
 - included-app access/auth state where applicable;
@@ -156,17 +156,21 @@ never retry through another account, browser, workspace, source selector, or car
 
 ## 6. Four-plugin control policy
 
-After exact fixed-commit import/readback and before Navigator install, run at
-most one bounded `CONTROL_POLICY_RECONCILE` when the imported defaults are not
+After exact fixed-commit import/readback and before Navigator install, run one
+bounded `CONTROL_POLICY_RECONCILE` sequence when the imported defaults are not
 already correct. A new marketplace may initially expose valid plugins as
 `Available`; that state authorizes no install or invocation and is not accepted
-canary evidence. Then require:
+canary evidence. Treat each plugin-policy change as its own owner-native effect with
+its own preimage/postimage and same-plugin reconciliation if a response is lost.
 
-- `mastermind-sol`: Disabled, uninstalled, non-installable, non-invokable.
-- `mastermind-operator`: Disabled, uninstalled, non-installable, non-invokable.
-- `mastermind-cortex`: Disabled, uninstalled, non-installable, non-invokable.
-- `mastermind-navigator`: least-wide policy that permits the sole canary principal
-  to install/invoke it; workspace-wide installation is forbidden.
+Use the platform's **Disable plugin** control for negative controls rather than
+inventing a nonexistent installation-policy enum. Then require:
+
+- `mastermind-sol`: plugin disabled, uninstalled, non-installable, non-invokable.
+- `mastermind-operator`: plugin disabled, uninstalled, non-installable, non-invokable.
+- `mastermind-cortex`: plugin disabled, uninstalled, non-installable, non-invokable.
+- `mastermind-navigator`: installation policy `Available` for the isolated
+  one-member Business workspace; `Installed` is forbidden for this canary.
 
 A plugin's disabled state must be directly observed. App disablement, absence of an
 app, or another plugin's policy never substitutes for the plugin/skill readback.
