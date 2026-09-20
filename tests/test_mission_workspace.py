@@ -13,7 +13,7 @@ from control_plane.mission_workspace import SCHEMA, _posture, compose_mission_wo
 
 
 def _inputs(*, candidates=("JOB-1",), state="STARTED", historical=False, status="RUNNING", unjoined=0):
-    validity = {"schema": "mastermind.control_room_source_validity.v1", "profile": "test", "publication_seq": 1, "cards": [{"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1", "components": {name: {"remaining_ms": 1} for name in ("card", "dispatch", "owed_open_age")}}]}
+    validity = {"schema": "mastermind.control_room_source_validity.v1", "profile": "b5.darwin-chrome-paired-v1", "publication_seq": 1, "cards": [{"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1", "components": {name: {"remaining_ms": 1, "state": "current", "proof_ref": "a" * 64} for name in ("card", "dispatch", "owed_open_age")}}]}
     return dict(control_room={"schema": "mastermind.chairman_control_room.v1", "generated_at": "2026-09-20T00:00:00Z", "work": [{"work_ref": "WS:ONE", "agent_os": {"title": "One", "state": "active", "next_action": "Read"}}], "autonomy": {"responsibilities": [{"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1", "root_job_candidates": list(candidates), "runtime_root_state": "RESOLVED" if len(candidates) == 1 else "CONFLICT", "accountable_seat": "ceo", "dispatch": {"dispatch_state": state, "historical": historical, "actionable": state == "RETURNED" and not historical}}]}}, fabric_view={"schema": "mastermind.fabric_job_view.v1", "generated_at": "2026-09-20T00:00:00Z", "armed": {"source": "absent"}, "root": {"job_id": "JOB-1", "status": status, "depth": 0, "orchestration_role": "plan", "plan_step_id": None, "result": {"state": "IN_PROGRESS"}, "review": {"required": False, "reviews_job_id": None, "verdict": "NOT_YET"}}, "children": [], "unjoined_job_count": unjoined, "missingness": [], "degraded": [], "capability": {"state": "PARTIAL"}}, work_ref="WS:ONE", root_job_id="JOB-1", source_validity=validity, cache_currentness={"state": "fresh", "publication_seq": 1}, source_generation={})
 
 
@@ -47,10 +47,10 @@ def test_stale_start_never_announces_running_and_unknown_arm_is_not_false():
 
 def test_expired_validity_never_promotes_current_cache_to_running():
     args = _inputs()
-    args["source_validity"] = {"schema": "mastermind.control_room_source_validity.v1", "publication_seq": 1, "cards": [
+    args["source_validity"] = {"schema": "mastermind.control_room_source_validity.v1", "profile": "b5.darwin-chrome-paired-v1", "publication_seq": 1, "cards": [
         {"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1", "components": {
-            "card": {"remaining_ms": 0}, "owed_open_age": {"remaining_ms": 0},
-            "dispatch": {"remaining_ms": 0},
+            "card": {"remaining_ms": 0, "state": "expired", "proof_ref": "a" * 64}, "owed_open_age": {"remaining_ms": 0, "state": "expired", "proof_ref": "a" * 64},
+            "dispatch": {"remaining_ms": 0, "state": "expired", "proof_ref": "a" * 64},
         }}]}
     doc = compose_mission_workspace(**args)
     assert doc["read_state"]["state"] != "CURRENT"
@@ -101,6 +101,15 @@ def test_safe_owner_artifacts_survive_and_unsafe_values_are_named_excluded():
     assert any(row["target_field"] == "execution.next_actions" for row in doc["missingness"])
 
 
+def test_fabric_diagnostic_paths_and_fact_reasons_are_withheld():
+    args = _inputs()
+    args["fabric_view"]["degraded"] = ["control.json missing at /private/secret/control.json", "executive_runtime: failed at /Users/example/private.sqlite3"]
+    args["fabric_view"]["missingness"] = [{"missingness_class": "DEGRADED", "target_field": "runtime", "producer_owner": "executive_os", "reason": "token at /private/secret"}]
+    raw = json.dumps(compose_mission_workspace(**args), sort_keys=True)
+    assert "/private/secret" not in raw and "private.sqlite3" not in raw
+    assert "source detail withheld" in raw
+
+
 def test_producer_composers_supply_the_real_envelope_shapes():
     job = SimpleNamespace(job_id="JOB-1", status="RUNNING", parent_job_id=None, root_job_id="JOB-1", depth=0, orchestration_role="plan", plan_step_id=None, attempt_count=1, attempt_limit=2, current_attempt_id="A-1", result={"artifacts": ["receipt"]}, review_required=False, reviews_job_id=None, repair_round=None, supersedes_job_id=None)
     fabric = compose_fabric_view(root_job_id="JOB-1", root_job=job, jobs=[job], attempts_by_job={}, joined_job_ids={"JOB-1"}, runtime_identity={"db_present": True}, armed={}, degraded=[], generated_at="2026-09-20T00:00:00Z")
@@ -115,7 +124,7 @@ def test_real_control_room_relationship_and_fabric_join_reduce_b5_root():
     card["dispatch"] = {"dispatch_state": "RETURNED", "historical": False, "actionable": True}
     job = SimpleNamespace(job_id="JOB-B5", status="RUNNING", parent_job_id=None, root_job_id="JOB-B5", depth=0, orchestration_role="plan", plan_step_id=None, attempt_count=1, attempt_limit=2, current_attempt_id="A", result={}, review_required=False, reviews_job_id=None, repair_round=None, supersedes_job_id=None)
     fabric = compose_fabric_view(root_job_id="JOB-B5", root_job=job, jobs=[job], attempts_by_job={}, joined_job_ids={"JOB-B5"}, runtime_identity={"db_present": True}, armed={}, degraded=[], generated_at="2026-09-05T00:00:00Z")
-    validity = {"schema": "mastermind.control_room_source_validity.v1", "profile": "test", "publication_seq": 7, "cards": [{"responsibility_ref": "WS:B5", "root_job_id": "JOB-B5", "components": {x: {"remaining_ms": 1} for x in ("card", "dispatch", "owed_open_age")}}]}
+    validity = {"schema": "mastermind.control_room_source_validity.v1", "profile": "b5.darwin-chrome-paired-v1", "publication_seq": 7, "cards": [{"responsibility_ref": "WS:B5", "root_job_id": "JOB-B5", "components": {x: {"remaining_ms": 1, "state": "current", "proof_ref": "a" * 64} for x in ("card", "dispatch", "owed_open_age")}}]}
     doc = compose_mission_workspace(control_room=control, fabric_view=fabric, work_ref="WS:B5", root_job_id="JOB-B5", source_validity=validity, cache_currentness={"state": "fresh", "publication_seq": 7}, source_generation={})
     assert doc["mission"]["root_job_id"] == "JOB-B5"
     assert doc["principal"]["accountable_seat"] == "ceo"
