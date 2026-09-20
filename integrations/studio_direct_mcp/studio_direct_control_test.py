@@ -49,27 +49,32 @@ class ControlTests(unittest.TestCase):
             (invalid / 'manifest.json').write_text('{}')
             self.assertEqual(control.installed_accounts(root), ['chatgpt1', 'chatgpt3'])
 
+    def test_installed_status_uses_installed_control_generation(self):
+        with patch.object(control, '_invoke_from', side_effect=[{'running':True}, {'ready':True}]) as invoke:
+            result = control.installed_status('chatgpt3')
+        self.assertTrue(result['ready'])
+        self.assertTrue(all(call.args[0] == control.INSTALLED_CONTROL_ROOT for call in invoke.call_args_list))
+        self.assertTrue(all(call.args[2] == 'status' for call in invoke.call_args_list))
+
     def test_fleet_status_is_read_only_and_aggregates_all_installed_accounts(self):
         states = {
             'chatgpt1': {'account':'chatgpt1','ready':True,'gateway':{'runtimeVersion':'0.1.5'},'tunnel':{'ready':True}},
             'chatgpt2': {'account':'chatgpt2','ready':True,'gateway':{'runtimeVersion':'0.1.6'},'tunnel':{'ready':True}},
         }
-        with patch.object(control, 'installed_accounts', return_value=['chatgpt1','chatgpt2']), \
-             patch.object(control, 'operate', side_effect=lambda action, account: states[account]) as operate:
-            result = control.fleet_status()
+        reader = lambda account: states[account]
+        with patch.object(control, 'installed_accounts', return_value=['chatgpt1','chatgpt2']):
+            result = control.fleet_status(status_reader=reader)
         self.assertTrue(result['allReady'])
         self.assertEqual(result['readyCount'], 2)
         self.assertEqual([row['account'] for row in result['accounts']], ['chatgpt1','chatgpt2'])
-        self.assertTrue(all(call.args[0] == 'status' for call in operate.call_args_list))
 
     def test_fleet_status_preserves_one_seat_failure_without_hiding_healthy_seats(self):
-        def status(action, account):
+        def status(account):
             if account == 'chatgpt2':
                 raise RuntimeError('tunnel unavailable')
             return {'account':account,'ready':True,'gateway':{},'tunnel':{}}
-        with patch.object(control, 'installed_accounts', return_value=['chatgpt1','chatgpt2','chatgpt3']), \
-             patch.object(control, 'operate', side_effect=status):
-            result = control.fleet_status()
+        with patch.object(control, 'installed_accounts', return_value=['chatgpt1','chatgpt2','chatgpt3']):
+            result = control.fleet_status(status_reader=status)
         self.assertFalse(result['allReady'])
         self.assertEqual(result['readyCount'], 2)
         self.assertEqual(result['accounts'][1], {
