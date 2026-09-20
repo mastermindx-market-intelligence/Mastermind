@@ -17,6 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+# Direct operator invocation sets sys.path[0] to scripts/. Bootstrap the
+# repository root before importing Mastermind packages so the documented
+# python3 scripts/... entrypoint has no hidden PYTHONPATH dependency.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from control_plane.sol_ops_health import (
     OpsHealthEnvelope,
     ServiceFact,
