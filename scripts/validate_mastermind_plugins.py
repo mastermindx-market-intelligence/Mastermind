@@ -337,7 +337,7 @@ NAVIGATOR_TRUTH_MARKERS = (
     "`EFFECT_UNKNOWN`",
 )
 NAVIGATOR_CONTENT_DIGESTS = {
-    "fixtures/capability-health-cases.json": "fc0d30016e80e345e7388677a0a85339060a7e8c2c74e24737a0ffc93f23b0d1",
+    "fixtures/capability-health-cases.json": "7135ce3920494b36b18bc6dcd3010387278512d6638da5d1fa5f2f875897e161",
     "fixtures/fresh-session-routing-cases.json": "547c03e1bf539263a25c41f47e8e9712f432812a1fe45d505644cf57572acd74",
     "references/boot-sources.json": "c30da8f3962ca421f8227ed0111e7da06825523ed3eea16399f6b7b863081e04",
     "references/capability-health.schema.json": "4923014ee860079ebfbaeddf16a38c9abe15525ab16ca08cb490774cb2db64fd",
