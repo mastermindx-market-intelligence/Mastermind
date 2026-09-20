@@ -51,6 +51,29 @@ _ALLOWED_APP_BINDINGS = frozenset(
         "mastermind-workspace-agent-return",
     }
 )
+_PROFILE_PERMITTED_TOOLS = {
+    "program-continuity-adviser": frozenset(
+        {
+            "list_responsibilities",
+            "get_responsibility",
+            "get_attention",
+            "get_current_runtime",
+            "explain_blocker",
+            "resolve_surface",
+            "submit_candidate",
+        }
+    ),
+    "independent-outcome-reviewer": frozenset(
+        {
+            "get_responsibility",
+            "get_current_runtime",
+            "explain_blocker",
+            "resolve_surface",
+            "read_project_file",
+            "submit_candidate",
+        }
+    ),
+}
 _COMMON_PROHIBITED = frozenset(
     {
         "source_write",
@@ -63,6 +86,10 @@ _COMMON_PROHIBITED = frozenset(
         "job_attempt_or_worker_mutation",
     }
 )
+_PROFILE_PROHIBITED_EFFECTS = {
+    "program-continuity-adviser": _COMMON_PROHIBITED | {"child_work_admission"},
+    "independent-outcome-reviewer": _COMMON_PROHIBITED | {"parent_self_acceptance"},
+}
 _PROFILE_KEYS = frozenset(
     {
         "profile_id",
@@ -220,7 +247,10 @@ def validate_profile(value: Mapping[str, Any]) -> dict[str, Any]:
         maximum_chars=96,
         unique=True,
     )
-    if not set(permitted_tools) <= _ALLOWED_TOOL_NAMES:
+    if (
+        not set(permitted_tools) <= _ALLOWED_TOOL_NAMES
+        or frozenset(permitted_tools) != _PROFILE_PERMITTED_TOOLS[profile_id]
+    ):
         _refuse("INVALID_PROFILE")
     app_bindings = _string_list(
         raw["required_app_bindings"],
@@ -236,7 +266,7 @@ def validate_profile(value: Mapping[str, Any]) -> dict[str, Any]:
         maximum_chars=96,
         unique=True,
     )
-    if not _COMMON_PROHIBITED <= set(prohibited):
+    if frozenset(prohibited) != _PROFILE_PROHIBITED_EFFECTS[profile_id]:
         _refuse("INVALID_PROFILE")
     instructions = _string_list(
         raw["instructions"],
