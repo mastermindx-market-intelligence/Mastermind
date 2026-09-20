@@ -48,9 +48,10 @@ export function validateMission(value: unknown, workRef: string, rootJobId?: str
   if (!value || typeof value !== 'object') return false
   const doc = value as Partial<MissionDocument>
   if (doc.schema !== 'mastermind.mission_workspace.v1' || !doc.program || doc.program.work_ref !== workRef || !doc.read_state || typeof doc.read_state.state !== 'string') return false
-  if (!doc.mission || !doc.children || !doc.conversation || !doc.execution || !doc.review || !doc.transport || !doc.acceptance || !doc.principal) return false
+  if (!doc.mission || !doc.children || !doc.conversation || !doc.execution || !doc.review || !doc.transport || !doc.acceptance || !doc.principal || !doc.posture) return false
   if (rootJobId && doc.mission.root_job_id !== rootJobId) return false
-  return Array.isArray(doc.children.items) && Array.isArray(doc.conversation.items)
+  const object = (entry: unknown): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
+  return object(doc.program) && object(doc.mission) && object(doc.principal) && object(doc.execution) && object(doc.review) && object(doc.transport) && object(doc.acceptance) && object(doc.posture) && Array.isArray(doc.children.items) && Array.isArray(doc.conversation.items) && (doc.missingness === undefined || Array.isArray(doc.missingness))
 }
 
 export function unavailableMission(workRef = 'No program selected', reason = 'NO_HOST_SELECTION'): MissionDocument {
