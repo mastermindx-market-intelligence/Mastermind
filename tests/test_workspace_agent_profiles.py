@@ -108,7 +108,10 @@ class ProfileCatalogTests(unittest.TestCase):
         )
         self.assertIn("source_write", profile["prohibited_effects"])
         self.assertIn("parent_self_acceptance", profile["prohibited_effects"])
-        self.assertEqual(profile["output_contract"]["max_result_chars"], 900)
+        self.assertEqual(
+            profile["output_contract"]["max_result_chars"],
+            tool_spec()["input_schema"]["properties"]["result"]["maxLength"],
+        )
         self.assertEqual(
             sorted(profile["output_contract"]["allowed_status"]),
             tool_spec()["input_schema"]["properties"]["status"]["enum"],
