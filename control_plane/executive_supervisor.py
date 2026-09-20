@@ -70,6 +70,7 @@ from control_plane.executive_workspace import (
 
 
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
+_RECOVERY_ERROR_TEXT_LIMIT = 9 * 100
 _ACTIVE_ATTEMPT_STATUSES = {
     AttemptStatus.CLAIMED,
     AttemptStatus.RUNNING,
@@ -2400,7 +2401,7 @@ class ExecutiveSupervisor:
                 job_id=attempt.job_id,
                 status=ReconcileStatus.LIVE_QUARANTINED,
                 process_was_live=process_was_live,
-                error=f"{type(exc).__name__}: {str(exc)[:900]}",
+                error=f"{type(exc).__name__}: {str(exc)[:_RECOVERY_ERROR_TEXT_LIMIT]}",
             )
         active = ActiveRun(
             lease=adopted,
