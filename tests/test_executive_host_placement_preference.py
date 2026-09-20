@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import hashlib
+import inspect
+import json
+from datetime import datetime, timezone
 
 import pytest
 
 from control_plane import executive_host_placement_preference as ehpp
 from control_plane import executive_placement_preference as epp
 from control_plane import executive_placement_selection as eps
+from control_plane.executive_capacity_join import (
+    PROVIDER_CAPACITY_SCHEMA,
+    CapacityJoin,
+    RegisteredCapacityJoin,
+)
+from control_plane.executive_capacity_observation import (
+    OBSERVATION_LIFETIME_MS,
+    OBSERVATION_SCHEMA,
+    CapacityObservationError,
+)
 from control_plane.executive_host_capacity import canonical_host_capacity_json
 from control_plane.executive_host_pressure import canonical_host_pressure_json
 from control_plane.executive_physical_resources import PhysicalResourceRefusal
@@ -31,7 +45,7 @@ BOOT_M3 = "boot-" + "6" * 64
 POOL_M2 = "capacity-pool-" + "7" * 64
 POOL_M1 = "capacity-pool-" + "8" * 64
 POOL_M3 = "capacity-pool-" + "9" * 64
-DECISION_TIME_MS = 100
+DECISION_TIME_MS = 1_800_000_000_000
 
 
 def _source(
@@ -105,6 +119,71 @@ def _decision() -> eps.PlacementSelectionDecision:
     )
     assert decision.state is eps.SelectionState.TIE_ABSTAINED
     return decision
+
+
+def _registered_join(*, worker_id: str, host_ref: str) -> RegisteredCapacityJoin:
+    source_digest = hashlib.sha256(f"source:{worker_id}".encode("utf-8")).hexdigest()
+    return RegisteredCapacityJoin(
+        worker_id=worker_id,
+        quota_class="routine",
+        provider="openai",
+        capacity_join=CapacityJoin(
+            host_ref=host_ref,
+            capacity_capability_id=f"capability-{worker_id}",
+            provider_capacity_schema=PROVIDER_CAPACITY_SCHEMA,
+            worker_source_config_digest=source_digest,
+        ),
+    )
+
+
+def _utc_seconds(timestamp_ms: int) -> str:
+    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def _capacity_observation(join: RegisteredCapacityJoin) -> dict:
+    observed_at_ms = DECISION_TIME_MS - 1_000
+    without_digest = {
+        "schema_version": OBSERVATION_SCHEMA,
+        "host_ref": join.capacity_join.host_ref,
+        "capacity_capability_id": join.capacity_join.capacity_capability_id,
+        "realm_metadata_valid": True,
+        "credential_present": True,
+        "credential_metadata_valid": True,
+        "provider_binary_attested": True,
+        "broker_generation_ready": True,
+        "source_config_digest": join.capacity_join.worker_source_config_digest,
+        "observed_at": _utc_seconds(observed_at_ms),
+        "expires_at": _utc_seconds(observed_at_ms + OBSERVATION_LIFETIME_MS),
+    }
+    rendered = json.dumps(
+        without_digest,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return {
+        **without_digest,
+        "observation_digest": hashlib.sha256(rendered).hexdigest(),
+    }
+
+
+def _resign_capacity_observation(value: dict) -> dict:
+    unsigned = copy.deepcopy(value)
+    unsigned.pop("observation_digest", None)
+    rendered = json.dumps(
+        unsigned,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return {
+        **unsigned,
+        "observation_digest": hashlib.sha256(rendered).hexdigest(),
+    }
 
 
 def _memory_demand(boot_ref: str) -> dict:
@@ -248,7 +327,7 @@ def _pressure_snapshot(
         "schema": "mastermind.host_pressure_snapshot/v1",
         "host_ref": host_ref,
         "boot_ref": boot_ref,
-        "observed_at_ms": 95,
+        "observed_at_ms": DECISION_TIME_MS - 5,
         "sample_window_ms": 5,
         "logical_cpu_count": logical_cpu_count,
         "load1_milli": load1_milli,
@@ -286,14 +365,14 @@ def _capacity_snapshot(
         "schema": "mastermind.host_capacity_snapshot/v1",
         "host_ref": host_ref,
         "boot_ref": boot_ref,
-        "observed_at_ms": 98,
+        "observed_at_ms": DECISION_TIME_MS - 2,
         "sample_window_ms": 3,
         "total_observation_window_ms": 8,
         "capacity_pool_ref": pool_ref,
         "hp0_sha256": hashlib.sha256(
             canonical_host_pressure_json(pressure)
         ).hexdigest(),
-        "hp0_observed_at_ms": 95,
+        "hp0_observed_at_ms": DECISION_TIME_MS - 5,
         "hp0_sample_window_ms": 5,
         "logical_cpu_count": logical_cpu_count,
         "load1_milli": load1_milli,
@@ -321,7 +400,7 @@ def _observations(*, host_ref: str, boot_ref: str, snapshot: dict) -> dict:
         "policy_revision": "fleet-policy-1",
         "sequence": 7,
         "required_sequence": 7,
-        "observed_at_ms": 98,
+        "observed_at_ms": DECISION_TIME_MS - 2,
         "pools": {
             "memory": {
                 "available": 100,
@@ -399,10 +478,16 @@ def _physical_inputs() -> dict[str, dict]:
             ),
         ),
     }
+    placement_candidates = {
+        candidate.worker_id: candidate for candidate in _selection_candidates()
+    }
     result = {}
     for worker_id, (host_ref, boot_ref, _pool_ref, snapshot) in rows.items():
+        registered_join = _registered_join(worker_id=worker_id, host_ref=host_ref)
         result[worker_id] = {
-            "worker_id": worker_id,
+            "placement_candidate": placement_candidates[worker_id],
+            "registered_join": registered_join,
+            "capacity_observation": _capacity_observation(registered_join),
             "request": _request(
                 host_ref=host_ref, boot_ref=boot_ref, worker_id=worker_id
             ),
@@ -421,13 +506,297 @@ def _qualify(inputs: dict | None = None) -> tuple[ehpp.QualifiedHostCandidate, .
     return tuple(ehpp.qualify_host_candidate(**rows[key]) for key in sorted(rows))
 
 
+def test_host_preference_emits_resolvable_content_addressed_artifact() -> None:
+    artifact = ehpp.make_host_capacity_preference(
+        decision=_decision(),
+        candidates=_qualify(),
+        generation=11,
+    )
+    assert isinstance(artifact, ehpp.HostCapacityPreferenceArtifact)
+    source_ref = artifact.preference.capacity_source.ref
+    assert source_ref == (
+        "capacity-source-sha256:"
+        + hashlib.sha256(artifact.source_bytes).hexdigest()
+    )
+    assert artifact.resolved_capacity_sources() == {
+        source_ref: artifact.source_bytes
+    }
+
+
+def test_source_artifact_rejects_hidden_policy_fields() -> None:
+    artifact = ehpp.make_host_capacity_preference(
+        decision=_decision(),
+        candidates=_qualify(),
+        generation=11,
+    )
+    source = json.loads(artifact.source_bytes)
+    source["hidden_hostname_policy"] = "m3-before-m1-before-m2"
+    tampered_bytes = json.dumps(
+        source,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    tampered_source = SourceRef(
+        owner=SourceOwner.CAPACITY,
+        ref=(
+            "capacity-source-sha256:"
+            + hashlib.sha256(tampered_bytes).hexdigest()
+        ),
+        observed_at=artifact.preference.capacity_source.observed_at,
+        freshness=Freshness.CURRENT,
+    )
+    tampered_preference = epp.make_capacity_preference(
+        decision=_decision(),
+        preference_order=artifact.preference.preference_order,
+        capacity_source=tampered_source,
+        generation=11,
+    )
+    with pytest.raises(ehpp.HostPlacementPreferenceError) as error:
+        ehpp.HostCapacityPreferenceArtifact(
+            preference=tampered_preference,
+            source_bytes=tampered_bytes,
+        )
+    assert error.value.code == "SOURCE_ARTIFACT_INVALID"
+
+
+def test_source_artifact_binds_preference_observation_time() -> None:
+    decision = _decision()
+    artifact = ehpp.make_host_capacity_preference(
+        decision=decision,
+        candidates=_qualify(),
+        generation=11,
+    )
+    moved_source = SourceRef(
+        owner=SourceOwner.CAPACITY,
+        ref=artifact.preference.capacity_source.ref,
+        observed_at="ms-999",
+        freshness=Freshness.CURRENT,
+    )
+    moved_preference = epp.make_capacity_preference(
+        decision=decision,
+        preference_order=artifact.preference.preference_order,
+        capacity_source=moved_source,
+        generation=11,
+    )
+    with pytest.raises(
+        ehpp.HostPlacementPreferenceError,
+        match="SOURCE_ARTIFACT_PREFERENCE_MISMATCH",
+    ) as error:
+        ehpp.HostCapacityPreferenceArtifact(
+            preference=moved_preference,
+            source_bytes=artifact.source_bytes,
+        )
+    assert error.value.code == "SOURCE_ARTIFACT_PREFERENCE_MISMATCH"
+
+
+def test_source_artifact_rejects_order_not_derived_from_scores() -> None:
+    decision = _decision()
+    artifact = ehpp.make_host_capacity_preference(
+        decision=decision,
+        candidates=_qualify(),
+        generation=11,
+    )
+    source = json.loads(artifact.source_bytes)
+    source["preference_order"] = list(reversed(source["preference_order"]))
+    tampered_bytes = json.dumps(
+        source,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    tampered_source = SourceRef(
+        owner=SourceOwner.CAPACITY,
+        ref=(
+            "capacity-source-sha256:"
+            + hashlib.sha256(tampered_bytes).hexdigest()
+        ),
+        observed_at=artifact.preference.capacity_source.observed_at,
+        freshness=Freshness.CURRENT,
+    )
+    tampered_preference = epp.make_capacity_preference(
+        decision=decision,
+        preference_order=tuple(source["preference_order"]),
+        capacity_source=tampered_source,
+        generation=11,
+    )
+    with pytest.raises(
+        ehpp.HostPlacementPreferenceError,
+        match="SOURCE_ARTIFACT_ORDER_MISMATCH",
+    ) as error:
+        ehpp.HostCapacityPreferenceArtifact(
+            preference=tampered_preference,
+            source_bytes=tampered_bytes,
+        )
+    assert error.value.code == "SOURCE_ARTIFACT_ORDER_MISMATCH"
+
+
+def test_source_artifact_rejects_candidate_receipt_mismatch() -> None:
+    decision = _decision()
+    artifact = ehpp.make_host_capacity_preference(
+        decision=decision,
+        candidates=_qualify(),
+        generation=11,
+    )
+    source = json.loads(artifact.source_bytes)
+    source["candidates"][0]["score"][0] += 1
+    tampered_bytes = json.dumps(
+        source,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    tampered_source = SourceRef(
+        owner=SourceOwner.CAPACITY,
+        ref=(
+            "capacity-source-sha256:"
+            + hashlib.sha256(tampered_bytes).hexdigest()
+        ),
+        observed_at=artifact.preference.capacity_source.observed_at,
+        freshness=Freshness.CURRENT,
+    )
+    tampered_preference = epp.make_capacity_preference(
+        decision=decision,
+        preference_order=artifact.preference.preference_order,
+        capacity_source=tampered_source,
+        generation=11,
+    )
+    with pytest.raises(
+        ehpp.HostPlacementPreferenceError,
+        match="QUALIFICATION_RECEIPT_MISMATCH",
+    ) as error:
+        ehpp.HostCapacityPreferenceArtifact(
+            preference=tampered_preference,
+            source_bytes=tampered_bytes,
+        )
+    assert error.value.code == "QUALIFICATION_RECEIPT_MISMATCH"
+
+
+@pytest.mark.parametrize("resolved", [None, "moved"])
+def test_missing_or_moved_source_preserves_v1_abstention(resolved: str | None) -> None:
+    candidates = _selection_candidates()
+    artifact = ehpp.make_host_capacity_preference(
+        decision=_decision(),
+        candidates=_qualify(),
+        generation=11,
+    )
+    source_ref = artifact.preference.capacity_source.ref
+    resolved_sources = (
+        {} if resolved is None else {source_ref: b"moved-source"}
+    )
+    result = epp.select_placement_v2(
+        responsibility=_responsibility(),
+        demand=_demand(),
+        candidates=candidates,
+        preference=artifact.preference,
+        resolved_capacity_sources=resolved_sources,
+    )
+    assert result.state is eps.SelectionState.TIE_ABSTAINED
+    assert result.selected is None
+    assert result.to_dict()["preference_admissibility"] == "inadmissible"
+    assert result.to_dict()["preference_refusal"] == {
+        "code": epp.CAPACITY_SOURCE_UNRESOLVED,
+        "source_ref": source_ref,
+    }
+
+
+def test_registered_join_must_match_candidate_and_physical_host() -> None:
+    candidate_mismatch = _physical_inputs()["worker-z-headroom"]
+    candidate_mismatch["registered_join"] = _registered_join(
+        worker_id="worker-other", host_ref=HOST_M3
+    )
+    candidate_mismatch["capacity_observation"] = _capacity_observation(
+        candidate_mismatch["registered_join"]
+    )
+    with pytest.raises(ehpp.HostPlacementPreferenceError) as error:
+        ehpp.qualify_host_candidate(**candidate_mismatch)
+    assert error.value.code == "CANDIDATE_JOIN_MISMATCH"
+
+    host_mismatch = _physical_inputs()["worker-z-headroom"]
+    host_mismatch["registered_join"] = _registered_join(
+        worker_id="worker-z-headroom", host_ref=HOST_M1
+    )
+    host_mismatch["capacity_observation"] = _capacity_observation(
+        host_mismatch["registered_join"]
+    )
+    with pytest.raises(ehpp.HostPlacementPreferenceError) as error:
+        ehpp.qualify_host_candidate(**host_mismatch)
+    assert error.value.code == "CAPACITY_JOIN_HOST_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        ("generation_unready", "CAPACITY_OBSERVE_GENERATION_UNREADY"),
+        ("stale", "CAPACITY_OBSERVE_STALE"),
+    ],
+)
+def test_worker_capacity_observation_must_be_ready_and_current(
+    mutation: str, expected_code: str
+) -> None:
+    inputs = _physical_inputs()["worker-z-headroom"]
+    observation = copy.deepcopy(inputs["capacity_observation"])
+    if mutation == "generation_unready":
+        observation["broker_generation_ready"] = False
+    else:
+        observed_at_ms = DECISION_TIME_MS - 30_000
+        observation["observed_at"] = _utc_seconds(observed_at_ms)
+        observation["expires_at"] = _utc_seconds(
+            observed_at_ms + OBSERVATION_LIFETIME_MS
+        )
+    inputs["capacity_observation"] = _resign_capacity_observation(observation)
+    with pytest.raises(CapacityObservationError) as error:
+        ehpp.qualify_host_candidate(**inputs)
+    assert error.value.code == expected_code
+
+
+def test_qualified_candidate_rejects_score_or_evidence_tamper() -> None:
+    qualified = _qualify()[0]
+    for changes in (
+        {"score": tuple(value + 1 for value in qualified.score)},
+        {"physical_evidence_digest": "f" * 64},
+    ):
+        with pytest.raises(
+            ehpp.HostPlacementPreferenceError,
+            match="QUALIFICATION_RECEIPT_MISMATCH",
+        ) as error:
+            dataclasses.replace(qualified, **changes)
+        assert error.value.code == "QUALIFICATION_RECEIPT_MISMATCH"
+
+
+def test_qualified_identity_is_rechecked_against_the_exact_v1_decision() -> None:
+    inputs = _physical_inputs()
+    row = inputs["worker-a-overloaded"]
+    row["placement_candidate"] = dataclasses.replace(
+        row["placement_candidate"], provider="anthropic"
+    )
+    row["registered_join"] = RegisteredCapacityJoin(
+        worker_id=row["registered_join"].worker_id,
+        quota_class=row["registered_join"].quota_class,
+        provider="anthropic",
+        capacity_join=row["registered_join"].capacity_join,
+    )
+    qualified = list(_qualify(inputs))
+    with pytest.raises(ehpp.HostPlacementPreferenceError) as error:
+        ehpp.make_host_capacity_preference(
+            decision=_decision(),
+            candidates=tuple(qualified),
+            generation=11,
+        )
+    assert error.value.code == "CANDIDATE_IDENTITY_MISMATCH"
+
+
 def test_current_host_evidence_prefers_headroom_without_hostname_or_worker_order() -> None:
     qualified = _qualify()
-    preference = ehpp.make_host_capacity_preference(
+    artifact = ehpp.make_host_capacity_preference(
         decision=_decision(),
         candidates=qualified,
         generation=11,
     )
+    preference = artifact.preference
     assert preference.preference_order == (
         "worker-z-headroom",
         "worker-m-usable",
@@ -436,7 +805,7 @@ def test_current_host_evidence_prefers_headroom_without_hostname_or_worker_order
     assert preference.preference_order != tuple(sorted(preference.preference_order))
     assert preference.capacity_source.owner is SourceOwner.CAPACITY
     assert preference.capacity_source.freshness is Freshness.CURRENT
-    assert preference.capacity_source.ref.startswith("host-placement-")
+    assert preference.capacity_source.ref.startswith("capacity-source-sha256:")
     assert HOST_M2 not in preference.capacity_source.ref
     assert HOST_M1 not in preference.capacity_source.ref
     assert HOST_M3 not in preference.capacity_source.ref
@@ -445,7 +814,7 @@ def test_current_host_evidence_prefers_headroom_without_hostname_or_worker_order
 def test_host_preference_resolves_only_the_existing_v1_tie() -> None:
     candidates = _selection_candidates()
     decision = _decision()
-    preference = ehpp.make_host_capacity_preference(
+    artifact = ehpp.make_host_capacity_preference(
         decision=decision,
         candidates=_qualify(),
         generation=11,
@@ -454,7 +823,8 @@ def test_host_preference_resolves_only_the_existing_v1_tie() -> None:
         responsibility=_responsibility(),
         demand=_demand(),
         candidates=candidates,
-        preference=preference,
+        preference=artifact.preference,
+        resolved_capacity_sources=artifact.resolved_capacity_sources(),
     )
     assert selected.state is eps.SelectionState.SELECTED
     assert selected.selected["worker_id"] == "worker-z-headroom"
@@ -471,8 +841,8 @@ def test_qualification_uses_existing_physical_reserve_and_rejects_insufficient_h
 
 def test_stale_host_capacity_refuses_before_preference() -> None:
     inputs = _physical_inputs()["worker-z-headroom"]
-    inputs["observations"]["observed_at_ms"] = 130
-    inputs["decision_time_ms"] = 130
+    inputs["observations"]["observed_at_ms"] = DECISION_TIME_MS + 30
+    inputs["decision_time_ms"] = DECISION_TIME_MS + 30
     with pytest.raises(PhysicalResourceRefusal) as error:
         ehpp.qualify_host_candidate(**inputs)
     assert error.value.code == "HOST_CAPACITY_STALE"
@@ -498,12 +868,16 @@ def test_evidence_movement_invalidates_prior_preference_even_when_order_is_uncha
         candidates=moved_candidates,
         generation=12,
     )
-    assert replacement.preference_order == old.preference_order
-    assert replacement.capacity_source.ref != old.capacity_source.ref
-    assert replacement.receipt_id != old.receipt_id
+    assert replacement.preference.preference_order == old.preference.preference_order
+    assert (
+        replacement.preference.capacity_source.ref
+        != old.preference.capacity_source.ref
+    )
+    assert replacement.preference.receipt_id != old.preference.receipt_id
+    assert replacement.source_bytes != old.source_bytes
     with pytest.raises(ehpp.HostPlacementPreferenceError) as error:
         ehpp.validate_current_host_capacity_preference(
-            preference=old,
+            artifact=old,
             decision=decision,
             candidates=moved_candidates,
             generation=12,
@@ -511,7 +885,13 @@ def test_evidence_movement_invalidates_prior_preference_even_when_order_is_uncha
     assert error.value.code == "PREFERENCE_NOT_CURRENT"
 
 
-def test_equal_host_scores_require_current_capacity_owned_tie_evidence() -> None:
+def test_equal_host_scores_have_no_secondary_tie_plane() -> None:
+    parameters = inspect.signature(ehpp.make_host_capacity_preference).parameters
+    assert "capacity_tie_order" not in parameters
+    assert "capacity_tie_source" not in parameters
+
+
+def test_equal_host_scores_refuse_without_hidden_fallback() -> None:
     inputs = _physical_inputs()
     source = inputs["worker-z-headroom"]["observations"]["host_capacity_evidence"]
     for worker_id in ("worker-a-overloaded", "worker-m-usable"):
@@ -538,61 +918,6 @@ def test_equal_host_scores_require_current_capacity_owned_tie_evidence() -> None
         )
     assert error.value.code == "HOST_SCORE_TIE_UNRESOLVED"
 
-    tie_source = _source(SourceOwner.CAPACITY, "capacity-fairness-generation-13")
-    preference = ehpp.make_host_capacity_preference(
-        decision=_decision(),
-        candidates=qualified,
-        generation=13,
-        capacity_tie_order=(
-            "worker-m-usable",
-            "worker-z-headroom",
-            "worker-a-overloaded",
-        ),
-        capacity_tie_source=tie_source,
-    )
-    assert preference.preference_order == (
-        "worker-m-usable",
-        "worker-z-headroom",
-        "worker-a-overloaded",
-    )
-
-
-def test_tie_evidence_cannot_expand_capacity_authority() -> None:
-    inputs = _physical_inputs()
-    source_snapshot = inputs["worker-z-headroom"]["observations"][
-        "host_capacity_evidence"
-    ]["snapshot"]
-    for worker_id in ("worker-a-overloaded", "worker-m-usable"):
-        request = inputs[worker_id]["request"]
-        snapshot = copy.deepcopy(source_snapshot)
-        snapshot["host_ref"] = request["host_id"]
-        snapshot["boot_ref"] = request["boot_id"]
-        snapshot["capacity_pool_ref"] = next(
-            row["capacity_pool_ref"]
-            for row in inputs[worker_id]["policy"]["host_qualifications"]
-            if row["host_id"] == request["host_id"]
-        )
-        evidence = inputs[worker_id]["observations"]["host_capacity_evidence"]
-        evidence["snapshot"] = snapshot
-        evidence["snapshot_sha256"] = hashlib.sha256(
-            canonical_host_capacity_json(snapshot)
-        ).hexdigest()
-    qualified = _qualify(inputs)
-    order = ("worker-z-headroom", "worker-m-usable", "worker-a-overloaded")
-    for source in (
-        _source(SourceOwner.EXECUTIVE_OS, "not-capacity"),
-        _source(SourceOwner.CAPACITY, "stale-capacity", Freshness.STALE),
-    ):
-        with pytest.raises(ehpp.HostPlacementPreferenceError) as error:
-            ehpp.make_host_capacity_preference(
-                decision=_decision(),
-                candidates=qualified,
-                generation=13,
-                capacity_tie_order=order,
-                capacity_tie_source=source,
-            )
-        assert error.value.code == "TIE_SOURCE_INVALID"
-
 
 def test_candidate_set_must_exactly_match_the_existing_v1_tie() -> None:
     with pytest.raises(ehpp.HostPlacementPreferenceError) as error:
@@ -613,21 +938,3 @@ def test_qualification_freezes_one_evidence_snapshot() -> None:
         "load1_milli"
     ] = 999_999
     assert qualified.to_dict() == before
-
-
-def test_unused_tie_order_is_refused_instead_of_becoming_hidden_policy() -> None:
-    with pytest.raises(ehpp.HostPlacementPreferenceError) as error:
-        ehpp.make_host_capacity_preference(
-            decision=_decision(),
-            candidates=_qualify(),
-            generation=11,
-            capacity_tie_order=(
-                "worker-z-headroom",
-                "worker-m-usable",
-                "worker-a-overloaded",
-            ),
-            capacity_tie_source=_source(
-                SourceOwner.CAPACITY, "capacity-fairness-unused"
-            ),
-        )
-    assert error.value.code == "TIE_SOURCE_UNUSED"
