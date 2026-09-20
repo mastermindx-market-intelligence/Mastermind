@@ -89,7 +89,7 @@ role-filtered packet; it does not become the capability registry or recompute CA
 
 Never perform a dummy mutation solely to prove capability. If only an effectful probe exists and the actual effect is not yet authorized/safe, keep the capability `UNKNOWN` / `UNPROBED` rather than fabricating `UNAVAILABLE`.
 
-A terminal negative capability claim must name the requested action class, current discovery result, non-effectful preflight/refusal evidence, exhausted safe probe path, exact target/binding scope, and any exact human/admin ceremony still required. Missing evidence means more bounded discovery work exists; it is not a Chairman gate.
+A terminal negative capability claim must name the requested action class, current discovery result, non-effectful preflight/refusal evidence, exhausted safe probe path, exact target/binding scope, and any exact human/admin ceremony still required. The packet records this as `requested_action_discovery`, `requested_action_preflight`, `safe_probe_status`, and nullable `human_ceremony`; a requested-action `NO` is schema-invalid unless the safe probe path is exhausted and either action absence or explicit preflight refusal is proven. Missing evidence means more bounded discovery work exists; it is not a Chairman gate.
 
 Keep four axes separate: technical tool/action exposure; authenticated resource permission; organizational/source-writer authority; and effect state. A denial or unknown on one axis must never be rewritten as another.
 
@@ -104,7 +104,7 @@ protected Mastermind commit and Skillpack compatibility
 selected role profile and explicit overlay, if any
 requested capability class, requested action class, and canonical owner
 role-filtered surface health:
-  requested_action_serviceability | installed | enabled | authenticated_or_connected | callable | organizationally_authorized | proven_live
+  requested_action_serviceability | requested_action_discovery | requested_action_preflight | safe_probe_status | human_ceremony\n  installed | enabled | authenticated_or_connected | callable | organizationally_authorized | proven_live
   state | exact binding | evidence | blocker | next probe
 minimal tool family loaded
 one owner-native action and exact result

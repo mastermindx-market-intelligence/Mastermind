@@ -312,7 +312,11 @@
         "evidence",
         "binding",
         "blocker",
-        "next_probe"
+        "next_probe",
+        "requested_action_discovery",
+        "requested_action_preflight",
+        "safe_probe_status",
+        "human_ceremony"
       ],
       "properties": {
         "surface_id": {
@@ -422,6 +426,42 @@
         },
         "requested_action_serviceability": {
           "$ref": "#/$defs/dimension"
+        },
+        "requested_action_discovery": {
+          "enum": [
+            "PROVEN_EXPOSED",
+            "PROVEN_ABSENT",
+            "UNKNOWN",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "requested_action_preflight": {
+          "enum": [
+            "PASS",
+            "REFUSED",
+            "UNPROBED",
+            "NOT_AVAILABLE",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "safe_probe_status": {
+          "enum": [
+            "AVAILABLE",
+            "EXHAUSTED",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "human_ceremony": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 700
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "allOf": [
@@ -1850,6 +1890,114 @@
             },
             "required": [
               "evidence"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "requested-action-positive-probe-evidence",
+          "if": {
+            "properties": {
+              "requested_action_serviceability": {
+                "const": "YES"
+              }
+            },
+            "required": [
+              "requested_action_serviceability"
+            ]
+          },
+          "then": {
+            "properties": {
+              "requested_action_discovery": {
+                "const": "PROVEN_EXPOSED"
+              },
+              "requested_action_preflight": {
+                "enum": [
+                  "PASS",
+                  "NOT_APPLICABLE"
+                ]
+              },
+              "safe_probe_status": {
+                "const": "NOT_APPLICABLE"
+              }
+            },
+            "required": [
+              "requested_action_discovery",
+              "requested_action_preflight",
+              "safe_probe_status"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "requested-action-negative-probe-evidence",
+          "if": {
+            "properties": {
+              "requested_action_serviceability": {
+                "const": "NO"
+              }
+            },
+            "required": [
+              "requested_action_serviceability"
+            ]
+          },
+          "then": {
+            "properties": {
+              "safe_probe_status": {
+                "const": "EXHAUSTED"
+              }
+            },
+            "anyOf": [
+              {
+                "properties": {
+                  "requested_action_discovery": {
+                    "const": "PROVEN_ABSENT"
+                  }
+                },
+                "required": [
+                  "requested_action_discovery"
+                ]
+              },
+              {
+                "properties": {
+                  "requested_action_preflight": {
+                    "const": "REFUSED"
+                  }
+                },
+                "required": [
+                  "requested_action_preflight"
+                ]
+              }
+            ],
+            "required": [
+              "safe_probe_status"
+            ]
+          }
+        },
+        {
+          "x-navigator-generated": "requested-action-unprobed-probe-path",
+          "if": {
+            "properties": {
+              "requested_action_serviceability": {
+                "const": "UNKNOWN"
+              },
+              "safe_probe_status": {
+                "const": "AVAILABLE"
+              }
+            },
+            "required": [
+              "requested_action_serviceability",
+              "safe_probe_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "next_probe": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 700
+              }
+            },
+            "required": [
+              "next_probe"
             ]
           }
         }

@@ -1227,3 +1227,62 @@ def test_packet_requested_action_class_must_match_every_surface() -> None:
     hostile["surfaces"][0]["requested_action_class"] = "READ"
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(hostile)
+
+
+def test_negative_action_serviceability_requires_exhausted_typed_probe_evidence() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    refused = _materialize_health_packet(
+        next(case["packet"] for case in fixture["cases"]
+             if case["id"] == "github-write-preflight-refused")
+    )
+    validator.validate(refused)
+    surface = refused["surfaces"][0]
+    assert surface["requested_action_serviceability"] == "NO"
+    assert surface["requested_action_discovery"] == "PROVEN_EXPOSED"
+    assert surface["requested_action_preflight"] == "REFUSED"
+    assert surface["safe_probe_status"] == "EXHAUSTED"
+    assert surface["human_ceremony"]
+
+    for field, value in (
+        ("safe_probe_status", "AVAILABLE"),
+        ("requested_action_preflight", "UNPROBED"),
+        ("requested_action_discovery", "UNKNOWN"),
+    ):
+        hostile = copy.deepcopy(refused)
+        hostile["surfaces"][0][field] = value
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(hostile)
+
+
+def test_unprobed_action_with_safe_probe_requires_next_probe() -> None:
+    schema = _load("references/capability-health.schema.json")
+    validator = jsonschema.Draft202012Validator(schema)
+    fixture = _load("fixtures/capability-health-cases.json")
+    packet = _materialize_health_packet(
+        next(case["packet"] for case in fixture["cases"]
+             if case["id"] == "github-write-unprobed-read-proven")
+    )
+    surface = packet["surfaces"][0]
+    assert surface["requested_action_serviceability"] == "UNKNOWN"
+    assert surface["requested_action_discovery"] == "UNKNOWN"
+    assert surface["requested_action_preflight"] == "UNPROBED"
+    assert surface["safe_probe_status"] == "AVAILABLE"
+    validator.validate(packet)
+    hostile = copy.deepcopy(packet)
+    hostile["surfaces"][0]["next_probe"] = None
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(hostile)
+
+
+def test_skill_emits_typed_negative_capability_receipt_fields() -> None:
+    skill = (PACKAGE / "skills/navigate-mastermind-universe/SKILL.md").read_text(encoding="utf-8")
+    for phrase in (
+        "`requested_action_discovery`",
+        "`requested_action_preflight`",
+        "`safe_probe_status`",
+        "nullable `human_ceremony`",
+        "schema-invalid unless the safe probe path is exhausted",
+    ):
+        assert phrase in skill

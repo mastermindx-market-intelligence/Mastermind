@@ -93,7 +93,11 @@
             "blocker": null,
             "next_probe": null,
             "requested_action_class": "READ",
-            "requested_action_serviceability": "YES"
+            "requested_action_serviceability": "YES",
+            "requested_action_discovery": "PROVEN_EXPOSED",
+            "requested_action_preflight": "PASS",
+            "safe_probe_status": "NOT_APPLICABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": "github-source",
@@ -194,7 +198,11 @@
             "blocker": "Workbench Action is not callable in the current session.",
             "next_probe": "Use Workbench Read for read-only needs or re-probe the action owner after installation changes.",
             "requested_action_class": "WRITE",
-            "requested_action_serviceability": "NO"
+            "requested_action_serviceability": "NO",
+            "requested_action_discovery": "PROVEN_ABSENT",
+            "requested_action_preflight": "NOT_AVAILABLE",
+            "safe_probe_status": "EXHAUSTED",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": null,
@@ -283,7 +291,11 @@
             "blocker": "No current connection, binding, or owner-native canary is available.",
             "next_probe": "Read Worker Browser health for the exact worker and generation.",
             "requested_action_class": "WRITE",
-            "requested_action_serviceability": "UNKNOWN"
+            "requested_action_serviceability": "UNKNOWN",
+            "requested_action_discovery": "UNKNOWN",
+            "requested_action_preflight": "UNPROBED",
+            "safe_probe_status": "AVAILABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": null,
@@ -378,7 +390,11 @@
             "blocker": "Web workspace installation, organization authorization, callable fresh-session invocation, and owner-native action are unproven.",
             "next_probe": "After source protection, use the existing Business workspace admin owner for the fixed-commit canary.",
             "requested_action_class": "READ",
-            "requested_action_serviceability": "UNKNOWN"
+            "requested_action_serviceability": "UNKNOWN",
+            "requested_action_discovery": "UNKNOWN",
+            "requested_action_preflight": "UNPROBED",
+            "safe_probe_status": "AVAILABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": null,
@@ -479,7 +495,11 @@
             "blocker": "Navigator is installed in the Web workspace canary scope but is not enabled or callable for the canary member.",
             "next_probe": "The existing workspace admin owner enables the exact fixed-commit package for the approved canary member and reads back policy.",
             "requested_action_class": "READ",
-            "requested_action_serviceability": "NO"
+            "requested_action_serviceability": "NO",
+            "requested_action_discovery": "PROVEN_ABSENT",
+            "requested_action_preflight": "NOT_AVAILABLE",
+            "safe_probe_status": "EXHAUSTED",
+            "human_ceremony": "Workspace administrator enables the fixed package for the approved canary member before a new observation epoch."
           }
         ],
         "selected_surface_id": null,
@@ -583,7 +603,11 @@
             "blocker": "The attended Web action lacks an exact current session generation.",
             "next_probe": "Read RuntimeBinding for the exact attended conversation and current generation before any Workbench action.",
             "requested_action_class": "WRITE",
-            "requested_action_serviceability": "YES"
+            "requested_action_serviceability": "YES",
+            "requested_action_discovery": "PROVEN_EXPOSED",
+            "requested_action_preflight": "PASS",
+            "safe_probe_status": "NOT_APPLICABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": null,
@@ -687,7 +711,11 @@
             "blocker": "The native action lacks an exact current approved native-session generation.",
             "next_probe": "Read the approved native-session context owner for the exact native session and generation before any Workbench action.",
             "requested_action_class": "WRITE",
-            "requested_action_serviceability": "YES"
+            "requested_action_serviceability": "YES",
+            "requested_action_discovery": "PROVEN_EXPOSED",
+            "requested_action_preflight": "PASS",
+            "safe_probe_status": "NOT_APPLICABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": null,
@@ -791,7 +819,11 @@
             "blocker": "The provider worker has no admitted Executive worker generation for this action.",
             "next_probe": "Read the current Executive OS Job/Attempt/Worker generation and authorization; do not fall back to attended mode.",
             "requested_action_class": "WRITE",
-            "requested_action_serviceability": "YES"
+            "requested_action_serviceability": "YES",
+            "requested_action_discovery": "PROVEN_EXPOSED",
+            "requested_action_preflight": "PASS",
+            "safe_probe_status": "NOT_APPLICABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": null,
@@ -892,7 +924,11 @@
             "blocker": "Only the read subset is currently proven.",
             "next_probe": "Probe the exact requested action class through the existing host owner.",
             "requested_action_class": "READ",
-            "requested_action_serviceability": "YES"
+            "requested_action_serviceability": "YES",
+            "requested_action_discovery": "PROVEN_EXPOSED",
+            "requested_action_preflight": "PASS",
+            "safe_probe_status": "NOT_APPLICABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": "studio-direct",
@@ -991,7 +1027,11 @@
             "blocker": "No owner-native exact target, RuntimeBinding generation, authorization, callability, or canary evidence.",
             "next_probe": "Read the current RuntimeBinding owner for the exact logical target and generation before loading or actuating Web-Sol.",
             "requested_action_class": "WRITE",
-            "requested_action_serviceability": "UNKNOWN"
+            "requested_action_serviceability": "UNKNOWN",
+            "requested_action_discovery": "UNKNOWN",
+            "requested_action_preflight": "UNPROBED",
+            "safe_probe_status": "AVAILABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": null,
@@ -1088,7 +1128,11 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "WRITE serviceability is unprobed; successful READ calls do not settle the requested WRITE action.",
-            "next_probe": "Discover the current GitHub WRITE action family and read a non-mutating repository permission/serviceability preflight before any terminal blocker."
+            "next_probe": "Discover the current GitHub WRITE action family and read a non-mutating repository permission/serviceability preflight before any terminal blocker.",
+            "requested_action_discovery": "UNKNOWN",
+            "requested_action_preflight": "UNPROBED",
+            "safe_probe_status": "AVAILABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": "github-write-unprobed",
@@ -1185,7 +1229,11 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "Technical/resource WRITE serviceability is proven, but organizational/source-writer authority has not yet been established.",
-            "next_probe": "Read the current source-writer/organizational authority owner for this exact operation; do not relabel that gate as tool unavailability."
+            "next_probe": "Read the current source-writer/organizational authority owner for this exact operation; do not relabel that gate as tool unavailability.",
+            "requested_action_discovery": "PROVEN_EXPOSED",
+            "requested_action_preflight": "PASS",
+            "safe_probe_status": "NOT_APPLICABLE",
+            "human_ceremony": null
           }
         ],
         "selected_surface_id": "github-write-serviceable",
@@ -1282,7 +1330,11 @@
               "expiry_state": "UNKNOWN"
             },
             "blocker": "The exact current non-mutating GitHub WRITE preflight explicitly refused this repository scope.",
-            "next_probe": "Wait for a material permission/generation change or follow the exact named admin ceremony; do not retry a dummy mutation."
+            "next_probe": "Wait for a material permission/generation change or follow the exact named admin ceremony; do not retry a dummy mutation.",
+            "requested_action_discovery": "PROVEN_EXPOSED",
+            "requested_action_preflight": "REFUSED",
+            "safe_probe_status": "EXHAUSTED",
+            "human_ceremony": "A repository administrator restores WRITE permission for the exact bound repository scope; a new observation generation is then required."
           }
         ],
         "selected_surface_id": null,
