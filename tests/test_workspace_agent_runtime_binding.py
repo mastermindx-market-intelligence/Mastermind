@@ -174,7 +174,8 @@ def test_exact_current_target_reconstructs_company_dialogue_binding() -> None:
     }
     assert binding.allowed_message_types == tuple(sorted(FABLE_MESSAGE_TYPES))
     assert binding.reply_to_message_key is None
-    assert binding_digest(binding) == binding_digest(instance.resolve(OPERATION))
+    second_instance, _ = resolver()
+    assert binding_digest(binding) == binding_digest(second_instance.resolve(OPERATION))
 
 
 def test_target_rollover_between_source_reads_refuses() -> None:
