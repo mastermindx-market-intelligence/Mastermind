@@ -191,6 +191,24 @@ class TriggerTransportTests(unittest.TestCase):
                 self.assertIsNone(result.run_id)
                 self.assertEqual(len(connection.calls), 1)
 
+    def test_accepted_body_read_failure_preserves_known_provider_acceptance(self):
+        connection = FakeConnection()
+
+        def fail_read(amount):
+            connection.response.read_amount = amount
+            raise OSError("SECRET_BODY_READ")
+
+        connection.response.read = fail_read
+        result = self.invoke(connection)
+        self.assertEqual(
+            (result.disposition, result.reason),
+            ("accepted", "ACCEPTED_CORRELATION_UNAVAILABLE"),
+        )
+        self.assertEqual(connection.response.read_amount, MAX_BODY_BYTES + 1)
+        self.assertEqual(len(connection.calls), 1)
+        self.assertTrue(connection.closed)
+        self.assertNotIn("SECRET_BODY_READ", repr(result))
+
     def test_known_provider_rejections_do_not_read_or_copy_error_body(self):
         for status in (401, 403, 404, 409):
             connection = FakeConnection()
