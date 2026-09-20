@@ -205,7 +205,9 @@ def _expected_capability_id(slot_id: str) -> str:
         raise CapacityObservationError("CAPACITY_OBSERVE_REALM_INVALID") from None
 
 
-def _validate_realm(slot: worker_slots.ProviderWorkerSlot) -> None:
+def _validate_realm(
+    slot: worker_slots.ProviderWorkerSlot,
+) -> tuple[int, ...]:
     try:
         info = slot.provider_home.lstat()
         if (
@@ -218,6 +220,7 @@ def _validate_realm(slot: worker_slots.ProviderWorkerSlot) -> None:
             _refuse("CAPACITY_OBSERVE_REALM_INVALID")
         if has_macos_acl(slot.provider_home, expected_identity=info):
             _refuse("CAPACITY_OBSERVE_REALM_INVALID")
+        return _identity(info)
     except (OSError, FilesystemSecurityError):
         _refuse("CAPACITY_OBSERVE_REALM_INVALID")
 
@@ -345,7 +348,7 @@ class WorkerCapacityObserver:
             _refuse("CAPACITY_OBSERVE_REALM_INVALID")
 
         expected_capability = _expected_capability_id(slot.slot_id)
-        _validate_realm(slot)
+        realm_identity = _validate_realm(slot)
         source = _load_root_owned_source_config(self.binding.source_config_path)
         if (
             source.host_ref != self.binding.host_ref
@@ -376,7 +379,8 @@ class WorkerCapacityObserver:
             binary_identity=binary_identity,
             credential_identity=credential_identity,
         )
-        _validate_realm(slot)
+        if _validate_realm(slot) != realm_identity:
+            _refuse("CAPACITY_OBSERVE_REALM_INVALID")
         if _read_current_credential_identity(slot) != credential_identity:
             _refuse("CAPACITY_OBSERVE_CREDENTIAL_METADATA_INVALID")
         if _read_current_binary_identity(self.binding.binary_path) != binary_identity:

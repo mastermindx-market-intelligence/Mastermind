@@ -505,3 +505,46 @@ def test_realm_metadata_movement_during_observation_refuses(
     with pytest.raises(CapacityObservationError) as raised:
         harness.observer().observe()
     assert raised.value.code == "CAPACITY_OBSERVE_REALM_INVALID"
+
+
+def test_valid_realm_identity_replacement_during_observation_refuses(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    auth_identity = provider_readiness.current_auth_identity(
+        harness.slot.auth_path,
+        worker_uid=harness.slot.worker_uid,
+        worker_gid=harness.slot.worker_gid,
+    )
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "current_auth_identity",
+        lambda *_args, **_kwargs: dict(auth_identity),
+    )
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "current_binary_identity",
+        lambda _path: dict(harness.binary_identity),
+    )
+
+    def replace_realm_with_another_valid_identity(
+        *_args: Any, **_kwargs: Any
+    ) -> dict[str, Any]:
+        old_home = harness.slot.provider_home.with_name("provider-home-old")
+        harness.slot.provider_home.rename(old_home)
+        harness.slot.provider_home.mkdir(mode=0o700)
+        harness.slot.auth_path.write_bytes(SECRET)
+        harness.slot.auth_path.chmod(0o600)
+        return {
+            "codex_binary": dict(harness.binary_identity),
+            "credential_lstat": dict(auth_identity),
+        }
+
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "validate_receipt_file",
+        replace_realm_with_another_valid_identity,
+    )
+
+    with pytest.raises(CapacityObservationError) as raised:
+        harness.observer().observe()
+    assert raised.value.code == "CAPACITY_OBSERVE_REALM_INVALID"
