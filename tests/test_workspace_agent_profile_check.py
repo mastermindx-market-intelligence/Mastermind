@@ -13,6 +13,7 @@ from scripts.workspace_agent_profile_check import MAX_INPUT_BYTES, main, run
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG = ROOT / "config" / "workspace_agents" / "profile_catalog.v1.json"
 NOW = 1789822800000
+RETURN_SUBJECT_DIGEST = "a" * 64
 
 
 def economic():
@@ -72,6 +73,8 @@ class WorkspaceAgentProfileCheckTests(unittest.TestCase):
                     "agtch_synthetic123",
                     "--agent-version-ref",
                     "agent-version-20260919-01",
+                    "--return-subject-digest",
+                    RETURN_SUBJECT_DIGEST,
                     "--now-ms",
                     str(NOW + 1),
                 ]
@@ -84,6 +87,7 @@ class WorkspaceAgentProfileCheckTests(unittest.TestCase):
         self.assertEqual(binding["concurrency_limit"], 1)
         self.assertFalse(binding["live_source_write_allowed"])
         self.assertFalse(binding["production_release_allowed"])
+        self.assertEqual(binding["return_subject_digest"], RETURN_SUBJECT_DIGEST)
         self.assertEqual(
             binding["app_bindings"],
             ["mastermind-steward", "mastermind-workspace-agent-return"],
