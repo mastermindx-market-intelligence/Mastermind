@@ -235,10 +235,11 @@ class GoogleDriveTransport:
                         raise DriveApiError("DRIVE_TRANSPORT_UNAVAILABLE")
                     return response.read(MAX_JSON_BYTES + 1 if expect_json else MAX_JSON_BYTES)
             except urllib.error.HTTPError as exc:
-                if exc.code == 401 and not forced_refresh:
+                http_code = exc.code
+                if http_code == 401 and not forced_refresh:
                     forced_refresh = True
                     continue
-                if safe_retry and (exc.code == 429 or 500 <= exc.code < 600) and attempt + 1 < attempts:
+                if safe_retry and (http_code == 429 or 500 <= http_code < 600) and attempt + 1 < attempts:
                     retry_after = exc.headers.get("Retry-After") if exc.headers is not None else None
                     try:
                         delay = max(1, min(30, int(str(retry_after))))
