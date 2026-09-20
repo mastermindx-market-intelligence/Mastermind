@@ -11,12 +11,14 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
 from control_plane import codex_worker as cw
+from control_plane import worker_execution_contract as wec
 
 
 _FAKE_CODEX = r'''#!/usr/bin/python3
@@ -2390,7 +2392,7 @@ def test_worker_normal_exit_foreign_pipe_holder_fails_boundedly_not_success(
     child_pid, child_pgid, receipt = asyncio.run(exercise())
     try:
         assert receipt.result.status is cw.WorkerRunStatus.INVALID_RESULT
-        assert "forced local retirement" in (receipt.result.error or "")
+        assert "expected one thread.started" in (receipt.result.error or "")
         assert original_killpg(child_pgid, 0) is None
     finally:
         try:
@@ -4091,3 +4093,275 @@ def test_unpublished_cleanup_consumes_done_wait_task_after_signal_failure(
         assert isinstance(wait_task.exception(), RuntimeError)
 
     asyncio.run(exercise())
+
+def test_worker_launch_binds_stdout_and_stderr_to_durable_files(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> tuple[cw.CollectionReceipt, bool, bool]:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        direct_stdout = state.process.stdout is None
+        direct_stderr = state.process.stderr is None
+        return await adapter.collect_result(ref), direct_stdout, direct_stderr
+
+    receipt, direct_stdout, direct_stderr = asyncio.run(exercise())
+    assert direct_stdout is True
+    assert direct_stderr is True
+    assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
+
+
+def test_reattach_replays_terminal_result_without_provider_start(
+    tmp_path: Path,
+) -> None:
+    adapter, spec, _workspace_path, run_dir = _fixture(tmp_path)
+    prompt_path = run_dir / "input" / "worker-prompt.txt"
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    logs = run_dir / "logs"
+    output = run_dir / "output"
+    logs.mkdir(mode=0o700)
+    output.mkdir(mode=0o700)
+    result = {
+        "run_id": spec.run_id,
+        "job_id": spec.job_id,
+        "worker_id": spec.worker_id,
+        "status": "COMPLETED",
+        "summary": "recovered durable result",
+        "artifacts": [],
+    }
+    events = (
+        {"type": "thread.started", "thread_id": "thread-recovered"},
+        {"type": "turn.started"},
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": json.dumps(result, sort_keys=True),
+            },
+        },
+        {
+            "type": "turn.completed",
+            "usage": {"input_tokens": 13, "output_tokens": 8},
+        },
+    )
+    stdout = logs / "stdout.jsonl"
+    stderr = logs / "stderr.log"
+    result_path = output / "result.json"
+    stdout.write_text(
+        "".join(json.dumps(event, sort_keys=True) + "\n" for event in events),
+        encoding="utf-8",
+    )
+    stderr.write_bytes(b"")
+    result_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+    for path in (stdout, stderr, result_path):
+        path.chmod(0o600)
+    ref = cw.ProcessRef(
+        run_id=spec.run_id,
+        pid=987654,
+        pgid=987654,
+        process_start_identity="absent-start",
+        boot_session_id="boot-recovered",
+        launch_nonce="nonce-recovered",
+        provider_session_id=None,
+        stdout_path=str(stdout),
+        stderr_path=str(stderr),
+        result_path=str(result_path),
+        started_at="2026-09-18T00:00:00+00:00",
+        binary=adapter.binary,
+        base_sha=spec.expected_base_sha or "",
+        session_id=987654,
+        effective_uid=os.geteuid(),
+        effective_gid=os.getegid(),
+        real_uid=os.getuid(),
+        real_gid=os.getgid(),
+    )
+
+    class AbsentInspector:
+        def boot_session_id(self) -> str:
+            return ref.boot_session_id
+
+        def identity(self, _pid: int):
+            raise cw.ProcessIdentityError("fixture process is absent")
+
+        def inspect(self, _pid: int):
+            raise cw.ProcessIdentityError("fixture process is absent")
+
+    adapter.inspector = AbsentInspector()
+    binding = wec.WorkerRecoveryBinding.bind(
+        adapter_id=adapter.adapter_id,
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
+    )
+    recovered_ref = adapter.reattach(spec, binding)
+    receipt = asyncio.run(adapter.collect_result(recovered_ref))
+    assert recovered_ref == ref
+    assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
+    assert receipt.result.provider_session_id == "thread-recovered"
+    assert receipt.result.usage == {"input_tokens": 13, "output_tokens": 8}
+    assert receipt.result.structured_output["summary"] == "recovered durable result"
+
+
+def _live_recovery_fixture(
+    tmp_path: Path,
+    *,
+    argv: tuple[str, ...] = ("/bin/sleep", "60"),
+) -> tuple[cw.CodexWorkerAdapter, cw.LaunchSpec, wec.WorkerRecoveryBinding, subprocess.Popen]:
+    adapter, spec, _workspace_path, run_dir = _fixture(tmp_path)
+    prompt_path = run_dir / "input" / "worker-prompt.txt"
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    logs = run_dir / "logs"
+    output = run_dir / "output"
+    logs.mkdir(mode=0o700)
+    output.mkdir(mode=0o700)
+    stdout = logs / "stdout.jsonl"
+    stderr = logs / "stderr.log"
+    result = output / "result.json"
+    for path in (stdout, stderr, result):
+        path.write_bytes(b"")
+        path.chmod(0o600)
+    process = subprocess.Popen(argv, start_new_session=True)
+    observed = adapter.inspector.inspect(process.pid)
+    ref = cw.ProcessRef(
+        run_id=spec.run_id,
+        pid=process.pid,
+        pgid=observed.pgid,
+        process_start_identity=observed.start_identity,
+        boot_session_id=adapter.inspector.boot_session_id(),
+        launch_nonce="nonce-live-recovery",
+        provider_session_id=None,
+        stdout_path=str(stdout),
+        stderr_path=str(stderr),
+        result_path=str(result),
+        started_at=cw._utc_now(),
+        binary=adapter.binary,
+        base_sha=spec.expected_base_sha or "",
+        session_id=observed.session_id,
+        effective_uid=observed.effective_uid,
+        effective_gid=observed.effective_gid,
+        real_uid=observed.real_uid,
+        real_gid=observed.real_gid,
+    )
+    binding = wec.WorkerRecoveryBinding.bind(
+        adapter_id=adapter.adapter_id,
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
+    )
+    threading.Thread(target=process.wait, daemon=True).start()
+    return adapter, spec, binding, process
+
+
+def test_recovered_cancel_reports_graceful_exact_absence_without_sigkill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    original_killpg = cw.os.killpg
+    signals: list[int] = []
+
+    def traced_killpg(pgid: int, value: int) -> None:
+        if value != 0:
+            signals.append(value)
+        original_killpg(pgid, value)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    try:
+        time.sleep(0.1)
+        ref = adapter.reattach(spec, binding)
+        receipt = asyncio.run(adapter.cancel(ref, "restart cancellation"))
+        process.wait(timeout=2)
+    finally:
+        monkeypatch.setattr(cw.os, "killpg", original_killpg)
+        if process.poll() is None:
+            original_killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=2)
+    assert receipt.signal_sent is True
+    assert receipt.escalated_to_sigkill is False
+    assert receipt.already_exited is False
+    assert signals == [signal.SIGTERM]
+
+
+def test_recovered_cancel_escalates_only_the_verified_residual_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready = tmp_path / "residual.ready"
+    child_program = (
+        "import pathlib,signal,sys,time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(60)"
+    )
+    program = (
+        "import os,subprocess,sys,time; "
+        "subprocess.Popen(['/usr/bin/python3','-c',sys.argv[2],sys.argv[1]]); "
+        "[(time.sleep(0.01)) for _ in range(500) if not os.path.exists(sys.argv[1])]; "
+        "time.sleep(60)"
+    )
+    adapter, spec, binding, process = _live_recovery_fixture(
+        tmp_path,
+        argv=("/usr/bin/python3", "-c", program, str(ready), child_program),
+    )
+    original_killpg = cw.os.killpg
+    signals: list[int] = []
+
+    def traced_killpg(pgid: int, value: int) -> None:
+        if value != 0:
+            signals.append(value)
+        original_killpg(pgid, value)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    try:
+        for _ in range(200):
+            if ready.exists():
+                break
+            time.sleep(0.01)
+        assert ready.exists()
+        ref = adapter.reattach(spec, binding)
+        receipt = asyncio.run(adapter.cancel(ref, "restart cancellation"))
+        process.wait(timeout=2)
+    finally:
+        monkeypatch.setattr(cw.os, "killpg", original_killpg)
+        try:
+            original_killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        if process.poll() is None:
+            process.wait(timeout=2)
+    assert receipt.signal_sent is True
+    assert receipt.escalated_to_sigkill is True
+    assert receipt.already_exited is False
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_duplicate_reattach_is_idempotent_for_the_same_execution(tmp_path: Path) -> None:
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    try:
+        first = adapter.reattach(spec, binding)
+        second = adapter.reattach(spec, binding)
+        assert first == second == binding.process_ref
+        receipt = asyncio.run(adapter.cancel(first, "fixture cleanup"))
+        assert receipt.signal_sent is True
+    finally:
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.wait(timeout=2)
+
+
+def test_recovery_reattach_anchors_exact_group_members(tmp_path: Path) -> None:
+    """Recovery remembers an exact group witness before leader loss can occur."""
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    try:
+        ref = adapter.reattach(spec, binding)
+        state = adapter._runs[ref.run_id]
+        assert isinstance(state, cw._RecoveredRunState)
+        assert state.group_member_identities[ref.pid] == ref.process_start_identity
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)
