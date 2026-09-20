@@ -57,6 +57,7 @@ def test_final_response_gate_is_closed_vocabulary_and_more_work_cannot_finalize(
         "ALL_SCOPED_LANES_BLOCKED",
         "PLATFORM_FAILURE",
         "DURABLE_EXECUTION_RUNNING",
+        "CONTEXT_ROTATION",
         "MORE_WORK_EXISTS",
     ):
         assert state in text
@@ -259,3 +260,33 @@ def test_companion_disagreement_preserves_incumbent_effects_and_source_pin():
     assert "Do not mix procedure revisions" in text
     assert "does not transfer an incumbent writer, authorize a retry, or relax admission" in text
     assert "explanatory notes, not a second closed routing taxonomy" in text
+
+
+def test_context_rotation_is_lawful_continuation_not_completion() -> None:
+    text = " ".join(_read(ACTIVE).split())
+    for phrase in (
+        "`CONTEXT_ROTATION`",
+        "exact surface is `ROTATION_REQUIRED`",
+        "modifying effects are reconciled",
+        "compact durable continuation",
+        "parent mission remains active",
+        "not success, completion, or acceptance",
+        "verified semantic phase boundary",
+        "before another high-context phase",
+        "durable capability progress and decision quality",
+        "not turn length, token volume, tool-call count, or wall-clock duration",
+    ):
+        assert phrase in text, f"ACTIVE_EXECUTION omits context-rotation boundary: {phrase}"
+
+
+def test_proactive_phase_rotation_reuses_the_closed_context_rotation_gate() -> None:
+    text = " ".join(
+        _section("Step 7A — Preserve operational continuity before interruption").split()
+    )
+    for phrase in (
+        "only when the exact surface is `ROTATION_REQUIRED`",
+        "all modifying effects are reconciled",
+        "a compact durable continuation exists",
+        "one lawful successor can recover the same responsibility",
+    ):
+        assert phrase in text, f"proactive rotation path omits closed gate: {phrase}"

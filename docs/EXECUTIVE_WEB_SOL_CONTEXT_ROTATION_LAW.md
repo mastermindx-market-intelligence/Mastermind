@@ -151,6 +151,33 @@ A generic error, stalled spinner, missing selector, slow generation, or single f
 
 The product need not always know why a conversation stopped. It must know whether the exact bound reasoning surface can continue safely.
 
+### 6.1 Tool-context pressure and transcript hygiene
+
+`REPEATED_TERMINAL_GENERATION_FAILURE` means **two consecutive terminal generation failures** in the
+exact conversation with **no successful intervening turn**. The surface also requires rotation after
+**one resume failure** immediately following an unresolved tool timeout, connector taint, or
+`EFFECT_UNKNOWN`; this establishes `ROTATION_REQUIRED`
+because the exact surface cannot safely reconcile its prior boundary. `ROTATION_REQUIRED` also
+applies when the **exact surface cannot safely continue** or the **Chairman explicitly retires the
+conversation**. These thresholds classify the surface; they do not prove a private provider context
+limit.
+
+A single failure preserves the existing truth rule: **Thinking failed != context exhausted**. It may
+establish `ROTATION_SUSPECTED`, provider transient, surface unusable, or unknown, but it cannot by
+itself establish repeated-terminal failure.
+
+A **tainted connector generation** is unusable for further work. The next connector generation must
+reconcile the exact original PID/action/effect before any replacement or repeat. A timeout, taint, or
+lost response never authorizes carrier failover or a blind retry.
+
+The rule is: **raw tool history is not a continuation manifest**. Never replay full logs, process dumps, metrics,
+source files, schemas, or private reasoning into the successor. Continue from durable conclusions,
+exact identities, unresolved effects, do-not-redo boundaries, and the minimum fresh canonical state.
+
+Planned retirement requires an **already-durable continuation** before the predecessor is abandoned.
+The continuation remains owned by Agent OS and accepted repository/runtime owners; this law creates no
+chat registry, transcript store, retry ledger, or second memory plane.
+
 ## 7. Closed Web-Sol action surface
 
 The existing public v1 surface remains:
