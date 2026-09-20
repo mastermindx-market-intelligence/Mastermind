@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -604,6 +605,73 @@ def test_matching_crash_identity_reconciles_partial_control_construction(
 
     assert Path(receipt.workspace_path).is_dir()
     assert not operation.exists()
+    assert not (root / ".commission-acquisition").exists()
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX process crash")
+def test_crash_after_workspace_validation_before_commit_remains_recoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, base_sha = _base_repository(tmp_path / "source")
+    commission_source, commission_sha, brief = _commission_repository(tmp_path, source)
+    _git(commission_source, "config", "uploadpack.allowFilter", "true")
+    plan = _acquiring_plan(source, commission_sha, brief)
+    monkeypatch.setattr(
+        workspace,
+        "_canonical_commission_remote_url",
+        lambda ref: commission_source.resolve().as_uri(),
+    )
+    root = tmp_path / "workspaces"
+    destination = root / "job-commission-crash-gap"
+    original_observe = workspace.observe_launch_cleanliness
+    original_lstat = Path.lstat
+    state = {"workspace_validated": False}
+
+    def mark_workspace_validated(run_git):
+        result = original_observe(run_git)
+        state["workspace_validated"] = True
+        return result
+
+    def crash_before_commit(path: Path):
+        if state["workspace_validated"] and path == destination:
+            os._exit(73)
+        return original_lstat(path)
+
+    monkeypatch.setattr(
+        workspace,
+        "observe_launch_cleanliness",
+        mark_workspace_validated,
+    )
+    monkeypatch.setattr(Path, "lstat", crash_before_commit)
+    pid = os.fork()
+    if pid == 0:
+        workspace.prepare_credentialless_clone(
+            source,
+            root,
+            job_id="JOB-COMMISSION-CRASH-GAP",
+            base_sha=base_sha,
+            commission_dependency=plan,
+        )
+        os._exit(72)
+    _pid, status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(status) == 73
+
+    monkeypatch.setattr(Path, "lstat", original_lstat)
+    monkeypatch.setattr(
+        workspace,
+        "observe_launch_cleanliness",
+        original_observe,
+    )
+    receipt = workspace.prepare_credentialless_clone(
+        source,
+        root,
+        job_id="JOB-COMMISSION-CRASH-GAP",
+        base_sha=base_sha,
+        commission_dependency=plan,
+    )
+
+    assert Path(receipt.workspace_path).is_dir()
     assert not (root / ".commission-acquisition").exists()
 
 

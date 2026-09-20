@@ -1534,13 +1534,6 @@ def prepare_credentialless_clone(
                 plan=dependency_plan,
                 env=env,
             )
-            if acquisition_operation is not None:
-                _cleanup_acquisition_operation(acquisition_operation)
-                if os.path.lexists(acquisition_operation):
-                    raise WorkspaceError(
-                        "commission acquisition cleanup did not complete"
-                    )
-                acquisition_operation = None
             if (
                 _run(
                     ["git", "rev-parse", "HEAD"],
@@ -1624,11 +1617,22 @@ def prepare_credentialless_clone(
                 shared_gid=int(shared_gid),
             )
         workspace_info = destination.lstat()
+        if acquisition_operation is not None:
+            # The private acquisition marker remains authoritative until every
+            # workspace handoff postcondition has passed.  A process death
+            # before this commit point can therefore reconcile and rebuild the
+            # same Job instead of leaving an unclassified existing workspace.
+            _cleanup_acquisition_operation(acquisition_operation)
+            if os.path.lexists(acquisition_operation):
+                raise WorkspaceError(
+                    "commission acquisition cleanup did not complete"
+                )
+            acquisition_operation = None
     except BaseException:
         # Any failure past this point leaves a half-written clone that
         # would block every later attempt for this job ID.  Discard it
-        # and re-raise the real cause unchanged.  Acquisition is also
-        # control-only STATE A state and must never survive into handoff.
+        # and re-raise the real cause unchanged.  Acquisition remains
+        # private control state until every handoff postcondition passes.
         if acquisition_operation is not None:
             _cleanup_acquisition_operation(acquisition_operation)
         _discard_partial_workspace(destination)
