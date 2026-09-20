@@ -298,3 +298,21 @@ def test_higher_candidacy_still_outranks_lexical_tiebreak(monkeypatch):
     monkeypatch.setattr(intake, "_from_radar", lambda: {"AAA": _rec(0.45), "ZZZ": _rec(0.50)})
     assert intake.queue(limit=1)[0]["ticker"] == "AAA"
     assert intake.tickers(limit=1, min_score=0.4) == ["ZZZ"]
+
+
+@pytest.mark.parametrize("limit", [-1, 0, 1, 5, 99])
+@pytest.mark.parametrize("min_score", [0.0, 0.3, 0.31])
+def test_no_evidence_seed_order_and_filter_compatibility(monkeypatch, limit, min_score):
+    monkeypatch.setattr(intake, "_from_briefing", lambda: ({}, {}, {}))
+    monkeypatch.setattr(intake, "_SIMPLE_SOURCES", ())
+    monkeypatch.setattr(intake, "_LOADERS", {})
+    expected = intake._SEED[:max(0, limit)] if min_score <= 0.3 else []
+    assert intake.tickers(limit=limit, min_score=min_score) == expected
+
+
+def test_real_evidence_for_seed_symbols_uses_identity_ties(monkeypatch):
+    monkeypatch.setattr(intake, "_from_briefing", lambda: ({}, {}, {}))
+    monkeypatch.setattr(intake, "_SIMPLE_SOURCES", ("radar",))
+    monkeypatch.setattr(intake, "_LOADERS", {"radar": "_from_radar"})
+    monkeypatch.setattr(intake, "_from_radar", lambda: {"NVDA": _rec(0.45), "AMD": _rec(0.45)})
+    assert intake.tickers(limit=2, min_score=0.4) == ["AMD", "NVDA"]

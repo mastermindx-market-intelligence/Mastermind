@@ -693,9 +693,11 @@ def tickers(limit: int = 40, min_score: float = 0.0) -> list[str]:
     candidates = build(limit=None)["candidates"]
     eligible = [c for c in candidates
                 if c["candidacy_score"] > 0.0 and c["candidacy_score"] >= min_score]
-    # A research-only observation must not choose the winner at a candidacy cutoff.
-    # Use a stable identity tie-break instead of research score (or inherited queue order).
-    eligible.sort(key=lambda c: (-c["candidacy_score"], -c["n_sources"], c["ticker"]))
+    # Keep the established order only for the genuine no-evidence seed fallback.
+    # Observed evidence uses identity, never research relevance, to resolve ties.
+    seed_fallback = bool(candidates) and all(c["sources"] == ["seed"] for c in candidates)
+    if not seed_fallback:
+        eligible.sort(key=lambda c: (-c["candidacy_score"], -c["n_sources"], c["ticker"]))
     return [c["ticker"] for c in eligible[:max(0, limit)]]
 
 
