@@ -1,3 +1,5 @@
+import pytest
+
 from brain import intake
 
 
@@ -246,3 +248,53 @@ def test_divergence_bonus_is_applied_exactly_once(monkeypatch):
     assert candidate["n_sources"] == 0
     assert candidate["score"] == intake._DIVERGENCE_BONUS
     assert candidate["candidacy_score"] == 0.0
+
+
+
+@pytest.mark.parametrize("context_source", ["altdata", "briefing", "divergence"])
+def test_context_only_evidence_cannot_break_candidacy_tie(monkeypatch, context_source):
+    """Research attention cannot decide which equally eligible name crosses a cutoff."""
+    artifacts = {}
+    monkeypatch.setattr(intake, "_read", lambda rel: artifacts.get(rel))
+    monkeypatch.setattr(intake, "_SIMPLE_SOURCES", ("radar", "altdata"))
+    monkeypatch.setattr(intake, "_LOADERS", {"radar": "_from_radar", "altdata": "_from_altdata"})
+    monkeypatch.setattr(intake, "_from_radar", lambda: {"AAA": _rec(0.45), "ZZZ": _rec(0.45)})
+    before = {c["ticker"]: c for c in intake.build(limit=None)["candidates"]}
+    selected_before = intake.tickers(limit=1, min_score=0.4)
+    assert selected_before == ["AAA"]
+    if context_source == "altdata":
+        artifact = _alt_artifact(granted=False)
+        artifact["signals"][0]["ticker"] = "ZZZ"
+        artifact["signals"][0]["signal_score"] = 99
+        artifacts["altdata/mastermind.json"] = artifact
+    elif context_source == "briefing":
+        artifacts["intelligence/briefing.json"] = {
+            "priority_queue": [{"ticker": "ZZZ", "priority": 0.99, "lean": 1}]
+        }
+    else:
+        artifacts["intelligence/briefing.json"] = {
+            "divergences": [{"ticker": "ZZZ", "lean": 1}]
+        }
+    after = {c["ticker"]: c for c in intake.build(limit=None)["candidates"]}
+    assert after["ZZZ"]["score"] > before["ZZZ"]["score"]
+    assert after["ZZZ"]["candidacy_score"] == before["ZZZ"]["candidacy_score"]
+    assert after["ZZZ"]["n_sources"] == before["ZZZ"]["n_sources"]
+    assert intake.tickers(limit=1, min_score=0.4) == selected_before
+    assert intake.tickers(limit=2, min_score=0.4) == ["AAA", "ZZZ"]
+
+
+def test_equal_candidacy_is_stable_under_source_row_order(monkeypatch):
+    monkeypatch.setattr(intake, "_from_briefing", lambda: ({}, {}, {}))
+    monkeypatch.setattr(intake, "_SIMPLE_SOURCES", ("radar",))
+    monkeypatch.setattr(intake, "_LOADERS", {"radar": "_from_radar"})
+    monkeypatch.setattr(intake, "_from_radar", lambda: {"ZZZ": _rec(0.45), "AAA": _rec(0.45)})
+    assert intake.tickers(limit=1, min_score=0.4) == ["AAA"]
+
+
+def test_higher_candidacy_still_outranks_lexical_tiebreak(monkeypatch):
+    monkeypatch.setattr(intake, "_from_briefing", lambda: ({"AAA": _rec(0.99)}, {}, {}))
+    monkeypatch.setattr(intake, "_SIMPLE_SOURCES", ("radar",))
+    monkeypatch.setattr(intake, "_LOADERS", {"radar": "_from_radar"})
+    monkeypatch.setattr(intake, "_from_radar", lambda: {"AAA": _rec(0.45), "ZZZ": _rec(0.50)})
+    assert intake.queue(limit=1)[0]["ticker"] == "AAA"
+    assert intake.tickers(limit=1, min_score=0.4) == ["ZZZ"]
