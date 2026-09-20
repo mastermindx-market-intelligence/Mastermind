@@ -783,29 +783,39 @@ def _derive_serviceability(
     # demote urgency for stale evidence while still declaring the actor able to
     # act on it — and would hand out a stale RuntimeBinding as the exact
     # current target (F0G §5.8, §6.2).
-    def _service_fact(fact: Fact | None) -> tuple[object | None, bool]:
-        """Return (value, degraded) where degraded marks unusable evidence."""
-        if fact is None:
-            return None, False
-        if fact.conflict:
-            return None, True
-        if fact.source.freshness is not Freshness.CURRENT:
-            return None, True
-        return fact.value, False
+    def _service_fact(fact: Fact | None) -> tuple[object | None, ServiceabilityReason | None]:
+        """Return (value, cause) where cause names why the evidence is unusable.
 
-    effect_value, effect_degraded = _service_fact(demand.effect_state)
-    if effect_degraded:
-        reasons.append(ServiceabilityReason.STALE_LOAD_BEARING_SOURCE)
-        issues.append(Issue.STALE_PRESSURE_SOURCE)
+        Conflict and staleness are independent attributes of a load-bearing
+        factor (F0G §3.3, §5.8) and must not collapse into one cause: an owner
+        DISAGREEMENT about whether an effect was applied is not a refresh
+        problem, and rendering it as one misleads the reader about what to do.
+        """
+        if fact is None:
+            return None, None
+        if fact.conflict:
+            return None, ServiceabilityReason.IDENTITY_CONFLICT
+        if fact.source.freshness is not Freshness.CURRENT:
+            return None, ServiceabilityReason.STALE_LOAD_BEARING_SOURCE
+        return fact.value, None
+
+    effect_value, effect_cause = _service_fact(demand.effect_state)
+    if effect_cause is not None:
+        reasons.append(effect_cause)
+        issues.append(
+            Issue.CONFLICTED_PRESSURE_SOURCE
+            if effect_cause is ServiceabilityReason.IDENTITY_CONFLICT
+            else Issue.STALE_PRESSURE_SOURCE
+        )
         unknown = True
     if effect_value is EffectState.EFFECT_UNKNOWN:
         # Blocks action/retry/failover; never erases time pressure.
         reasons.append(ServiceabilityReason.EFFECT_UNKNOWN)
         blocked = True
 
-    capacity_value, capacity_degraded = _service_fact(demand.capacity_state)
-    if capacity_degraded:
-        reasons.append(ServiceabilityReason.STALE_LOAD_BEARING_SOURCE)
+    capacity_value, capacity_cause = _service_fact(demand.capacity_state)
+    if capacity_cause is not None:
+        reasons.append(capacity_cause)
         unknown = True
     if capacity_value is CapacityState.DEGRADED:
         reasons.append(ServiceabilityReason.CAPACITY_DEGRADED)
@@ -1317,10 +1327,10 @@ def compute_attention_frontier(
         did = demand.demand_id
         receipts = [demand.admission_source]
         for name in (
-            "authority", "decision_window", "actual_impact", "reversibility",
-            "unblocks", "resource_burn", "autonomous_progress", "wait",
-            "became_actionable_at", "effect_state", "capacity_state",
-            "action_target", "terminal",
+            "authority", "decision_window", "actual_impact", "blast_radius",
+            "reversibility", "unblocks", "resource_burn", "autonomous_progress",
+            "wait", "became_actionable_at", "cost_of_delay", "effect_state",
+            "capacity_state", "action_target", "terminal",
         ):
             fact = getattr(demand, name)
             if fact is not None:
