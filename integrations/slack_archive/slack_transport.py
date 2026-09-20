@@ -162,7 +162,8 @@ class SlackReadTransport:
                 return payload
             except urllib.error.HTTPError as exc:
                 last_error = exc
-                if exc.code == 429 and attempt < 4:
+                http_code = exc.code
+                if http_code == 429 and attempt < 4:
                     retry_after = exc.headers.get("Retry-After") if exc.headers is not None else None
                     try:
                         delay = max(1, min(60, int(str(retry_after))))
@@ -170,7 +171,7 @@ class SlackReadTransport:
                         delay = min(2 ** attempt, 15)
                     time.sleep(delay)
                     continue
-                if 500 <= exc.code < 600 and attempt < 2:
+                if 500 <= http_code < 600 and attempt < 2:
                     time.sleep(1 + attempt)
                     continue
                 raise SlackApiError("transport_unavailable") from None
