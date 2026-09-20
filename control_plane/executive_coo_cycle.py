@@ -200,6 +200,29 @@ class CooCycle:
             and int(row["lease_expires_at_ms"]) > self.runtime.store.now_ms()
         )
 
+    @classmethod
+    def _ready_frontier_open(
+        cls,
+        active: list[Job],
+        queued: list[Job],
+        current_by_step: Mapping[str, Mapping[str, Any]],
+    ) -> bool:
+        if not active or not queued:
+            return False
+        for job in [*active, *queued]:
+            if not cls._is_read_only_frontier_work(job):
+                return False
+            step_id = job.plan_step_id
+            if not isinstance(step_id, str):
+                return False
+            current = current_by_step.get(step_id)
+            if (
+                not isinstance(current, Mapping)
+                or current.get("current_job_id") != job.job_id
+            ):
+                return False
+        return True
+
     def _ready_frontier_candidate(
         self, candidate: Job, active: list[Job]
     ) -> bool:
@@ -627,7 +650,11 @@ class CooCycle:
             [job for job in children if job.status == JobStatus.QUEUED],
             key=lambda job: _job_sort_key(job, ordinals),
         )
-        if active and queued:
+        if (
+            active
+            and queued
+            and self._ready_frontier_open(active, queued, current_by_step)
+        ):
             ready = next(
                 (
                     candidate

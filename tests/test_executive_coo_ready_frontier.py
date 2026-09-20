@@ -2,10 +2,18 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 
+from control_plane.ceo_intent import submit_intent
 from control_plane.executive_coo_cycle import CooCycle
+from control_plane.executive_orchestration_result import canonical_digest as result_digest
 from control_plane.executive_runtime import OrchestrationDispatchOutcome, Runtime
-from test_executive_os_phase1fc import _admit_v2_plan, _register_placement_union
+from test_executive_os_phase1fc import (
+    _admit_v2_plan,
+    _complete_ohf_role,
+    _register_placement_union,
+    _v2_intent,
+)
 
 _CODEX = {"provider_realm": "codex", "quota_class": "codex-hf1q-step"}
 _CLAUDE = {
@@ -22,6 +30,104 @@ def _admitted_pair(runtime: Runtime):
     )
     by_step = {job.plan_step_id: job for job in admitted}
     return root, by_step["step-0"], by_step["step-1"]
+
+
+def _admitted_three_with_required_review(runtime: Runtime):
+    _register_placement_union(runtime)
+    _register_codex_peer(runtime, "worker-c")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-READY-FRONTIER-BARRIER-001",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE jobs SET constraints_json=? WHERE job_id=?",
+            (
+                json.dumps(
+                    {
+                        **root.constraints,
+                        "provider": "codex",
+                        "eligible_quota_classes": ["codex-hf1q-step"],
+                        "work_placement_union": [_CODEX, _CLAUDE],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                root.job_id,
+            ),
+        )
+    root = runtime.jobs.get_job(root.job_id)
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    planner_dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(planner_dispatch, OrchestrationDispatchOutcome)
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v2",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner_dispatch.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Keep one exact read-only work item live.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": _CODEX,
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Complete one item that requires independent review.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": _CLAUDE,
+            },
+            {
+                "ordinal": 2,
+                "step_id": "step-2",
+                "objective": "Remain queued behind the coupled review barrier.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": _CODEX,
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner_dispatch, plan_body, identity_seed=7401)
+    admitted = runtime.jobs.admit_cycle_plan(
+        root.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:admit-plan:"
+            f"{planner_dispatch.attempt.attempt_id}"
+        ),
+    )
+    return root, planner_dispatch, plan_body, admitted
 
 
 def _start_first(runtime: Runtime, root_id: str, job_id: str):
@@ -66,6 +172,63 @@ def test_live_read_only_work_does_not_starve_ready_sibling(tmp_path):
     )
     assert runtime.jobs.get_job(first.job_id).attempt_count == 1
     assert runtime.jobs.get_job(second.job_id).attempt_count == 1
+
+
+def test_queued_review_closes_ready_frontier_until_coupled_work_resolves(
+    tmp_path,
+):
+    runtime = Runtime.at(tmp_path)
+    root, planner, plan_body, admitted = _admitted_three_with_required_review(
+        runtime
+    )
+    by_step = {job.plan_step_id: job for job in admitted}
+    active_dispatch = _start_first(
+        runtime, root.job_id, by_step["step-0"].job_id
+    )
+    reviewed_dispatch = runtime.attempts.dispatch_cycle_job(
+        by_step["step-1"].job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:dispatch:"
+            f"{by_step['step-1'].job_id}:attempt:1"
+        ),
+        worker_id="worker-b",
+        quota_class="claude-hf1q-step",
+    )
+    assert isinstance(reviewed_dispatch, OrchestrationDispatchOutcome)
+    work_body = {
+        "schema_version": "mastermind.work_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-1",
+        "repair_round": 0,
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    _complete_ohf_role(runtime, reviewed_dispatch, work_body, identity_seed=7402)
+    review = runtime.jobs.create_cycle_review(
+        root.job_id,
+        by_step["step-1"].job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:create-review:"
+            f"{by_step['step-1'].job_id}:1"
+        ),
+    )
+    assert review.attempt_count == 0
+
+    calls: list[str] = []
+
+    def reconcile(job_id: str, _command_id: str):
+        calls.append(job_id)
+        assert job_id == by_step["step-0"].job_id
+        return active_dispatch
+
+    outcome = CooCycle(runtime, dispatcher=reconcile).run_once(root.job_id)
+
+    assert outcome.selected_job_id == by_step["step-0"].job_id
+    assert calls == [by_step["step-0"].job_id]
+    assert runtime.jobs.get_job(by_step["step-2"].job_id).attempt_count == 0
+    assert runtime.jobs.get_job(review.job_id).attempt_count == 0
 
 
 def test_expired_active_attempt_keeps_reconciliation_priority(tmp_path):
@@ -271,3 +434,22 @@ def test_ready_frontier_refuses_write_paths_even_with_read_only_authority(tmp_pa
     assert path_only.requested_authorities == ["READ"]
     assert not cycle._is_read_only_frontier_work(path_only)
     assert not cycle._ready_frontier_candidate(path_only, [active])
+
+
+def test_ready_frontier_open_requires_current_lineage(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, first, second = _admitted_pair(runtime)
+    _start_first(runtime, root.job_id, first.job_id)
+    active = runtime.jobs.get_job(first.job_id)
+    candidate = runtime.jobs.get_job(second.job_id)
+    assert active is not None and candidate is not None
+
+    cycle = CooCycle(runtime, dispatcher=lambda _job, _command: None)
+    current_by_step = {
+        str(active.plan_step_id): {"current_job_id": active.job_id},
+        str(candidate.plan_step_id): {"current_job_id": "JOB-NOT-CURRENT"},
+    }
+
+    assert not cycle._ready_frontier_open(
+        [active], [candidate], current_by_step
+    )
