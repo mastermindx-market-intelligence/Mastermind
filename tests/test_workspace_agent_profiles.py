@@ -122,15 +122,17 @@ class ProfileCatalogTests(unittest.TestCase):
             "normalized profile must remain canonical input to digest/activation paths",
         )
 
-    def test_profile_digests_change_on_instruction_or_tool_drift(self):
+    def test_profile_digests_change_on_instruction_drift_and_tool_drift_refuses(self):
         profile = profile_by_id(load_catalog(), "program-continuity-adviser")
         original = profile_digest(profile)
         changed_instruction = copy.deepcopy(profile)
         changed_instruction["instructions"][0] += " Changed."
+        self.assertNotEqual(profile_digest(changed_instruction), original)
+
         changed_tool = copy.deepcopy(profile)
         changed_tool["permitted_tools"].remove("get_attention")
-        self.assertNotEqual(profile_digest(changed_instruction), original)
-        self.assertNotEqual(profile_digest(changed_tool), original)
+        with self.assertRaises(WorkspaceProfileError):
+            profile_digest(changed_tool)
 
     def test_profile_contract_refuses_privilege_widening(self):
         catalog = load_catalog()
@@ -148,6 +150,24 @@ class ProfileCatalogTests(unittest.TestCase):
         publication["publication_state"] = "PUBLISHED"
         cases.append(publication)
         for value in cases:
+            with self.subTest(value=value), self.assertRaises(WorkspaceProfileError):
+                validate_profile_catalog(value)
+
+    def test_profile_specific_privilege_contracts_cannot_drift_inside_global_allowlists(self):
+        catalog = load_catalog()
+
+        continuity_effect = copy.deepcopy(catalog)
+        continuity_effect["profiles"][0]["prohibited_effects"].remove(
+            "child_work_admission"
+        )
+        reviewer_effect = copy.deepcopy(catalog)
+        reviewer_effect["profiles"][1]["prohibited_effects"].remove(
+            "parent_self_acceptance"
+        )
+        reviewer_tool = copy.deepcopy(catalog)
+        reviewer_tool["profiles"][1]["permitted_tools"].append("get_attention")
+
+        for value in (continuity_effect, reviewer_effect, reviewer_tool):
             with self.subTest(value=value), self.assertRaises(WorkspaceProfileError):
                 validate_profile_catalog(value)
 
