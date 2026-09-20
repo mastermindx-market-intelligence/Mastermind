@@ -70,7 +70,15 @@ from control_plane.executive_workspace import (
 
 
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
-_RECOVERY_ERROR_TEXT_LIMIT = 9 * 100
+_RECOVERY_ERROR_TEXT_LIMIT = 1_000
+
+
+def _render_recovery_error(error: BaseException) -> str:
+    """Persist one complete, bounded recovery diagnostic."""
+
+    return (f"{type(error).__name__}: {str(error)}")[:_RECOVERY_ERROR_TEXT_LIMIT]
+
+
 _ACTIVE_ATTEMPT_STATUSES = {
     AttemptStatus.CLAIMED,
     AttemptStatus.RUNNING,
@@ -2367,6 +2375,17 @@ class ExecutiveSupervisor:
                 process_was_live=process_was_live,
                 error=str(exc)[:1000],
             )
+        reattach = getattr(self.adapter, "reattach", None)
+        if not callable(reattach):
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id,
+                job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=process_was_live,
+                error=(
+                    "worker adapter does not support existing-execution recovery"
+                ),
+            )
         try:
             adopted = self.runtime.attempts.adopt_attempt(
                 attempt.attempt_id,
@@ -2394,14 +2413,14 @@ class ExecutiveSupervisor:
             )
         try:
             adopted = self._normalise_recovered_lease(adopted)
-            ref = self.adapter.reattach(spec, binding)
+            ref = reattach(spec, binding)
         except Exception as exc:
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id,
                 job_id=attempt.job_id,
                 status=ReconcileStatus.LIVE_QUARANTINED,
                 process_was_live=process_was_live,
-                error=f"{type(exc).__name__}: {str(exc)[:_RECOVERY_ERROR_TEXT_LIMIT]}",
+                error=_render_recovery_error(exc),
             )
         active = ActiveRun(
             lease=adopted,

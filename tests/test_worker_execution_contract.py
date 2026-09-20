@@ -1004,7 +1004,7 @@ def test_worker_recovery_binding_refuses_prompt_or_identity_drift(tmp_path: Path
         worker_execution_contract.WorkerRecoveryBinding.from_dict(changed)
 
 
-def test_worker_adapter_protocol_requires_synchronous_reattach() -> None:
+def test_worker_adapter_v1_keeps_recovery_as_an_optional_capability() -> None:
     class MissingReattach:
         adapter_id = "fixture"
         inspector = _SyntheticInspector()
@@ -1028,5 +1028,11 @@ def test_worker_adapter_protocol_requires_synchronous_reattach() -> None:
         def reattach(self, spec, binding):
             return binding.process_ref
 
-    assert not isinstance(MissingReattach(), worker_adapter.WorkerExecutionAdapter)
+    assert isinstance(MissingReattach(), worker_adapter.WorkerExecutionAdapter)
+    assert not isinstance(
+        MissingReattach(), worker_adapter.RecoverableWorkerExecutionAdapter
+    )
     assert isinstance(Complete(), worker_adapter.WorkerExecutionAdapter)
+    assert isinstance(
+        Complete(), worker_adapter.RecoverableWorkerExecutionAdapter
+    )

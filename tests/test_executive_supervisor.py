@@ -1643,3 +1643,65 @@ def test_local_orphan_without_truthful_exit_code_remains_quarantined(
     assert persisted is not None and persisted.status is AttemptStatus.CHECKPOINTED
     assert persisted.exit_code is None
     assert job is not None and job.status is JobStatus.CHECKPOINTED
+
+
+def test_recovery_error_bounds_the_complete_rendered_diagnostic() -> None:
+    long_error_type = type("RecoveryFailure" * 20, (RuntimeError,), {})
+    error = long_error_type("x" * 2_000)
+
+    rendered = supervisor_module._render_recovery_error(error)
+
+    expected = (f"{type(error).__name__}: {str(error)}")[:1_000]
+    assert rendered == expected
+    assert len(rendered) == 1_000
+
+
+def test_restart_quarantine_bounds_complete_reattach_failure(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    first_adapter = RestartCapableFakeAdapter(inspector)
+    asyncio.run(_supervisor(runtime, tmp_path, first_adapter).start_job(job_id))
+
+    long_error_type = type("RecoveryFailure" * 20, (RuntimeError,), {})
+    failure = long_error_type("x" * 2_000)
+
+    class FailingReattachAdapter(RestartCapableFakeAdapter):
+        def reattach(self, spec, binding):
+            raise failure
+
+    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    restarted = _supervisor(
+        reopened, tmp_path, FailingReattachAdapter(inspector)
+    )
+    outcome = restarted.reconcile_restart(requeue_lost=False)[0]
+
+    expected = (f"{type(failure).__name__}: {str(failure)}")[:1_000]
+    assert outcome.status is ReconcileStatus.LIVE_QUARANTINED
+    assert outcome.error == expected
+    assert len(outcome.error or "") == 1_000
+
+
+def test_recovery_feature_gate_precedes_fence_rotation(tmp_path: Path) -> None:
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    first_adapter = RestartCapableFakeAdapter(inspector)
+    active = asyncio.run(_supervisor(runtime, tmp_path, first_adapter).start_job(job_id))
+    original_fence = active.lease.attempt.fence_generation
+
+    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    legacy_adapter = FakeAdapter(inspector)
+    restarted = _supervisor(reopened, tmp_path, legacy_adapter)
+
+    outcome = restarted.reconcile_restart(requeue_lost=False)[0]
+
+    persisted = reopened.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert outcome.status is ReconcileStatus.LIVE_QUARANTINED
+    assert outcome.error == "worker adapter does not support existing-execution recovery"
+    assert persisted is not None
+    assert persisted.fence_generation == original_fence
+    assert restarted.take_recovered_runs() == ()
+    assert restarted.process_controller.terminated_attempt_ids == []
+    assert legacy_adapter.spec is None
+    assert legacy_adapter.ref is None

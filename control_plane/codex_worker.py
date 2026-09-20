@@ -426,6 +426,8 @@ class _RecoveredRunState:
     cancel_receipt: CancelReceipt | None = None
     signal_sent: bool = False
     sigkill_sent: bool = False
+    signal_error: ProcessIdentityError | None = None
+    cancel_task: asyncio.Task[CancelReceipt] | None = None
 
 
 _RunStateLike = _RunState | _RecoveredRunState
@@ -3763,6 +3765,80 @@ class CodexWorkerAdapter:
             return _RecoveredPresence.UNKNOWN
         return _RecoveredPresence.LIVE
 
+    def _observe_recovered_group(self, ref: ProcessRef) -> _RecoveredPresence:
+        """Prove a leaderless group still belongs to the durable execution."""
+
+        try:
+            result = _run_checked(
+                ["/bin/ps", "-axo", "pid=,pgid="],
+                timeout=2.0,
+            )
+        except Exception:
+            return _RecoveredPresence.UNKNOWN
+        if result.returncode != 0 or not result.stdout.strip():
+            return _RecoveredPresence.UNKNOWN
+
+        members: list[int] = []
+        for raw in result.stdout.splitlines():
+            fields = raw.split()
+            if len(fields) != 2:
+                return _RecoveredPresence.UNKNOWN
+            try:
+                pid, pgid = (int(value) for value in fields)
+            except ValueError:
+                return _RecoveredPresence.UNKNOWN
+            if pgid == ref.pgid:
+                if pid <= 1:
+                    return _RecoveredPresence.UNKNOWN
+                members.append(pid)
+        if len(members) > 1024:
+            return _RecoveredPresence.UNKNOWN
+        if not members:
+            group = self._group_presence_for_recovery(ref.pgid)
+            return (
+                _RecoveredPresence.ABSENT
+                if group is _RecoveredPresence.ABSENT
+                else _RecoveredPresence.UNKNOWN
+            )
+
+        expected = {
+            "pgid": ref.pgid,
+            "session_id": ref.session_id,
+            "effective_uid": ref.effective_uid,
+            "effective_gid": ref.effective_gid,
+            "real_uid": ref.real_uid,
+            "real_gid": ref.real_gid,
+        }
+        if any(value is None for value in expected.values()):
+            return _RecoveredPresence.UNKNOWN
+        for pid in members:
+            try:
+                observed = self.inspector.inspect(pid)
+            except Exception:
+                return _RecoveredPresence.UNKNOWN
+            if pid == ref.pid:
+                if (
+                    observed.start_identity != ref.process_start_identity
+                    or any(
+                        getattr(observed, name, None) != value
+                        for name, value in expected.items()
+                    )
+                ):
+                    return _RecoveredPresence.IDENTITY_CHANGED
+                return _RecoveredPresence.UNKNOWN
+            if any(
+                getattr(observed, name, None) != value
+                for name, value in expected.items()
+            ):
+                return _RecoveredPresence.IDENTITY_CHANGED
+
+        group = self._group_presence_for_recovery(ref.pgid)
+        if group is _RecoveredPresence.ABSENT:
+            return _RecoveredPresence.ABSENT
+        if group is not _RecoveredPresence.LIVE:
+            return _RecoveredPresence.UNKNOWN
+        return _RecoveredPresence.RESIDUAL_GROUP
+
     def _observe_recovered_ref(self, ref: ProcessRef) -> _RecoveredPresence:
         try:
             boot = self.inspector.boot_session_id()
@@ -3776,12 +3852,7 @@ class CodexWorkerAdapter:
             try:
                 os.kill(ref.pid, 0)
             except ProcessLookupError:
-                group = self._group_presence_for_recovery(ref.pgid)
-                if group is _RecoveredPresence.ABSENT:
-                    return _RecoveredPresence.ABSENT
-                if group is _RecoveredPresence.LIVE:
-                    return _RecoveredPresence.RESIDUAL_GROUP
-                return _RecoveredPresence.UNKNOWN
+                return self._observe_recovered_group(ref)
             except (PermissionError, OSError):
                 return _RecoveredPresence.UNKNOWN
             return _RecoveredPresence.UNKNOWN
@@ -3939,26 +4010,15 @@ class CodexWorkerAdapter:
         return state.monitor_task
 
     async def _wait_recovered_absence(
-        self,
-        state: _RecoveredRunState,
-        *,
-        timeout: float,
-        wait_for_residual_group: bool = False,
+        self, state: _RecoveredRunState, *, timeout: float
     ) -> _RecoveredPresence:
         deadline = asyncio.get_running_loop().time() + max(0.0, timeout)
         while True:
             presence = self._observe_recovered_ref(state.ref)
-            if presence is _RecoveredPresence.ABSENT:
-                return presence
             if presence not in {
                 _RecoveredPresence.LIVE,
                 _RecoveredPresence.RESIDUAL_GROUP,
             }:
-                return presence
-            if (
-                presence is _RecoveredPresence.RESIDUAL_GROUP
-                and not wait_for_residual_group
-            ):
                 return presence
             if asyncio.get_running_loop().time() >= deadline:
                 return presence
@@ -3973,15 +4033,21 @@ class CodexWorkerAdapter:
         except ProcessLookupError:
             return False
         except OSError as exc:
-            raise ProcessIdentityError(
+            state.signal_error = ProcessIdentityError(
                 f"recovered worker signal failed: {type(exc).__name__}"
-            ) from exc
+            )
+            raise state.signal_error from exc
         return True
 
     async def _terminate_recovered(
         self, state: _RecoveredRunState
     ) -> tuple[bool, bool, bool]:
         async with state.termination_lock:
+            if state.signal_error is not None:
+                # A refused signal is a terminal local uncertainty for this
+                # exact cancellation transaction. Re-entry must not signal
+                # the same PGID again.
+                raise state.signal_error
             presence = self._observe_recovered_ref(state.ref)
             if presence is _RecoveredPresence.ABSENT:
                 return (
@@ -3989,7 +4055,10 @@ class CodexWorkerAdapter:
                     state.sigkill_sent,
                     not state.signal_sent,
                 )
-            if presence is not _RecoveredPresence.LIVE:
+            if presence not in {
+                _RecoveredPresence.LIVE,
+                _RecoveredPresence.RESIDUAL_GROUP,
+            }:
                 raise self._recovery_presence_error(presence)
             if not state.signal_sent:
                 if self._signal_recovered_group(state, signal.SIGTERM):
@@ -4004,29 +4073,53 @@ class CodexWorkerAdapter:
                 timeout=float(state.spec.cancel_grace_seconds),
             )
             if presence is _RecoveredPresence.ABSENT:
-                return state.signal_sent, False, False
+                return (
+                    state.signal_sent,
+                    state.sigkill_sent,
+                    not state.signal_sent,
+                )
             if presence not in {
                 _RecoveredPresence.LIVE,
                 _RecoveredPresence.RESIDUAL_GROUP,
             }:
                 raise self._recovery_presence_error(presence)
             if not state.sigkill_sent:
-                if (
-                    presence is _RecoveredPresence.LIVE
-                    and self._observe_recovered_ref(state.ref)
-                    is not _RecoveredPresence.LIVE
-                ):
-                    raise ProcessIdentityError(
-                        "recovered worker identity changed before SIGKILL"
+                # Re-check exact identity immediately before escalation. If the
+                # verified original group has already disappeared, SIGTERM
+                # succeeded and no SIGKILL may be claimed.
+                presence = self._observe_recovered_ref(state.ref)
+                if presence is _RecoveredPresence.ABSENT:
+                    return (
+                        state.signal_sent,
+                        state.sigkill_sent,
+                        not state.signal_sent,
                     )
+                if presence not in {
+                    _RecoveredPresence.LIVE,
+                    _RecoveredPresence.RESIDUAL_GROUP,
+                }:
+                    raise self._recovery_presence_error(presence)
+                if (
+                    presence is _RecoveredPresence.RESIDUAL_GROUP
+                    and not state.signal_sent
+                ):
+                    raise self._recovery_presence_error(presence)
                 if self._signal_recovered_group(state, signal.SIGKILL):
                     state.signal_sent = True
                     state.sigkill_sent = True
                     state.escalated = True
+                else:
+                    presence = self._observe_recovered_ref(state.ref)
+                    if presence is _RecoveredPresence.ABSENT:
+                        return (
+                            state.signal_sent,
+                            state.sigkill_sent,
+                            not state.signal_sent,
+                        )
+                    raise self._recovery_presence_error(presence)
             presence = await self._wait_recovered_absence(
                 state,
                 timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
-                wait_for_residual_group=True,
             )
             if presence is not _RecoveredPresence.ABSENT:
                 if presence is _RecoveredPresence.LIVE:
@@ -4041,32 +4134,44 @@ class CodexWorkerAdapter:
     ) -> CancelReceipt:
         if state.cancel_receipt is not None:
             return state.cancel_receipt
-        state.cancel_reason = reason[:1000]
-        state.status = WorkerRunStatus.CANCELLING
+        task = state.cancel_task
+        if task is None:
+            # Cancellation belongs to the recovered run, not to a socket
+            # caller. Freeze the first diagnostic and publish exactly one
+            # owned transaction before any await can admit a second caller.
+            state.cancel_reason = reason[:1000]
+            state.status = WorkerRunStatus.CANCELLING
 
-        async def transaction() -> CancelReceipt:
-            sent, escalated, already_exited = await self._terminate_recovered(
-                state
-            )
-            await self._ensure_recovered_monitor(state)
-            receipt = CancelReceipt(
-                run_id=state.ref.run_id,
-                reason=state.cancel_reason or reason,
-                signal_sent=sent,
-                escalated_to_sigkill=escalated,
-                already_exited=already_exited,
-                finished_at=state.finished_at or _utc_now(),
-            )
-            state.cancel_receipt = receipt
-            return receipt
+            async def transaction() -> CancelReceipt:
+                sent, escalated, already_exited = await self._terminate_recovered(
+                    state
+                )
+                await self._ensure_recovered_monitor(state)
+                receipt = CancelReceipt(
+                    run_id=state.ref.run_id,
+                    reason=state.cancel_reason or reason,
+                    signal_sent=sent,
+                    escalated_to_sigkill=escalated,
+                    already_exited=already_exited,
+                    finished_at=state.finished_at or _utc_now(),
+                )
+                state.cancel_receipt = receipt
+                return receipt
 
-        task = asyncio.create_task(transaction())
+            task = asyncio.create_task(transaction())
+            state.cancel_task = task
         pending: asyncio.CancelledError | None = None
         while not task.done():
             try:
                 await asyncio.shield(task)
             except asyncio.CancelledError as exc:
                 pending = pending or exc
+            except BaseException:
+                if not task.done():
+                    raise
+                # Retrieve the exact terminal task below so a later typed
+                # failure cannot replace the caller's original cancellation.
+                break
         try:
             receipt = task.result()
         except BaseException as exc:
