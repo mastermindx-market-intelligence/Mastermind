@@ -16,3 +16,13 @@ Questions that could not be answered without a targeted follow-up investigation.
 12. Are document-search results universe-wide without selecting a company, and can results be saved/exported/compared? The tested query used NVDA and exposed no save/export/compare controls.
 13. Do Notifications apply a deliberate subset of dashboard News (for example, `Measurable Impact` plus selected research), and is the rule configurable?
 14. What does Owner Mode compute or suppress beyond adding the Business Owner Mode projection? It preserved the standard company tabs and most overview content in both tested companies.
+
+## Raised by the evidence-packaging repair
+
+These were found by inspecting the captures before removing them, not by a new
+run. They are unresolved because Run 01 cannot be replayed and this repair was
+not permitted to open a new session.
+
+15. Was the QUIK Revenue Estimates surface ever actually empty? The OBS-011 record says nothing rendered after bounded waiting; its own capture showed a populated chart and table. If the surface hydrated late, question 4 is a latency question rather than a coverage question, and the run's only `negative` estimates finding is wrong.
+16. Did the as-reported switch described in OBS-012 get captured at all? The archived frame showed a single charted revenue series rather than the issuer-worded sparse rows the record describes, so the as-reported presentation claim rests on the record alone.
+17. Should a future run capture evidence in a rights-safe form at capture time — cropping to interaction chrome, empty states and failures as it goes — rather than taking full-frame captures that later have to be destroyed? Run 01 produced 30 captures of which 25 could not lawfully be kept.

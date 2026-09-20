@@ -1,6 +1,6 @@
 # Interaction ledger
 
-Ordered factual account of the authenticated workflows tested in Fiscal.ai. Observation IDs link to `observations.jsonl` and focused screenshots.
+Ordered factual account of the authenticated workflows tested in Fiscal.ai. Observation IDs link to `observations.jsonl`. Most of the raw captures were intentionally omitted from canonical Git for rights safety; each observation record states the disposition of its own evidence, and `evidence/EVIDENCE_DISPOSITION.md` explains the rule.
 
 | Step | Surface / action | Result | Evidence |
 |---:|---|---|---|
