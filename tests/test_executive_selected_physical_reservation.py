@@ -5,6 +5,7 @@ import dataclasses
 import hashlib
 import inspect
 import json
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 
 import pytest
@@ -530,6 +531,22 @@ def _artifact_selection_inputs():
     return artifact, selection, inputs, qualified
 
 
+class _TraversalCountingCandidates(Sequence[ehpp.QualifiedHostCandidate]):
+    def __init__(self, values: Sequence[ehpp.QualifiedHostCandidate]) -> None:
+        self._values = tuple(values)
+        self.traversals = 0
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def __getitem__(self, index):
+        return self._values[index]
+
+    def __iter__(self) -> Iterator[ehpp.QualifiedHostCandidate]:
+        self.traversals += 1
+        return iter(self._values)
+
+
 def _package():
     artifact, selection, inputs, qualified = _artifact_selection_inputs()
     winner = selection.selected["worker_id"]
@@ -540,6 +557,41 @@ def _package():
         **inputs[winner],
     )
     return package, artifact, selection, inputs, qualified
+
+
+def test_package_creation_freezes_qualified_candidates_once() -> None:
+    artifact, selection, inputs, qualified = _artifact_selection_inputs()
+    winner_inputs = inputs[selection.selected["worker_id"]]
+    candidates = _TraversalCountingCandidates(qualified)
+
+    package = espr.make_selected_physical_reservation_package(
+        selection=selection,
+        artifact=artifact,
+        qualified_candidates=candidates,
+        **winner_inputs,
+    )
+
+    assert package.selected_worker_id == "worker-z-headroom"
+    assert candidates.traversals == 1
+
+
+def test_commit_evaluation_freezes_qualified_candidates_once() -> None:
+    package, artifact, selection, inputs, qualified = _package()
+    winner_inputs = inputs[package.selected_worker_id]
+    candidates = _TraversalCountingCandidates(qualified)
+
+    result = package.evaluate_for_commit(
+        selection=selection,
+        artifact=artifact,
+        qualified_candidates=candidates,
+        policy=winner_inputs["policy"],
+        current_charges=winner_inputs["current_charges"],
+        observations=winner_inputs["observations"],
+        decision_time_ms=DECISION_TIME_MS,
+    )
+
+    assert result["selected_worker_id"] == "worker-z-headroom"
+    assert candidates.traversals == 1
 
 
 def test_package_binds_resolved_selection_to_exact_selected_physical_inputs() -> None:

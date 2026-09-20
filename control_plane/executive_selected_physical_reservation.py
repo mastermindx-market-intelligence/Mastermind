@@ -243,9 +243,9 @@ def _registered_join_from_dict(value: object) -> RegisteredCapacityJoin:
         raise SelectedPhysicalReservationError("PACKAGE_INVALID") from None
 
 
-def _sorted_candidate_wires(
+def _freeze_candidates(
     candidates: Sequence[QualifiedHostCandidate],
-) -> list[dict[str, Any]]:
+) -> tuple[QualifiedHostCandidate, ...]:
     if isinstance(candidates, (str, bytes)) or not isinstance(candidates, Sequence):
         _refuse("QUALIFIED_CANDIDATES_MOVED")
     frozen = tuple(candidates)
@@ -254,6 +254,13 @@ def _sorted_candidate_wires(
     worker_ids = [row.worker_id for row in frozen]
     if len(worker_ids) != len(set(worker_ids)):
         _refuse("QUALIFIED_CANDIDATES_MOVED")
+    return frozen
+
+
+def _sorted_candidate_wires(
+    candidates: Sequence[QualifiedHostCandidate],
+) -> list[dict[str, Any]]:
+    frozen = _freeze_candidates(candidates)
     return [row.to_dict() for row in sorted(frozen, key=lambda row: row.worker_id)]
 
 
@@ -434,14 +441,15 @@ class SelectedPhysicalReservationPackage:
             raise SelectedPhysicalReservationError("CAPACITY_SOURCE_MOVED") from None
         if current_source != wire["capacity_source"]:
             _refuse("CAPACITY_SOURCE_MOVED")
-        current_candidate_wires = _sorted_candidate_wires(qualified_candidates)
+        frozen_candidates = _freeze_candidates(qualified_candidates)
+        current_candidate_wires = _sorted_candidate_wires(frozen_candidates)
         if current_candidate_wires != wire["qualified_candidates"]:
             _refuse("QUALIFIED_CANDIDATES_MOVED")
         try:
             validate_current_host_capacity_preference(
                 artifact=artifact,
                 decision=selection.base_v1,
-                candidates=qualified_candidates,
+                candidates=frozen_candidates,
                 generation=wire["capacity_source"]["generation"],
             )
             validated_selection = validate_placement_selection_v2(
@@ -508,13 +516,14 @@ def make_selected_physical_reservation_package(
         raise TypeError("selection must be PlacementSelectionDecisionV2")
     if not isinstance(artifact, HostCapacityPreferenceArtifact):
         raise TypeError("artifact must be HostCapacityPreferenceArtifact")
-    candidate_wires = _sorted_candidate_wires(qualified_candidates)
+    frozen_candidates = _freeze_candidates(qualified_candidates)
+    candidate_wires = _sorted_candidate_wires(frozen_candidates)
     try:
         source = json.loads(artifact.source_bytes)
         validate_current_host_capacity_preference(
             artifact=artifact,
             decision=selection.base_v1,
-            candidates=qualified_candidates,
+            candidates=frozen_candidates,
             generation=source["generation"],
         )
         validated_selection = validate_placement_selection_v2(
