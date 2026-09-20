@@ -29,6 +29,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from enum import Enum
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 from uuid import uuid4
@@ -788,7 +789,7 @@ def _fetch_remote_commission(*, repository: str, commit: str, path: str) -> byte
     except SupervisorError:
         raise
     except urllib.error.HTTPError as exc:
-        if 300 <= exc.code < 400:
+        if 300 <= exc.code < HTTPStatus.BAD_REQUEST:
             raise SupervisorError("commission fetch redirect is forbidden") from exc
         raise SupervisorError("immutable commission remote evidence is unavailable") from exc
     except (OSError, urllib.error.URLError, ValueError) as exc:
@@ -1173,7 +1174,7 @@ class ExecutiveSupervisor:
         # directory uses the existing shared worker group for schema traversal.
         # The provider receives these already-verified bytes through the prompt
         # below, so commission readability never widens to the shared group.
-        os.chmod(target, 0o400)
+        os.chmod(target, stat.S_IRUSR)
         return {
             **commission.ref_dict(),
             "verified_local_path": str(target),
