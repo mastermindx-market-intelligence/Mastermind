@@ -163,8 +163,8 @@ def test_root_helpers_are_not_invoked_from_a_mutable_checkout() -> None:
 
 def test_release_manifest_is_created_and_verified_before_atomic_publish() -> None:
     text = _source()
-    create = text.index('$STAGING/ops/executive_os/release_manifest.py" create')
-    verify = text.index('$STAGING/ops/executive_os/release_manifest.py" verify')
+    create = text.index('$SCRIPT_DIR/release_manifest.py" create')
+    verify = text.index('$SCRIPT_DIR/release_manifest.py" verify')
     publish = text.index('/bin/mv "$STAGING" "$RELEASE_ROOT"')
     assert create < verify < publish
     assert '$RELEASE_ROOT/ops/executive_os/release_manifest.py" create' not in text
