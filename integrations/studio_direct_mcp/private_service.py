@@ -49,7 +49,7 @@ TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Maste
 # guarded adapter in PR #585. The private gateway never accepts these paths or
 # hashes from ChatGPT.
 PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v1")
-PAPER_BRIDGE_SHA256 = "94329a2813e37f1081e1be48aacf371b8f1b23505ec609cc6e8d453554cf8fa0"
+PAPER_BRIDGE_SHA256 = "83e36b0bcd0acabbf5dd6ace5b708e5797a52e7db732e8dbbf848ded781c231d"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
 
 # CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
