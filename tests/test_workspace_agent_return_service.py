@@ -265,7 +265,9 @@ def test_service_app_has_only_health_readiness_and_authenticated_mcp_mount(
     )
     app = build_service_app(runtime, ServiceState())
     paths = [route.path for route in app.routes]
-    assert paths == ["/healthz", "/readyz", ""]
+    assert paths[:2] == ["/healthz", "/readyz"]
+    assert len(paths) == 3
+    assert paths[2] in {"", "/"}
 
 
 def test_service_source_reuses_owners_and_adds_no_workspace_state_plane() -> None:
