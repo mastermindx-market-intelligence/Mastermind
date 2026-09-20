@@ -113,6 +113,7 @@ from control_plane.operator_materialization_receipt import (
     validate_materialization_request,
 )
 from control_plane.worker_execution_contract import (
+    _freeze as _freeze_worker_execution_value,
     ArtifactReceipt,
     BinaryAttestation,
     CancelReceipt,
@@ -4059,6 +4060,206 @@ class RemoteWorkerProcessController:
         )
 
 
+@dataclasses.dataclass(frozen=True)
+class RemoteWorkerBrokerEndpoint:
+    """One fixed transport endpoint for an Executive-selected worker identity."""
+
+    worker_id: str
+    client: WorkerBrokerClient
+    worker_user: str
+    worker_uid: int
+    worker_gid: int
+    secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        worker_id = str(self.worker_id or "").strip()
+        worker_user = str(self.worker_user or "").strip()
+        if not _ID_RE.fullmatch(worker_id):
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_id")
+        if not worker_user or any(character.isspace() for character in worker_user):
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_user")
+        if type(self.worker_uid) is not int or self.worker_uid <= 0:
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_uid")
+        if type(self.worker_gid) is not int or self.worker_gid <= 0:
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_gid")
+        if not isinstance(self.secret_canary_verdict, Mapping):
+            raise WorkerBrokerError("remote worker endpoint canary verdict must be a mapping")
+        object.__setattr__(self, "worker_id", worker_id)
+        object.__setattr__(self, "worker_user", worker_user)
+        object.__setattr__(
+            self,
+            "secret_canary_verdict",
+            _freeze_worker_execution_value(self.secret_canary_verdict),
+        )
+
+    def bind_launch_spec(self, spec: WorkerLaunchSpec) -> WorkerLaunchSpec:
+        if spec.worker_id != self.worker_id:
+            raise BrokerStateError("LaunchSpec worker differs from broker endpoint")
+        return dataclasses.replace(
+            spec,
+            worker_user=self.worker_user,
+            expected_worker_uid=self.worker_uid,
+            expected_worker_gid=self.worker_gid,
+            secret_canary_verdict=self.secret_canary_verdict,
+        )
+
+
+class RemoteWorkerBrokerFleet:
+    """Exact worker-id transport binding with no provider selection or failover.
+
+    Executive Runtime selects and persists ``Attempt.worker_id`` before this
+    object is consulted.  The fleet only maps that exact identity to one fixed
+    broker carrier.  It binds ``run_id -> worker_id`` before invoking ``start``
+    and retains the binding after any exception so ambiguous effects can only be
+    reconciled on the same carrier.
+    """
+
+    @property
+    def adapter_id(self) -> str:
+        """Immutable identity of the transport facade, never a provider label."""
+
+        return "remote-worker-broker-fleet"
+
+    def __init__(
+        self,
+        endpoints: Sequence[RemoteWorkerBrokerEndpoint],
+        *,
+        validation_commands_for_spec: (
+            Callable[[WorkerLaunchSpec], Sequence[Sequence[str]]] | None
+        ) = None,
+        adapter_factory: Callable[[RemoteWorkerBrokerEndpoint], Any] | None = None,
+        controller_factory: Callable[[RemoteWorkerBrokerEndpoint], Any] | None = None,
+    ) -> None:
+        rows = tuple(endpoints)
+        if not rows:
+            raise WorkerBrokerError("remote worker broker fleet requires endpoints")
+        worker_ids = tuple(row.worker_id for row in rows)
+        if len(worker_ids) != len(set(worker_ids)):
+            raise WorkerBrokerError("remote worker broker fleet has duplicate worker_id")
+        validation_resolver = validation_commands_for_spec or (lambda _spec: ())
+        if adapter_factory is None:
+            adapter_factory = lambda row: RemoteCodexWorkerAdapter(
+                row.client,
+                validation_commands_for_spec=validation_resolver,
+            )
+        if controller_factory is None:
+            controller_factory = lambda row: RemoteWorkerProcessController(row.client)
+        self._endpoints = {row.worker_id: row for row in rows}
+        self._adapters = {row.worker_id: adapter_factory(row) for row in rows}
+        self._controllers = {row.worker_id: controller_factory(row) for row in rows}
+        self._run_workers: dict[str, str] = {}
+        self._source_specs: dict[str, WorkerLaunchSpec] = {}
+        self._bound_specs: dict[str, WorkerLaunchSpec] = {}
+        self.inspector = _UnavailableRemoteInspector()
+
+    @property
+    def worker_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._endpoints))
+
+    def _endpoint_for_worker(self, worker_id: str) -> RemoteWorkerBrokerEndpoint:
+        try:
+            return self._endpoints[str(worker_id)]
+        except KeyError as exc:
+            raise BrokerStateError("selected worker has no configured broker endpoint") from exc
+
+    def _adapter_for_worker(self, worker_id: str) -> Any:
+        try:
+            return self._adapters[str(worker_id)]
+        except KeyError as exc:
+            raise BrokerStateError("selected worker has no configured broker endpoint") from exc
+
+    def _controller_for_worker(self, worker_id: str) -> Any:
+        try:
+            return self._controllers[str(worker_id)]
+        except KeyError as exc:
+            raise BrokerStateError("persisted worker has no configured broker endpoint") from exc
+
+    def _worker_for_run(self, run_id: str) -> str:
+        try:
+            return self._run_workers[str(run_id)]
+        except KeyError as exc:
+            raise BrokerStateError("run has no bound worker broker carrier") from exc
+
+    def _adapter_for_ref(self, ref: WorkerProcessRef) -> Any:
+        return self._adapter_for_worker(self._worker_for_run(ref.run_id))
+
+    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+        if spec.run_id in self._run_workers:
+            raise BrokerStateError("run is already bound to a worker broker carrier")
+        endpoint = self._endpoint_for_worker(spec.worker_id)
+        adapter = self._adapter_for_worker(spec.worker_id)
+        bound_spec = endpoint.bind_launch_spec(spec)
+        self._run_workers[spec.run_id] = spec.worker_id
+        self._source_specs[spec.run_id] = spec
+        self._bound_specs[spec.run_id] = bound_spec
+        return await adapter.start(bound_spec)
+
+    def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
+        adapter = self._adapter_for_ref(ref)
+        reader = getattr(adapter, "launch_attestation", None)
+        if not callable(reader):
+            raise BrokerStateError("bound worker adapter has no launch attestation")
+        return reader(ref)
+
+    def uid_sweep_receipt(self, subject: Any) -> Mapping[str, Any]:
+        if isinstance(subject, WorkerProcessRef):
+            delegate = self._adapter_for_ref(subject)
+        else:
+            worker_id = getattr(subject, "worker_id", None)
+            if not isinstance(worker_id, str):
+                raise BrokerStateError("UID sweep subject has no worker identity")
+            delegate = self._controller_for_worker(worker_id)
+        reader = getattr(delegate, "uid_sweep_receipt", None)
+        if not callable(reader):
+            raise BrokerStateError("bound worker carrier has no UID sweep receipt")
+        return reader(subject)
+
+    async def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
+        adapter = self._adapter_for_worker(self._worker_for_run(run_id))
+        cleanup = getattr(adapter, "cleanup_unbound_run", None)
+        if not callable(cleanup):
+            raise BrokerStateError("bound worker adapter cannot reconcile ambiguous start")
+        return await cleanup(run_id)
+
+    async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:
+        return await self._adapter_for_ref(ref).status(ref)
+
+    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
+        return await self._adapter_for_ref(ref).collect_result(ref)
+
+    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt:
+        return await self._adapter_for_ref(ref).cancel(ref, reason)
+
+    async def run_validation_argv(
+        self,
+        spec: WorkerLaunchSpec,
+        argv: Sequence[str],
+        *,
+        timeout_seconds: float = 300.0,
+    ) -> ValidationReceipt:
+        worker_id = self._worker_for_run(spec.run_id)
+        if worker_id != spec.worker_id:
+            raise BrokerStateError("LaunchSpec worker differs from bound broker carrier")
+        if self._source_specs.get(spec.run_id) != spec:
+            raise BrokerStateError("LaunchSpec differs from the spec bound at start")
+        return await self._adapter_for_worker(worker_id).run_validation_argv(
+            self._bound_specs[spec.run_id],
+            argv,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def presence(self, attempt: Any):
+        return self._controller_for_worker(attempt.worker_id).presence(attempt)
+
+    def absence_verified(self, attempt: Any) -> bool:
+        return bool(
+            self._controller_for_worker(attempt.worker_id).absence_verified(attempt)
+        )
+
+    def terminate(self, attempt: Any) -> None:
+        self._controller_for_worker(attempt.worker_id).terminate(attempt)
+
+
 class _UnavailableRemoteInspector:
     """Fail-closed marker: cross-UID inspection must use the remote controller."""
 
@@ -4093,6 +4294,8 @@ __all__ = [
     "PeerCredentials",
     "RemoteBrokerError",
     "RemoteCodexWorkerAdapter",
+    "RemoteWorkerBrokerEndpoint",
+    "RemoteWorkerBrokerFleet",
     "RemoteWorkerProcessController",
     "UIDSweepReceipt",
     "WorkerBrokerClient",
