@@ -81,7 +81,8 @@ class DriveResumableMixin:
         except DriveApiError:
             raise
         except urllib.error.HTTPError as exc:
-            if exc.code == 401:
+            http_code = exc.code
+            if http_code == 401:
                 self._access_token = None
             raise DriveApiError("DRIVE_RESUMABLE_INIT_UNAVAILABLE") from None
         except Exception:
