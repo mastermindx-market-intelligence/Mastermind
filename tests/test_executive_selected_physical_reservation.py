@@ -860,3 +860,14 @@ def test_package_constructor_cannot_be_called_without_producer_seal() -> None:
     with pytest.raises(espr.SelectedPhysicalReservationError) as raised:
         espr.SelectedPhysicalReservationPackage({}, _seal=object())
     assert raised.value.code == "UNSEALED_PACKAGE"
+
+
+def test_resigned_physical_input_tamper_must_reproduce_selected_receipt() -> None:
+    package, *_ = _package()
+    tampered = package.to_dict()
+    tampered["reservation_input"]["policy"]["authority_receipt"] = "other-authority"
+    tampered = _resign_package(tampered)
+
+    with pytest.raises(espr.SelectedPhysicalReservationError) as raised:
+        espr.validate_selected_physical_reservation_package(tampered)
+    assert raised.value.code == "SELECTED_INPUT_MISMATCH"
