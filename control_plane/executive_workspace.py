@@ -838,7 +838,10 @@ def _run_canonical_acquisition_fetch(
     # Do not use preexec_fn here: this function is called from asyncio.to_thread
     # in the production service, and preexec_fn is unsafe in a multithreaded
     # parent.  POSIX sh applies native rlimits in the child before exec instead.
-    file_blocks = max(1, (limits.max_pack_bytes + 511) // 512)
+    file_block_bytes = 1 << 9
+    file_blocks = max(
+        1, (limits.max_pack_bytes + file_block_bytes - 1) // file_block_bytes
+    )
     shell = (
         'ulimit -f "$1" || exit 97; '
         'ulimit -t "$2" || exit 98; '
@@ -946,14 +949,14 @@ def _acquire_commission_quarantine(
             acquisition_root, label="commission acquisition root"
         )
     else:
-        acquisition_root.mkdir(mode=0o700)
+        acquisition_root.mkdir(mode=stat.S_IRWXU)
         _require_private_control_directory(
             acquisition_root, label="commission acquisition root"
         )
     operation_path = _acquisition_operation_path(root, job_id=job_id)
     if os.path.lexists(operation_path):
         raise WorkspaceError("commission acquisition operation was not reconciled")
-    operation_path.mkdir(mode=0o700)
+    operation_path.mkdir(mode=stat.S_IRWXU)
     identity_path = operation_path / "identity"
     identity_path.write_bytes(
         _commission_acquisition_identity(
