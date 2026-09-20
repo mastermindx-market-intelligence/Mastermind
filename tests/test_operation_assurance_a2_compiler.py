@@ -762,3 +762,58 @@ def test_r2_gap_survives_arbitrary_serialized_mutation_when_no_root_supplied(mut
     ingested = SourceFacts.from_dict(doc)
     model = compile_operation_assurance_model(ingested)
     assert _has_attestation_gap(model)
+
+
+# ---------------------------------------------------------------------------
+# REPAIR R1 — source-coverage honesty. A target record that itself parsed
+# cleanly, gathered from a family that was only partially readable, must not
+# publish full-coverage receipts: the compiled model cannot have seen every
+# sibling that could conflict with or supersede this identity.
+# ---------------------------------------------------------------------------
+
+
+def test_partially_read_family_marks_coverage_partial_and_emits_load_bearing_gap() -> None:
+    model = _compile("partial_family")
+
+    # the family census really is short (one readable target, one unreadable sibling)
+    facts = _facts("partial_family")
+    workstream_cov = next(c for c in facts.coverage if c.record_schema == "agentos.workstream.v1")
+    assert workstream_cov.attempted == 2
+    assert workstream_cov.ok == 1
+
+    # every materialized source is PARTIAL, not COMPLETE
+    assert [s.coverage for s in model.source_snapshot.sources] == ["PARTIAL"]
+
+    # and the shortfall is machine-readable, load-bearing, and carries the counts
+    gap = next(
+        g for g in model.known_model_gaps if g.gap_id == "source_family_coverage_incomplete"
+    )
+    assert gap.load_bearing is True
+    assert list(gap.affects_property_ids) == ["OPTION_TO_COMPLETE"]
+    assert "read 1 of 2" in gap.reason
+
+
+def test_partially_read_family_reaches_a1_incomplete_applicability() -> None:
+    """The whole point of R1: reach the protected A1 INCOMPLETE branch that
+    was previously unreachable from A2 output, with no A1 change."""
+    import json
+
+    from control_plane.operation_assurance_checker import run_checker
+    from control_plane.operation_assurance_model import parse_model_bytes
+
+    model = _compile("partial_family")
+    report = run_checker(
+        parse_model_bytes(json.dumps(model.to_dict()).encode("utf-8")),
+        generated_at="2026-09-02T00:00:00Z",
+    ).to_dict()
+    assert report["source_applicability_at_generation"] == "INCOMPLETE"
+
+
+def test_fully_read_family_still_reports_complete_coverage() -> None:
+    """R1 must not make every compile look degraded: a family read in full
+    keeps COMPLETE coverage and emits no coverage gap."""
+    model = _compile("corrected")
+    assert [s.coverage for s in model.source_snapshot.sources] == ["COMPLETE"]
+    assert not [
+        g for g in model.known_model_gaps if g.gap_id == "source_family_coverage_incomplete"
+    ]

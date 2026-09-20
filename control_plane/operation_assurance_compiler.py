@@ -584,11 +584,71 @@ def _family_census_notes(facts: SourceFacts) -> list[str]:
     return notes
 
 
-def _build_source_snapshot(relevant_facts: list[SourceFact]) -> dict:
+def _incomplete_families(facts: SourceFacts | None) -> frozenset[str]:
+    """Record families whose gather was not fully readable (REPAIR R1)."""
+    if facts is None:
+        return frozenset()
+    return frozenset(
+        c.record_schema for c in facts.coverage if c.truncated or c.ok < c.attempted
+    )
+
+
+def _source_coverage_gap(facts: SourceFacts | None) -> list[dict]:
+    """REPAIR R1: a LOAD-BEARING, machine-readable gap whenever any gathered
+    family was incompletely read. Before this, the only trace of a collapsed
+    read basis was a free-text ``abstraction_contract.notes`` census line that
+    nothing machine-reads, so a report derived from 2 of 546 records was
+    indistinguishable from one derived from all of them.
+    """
+    if facts is None:
+        return []
+    short = [c for c in facts.coverage if c.truncated or c.ok < c.attempted]
+    if not short:
+        return []
+    detail = "; ".join(
+        f"{c.record_schema} read {c.ok} of {c.attempted}"
+        + (" (family truncated)" if c.truncated else "")
+        for c in sorted(short, key=lambda c: c.record_schema)
+    )
+    return [
+        {
+            "gap_id": "source_family_coverage_incomplete",
+            "reason": (
+                "owner-native gather did not read every record in at least one family, so "
+                "conflict, supersession and contradiction detection over this identity is "
+                "not complete and any absent-evidence conclusion is unsupported: " + detail
+            ),
+            "load_bearing": True,
+            # Same anchor the attestation gap uses: OPTION_TO_COMPLETE is the
+            # GENERIC_MANDATORY property present in every compiled model, and
+            # it is the one a reader consumes as "can this operation finish?".
+            # An unread sibling could supersede the whole wave set, so a
+            # conclusion drawn from absent evidence is what degrades.
+            "affects_property_ids": ["OPTION_TO_COMPLETE"],
+            "affects_transition_ids": [],
+            "affects_variable_ids": [],
+            "source_refs": [],
+        }
+    ]
+
+
+def _build_source_snapshot(relevant_facts: list[SourceFact], facts: SourceFacts | None = None) -> dict:
+    """REPAIR R1 (source-coverage honesty): ``coverage`` is the DESIGN's
+    per-FAMILY coverage ("which record families were read; truncation
+    explicit" — design Section 3), not a per-record re-statement of
+    ``fact.status``. A record that itself parsed cleanly, but whose family
+    was only partially readable, is ``PARTIAL``: the compiled model cannot
+    have seen every sibling record that could conflict with, supersede, or
+    contradict this identity. Reporting ``COMPLETE`` there let a real
+    gather of 2/546 readable records publish full-coverage receipts and
+    left A1's existing ``INCOMPLETE`` applicability branch
+    (``checker.py`` ``_compose_source_applicability``) unreachable.
+    """
+    incomplete_families = _incomplete_families(facts)
     sources = []
     for fact in relevant_facts:
         if fact.status == STATUS_OK:
-            coverage = "COMPLETE"
+            coverage = "PARTIAL" if fact.record_schema in incomplete_families else "COMPLETE"
         elif fact.status == STATUS_SOURCE_MISSING:
             coverage = "UNKNOWN"
         else:
@@ -684,6 +744,7 @@ def compile_operation_assurance_model(
 
     transition_ids = [t["transition_id"] for t in transitions]
     known_model_gaps = _unsupported_scope_gaps(transition_ids)
+    known_model_gaps.extend(_source_coverage_gap(facts))
 
     # REPAIR B3: mechanize the workstream-status/wave-marking agreement
     # axis. A disagreement adds a declared FAILing safety property plus a
@@ -733,7 +794,7 @@ def compile_operation_assurance_model(
             "version": COMPILER_VERSION,
             "invocation_mode": "AUTHORED_INPUT",
         },
-        "source_snapshot": _build_source_snapshot(relevant_facts),
+        "source_snapshot": _build_source_snapshot(relevant_facts, facts),
         "abstraction_contract": {
             "kind": "SOUND_OVERAPPROXIMATION",
             "concrete_scope": (
