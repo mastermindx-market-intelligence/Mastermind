@@ -210,7 +210,7 @@ protected host-discovery procedure when present. Within a stable connection/gene
 
 * classify the exact requested action family before making a capability claim; a route or provider name
   is too coarse when READ, WRITE, ADMIN, browser, process, or another action class differs;
-* discover the needed schema/action family once and record the discovery result from the current
+* discover the needed schema/capability once for the exact requested action family and record the discovery result from the current
   generation;
 * when a non-mutating permission/capability/binding preflight exists, use it before declaring the
   requested action unavailable;
