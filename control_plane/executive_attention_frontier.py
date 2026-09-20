@@ -36,6 +36,7 @@ read core rather than re-declared (Charter P7 — no duplicate control planes).
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import enum
 import hashlib
 from collections.abc import Iterable, Mapping, Sequence
@@ -774,32 +775,65 @@ def _derive_serviceability(
         reasons.append(ServiceabilityReason.UNKNOWN_LOAD_BEARING_SOURCE)
         unknown = True
 
-    if demand.effect_state is not None:
-        if demand.effect_state.value is EffectState.EFFECT_UNKNOWN:
-            # Blocks action/retry/failover; never erases time pressure.
-            reasons.append(ServiceabilityReason.EFFECT_UNKNOWN)
-            blocked = True
+    # Serviceability facts are load-bearing too: a stale or conflicted source
+    # may not prove the action path is usable.  Without this the engine would
+    # demote urgency for stale evidence while still declaring the actor able to
+    # act on it — and would hand out a stale RuntimeBinding as the exact
+    # current target (F0G §5.8, §6.2).
+    def _service_fact(fact: Fact | None) -> tuple[object | None, bool]:
+        """Return (value, degraded) where degraded marks unusable evidence."""
+        if fact is None:
+            return None, False
+        if fact.conflict:
+            return None, True
+        if fact.source.freshness is not Freshness.CURRENT:
+            return None, True
+        return fact.value, False
 
-    if demand.capacity_state is not None:
-        if demand.capacity_state.value is CapacityState.DEGRADED:
-            reasons.append(ServiceabilityReason.CAPACITY_DEGRADED)
-            blocked = True
-        elif demand.capacity_state.value is CapacityState.UNKNOWN:
-            reasons.append(ServiceabilityReason.UNKNOWN_LOAD_BEARING_SOURCE)
-            unknown = True
+    effect_value, effect_degraded = _service_fact(demand.effect_state)
+    if effect_degraded:
+        reasons.append(ServiceabilityReason.STALE_LOAD_BEARING_SOURCE)
+        issues.append(Issue.STALE_PRESSURE_SOURCE)
+        unknown = True
+    if effect_value is EffectState.EFFECT_UNKNOWN:
+        # Blocks action/retry/failover; never erases time pressure.
+        reasons.append(ServiceabilityReason.EFFECT_UNKNOWN)
+        blocked = True
+
+    capacity_value, capacity_degraded = _service_fact(demand.capacity_state)
+    if capacity_degraded:
+        reasons.append(ServiceabilityReason.STALE_LOAD_BEARING_SOURCE)
+        unknown = True
+    if capacity_value is CapacityState.DEGRADED:
+        reasons.append(ServiceabilityReason.CAPACITY_DEGRADED)
+        blocked = True
+    elif capacity_value is CapacityState.UNKNOWN:
+        reasons.append(ServiceabilityReason.UNKNOWN_LOAD_BEARING_SOURCE)
+        unknown = True
 
     target_ref: str | None = None
-    if demand.action_target is not None:
+    if demand.action_target is None:
+        # Not declaring a target must never score better than declaring it
+        # unknown.  A caller that knows no target is needed says so explicitly
+        # with TargetState.NOT_APPLICABLE.
+        reasons.append(ServiceabilityReason.ACTION_TARGET_UNKNOWN)
+        issues.append(Issue.TARGET_EVIDENCE_UNAVAILABLE)
+        unknown = True
+    else:
         target = demand.action_target.value
         if not isinstance(target, ActionTarget):
             raise TypeError("action_target Fact.value must be ActionTarget")
-        if target.state is TargetState.RESOLVED:
-            if demand.action_target.conflict:
-                reasons.append(ServiceabilityReason.ACTION_TARGET_CONFLICT)
-                blocked = True
-            else:
-                target_ref = target.target_ref
-        elif target.state is TargetState.UNAVAILABLE:
+        target_value, target_degraded = _service_fact(demand.action_target)
+        if target_degraded:
+            # A stale binding ref is not the current action target.
+            reasons.append(ServiceabilityReason.STALE_LOAD_BEARING_SOURCE)
+            issues.append(Issue.TARGET_EVIDENCE_UNAVAILABLE)
+            if target.state is TargetState.RESOLVED:
+                reasons.append(ServiceabilityReason.ACTION_TARGET_UNKNOWN)
+            unknown = True
+        elif target.state is TargetState.RESOLVED:
+            target_ref = target.target_ref
+        if target.state is TargetState.UNAVAILABLE:
             reasons.append(ServiceabilityReason.ACTION_TARGET_UNAVAILABLE)
             blocked = True
         elif target.state is TargetState.CONFLICT:
@@ -834,6 +868,28 @@ def _actor_can_act(state: Serviceability) -> bool | None:
 # --------------------------------------------------------------------------
 # 8. Exact-root fan-in (F0G §7) — never semantic
 # --------------------------------------------------------------------------
+
+
+def _instant(value: object) -> datetime.datetime | None:
+    """Parse a source-backed instant for ordering only.
+
+    This reads no clock and invents no TTL (F0G §19) — it normalises two legal
+    spellings of the same moment so fairness ordering compares moments rather
+    than strings.  ``2026-09-01T00:00:00+09:00`` is genuinely earlier than
+    ``2026-08-31T20:00:00Z``; a lexicographic compare gets that backwards.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed.astimezone(datetime.timezone.utc)
 
 
 def _bundle_id(root_key: str, member_ids: Sequence[str]) -> str:
@@ -965,7 +1021,22 @@ def compute_attention_frontier(
     never an inferred collision (F0G §10).
     """
     _require_text("snapshot_identity", snapshot_identity)
-    collisions = dict(proven_window_collisions or {})
+    collisions: dict[str, tuple[str, ...]] = {}
+    for key, refs in (proven_window_collisions or {}).items():
+        # A mis-keyed authority must not silently discard real collision
+        # evidence, and an empty ref is not proof of anything (F0G §10).
+        try:
+            AuthorityRequirement(key)
+        except ValueError:
+            raise ValueError(
+                f"proven_window_collisions key {key!r} is not an AuthorityRequirement"
+            ) from None
+        cleaned = tuple(r for r in refs if isinstance(r, str) and r.strip())
+        if not cleaned:
+            raise ValueError(
+                f"proven_window_collisions[{key!r}] must carry at least one source ref"
+            )
+        collisions[key] = cleaned
 
     ordered = sorted(demands, key=lambda d: d.demand_id)
     if len({d.demand_id for d in ordered}) != len(ordered):
@@ -1002,32 +1073,48 @@ def compute_attention_frontier(
         service_reasons_of[did] = service_reasons
         target_of[did] = target_ref
         merged = list(auth_issues) + list(pressure_issues) + list(service_issues)
-        if demand.became_actionable_at is None:
+        age_fact = demand.became_actionable_at
+        if age_fact is None:
             merged.append(Issue.READY_AGE_UNKNOWN)
+        elif not age_fact.grounded or _instant(age_fact.value) is None:
+            # A stale, conflicted or unparseable ready time is not an age.
+            merged.append(Issue.READY_AGE_UNKNOWN)
+            if not age_fact.grounded:
+                merged.append(Issue.STALE_PRESSURE_SOURCE)
         issues_of[did] = sorted(set(merged), key=lambda i: i.value)
 
     # -- exact-root fan-in (F0G §7) ---------------------------------------
-    root_members: dict[str, list[str]] = {}
+    # Fan-in is partitioned by AUTHORITY as well as exact root.  Sharing a root
+    # cause is context, and context grouping never grants shared permission
+    # (F0G §7).  Without the authority key a Chairman emergency could be folded
+    # behind a Sol-authority bundle face and render nowhere in its own
+    # partition, contradicting §10's guarantee that every independent
+    # INTERRUPT_NOW root stays visible.
+    root_members: dict[tuple[str, str], list[str]] = {}
     for demand in ordered:
+        did = demand.demand_id
         for root in demand.fanin_roots:
-            root_members.setdefault(root.key, []).append(demand.demand_id)
+            root_members.setdefault(
+                (authority_of[did].value, root.key), []
+            ).append(did)
 
     bundles: list[Bundle] = []
     bundle_of: dict[str, str] = {}
     canonical_of_bundle: dict[str, str] = {}
-    for root_key in sorted(root_members):
-        members = sorted(set(root_members[root_key]))
+    for key in sorted(root_members):
+        authority_value, root_key = key
+        # Drop only members already claimed by an earlier exact root, rather
+        # than abandoning the whole bundle, so overlapping roots still fan in.
+        members = sorted(
+            {m for m in root_members[key] if m not in bundle_of}
+        )
         if len(members) < 2:
             continue
-        if any(m in bundle_of for m in members):
-            continue  # a demand belongs to at most one bundle; first root wins
-        bid = _bundle_id(root_key, members)
-        canonical = members[0]
+        bid = _bundle_id(f"{authority_value}|{root_key}", members)
         interrupts = [m for m in members if class_of[m] is AttentionClass.INTERRUPT_NOW]
-        if interrupts:
-            # An interrupt member is always the visible face of its bundle so
-            # exact-root compaction can never hide an emergency.
-            canonical = interrupts[0]
+        # An interrupt member is always the visible face of its bundle so
+        # exact-root compaction can never hide an emergency.
+        canonical = interrupts[0] if interrupts else members[0]
         for m in members:
             bundle_of[m] = bid
         canonical_of_bundle[bid] = canonical
@@ -1054,6 +1141,26 @@ def compute_attention_frontier(
             (authority_of[did].value, class_of[did].value), []
         ).append(did)
 
+    # A demand may only be hidden by dominance when it is genuinely
+    # non-maximal.  Collecting ALL dominators and omitting exactly the
+    # non-maximal elements makes the result transitive and independent of
+    # demand-id spelling by construction; the earlier single-dominator record
+    # plus a repair pass let lexicographic id order decide visibility, and
+    # could promote a strictly weaker demand over a stronger one.
+    def _can_dominate(did: str) -> bool:
+        """Visible enough to stand in for something it dominates."""
+        if class_of[did] not in _DOMINANCE_ELIGIBLE:
+            return False
+        bid = bundle_of.get(did)
+        return bid is None or canonical_of_bundle[bid] == did
+
+    def _can_be_omitted(did: str) -> bool:
+        """A bundle's own face is never dominance-omitted (it represents members)."""
+        if class_of[did] not in _DOMINANCE_ELIGIBLE:
+            return False
+        return bundle_of.get(did) is None
+
+    dominators: dict[str, list[str]] = {}
     for key in sorted(partitions):
         _, class_value = key
         members = sorted(partitions[key])
@@ -1063,19 +1170,23 @@ def compute_attention_frontier(
                     by_id[a], by_id[b], authority_conflicted[a], authority_conflicted[b]
                 )
                 comparisons.append((a, b, relation))
-                if AttentionClass(class_value) not in _DOMINANCE_ELIGIBLE:
+                if relation is Comparison.DOMINATES:
+                    stronger, weaker = a, b
+                elif relation is Comparison.DOMINATED_BY:
+                    stronger, weaker = b, a
+                else:
                     continue
-                if relation is Comparison.DOMINATES and b not in dominated_by:
-                    dominated_by[b] = a
-                elif relation is Comparison.DOMINATED_BY and a not in dominated_by:
-                    dominated_by[a] = b
+                if _can_dominate(stronger) and _can_be_omitted(weaker):
+                    dominators.setdefault(weaker, []).append(stronger)
 
-    # A dominator that is itself omitted may not hide its subordinate.
-    for did in sorted(dominated_by):
-        chain = dominated_by[did]
-        if chain in dominated_by or bundle_of.get(chain) not in (None, bundle_of.get(did)):
-            if chain in dominated_by:
-                del dominated_by[did]
+    # Point each receipt at a MAXIMAL dominator — one nothing else dominates —
+    # so a receipt can never resolve to something that is itself omitted.
+    for weaker in sorted(dominators):
+        maximal = sorted(
+            d for d in dominators[weaker] if d not in dominators
+        )
+        if maximal:
+            dominated_by[weaker] = maximal[0]
 
     # -- projection relations + omission receipts -------------------------
     relation_of: dict[str, ProjectionRelation] = {}
@@ -1138,11 +1249,15 @@ def compute_attention_frontier(
             did
             for did in eligible
             if by_id[did].became_actionable_at is not None
-            and isinstance(by_id[did].became_actionable_at.value, str)
+            and by_id[did].became_actionable_at.grounded
+            and _instant(by_id[did].became_actionable_at.value) is not None
         ]
         if not aged:
             continue  # unknown ready time is a coverage gap, never age zero
-        oldest = min(aged, key=lambda d: (str(by_id[d].became_actionable_at.value), d))
+        oldest = min(
+            aged,
+            key=lambda d: (_instant(by_id[d].became_actionable_at.value), d),
+        )
         relation_of[oldest] = ProjectionRelation.ROOT_VISIBLE
         covered_by[oldest] = None
         omissions[:] = [o for o in omissions if o.demand_id != oldest]
@@ -1251,7 +1366,32 @@ def compute_attention_frontier(
             )
         )
 
+    # Starvation debt is reported per authority even when no sentinel can fire,
+    # so a suppressed backlog is never invisible (F0G §9 "remains visible as
+    # deferred debt").  An unknown ready time is a coverage gap, not age zero.
+    fairness_debt: dict[str, dict[str, int]] = {}
+    for authority_value in sorted(by_authority):
+        eligible = [
+            did for did in by_authority[authority_value]
+            if class_of[did] in _DOMINANCE_ELIGIBLE
+        ]
+        hidden = [
+            did for did in eligible
+            if relation_of[did] is not ProjectionRelation.ROOT_VISIBLE
+        ]
+        if not hidden:
+            continue
+        fairness_debt[authority_value] = {
+            "deferred_ordinary": len(hidden),
+            "ready_age_unknown": sum(
+                1 for did in hidden
+                if by_id[did].became_actionable_at is None
+                or _instant(by_id[did].became_actionable_at.value) is None
+            ),
+        }
+
     coverage = {
+        "fairness_debt_by_authority": fairness_debt,
         "admitted_demands": len(ordered),
         "visible_roots": sum(
             1 for r in relation_of.values() if r is ProjectionRelation.ROOT_VISIBLE
