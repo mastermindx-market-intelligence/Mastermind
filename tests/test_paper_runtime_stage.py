@@ -30,11 +30,17 @@ class RuntimeStageTests(unittest.TestCase):
         self.root = Path(self.tmp.name) / "runtime"
         self.source = Path(self.tmp.name) / "source"
         self.source.mkdir()
-        (self.source / "bridge.py").write_text(
-            "import argparse\nargparse.ArgumentParser().parse_args()\n", encoding="utf-8"
+        bridge_bytes = b"import argparse\nargparse.ArgumentParser().parse_args()\n"
+        (self.source / "bridge.py").write_bytes(bridge_bytes)
+        self.reviewed_patch = mock.patch.object(
+            stage,
+            "REVIEWED_GENERATIONS",
+            {"v2": {"bridge.py": stage._sha256(bridge_bytes)}},
         )
+        self.reviewed_patch.start()
 
     def tearDown(self):
+        self.reviewed_patch.stop()
         self.tmp.cleanup()
 
     def test_stage_creates_offline_versioned_runtime_and_verifies(self):
@@ -68,6 +74,28 @@ class RuntimeStageTests(unittest.TestCase):
         for value in ["v0", "2", "v2/other", "latest", "v10000"]:
             with self.subTest(value=value), self.assertRaisesRegex(stage.Refusal, "GENERATION_INVALID"):
                 stage.stage(value, root=self.root, _source_dir=self.source)
+
+    def test_valid_but_unreviewed_generation_refuses(self):
+        with self.assertRaisesRegex(stage.Refusal, "GENERATION_UNSUPPORTED"):
+            stage.stage("v3", root=self.root, _source_dir=self.source)
+
+    def test_source_hash_must_match_reviewed_generation(self):
+        with mock.patch.object(
+            stage,
+            "REVIEWED_GENERATIONS",
+            {"v2": {"bridge.py": "0" * 64}},
+        ):
+            with self.assertRaisesRegex(stage.Refusal, "SOURCE_HASH_MISMATCH"):
+                stage.stage("v2", root=self.root, _source_dir=self.source)
+        self.assertFalse((self.root / "v2").exists())
+
+    def test_verify_uses_generation_pin_not_current_source(self):
+        stage.stage("v2", root=self.root, _source_dir=self.source)
+        (self.source / "bridge.py").write_text("different protected source later\n", encoding="utf-8")
+        self.assertEqual(
+            stage.verify("v2", root=self.root, _source_dir=self.source)["state"],
+            "RUNTIME_VERIFIED",
+        )
 
     def test_unsafe_existing_runtime_root_refuses(self):
         self.root.mkdir(parents=True, mode=0o700)

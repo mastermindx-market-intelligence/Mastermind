@@ -27,6 +27,11 @@ GENERATION_RE = re.compile(r"v[1-9][0-9]{0,3}")
 PRIVATE_DIR_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
 SOURCE_FILES = ("bridge.py",)
+REVIEWED_GENERATIONS = {
+    "v2": {
+        "bridge.py": "83e36b0bcd0acabbf5dd6ace5b708e5797a52e7db732e8dbbf848ded781c231d",
+    },
+}
 
 
 class Refusal(RuntimeError):
@@ -101,6 +106,15 @@ def _expected_hashes(files: dict[str, bytes]) -> dict[str, str]:
     return {name: _sha256(data) for name, data in sorted(files.items())}
 
 
+def _reviewed_hashes(generation: str) -> dict[str, str]:
+    if not GENERATION_RE.fullmatch(generation):
+        raise Refusal("GENERATION_INVALID")
+    expected = REVIEWED_GENERATIONS.get(generation)
+    if expected is None:
+        raise Refusal("GENERATION_UNSUPPORTED")
+    return dict(expected)
+
+
 def _write_private(path: Path, data: bytes) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, PRIVATE_FILE_MODE)
     try:
@@ -162,14 +176,12 @@ def _receipt(target: Path) -> dict:
 
 
 def verify(generation: str, *, root: Path | None = None, _source_dir: Path | None = None) -> dict:
-    if not GENERATION_RE.fullmatch(generation):
-        raise Refusal("GENERATION_INVALID")
+    expected = _reviewed_hashes(generation)
     root = _require_private_dir(_runtime_root(root))
     target = root / generation
     info = target.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise Refusal("RUNTIME_DIRECTORY_UNSAFE")
-    expected = _expected_hashes(_read_source(_source_dir))
     receipt = _receipt(target)
     if (
         receipt.get("generation") != generation
@@ -204,12 +216,13 @@ def verify(generation: str, *, root: Path | None = None, _source_dir: Path | Non
 
 
 def stage(generation: str, *, root: Path | None = None, _source_dir: Path | None = None) -> dict:
-    if not GENERATION_RE.fullmatch(generation):
-        raise Refusal("GENERATION_INVALID")
+    reviewed = _reviewed_hashes(generation)
     root = _require_private_dir(_runtime_root(root), create=True)
     target = root / generation
     files = _read_source(_source_dir)
     hashes = _expected_hashes(files)
+    if hashes != reviewed:
+        raise Refusal("SOURCE_HASH_MISMATCH")
     with _stage_lock(root):
         if target.exists() or target.is_symlink():
             return {**verify(generation, root=root, _source_dir=_source_dir), "state": "RUNTIME_ALREADY_PRESENT"}
