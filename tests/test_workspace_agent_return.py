@@ -37,7 +37,7 @@ def binding(**overrides) -> DialogueBinding:
             "path": "research/WORKSPACE_AGENT_SUPERVISION_INTEGRATION_2026-09-13.md",
             "content_sha256": "2" * 64,
         },
-        "session_ref": "workspace-agent-program-001",
+        "session_ref": "asd-session-workspace-agent-program-001",
         "operation_key": "workspace-agent-supervision-001",
         "watch_mode": None,
         "applies_to": {
