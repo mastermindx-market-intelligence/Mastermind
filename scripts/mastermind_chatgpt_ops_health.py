@@ -151,9 +151,12 @@ def read_tunnel_id(profile: Path) -> str:
     value = json.loads(profile.read_text())
     if not isinstance(value, dict):
         raise ValueError("tunnel profile must be an object")
-    tunnel_id = value.get("tunnel_id")
+    control_plane = value.get("control_plane")
+    if not isinstance(control_plane, dict):
+        raise ValueError("tunnel profile has no control_plane object")
+    tunnel_id = control_plane.get("tunnel_id")
     if not isinstance(tunnel_id, str) or TUNNEL_RE.fullmatch(tunnel_id) is None:
-        raise ValueError("tunnel profile has no valid tunnel_id")
+        raise ValueError("tunnel profile has no valid control_plane.tunnel_id")
     return tunnel_id
 
 
