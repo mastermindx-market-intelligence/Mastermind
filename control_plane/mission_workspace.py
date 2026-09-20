@@ -177,8 +177,15 @@ MISSINGNESS_KEYS = frozenset(
 )
 SOURCE_GENERATION_KEYS = frozenset({"state", "version", "generation"})
 FEATURE_GATE_KEYS = frozenset({"conversation", "actions", "advanced"})
+RESULT_INPUT_KEYS = frozenset({"state", "summary", "artifacts", "errors", "next_actions"})
+SOURCE_GENERATION_STATES = frozenset({"CURRENT", "STALE", "CONFLICT", "UNKNOWN"})
 
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
+_UTC_TIMESTAMP = re.compile(
+    r"^(?P<year>[0-9]{4})-(?P<month>[0-9]{2})-(?P<day>[0-9]{2})"
+    r"T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})"
+    r"(?:\.(?P<fraction>[0-9]{1,6}))?Z$"
+)
 _GITHUB_URL = re.compile(r"^https://github\.com/[^/?#]+/[^/?#]+/pull/[1-9][0-9]*$")
 _SECRET_SHAPE = re.compile(
     r"(?i)(?:\b(?:bearer|authorization|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|"
@@ -240,7 +247,19 @@ def _closed_string(value: object, allowed: frozenset[str]) -> str | None:
 
 def _safe_timestamp(value: object) -> str | None:
     text = _safe_identifier(value)
-    if text is None or not text.endswith("Z") or "T" not in text:
+    if text is None or (match := _UTC_TIMESTAMP.fullmatch(text)) is None:
+        return None
+    year = int(match.group("year"))
+    month = int(match.group("month"))
+    day = int(match.group("day"))
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute"))
+    second = int(match.group("second"))
+    if year == 0 or month not in range(1, 13) or hour > 23 or minute > 59 or second > 59:
+        return None
+    month_lengths = (31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                     31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+    if day not in range(1, month_lengths[month - 1] + 1):
         return None
     return text
 
@@ -287,12 +306,20 @@ def _facts(values: object) -> list[dict[str, Any]]:
     return [found[key] for key in sorted(found, key=repr)]
 
 
-def _evidence(values: object) -> list[dict[str, Any]]:
+def _evidence(values: object) -> tuple[list[dict[str, Any]], bool]:
     """Retain only complete, already-qualified DF1 evidence tuples."""
 
     found: dict[tuple[object, ...], dict[str, Any]] = {}
-    for row in _mapping_rows(values):
+    is_sequence = (
+        isinstance(values, Sequence) and not isinstance(values, (str, bytes, bytearray))
+    )
+    source_rows = _sequence(values)
+    invalid = values is not None and not is_sequence
+    if any(not isinstance(row, Mapping) for row in source_rows):
+        invalid = True
+    for row in (row for row in source_rows if isinstance(row, Mapping)):
         if set(row) != EVIDENCE_KEYS:
+            invalid = True
             continue
         owner = _closed_string(row.get("owner"), EVIDENCE_OWNERS)
         ref = _safe_identifier(row.get("ref"))
@@ -302,10 +329,13 @@ def _evidence(values: object) -> list[dict[str, Any]]:
         source_time = _safe_timestamp(row.get("source_time"))
         observed_at = _safe_timestamp(row.get("observed_at"))
         if owner is None or ref is None or field is None or freshness is None or observed_at is None:
+            invalid = True
             continue
         if row.get("source_revision") is not None and revision is None:
+            invalid = True
             continue
         if row.get("source_time") is not None and source_time is None:
+            invalid = True
             continue
         item = {
             "owner": owner, "ref": ref, "field": field, "source_revision": revision,
@@ -315,7 +345,10 @@ def _evidence(values: object) -> list[dict[str, Any]]:
             "owner", "ref", "field", "source_revision", "source_time", "observed_at", "freshness_state"
         ))
         found[key] = item
-    return [found[key] for key in sorted(found, key=repr)[:32]]
+    ordered = [found[key] for key in sorted(found, key=repr)]
+    if len(ordered) > 32:
+        invalid = True
+    return ordered[:32], invalid
 
 
 def _section(
@@ -347,17 +380,28 @@ def _section(
     }
 
 
-def _project_source_receipts(value: object) -> list[dict[str, Any]]:
+def _project_source_receipts(value: object) -> tuple[list[dict[str, Any]], bool]:
     rows: list[dict[str, Any]] = []
-    for row in _mapping_rows(value)[:32]:
+    source = _sequence(value)
+    invalid = not isinstance(value, list) or any(not isinstance(row, Mapping) for row in source)
+    for row in (row for row in source if isinstance(row, Mapping)):
         owner = _safe_identifier(row.get("owner"))
         ref = _safe_identifier(row.get("ref"))
         observed_at = _safe_timestamp(row.get("observed_at"))
         freshness = _safe_identifier(row.get("freshness"))
-        if owner is None or ref is None or observed_at is None or freshness is None:
+        if (
+            set(row) != SOURCE_RECEIPT_KEYS
+            or owner is None
+            or ref is None
+            or observed_at is None
+            or freshness is None
+        ):
+            invalid = True
             continue
         rows.append({"owner": owner, "ref": ref, "observed_at": observed_at, "freshness": freshness})
-    return rows
+    if len(rows) > 32:
+        invalid = True
+    return rows[:32], invalid
 
 
 def _project_runtime_card(value: object) -> dict[str, Any] | None:
@@ -378,15 +422,16 @@ def _project_runtime_card(value: object) -> dict[str, Any] | None:
     }
 
 
-def _project_owed_turn(value: object) -> dict[str, Any] | None:
+def _project_owed_turn(value: object) -> tuple[dict[str, Any] | None, bool]:
     row = _mapping(value)
     if not row:
-        return None
+        return None, value is not None
+    source_refs, invalid = _project_source_receipts(row.get("source_refs"))
     return {
         "seat": _closed_string(row.get("seat"), OWED_SEATS),
         "reason": _safe_text(row.get("reason")),
-        "source_refs": _project_source_receipts(row.get("source_refs")),
-    }
+        "source_refs": source_refs,
+    }, invalid
 
 
 def _project_attempt(value: object) -> dict[str, Any] | None:
@@ -421,6 +466,19 @@ def _project_child(value: Mapping[str, Any]) -> dict[str, Any]:
         "latest_attempt": _project_attempt(value.get("latest_attempt")),
         "worker_id": None,
     }
+
+
+def _valid_result(value: object) -> tuple[Mapping[str, Any], bool]:
+    row = _mapping(value)
+    valid = (
+        set(row) == RESULT_INPUT_KEYS
+        and row.get("state") in EXECUTION_STATES
+        and (row.get("summary") is None or isinstance(row.get("summary"), str))
+        and isinstance(row.get("artifacts"), list)
+        and isinstance(row.get("errors"), list)
+        and isinstance(row.get("next_actions"), list)
+    )
+    return (row if valid else {}), valid
 
 
 def _project_prs(value: object) -> list[dict[str, Any]]:
@@ -582,12 +640,12 @@ def _project_carrier(value: object) -> dict[str, Any] | None:
     }
 
 
-def _project_w3c_receipt(value: object) -> dict[str, Any] | None:
+def _project_w3c_receipt(value: object) -> tuple[dict[str, Any] | None, bool]:
     row = _mapping(value)
     if not row:
-        return None
+        return None, value is not None
     snapshot_digest = row.get("snapshot_digest")
-    return {
+    projected = {
         "observed_at": _safe_timestamp(row.get("observed_at")),
         "freshness": (
             row.get("freshness") if row.get("freshness") == "SOURCE_EVIDENCE_TIME" else None
@@ -608,12 +666,16 @@ def _project_w3c_receipt(value: object) -> dict[str, Any] | None:
             else None
         ),
     }
+    if set(row) != W3C_RECEIPT_KEYS or any(item is None for item in projected.values()):
+        return None, True
+    return projected, False
 
 
-def _project_w3c(value: object) -> dict[str, Any] | None:
+def _project_w3c(value: object) -> tuple[dict[str, Any] | None, bool]:
     row = _mapping(value)
     if not row:
-        return None
+        return None, value is not None
+    receipt, receipt_invalid = _project_w3c_receipt(row.get("source_receipt"))
     return {
         "state": _closed_string(row.get("state"), W3C_STATES),
         "reason": _safe_text(row.get("reason")),
@@ -622,16 +684,18 @@ def _project_w3c(value: object) -> dict[str, Any] | None:
         "terminal_applied": (
             row.get("terminal_applied") if type(row.get("terminal_applied")) is bool else None
         ),
-        "source_receipt": _project_w3c_receipt(row.get("source_receipt")),
-    }
+        "source_receipt": receipt,
+    }, receipt_invalid
 
 
 def _source_generation(value: object) -> dict[str, Any]:
     row = _mapping(value)
+    version = row.get("version")
+    generation = row.get("generation")
     return {
-        "state": _safe_scalar(row.get("state")),
-        "version": _safe_scalar(row.get("version")),
-        "generation": _safe_scalar(row.get("generation")),
+        "state": _closed_string(row.get("state"), SOURCE_GENERATION_STATES) or "UNKNOWN",
+        "version": version if type(version) is int and version > 0 else None,
+        "generation": generation if type(generation) is int and generation > 0 else None,
     }
 
 
@@ -671,33 +735,64 @@ def _children_section(
     historical: bool,
     resolved_root: str | None,
     fabric: Mapping[str, Any],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bool]:
     owner_fabric = fabric if fabric_valid else {}
     raw_count = owner_fabric.get("unjoined_job_count")
     unjoined_count = raw_count if type(raw_count) is int and raw_count >= 0 else None
-    unjoined_ids = sorted(
-        {
-            item
-            for item in (
-                _safe_identifier(value)
-                for value in _sequence(owner_fabric.get("unjoined_job_ids"))
-            )
-            if item is not None
-        }
-    )[:_MAX_ITEMS]
-    raw_children = (
-        [
-            row for row in _mapping_rows(owner_fabric.get("children"))
-            if row.get("root_job_id") == resolved_root
-        ]
-        if fabric_valid and resolved_root is not None
-        else []
+    raw_unjoined_ids = owner_fabric.get("unjoined_job_ids")
+    unjoined_sequence = _sequence(raw_unjoined_ids)
+    unjoined_values = [_safe_identifier(value) for value in unjoined_sequence]
+    invalid = (
+        fabric_valid
+        and (
+            type(raw_count) is not int
+            or raw_count < 0
+            or not isinstance(raw_unjoined_ids, list)
+            or any(value is None for value in unjoined_values)
+        )
     )
-    items = [_project_child(row) for row in raw_children]
+    unjoined_ids = sorted({item for item in unjoined_values if item is not None})[:_MAX_ITEMS]
+
+    raw_children_value = owner_fabric.get("children")
+    child_values = _sequence(raw_children_value)
+    if fabric_valid and not isinstance(raw_children_value, list):
+        invalid = True
+    candidates: list[Mapping[str, Any]] = []
+    identity_counts: dict[str, int] = {}
+    if fabric_valid and resolved_root is not None:
+        for value in child_values:
+            if not isinstance(value, Mapping):
+                invalid = True
+                continue
+            job_id = _safe_identifier(value.get("job_id"))
+            parent_job_id = _safe_identifier(value.get("parent_job_id"))
+            if (
+                job_id is None
+                or job_id == resolved_root
+                or parent_job_id is None
+                or value.get("root_job_id") != resolved_root
+            ):
+                invalid = True
+                continue
+            identity_counts[job_id] = identity_counts.get(job_id, 0) + 1
+            candidates.append(value)
+    duplicate_ids = {job_id for job_id, count in identity_counts.items() if count > 1}
+    if duplicate_ids:
+        invalid = True
+    valid_children = [
+        row for row in candidates
+        if isinstance(row.get("job_id"), str) and row.get("job_id") not in duplicate_ids
+    ]
+    items = [_project_child(row) for row in valid_children]
 
     if not fabric_valid:
         section = _section(
             "UNAVAILABLE", "INCOMPLETE", ["FABRIC_VIEW_UNAVAILABLE"], [],
+            total_count=None, overflow_count=None,
+        )
+    elif invalid:
+        section = _section(
+            "PARTIAL", "INCOMPLETE", ["CHILD_ROWS_INVALID"], items,
             total_count=None, overflow_count=None,
         )
     elif historical:
@@ -731,7 +826,7 @@ def _children_section(
             total_count=len(items), overflow_count=0,
         )
     section.update({"unjoined_job_count": unjoined_count, "unjoined_job_ids": unjoined_ids})
-    return section
+    return section, invalid
 
 
 def compose_mission_workspace(
@@ -754,6 +849,7 @@ def compose_mission_workspace(
     fabric_valid = fabric.get("schema") == FABRIC_VIEW_SCHEMA
     control_generation = _safe_timestamp(control.get("generated_at"))
     fabric_generation = _safe_timestamp(fabric.get("generated_at"))
+    generation_projection = _source_generation(source_generation)
 
     safe_work_ref = _safe_identifier(work_ref)
     matching_work = (
@@ -806,7 +902,7 @@ def compose_mission_workspace(
     dispatch_state = (
         raw_dispatch_state if raw_dispatch_state in PROJECTED_DISPATCH_STATES else "UNKNOWN"
     )
-    qualified = _qualified_current(
+    control_current = _qualified_current(
         validity=validity,
         cache=cache,
         responsibility=responsibility,
@@ -815,10 +911,18 @@ def compose_mission_workspace(
         control_generated_at=control_generation,
         autonomy_generated_at=_safe_timestamp(autonomy.get("generated_at")),
     )
-    observation_current = qualified and dispatch.get("historical") is False
+    # G8 remains open: no owner-issued cross-owner generation-vector contract
+    # exists.  Caller-supplied generation diagnostics are retained below but
+    # cannot prove a current Control Room/Fabric observation.
+    cross_owner_generation_current = False
+    observation_current = (
+        control_current
+        and cross_owner_generation_current
+        and dispatch.get("historical") is False
+    )
 
-    result = _mapping(root.get("result"))
-    execution_state = _closed_string(result.get("state"), EXECUTION_STATES) or "NOT_STARTED"
+    result, result_valid = _valid_result(root.get("result")) if root else ({}, False)
+    execution_state = _closed_string(result.get("state"), EXECUTION_STATES)
     review_source = _mapping(root.get("review"))
     review_verdict = _closed_string(review_source.get("verdict"), REVIEW_VERDICTS) or "NOT_YET"
     artifacts, artifacts_excluded = _safe_items(result.get("artifacts"))
@@ -831,10 +935,10 @@ def compose_mission_workspace(
         "ruling": None,
         "evidence": [],
     }
-    generation_conflict = _mapping(source_generation).get("conflict") is True
+    generation_conflict = generation_projection["state"] == "CONFLICT"
     blocker = bool(responsibility.get("blocker") or responsibility.get("declared_blocker"))
     posture_value, posture_rule = _posture(
-        execution=execution_state,
+        execution=execution_state or "UNKNOWN",
         dispatch=dispatch_state,
         current=observation_current,
         conflict=(runtime_root_state == "CONFLICT" or generation_conflict),
@@ -860,7 +964,7 @@ def compose_mission_workspace(
         "version": _safe_scalar(capability_source.get("version")),
         "detail": _safe_text(capability_source.get("detail")),
     }
-    children = _children_section(
+    children, children_invalid = _children_section(
         fabric_valid=fabric_valid,
         historical=cache.get("state") == "historical_refresh_error",
         resolved_root=resolved_root,
@@ -871,7 +975,14 @@ def compose_mission_workspace(
         read_state = "UNAVAILABLE"
     elif cache.get("state") == "historical_refresh_error":
         read_state = "HISTORICAL"
-    elif qualified and control_valid and fabric_valid and resolved_root is not None:
+    elif (
+        control_current
+        and cross_owner_generation_current
+        and control_valid
+        and fabric_valid
+        and resolved_root is not None
+        and result_valid
+    ):
         read_state = "CURRENT"
     else:
         read_state = "PARTIAL"
@@ -880,11 +991,22 @@ def compose_mission_workspace(
     if work:
         usable_sections.append("program")
     if root:
-        usable_sections.extend(["mission", "execution", "review"])
+        usable_sections.extend(["mission", "review"])
+    if result_valid:
+        usable_sections.append("execution")
     if responsibility:
         usable_sections.extend(["principal", "transport"])
     if children["state"] in {"AVAILABLE", "EMPTY", "PARTIAL", "HISTORICAL"}:
         usable_sections.append("children")
+
+    program_evidence, program_evidence_invalid = _evidence(work.get("evidence"))
+    mission_evidence, mission_evidence_invalid = _evidence(root.get("evidence"))
+    principal_evidence, principal_evidence_invalid = _evidence(responsibility.get("evidence"))
+    execution_evidence, execution_evidence_invalid = _evidence(result.get("evidence"))
+    review_evidence, review_evidence_invalid = _evidence(review_source.get("evidence"))
+    transport_evidence, transport_evidence_invalid = _evidence(dispatch.get("evidence"))
+    owed_turn, owed_turn_evidence_invalid = _project_owed_turn(responsibility.get("owed_turn"))
+    w3c, w3c_evidence_invalid = _project_w3c(dispatch.get("w3c"))
 
     extra_facts = [
         _fact("MISSING_PRODUCER", "acceptance", None, "acceptance owner is not projected"),
@@ -892,6 +1014,10 @@ def compose_mission_workspace(
         _fact("MISSING_PRODUCER", "mission.title", "executive_os", "mission title is not projected"),
         _fact("MISSING_PRODUCER", "transport.continued", "slack", "continuation is not projected"),
         _fact("MISSING_PRODUCER", "transport.stopped", "slack", "terminal stop is not projected"),
+        _fact(
+            "MISSING_PRODUCER", "source.generation_vector", None,
+            "cross-owner generation vector is not projected",
+        ),
         _fact("EXCLUDED", "conversation", "executive_os", "mission tree content is excluded"),
     ]
     if duplicate_program:
@@ -900,6 +1026,64 @@ def compose_mission_workspace(
         extra_facts.append(
             _fact("DEGRADED", "principal", "autonomy_projection", "duplicate responsibility identity")
         )
+    if root and not result_valid:
+        extra_facts.append(
+            _fact("DEGRADED", "execution", "executive_os", "root result is invalid")
+        )
+    if children_invalid:
+        extra_facts.append(
+            _fact("DEGRADED", "children", "executive_os", "child rows are invalid")
+        )
+    if control_valid and control_generation is None:
+        extra_facts.append(
+            _fact(
+                "DEGRADED", "source.control_room_generated_at", "control_room_cache",
+                "control room generation timestamp is invalid",
+            )
+        )
+    if fabric_valid and fabric_generation is None:
+        extra_facts.append(
+            _fact(
+                "DEGRADED", "source.fabric_view_generated_at", "executive_os",
+                "fabric generation timestamp is invalid",
+            )
+        )
+    raw_generation = _mapping(source_generation)
+    if source_generation is not None and (
+        not isinstance(source_generation, Mapping)
+        or raw_generation.get("state") not in SOURCE_GENERATION_STATES
+        or (
+            raw_generation.get("version") is not None
+            and (type(raw_generation.get("version")) is not int or raw_generation["version"] <= 0)
+        )
+        or (
+            raw_generation.get("generation") is not None
+            and (
+                type(raw_generation.get("generation")) is not int
+                or raw_generation["generation"] <= 0
+            )
+        )
+    ):
+        extra_facts.append(
+            _fact(
+                "DEGRADED", "source.source_generation", None,
+                "source generation diagnostic is invalid",
+            )
+        )
+    for target, invalid in (
+        ("program.evidence", program_evidence_invalid),
+        ("mission.evidence", mission_evidence_invalid),
+        ("principal.evidence", principal_evidence_invalid),
+        ("execution.evidence", execution_evidence_invalid),
+        ("review.evidence", review_evidence_invalid),
+        ("transport.evidence", transport_evidence_invalid),
+        ("principal.owed_turn.source_refs", owed_turn_evidence_invalid),
+        ("transport.w3c.source_receipt", w3c_evidence_invalid),
+    ):
+        if invalid:
+            extra_facts.append(
+                _fact("DEGRADED", target, None, "invalid evidence was withheld")
+            )
     if artifacts_excluded:
         extra_facts.append(
             _fact("EXCLUDED", "execution.artifacts", "executive_os", "unsafe artifact detail excluded")
@@ -960,7 +1144,7 @@ def compose_mission_workspace(
         "disagreements": _project_disagreements(
             work.get("disagreements"), responsibility.get("disagreements")
         ),
-        "evidence": _evidence(work.get("evidence")),
+        "evidence": program_evidence,
     }
     mission = {
         "root_job_id": resolved_root,
@@ -977,14 +1161,14 @@ def compose_mission_workspace(
             "UNAVAILABLE_NEW_SUBMISSION" if armed["ceo_submit_armed"] is False else "UNKNOWN"
         ),
         "capability": capability,
-        "evidence": _evidence(root.get("evidence")),
+        "evidence": mission_evidence,
     }
     principal = {
         "accountable_seat": _closed_string(responsibility.get("accountable_seat"), ACCOUNTABLE_SEATS),
         "current_worker": _project_runtime_card(responsibility.get("current_worker")),
         "current_sol_target": _project_runtime_card(responsibility.get("current_sol_target")),
-        "owed_turn": _project_owed_turn(responsibility.get("owed_turn")),
-        "evidence": _evidence(responsibility.get("evidence")),
+        "owed_turn": owed_turn,
+        "evidence": principal_evidence,
     }
     transport = {
         "dispatch_state": dispatch_state,
@@ -997,15 +1181,15 @@ def compose_mission_workspace(
         ),
         "watch_proven": dispatch.get("watch_proven") if type(dispatch.get("watch_proven")) is bool else None,
         "carrier": _project_carrier(dispatch.get("carrier")),
-        "w3c": _project_w3c(dispatch.get("w3c")),
-        "evidence": _evidence(dispatch.get("evidence")),
+        "w3c": w3c,
+        "evidence": transport_evidence,
     }
     source = {
         "control_room_schema": CONTROL_ROOM_SCHEMA if control_valid else None,
         "control_room_generated_at": control_generation,
         "fabric_view_schema": FABRIC_VIEW_SCHEMA if fabric_valid else None,
         "fabric_view_generated_at": fabric_generation,
-        "source_generation": _source_generation(source_generation),
+        "source_generation": generation_projection,
         "source_coverage": [
             name
             for name, available in (("control_room", control_valid), ("fabric_view", fabric_valid))
@@ -1032,13 +1216,13 @@ def compose_mission_workspace(
             "artifacts": artifacts,
             "errors_present": bool(_sequence(result.get("errors"))),
             "next_actions": next_actions,
-            "evidence": _evidence(result.get("evidence")),
+            "evidence": execution_evidence,
         },
         "review": {
             "required": review_source.get("required") if type(review_source.get("required")) is bool else None,
             "reviews_job_id": _safe_identifier(review_source.get("reviews_job_id")),
             "verdict": review_verdict,
-            "evidence": _evidence(review_source.get("evidence")),
+            "evidence": review_evidence,
         },
         "transport": transport,
         "acceptance": acceptance,

@@ -194,7 +194,7 @@ def _inputs(
         "root_job_id": "JOB-1",
         "source_validity": _validity(),
         "cache_currentness": {"state": "fresh", "publication_seq": 1},
-        "source_generation": {},
+        "source_generation": None,
     }
 
 
@@ -229,7 +229,10 @@ def test_closed_nested_shape_and_real_owner_vocabulary_are_exact():
     assert document["read_state"]["state"] in READ_STATES
     assert document["children"]["state"] in SECTION_STATES
     assert document["children"]["coverage"] in COVERAGE_STATES
-    assert document["posture"] == {"value": "RUNNING", "rule": "G1", "evidence": []}
+    assert document["read_state"]["state"] == "PARTIAL"
+    assert document["posture"] == {
+        "value": "HISTORICAL_OBSERVATION", "rule": "G1h", "evidence": [],
+    }
     assert document["acceptance"]["state"] == "NOT_PROJECTED"
     assert document["mission"]["title"] is None
     assert document["mission"]["capability"]["detail"] == "the requested root job was found"
@@ -300,7 +303,10 @@ def test_populated_nested_cards_have_only_the_frozen_keys_and_owner_enums():
     assert document["transport"]["w3c"]["wake_state"] == "TARGET_ACKNOWLEDGED"
 
 
-def test_real_b5_server_fixture_and_real_fabric_composer_reduce_current_root(tmp_path, monkeypatch):
+def test_real_producer_shapes_remain_partial_without_coherent_live_acquisition(
+    tmp_path, monkeypatch,
+):
+    """Real composers prove shape compatibility, not an admitted G8 generation vector."""
     config, clock, _binding = control_room_server_tests._b5_navigation_fixture(tmp_path, monkeypatch)
     generation = control_room_server_tests.server_mod._reserve_composition(config)
     control_room_server_tests.server_mod._refresh_state_cache(
@@ -346,11 +352,14 @@ def test_real_b5_server_fixture_and_real_fabric_composer_reduce_current_root(tmp
         root_job_id="JOB-B5",
         source_validity=envelope["source_validity"],
         cache_currentness={"state": "fresh", "publication_seq": envelope["source_validity"]["publication_seq"]},
-        source_generation={},
+        source_generation=None,
     )
 
     assert "qualification_generation" not in envelope["source_validity"]
-    assert document["read_state"]["state"] == "CURRENT"
+    assert document["read_state"]["state"] == "PARTIAL"
+    assert document["posture"] == {
+        "value": "CONSUMPTION_UNKNOWN", "rule": "E3", "evidence": [],
+    }
     assert document["mission"]["root_job_id"] == "JOB-B5"
     assert document["principal"]["accountable_seat"] == "ceo"
     assert document["children"]["state"] == "AVAILABLE"
@@ -394,15 +403,73 @@ def test_each_currentness_contract_failure_independently_refuses_present_livenes
     assert document["posture"]["value"] != "RUNNING"
 
 
+@pytest.mark.parametrize(
+    "diagnostic,projected_state",
+    [
+        (None, "UNKNOWN"),
+        ({}, "UNKNOWN"),
+        ({"state": "UNKNOWN", "version": 1, "generation": 2}, "UNKNOWN"),
+        ({"state": "STALE", "version": 1, "generation": 2}, "STALE"),
+        ({"state": "CURRENT", "version": 1, "generation": 2}, "CURRENT"),
+        ({"state": "invented", "version": 1, "generation": 2}, "UNKNOWN"),
+    ],
+)
+def test_unproved_generation_diagnostics_never_establish_present_liveness(
+    diagnostic, projected_state,
+):
+    document = _compose(source_generation=diagnostic)
+    assert document["source"]["source_generation"]["state"] == projected_state
+    assert document["read_state"]["state"] == "PARTIAL"
+    assert document["posture"] == {
+        "value": "HISTORICAL_OBSERVATION", "rule": "G1h", "evidence": [],
+    }
+
+
+def test_projected_generation_conflict_drives_the_conflict_predicate():
+    document = _compose(
+        source_generation={"state": "CONFLICT", "version": 1, "generation": 2}
+    )
+    assert document["source"]["source_generation"] == {
+        "state": "CONFLICT", "version": 1, "generation": 2,
+    }
+    assert document["read_state"]["state"] == "PARTIAL"
+    assert document["posture"] == {
+        "value": "RECONCILIATION_REQUIRED", "rule": "B2", "evidence": [],
+    }
+
+
+def test_hidden_generation_conflict_boolean_has_no_unprojected_authority():
+    document = _compose(source_generation={"conflict": True})
+    assert document["source"]["source_generation"] == {
+        "state": "UNKNOWN", "version": None, "generation": None,
+    }
+    assert document["posture"]["rule"] == "G1h"
+
+
+def test_missing_fabric_generation_never_yields_current_or_present_liveness():
+    args = _inputs()
+    args["fabric_view"].pop("generated_at")
+    document = compose_mission_workspace(**args)
+    assert document["source"]["fabric_view_generated_at"] is None
+    assert document["read_state"]["state"] == "PARTIAL"
+    assert document["posture"]["rule"] == "G1h"
+    assert any(
+        row["target_field"] == "source.fabric_view_generated_at"
+        for row in document["missingness"]
+    )
+
+
 def test_decision_current_is_admitted_but_is_not_a_mission_currentness_gate():
     args = _inputs()
+    before = compose_mission_workspace(**copy.deepcopy(args))
     args["source_validity"]["cards"][0]["components"]["decision_current"].update(
         state="expired", remaining_ms=0
     )
     args["control_room"]["autonomy"]["responsibilities"][0]["validity"]["decision_current"].update(
         valid_for_ms=0
     )
-    assert compose_mission_workspace(**args)["read_state"]["state"] == "CURRENT"
+    after = compose_mission_workspace(**args)
+    assert after == before
 
 
 @pytest.mark.parametrize("duplicate", ["program", "responsibility"])
@@ -504,6 +571,99 @@ def test_evidence_accepts_only_the_exact_closed_tuple_and_enums():
     assert output[0]["freshness_state"] in EVIDENCE_FRESHNESS_STATES
 
 
+@pytest.mark.parametrize(
+    "bad_timestamp",
+    [
+        "TbadZ",
+        "2026-13-01T00:00:00Z",
+        "2026-02-29T00:00:00Z",
+        "2026-09-20T24:00:00Z",
+        "2026-09-20T00:00:60Z",
+        "2026-09-20 00:00:00Z",
+        "2026-09-20T00:00:00+00:00",
+    ],
+)
+def test_invalid_evidence_timestamp_is_withheld_with_fixed_missingness(bad_timestamp):
+    args = _inputs()
+    args["control_room"]["work"][0]["evidence"] = [
+        {
+            "owner": "EXECUTIVE_OS",
+            "ref": "private diagnostic must not echo",
+            "field": "root.status",
+            "source_revision": None,
+            "source_time": None,
+            "observed_at": bad_timestamp,
+            "freshness_state": "CURRENT",
+        }
+    ]
+    document = compose_mission_workspace(**args)
+    raw = json.dumps(document, sort_keys=True)
+    assert document["program"]["evidence"] == []
+    assert bad_timestamp not in raw
+    assert "private diagnostic must not echo" not in raw
+    evidence_facts = [
+        row for row in document["missingness"]
+        if row["target_field"] == "program.evidence"
+    ]
+    assert evidence_facts == [
+        {
+            "missingness_class": "DEGRADED",
+            "target_field": "program.evidence",
+            "producer_owner": None,
+            "reason": "source detail withheld",
+        }
+    ]
+
+
+def test_invalid_source_timestamp_is_null_and_generates_fixed_missingness():
+    args = _inputs()
+    args["fabric_view"]["generated_at"] = "TbadZ"
+    document = compose_mission_workspace(**args)
+    assert document["source"]["fabric_view_generated_at"] is None
+    assert document["read_state"]["state"] == "PARTIAL"
+    assert any(
+        row["target_field"] == "source.fabric_view_generated_at"
+        and row["reason"] == "source detail withheld"
+        for row in document["missingness"]
+    )
+    assert "TbadZ" not in json.dumps(document, sort_keys=True)
+
+
+@pytest.mark.parametrize("invalid_evidence", [{"not": "an array"}, [None], "raw diagnostic"])
+def test_invalid_evidence_container_is_not_silently_dropped(invalid_evidence):
+    args = _inputs()
+    args["control_room"]["work"][0]["evidence"] = invalid_evidence
+    document = compose_mission_workspace(**args)
+    assert document["program"]["evidence"] == []
+    assert any(
+        row["target_field"] == "program.evidence"
+        and row["reason"] == "source detail withheld"
+        for row in document["missingness"]
+    )
+    assert "raw diagnostic" not in json.dumps(document, sort_keys=True)
+
+
+def test_invalid_owed_turn_source_receipt_is_withheld_with_fixed_missingness():
+    args = _inputs()
+    owed_turn = args["control_room"]["autonomy"]["responsibilities"][0]["owed_turn"]
+    owed_turn["source_refs"] = [
+        {
+            "owner": "executive_inbox", "ref": "private raw receipt",
+            "observed_at": "TbadZ", "freshness": "current",
+        }
+    ]
+    document = compose_mission_workspace(**args)
+    assert document["principal"]["owed_turn"]["source_refs"] == []
+    assert any(
+        row["target_field"] == "principal.owed_turn.source_refs"
+        and row["reason"] == "source detail withheld"
+        for row in document["missingness"]
+    )
+    raw = json.dumps(document, sort_keys=True)
+    assert "private raw receipt" not in raw
+    assert "TbadZ" not in raw
+
+
 @pytest.mark.parametrize("state", ["CONTINUED", "STOPPED"])
 def test_unproduced_dialogue_states_remain_typed_not_projected(state):
     args = _inputs(dispatch_state=state)
@@ -531,7 +691,7 @@ def test_execution_review_transport_and_acceptance_remain_four_distinct_facets()
         "evidence": [],
     }
     assert document["posture"] == {
-        "value": "REVIEWED_NOT_ACCEPTED", "rule": "F5", "evidence": [],
+        "value": "CONSUMPTION_UNKNOWN", "rule": "E3", "evidence": [],
     }
 
 
@@ -581,6 +741,87 @@ def test_fabric_root_must_be_a_self_identified_root():
     assert document["mission"]["root_job_ambiguous"] is True
     assert document["children"]["coverage"] == "INCOMPLETE"
     assert document["posture"]["rule"] == "B2"
+
+
+@pytest.mark.parametrize("malformed_result", [None, "BOGUS", {}, {"state": "BOGUS"}])
+def test_malformed_root_result_never_invents_not_started(malformed_result):
+    args = _inputs()
+    args["fabric_view"]["root"]["result"] = malformed_result
+    document = compose_mission_workspace(**args)
+    assert document["execution"]["state"] is None
+    assert document["posture"]["value"] not in {"NOT_STARTED", "RUNNING", "WAITING"}
+    assert any(
+        row["missingness_class"] == "DEGRADED" and row["target_field"] == "execution"
+        for row in document["missingness"]
+    )
+    assert "BOGUS" not in json.dumps(document, sort_keys=True)
+
+
+def test_explicit_valid_not_started_result_remains_a_real_execution_fact():
+    args = _inputs(execution_state="NOT_STARTED")
+    document = compose_mission_workspace(**args)
+    assert document["execution"]["state"] == "NOT_STARTED"
+
+
+def _child_row(job_id="CHILD", *, root_job_id="JOB-1"):
+    return {
+        "job_id": job_id,
+        "root_job_id": root_job_id,
+        "parent_job_id": "JOB-1",
+        "status": "RUNNING",
+        "depth": 1,
+        "orchestration_role": "work",
+        "plan_step_id": None,
+        "attempt_count": 0,
+        "attempt_limit": 1,
+        "current_attempt_id": None,
+        "latest_attempt": None,
+    }
+
+
+@pytest.mark.parametrize("invalid_kind", ["malformed", "duplicate", "wrong_root"])
+def test_invalid_child_identity_rows_are_rejected_without_false_empty_complete(invalid_kind):
+    args = _inputs()
+    valid = _child_row("VALID")
+    if invalid_kind == "malformed":
+        rows = [None, valid]
+    elif invalid_kind == "duplicate":
+        rows = [_child_row("DUP"), _child_row("DUP"), valid]
+    else:
+        rows = [_child_row("WRONG", root_job_id="OTHER-ROOT"), valid]
+    args["fabric_view"]["children"] = rows
+
+    document = compose_mission_workspace(**args)
+    section = document["children"]
+    assert section["state"] == "PARTIAL"
+    assert section["coverage"] == "INCOMPLETE"
+    assert section["total_count"] is None
+    assert section["overflow_count"] is None
+    assert [row["job_id"] for row in section["items"]] == ["VALID"]
+    assert any(
+        row["missingness_class"] == "DEGRADED" and row["target_field"] == "children"
+        for row in document["missingness"]
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda fabric: fabric.pop("children"),
+        lambda fabric: fabric.update(children=None),
+        lambda fabric: fabric.update(unjoined_job_count=None),
+        lambda fabric: fabric.update(unjoined_job_count=True),
+        lambda fabric: fabric.pop("unjoined_job_ids"),
+    ],
+)
+def test_exact_child_zero_requires_a_valid_owner_document(mutation):
+    args = _inputs()
+    mutation(args["fabric_view"])
+    section = compose_mission_workspace(**args)["children"]
+    assert section["state"] == "PARTIAL"
+    assert section["coverage"] == "INCOMPLETE"
+    assert section["total_count"] is None
+    assert section["overflow_count"] is None
 
 
 @pytest.mark.parametrize("armed, expected", [(False, "UNAVAILABLE_NEW_SUBMISSION"), (True, "UNKNOWN"), (None, "UNKNOWN")])
