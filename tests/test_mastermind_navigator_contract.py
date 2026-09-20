@@ -1248,12 +1248,17 @@ def test_negative_action_serviceability_requires_exhausted_typed_probe_evidence(
     for field, value in (
         ("safe_probe_status", "AVAILABLE"),
         ("requested_action_preflight", "UNPROBED"),
-        ("requested_action_discovery", "UNKNOWN"),
     ):
         hostile = copy.deepcopy(refused)
         hostile["surfaces"][0][field] = value
         with pytest.raises(jsonschema.ValidationError):
             validator.validate(hostile)
+
+    # Exact refusal is independently decisive even if discovery metadata is
+    # otherwise UNKNOWN; the contract requires absence OR explicit refusal.
+    refused_with_unknown_discovery = copy.deepcopy(refused)
+    refused_with_unknown_discovery["surfaces"][0]["requested_action_discovery"] = "UNKNOWN"
+    validator.validate(refused_with_unknown_discovery)
 
 
 def test_unprobed_action_with_safe_probe_requires_next_probe() -> None:
