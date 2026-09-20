@@ -9,6 +9,7 @@ state.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,7 @@ from typing import Any, Callable
 
 from . import web_sol_instance as wsi
 from . import web_sol_protocol as wsp
+from . import web_sol_census_protocol as census
 
 NATIVE_HOST_NAME = "com.mastermind.web_sol_surface"
 EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
@@ -57,6 +59,8 @@ _PROBE_KEYS = frozenset(
     }
 )
 _SERVER_SOCKET_IDENTITIES: dict[int, tuple[int, int]] = {}
+_TYPED_REENTRY_NONCES: set[str] = set()
+MAX_TYPED_REENTRY_NONCES = 256
 
 
 class NativeHostError(RuntimeError):
@@ -473,26 +477,27 @@ def _is_probe_event(message: Any) -> bool:
 
 
 def _timeout_code(request: dict[str, Any]) -> str:
-    return (
-        "foreground_effect_unknown"
-        if request["action"] == "FOREGROUND"
-        else "inspect_timeout"
-    )
+    if request.get("action") == "FOREGROUND":
+        return "foreground_effect_unknown"
+    if request.get("action") == "TYPED_REENTRY":
+        return "typed_reentry_timeout"
+    return "census_timeout" if request.get("schema") == census.REQUEST_SCHEMA else "inspect_timeout"
 
 
 def _receipt_matches(
     request: dict[str, Any],
     receipt: dict[str, Any],
 ) -> bool:
-    return all(receipt[field] == request[field] for field in _MATCH_FIELDS)
+    fields = census.IDENTITY_FIELDS if request.get("schema") == census.REQUEST_SCHEMA else _MATCH_FIELDS
+    return all(receipt.get(field) == request[field] for field in fields)
 
 
 def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
-    return (
-        "foreground_effect_unknown"
-        if request["action"] == "FOREGROUND"
-        else default
-    )
+    if request.get("action") == "FOREGROUND":
+        return "foreground_effect_unknown"
+    if request.get("action") == "TYPED_REENTRY":
+        return "typed_reentry_effect_unknown"
+    return default
 
 
 def _validate_timeout_seconds(timeout_seconds: float) -> float:
@@ -517,7 +522,26 @@ def forward_request(
     """Forward one exact action once and wait for its matching receipt."""
 
     timeout = _validate_timeout_seconds(timeout_seconds)
-    accepted = wsp.validate_request(request)
+    is_census = request.get("schema") == census.REQUEST_SCHEMA if isinstance(request, dict) else False
+    accepted = census.validate_census_window(request) if is_census else wsp.validate_request(request)
+    if not is_census:
+        accepted = wsp.validate_action_window(accepted, now=datetime.now(timezone.utc))
+    if (
+        accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value
+        and accepted["nonce"] in _TYPED_REENTRY_NONCES
+    ):
+        raise NativeHostError("nonce_reused")
+    if (
+        accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value
+        and len(_TYPED_REENTRY_NONCES) >= MAX_TYPED_REENTRY_NONCES
+    ):
+        raise wsp._error(
+            "$.nonce",
+            "nonce ledger full; TYPED_REENTRY is closed",
+        )
+    if accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
+        _TYPED_REENTRY_NONCES.add(accepted["nonce"])
+    fields = census.IDENTITY_FIELDS if is_census else _MATCH_FIELDS
     exchange_deadline = deadline or Deadline(ends_at=monotonic() + timeout)
     _remaining_or_timeout(
         exchange_deadline,
@@ -526,42 +550,46 @@ def forward_request(
     )
     write_chrome(accepted)
     ignored = 0
-    while True:
-        remaining = _remaining_or_timeout(
-            exchange_deadline,
-            monotonic,
-            _timeout_code(accepted),
-        )
-        assert remaining is not None
-        message = read_chrome(remaining)
-        if message is None:
-            raise NativeHostError(_timeout_code(accepted))
-        if _is_probe_event(message):
-            ignored += 1
-            if ignored > 32:
+    try:
+        while True:
+            remaining = _remaining_or_timeout(
+                exchange_deadline,
+                monotonic,
+                _timeout_code(accepted),
+            )
+            assert remaining is not None
+            message = read_chrome(remaining)
+            if message is None:
+                raise NativeHostError(_timeout_code(accepted))
+            if _is_probe_event(message):
+                ignored += 1
+                if ignored > 32:
+                    raise ChromeChannelError(
+                        _untrusted_receipt_code(accepted, "probe_event_limit")
+                    )
+                continue
+            if (
+                isinstance(message, dict)
+                and all(field in message for field in fields)
+                and not _receipt_matches(accepted, message)
+            ):
                 raise ChromeChannelError(
-                    _untrusted_receipt_code(accepted, "probe_event_limit")
+                    _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
                 )
-            continue
-        if (
-            isinstance(message, dict)
-            and all(field in message for field in _MATCH_FIELDS)
-            and not _receipt_matches(accepted, message)
-        ):
-            raise ChromeChannelError(
-                _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
-            )
-        try:
-            receipt = wsp.validate_receipt(message)
-        except wsp.WebSolProtocolError as exc:
-            raise ChromeChannelError(
-                _untrusted_receipt_code(accepted, "receipt_invalid")
-            ) from exc
-        if not _receipt_matches(accepted, receipt):
-            raise ChromeChannelError(
-                _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
-            )
-        return receipt
+            try:
+                receipt = census.validate_census_receipt(message) if is_census else wsp.validate_receipt(message)
+            except wsp.WebSolProtocolError as exc:
+                raise ChromeChannelError(
+                    _untrusted_receipt_code(accepted, "receipt_invalid")
+                ) from exc
+            if not _receipt_matches(accepted, receipt):
+                raise ChromeChannelError(
+                    _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
+                )
+            _remaining_or_timeout(exchange_deadline, monotonic, _timeout_code(accepted))
+            return receipt
+    except BaseException:
+        raise
 
 
 def _private_parent(path: Path, owner_uid: int) -> None:
@@ -764,7 +792,8 @@ def _serve_client(
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
     timeout = _validate_timeout_seconds(timeout_seconds)
-    deadline = Deadline(ends_at=monotonic() + timeout)
+    started = monotonic()
+    deadline = Deadline(ends_at=started + min(timeout, 5.0))
     with client:
         reader = client.makefile("rb", buffering=0)
         writer = client.makefile("wb", buffering=0)
@@ -783,6 +812,11 @@ def _serve_client(
                 deadline=deadline,
                 monotonic=monotonic,
             )
+            if request.get("schema") == census.REQUEST_SCHEMA:
+                request = census.validate_census_window(request)
+                if request["adapter_instance_id"] != expected_instance_id:
+                    raise NativeHostError("transport_instance_mismatch")
+                deadline = Deadline(ends_at=started + census.TOTAL_SECONDS)
             receipt = forward_request(
                 request,
                 write_chrome=lambda document: _write_chrome(

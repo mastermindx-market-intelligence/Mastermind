@@ -7,7 +7,7 @@ no provider process, session, reader, retry, registry, or lifecycle state.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from control_plane.executive_worker_broker import RemoteBrokerError
@@ -40,6 +40,7 @@ class CodexCurrentWriterWakeClient:
         attempt_id: str,
         runtime_binding: RuntimeBinding,
         completion_timeout_seconds: float = 15.0,
+        pre_submit_guard: Callable[[], None] | None = None,
     ) -> None:
         if not callable(getattr(operator_adapter, "deliver_attention", None)):
             raise TypeError("operator_adapter must support current-writer attention")
@@ -68,11 +69,14 @@ class CodexCurrentWriterWakeClient:
             or not 0.1 <= float(timeout) <= 300.0
         ):
             raise ValueError("completion_timeout_seconds is outside (0.1, 300]")
+        if pre_submit_guard is not None and not callable(pre_submit_guard):
+            raise TypeError("pre_submit_guard must be callable or None")
         self._operator_adapter = operator_adapter
         self._generation = generation
         self._attempt_id = str(attempt_id)
         self._runtime_binding = runtime_binding
         self._completion_timeout_seconds = float(timeout)
+        self._pre_submit_guard = pre_submit_guard
 
     async def deliver_wake(
         self,
@@ -130,6 +134,14 @@ class CodexCurrentWriterWakeClient:
         opaque_ids: tuple[str, ...],
         instruction: str,
     ) -> CodexWakeDeliveryObservation:
+        guard = self._pre_submit_guard
+        if guard is not None:
+            try:
+                guard()
+            except WakePreSubmitError:
+                raise
+            except Exception as exc:
+                raise _pre_submit("current Codex writer guard refused submission") from exc
         try:
             observation = self._operator_adapter.deliver_attention(
                 generation=self._generation,

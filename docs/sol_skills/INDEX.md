@@ -86,6 +86,19 @@ Do not call architecture/docs “built,” a merged implementation “proven liv
 Use when opening/recovering a program, workstream, unfamiliar task, or fresh CEO session.
 Produces a current-state model, disagreement ledger and exact next action.
 
+### `ACTIVE_EXECUTION.md`
+Mandatory after current-state recovery for substantial continuing or modifying CEO work in the
+active session. It keeps Sol on the highest-leverage unblocked critical-path dependency, prevents
+status/artifact substitution and repeated tool rediscovery, and applies the final-response gate.
+
+### `WEB_CEO_DELEGATION.md`
+Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires
+principal-duty selection, delegation economics, worker packets, capacity-aware routing, or
+evidence/continuity handling. Load it from the same pinned Skillpack revision. ACTIVE_EXECUTION
+remains the sole active-turn, no-delta and finalization owner; this companion does not select a
+provider, account, credential, host, model setting, or reasoning mode, and grants no lifecycle,
+admission, retry, transfer, effect, or production authority.
+
 ### `REVIEW_RETURN.md`
 Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed
 completion. Reviews against original outcome, not merely implementation quality.
@@ -202,6 +215,11 @@ specific law.
     and thread-root timestamp. A same-channel top-level post is not the same carrier. When a Sol or
     Chairman commission is the thread parent, pickup/start/return/ruling/STOP edges stay under that
     exact parent unless current canonical transport law explicitly establishes a different carrier.
+23. Forward execution. After current-source recovery, keep advancing the highest-leverage unblocked
+    dependency in the Chairman-authorized scope. A genuine blocker freezes that lane, not the whole
+    turn, while another useful independent lane remains. Supporting artifacts do not substitute for
+    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`; durable
+    work may outlive the turn only through a production-proven external owner with a real return path.
 
 ## Modification handshake
 

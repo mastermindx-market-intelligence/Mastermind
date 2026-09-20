@@ -677,7 +677,13 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
     root = Path(__file__).resolve().parent.parent
     package = root / "integrations" / "mastermind_company_mcp"
     imports = {path.name: _imported_modules(path) for path in sorted(package.glob("*.py"))}
-    assert set(imports) == {"__init__.py", "adapter.py", "schemas.py", "server.py"}
+    assert set(imports) == {
+        "__init__.py",
+        "adapter.py",
+        "consultation.py",
+        "schemas.py",
+        "server.py",
+    }
     for filename, modules in imports.items():
         mcp_imports = {module for module in modules if module == "mcp" or module.startswith("mcp.")}
         assert bool(mcp_imports) is (filename == "server.py")

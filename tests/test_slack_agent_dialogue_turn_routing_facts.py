@@ -148,6 +148,7 @@ def _terminal_receipt() -> TerminalReturnProjectionReceipt:
 
 def _terminal_snapshot():
     return snapshot(
+        attempt_id=_terminal_candidate().attempt_id,
         attempt_status=AttemptStatus.COMPLETED,
         worker_status=WorkerStatus.AVAILABLE,
     )
@@ -177,8 +178,12 @@ def test_terminal_routing_derives_targets_without_busy_worker_or_stale_worker_bi
 @pytest.mark.parametrize(
     "current",
     [
-        snapshot(attempt_status=AttemptStatus.COMPLETED, worker_status=WorkerStatus.BUSY),
-        snapshot(attempt_status=AttemptStatus.RUNNING, worker_status=WorkerStatus.AVAILABLE),
+        dataclasses.replace(
+            _terminal_snapshot(), worker_status=WorkerStatus.BUSY
+        ),
+        dataclasses.replace(
+            _terminal_snapshot(), attempt_status=AttemptStatus.RUNNING
+        ),
         dataclasses.replace(_terminal_snapshot(), job_id="JOB-999"),
         dataclasses.replace(_terminal_snapshot(), root_job_id="JOB-999"),
         dataclasses.replace(_terminal_snapshot(), attempt_id="ATT-999"),

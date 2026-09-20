@@ -102,6 +102,10 @@ MAX_REQUEST_BYTES = 8192
 #: this bound is a protocol/backend defect and must refuse, never truncate.
 MAX_RESPONSE_BYTES = 32768
 
+# Closed internal read capabilities for the separately configured App peer.
+APP_READ_SCHEMA = "mastermind.executive_ceo_ingress_app_read.v1"
+APP_GROUNDING_SCHEMA = "mastermind.executive_ceo_ingress_app_grounding.v1"
+
 #: §7.2 — exact status id validation.
 STATUS_ID_RE = re.compile(r"^slack-[0-9a-f]{32}$")
 

@@ -11,6 +11,7 @@ import os
 import signal
 import sys
 import uuid
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,19 @@ from scripts.ohf.fixtures import (
     OHF_PROBE_TURN_ACK,
 )
 
+# CAP-S1 addendum (Sol wave-3 review 5087373998, finding 1): turn-specific,
+# closed-marker-compliant replies keyed by the captured Skill turn-input's
+# ``name`` -- gated behind ``OHF_FAKE_CAP_S1_TURN_REPLIES=1`` so every other
+# fake-App-Server caller (including this module's own default behavior) is
+# unaffected. Each reply carries its turn's required standalone token and
+# withholds its forbidden one, per the vertical amendment's closed marker law.
+CAP_S1_TURN_REPLIES: dict[str, str] = {
+    "receive-commission": "PICKUP-ACK: synthetic operation acknowledged; work not begun.",
+    "return-progress": "PROGRESS: synthetic operation moving forward, not finished.",
+    "escalate-decision": "DECISION-REQUEST: ambiguity found, awaiting explicit ruling.",
+    "finish-operation": "RESULT: synthetic operation output recorded.",
+}
+
 
 class FakeAppServer:
     def __init__(self) -> None:
@@ -32,6 +46,12 @@ class FakeAppServer:
         self.include_mcp = os.environ.get("OHF_FAKE_MCP_GONE") != "1"
         self.leak = os.environ.get("OHF_FAKE_LEAK") == "1"
         self.flat_skills = os.environ.get("OHF_FAKE_FLAT_SKILLS") == "1"
+        self.skills_omit_path = os.environ.get("OHF_FAKE_SKILLS_OMIT_PATH") == "1"
+        self.skills_malformed_enabled = os.environ.get("OHF_FAKE_SKILLS_MALFORMED_ENABLED") or ""
+        self.ambient_skill = os.environ.get("OHF_FAKE_AMBIENT_SKILL") or ""
+        self.skills_changed_notify = os.environ.get("OHF_FAKE_SKILLS_CHANGED") == "1"
+        self.bundled_disabled = os.environ.get("OHF_FAKE_BUNDLED_DISABLED") == "1"
+        self.cap_s1_turn_replies = os.environ.get("OHF_FAKE_CAP_S1_TURN_REPLIES") == "1"
         self.native_helper = os.environ.get("OHF_FAKE_NATIVE_HELPER") == "1"
         self.native_helper_depth = int(
             os.environ.get("OHF_FAKE_NATIVE_HELPER_DEPTH") or "1"
@@ -40,6 +60,33 @@ class FakeAppServer:
             os.environ.get("OHF_FAKE_NATIVE_HELPER_MODEL_OVERRIDE") == "1"
         )
         self.die_after = int(os.environ.get("OHF_FAKE_DIE_AFTER") or "0")
+        self.gate_held = os.environ.get("OHF_FAKE_GATE_MODE") == "held"
+        self.gate_path = Path(
+            os.environ.get("OHF_FAKE_GATE_PATH")
+            or (self.state_path.parent / "w7_lc1_gate")
+        )
+        self.gate_log_path = Path(
+            os.environ.get("OHF_FAKE_GATE_LOG")
+            or (self.state_path.parent / "w7_lc1_gate.log")
+        )
+        self.item_gate_path = (
+            Path(os.environ["OHF_FAKE_ITEM_GATE_PATH"])
+            if os.environ.get("OHF_FAKE_ITEM_GATE_PATH")
+            else None
+        )
+        self.effect_counter_path = (
+            Path(os.environ.get("OHF_FAKE_EFFECT_COUNTERS"))
+            if os.environ.get("OHF_FAKE_EFFECT_COUNTERS")
+            else None
+        )
+        self.visible_updates = [
+            value
+            for value in (
+                os.environ.get("OHF_FAKE_VISIBLE_UPDATES")
+                or "LC1 partial one;LC1 final one;LC1 partial two;LC1 final two"
+            ).split(";")
+            if value
+        ]
         self.requests_seen = 0
         self.initialized = False
         self.threads: dict[str, dict[str, Any]] = {}
@@ -47,6 +94,13 @@ class FakeAppServer:
         self.mcp_status = "ready" if self.include_mcp else "missing"
         self._load()
         signal.signal(signal.SIGTERM, self._on_term)
+
+    def _effect(self, name: str) -> None:
+        if self.effect_counter_path is None:
+            return
+        self.effect_counter_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.effect_counter_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{name}\n")
 
     def _untrusted_blob(self) -> str:
         return os.environ.get("OHF_FAKE_UNTRUSTED_BLOB") or ""
@@ -102,22 +156,42 @@ class FakeAppServer:
         return self.threads.get(thread_id)
 
     def _discover_skills(self, extra_dirs: list[Path]) -> list[dict[str, Any]]:
-        names: dict[str, Path] = {}
+        """Row-preserving, deterministically ordered skill discovery.
+
+        Unlike a name-keyed map, a same-name skill served by two roots
+        yields TWO rows here — CAP-S1's fidelity requirement — ordered by
+        per-root scan order (alphabetical by skill name within a root),
+        then by root order (bundled root, then extra roots in the order
+        they were set, then any per-call extra dirs).
+        """
+        rows: list[dict[str, Any]] = []
         roots = [self.skill_root, *self.extra_roots, *extra_dirs]
         for root in roots:
             if not root.exists():
                 continue
-            for skill_md in root.glob("*/SKILL.md"):
-                names[skill_md.parent.name] = skill_md.parent
-        return [
-            {
-                "name": name,
-                "enabled": True,
-                "path": str(path),
-                "scope": "repo",
-            }
-            for name, path in sorted(names.items())
-        ]
+            for skill_md in sorted(root.glob("*/SKILL.md"), key=lambda p: p.parent.name):
+                rows.append(self._skill_row(skill_md.parent.name, str(skill_md.parent)))
+        if self.ambient_skill:
+            rows.append(
+                self._skill_row(
+                    self.ambient_skill,
+                    str(Path("/fake-ambient-skills") / self.ambient_skill / "SKILL.md"),
+                )
+            )
+        return rows
+
+    def _skill_row(self, name: str, path: str) -> dict[str, Any]:
+        row: dict[str, Any] = {"name": name}
+        if self.skills_malformed_enabled == "missing":
+            pass
+        elif self.skills_malformed_enabled == "string":
+            row["enabled"] = "true"
+        else:
+            row["enabled"] = True
+        if not self.skills_omit_path:
+            row["path"] = path
+        row["scope"] = "repo"
+        return row
 
     def handle(self, message: dict[str, Any]) -> None:
         method = message.get("method")
@@ -125,15 +199,44 @@ class FakeAppServer:
         params = message.get("params") or {}
         if request_id is not None:
             self.requests_seen += 1
+            self._effect("provider_calls")
+            if method == "thread/start":
+                self._effect("session_starts")
+            elif method == "thread/resume":
+                self._effect("resumes")
+            elif method == "thread/fork":
+                self._effect("parent_obligations")
+            elif method == "thread/turns/list":
+                self._effect("raw_collections")
             if self.die_after and self.requests_seen >= self.die_after:
                 self._save()
                 raise SystemExit(9)
         if method == "initialize":
             self.initialized = True
+            user_agent = "ohf-fake-app-server/p0b"
+            if os.environ.get("OHF_FAKE_ECHO_CLIENT_INFO") == "1":
+                # Faithful to the real App Server, whose returned userAgent
+                # incorporates the caller's declared clientInfo: a probe and a
+                # launch that identify differently observe DIFFERENT versions.
+                # This made the CAP-S1 live canary's version-equality gate
+                # refuse (EFFECT_UNKNOWN, PR #350) while every fake-backed
+                # gate passed against the constant string above. Opt-in so
+                # legacy fixtures sealing the bare constant stay valid.
+                client = params.get("clientInfo") if isinstance(params, dict) else None
+                name = str((client or {}).get("name") or "unknown")
+                version = str((client or {}).get("version") or "0")
+                user_agent = f"ohf-fake-app-server/p0b ({name}/{version})"
+            suffix = os.environ.get("OHF_FAKE_UA_SUFFIX")
+            if suffix:
+                # Faithful to the real binary, whose userAgent embeds
+                # env-derived terminal identity: a process that inherits
+                # extra environment reports a DIFFERENT version string than
+                # a sanitized one (second live EFFECT_UNKNOWN, PR #350).
+                user_agent = f"{user_agent} [{suffix}]"
             self._ok(
                 request_id,
                 {
-                    "userAgent": "ohf-fake-app-server/p0b",
+                    "userAgent": user_agent,
                     "codexHome": str(self.state_path.parent),
                     "platformFamily": "unix",
                     "platformOs": sys.platform,
@@ -214,6 +317,7 @@ class FakeAppServer:
             )
             return
         if method == "thread/turns/list":
+            self._effect("candidate_collections")
             thread = self._require_thread(str(params.get("threadId") or ""))
             if thread is None:
                 self._error(request_id, "native session reference missing", code=-32004)
@@ -239,15 +343,38 @@ class FakeAppServer:
             if not Path(thread.get("cwd") or self.workspace).exists():
                 self._error(request_id, "workspace missing", code=-32005)
                 return
-            turn_id = f"turn_{uuid.uuid4().hex[:8]}"
             text_in = ""
+            input_skills: list[dict[str, Any]] = []
             for item in params.get("input") or []:
-                if isinstance(item, dict) and item.get("type") == "text":
+                if not isinstance(item, dict):
+                    continue
+                input_kind = item.get("type")
+                if input_kind == "text":
                     text_in += str(item.get("text") or "")
-                if isinstance(item, dict) and item.get("type") == "skill":
-                    text_in += str(item.get("name") or "")
+                elif input_kind == "skill":
+                    skill_name = item.get("name")
+                    skill_path = item.get("path")
+                    if (
+                        not isinstance(skill_name, str)
+                        or not skill_name.strip()
+                        or not isinstance(skill_path, str)
+                        or not skill_path.startswith("/")
+                    ):
+                        self._error(request_id, "malformed skill input item", code=-32008)
+                        return
+                    text_in += skill_name
+                    input_skills.append(dict(item))
+            turn_id = f"turn_{uuid.uuid4().hex[:8]}"
+            self._effect("turn_starts")
+            cap_s1_reply = None
+            if self.cap_s1_turn_replies and input_skills:
+                skill_name = str(input_skills[-1].get("name") or "")
+                cap_s1_reply = CAP_S1_TURN_REPLIES.get(skill_name)
             fixture_reply = os.environ.get("OHF_FAKE_TURN_REPLY")
-            if fixture_reply is not None:
+            if cap_s1_reply is not None:
+                reply = cap_s1_reply
+                item_type = "agent_message"
+            elif fixture_reply is not None:
                 reply = fixture_reply
                 item_type = "agent_message"
             elif OHF_PROBE_SKILL_NAME in text_in or "$ohf-probe" in text_in:
@@ -269,11 +396,74 @@ class FakeAppServer:
                     "items": [
                         {"type": "agentMessage", "text": reply, "content": [{"type": "text", "text": reply}]}
                     ],
+                    "inputSkills": input_skills,
                 }
             )
             self._save()
-            turn = {"id": turn_id, "status": "completed", "threadId": thread_id}
+            turn = {
+                "id": turn_id,
+                "status": "running" if self.gate_held else "completed",
+                "threadId": thread_id,
+            }
             self._ok(request_id, {"turn": turn})
+            if self.gate_held:
+                self._effect("native_acks")
+                self.gate_log_path.parent.mkdir(parents=True, exist_ok=True)
+                with self.gate_log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(
+                        f"gate=held turn={turn_id} terminal=pending "
+                        f"gate_path={self.gate_path}\n"
+                    )
+                self._notify("turn/started", {"turn": {"id": turn_id}})
+                if self.item_gate_path is not None:
+                    while self.item_gate_path.exists():
+                        time.sleep(0.01)
+                for index, text in enumerate(self.visible_updates):
+                    self._notify(
+                        "item/updated",
+                        {
+                            "threadId": thread_id,
+                            "turnId": turn_id,
+                            "item": {
+                                "id": f"item_{turn_id}_{index}",
+                                "sequence": index,
+                                "type": "agentMessage",
+                                "text": text,
+                            }
+                        },
+                    )
+                self._notify(
+                    "item/completed",
+                    {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
+                        "item": {
+                            "id": f"item_{turn_id}_0",
+                            "sequence": 0,
+                            "type": "agentMessage",
+                            "text": self.visible_updates[0],
+                        }
+                    },
+                )
+                self._notify(
+                    "item/completed",
+                    {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
+                        "item": {
+                            "id": f"item_{turn_id}_1",
+                            "sequence": 1,
+                            "type": "agentMessage",
+                            "text": self.visible_updates[1],
+                        }
+                    },
+                )
+                while self.gate_path.exists():
+                    time.sleep(0.01)
+                with self.gate_log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(f"gate=released turn={turn_id}\n")
+                self._notify("turn/completed", {"turn": {**turn, "status": "completed"}})
+                return
             self._notify("turn/started", {"turn": {"id": turn_id}})
             if self.native_helper:
                 child_id = f"thr_{uuid.uuid4().hex[:10]}"
@@ -403,7 +593,7 @@ class FakeAppServer:
             if self.flat_skills:
                 self._ok(
                     request_id,
-                    {"data": [{"name": item["name"], "path": item["path"]} for item in skills]},
+                    {"data": [{"name": item["name"], "path": item.get("path")} for item in skills]},
                 )
                 return
             self._ok(
@@ -425,6 +615,8 @@ class FakeAppServer:
             if isinstance(roots, list):
                 self.extra_roots = [Path(str(item)) for item in roots]
             self._ok(request_id, {})
+            if self.skills_changed_notify:
+                self._notify("skills/changed", {})
             return
         if method == "config/read":
             mcp = [OHF_PROBE_MCP_SERVER] if self.include_mcp else []
@@ -456,20 +648,20 @@ class FakeAppServer:
                     "max_concurrent_threads_per_session": 2,
                     "non_code_mode_only": False,
                 }
-            self._ok(
-                request_id,
-                {
-                    "config": {
-                        "model": self.model,
-                        "approval_policy": "never",
-                        "sandbox_mode": "read-only",
-                        "agents": agents,
-                        "features": features,
-                        "mcp_servers": {name: {"command": "python3"} for name in mcp},
-                        "plugins": {},
-                    }
-                },
-            )
+            config: dict[str, Any] = {
+                "model": self.model,
+                "approval_policy": "never",
+                "sandbox_mode": "read-only",
+                "agents": agents,
+                "features": features,
+                "mcp_servers": {name: {"command": "python3"} for name in mcp},
+                "plugins": {},
+            }
+            if self.bundled_disabled:
+                skills_config = dict(config.get("skills") or {})
+                skills_config["bundled"] = {"enabled": False}
+                config["skills"] = skills_config
+            self._ok(request_id, {"config": config})
             return
         if method == "mcpServerStatus/list":
             if not self.include_mcp:

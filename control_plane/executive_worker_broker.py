@@ -46,27 +46,24 @@ from control_plane.executive_ambient_process import (
     NullAmbientClassifier,
 )
 from control_plane.codex_worker import (
-    ArtifactReceipt,
-    BinaryAttestation,
-    CancelReceipt,
-    CodexWorkerAdapter,
-    CollectionReceipt,
     GitPreflightFailed,
     GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
-    LaunchSpec,
     LaunchValidationStageError,
     ProcessIdentityError,
-    ProcessRef,
-    ValidationReceipt,
-    WorkerResult,
-    WorkerRunStatus,
+)
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    WorkerExecutionAdapter,
+    adapter_descriptor,
+    bind_reviewed_adapter,
 )
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
@@ -115,13 +112,22 @@ from control_plane.operator_materialization_receipt import (
     requested_profile_digest,
     validate_materialization_request,
 )
+from control_plane.worker_execution_contract import (
+    ArtifactReceipt,
+    BinaryAttestation,
+    CancelReceipt,
+    CollectionReceipt,
+    ValidationReceipt,
+    WorkerLaunchSpec,
+    WorkerProcessRef,
+    WorkerResult,
+    WorkerRunStatus,
+)
 from control_plane.worker_browser_b1 import (
     BrowserReviewReceipt,
     BrowserReviewError,
     browser_review_receipt,
 )
-
-
 BROKER_REQUEST_SCHEMA_VERSION = "mastermind.executive_worker_broker_request/v1"
 BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1"
 UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v2"
@@ -164,6 +170,7 @@ _OHF_OPERATIONS = frozenset(
         "ohf-begin-turn",
         "ohf-deliver-attention",
         "ohf-collect-turn",
+        "ohf-observe-turn",
         "ohf-interrupt",
         "ohf-stop",
         "ohf-cancel",
@@ -209,6 +216,10 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class WorkerAdapterNotImplementedError(WorkerBrokerError):
+    """A reviewed adapter is not implemented for broker execution."""
 
 
 class BrokerPreSubmitError(WorkerBrokerError):
@@ -465,7 +476,10 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, UIDSweepReceipt):
         return _jsonable(value.to_dict())
     if dataclasses.is_dataclass(value):
-        return _jsonable(dataclasses.asdict(value))
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
     if isinstance(value, enum.Enum):
         return value.value
     if isinstance(value, Path):
@@ -886,8 +900,8 @@ class BrokerPolicy:
 
 @dataclasses.dataclass
 class _BrokerRun:
-    spec: LaunchSpec
-    process_ref: ProcessRef
+    spec: WorkerLaunchSpec
+    process_ref: WorkerProcessRef
     validation_commands: tuple[tuple[str, ...], ...]
     launch_attestation: Any = None
     collected_receipt: Any = None
@@ -972,7 +986,6 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "run_dir",
         "prompt",
         "result_schema_path",
-        "codex_home",
         "authorities",
         "authority",
         "model",
@@ -997,11 +1010,27 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "require_secret_canary",
     }
 )
+_PROVIDER_OWNED_LAUNCH_FIELDS = frozenset(
+    {
+        "codex_home",
+        "provider_home",
+        "claude_home",
+        "credential_path",
+        "api_key",
+        "token",
+        "provider_session_id",
+    }
+)
 
 
-def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
+def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec:
     if not isinstance(value, dict):
         raise BrokerProtocolError("launch_spec must be an object")
+    provider_owned = set(value).intersection(_PROVIDER_OWNED_LAUNCH_FIELDS)
+    if provider_owned:
+        raise BrokerProtocolError(
+            f"launch_spec includes provider-owned fields: {sorted(provider_owned)}"
+        )
     unknown = set(value) - _LAUNCH_SPEC_FIELDS
     if unknown:
         raise BrokerProtocolError(f"launch_spec has unknown fields: {sorted(unknown)}")
@@ -1013,7 +1042,6 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
         "run_dir",
         "prompt",
         "result_schema_path",
-        "codex_home",
         "expected_base_sha",
     }
     missing = required - set(value)
@@ -1043,11 +1071,6 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
     workspace = _resolve_child(value["workspace_path"], policy.workspace_root, field="workspace_path")
     run_dir = _resolve_child(value["run_dir"], policy.run_root, field="run_dir")
     schema = _resolve_child(value["result_schema_path"], run_dir, field="result_schema_path")
-    if not isinstance(value["codex_home"], str):
-        raise BrokerProtocolError("launch_spec CODEX_HOME must be an absolute path string")
-    provider_home = Path(value["codex_home"]).resolve(strict=True)
-    if provider_home != Path(policy.provider_home).resolve(strict=True):
-        raise BrokerProtocolError("launch_spec CODEX_HOME is not the dedicated provider home")
     authorities = value.get("authorities", [])
     artifacts = value.get("allowed_artifact_paths", [])
     isolation = value.get("isolation_roots", [])
@@ -1174,7 +1197,6 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
         "run_dir": run_dir,
         "prompt": value["prompt"],
         "result_schema_path": schema,
-        "codex_home": provider_home,
         "authorities": tuple(authorities),
         "authority": value.get("authority"),
         "worker_user": policy.worker_user,
@@ -1202,7 +1224,7 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
     ):
         if optional in value:
             keyword[optional] = value[optional]
-    return LaunchSpec(**keyword)
+    return WorkerLaunchSpec(**keyword)
 
 
 def get_peer_credentials(peer_socket: socket.socket) -> PeerCredentials:
@@ -1272,10 +1294,11 @@ class ExecutiveWorkerBroker:
 
     def __init__(
         self,
-        adapter: CodexWorkerAdapter,
+        adapter: WorkerExecutionAdapter,
         policy: BrokerPolicy,
         sweeper: ResidualSweeper,
         *,
+        adapter_id: str = "codex-cli",
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
@@ -1286,7 +1309,16 @@ class ExecutiveWorkerBroker:
         ]
         | None = None,
     ) -> None:
+        try:
+            descriptor = bind_reviewed_adapter(adapter, adapter_id)
+        except AdapterBindingError as exc:
+            raise WorkerBrokerError(str(exc)) from exc
+        except Exception as exc:
+            raise WorkerBrokerError(
+                f"worker adapter {adapter_id!r} failed to bind"
+            ) from exc
         self.adapter = adapter
+        self.adapter_id = descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -1321,6 +1353,7 @@ class ExecutiveWorkerBroker:
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
+        self._observer_refusals: list[tuple[Any, str]] = []
         self._state_lock = asyncio.Lock()
         self._starting = False
         self._validation_busy = False
@@ -1435,6 +1468,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
+        if operation == "ohf-observe-turn":
+            return await self._ohf_observe_turn(payload)
         if operation == "ohf-interrupt":
             return await self._ohf_interrupt(payload)
         if operation == "ohf-stop":
@@ -2078,6 +2113,129 @@ class ExecutiveWorkerBroker:
         finally:
             await self._operator_release_busy(state)
 
+    async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        expected = {
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+            "cursor",
+            "max_items",
+        }
+        if set(payload) != expected:
+            raise BrokerStateError("ohf-observe-turn payload fields are invalid")
+        identity_fields = (
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+        )
+        if any(
+            not isinstance(payload[field], str) or not payload[field]
+            for field in identity_fields
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        async with self._state_lock:
+            active = self._operator_run
+            if active is None:
+                self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+                raise BrokerStateError("UNKNOWN_GENERATION")
+            generation_number = active.generation.generation_number
+            worker_id = active.generation.worker_id
+        if (
+            payload["attempt"] != active.epoch.attempt_id
+            or payload["epoch"] != active.epoch.session_epoch_id
+            or payload["generation"] != active.generation.process_generation_id
+            or generation_number != active.generation.generation_number
+            or worker_id != active.generation.worker_id
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        native_turn = None
+        projection = getattr(active.adapter, "visible_turn_projection", None)
+        if projection is None:
+            self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+            raise BrokerStateError("UNKNOWN_GENERATION")
+        grant_key = projection.check_grant(payload["reader_grant"])
+        if grant_key is None:
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
+        exact_local = None
+        generation_state = active.adapter._generations.get(
+            active.generation.process_generation_id
+        )
+        if generation_state is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        for local_turn, candidate_native in generation_state.turns.items():
+            if (
+                local_turn == payload["turn"]
+                and candidate_native
+                and candidate_native == grant_key.native_turn_id
+            ):
+                exact_local = local_turn
+                native_turn = candidate_native
+                break
+        if exact_local is None or native_turn is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        expected_key = TurnKey(
+            active.epoch.attempt_id,
+            active.epoch.session_epoch_id,
+            active.generation.process_generation_id,
+            active.generation.generation_number,
+            active.generation.worker_id,
+            exact_local,
+            native_turn,
+        )
+        if grant_key != expected_key:
+            self._observer_refusals.append((grant_key, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        try:
+            result = projection.read(
+                expected_key,
+                reader_grant=payload["reader_grant"],
+                cursor=payload["cursor"],
+                max_items=payload["max_items"],
+            )
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if not isinstance(code, str):
+                raise
+            self._observer_refusals.append((expected_key, code))
+            raise BrokerStateError(code) from None
+        return {
+            "items": [
+                {
+                    "source_item_id": item.source_item_id,
+                    "source_sequence": item.source_sequence,
+                    "publication_sequence": item.publication_sequence,
+                    "state": item.state,
+                    "text": item.text,
+                    "byte_length": item.byte_length,
+                    "truncated": False,
+                    "gap": None,
+                }
+                for item in result.items
+            ],
+            "next_cursor": result.next_cursor,
+            "gaps": [
+                {
+                    "from_publication_sequence": gap.from_publication_sequence,
+                    "to_publication_sequence": gap.to_publication_sequence,
+                    "reason": gap.reason,
+                }
+                for gap in result.gaps
+            ],
+            "terminal": result.terminal,
+            "publication_epoch": result.publication_epoch,
+            "retained_scope": list(result.retained_scope),
+            "resync_required": result.resync_required,
+        }
+
     async def _ohf_deliver_attention(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send one bounded nudge through the already-owned current writer."""
 
@@ -2618,10 +2776,28 @@ class ExecutiveWorkerBroker:
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        descriptor = adapter_descriptor(self.adapter_id)
+        if not descriptor.implemented:
+            raise WorkerAdapterNotImplementedError(
+                f"worker adapter {descriptor.adapter_id!r} is not implemented "
+                "for broker execution"
+            )
+        binding = getattr(self.adapter, "binding", None)
+        if binding is not None:
+            if getattr(binding, "implementation_state", None) == "SPEC_ONLY":
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "is SPEC_ONLY for broker execution"
+                )
+            if getattr(binding, "autonomous_allowed", None) is False:
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "does not allow autonomous broker execution"
+                )
         self._require_current_autonomy()
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
-        spec = _launch_spec(payload["launch_spec"], self.policy)
+        spec = _launch_spec_from_wire(payload["launch_spec"], self.policy)
         commands = _validation_commands(payload["validation_commands"])
         async with self._state_lock:
             if self._quarantined_reason is not None:
@@ -2637,10 +2813,12 @@ class ExecutiveWorkerBroker:
             if spec.run_id in self._runs:
                 raise BrokerStateError("run_id cannot be reused")
             self._starting = True
+        started = False
         try:
             process_ref = await self.adapter.start(spec)
             attestation_reader = getattr(self.adapter, "launch_attestation", None)
             attestation = attestation_reader(process_ref) if callable(attestation_reader) else None
+            started = True
         except Exception:
             try:
                 self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "start_failed")
@@ -2650,16 +2828,17 @@ class ExecutiveWorkerBroker:
             raise
         finally:
             async with self._state_lock:
+                if started:
+                    # Publish before releasing admission, in the original finalizer.
+                    state = _BrokerRun(
+                        spec=spec,
+                        process_ref=process_ref,
+                        validation_commands=commands,
+                        launch_attestation=attestation,
+                    )
+                    self._remember(spec.run_id, state)
+                    self._active_run_id = spec.run_id
                 self._starting = False
-        async with self._state_lock:
-            state = _BrokerRun(
-                spec=spec,
-                process_ref=process_ref,
-                validation_commands=commands,
-                launch_attestation=attestation,
-            )
-            self._remember(spec.run_id, state)
-            self._active_run_id = spec.run_id
         return {
             "process_ref": process_ref,
             "launch_attestation": attestation,
@@ -3347,11 +3526,11 @@ def _binary_from_json(value: Any) -> BinaryAttestation:
         raise BrokerProtocolError("remote binary attestation is invalid") from exc
 
 
-def _process_ref_from_json(value: Any) -> ProcessRef:
+def _process_ref_from_json(value: Any) -> WorkerProcessRef:
     raw = _mapping(value, field="process reference").copy()
     raw["binary"] = _binary_from_json(raw.get("binary"))
     try:
-        return ProcessRef(**raw)
+        return WorkerProcessRef(**raw)
     except (TypeError, ValueError) as exc:
         raise BrokerProtocolError("remote process reference is invalid") from exc
 
@@ -3405,31 +3584,36 @@ def _uid_sweep_from_json(value: Any) -> dict[str, Any]:
     return raw
 
 
-def _launch_spec_to_json(spec: LaunchSpec) -> dict[str, Any]:
-    return _jsonable(dataclasses.asdict(spec))
+def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
+    serialized = _jsonable(spec)
+    if not isinstance(serialized, dict):  # pragma: no cover - dataclass invariant
+        raise BrokerProtocolError("worker launch spec did not serialize to an object")
+    return serialized
 
 
 class RemoteCodexWorkerAdapter:
     """Control-side Codex adapter facade backed by the distinct-UID broker."""
+
+    adapter_id = "codex-cli"
 
     def __init__(
         self,
         client: WorkerBrokerClient,
         *,
         validation_commands_for_spec: (
-            Callable[[LaunchSpec], Sequence[Sequence[str]]] | None
+            Callable[[WorkerLaunchSpec], Sequence[Sequence[str]]] | None
         ) = None,
     ) -> None:
         self.client = client
         self.validation_commands_for_spec = validation_commands_for_spec or (lambda _spec: ())
-        self._refs: dict[str, ProcessRef] = {}
+        self._refs: dict[str, WorkerProcessRef] = {}
         self._attestations: dict[str, Mapping[str, Any]] = {}
-        self._specs: dict[str, LaunchSpec] = {}
+        self._specs: dict[str, WorkerLaunchSpec] = {}
         self._uid_sweeps: dict[str, Mapping[str, Any]] = {}
         self.startup_uid_sweep: Mapping[str, Any] | None = None
         self.inspector = _UnavailableRemoteInspector()
 
-    async def start(self, spec: LaunchSpec) -> ProcessRef:
+    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
         commands = [list(command) for command in self.validation_commands_for_spec(spec)]
         result = await self.client.request(
             "start",
@@ -3449,12 +3633,12 @@ class RemoteCodexWorkerAdapter:
         self.startup_uid_sweep = startup_sweep
         return process_ref
 
-    def launch_attestation(self, ref: ProcessRef) -> Mapping[str, Any]:
+    def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         return self._attestations[ref.run_id]
 
-    def uid_sweep_receipt(self, ref: ProcessRef) -> Mapping[str, Any]:
+    def uid_sweep_receipt(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
         """Return the last validated per-run broker sweep for durable persistence."""
 
         if self._refs.get(ref.run_id) != ref or ref.run_id not in self._uid_sweeps:
@@ -3490,7 +3674,7 @@ class RemoteCodexWorkerAdapter:
         self._uid_sweeps[run_id] = combined
         return combined
 
-    async def status(self, ref: ProcessRef) -> WorkerRunStatus:
+    async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request("status", {"run_id": ref.run_id})
@@ -3507,7 +3691,7 @@ class RemoteCodexWorkerAdapter:
         except ValueError as exc:
             raise BrokerProtocolError("remote worker status is invalid") from exc
 
-    async def collect_result(self, ref: ProcessRef) -> CollectionReceipt:
+    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         spec = self._specs[ref.run_id]
@@ -3535,7 +3719,7 @@ class RemoteCodexWorkerAdapter:
         self._uid_sweeps[ref.run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
         return receipt
 
-    async def cancel(self, ref: ProcessRef, reason: str) -> CancelReceipt:
+    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request(
@@ -3547,7 +3731,7 @@ class RemoteCodexWorkerAdapter:
 
     async def run_validation_argv(
         self,
-        spec: LaunchSpec,
+        spec: WorkerLaunchSpec,
         argv: Sequence[str],
         *,
         timeout_seconds: float = 300.0,
@@ -3599,7 +3783,7 @@ class RemoteWorkerProcessController:
         return self._uid_sweeps[run_id]
 
     @staticmethod
-    def _matches_attempt(process: ProcessRef, attempt: Any) -> bool:
+    def _matches_attempt(process: WorkerProcessRef, attempt: Any) -> bool:
         metadata = getattr(attempt, "launch_metadata", None)
         if not isinstance(metadata, dict):
             return False

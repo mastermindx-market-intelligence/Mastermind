@@ -17,6 +17,13 @@
         "source": "local",
         "path": "./plugins/mastermind-operator"
       }
+    },
+    {
+      "name": "mastermind-cortex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mastermind-cortex"
+      }
     }
   ]
 }

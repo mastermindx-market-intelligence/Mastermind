@@ -517,3 +517,102 @@ real-seat proof remains after Sol accepts the disposable receipts.
   anomaly is escalated to Sol in the PR #110 thread. Any genuinely live
   duplicate FABLE-00 dispatch must reconcile through Sol, not adopt this
   branch.
+
+
+## B5 source expiry and owed navigation (source implementation)
+
+This slice preserves the existing Control Room, owners, source acquisition and
+Inbox route. It adds finite presentation permission beside the canonical
+Autonomy facts. It does not qualify the installed service or a Business app,
+and it does not admit Executive intent, dispatch, repair or retry work.
+
+The canonical mapper emits four independent `mastermind.autonomy_validity.v1`
+components per responsibility: `card`, `decision_current`, `dispatch` and
+`owed_open_age`. Each names its exact contributing source receipts, stable
+proof identity, qualification reference and integer `valid_for_ms`, or an
+explicit unqualified reason. The mapper uses its existing inclusive 48-hour
+freshness and one-hour future tolerance. At exactly 48 hours a source can still
+say CURRENT while its remaining presentation budget is zero. The UI must then
+withdraw current permission; it must not invent a STALE owner event. Dispatch
+uses the validated W3C source observation timestamp where supplied. Binding
+observation age is independent of `last_verified_at` and binds the complete
+canonical target, including locator and verification stamp.
+
+The generation cache publishes `source_validity` alongside the existing HTTP
+state envelope, under the existing composition lock and sequence. Its source
+anchor precedes the gather. The GET budget subtracts gather, publication and
+cache residence. Per-proof bounds stay in that existing process cache across
+omitted cards and intervening proofs; a later publication or reference-clock
+rollback cannot renew an expired or poisoned proof. Only the current document
+selects which retained bounds may appear in a response or authorize navigation.
+No extra source gather, persistent store or lifecycle authority is introduced.
+Each server/page accounting map is bounded to 8,192 proof components. If it
+fills, that cache/page lifetime becomes unqualified; it does not evict a bound
+and silently renew old evidence. Canonical facts remain readable. This
+conservative resource limit and the lack of an installed launcher qualification
+must be considered before any later operational release.
+
+The conditional `b5.darwin-chrome-paired-v1` profile uses D=8 ms discrepancy,
+U=16 ms reserve at each independent server/browser stage, H=1 ms bracket width
+and the stated Q=4 ms undercount premise. Samples synchronously read
+Mlo/Wlo/Mhi/Whi, floor each endpoint to integer milliseconds, and compare the
+outward elapsed/wall deltas against both the original anchor and the previous
+sample. Remaining duration is `max(0, budget - elapsed - 16)` after all checks.
+The reserve is charged once for the anchored stage, not repeatedly per render.
+The server selects Darwin `CLOCK_MONOTONIC_RAW` through integer nanoseconds;
+unsupported or failed capability never falls back to ordinary monotonic time.
+The browser requires finite `performance.now()` below 2^40 ms, safe-integer
+`Date.now()`, a compatible time origin and the qualified launcher boundary.
+These observations cannot prove the Q premise or detect arbitrary mutually
+masking clocks. No repaint during JavaScript or host suspension is claimed.
+
+**The generic HTTP server currently supplies no browser qualification.** A UA,
+version hint, profile label, webdriver flag or matching clock samples is not
+an authenticated browser/launcher binding. Consequently production browser
+positive permission remains disabled at this boundary; server-qualified age
+and dated source details remain readable. The isolated actual-page test may
+supply the narrowly named `owned_test_fixture` context only after verifying
+its own Chrome revision and launch configuration outside the page. No public
+query, header, CLI option or client boolean enables that test context in the
+product. Installed launcher qualification remains a separate release concern.
+
+The page keeps the original request anchor through transport, parsing, render
+and retention. Its single expiry timer is fenced to the accepted page state.
+Every component render and owed action also samples its remaining duration,
+so a late timer is not permission to act. Hidden/pagehide/freeze and resume or
+BFCache uncertainty withdraw permission and fence outstanding state reads.
+Returning to visibility uses the existing bounded read path. Same-proof
+minimums survive omitted components; a newly qualified different proof can
+restore only the components that independently qualify. Detail retains the
+recorded source facts. Unknown current decision counts display an unknown
+value rather than an all-clear zero. A fresh Chairman decision can remain
+visible while dispatch or owed navigation is unqualified or EFFECT_UNKNOWN.
+The global Inbox and general Surfaces address book retain their separate
+contracts.
+
+Autonomy owed Open requires the existing actionability, hold, dispatch,
+capability and unique-target guards plus current card, dispatch and
+`owed_open_age` permission. It submits `/api/open` with a closed
+`mastermind.owed_navigation.v1` context: exact publication sequence,
+responsibility/root, owed proof, binding fingerprint and seat. The server
+fresh-loads the canonical bindings, re-establishes uniqueness, matches the
+current document's selected proof, and samples age after all mutable reads.
+Mismatch returns 409 `source_precondition_failed`, `verified:false` and
+`next_action:read_current_state`, with no provider call or binding write. The
+provider receives the exact immutable checked target; no composition lock
+spans its call. This is a comparison at handoff, not a lease over later
+filesystem/provider changes. Scoped verified navigation intentionally does
+not persist `last_verified_at`, because the binding owner offers no conditional
+write and a completed provider result must not overwrite a concurrent target.
+The unscoped address-book endpoint keeps its existing behavior.
+
+Tests exercise actual mapper/compositor/cache/HTTP data, independent expiry,
+same-proof omission and rollback, current-publication/old-proof refusal,
+newly ambiguous targets, expiry during binding reads, immutable fake provider
+targets, no-write outcomes and late page callbacks. Deterministic clock and
+lifecycle injection is separate from actual Chrome observation. The optional
+actual-page run uses an owned ephemeral profile, default background/BFCache
+behavior, real clocks, three viewports and verified teardown. An unobserved
+visibility or BFCache leg is reported as unobserved. A skipped browser test
+is not browser proof, and source/CI success is not installed or production
+acceptance.

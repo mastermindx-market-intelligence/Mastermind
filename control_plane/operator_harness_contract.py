@@ -2645,16 +2645,19 @@ def classify_observed_capabilities(
     missing: list[str] = []
     unknown_precision: list[str] = []
     for rule in requested.capabilities.required:
-        proven = any(
-            _identity_proven(rule, item, observed.harness_binary_digest) for item in observed_caps
-        )
-        if proven:
-            continue
-        if any(item.name == rule.name for item in observed_caps) or rule.name in named:
+        same_name_rows = [item for item in observed_caps if item.name == rule.name]
+        if len(same_name_rows) != 1:
+            # Zero rows (including a name observed only via a `named`
+            # summary set), or more than one row sharing this name, can
+            # never satisfy a digest-bearing requirement -- there must be
+            # exactly one candidate identity to prove.
+            missing.append(rule.name)
             unknown_precision.append(rule.name)
-            missing.append(rule.name)
-        else:
-            missing.append(rule.name)
+            continue
+        if _identity_proven(rule, same_name_rows[0], observed.harness_binary_digest):
+            continue
+        missing.append(rule.name)
+        unknown_precision.append(rule.name)
 
     forbidden_present = tuple(
         name for name in sorted(named) if name in set(requested.capabilities.forbidden)

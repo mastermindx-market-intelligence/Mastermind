@@ -72,6 +72,7 @@ __all__ = [
     "GroundingUnavailable",
     "load_app_policies",
     "make_jwt_authenticators",
+    "make_shared_jwks_cache",
     "observe_trusted_grounding",
     "read_only_gateway_config",
 ]
@@ -154,24 +155,55 @@ def _default_jwks_cache(policy: ResourcePolicy) -> JwksKeySource:
     )
 
 
+def _jwks_cache_contract(policy: ResourcePolicy) -> tuple[object, ...]:
+    """Return the authority and refresh controls that make a JWKS cache shareable."""
+
+    return (
+        policy.resource,
+        policy.issuer,
+        policy.authorization_servers,
+        policy.jwks_uri,
+        policy.allowed_algorithms,
+        policy.jwks_cache_ttl_seconds,
+        policy.unknown_kid_refresh_cooldown_seconds,
+        policy.fetch_failure_backoff_seconds,
+    )
+
+
+def make_shared_jwks_cache(policies: AppPolicies) -> JwksKeySource | None:
+    """Build one cache only when both policies have the same JWKS contract.
+
+    The cache contains public signing keys and bounded refresh state only; it
+    carries no authorization decision.  Scope, subject, audience, lifetime, and
+    tool authority stay inside the separate JwtAuthenticator instances.
+    """
+
+    if _jwks_cache_contract(policies.read) != _jwks_cache_contract(policies.submit):
+        return None
+    return _default_jwks_cache(policies.read)
+
+
 def make_jwt_authenticators(
     policies: AppPolicies, *, jwks_cache: JwksKeySource | None = None
 ) -> tuple[JwtAuthenticator, JwtAuthenticator]:
     """Build the (read, submit) :class:`JwtAuthenticator` pair.
 
-    ``integrations.business_mcp_auth.jwks.BoundedJwksCache``/``HttpxJwksFetcher``
-    are each bound to exactly ONE :class:`ResourcePolicy` (its own
-    ``jwks_uri``/cache TTL), so the default production wiring builds one
-    independent cache PER policy even though both name the same authorization
-    server in every legal deployment.  A caller-supplied ``jwks_cache`` is a
-    single stateless object (e.g. a test fake) reused for BOTH authenticators
-    instead — the :class:`JwksKeySource` protocol has no policy-affinity
-    requirement, only ``.key_for(kid)``.
+    Read and submit remain separate authorization policies.  When they bind
+    the same OAuth resource/JWKS authority and the same cache safety controls,
+    they share one process-memory JWKS cache.  This prevents a wider-scope
+    token from performing two independent JWKS refreshes while preserving
+    separate scope, subject, audience, lifetime, and tool-authority checks.
+    Policies with different JWKS authority or refresh controls keep independent
+    caches.  A caller-supplied ``jwks_cache`` is reused for both as before.
     """
 
     if jwks_cache is None:
-        read_cache: JwksKeySource = _default_jwks_cache(policies.read)
-        submit_cache: JwksKeySource = _default_jwks_cache(policies.submit)
+        shared_cache = make_shared_jwks_cache(policies)
+        if shared_cache is None:
+            read_cache: JwksKeySource = _default_jwks_cache(policies.read)
+            submit_cache: JwksKeySource = _default_jwks_cache(policies.submit)
+        else:
+            read_cache = submit_cache = shared_cache
     else:
         read_cache = submit_cache = jwks_cache
     read_authenticator = JwtAuthenticator(policy=policies.read, jwks_cache=read_cache)
@@ -181,7 +213,12 @@ def make_jwt_authenticators(
     return read_authenticator, submit_authenticator
 
 
-def read_only_gateway_config(repo_root: "Path | str") -> GatewayConfig:
+def read_only_gateway_config(
+    repo_root: "Path | str",
+    *,
+    macro_root_flag: str | None = None,
+    runtime_root: "Path | str | None" = None,
+) -> GatewayConfig:
     """The one legal :class:`GatewayConfig` this app ever builds.
 
     Always ``ServerMode.READONLY`` — there is no fixture/write mode here.
@@ -191,11 +228,27 @@ def read_only_gateway_config(repo_root: "Path | str") -> GatewayConfig:
 
     from integrations.executive_mcp.schemas import ServerMode
 
-    return GatewayConfig(mode=ServerMode.READONLY, repo_root=Path(repo_root))
+    return GatewayConfig(
+        mode=ServerMode.READONLY,
+        repo_root=Path(repo_root),
+        macro_root_flag=macro_root_flag,
+        read_runtime_root=runtime_root,
+    )
 
 
-def build_read_gateway(repo_root: "Path | str") -> ExecutiveMcpGateway:
-    return ExecutiveMcpGateway(read_only_gateway_config(repo_root))
+def build_read_gateway(
+    repo_root: "Path | str",
+    *,
+    macro_root_flag: str | None = None,
+    runtime_root: "Path | str | None" = None,
+) -> ExecutiveMcpGateway:
+    return ExecutiveMcpGateway(
+        read_only_gateway_config(
+            repo_root,
+            macro_root_flag=macro_root_flag,
+            runtime_root=runtime_root,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -425,3 +478,54 @@ class CeoIngressClient:
                 await writer.wait_closed()
             except (OSError, asyncio.TimeoutError):
                 pass
+
+
+class CeoIngressReadGateway:
+    """Network-only access to the installed control process's four readers."""
+
+    def __init__(self, socket_path: Path | str, client: CeoIngressClient) -> None:
+        self._socket_path = socket_path
+        self._client = client
+
+    async def aclose(self) -> None:
+        # Each request owns and closes its socket. No local state to drain.
+        return None
+
+    async def call(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        from datetime import datetime, timezone
+        from integrations.executive_mcp.schemas import (
+            GatewayError, RESULT_SCHEMA, ServerMode, error_envelope, validate_tool_arguments,
+        )
+        try:
+            if name not in READ_TOOL_NAMES:
+                raise GatewayError("authority_refused", "installed reader is read-only")
+            validated = validate_tool_arguments(name, arguments)
+            response = await self._client.send_frame(self._socket_path, {
+                "schema": ceo_ingress.APP_READ_SCHEMA,
+                "tool": name, "arguments": validated,
+            })
+            result = response.result
+            if (response.transport == TRANSPORT_SENT_OK and response.ok is True
+                    and isinstance(result, dict) and result.get("schema") == RESULT_SCHEMA
+                    and result.get("tool") == name and type(result.get("ok")) is bool):
+                return result
+            raise GatewayError("backend_unavailable", "installed Executive reader is unavailable")
+        except GatewayError as exc:
+            return error_envelope(
+                name, mode=ServerMode.READONLY,
+                generated_at=datetime.now(timezone.utc).isoformat(),
+                code=exc.code, message=exc.message,
+            )
+
+
+async def observe_ingress_grounding(
+    client: CeoIngressClient, socket_path: Path | str,
+) -> dict[str, str]:
+    """Read the host-bound source identities from the existing trusted ingress."""
+    response = await client.send_frame(socket_path, {"schema": ceo_ingress.APP_GROUNDING_SCHEMA})
+    if response.transport != TRANSPORT_SENT_OK or response.ok is not True:
+        raise GroundingUnavailable("installed grounding is unavailable")
+    result = ceo_ingress._coerce_grounding_shape(response.result)
+    if result is None:
+        raise GroundingUnavailable("installed grounding is unavailable")
+    return result

@@ -171,9 +171,9 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 ## Repository and delivery workflow
 - GitHub `origin` is the source of truth. Never push directly to `master`, never
   force-push shared branches, and never deploy an arbitrary working directory.
-- Every session must fetch `origin` and work in its own uniquely named worktree
-  and `codex/<task>-<session>` branch created from `origin/master`. Two sessions
-  must never share a branch or working directory.
+- Every modifying session uses exactly one source-custody-owned workspace. A session already launched by a Claude/Codex/Executive harness MUST use its assigned workspace and must not allocate a nested or sibling checkout.
+- Attended ChatGPT Web/host sessions MUST acquire or reuse their workspace through the installed `mmx-workspace` launcher; raw `git clone`, raw `git worktree add`, or direct invocation of the repository Python payload is not a production session-isolation API. The installed launcher pins the canonical source checkout and host-selected workspace root (including the external-volume mount guard) before dispatching the payload, while branch/path identity is derived from the operation and lane. Proof/review turns therefore reuse the same operation workspace instead of minting new checkouts.
+- Linked worktrees are only for the trusted same-OS-principal attended path. Untrusted Executive workers retain the existing private credentialless-clone path and its distinct `.git` security boundary. At terminal close, call the canonical release route; dirty or local-only work is preserved fail-closed rather than deleted.
 - Completion means: run the relevant tests; commit only scoped source/config/test
   changes; push the branch; open a PR; wait for required checks; merge the PR; then
   deploy the exact merged `origin/master` commit with

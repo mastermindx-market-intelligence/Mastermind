@@ -9,6 +9,7 @@ import os
 import pwd
 import sqlite3
 import stat
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -84,9 +85,22 @@ def _sealed_worker_path_identity(path: Path) -> dict[str, object]:
 class _PlannerSealedWorkerAdapter(FakeAdapter):
     """Inert complete-launch adapter for one real SEALED_WORKER planner run."""
 
-    def __init__(self, inspector: FakeInspector, *, root_job_id: str) -> None:
+    def __init__(
+        self,
+        inspector: FakeInspector,
+        *,
+        root_job_id: str,
+        provider_home: Path | None = None,
+    ) -> None:
         super().__init__(inspector)
         self.root_job_id = root_job_id
+        self._provider_home_guard = None
+        if provider_home is None:
+            self._provider_home_guard = tempfile.TemporaryDirectory(
+                prefix="mmx-provider-home-",
+            )
+            provider_home = Path(self._provider_home_guard.name)
+        self.provider_home = provider_home
 
     async def start(self, spec):
         ref = await super().start(spec)
@@ -135,7 +149,7 @@ class _PlannerSealedWorkerAdapter(FakeAdapter):
                 "real_gid": gid,
             },
             "provider_home_identity": _sealed_worker_path_identity(
-                self.spec.codex_home
+                self.provider_home
             ),
             "secret_canary_verdict": dict(_SEALED_WORKER_SECRET_CANARY),
             "launch_nonce": ref.launch_nonce,
@@ -314,20 +328,19 @@ def test_reducer_projects_positive_canonical_sealed_worker_completion(
         root.job_id,
         command_id=f"coo-cycle:{root.job_id}:create-planner:0",
     )
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir(mode=0o700)
     adapter = _PlannerSealedWorkerAdapter(
         FakeInspector(),
         root_job_id=root.job_id,
+        provider_home=codex_home,
     )
-
-    codex_home = tmp_path / "codex-home"
-    codex_home.mkdir(mode=0o700)
     uid = os.geteuid()
     gid = os.getegid()
     worker_user = pwd.getpwuid(uid).pw_name
     supervisor = ExecutiveSupervisor(
         runtime,
         adapter,
-        codex_home=codex_home,
         runs_root=tmp_path / "runs",
         isolation_roots=(workspace_root, tmp_path / "runs"),
         worker_user=worker_user,

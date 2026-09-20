@@ -6,9 +6,13 @@ from pathlib import Path
 import pytest
 
 from control_plane.executive_agent_capabilities import (
+    CAPABILITY_POLICY_SCHEMA,
+    CAPABILITY_POLICY_SCHEMA_V3,
+    CAPABILITY_POLICY_SCHEMA_V4,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
     app_server_security_config_digest,
+    app_server_security_config_projection,
     observed_mcp_tool_schema_digest,
 )
 from control_plane.operator_harness_contract import NativeHelperPolicy
@@ -60,7 +64,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-08-29.browser-b1"
+    assert registry.policy_version == "2026-09-18.browser-b1-runtime-r2"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -274,6 +278,61 @@ def test_docs_mcp_schema_and_security_projection_are_exact_and_drift_sensitive()
     )
 
 
+def test_security_config_projection_without_skills_bundled_key_is_byte_identical_to_pre_change_shape():
+    """CAP-S1 digest-stability pin (protocol amendment §5).
+
+    A raw config whose ``skills`` mapping never carries a ``bundled`` key
+    (every V3 profile, and any V4 config/plugin/agent host that predates the
+    Skill-package surface) must project and digest EXACTLY as it did before
+    ``app_server_security_config_projection`` learned to observe
+    ``skills.bundled`` -- this is the "V3 config/profile/policy digests
+    remain byte-identical" half of the amendment.
+    """
+
+    config = {
+        "agents": {"enabled": False},
+        "features": {
+            "apps": False,
+            "auth_elicitation": False,
+            "enable_mcp_apps": False,
+            "mcp_2026_07_28": False,
+            "multi_agent": False,
+            "multi_agent_v2": False,
+            "plugins": False,
+            "remote_plugin": False,
+            "tool_call_mcp_elicitation": False,
+        },
+        "mcp_servers": {},
+        "plugins": {},
+        "skills": {"config": None},
+    }
+    projection = app_server_security_config_projection(config)
+    assert projection == {
+        "agents": {"enabled": False},
+        "features": {
+            "apps": False,
+            "auth_elicitation": False,
+            "enable_mcp_apps": False,
+            "mcp_2026_07_28": False,
+            "multi_agent": False,
+            "multi_agent_v2": False,
+            "plugins": False,
+            "remote_plugin": False,
+            "tool_call_mcp_elicitation": False,
+        },
+        "mcp_servers": {},
+        "plugins": {},
+        "skills": {"config": None},
+    }
+    # Pre-change literal: computed against this exact config with
+    # ``python3 -c`` immediately BEFORE the CAP-S1 observed-``bundled``
+    # production edit landed. Absence of "bundled" in the raw config's
+    # "skills" mapping must keep producing this exact digest forever.
+    assert app_server_security_config_digest(config) == (
+        "16f3a01790a8fad7b098a037018b55dd49c9c4fcf99ec0d5872cec992fdcfd61"
+    )
+
+
 def test_native_helper_profile_compiles_a_hidden_depth_one_parent_ceiling():
     profile = ExecutionCapabilityRegistry.load().resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
@@ -413,7 +472,7 @@ def test_browser_profile_uses_existing_capability_registry_for_stdio_mcp_and_one
         "worker-browser-b1-install-manifest.json"
     )
     assert resource.runtime_manifest_digest == (
-        "ca55da0fbdd1366bfc6fd78612ebe9cc669e45ef5c21b084ad338b50e2d0e49d"
+        "c4b15f3ba4d5c20e869b63af86109ed57d2da929d525d1d8a0a2c65625209e9f"
     )
 
     assert profile.mcp_server_grants[0] == registry.mcp_servers[
@@ -520,3 +579,140 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
     mutation(raw)
     with pytest.raises(CapabilityPolicyError):
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+def test_v3_ratified_generation_and_schema_constants_remain_exact():
+    """Freeze the explicitly ratified V3 Browser B1 runtime generation.
+
+    CAP-S1 remains opt-in for V4 and the default schema remains V3.  The
+    Browser B1 runtime receipt is target-generation-bound, so its deliberate
+    ratification rotates the V3 policy identity instead of silently reusing
+    the prior generation.
+    """
+
+    assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
+    assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
+    assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
+
+    registry = ExecutionCapabilityRegistry.load()
+    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert registry.capability_packages == {}
+    assert registry.policy_digest == (
+        "daac5b9a290156b2b96bf562ed69ffd79d93ba753d3017799bef303aac2b38ed"
+    )
+    assert registry.resolve(
+        "operator.appserver.readonly.docs-mcp.native-helper.v1"
+    ).profile_digest == (
+        "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39"
+    )
+
+    for profile in registry.profiles.values():
+        assert profile.skill_grants == ()
+        assert profile.app_server_config_projection()["skills"] == {"config": None}
+
+
+@pytest.mark.parametrize(
+    "raw_key_path",
+    [
+        (),
+        ("profiles", "operator.appserver.readonly.v1"),
+    ],
+)
+def test_duplicate_json_keys_refuse_for_v3_documents(tmp_path, raw_key_path):
+    """Identity amendment §5.1: duplicate JSON keys refuse at every depth,
+
+    including for V3 documents, under the shared object_pairs_hook.
+    """
+
+    raw_text = json.dumps(_raw_policy())
+    # Build a hand-crafted duplicate: re-serialize the target object with one
+    # of its own keys repeated, verbatim, as a second occurrence.
+    raw = _raw_policy()
+    target = raw
+    for key in raw_key_path:
+        target = target[key]
+    dup_key = next(iter(target))
+    dup_value = target[dup_key]
+
+    def _canon(value):
+        if isinstance(value, dict):
+            return "{" + ",".join(f"{json.dumps(k)}:{_canon(v)}" for k, v in value.items()) + "}"
+        if isinstance(value, list):
+            return "[" + ",".join(_canon(v) for v in value) + "]"
+        return json.dumps(value)
+
+    def _canon_with_dup(value, path):
+        if not path:
+            assert isinstance(value, dict)
+            inner = ",".join(f"{json.dumps(k)}:{_canon(v)}" for k, v in value.items())
+            inner += f",{json.dumps(dup_key)}:{_canon(dup_value)}"
+            return "{" + inner + "}"
+        head, *rest = path
+        parts = []
+        for k, v in value.items():
+            if k == head:
+                parts.append(f"{json.dumps(k)}:{_canon_with_dup(v, rest)}")
+            else:
+                parts.append(f"{json.dumps(k)}:{_canon(v)}")
+        return "{" + ",".join(parts) + "}"
+
+    duplicated_text = _canon_with_dup(raw, list(raw_key_path))
+    path = tmp_path / "dup.json"
+    path.write_text(duplicated_text, encoding="utf-8")
+    with pytest.raises(CapabilityPolicyError, match="duplicate JSON key"):
+        ExecutionCapabilityRegistry.load(path)
+
+
+# ---------------------------------------------------------------------------
+# WAVE-3 REPAIR A, Part 2: fixed non-echoing duplicate-JSON-key refusal
+# (review 5087139217 BLOCKER 4). A duplicate JSON object key is completely
+# attacker-controlled and has no length or character-set bound the way every
+# OTHER validated field in this module does -- the refusal must never echo
+# any fragment of it into the exception text, its exception chain, or any
+# captured log/stdout/stderr surface.
+# ---------------------------------------------------------------------------
+
+
+def test_wave3_partB_duplicate_key_shaped_like_secret_does_not_echo(tmp_path, capsys, caplog):
+    poison = "sk-live-EXAMPLESECRETTOKEN"
+    raw_text = "{" + f'"{poison}": 1, "{poison}": 2' + "}"
+    path = tmp_path / "dup_secret.json"
+    path.write_text(raw_text, encoding="utf-8")
+
+    with pytest.raises(CapabilityPolicyError) as excinfo:
+        ExecutionCapabilityRegistry.load(path)
+
+    exc = excinfo.value
+    assert poison not in str(exc)
+    assert poison not in repr(exc)
+
+    cause = exc.__cause__
+    context = exc.__context__
+    assert cause is None or poison not in str(cause)
+    assert cause is None or poison not in repr(cause)
+    assert context is None or poison not in str(context)
+    assert context is None or poison not in repr(context)
+
+    captured = capsys.readouterr()
+    assert poison not in captured.out
+    assert poison not in captured.err
+    assert poison not in caplog.text
+
+
+def test_wave3_partB_duplicate_key_refusal_reason_is_fixed_regardless_of_key(tmp_path):
+    """The refusal reason is IDENTICAL byte-for-byte no matter which key
+    repeated, how long it was, or at what depth -- proving it is a fixed
+    token rather than a template that merely omits the key in this one
+    case."""
+    from control_plane.executive_agent_capabilities import _DUPLICATE_JSON_KEY_REASON
+
+    messages: set[str] = set()
+    for poison in ("short", "a-very-different-and-much-longer-duplicate-key-value-entirely"):
+        raw_text = "{" + f'"{poison}": 1, "{poison}": 2' + "}"
+        path = tmp_path / f"dup-{len(poison)}.json"
+        path.write_text(raw_text, encoding="utf-8")
+        with pytest.raises(CapabilityPolicyError) as excinfo:
+            ExecutionCapabilityRegistry.load(path)
+        messages.add(str(excinfo.value))
+
+    assert messages == {_DUPLICATE_JSON_KEY_REASON}

@@ -15,24 +15,523 @@ rewrites a tool at runtime.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
+import httpx
 import mcp.types as mcp_types
+from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend, RequireAuthMiddleware
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
+from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
+from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
+from integrations.business_mcp_auth.metadata import (
+    mcp_auth_error_result, oauth_security_schemes, protected_resource_metadata,
+)
+from integrations.business_mcp_auth.contracts import AuthError, AuthErrorCode
 from integrations.executive_mcp.adapter import ExecutiveMcpGateway, GatewayConfig
+from integrations.executive_mcp.e1_http import (
+    MAX_REQUEST_BYTES,
+    MAX_RESPONSE_BYTES,
+    BoundedE1App,
+    BoundedRequestApp,
+    E1_READ_PATHS,
+    PreAuthMcpBodyApp,
+    build_e1_app,
+)
 from integrations.executive_mcp.schemas import (
+    ERROR_CODES,
+    RESULT_SCHEMA,
     SERVER_NAME,
     SERVER_VERSION,
+    GatewayError,
+    ServerMode,
     TOOL_SPECS,
     canonical_json,
+    error_envelope,
+    validate_tool_arguments,
 )
 
-__all__ = ["build_mcp_server", "build_tools", "run_stdio"]
+__all__ = ["build_executive_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_mcp_server", "build_tools", "run_stdio"]
 
+_E1_READ_NAMES = tuple(path.rsplit("/", 1)[-1] for path in sorted(E1_READ_PATHS))
+_E1_ENVELOPE_FIELDS = frozenset(
+    {
+        "schema", "tool", "ok", "server_version", "mode", "generated_at",
+        "grounding", "data", "degraded", "bounded", "error",
+    }
+)
+
+
+def _e1_generated_at(settings: Any) -> str:
+    """Translate the integer auth clock to the result contract's UTC timestamp."""
+
+    value = settings.clock()
+    if type(value) is int:
+        return (
+            datetime.fromtimestamp(value, timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _e1_error(settings: Any, tool: str, code: str, message: str) -> dict[str, Any]:
+    """Return the one canonical E1 failure envelope for the outer bridge."""
+
+    return error_envelope(
+        tool,
+        mode=ServerMode.READONLY,
+        generated_at=_e1_generated_at(settings),
+        code=code,
+        message=message,
+    )
+
+
+def _is_e1_envelope(payload: Any, tool: str) -> bool:
+    """Recognize only the fixed read-profile result shape from the inner app."""
+
+    if not isinstance(payload, dict) or set(payload) != _E1_ENVELOPE_FIELDS:
+        return False
+    try:
+        canonical_json(payload)
+    except (TypeError, ValueError):
+        return False
+    if (
+        payload["schema"] != RESULT_SCHEMA
+        or payload["tool"] != tool
+        or type(payload["ok"]) is not bool
+        or payload["server_version"] != SERVER_VERSION
+        or payload["mode"] != ServerMode.READONLY.value
+        or not isinstance(payload["generated_at"], str)
+        or not isinstance(payload["grounding"], dict)
+        or not isinstance(payload["degraded"], list)
+        or not all(isinstance(item, str) for item in payload["degraded"])
+        or not isinstance(payload["bounded"], list)
+        or not all(isinstance(item, dict) for item in payload["bounded"])
+    ):
+        return False
+    if payload["ok"]:
+        return payload["error"] is None
+    error = payload["error"]
+    return (
+        payload["data"] is None
+        and isinstance(error, dict)
+        and set(error).issubset({"code", "message", "intent_id"})
+        and {"code", "message"}.issubset(error)
+        and isinstance(error["code"], str)
+        and error["code"] in ERROR_CODES
+        and isinstance(error["message"], str)
+        and ("intent_id" not in error or isinstance(error["intent_id"], str))
+    )
+
+
+class _DuplicateAuthorizationGuard:
+    """Reject raw duplicate credentials before SDK header coalescing."""
+
+    def __init__(self, app: Any, *, fenced_app: Any | None = None) -> None:
+        self._app = app
+        self._fenced_app = fenced_app or app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") == "http" and scope.get("path") == "/mcp":
+            values = [value for key, value in scope.get("headers", []) if key.lower() == b"authorization"]
+            if len(values) > 1:
+                response = JSONResponse(
+                    {"ok": False, "error": {"code": "authority_refused", "message": "duplicate Authorization headers are refused"}},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+                await response(scope, receive, send)
+                return
+        await self._fenced_app(scope, receive, send)
+
+
+def build_e1_tools() -> list[mcp_types.Tool]:
+    """The temporary MCP profile is a literal four-reader subset."""
+
+    by_name = {spec.name: spec for spec in TOOL_SPECS}
+    return [
+        mcp_types.Tool(
+            name=name,
+            description=by_name[name].description,
+            inputSchema=by_name[name].input_schema,
+            annotations=mcp_types.ToolAnnotations(**by_name[name].annotations),
+        )
+        for name in ("executive_state", "executive_inbox", "executive_job", "ceo_intent_status")
+    ]
+
+
+def build_e1_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+    """Compose one stateless, authenticated MCP HTTP edge around E1 ASGI."""
+
+    from integrations.mastermind_executive_app.gateway import make_jwt_authenticators
+
+    if not getattr(settings, "read_only", False):
+        raise ValueError("E1 MCP requires read-only app settings")
+    inner_app = build_e1_app(settings)
+    read_authenticator, _submit_authenticator = make_jwt_authenticators(
+        settings.policies, jwks_cache=settings.jwks_cache
+    )
+    verifier = MastermindTokenVerifier(
+        authenticator=read_authenticator,
+        policy=settings.policies.read,
+        now=settings.clock,
+        audit_sink=audit_sink,
+    )
+    server: Server = Server(f"{SERVER_NAME}-e1", version=SERVER_VERSION)
+    tools = build_e1_tools()
+
+    @server.list_tools()
+    async def list_tools() -> list[mcp_types.Tool]:
+        return list(tools)
+
+    @server.call_tool()
+    async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[Any]:
+        try:
+            request = server.request_context.request
+        except LookupError as exc:
+            raise ValueError("current MCP request is unavailable") from exc
+        if not isinstance(request, Request):
+            raise ValueError("current MCP request is unavailable")
+        headers = request.headers.getlist("authorization")
+        if len(headers) != 1 or name not in _E1_READ_NAMES:
+            raise ValueError("ambiguous or unsupported E1 tool request")
+        try:
+            validated_arguments = validate_tool_arguments(name, arguments)
+        except GatewayError as exc:
+            payload = _e1_error(settings, name, exc.code, exc.message)
+        else:
+            try:
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=inner_app, raise_app_exceptions=True),
+                    base_url="http://e1.internal",
+                    trust_env=False,
+                    follow_redirects=False,
+                ) as client:
+                    response = await client.post(
+                        f"/v1/tools/{name}",
+                        headers=[("authorization", headers[0])],
+                        json={"arguments": validated_arguments},
+                    )
+                if response.status_code != 200 or len(response.content) > MAX_RESPONSE_BYTES:
+                    raise ValueError("inner response is unavailable")
+                payload = response.json()
+                if not _is_e1_envelope(payload, name):
+                    raise ValueError("inner response has no E1 envelope")
+            except (httpx.HTTPError, ValueError):
+                payload = _e1_error(
+                    settings, name, "backend_unavailable", "E1 response is unavailable"
+                )
+        return [
+            mcp_types.TextContent(
+                type="text", text=canonical_json(payload).decode("utf-8")
+            )
+        ]
+
+    manager = StreamableHTTPSessionManager(
+        server,
+        stateless=True,
+        json_response=True,
+        security_settings=TransportSecuritySettings(
+            allowed_hosts=[
+                "127.0.0.1",
+                "127.0.0.1:*",
+                "localhost",
+                "localhost:*",
+                "e1.local",
+                "e1.local:*",
+                "::1",
+                "[::1]",
+                "[::1]:*",
+            ],
+            allowed_origins=[],
+        ),
+    )
+    protected = RequireAuthMiddleware(
+        BoundedRequestApp(manager.handle_request),
+        required_scopes=list(settings.policies.read.required_scopes),
+        resource_metadata_url=settings.policies.read.resource_metadata_url,
+    )
+    authenticated = PreAuthMcpBodyApp(
+        AuthenticationMiddleware(protected, backend=BearerAuthBackend(verifier))
+    )
+
+    @asynccontextmanager
+    async def lifespan(_app: Any):
+        try:
+            async with manager.run():
+                yield
+        finally:
+            await inner_app.aclose()
+
+    metadata_path = urlsplit(settings.policies.read.resource_metadata_url).path or "/"
+
+    async def metadata(_request: Request) -> JSONResponse:
+        return JSONResponse(protected_resource_metadata(settings.policies.read))
+
+    outer_app = Starlette(
+        routes=[
+            Route(metadata_path, metadata, methods=["GET"]),
+            Route("/mcp", authenticated, methods=["POST"]),
+        ],
+        lifespan=lifespan,
+    )
+    outer_app.router.redirect_slashes = False
+    from integrations.mastermind_executive_app.app import _RawPathFence
+
+    return _DuplicateAuthorizationGuard(
+        outer_app,
+        fenced_app=_RawPathFence(
+            outer_app, metadata_path=metadata_path, read_gateway=inner_app
+        ),
+    )
+
+
+class _ExecutivePolicyVerifiers:
+    """Compose the two existing A1 adapters without changing either policy.
+
+    Each adapter independently verifies and audits an exact scope set. A read
+    token is never projected into a submit principal, and vice versa.
+    """
+
+    def __init__(self, read: MastermindTokenVerifier, submit: MastermindTokenVerifier):
+        self._read = read
+        self._submit = submit
+
+    async def verify_token(self, token: str) -> Any:
+        access = await self._read.verify_token(token)
+        if access is not None:
+            return access
+        return await self._submit.verify_token(token)
+
+
+class _ExecutivePathFence:
+    """Literal, query-free routes for the private stateless HTTP transport."""
+
+    def __init__(self, app: Any, metadata_path: str):
+        self._app = app
+        self._routes = {
+            metadata_path: "GET", "/mcp": "POST",
+            "/v1/tools/submit_ceo_intent/reconcile": "POST",
+        }
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope.get("type") == "http":
+            path = scope.get("path", "")
+            if (
+                self._routes.get(path) != scope.get("method")
+                or not path.isascii()
+                or scope.get("raw_path") != path.encode("ascii")
+                or scope.get("query_string")
+            ):
+                await JSONResponse({"ok": False, "error": {
+                    "code": "not_found", "message": "unknown Executive transport route",
+                }}, status_code=404)(scope, receive, send)
+                return
+        await self._app(scope, receive, send)
+
+
+def _executive_outcome(payload: Any, request_ref: str, status_code: int) -> bool:
+    """Require the existing App outcome and the original deterministic identity."""
+    if not isinstance(payload, dict):
+        return False
+    expected_status = {
+        "accepted": 200, "operation_conflict": 409, "refused": 200,
+        "ingress_unavailable": 503, "effect_unknown": 202,
+    }
+    status = payload.get("status")
+    if (
+        not isinstance(status, str)
+        or expected_status.get(status) != status_code
+        or payload.get("request_ref") != request_ref
+        or payload.get("ok") is not (status == "accepted")
+        or set(payload) - {"ok", "status", "request_ref", "receipt", "error"}
+    ):
+        return False
+    if status == "accepted":
+        receipt = payload.get("receipt")
+        return isinstance(receipt, dict) and receipt.get("dispatched") is False
+    error = payload.get("error")
+    return (
+        isinstance(error, dict) and set(error) == {"code", "message"}
+        and isinstance(error["code"], str) and isinstance(error["message"], str)
+    )
+
+
+def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+    """Expose the frozen five tools through the existing authenticated App.
+
+    This is a stateless transport composition, not a new admission service.
+    Submit and status use only the App's dedicated CeoIngress client. Every
+    tool call forwards its current raw bearer for independent App verification.
+    No installed configuration, public listener, or fixture write is implied.
+    """
+    from control_plane.ceo_request import app_request_ref
+    from integrations.mastermind_executive_app.app import (
+        _metadata_policy_and_path, _outcome_response, create_app,
+    )
+    from integrations.mastermind_executive_app.admission import (
+        AdmissionOutcome, STATUS_EFFECT_UNKNOWN,
+    )
+    from integrations.mastermind_executive_app.gateway import (
+        make_jwt_authenticators, make_shared_jwks_cache,
+    )
+
+    if settings.read_only:
+        raise ValueError("five-tool MCP refuses read-only app settings")
+    _, metadata_path = _metadata_policy_and_path(settings.policies)
+    if metadata_path == "/mcp":
+        raise ValueError("metadata route collides with MCP transport")
+    configured = dataclasses.replace(settings, allow_submit_authorized_reads=True)
+    if configured.jwks_cache is None:
+        shared_cache = make_shared_jwks_cache(configured.policies)
+        if shared_cache is not None:
+            configured = dataclasses.replace(configured, jwks_cache=shared_cache)
+    authenticators = make_jwt_authenticators(configured.policies, jwks_cache=configured.jwks_cache)
+    verifier = _ExecutivePolicyVerifiers(*(
+        MastermindTokenVerifier(authenticator=authenticator, policy=policy,
+            now=configured.clock, audit_sink=audit_sink)
+        for authenticator, policy in zip(authenticators, (configured.policies.read, configured.policies.submit))
+    ))
+    # Reuse the bounded ASGI seam. Its generic failure body is never evidence
+    # of no effect: all unrecognized submit replies become same-request UNKNOWN.
+    inner_app = BoundedE1App(create_app(configured))
+    server: Server = Server(SERVER_NAME, version=SERVER_VERSION)
+    def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
+        policy = (
+            configured.policies.submit
+            if tool.name == "submit_ceo_intent"
+            else configured.policies.read
+        )
+        schemes = oauth_security_schemes(policy.required_scopes)
+        return tool.model_copy(update={
+            "securitySchemes": schemes,
+            "meta": {"securitySchemes": schemes},
+        })
+
+    tools = tuple(authenticated_tool(tool) for tool in build_tools())
+
+    @server.list_tools()
+    async def list_tools() -> list[mcp_types.Tool]:
+        return list(tools)
+
+    def unknown(request_ref: str) -> dict[str, Any]:
+        response = _outcome_response(AdmissionOutcome(
+            status=STATUS_EFFECT_UNKNOWN, request_ref=request_ref, code="effect_unknown",
+            message="the Executive response is unavailable; reconcile the same request_ref before any further submission",
+        ))
+        return json.loads(response.body)
+
+    def result(payload: dict[str, Any], *, challenge: str | None = None) -> mcp_types.CallToolResult:
+        return mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(type="text", text=canonical_json(payload).decode("utf-8"))],
+            isError=payload.get("ok") is not True,
+            _meta={"mcp/www_authenticate": [challenge]} if challenge else None,
+        )
+
+    @server.call_tool(validate_input=False)
+    async def call_tool(name: str, arguments: dict[str, Any] | None) -> mcp_types.CallToolResult:
+        request = server.request_context.request
+        if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
+            raise ValueError("current unambiguous MCP authorization is unavailable")
+        try:
+            validated = validate_tool_arguments(name, arguments)
+        except GatewayError as exc:
+            return result(_e1_error(configured, name, exc.code, exc.message))
+        is_submit = name == "submit_ceo_intent"
+        request_ref = app_request_ref(validated["operation_key"]) if is_submit else None
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=inner_app, raise_app_exceptions=True),
+                base_url="http://127.0.0.1", trust_env=False, follow_redirects=False,
+            ) as client:
+                response = await client.post(f"/v1/tools/{name}",
+                    headers={"authorization": request.headers["authorization"]},
+                    json={"arguments": validated})
+            payload = response.json()
+            canonical_json(payload)
+            challenge = response.headers.get("www-authenticate")
+            if response.status_code in (401, 403) and challenge:
+                if is_submit and payload.get("error", {}).get("code") == "scope_refused":
+                    # The direct App's challenge intentionally omits requested
+                    # scopes. Use its existing A1 helper for the MCP upgrade.
+                    challenge = mcp_auth_error_result(configured.policies.submit,
+                        AuthError(AuthErrorCode.SCOPE_REFUSED),
+                        required_scopes=configured.policies.submit.required_scopes,
+                    )["_meta"]["mcp/www_authenticate"][0]
+                return result(payload, challenge=challenge)
+            if is_submit:
+                # These closed errors are raised before the App's socket send.
+                preflight_error = (
+                    response.status_code in (400, 403)
+                    and isinstance(payload, dict) and payload.get("ok") is False
+                    and isinstance(payload.get("error"), dict)
+                    and payload["error"].get("code") in {
+                        "invalid_input", "authority_refused", "grounding_unavailable", "internal_error",
+                    }
+                )
+                if not preflight_error and not _executive_outcome(payload, request_ref, response.status_code):
+                    payload = unknown(request_ref)
+            elif response.status_code != 200 or not _is_e1_envelope(payload, name):
+                payload = _e1_error(configured, name, "backend_unavailable", "Executive response is unavailable")
+        except Exception:
+            payload = unknown(request_ref) if is_submit else _e1_error(
+                configured, name, "backend_unavailable", "Executive response is unavailable")
+        reply = result(payload)
+        # Bound the actual escaped MCP result, reserving room for the maximum
+        # admitted request id and JSON-RPC envelope, not only the inner JSON.
+        if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
+            reply = result(unknown(request_ref) if is_submit else _e1_error(
+                configured, name, "output_too_large", "Executive response exceeds the transport budget"))
+        return reply
+
+    manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True,
+        security_settings=TransportSecuritySettings(
+            allowed_hosts=["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*", "::1", "[::1]", "[::1]:*"],
+            allowed_origins=[],
+        ))
+    authenticated = PreAuthMcpBodyApp(
+        AuthenticationMiddleware(
+            RequireAuthMiddleware(BoundedRequestApp(manager.handle_request),
+                required_scopes=list(configured.policies.read.required_scopes),
+                resource_metadata_url=configured.policies.read.resource_metadata_url),
+            backend=BearerAuthBackend(verifier),
+        )
+    )
+
+    @asynccontextmanager
+    async def lifespan(_app: Any):
+        try:
+            async with manager.run():
+                yield
+        finally:
+            await inner_app.aclose()
+
+    async def metadata(_request: Request) -> JSONResponse:
+        return JSONResponse(protected_resource_metadata(configured.policies.submit))
+
+    outer_app = Starlette(routes=[
+        Route(metadata_path, metadata, methods=["GET"]),
+        Route("/mcp", authenticated, methods=["POST"]),
+        Route("/v1/tools/submit_ceo_intent/reconcile", inner_app, methods=["POST"]),
+    ], lifespan=lifespan)
+    outer_app.router.redirect_slashes = False
+    return _DuplicateAuthorizationGuard(outer_app,
+        fenced_app=_ExecutivePathFence(outer_app, metadata_path))
 
 def build_tools() -> list[mcp_types.Tool]:
     """The static five-tool advertisement, built from the reviewed table.

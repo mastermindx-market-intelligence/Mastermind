@@ -21,6 +21,7 @@ import hashlib
 import inspect
 import json
 import os
+import pwd
 import re
 import signal
 import socket
@@ -29,6 +30,7 @@ import stat
 import struct
 import subprocess
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Protocol
@@ -68,9 +70,11 @@ from control_plane.executive_dialogue_observation import (
     CanonicalTerminalWakeCandidate,
     CanonicalTerminalWakeRead,
     DialogueCandidateReference,
+    DialogueDelayedAckRequest,
     DialogueObservationFacts,
     DialogueObservationProtocolError,
     DialogueWakeRequest,
+    DialogueSourceReconcileRequest,
     RECONCILE_WAKE,
     SUBMIT_WAKE,
     PublicRuntimeBindingFacts,
@@ -83,9 +87,13 @@ from control_plane.executive_dialogue_observation import (
     TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT as _TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT,
     TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT as _TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT,
     parse_observation_request,
+    parse_delayed_ack_request,
+    parse_source_reconcile_request,
     parse_wake_request,
     reduce_dialogue_observation,
     response_bytes as dialogue_observation_response_bytes,
+    SOURCE_RECONCILE_RESPONSE_SCHEMA,
+    DELAYED_ACK_RESPONSE_SCHEMA,
 )
 from control_plane.executive_terminal_return import (
     TerminalReturnCandidate,
@@ -110,6 +118,7 @@ from control_plane.executive_workspace import (
 CONTROL_PROTOCOL_VERSION = "mastermind.executive_control/v1"
 DEFAULT_MAX_REQUEST_BYTES = 64 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
+_PRODUCTION_CONTROL_SOCKET = Path("/var/run/mastermind-executive/control.sock")
 DIALOGUE_OBSERVATION_IO_TIMEOUT_SECONDS = 5.0
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
@@ -161,6 +170,10 @@ _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 class ServiceError(RuntimeProofError):
     """A private control-service request could not be completed safely."""
+
+
+class _CeoSubmitUnarmedError(ServiceError):
+    code = "ceo_submit_unarmed"
 
 
 class SupervisorProtocol(Protocol):
@@ -240,6 +253,16 @@ class DialogueWakeTarget:
 DialogueWakeTargetProvider = Callable[
     [Runtime, Mapping[str, Any], Any], DialogueWakeTarget | None
 ]
+
+
+@dataclasses.dataclass(frozen=True)
+class DialogueWakeHistoricalTarget:
+    """Exact immutable OHF generation used only to reconcile an accepted attempt."""
+
+    runtime_binding: Any
+    generation: Any
+    target_attempt_id: str
+    operator_adapter: Any
 
 
 def _dialogue_candidate_from_response(
@@ -352,6 +375,12 @@ class ExecutiveDialogueWakeBridge:
         retry_policy: Any,
         operator_adapter: Any = None,
         carrier_factory: Callable[..., Any] | None = None,
+        canary_profile: Any = None,
+        canary_current_facts_for: Callable[..., Any] | None = None,
+        canary_now_epoch_seconds: Callable[[], int] | None = None,
+        historical_target_for: Callable[..., Any] | None = None,
+        installed_release_sha: str | None = None,
+        operation_key: str | None = None,
     ) -> None:
         from control_plane.wake_ledger import WakeRetryPolicy
 
@@ -365,10 +394,680 @@ class ExecutiveDialogueWakeBridge:
             raise TypeError("operator_adapter must support deliver_attention")
         if not callable(carrier_factory):
             raise TypeError("carrier_factory must be callable")
+        from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
+
+        if canary_profile is not None and type(canary_profile) is not DialogueWakeCanaryProfile:
+            raise TypeError("canary_profile must be a closed DialogueWakeCanaryProfile")
+        if canary_profile is not None and not callable(canary_current_facts_for) and (
+            not isinstance(installed_release_sha, str)
+            or not installed_release_sha
+            or not isinstance(operation_key, str)
+            or not operation_key
+        ):
+            raise TypeError("canary composition requires attested release and operation")
+        if canary_profile is not None and not callable(canary_now_epoch_seconds):
+            raise TypeError("canary_now_epoch_seconds is required for current submission")
+        if historical_target_for is not None and not callable(historical_target_for):
+            raise TypeError("historical_target_for must be callable or None")
         self._target_provider = target_provider
         self._retry_policy = retry_policy
         self._operator_adapter = operator_adapter
         self._carrier_factory = carrier_factory
+        self._canary_profile = canary_profile
+        self._canary_current_facts_for = canary_current_facts_for
+        self._canary_now_epoch_seconds = canary_now_epoch_seconds
+        self._historical_target_for = historical_target_for
+        self._installed_release_sha = installed_release_sha
+        self._operation_key = operation_key
+
+    @property
+    def canary_profile(self) -> Any:
+        return self._canary_profile
+
+    def reconcile_dialogue_sources(
+        self, runtime: Runtime, request: DialogueSourceReconcileRequest
+    ) -> dict[str, str]:
+        """Reconcile one accepted source snapshot without provider access."""
+
+        from control_plane.dialogue_source_resolution import (
+            DialogueSourceObservation,
+            DialogueSourceSnapshot,
+            PhysicalDialogueSourceIdentity,
+            attention_source_ref,
+            correlated_source_ref,
+        )
+        from control_plane.executive_dialogue_observation import (
+            ACTIVE_CURRENT_WORKER, TERMINAL_RESULT,
+        )
+        from control_plane.wake_events import canonical_json_bytes, mint_obligation_id
+        from control_plane.wake_ledger import (
+            LedgerPhase, SourceReadHealth, SourceResolutionCode,
+            assert_causal, resolve_source, resolved_record,
+        )
+        from control_plane.wake_persist import WakeLedgerRepository
+        from control_plane.session_targets import route_digest
+        from common.agent_dialogue_turn_watcher import (
+            TurnAction, TurnRoutingFacts, classify_turn,
+        )
+
+        profile = self._canary_profile
+        if profile is None:
+            return {"state": "NOT_APPLICABLE", "reason": "NONCANARY_PROFILE"}
+        grant = profile.grant
+        if grant is None or type(request.snapshot) is not DialogueSourceSnapshot:
+            return {"state": "UNKNOWN", "reason": "CANARY_GRANT_UNAVAILABLE"}
+        snapshot = request.snapshot
+        if (
+            request.parent.get("operation_key") != grant.operation_key
+            or snapshot.operation_key != grant.operation_key
+        ):
+            return {"state": "UNKNOWN", "reason": "SOURCE_IDENTITY_DISAGREES"}
+        messages = tuple(item.to_dict() for item in snapshot.messages)
+        decision = classify_turn(
+            parent=request.parent,
+            messages=messages,
+            routing=TurnRoutingFacts(
+                bound_operation_key=grant.operation_key,
+                bound_commission_fingerprint=snapshot.parent_fingerprint,
+                root_job_id=grant.source_root_job_id,
+                routing_workstream=None,
+                source_workstream=str(request.parent["work_ref"]),
+                ceo_target_bound=True,
+                coo_target_bound=True,
+            ),
+        )
+        if decision.action is TurnAction.REFUSE:
+            return {"state": "UNKNOWN", "reason": "SOURCE_SEMANTICS_REFUSED"}
+        repository = WakeLedgerRepository(runtime)
+        try:
+            with runtime.store.transaction() as connection:
+                records = repository.list_ledger_records_on_connection(
+                    connection, grant.obligation_id
+                )
+                assert_causal(records)
+                if not records:
+                    matches = 0
+                    matched_physical = None
+                    if decision.attention is not None:
+                        classified_attention = attention_source_ref(
+                            parent_fingerprint=snapshot.parent_fingerprint,
+                            message_key=decision.attention.message_key,
+                            target_seat=grant.target_seat,
+                        )
+                        if (
+                            decision.attention.target_seat != grant.target_seat
+                            or decision.attention.source_ref
+                            != classified_attention
+                        ):
+                            return {
+                                "state": "UNKNOWN",
+                                "reason": "SOURCE_GRANT_DISAGREES",
+                            }
+                        for mode in (ACTIVE_CURRENT_WORKER, TERMINAL_RESULT):
+                            candidate = {
+                                "mode": mode,
+                                "root_job_id": grant.source_root_job_id,
+                                "job_id": grant.source_job_id,
+                                "attempt_id": grant.source_attempt_id,
+                                "worker_id": grant.source_worker_id,
+                                "evidence_digest": grant.source_semantic_digest,
+                            }
+                            logical = correlated_source_ref(
+                                attention_source_ref=classified_attention,
+                                parent_fingerprint=snapshot.parent_fingerprint,
+                                operation_key=snapshot.operation_key,
+                                candidate=candidate,
+                            )
+                            if mint_obligation_id(
+                                source_kind="agent_dialogue_attention",
+                                source_ref=logical,
+                                wake_kind="dialogue_turn_pending",
+                            ) == grant.obligation_id:
+                                matches += 1
+                                matched_physical = (
+                                    PhysicalDialogueSourceIdentity.create(
+                                        logical_source_ref=logical,
+                                        obligation_id=grant.obligation_id,
+                                        observation=DialogueSourceObservation(
+                                            workspace_id=snapshot.workspace_id,
+                                            channel_id=snapshot.channel_id,
+                                            thread_ts=snapshot.thread_ts,
+                                            predecessor_message_key=(
+                                                decision.attention.message_key
+                                            ),
+                                            predecessor_message_fingerprint=(
+                                                decision.attention.message_fingerprint
+                                            ),
+                                        ),
+                                        parent_fingerprint=(
+                                            snapshot.parent_fingerprint
+                                        ),
+                                        operation_key=snapshot.operation_key,
+                                        target_seat=grant.target_seat,
+                                        candidate=candidate,
+                                    )
+                                )
+                    if matches == 1:
+                        assert matched_physical is not None
+                        repository.assert_physical_source_request_available_on_connection(
+                            connection,
+                            matched_physical,
+                            obligation_id=grant.obligation_id,
+                        )
+                        return {"state": "NO_RESOLUTION_REQUIRED", "reason": "SOURCE_PRESENT"}
+                    if matches > 1:
+                        return {
+                            "state": "UNKNOWN",
+                            "reason": "SOURCE_CANDIDATE_AMBIGUOUS",
+                        }
+                    return {"state": "ACK_REQUIRED", "reason": "ADVANCED_WITHOUT_REQUEST"}
+                requested = records[0]
+                obligation = requested.obligation
+                physical = requested.physical_source
+                if obligation is None or physical is None:
+                    return {"state": "CARRIER_IDENTITY_UNAVAILABLE", "reason": "LEGACY_SOURCE_IDENTITY"}
+                if (
+                    physical.workspace_id != snapshot.workspace_id
+                    or physical.channel_id != snapshot.channel_id
+                    or physical.thread_ts != snapshot.thread_ts
+                    or physical.parent_fingerprint != snapshot.parent_fingerprint
+                    or physical.operation_key != snapshot.operation_key
+                    or physical.obligation_id != grant.obligation_id
+                ):
+                    return {"state": "UNKNOWN", "reason": "SOURCE_CARRIER_DISAGREES"}
+                candidate = physical.candidate
+                if (
+                    candidate.root_job_id != grant.source_root_job_id
+                    or candidate.job_id != grant.source_job_id
+                    or candidate.attempt_id != grant.source_attempt_id
+                    or candidate.worker_id != grant.source_worker_id
+                    or candidate.evidence_digest != grant.source_semantic_digest
+                    or physical.target_seat != grant.target_seat
+                    or obligation.root_job_id != grant.source_root_job_id
+                    or obligation.job_id != grant.source_job_id
+                    or obligation.attempt_id != grant.source_attempt_id
+                    or obligation.declared_target_seat != grant.target_seat
+                    or obligation.source_workstream != request.parent["work_ref"]
+                ):
+                    return {"state": "UNKNOWN", "reason": "SOURCE_GRANT_DISAGREES"}
+                delivery_attempts = tuple(
+                    record for record in records
+                    if record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                )
+                if len(delivery_attempts) > 1:
+                    return {"state": "UNKNOWN", "reason": "SOURCE_ATTEMPT_AMBIGUOUS"}
+                if delivery_attempts:
+                    attempted = delivery_attempts[0]
+                    effective_policy = hashlib.sha256(
+                        canonical_json_bytes(
+                            {
+                                "base_policy_digest": grant.policy_digest,
+                                "grant_digest": grant.digest,
+                            }
+                        )
+                    ).hexdigest()[:16]
+                    expected_route_digest = route_digest(
+                        obligation_id=grant.obligation_id,
+                        destination=str(attempted.destination_digest),
+                        policy_digest=effective_policy,
+                    )
+                    if (
+                        attempted.attempt_n != 1
+                        or attempted.binding_id != grant.binding_id
+                        or attempted.binding_generation != grant.binding_generation
+                        or attempted.session_alias != grant.target_session_alias
+                        or attempted.route_digest != expected_route_digest
+                    ):
+                        return {"state": "UNKNOWN", "reason": "SOURCE_ATTEMPT_DISAGREES"}
+                phases = {record.phase for record in records}
+                if LedgerPhase.SOURCE_RESOLVED in phases:
+                    return {"state": "RECORDED", "reason": "SOURCE_ALREADY_RESOLVED"}
+                predecessor_documents = tuple(
+                    message for message in messages
+                    if message["message_key"] == physical.predecessor_message_key
+                    and message["fingerprint"] == physical.predecessor_message_fingerprint
+                )
+                initial_key = f"asd-initial-{snapshot.parent_fingerprint}"
+                predecessor_proven = bool(predecessor_documents) or (
+                    physical.predecessor_message_key == initial_key
+                    and physical.predecessor_message_fingerprint == snapshot.parent_fingerprint
+                )
+                expected_attention = attention_source_ref(
+                    parent_fingerprint=snapshot.parent_fingerprint,
+                    message_key=physical.predecessor_message_key,
+                    target_seat=physical.target_seat,
+                )
+                present = (
+                    predecessor_proven
+                    and decision.attention is not None
+                    and decision.attention.source_ref == expected_attention
+                )
+                if present:
+                    return {"state": "NO_RESOLUTION_REQUIRED", "reason": "SOURCE_PRESENT"}
+                if LedgerPhase.TARGET_ACKNOWLEDGED not in phases:
+                    if (
+                        len(delivery_attempts) == 1
+                        and LedgerPhase.DELIVERED in phases
+                        and LedgerPhase.FAILED not in phases
+                        and LedgerPhase.TARGET_UNAVAILABLE not in phases
+                        and delivery_attempts[0].nudge_id is not None
+                        and delivery_attempts[0].nudge_attempt_command_ids
+                        == (delivery_attempts[0].command_id,)
+                    ):
+                        return {
+                            "state": "ACK_REQUIRED",
+                            "reason": "DELIVERED_ACK_PENDING",
+                            "source_observation": {
+                                "workspace_id": physical.workspace_id,
+                                "channel_id": physical.channel_id,
+                                "thread_ts": physical.thread_ts,
+                                "predecessor_message_key": physical.predecessor_message_key,
+                                "predecessor_message_fingerprint": physical.predecessor_message_fingerprint,
+                            },
+                        }
+                    return {"state": "ACK_REQUIRED", "reason": "TARGET_ACK_REQUIRED"}
+                successors = []
+                initial_predecessor = (
+                    physical.predecessor_message_key == initial_key
+                    and physical.predecessor_message_fingerprint == snapshot.parent_fingerprint
+                )
+                for message in messages:
+                    if (
+                        message["reply_to_message_key"]
+                        != (None if initial_predecessor else physical.predecessor_message_key)
+                    ):
+                        continue
+                    actor = message["actor_ref"]
+                    executive_target = (
+                        actor["kind"] == "executive_surface"
+                        and actor["seat"] == physical.target_seat
+                    )
+                    worker_target = (
+                        physical.target_seat == "coo"
+                        and actor["kind"] == "worker_attempt"
+                        and actor["job_id"] == physical.candidate.job_id
+                        and actor["attempt_id"] == physical.candidate.attempt_id
+                        and actor["worker_id"] == physical.candidate.worker_id
+                    )
+                    if executive_target or worker_target:
+                        successors.append(message)
+                if not predecessor_proven or len(successors) != 1:
+                    return {"state": "UNKNOWN", "reason": "SOURCE_SUCCESSOR_AMBIGUOUS"}
+                successor = successors[0]
+                by_key = {message["message_key"]: message for message in messages}
+                causal_prefix = []
+                cursor = successor
+                while cursor is not None:
+                    causal_prefix.append(cursor)
+                    reply_to = cursor["reply_to_message_key"]
+                    cursor = by_key.get(reply_to) if reply_to is not None else None
+                causal_prefix.reverse()
+                direct_decision = classify_turn(
+                    parent=request.parent,
+                    messages=causal_prefix,
+                    routing=TurnRoutingFacts(
+                        bound_operation_key=grant.operation_key,
+                        bound_commission_fingerprint=snapshot.parent_fingerprint,
+                        root_job_id=grant.source_root_job_id,
+                        routing_workstream=None,
+                        source_workstream=str(request.parent["work_ref"]),
+                        ceo_target_bound=True,
+                        coo_target_bound=True,
+                    ),
+                )
+                if direct_decision.action is TurnAction.REFUSE:
+                    return {"state": "UNKNOWN", "reason": "SOURCE_SUCCESSOR_REFUSED"}
+                resolution = resolve_source(
+                    obligation,
+                    code=SourceResolutionCode.DIALOGUE_ATTENTION_ABSENT,
+                    health=SourceReadHealth.HEALTHY,
+                    source_present=False,
+                    snapshot_digest=snapshot.digest,
+                    evidence_refs=(str(successor["fingerprint"]),),
+                )
+                repository.append_records_on_connection(
+                    connection, ((resolved_record(obligation, resolution), None),)
+                )
+                return {"state": "RECORDED", "reason": "SOURCE_RESOLVED"}
+        except Exception:
+            return {"state": "UNKNOWN", "reason": "SOURCE_RECONCILIATION_UNKNOWN"}
+
+    async def reconcile_delayed_ack(
+        self, runtime: Runtime, request: DialogueDelayedAckRequest
+    ) -> dict[str, str]:
+        """Attempt one provider ACK drain for an exact stored v2 delivery."""
+
+        from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
+        from control_plane.wake_ledger import LedgerPhase, assert_causal
+        from control_plane.wake_persist import WakeLedgerRepository
+
+        profile = self._canary_profile
+        if profile is None:
+            return {"state": "NOT_APPLICABLE", "reason": "NONCANARY_PROFILE"}
+        grant = profile.grant
+        if grant is None:
+            return {"state": "HOLD", "reason": "ACK_GRANT_UNAVAILABLE"}
+        if request.parent.get("operation_key") != grant.operation_key:
+            return {"state": "HOLD", "reason": "ACK_SOURCE_REFUSED"}
+        repository = WakeLedgerRepository(runtime)
+        persisted = repository.list_records(grant.obligation_id)
+        records = tuple(item.record for item in persisted)
+        try:
+            assert_causal(records)
+        except Exception:
+            return {"state": "HOLD", "reason": "ACK_HISTORY_REFUSED"}
+        if not persisted:
+            return {"state": "HOLD", "reason": "ACK_HISTORY_MISSING"}
+        requested = tuple(
+            item for item in persisted
+            if item.record.phase is LedgerPhase.WAKE_REQUESTED
+        )
+        if len(requested) != 1:
+            return {"state": "HOLD", "reason": "ACK_HISTORY_REFUSED"}
+        physical = requested[0].record.physical_source
+        obligation = requested[0].obligation
+        if (
+            type(physical) is not PhysicalDialogueSourceIdentity
+            or obligation is None
+            or physical.operation_key != request.parent.get("operation_key")
+            or physical.parent_fingerprint != request.parent.get("fingerprint")
+            or request.source_observation.to_dict()
+            != {
+                "workspace_id": physical.workspace_id,
+                "channel_id": physical.channel_id,
+                "thread_ts": physical.thread_ts,
+                "predecessor_message_key": physical.predecessor_message_key,
+                "predecessor_message_fingerprint": physical.predecessor_message_fingerprint,
+            }
+            or physical.obligation_id != grant.obligation_id
+            or physical.target_seat != grant.target_seat
+            or physical.candidate.root_job_id != grant.source_root_job_id
+            or physical.candidate.job_id != grant.source_job_id
+            or physical.candidate.attempt_id != grant.source_attempt_id
+            or physical.candidate.worker_id != grant.source_worker_id
+            or physical.candidate.evidence_digest != grant.source_semantic_digest
+        ):
+            return {"state": "HOLD", "reason": "ACK_SOURCE_REFUSED"}
+        carrier = self._carrier_factory(
+            runtime=runtime,
+            resolved=None,
+            target=None,
+            current_binding=None,
+            retry_policy=self._retry_policy,
+            generation=None,
+            canary_profile=profile,
+            pre_submit_guard=None,
+            historical_context_for=lambda attempt: (
+                self._historical_target_for(runtime, attempt)
+                if callable(self._historical_target_for)
+                else self._resolve_historical_target(runtime, attempt)
+            ),
+            historical_only=True,
+            physical_source=physical,
+        )
+        history_matches = getattr(carrier, "delayed_ack_history_matches", None)
+        if not callable(history_matches) or not history_matches(obligation):
+            return {"state": "HOLD", "reason": "ACK_HISTORY_REFUSED"}
+        phases = tuple(record.phase for record in records)
+        if (
+            LedgerPhase.TARGET_ACKNOWLEDGED in phases
+            or LedgerPhase.SOURCE_RESOLVED in phases
+        ):
+            return {"state": "RECORDED", "reason": "ACK_ALREADY_RECORDED"}
+        if (
+            LedgerPhase.FAILED in phases
+            or LedgerPhase.TARGET_UNAVAILABLE in phases
+        ):
+            return {"state": "HOLD", "reason": "ACK_HISTORY_INELIGIBLE"}
+        method = getattr(carrier, "reconcile_delivered_ack", None)
+        if not callable(method):
+            return {"state": "HOLD", "reason": "ACK_CARRIER_UNAVAILABLE"}
+        try:
+            state = await method(request.source_observation, obligation)
+        except Exception:
+            return {"state": "EFFECT_UNKNOWN", "reason": "ACK_EFFECT_UNKNOWN"}
+        if state.value == "RECORDED":
+            return {"state": "RECORDED", "reason": "ACK_RECORDED"}
+        if state.value == "EFFECT_UNKNOWN":
+            return {"state": "EFFECT_UNKNOWN", "reason": "ACK_EFFECT_UNKNOWN"}
+        return {"state": "HOLD", "reason": "ACK_NOT_RECORDED"}
+
+    def _historical_carrier(self, runtime: Runtime, request: DialogueWakeRequest) -> Any:
+        profile = self._canary_profile
+        if profile is None:
+            raise TypeError("historical carrier requires the closed canary profile")
+
+        def resolve(attempt: Any) -> Any:
+            provider = self._historical_target_for
+            if callable(provider):
+                return provider(runtime, attempt)
+            return self._resolve_historical_target(runtime, attempt)
+
+        return self._carrier_factory(
+            runtime=runtime,
+            resolved=None,
+            target=None,
+            current_binding=None,
+            retry_policy=self._retry_policy,
+            generation=None,
+            canary_profile=profile,
+            pre_submit_guard=None,
+            historical_context_for=resolve,
+            historical_only=True,
+            physical_source=request.physical_source,
+        )
+
+    def _resolve_historical_target(self, runtime: Runtime, attempt: Any) -> Any:
+        """Recover only the grant's immutable generation; never select a successor."""
+
+        from control_plane.operator_harness_contract import runtime_binding_id_for
+        from control_plane.session_targets import RuntimeBinding
+
+        profile = self._canary_profile
+        grant = None if profile is None else profile.grant
+        if grant is None or attempt.attempt_n != 1:
+            raise StateConflict("historical canary identity is unavailable")
+        epoch, generation = runtime.operator_harness.generation_refs(
+            grant.process_generation_id
+        )
+        if (
+            epoch.attempt_id != grant.target_attempt_id
+            or generation.process_generation_id != grant.process_generation_id
+            or generation.generation_number != grant.binding_generation
+            or runtime_binding_id_for(epoch.attempt_id, epoch.session_epoch_id)
+            != grant.binding_id
+        ):
+            raise StateConflict("historical canary generation identity disagrees")
+        with runtime.store.read() as connection:
+            rows = connection.execute(
+                """
+                SELECT e.provider_session_id AS epoch_provider_session,
+                       g.provider_session_id AS generation_provider_session
+                FROM process_generations AS g
+                JOIN harness_session_epochs AS e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                  AND e.attempt_id=?
+                  AND g.generation_number=?
+                """,
+                (
+                    grant.process_generation_id,
+                    grant.target_attempt_id,
+                    grant.binding_generation,
+                ),
+            ).fetchall()
+        if (
+            len(rows) != 1
+            or not rows[0]["epoch_provider_session"]
+            or rows[0]["generation_provider_session"]
+            != rows[0]["epoch_provider_session"]
+        ):
+            raise StateConflict("historical provider identity is unavailable")
+        binding = RuntimeBinding(
+            session_alias=grant.target_session_alias,
+            binding_id=grant.binding_id,
+            binding_generation=grant.binding_generation,
+            native_handle=str(rows[0]["epoch_provider_session"]),
+            reasoning_surface=str(attempt.reasoning_surface),
+        )
+        return DialogueWakeHistoricalTarget(
+            runtime_binding=binding,
+            generation=generation,
+            target_attempt_id=grant.target_attempt_id,
+            operator_adapter=self._operator_adapter,
+        )
+
+    def _current_canary_facts(
+        self,
+        runtime: Runtime,
+        request: DialogueWakeRequest,
+        resolved: DialogueWakeTarget,
+        base_route: Any,
+    ) -> Any:
+        """Derive all current admission facts from one fresh Runtime snapshot."""
+
+        from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryCurrentFacts
+        from control_plane.runtime_binding_projection import project_runtime_binding
+
+        profile = self._canary_profile
+        grant = None if profile is None else profile.grant
+        if grant is None:
+            raise StateConflict("current canary grant is unavailable")
+        if (
+            request.parent.get("operation_key") != self._operation_key
+            or self._operation_key != grant.operation_key
+            or request.candidate.root_job_id != grant.source_root_job_id
+            or request.candidate.job_id != grant.source_job_id
+            or request.candidate.attempt_id != grant.source_attempt_id
+            or request.candidate.worker_id != grant.source_worker_id
+            or request.candidate.evidence_digest != grant.source_semantic_digest
+        ):
+            raise StateConflict("current canary source grant disagrees")
+        now_provider = self._canary_now_epoch_seconds
+        assert callable(now_provider)
+        with runtime.store.read() as connection:
+            reader = object.__new__(ExecutiveControlService)
+            source_facts = reader._runtime_dialogue_observation_facts(
+                runtime,
+                request.parent,
+                connection=connection,
+            )
+            source_response = reduce_dialogue_observation(
+                parent=request.parent,
+                thread_ts=request.thread_ts,
+                facts=source_facts,
+            )
+            if _dialogue_candidate_from_response(source_response) != request.candidate:
+                raise StateConflict("current canary source candidate disagrees")
+            source = runtime.current_harness_binding_source(
+                resolved.target_attempt_id,
+                connection=connection,
+            )
+            target = resolved.registry.get(resolved.runtime_binding.session_alias)
+            binding = project_runtime_binding(
+                runtime,
+                resolved.target_attempt_id,
+                target,
+                connection=connection,
+            )
+            rows = connection.execute(
+                """
+                SELECT g.process_generation_id
+                FROM process_generations AS g
+                JOIN harness_session_epochs AS e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE e.attempt_id=? AND e.state='CURRENT'
+                  AND g.executive_writer_held=1
+                  AND g.ended_at_ms IS NULL
+                  AND g.generation_number=?
+                """,
+                (resolved.target_attempt_id, binding.binding_generation),
+            ).fetchall()
+            if (
+                len(rows) != 1
+                or source.owner_seat != grant.target_seat
+                or binding != resolved.runtime_binding
+                or str(rows[0]["process_generation_id"])
+                != resolved.process_generation_id
+            ):
+                raise StateConflict("current canary writer identity disagrees")
+            facts = DialogueWakeCanaryCurrentFacts(
+                installed_release_sha=str(self._installed_release_sha),
+                operation_key=str(self._operation_key),
+                source_root_job_id=request.candidate.root_job_id,
+                source_job_id=request.candidate.job_id,
+                source_attempt_id=request.candidate.attempt_id,
+                source_worker_id=request.candidate.worker_id,
+                source_semantic_digest=request.candidate.evidence_digest,
+                obligation_id=request.obligation.obligation_id,
+                target_seat=source.owner_seat,
+                target_session_alias=binding.session_alias,
+                target_attempt_id=resolved.target_attempt_id,
+                binding_id=binding.binding_id,
+                binding_generation=binding.binding_generation,
+                process_generation_id=str(rows[0]["process_generation_id"]),
+                policy_digest=base_route.policy_digest,
+            )
+            # The Executive clock is deliberately the final observation made
+            # while this fresh read snapshot is still owned by the worker thread.
+            now = now_provider()
+        return facts, now
+
+    async def historical_only(
+        self,
+        runtime: Runtime,
+        request: DialogueWakeRequest,
+    ) -> DialogueWakeResult:
+        """Read or reconcile exact persisted canary history without current gates."""
+
+        from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryActivationError
+        from control_plane.wake_dispatcher import WakeEffectUnknownError
+
+        if self._canary_profile is None or not isinstance(runtime, Runtime):
+            return DialogueWakeResult("MISSING", "CANDIDATE_BINDING_REQUIRED")
+        if request.operation not in {SUBMIT_WAKE, RECONCILE_WAKE}:
+            return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
+        grant = self._canary_profile.grant
+        request_mismatch = (
+            request.obligation.root_job_id != request.candidate.root_job_id
+            or request.obligation.job_id != request.candidate.job_id
+            or request.obligation.attempt_id != request.candidate.attempt_id
+            or request.obligation.source_workstream != request.parent.get("work_ref")
+            or (
+                grant is not None
+                and (
+                    request.parent.get("operation_key") != grant.operation_key
+                    or request.candidate.root_job_id != grant.source_root_job_id
+                    or request.candidate.job_id != grant.source_job_id
+                    or request.candidate.attempt_id != grant.source_attempt_id
+                    or request.candidate.worker_id != grant.source_worker_id
+                    or request.candidate.evidence_digest
+                    != grant.source_semantic_digest
+                    or request.obligation.obligation_id != grant.obligation_id
+                )
+            )
+        )
+        try:
+            carrier = self._historical_carrier(runtime, request)
+            has_attempt = carrier.has_persisted_attempt(request.obligation)
+            if request_mismatch:
+                if has_attempt:
+                    return DialogueWakeResult("EFFECT_UNKNOWN", "WAKE_EFFECT_UNKNOWN")
+                return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
+            state = await carrier.reconcile(
+                request.obligation,
+                request.proposed_route,
+            )
+        except (DialogueWakeCanaryActivationError, WakeEffectUnknownError):
+            return DialogueWakeResult("EFFECT_UNKNOWN", "WAKE_EFFECT_UNKNOWN")
+        except Exception:
+            return DialogueWakeResult("EFFECT_UNKNOWN", "WAKE_COORDINATION_EFFECT_UNKNOWN")
+        reasons = {
+            "MISSING": "WAKE_NOT_RECORDED",
+            "RECORDED": "WAKE_RECORDED",
+            "EFFECT_UNKNOWN": "WAKE_EFFECT_UNKNOWN",
+        }
+        return DialogueWakeResult(state.value, reasons[state.value])
 
     def _resolve_current_target(
         self,
@@ -474,6 +1173,11 @@ class ExecutiveDialogueWakeBridge:
             WakeEffectUnknownError,
             WakePreSubmitError,
         )
+        from control_plane.dialogue_wake_canary_activation import (
+            DialogueWakeCanaryActivationError,
+            effective_dialogue_wake_canary_route,
+            match_dialogue_wake_canary_activation,
+        )
 
         if not isinstance(runtime, Runtime) or not isinstance(
             request, DialogueWakeRequest
@@ -486,6 +1190,17 @@ class ExecutiveDialogueWakeBridge:
             or request.obligation.source_workstream != request.parent["work_ref"]
         ):
             return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
+        profile = self._canary_profile
+        if profile is not None:
+            historical = await self.historical_only(runtime, request)
+            if (
+                historical.state != "MISSING"
+                or request.operation == RECONCILE_WAKE
+                or historical.reason != "WAKE_NOT_RECORDED"
+            ):
+                return historical
+            if request.physical_source is None:
+                return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
         provider = self._target_provider
         try:
             resolved = (
@@ -526,10 +1241,55 @@ class ExecutiveDialogueWakeBridge:
             )
             if (
                 epoch.attempt_id != resolved.target_attempt_id
-                or runtime.operator_harness.current_writer_generation(epoch)
-                != generation
+                or (
+                    profile is None
+                    and runtime.operator_harness.current_writer_generation(epoch)
+                    != generation
+                )
             ):
                 return DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
+            carrier_route = authoritative_route
+            extra_factory: dict[str, Any] = {}
+            if profile is not None:
+                current_provider = self._canary_current_facts_for
+                now_provider = self._canary_now_epoch_seconds
+                assert callable(now_provider)
+
+                def validate_current() -> None:
+                    if callable(current_provider):
+                        facts = current_provider(
+                            runtime, request, resolved, authoritative_route
+                        )
+                        now = now_provider()
+                    else:
+                        facts, now = self._current_canary_facts(
+                            runtime, request, resolved, authoritative_route
+                        )
+                    match_dialogue_wake_canary_activation(
+                        profile.grant,
+                        facts,
+                        now_epoch_seconds=now,
+                    )
+
+                validate_current()
+                carrier_route = effective_dialogue_wake_canary_route(
+                    profile, authoritative_route
+                )
+
+                def final_guard() -> None:
+                    validate_current()
+
+                extra_factory = {
+                    "canary_profile": profile,
+                    "pre_submit_guard": final_guard,
+                    "historical_context_for": lambda attempt: (
+                        self._historical_target_for(runtime, attempt)
+                        if callable(self._historical_target_for)
+                        else self._resolve_historical_target(runtime, attempt)
+                    ),
+                    "historical_only": False,
+                    "physical_source": request.physical_source,
+                }
             carrier = self._carrier_factory(
                 runtime=runtime,
                 resolved=resolved,
@@ -537,7 +1297,10 @@ class ExecutiveDialogueWakeBridge:
                 current_binding=current_binding,
                 retry_policy=self._retry_policy,
                 generation=generation,
+                **extra_factory,
             )
+        except DialogueWakeCanaryActivationError:
+            return DialogueWakeResult("MISSING", "WAKE_TARGET_UNAVAILABLE")
         except Exception:
             return DialogueWakeResult("MISSING", "WAKE_TARGET_UNAVAILABLE")
 
@@ -545,7 +1308,7 @@ class ExecutiveDialogueWakeBridge:
             if request.operation == RECONCILE_WAKE:
                 state = await carrier.reconcile(
                     request.obligation,
-                    authoritative_route,
+                    carrier_route,
                 )
                 reasons = {
                     "MISSING": "WAKE_NOT_RECORDED",
@@ -555,7 +1318,7 @@ class ExecutiveDialogueWakeBridge:
                 return DialogueWakeResult(state.value, reasons[state.value])
             if request.operation != SUBMIT_WAKE:
                 return DialogueWakeResult("MISSING", "WAKE_REQUEST_REFUSED")
-            await carrier.submit(request.obligation, authoritative_route)
+            await carrier.submit(request.obligation, carrier_route)
             return DialogueWakeResult("RECORDED", "WAKE_RECORDED")
         except WakePreSubmitError:
             return DialogueWakeResult("MISSING", "WAKE_TARGET_UNAVAILABLE")
@@ -588,6 +1351,7 @@ class ServiceConfig:
     effort: str = "xhigh"
     cost_class: str = "standard"
     coo_autonomy_armed: bool = False
+    ceo_submit_armed: bool = False
     coo_operator_harness_armed: bool = False
     coo_tick_interval_seconds: float = 15.0
     coo_model_alias: str = "coo.sealed"
@@ -639,6 +1403,8 @@ class ServiceConfig:
                 raise ValueError(f"invalid {field_name}")
         if not isinstance(self.coo_autonomy_armed, bool):
             raise ValueError("coo_autonomy_armed must be boolean")
+        if not isinstance(self.ceo_submit_armed, bool):
+            raise ValueError("ceo_submit_armed must be boolean")
         if not isinstance(self.coo_operator_harness_armed, bool):
             raise ValueError("coo_operator_harness_armed must be boolean")
         if self.coo_operator_harness_armed and not self.coo_autonomy_armed:
@@ -837,6 +1603,31 @@ class _ModuleBackupBackend:
         return function(database_path, manifest_path)
 
 
+CEO_APP_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
+
+
+@dataclasses.dataclass(frozen=True)
+class CeoIngressAppBinding:
+    """Host-owned capability for one App peer on the existing ingress.
+
+    It neither changes C1's peer nor arms C1. The App can send v2 frames
+    only; the existing admission owner still validates every request.
+    """
+
+    peer_uid: int
+    armed: bool
+    grounding_provider: ceo_ingress.GroundingProvider
+    read_provider: Any | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.peer_uid) is not int or self.peer_uid < 0:
+            raise ValueError("App peer uid must be a nonnegative integer")
+        if type(self.armed) is not bool:
+            raise ValueError("App admission arming must be boolean")
+        if not callable(getattr(self.grounding_provider, "observe", None)):
+            raise ValueError("App binding requires a grounding provider")
+
+
 class ExecutiveControlService:
     """One private AF_UNIX service around one durable Executive runtime."""
 
@@ -863,6 +1654,7 @@ class ExecutiveControlService:
             CeoIngressDialogueSourceProvider | None
         ) = None,
         ceo_ingress_armed: bool = False,
+        ceo_ingress_app_binding: CeoIngressAppBinding | None = None,
         ceo_ingress_activated_socket: socket.socket | None = None,
         terminal_return_projector: TerminalReturnProjector | None = None,
         terminal_return_projector_factory: (
@@ -1050,6 +1842,14 @@ class ExecutiveControlService:
                         "ceo_ingress_activated_socket must already be listening"
                     ) from exc
             self._ceo_ingress_socket_path = resolved_ceo_ingress_path
+        if ceo_ingress_app_binding is not None:
+            if type(ceo_ingress_app_binding) is not CeoIngressAppBinding:
+                raise ValueError("App binding must be a CeoIngressAppBinding")
+            if self._ceo_ingress_socket_path is None:
+                raise ValueError("App binding requires the existing CeoIngress socket")
+            if ceo_ingress_app_binding.peer_uid == ceo_ingress_peer_uid:
+                raise ValueError("App and C1 must have distinct peer uids")
+        self._ceo_ingress_app_binding = ceo_ingress_app_binding
         self._ceo_ingress_peer_uid = ceo_ingress_peer_uid
         self._ceo_ingress_grounding_provider = ceo_ingress_grounding_provider
         if (
@@ -1583,6 +2383,50 @@ class ExecutiveControlService:
             if mode & 0o007:
                 raise ServiceError("launchd control socket must not be world-accessible")
 
+    def _grant_app_socket_access(self) -> None:
+        """One named-user ACL; C1 ownership, modes and groups stay intact.
+
+        Reapply after launchd recreates its socket. The existing bootstrap's
+        root-owned 0755 parent already allows traversal and stays untouched.
+        A private service-owned parent receives only a traversal ACL. No root
+        subprocess, broad group, or Runtime ACL is needed.
+        """
+        binding = self._ceo_ingress_app_binding
+        if binding is None or binding.peer_uid == os.geteuid():
+            return
+        if sys.platform != "darwin":
+            raise ServiceError("installed App socket permissions require macOS")
+        name = pwd.getpwuid(binding.peer_uid).pw_name
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name) is None:
+            raise ServiceError("App service identity is invalid")
+        path = self._ceo_ingress_socket_path
+        assert path is not None
+        for node, permissions, directory in (
+            (path.parent, "search", True), (path, "read,write", False),
+        ):
+            before = node.lstat()
+            if directory and (stat.S_ISDIR(before.st_mode)
+                    and before.st_uid == 0
+                    and stat.S_IMODE(before.st_mode) == 0o755):
+                # bootstrap-host.sh owns this shared parent. All peers can
+                # traverse it already; each socket retains its own authority.
+                continue
+            if (before.st_uid != os.geteuid() or stat.S_ISLNK(before.st_mode)
+                    or before.st_mode & 0o007
+                    or not (stat.S_ISDIR(before.st_mode) if directory else stat.S_ISSOCK(before.st_mode))):
+                raise ServiceError("App socket custody is unavailable")
+            rule = f"user:{name} allow {permissions}"
+            observed = subprocess.run(
+                ["/bin/ls", "-lde", str(node)], check=True, capture_output=True, text=True,
+            ).stdout
+            if not any(line.strip().split(": ", 1)[-1] == rule for line in observed.splitlines()[1:]):
+                subprocess.run(["/bin/chmod", "+a", rule, str(node)], check=True, capture_output=True)
+            after = node.lstat()
+            if (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid) != (
+                before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+            ):
+                raise ServiceError("App socket identity changed while applying access")
+
     async def _bind_ceo_ingress_server(self, *, start_serving: bool) -> None:
         """Construct (bind) the dedicated CeoIngress listener; see ``_bind_operator_server``."""
 
@@ -1611,6 +2455,9 @@ class ExecutiveControlService:
                 start_serving=start_serving,
                 **activated_options,
             )
+
+        if self._ceo_ingress_launchd_activated:
+            self._grant_app_socket_access()
 
     def _prepare_dialogue_observation_socket_path(self) -> None:
         """Prepare only the exact dedicated W3C directory and stale inode."""
@@ -1952,6 +2799,10 @@ class ExecutiveControlService:
         if ceo_ingress_tasks:
             await asyncio.gather(*ceo_ingress_tasks, return_exceptions=True)
         self._ceo_ingress_tasks.clear()
+        if self._ceo_ingress_app_binding is not None:
+            read_provider = self._ceo_ingress_app_binding.read_provider
+            if read_provider is not None:
+                await read_provider.aclose()
         observation_task_set = getattr(self, "_dialogue_observation_tasks", None)
         observation_tasks = [
             task
@@ -2024,6 +2875,12 @@ class ExecutiveControlService:
         configured = {int(value) for value in self.config.allowed_peer_uids}
         return configured or {os.geteuid()}
 
+    def _is_production_control_socket(self) -> bool:
+        return (
+            Path(self.config.socket_path).resolve(strict=False)
+            == _PRODUCTION_CONTROL_SOCKET.resolve(strict=False)
+        )
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -2067,6 +2924,9 @@ class ExecutiveControlService:
                 return
             try:
                 result = await self._dispatch_request(request)
+            except _CeoSubmitUnarmedError as exc:
+                await self._send_error(writer, exc.code, str(exc))
+                return
             except (RuntimeProofError, ValueError) as exc:
                 await self._send_error(writer, "request_failed", str(exc)[:1000])
                 return
@@ -2162,7 +3022,11 @@ class ExecutiveControlService:
             return False
 
     def _runtime_dialogue_observation_facts(
-        self, runtime: Runtime, parent: Mapping[str, Any]
+        self,
+        runtime: Runtime,
+        parent: Mapping[str, Any],
+        *,
+        connection: sqlite3.Connection | None = None,
     ) -> DialogueObservationFacts:
         """Prepare exact current Runtime facts without writing or caching.
 
@@ -2199,7 +3063,11 @@ class ExecutiveControlService:
             ).hexdigest()
         except (KeyError, RuntimeProofError, TypeError, ValueError):
             return DialogueObservationFacts(complete=False)
-        with runtime.store.read() as connection:
+        with (
+            runtime.store.read()
+            if connection is None
+            else nullcontext(connection)
+        ) as connection:
             root_rows = connection.execute(
                 """
                 SELECT j.job_id
@@ -2599,6 +3467,60 @@ class ExecutiveControlService:
             provider = self._dialogue_observation_facts_provider
             runtime = self._require_runtime()
             try:
+                delayed_ack_request = parse_delayed_ack_request(raw)
+            except DialogueObservationProtocolError:
+                delayed_ack_request = None
+            if delayed_ack_request is not None:
+                wake_handler = self._dialogue_wake_handler
+                if (
+                    type(wake_handler) is ExecutiveDialogueWakeBridge
+                    and wake_handler.canary_profile is not None
+                ):
+                    delayed_result = await wake_handler.reconcile_delayed_ack(
+                        runtime, delayed_ack_request
+                    )
+                else:
+                    delayed_result = {
+                        "state": "NOT_APPLICABLE",
+                        "reason": "NONCANARY_PROFILE",
+                    }
+                await self._send_dialogue_observation(
+                    writer,
+                    {
+                        "schema": DELAYED_ACK_RESPONSE_SCHEMA,
+                        **delayed_result,
+                    },
+                )
+                return
+            try:
+                source_request = parse_source_reconcile_request(raw)
+            except DialogueObservationProtocolError:
+                source_request = None
+            if source_request is not None:
+                wake_handler = self._dialogue_wake_handler
+                if (
+                    type(wake_handler) is ExecutiveDialogueWakeBridge
+                    and wake_handler.canary_profile is not None
+                ):
+                    source_result = await asyncio.to_thread(
+                        wake_handler.reconcile_dialogue_sources,
+                        runtime,
+                        source_request,
+                    )
+                else:
+                    source_result = {
+                        "state": "NOT_APPLICABLE",
+                        "reason": "NONCANARY_PROFILE",
+                    }
+                await self._send_dialogue_observation(
+                    writer,
+                    {
+                        "schema": SOURCE_RECONCILE_RESPONSE_SCHEMA,
+                        **source_result,
+                    },
+                )
+                return
+            try:
                 request = parse_observation_request(raw)
             except DialogueObservationProtocolError:
                 try:
@@ -2650,6 +3572,23 @@ class ExecutiveControlService:
                     else:
                         wake_result = DialogueWakeResult(
                             "MISSING", "CANDIDATE_BINDING_REQUIRED"
+                        )
+                        wake_handler = self._dialogue_wake_handler
+                        if (
+                            type(wake_handler) is ExecutiveDialogueWakeBridge
+                            and wake_handler.canary_profile is not None
+                        ):
+                            wake_result = await wake_handler.historical_only(
+                                runtime, wake_request
+                            )
+                else:
+                    wake_handler = self._dialogue_wake_handler
+                    if (
+                        type(wake_handler) is ExecutiveDialogueWakeBridge
+                        and wake_handler.canary_profile is not None
+                    ):
+                        wake_result = await wake_handler.historical_only(
+                            runtime, wake_request
                         )
                 response = {
                     "schema": DIALOGUE_WAKE_RESPONSE_SCHEMA,
@@ -2745,14 +3684,11 @@ class ExecutiveControlService:
     ) -> None:
         """The dedicated CeoIngress protocol handler (§7, §8, R1 §2).
 
-        Peer identity is authenticated against the ONE exact configured
-        ingress peer uid — separate from the generic Operator
-        ``allowed_peer_uids`` set — before any body read/parsing.  There is no
-        generic dispatcher on this path: everything past peer authentication
-        and the startup-readiness gate is delegated to
-        ``executive_ceo_ingress.handle_frame``, which owns the three closed
-        submit/status/state frame validators and typed error law.  Exactly one
-        frame is read and one response is written per connection (§7.3).
+        Kernel identity selects the exact C1 or optional App capability before
+        any body read. Neither uses the generic Operator allowlist. The App's
+        closed read frames project existing canonical state; all admission
+        remains with ``executive_ceo_ingress.handle_frame`` and its existing
+        validators. Exactly one bounded frame and response use each connection.
         """
 
         task = asyncio.current_task()
@@ -2787,7 +3723,9 @@ class ExecutiveControlService:
                     "platform exposes no trusted local peer uid",
                 )
                 return
-            if peer != self._ceo_ingress_peer_uid:
+            app_binding = self._ceo_ingress_app_binding
+            app_peer = app_binding is not None and peer == app_binding.peer_uid
+            if peer != self._ceo_ingress_peer_uid and not app_peer:
                 await self._send_ceo_ingress_error(
                     writer, "peer_denied", "peer uid is not authorized"
                 )
@@ -2846,6 +3784,59 @@ class ExecutiveControlService:
                     writer, "invalid_json", "request is not valid JSON"
                 )
                 return
+            if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
+                ceo_ingress.APP_READ_SCHEMA, ceo_ingress.APP_GROUNDING_SCHEMA,
+            }:
+                try:
+                    if parsed["schema"] == ceo_ingress.APP_GROUNDING_SCHEMA:
+                        if set(parsed) != {"schema"}:
+                            raise ValueError("invalid grounding frame")
+                        result = await ceo_ingress._observe_trusted_grounding(
+                            app_binding.grounding_provider
+                        )
+                    else:
+                        if set(parsed) != {"schema", "tool", "arguments"}:
+                            raise ValueError("invalid read frame")
+                        if parsed["tool"] not in {
+                            "executive_state", "executive_inbox",
+                            "executive_job", "ceo_intent_status",
+                        } or not isinstance(parsed["arguments"], dict):
+                            raise ValueError("invalid read operation")
+                        if app_binding.read_provider is None:
+                            await self._send_ceo_ingress_error(
+                                writer, "ingress_unavailable", "installed readers are unavailable"
+                            )
+                            return
+                        result = await app_binding.read_provider.call(
+                            parsed["tool"], parsed["arguments"]
+                        )
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
+                except ceo_ingress.CeoIngressError as exc:
+                    await self._send_ceo_ingress_error(writer, exc.code, exc.message)
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "invalid_input", "installed read was refused"
+                    )
+                return
+            if app_peer and (
+                not isinstance(parsed, Mapping)
+                or parsed.get("schema") not in {
+                    ceo_ingress.SUBMIT_SCHEMA_V2, ceo_ingress.STATUS_SCHEMA_V2,
+                }
+            ):
+                await self._send_ceo_ingress_error(
+                    writer, "peer_denied", "frame is not authorized for this peer"
+                )
+                return
+            if app_peer and (
+                not app_binding.armed
+                or self._service_state not in {"READY", "AWAITING_CANARY"}
+            ):
+                await self._send_ceo_ingress_error(
+                    writer, "ingress_unavailable",
+                    "Executive CEO ingress is not currently admitting requests",
+                )
+                return
             if (
                 isinstance(parsed, Mapping)
                 and parsed.get("schema")
@@ -2862,10 +3853,12 @@ class ExecutiveControlService:
                 result = await ceo_ingress.handle_frame(
                     parsed,
                     runtime=self._require_runtime(),
-                    grounding_provider=self._ceo_ingress_grounding_provider,
+                    grounding_provider=(app_binding.grounding_provider if app_peer
+                                        else self._ceo_ingress_grounding_provider),
                     workspace_root=self.config.proof_workspace_root,
                     service_state=self._service_state,
-                    ceo_ingress_armed=self._ceo_ingress_armed,
+                    ceo_ingress_armed=(app_binding.armed if app_peer
+                                       else self._ceo_ingress_armed),
                     # Strict-v2 selection is trusted host composition.  The
                     # source-free public frame cannot opt itself into (or out
                     # of) the terminal-return admission path.
@@ -3747,6 +4740,18 @@ class ExecutiveControlService:
         self._require_shared_git_handoff(workspace)
         return observation
 
+    def _require_initial_coo_workspace(self, root: Job) -> dict[str, Any]:
+        """Reuse one read-only initial-workspace rule at selection and execution."""
+        observation = self._require_coo_workspace(root)
+        if (
+            observation["head"] != self.config.proof_base_sha
+            or observation["launch_clean"] is not True
+        ):
+            raise ServiceError(
+                "new COO root requires the clean exact reviewed-base workspace"
+            )
+        return observation
+
     def _require_coo_worker_composed(self) -> None:
         runtime = self._require_runtime()
         binding = self._require_current_coo_binding()
@@ -3956,14 +4961,7 @@ class ExecutiveControlService:
                 if job.parent_job_id == root_id
             ]
             if not children:
-                observation = self._require_coo_workspace(root)
-                if (
-                    observation["head"] != self.config.proof_base_sha
-                    or observation["launch_clean"] is not True
-                ):
-                    raise ServiceError(
-                        "new COO root requires the clean exact reviewed-base workspace"
-                    )
+                self._require_initial_coo_workspace(root)
             live = {
                 value
                 for value, task in self._dispatch_tasks.items()
@@ -4005,7 +5003,15 @@ class ExecutiveControlService:
         finally:
             self._coo_action_tasks.discard(task)
 
-    def _next_bound_coo_root(self) -> str | None:
+    def _next_bound_coo_root(
+        self, *, prestart_refusals: dict[str, Exception] | None = None
+    ) -> str | None:
+        """Select one root, optionally collecting ephemeral pre-start diagnostics.
+
+        Only a QUEUED root with no child or Attempt history may be deferred.
+        Existing work and ambiguous effects retain their reconciliation path.
+        No persistent exclusion, new queue or retry state is introduced.
+        """
         runtime = self._require_runtime()
         with runtime.store.read() as connection:
             rows = connection.execute(
@@ -4029,8 +5035,30 @@ class ExecutiveControlService:
                 event.event_type == "COO_CYCLE_BLOCKED"
                 for event in runtime.events.list_events(job_id=root.job_id)
             )
-            if not blocked:
-                return root.job_id
+            if blocked:
+                continue
+            if (
+                root.status is JobStatus.QUEUED
+                and root.attempt_count == 0
+                and root.current_attempt_id is None
+            ):
+                with runtime.store.read() as connection:
+                    child = connection.execute(
+                        "SELECT 1 FROM jobs WHERE parent_job_id=? LIMIT 1",
+                        (root.job_id,),
+                    ).fetchone()
+                    attempt = connection.execute(
+                        "SELECT 1 FROM attempts WHERE job_id=? LIMIT 1",
+                        (root.job_id,),
+                    ).fetchone()
+                if child is None and attempt is None:
+                    try:
+                        self._require_initial_coo_workspace(root)
+                    except (OSError, ServiceError, StateConflict) as exc:
+                        if prestart_refusals is not None:
+                            prestart_refusals[root.job_id] = exc
+                        continue
+            return root.job_id
         return None
 
     def _record_coo_tick_refusal(self, root_job_id: str, exc: Exception) -> None:
@@ -4086,9 +5114,27 @@ class ExecutiveControlService:
             try:
                 if not self.config.coo_autonomy_armed:
                     continue
-                root_id = self._next_bound_coo_root()
+                # Validate before writing even a diagnostic refusal. The existing
+                # per-action guard revalidates immediately before useful work.
+                self._require_current_autonomy()
+                prestart_refusals: dict[str, Exception] = {}
+                selected_root_id = self._next_bound_coo_root(
+                    prestart_refusals=prestart_refusals
+                )
+                for refused_root_id, refusal in prestart_refusals.items():
+                    self._record_coo_tick_refusal(refused_root_id, refusal)
+                # A diagnostic-write failure must not be attributed to a healthy
+                # root that has not yet been selected for any action.
+                root_id = selected_root_id
                 if root_id is not None:
                     await self._run_coo_cycle(root_id)
+                elif prestart_refusals:
+                    self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
+                        timespec="seconds"
+                    )
+                    self._coo_last_error = (
+                        "ServiceError: no usable never-started COO workspace"
+                    )
             except Exception as exc:
                 self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
                     timespec="seconds"
@@ -5016,6 +6062,8 @@ class ExecutiveControlService:
                 )
             )
         if command == "submit-ceo-intent":
+            if self._is_production_control_socket() and not self.config.ceo_submit_armed:
+                raise _CeoSubmitUnarmedError("CEO intent submission is not armed")
             # The bounded CEO write bridge (Phase 1E-A).  It validates one typed
             # envelope, lets the existing authority policy adjudicate it inside
             # create_job, and returns a receipt naming the resulting QUEUED Job.
@@ -5136,6 +6184,7 @@ __all__ = [
     "DEFAULT_MAX_REQUEST_BYTES",
     "DEFAULT_MAX_RESPONSE_BYTES",
     "DialogueWakeResult",
+    "DialogueWakeHistoricalTarget",
     "DialogueWakeTarget",
     "ExecutiveControlService",
     "ExecutiveDialogueWakeBridge",
