@@ -136,6 +136,7 @@ _ACTIVATION_KEYS = frozenset(
         "profile_digest",
         "provider_channel_ref",
         "agent_version_ref",
+        "return_subject_digest",
         "app_bindings",
         "economic_envelope",
         "economic_envelope_digest",
@@ -457,6 +458,7 @@ def build_activation_binding(
     profile_id: str,
     provider_channel_ref: str,
     agent_version_ref: str,
+    return_subject_digest: str,
     economic_envelope: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Freeze a pre-effect binding; live owners must revalidate all referenced facts."""
@@ -468,6 +470,9 @@ def build_activation_binding(
     version = _text(agent_version_ref, maximum=256)
     if _AGENT_VERSION.fullmatch(version) is None:
         _refuse("INVALID_ACTIVATION_BINDING")
+    subject_digest = _text(return_subject_digest, maximum=64)
+    if _SHA256.fullmatch(subject_digest) is None:
+        _refuse("INVALID_ACTIVATION_BINDING")
     envelope = validate_economic_envelope(economic_envelope)
     return {
         "schema": ACTIVATION_SCHEMA,
@@ -476,6 +481,7 @@ def build_activation_binding(
         "profile_digest": profile_digest(profile),
         "provider_channel_ref": channel,
         "agent_version_ref": version,
+        "return_subject_digest": subject_digest,
         "app_bindings": list(profile["required_app_bindings"]),
         "economic_envelope": envelope,
         "economic_envelope_digest": economic_envelope_digest(envelope),
@@ -503,6 +509,7 @@ def validate_activation_binding(
         profile_id=raw["profile_id"],
         provider_channel_ref=raw["provider_channel_ref"],
         agent_version_ref=raw["agent_version_ref"],
+        return_subject_digest=raw["return_subject_digest"],
         economic_envelope=raw["economic_envelope"],
     )
     if raw != rebuilt:
