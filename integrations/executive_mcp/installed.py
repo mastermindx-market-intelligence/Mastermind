@@ -7,6 +7,7 @@ Temporary E1/fixture configuration and their production-path fences are unchange
 from __future__ import annotations
 
 import ast
+import concurrent.futures
 import configparser
 import ctypes
 import hashlib
@@ -588,11 +589,6 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
         out[key] = items
         index = cursor
     return out
-
-
-def _git_blob_oid(payload: bytes) -> str:
-    header = f"blob {len(payload)}\0".encode("ascii")
-    return hashlib.sha1(header + payload, usedforsecurity=False).hexdigest()
 
 
 def _static_macro_probe(entry: str, repos: list[str]) -> str | None:
@@ -1234,18 +1230,99 @@ class InstalledBootPacketCollector:
             raise ValueError("expected installed source SHA must be lowercase hexadecimal")
         self._expected_source_sha = expected_source_sha
 
+    def _repository_observation_pair(
+        self, source_observer: Callable[[], tuple[str, str]],
+        macro_observer: Callable[[], tuple[str, str]], *,
+        deadline: float | None, label: str,
+    ) -> tuple[tuple[str, str], tuple[str, str]]:
+        if self._allow_synthetic_fixture:
+            return source_observer(), macro_observer()
+
+        # Reject unsafe/missing topology before dispatch.  The observers repeat the
+        # checks while binding the exact generation; this first pass only decides
+        # whether the real direct-Git path is eligible for bounded parallel reads.
+        if (
+            _direct_git_directory(self._source_root, label="Mastermind source") is None
+            or _direct_git_directory(self._macro_root, label="Macro source") is None
+        ):
+            raise GatewayError(
+                "backend_unavailable", "installed repository topology is unsafe"
+            )
+        try:
+            timeout = _remaining_deadline_seconds(deadline, label=label)
+        except TimeoutError as exc:
+            raise GatewayError(
+                "backend_unavailable",
+                f"installed {label} exceeded its cumulative deadline",
+            ) from exc
+
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="mmx-installed-proof",
+        )
+        source_future = executor.submit(source_observer)
+        macro_future = executor.submit(macro_observer)
+        futures = {source_future, macro_future}
+        pending: set[concurrent.futures.Future[tuple[str, str]]] = set(futures)
+        wait_for_workers = True
+        try:
+            done, pending = concurrent.futures.wait(
+                futures, timeout=timeout,
+                return_when=concurrent.futures.FIRST_EXCEPTION,
+            )
+            failures: list[BaseException] = []
+            for future in done:
+                failure = future.exception()
+                if failure is not None:
+                    failures.append(failure)
+            if failures:
+                wait_for_workers = not pending
+                # Concurrency can expose a lower-level Git error after repository
+                # metadata disappears.  Recheck the direct topology before returning
+                # the worker failure so the canonical, actionable cause remains stable.
+                for root, root_label in (
+                    (self._source_root, "Mastermind source"),
+                    (self._macro_root, "Macro source"),
+                ):
+                    if _direct_git_directory(root, label=root_label) is None:
+                        raise GatewayError(
+                            "backend_unavailable",
+                            f"installed {root_label} repository topology is unsafe",
+                        )
+                failure = failures[0]
+                if isinstance(failure, GatewayError):
+                    raise failure
+                raise GatewayError(
+                    "backend_unavailable", f"installed {label} observation failed"
+                ) from failure
+            if pending:
+                wait_for_workers = False
+                raise GatewayError(
+                    "backend_unavailable",
+                    f"installed {label} exceeded its cumulative deadline",
+                )
+            return source_future.result(), macro_future.result()
+        finally:
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=wait_for_workers, cancel_futures=True)
+
     def _snapshot_pair(
         self, env: Mapping[str, str], *, deadline: float | None,
     ) -> tuple[str, str, str, str]:
-        source_observation = _clean_git_snapshot(
-            self._source_root, runner=self._runner, env=env, label="Mastermind source",
-            content_scope="identity", include_seal=True, deadline=deadline,
-            _allow_synthetic_fixture=self._allow_synthetic_fixture,
-        )
-        macro_observation = _clean_git_snapshot(
-            self._macro_root, runner=self._runner, env=env, label="Macro source",
-            content_scope="macro_brief", include_seal=True, deadline=deadline,
-            _allow_synthetic_fixture=self._allow_synthetic_fixture,
+        source_observation, macro_observation = self._repository_observation_pair(
+            lambda: _clean_git_snapshot(
+                self._source_root, runner=self._runner, env=env,
+                label="Mastermind source", content_scope="identity", include_seal=True,
+                deadline=deadline,
+                _allow_synthetic_fixture=self._allow_synthetic_fixture,
+            ),
+            lambda: _clean_git_snapshot(
+                self._macro_root, runner=self._runner, env=env,
+                label="Macro source", content_scope="macro_brief", include_seal=True,
+                deadline=deadline,
+                _allow_synthetic_fixture=self._allow_synthetic_fixture,
+            ),
+            deadline=deadline, label="snapshot pair",
         )
         if not isinstance(source_observation, tuple) or not isinstance(macro_observation, tuple):
             raise GatewayError("backend_unavailable", "installed snapshot seal is unavailable")
@@ -1258,16 +1335,21 @@ class InstalledBootPacketCollector:
     def _generation_pair(
         self, env: Mapping[str, str], *, deadline: float | None,
     ) -> tuple[str, str, str, str]:
-        source_sha, source_seal = _snapshot_generation_observation(
-            self._source_root, runner=self._runner, env=env,
-            label="Mastermind source", deadline=deadline,
-            _allow_synthetic_fixture=self._allow_synthetic_fixture,
+        source_observation, macro_observation = self._repository_observation_pair(
+            lambda: _snapshot_generation_observation(
+                self._source_root, runner=self._runner, env=env,
+                label="Mastermind source", deadline=deadline,
+                _allow_synthetic_fixture=self._allow_synthetic_fixture,
+            ),
+            lambda: _snapshot_generation_observation(
+                self._macro_root, runner=self._runner, env=env,
+                label="Macro source", deadline=deadline,
+                _allow_synthetic_fixture=self._allow_synthetic_fixture,
+            ),
+            deadline=deadline, label="generation pair",
         )
-        macro_sha, macro_seal = _snapshot_generation_observation(
-            self._macro_root, runner=self._runner, env=env,
-            label="Macro source", deadline=deadline,
-            _allow_synthetic_fixture=self._allow_synthetic_fixture,
-        )
+        source_sha, source_seal = source_observation
+        macro_sha, macro_seal = macro_observation
         if self._expected_source_sha is not None and source_sha != self._expected_source_sha:
             raise GatewayError("backend_unavailable", "installed Mastermind source SHA changed")
         return source_sha, macro_sha, source_seal, macro_seal

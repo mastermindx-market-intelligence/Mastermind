@@ -1040,3 +1040,138 @@ def test_sparse_macro_materialization_refuses_unsupported_path_list_shape(tmp_pa
         _build_macro_materialization_plan(
             macro, runner=_default_packet_runner, env=env, deadline=None,
         )
+
+
+def _direct_pair_collector(tmp_path: Path):
+    from integrations.executive_mcp.installed import InstalledBootPacketCollector
+
+    source_parent = tmp_path / "source-parent"
+    macro_parent = tmp_path / "macro-parent"
+    source_parent.mkdir()
+    macro_parent.mkdir()
+    source, _source_file = _clean_repo(source_parent)
+    macro, _macro_file = _clean_repo(macro_parent)
+    code = tmp_path / "immutable-release"
+    (code / "scripts").mkdir(parents=True)
+    python = tmp_path / "python"
+    python.write_text("fixture", encoding="utf-8")
+    source_sha = _git(source, "rev-parse", "HEAD").stdout.strip()
+    macro_sha = _git(macro, "rev-parse", "HEAD").stdout.strip()
+    collector = InstalledBootPacketCollector(
+        source_root=source,
+        macro_root=macro,
+        code_root=code,
+        python_executable=python,
+        expected_source_sha=source_sha,
+    )
+    return collector, source, macro, source_sha, macro_sha
+
+
+def test_installed_collector_pre_snapshots_overlap_for_direct_repositories(
+    tmp_path: Path, monkeypatch,
+):
+    import threading
+    import time
+    from integrations.executive_mcp import installed
+
+    collector, source, macro, source_sha, macro_sha = _direct_pair_collector(tmp_path)
+    rendezvous = threading.Barrier(2)
+    thread_ids: set[int] = set()
+
+    def snapshot(path: Path, **_kwargs):
+        thread_ids.add(threading.get_ident())
+        rendezvous.wait(timeout=1.0)
+        if Path(path) == source:
+            return source_sha, "source-seal"
+        if Path(path) == macro:
+            return macro_sha, "macro-seal"
+        raise AssertionError(f"unexpected snapshot root: {path}")
+
+    monkeypatch.setattr(installed, "_clean_git_snapshot", snapshot)
+    observed = collector._snapshot_pair({}, deadline=time.monotonic() + 2.0)
+
+    assert observed == (source_sha, macro_sha, "source-seal", "macro-seal")
+    assert len(thread_ids) == 2
+
+
+def test_installed_collector_post_generations_overlap_for_direct_repositories(
+    tmp_path: Path, monkeypatch,
+):
+    import threading
+    import time
+    from integrations.executive_mcp import installed
+
+    collector, source, macro, source_sha, macro_sha = _direct_pair_collector(tmp_path)
+    rendezvous = threading.Barrier(2)
+    thread_ids: set[int] = set()
+
+    def generation(path: Path, **_kwargs):
+        thread_ids.add(threading.get_ident())
+        rendezvous.wait(timeout=1.0)
+        if Path(path) == source:
+            return source_sha, "source-seal"
+        if Path(path) == macro:
+            return macro_sha, "macro-seal"
+        raise AssertionError(f"unexpected generation root: {path}")
+
+    monkeypatch.setattr(installed, "_snapshot_generation_observation", generation)
+    observed = collector._generation_pair({}, deadline=time.monotonic() + 2.0)
+
+    assert observed == (source_sha, macro_sha, "source-seal", "macro-seal")
+    assert len(thread_ids) == 2
+
+
+def test_installed_collector_pair_enforces_outer_cumulative_deadline(
+    tmp_path: Path, monkeypatch,
+):
+    import time
+    from integrations.executive_mcp import installed
+    from integrations.executive_mcp.schemas import GatewayError
+
+    collector, _source, _macro, _source_sha, _macro_sha = _direct_pair_collector(tmp_path)
+
+    def ignores_deadline(*_args, **_kwargs):
+        time.sleep(0.30)
+        return "a" * 40, "seal"
+
+    monkeypatch.setattr(installed, "_clean_git_snapshot", ignores_deadline)
+    started = time.monotonic()
+    with pytest.raises(GatewayError, match="cumulative deadline"):
+        collector._snapshot_pair({}, deadline=started + 0.05)
+    assert time.monotonic() - started < 0.20
+
+
+def test_installed_collector_synthetic_snapshot_pair_stays_sequential(
+    tmp_path: Path, monkeypatch,
+):
+    from integrations.executive_mcp import installed
+    from integrations.executive_mcp.installed import InstalledBootPacketCollector
+
+    source = tmp_path / "source"
+    macro = tmp_path / "macro"
+    code = tmp_path / "code"
+    for root in (source, macro, code):
+        root.mkdir()
+    python = tmp_path / "python"
+    python.write_text("fixture", encoding="utf-8")
+    calls: list[Path] = []
+
+    def snapshot(path: Path, **_kwargs):
+        calls.append(Path(path))
+        marker = "a" if Path(path) == source else "b"
+        return marker * 40, f"{marker}-seal"
+
+    monkeypatch.setattr(installed, "_clean_git_snapshot", snapshot)
+    collector = InstalledBootPacketCollector(
+        source_root=source,
+        macro_root=macro,
+        code_root=code,
+        python_executable=python,
+        expected_source_sha="a" * 40,
+        _allow_synthetic_fixture=True,
+    )
+
+    assert collector._snapshot_pair({}, deadline=None) == (
+        "a" * 40, "b" * 40, "a-seal", "b-seal",
+    )
+    assert calls == [source, macro]
