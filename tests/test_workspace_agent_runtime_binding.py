@@ -48,6 +48,12 @@ def target(**changes) -> WorkspaceReturnTargetEpoch:
         attempt_status=AttemptStatus.RUNNING,
         fence_generation=4,
         worker_status=WorkerStatus.BUSY,
+        harness_session_epoch_id="epoch-01",
+        harness_generation_number=7,
+        harness_provider_session_id="provider-session-01",
+        harness_provider="openai-codex",
+        harness_account_label="workspace-test",
+        harness_owner_seat="coo",
     )
     return dataclasses.replace(value, **changes)
 
@@ -180,16 +186,22 @@ def test_exact_current_target_reconstructs_company_dialogue_binding() -> None:
 
 
 def test_target_rollover_between_source_reads_refuses() -> None:
-    changed = target(
-        attempt_id="ATT-" + "3" * 32,
-        worker_id="worker-02",
-        fence_generation=5,
-    )
-    instance, targets = resolver(targets=TargetSequence(target(), changed))
-
-    with pytest.raises(WorkspaceReturnError, match="BINDING_UNAVAILABLE"):
-        instance.resolve(OPERATION)
-    assert targets.calls == [OPERATION, OPERATION]
+    for changed in (
+        target(
+            attempt_id="ATT-" + "3" * 32,
+            worker_id="worker-02",
+            fence_generation=5,
+        ),
+        target(
+            harness_session_epoch_id="epoch-02",
+            harness_generation_number=8,
+            harness_provider_session_id="provider-session-02",
+        ),
+    ):
+        instance, targets = resolver(targets=TargetSequence(target(), changed))
+        with pytest.raises(WorkspaceReturnError, match="BINDING_UNAVAILABLE"):
+            instance.resolve(OPERATION)
+        assert targets.calls == [OPERATION, OPERATION]
 
 
 @pytest.mark.parametrize(
