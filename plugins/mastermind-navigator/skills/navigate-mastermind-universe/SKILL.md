@@ -82,8 +82,8 @@ For the requested action class:
 5. continue the requested action when the technical/resource gate clears, then evaluate organizational/source-writer authority separately.
 
 When an owner supplies `mastermind.sol_capability_status.v1`, consume it rather than reimplementing
-CAP1 policy: for the exact matching scope, READ may consume `read_serviceable` and WRITE may consume
-`write_serviceable`; ADMIN remains UNKNOWN unless its actual owner supplies action-specific evidence.
+CAP1 policy: for the exact matching scope, READ may consume `read_serviceable`.
+WRITE may consume `write_serviceable`; ADMIN remains UNKNOWN unless its actual owner supplies action-specific evidence.
 Preserve CAP1 source refs/issues and proof generation. Navigator normalizes that owner fact into the
 role-filtered packet; it does not become the capability registry or recompute CAP1's serviceability law.
 
