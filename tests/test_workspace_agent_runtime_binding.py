@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,6 +25,7 @@ from integrations.workspace_agent_runtime_binding import (
     ExecutiveWorkspaceReturnBindingResolver,
     WorkspaceReturnPhysicalSource,
     WorkspaceReturnTargetEpoch,
+    _read_current_target,
 )
 
 
@@ -183,6 +185,63 @@ def test_exact_current_target_reconstructs_company_dialogue_binding() -> None:
     assert binding.reply_to_message_key is None
     second_instance, _ = resolver()
     assert binding_digest(binding) == binding_digest(second_instance.resolve(OPERATION))
+
+
+def test_current_target_consumes_canonical_harness_generation(monkeypatch) -> None:
+    calls = []
+    job = SimpleNamespace(
+        status=JobStatus.RUNNING,
+        current_attempt_id=ATTEMPT,
+        assigned_worker_id=WORKER,
+    )
+    attempt = SimpleNamespace(
+        attempt_id=ATTEMPT,
+        job_id=JOB,
+        status=AttemptStatus.RUNNING,
+        worker_id=WORKER,
+        fence_generation=4,
+    )
+    worker = SimpleNamespace(
+        status=WorkerStatus.BUSY,
+        active_job_id=JOB,
+    )
+    identity = SimpleNamespace(
+        root_job_id=ROOT_JOB,
+        job_id=JOB,
+        operation_key=OPERATION,
+        session_ref=SESSION,
+    )
+    harness = SimpleNamespace(
+        attempt_id=ATTEMPT,
+        session_epoch_id="epoch-01",
+        generation_number=7,
+        provider_session_id="provider-session-01",
+        provider="openai-codex",
+        account_label="workspace-test",
+        owner_seat="coo",
+    )
+    runtime = SimpleNamespace(
+        jobs=SimpleNamespace(get_job=lambda job_id: job if job_id == JOB else None),
+        attempts=SimpleNamespace(
+            get_attempt=lambda attempt_id: attempt if attempt_id == ATTEMPT else None
+        ),
+        workers=SimpleNamespace(
+            get_worker=lambda worker_id: worker if worker_id == WORKER else None
+        ),
+        current_harness_binding_source=lambda attempt_id: (
+            calls.append(attempt_id) or harness
+        ),
+    )
+    import integrations.workspace_agent_runtime_binding as module
+    monkeypatch.setattr(module, "derive_delegation_identity", lambda value: identity)
+
+    observed = _read_current_target(runtime, OPERATION)
+
+    assert calls == [ATTEMPT]
+    assert observed.session_ref == SESSION
+    assert observed.harness_session_epoch_id == "epoch-01"
+    assert observed.harness_generation_number == 7
+    assert observed.harness_provider_session_id == "provider-session-01"
 
 
 def test_target_rollover_between_source_reads_refuses() -> None:
