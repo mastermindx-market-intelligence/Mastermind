@@ -38,6 +38,33 @@ afterEach(() => {
 });
 
 describe("React read lifecycle fences", () => {
+  it("hides displayed A synchronously while B is pending and after B rejects", async () => {
+    const b = deferred<unknown>(),
+      read = vi.fn(({ workRef }: { workRef: string }) =>
+        workRef === "WS:ALPHA"
+          ? Promise.resolve(missionFixture("WS:ALPHA", "JOB-A"))
+          : b.promise,
+      );
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      controlRoom: controlRoomFixture(),
+      readMission: read,
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      await screen.findByRole("button", { name: "Mission Workspace" }),
+    );
+    expect(await screen.findByText("JOB-A")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await user.click(screen.getByRole("button", { name: /Beta program/ }));
+    expect(screen.queryByText("JOB-A")).toBeNull();
+    expect(screen.getByText(/SOURCE_READ_PENDING/)).toBeTruthy();
+    await act(async () => b.reject(new Error("disconnected")));
+    expect(await screen.findByText(/SOURCE_UNAVAILABLE/)).toBeTruthy();
+    expect(screen.queryByText("JOB-A")).toBeNull();
+    expect(document.body.textContent).not.toContain("disconnected");
+  });
   it("keeps B when an abort-ignoring A read resolves late", async () => {
     const a = deferred<unknown>(),
       b = deferred<unknown>(),
@@ -61,7 +88,7 @@ describe("React read lifecycle fences", () => {
     await act(async () => b.resolve(missionFixture("WS:BETA", "JOB-B")));
     expect(
       (await screen.findAllByRole("heading", { name: "Beta program" })).length,
-    ).toBe(2);
+    ).toBe(1);
     await act(async () => a.resolve(missionFixture("WS:ALPHA", "JOB-A")));
     await waitFor(() =>
       expect(
@@ -112,7 +139,33 @@ describe("native and interaction contracts", () => {
     render(<App />);
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("readiness"));
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("heading", { name: "Today", level: 1 }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Workspace connection unavailable. Current work was not read.",
+      ),
+    ).toBeTruthy();
     expect(screen.getByText(/UNCONFIGURED \/ BUILT_NOT_PROVEN/)).toBeTruthy();
+    expect(screen.getByText("a".repeat(40))).toBeTruthy();
+  });
+  it("distinguishes an absent Programs source from a malformed source", async () => {
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    expect(
+      screen.getByRole("heading", { name: "Programs", level: 1 }),
+    ).toBeTruthy();
+    expect(screen.getByText(/approved source is available/)).toBeTruthy();
+    cleanup();
+
+    window.MastermindMissionHost = { controlRoom: { invalid: true } };
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    expect(
+      screen.getByText(/did not match the required contract/),
+    ).toBeTruthy();
   });
   it("graph and list share identities and restore keyboard focus", async () => {
     window.MastermindMissionHost = {
@@ -157,5 +210,38 @@ describe("native and interaction contracts", () => {
     expect(
       screen.getAllByText(/EXECUTIVE_OS · job:JOB-ROOT · status/).length,
     ).toBeGreaterThan(0);
+  });
+  it("labels partial missions without a current qualification claim", async () => {
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-ROOT" },
+      readMission: async () => missionFixture(),
+    };
+    render(<App />);
+    expect(
+      await screen.findByText(/source qualification is not current/),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain(
+      "exact source-qualified mission",
+    );
+  });
+  it("renders unjoined counts and identities as separate bounded facts", async () => {
+    const fixture: any = missionFixture();
+    fixture.children.state = "PARTIAL";
+    fixture.children.coverage = "INCOMPLETE";
+    fixture.children.reason_codes = ["UNJOINED_JOBS_PRESENT"];
+    fixture.children.total_count = null;
+    fixture.children.overflow_count = null;
+    fixture.children.unjoined_job_count = null;
+    fixture.children.unjoined_job_ids = ["JOB-UNJOINED"];
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-ROOT" },
+      readMission: async () => fixture,
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Mission Workspace" }));
+    await waitFor(() => expect(screen.getByText("Count unknown")).toBeTruthy());
+    expect(screen.getByText("JOB-UNJOINED")).toBeTruthy();
+    expect(screen.getByText(/Known-subset evidence/)).toBeTruthy();
   });
 });

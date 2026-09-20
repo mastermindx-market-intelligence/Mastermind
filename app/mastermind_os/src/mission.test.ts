@@ -200,6 +200,18 @@ describe("closed mission decoder", () => {
     expect(local.kind).toBe("LOCAL_UNAVAILABLE");
     expect(validateMission(local, "WS:ALPHA", "JOB-ROOT")).toBe(false);
   });
+  it("admits a withheld execution state only with matching degraded missingness", () => {
+    const raw: any = clone(missionFixture());
+    raw.execution.state = null;
+    expect(decodeMission(raw, selection)).toBeNull();
+    raw.missingness.push({
+      missingness_class: "DEGRADED",
+      target_field: "execution",
+      producer_owner: "executive_os",
+      reason: "source detail withheld",
+    });
+    expect(decodeMission(raw, selection)?.execution.state).toBeNull();
+  });
   it("accepts the frozen real producer-to-reducer output without adaptation", () => {
     const decoded = decodeMission(realMissionFixture(), {
       workRef: "WS:B5",
@@ -214,15 +226,110 @@ describe("closed mission decoder", () => {
     expect(decoded?.transport.w3c?.source_receipt?.freshness).toBe(
       "SOURCE_EVIDENCE_TIME",
     );
+    expect(decoded?.read_state.state).toBe("PARTIAL");
+    expect(decoded?.source.source_generation).toEqual({
+      state: "UNKNOWN",
+      version: null,
+      generation: null,
+    });
+    expect(decoded?.posture).toMatchObject({
+      value: "CONSUMPTION_UNKNOWN",
+      rule: "E3",
+    });
+  });
+  it.each([
+    "2026-13-01T00:00:00Z",
+    "2026-02-30T00:00:00Z",
+    "2026-01-01T24:00:00Z",
+    "2026-01-01T00:60:00Z",
+    "2026-01-01T00:00:60Z",
+  ])("rejects impossible UTC timestamp %s", (timestamp) => {
+    const raw: any = clone(missionFixture());
+    raw.generated_at = timestamp;
+    expect(decodeMission(raw, selection)).toBeNull();
+  });
+  it("accepts a descendant tree and preserves each producer parent edge", () => {
+    const raw: any = clone(missionFixture());
+    const grandchild = clone(raw.children.items[0]);
+    grandchild.job_id = "JOB-GRANDCHILD";
+    grandchild.parent_job_id = "JOB-ROOT-CHILD";
+    grandchild.depth = 2;
+    raw.children.items.push(grandchild);
+    raw.children.total_count = 2;
+    const decoded = decodeMission(raw, selection)!;
+    expect(relationshipsForMission(decoded)).toEqual([
+      {
+        id: "JOB-ROOT->JOB-ROOT-CHILD",
+        from: "JOB-ROOT",
+        to: "JOB-ROOT-CHILD",
+        kind: "Execution containment",
+      },
+      {
+        id: "JOB-ROOT-CHILD->JOB-GRANDCHILD",
+        from: "JOB-ROOT-CHILD",
+        to: "JOB-GRANDCHILD",
+        kind: "Execution containment",
+      },
+    ]);
+  });
+  it.each([
+    [
+      "null child identity",
+      (d: any) => {
+        d.children.items[0].job_id = null;
+      },
+    ],
+    [
+      "duplicate child identity",
+      (d: any) => {
+        d.children.items.push(clone(d.children.items[0]));
+        d.children.total_count = 2;
+      },
+    ],
+    [
+      "missing parent",
+      (d: any) => {
+        d.children.items[0].parent_job_id = "JOB-MISSING";
+      },
+    ],
+    [
+      "self parent",
+      (d: any) => {
+        d.children.items[0].parent_job_id = d.children.items[0].job_id;
+      },
+    ],
+    [
+      "cycle",
+      (d: any) => {
+        const second = clone(d.children.items[0]);
+        second.job_id = "JOB-SECOND";
+        second.parent_job_id = d.children.items[0].job_id;
+        second.depth = 2;
+        d.children.items[0].parent_job_id = "JOB-SECOND";
+        d.children.items.push(second);
+        d.children.total_count = 2;
+      },
+    ],
+  ])("rejects %s topology", (_name, mutate) => {
+    const raw: any = clone(missionFixture());
+    mutate(raw);
+    expect(decodeMission(raw, selection)).toBeNull();
   });
   it.each([
     "/Users/person/private.json",
+    "/tmp/private.json",
+    "C:\\Users\\person\\private.json",
     "http://127.0.0.1:8123/admin",
+    "https://unapproved.example/report",
     "service.internal.local",
+    "service.internal",
     "operator@example.com",
     "X-CCR-Token: abc",
+    "authorization: bearer abc",
+    "ghp_privatecredential",
     "session_id=abc123",
     "Traceback: raw model failure",
+    "unsafe\u0000control",
   ])("rejects private or raw material %s", (value) => {
     const raw: any = clone(missionFixture());
     raw.execution.artifacts = [value];
@@ -257,6 +364,14 @@ describe("actual Control Room shape", () => {
       ],
     });
   });
+  it("distinguishes absent and malformed Control Room inputs", () => {
+    expect(programsFromControlRoom(undefined).reason).toBe(
+      "SOURCE_UNAVAILABLE",
+    );
+    expect(programsFromControlRoom({ invalid: true }).reason).toBe(
+      "SCHEMA_INVALID",
+    );
+  });
   it("orients from work.agent_os and joins exactly one responsibility", () => {
     const result = programsFromControlRoom(controlRoomFixture());
     expect(result.programs[0]).toMatchObject({
@@ -285,7 +400,31 @@ describe("actual Control Room shape", () => {
     raw.autonomy.responsibilities[0].qualification_generation = 3;
     expect(programsFromControlRoom(raw)).toMatchObject({
       state: "UNAVAILABLE",
-      reason: "AUTONOMY_PROJECTION_UNAVAILABLE",
+      reason: "SCHEMA_INVALID",
+    });
+  });
+  it("does not call mismatched producer clocks current or available", () => {
+    const raw: any = realControlRoomFixture();
+    raw.autonomy.generated_at = "2026-09-05T00:00:01Z";
+    expect(programsFromControlRoom(raw)).toMatchObject({
+      state: "UNAVAILABLE",
+      reason: "GENERATION_MISMATCH",
+    });
+  });
+  it("never selects an ambiguous RESOLVED root", () => {
+    const raw: any = realControlRoomFixture();
+    raw.autonomy.responsibilities[0].root_job_ambiguous = true;
+    expect(programsFromControlRoom(raw).programs[0]).toMatchObject({
+      rootJobId: null,
+      rootState: "CONFLICT",
+    });
+  });
+  it("rejects duplicate work references", () => {
+    const raw: any = realControlRoomFixture();
+    raw.work.push(clone(raw.work[0]));
+    expect(programsFromControlRoom(raw)).toMatchObject({
+      state: "UNAVAILABLE",
+      reason: "DUPLICATE_WORK_REF",
     });
   });
   it("rejects the invented legacy card shape", () =>

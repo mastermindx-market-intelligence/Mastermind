@@ -21,6 +21,13 @@ export const navigation = [
   "Conversation",
 ] as const;
 type View = (typeof navigation)[number];
+interface BuildReceipt {
+  version: string;
+  source_revision: string;
+  build_identity: string;
+  transport: string;
+  state: string;
+}
 declare global {
   interface Window {
     MastermindMissionHost?: {
@@ -169,6 +176,27 @@ function Mission({ d }: { d: MissionDocument }) {
             : d.children.reason_codes.join(" · ") ||
               "Complete source coverage."}
         </p>
+        <div className="unjoined" aria-label="Unjoined jobs">
+          <b>Unjoined jobs</b>
+          <span>
+            {d.children.unjoined_job_count === null
+              ? "Count unknown"
+              : `${d.children.unjoined_job_count} reported`}
+          </span>
+          {d.children.unjoined_job_ids.length ? (
+            <ul>
+              {d.children.unjoined_job_ids.map((id) => (
+                <li key={id}>
+                  <code>{id}</code>
+                </li>
+              ))}
+            </ul>
+          ) : d.children.unjoined_job_count === 0 ? (
+            <small>No unjoined job IDs were reported.</small>
+          ) : (
+            <small>No bounded unjoined identities were projected.</small>
+          )}
+        </div>
         {d.children.items.length ? (
           <ul className="items">
             {d.children.items.map((x, index) => (
@@ -374,6 +402,7 @@ export function App() {
       ),
     ),
     [notice, setNotice] = useState("A qualified source has not been read."),
+    [build, setBuild] = useState<BuildReceipt | null>(null),
     request = useRef(0);
   useEffect(() => {
     let attached = true;
@@ -383,24 +412,11 @@ export function App() {
       setMission(
         unavailableMission(selection, "NATIVE_TRANSPORT_UNCONFIGURED"),
       );
-      setNotice(
-        "Native shell detected. Its fixed transport is unconfigured; no source request was attempted.",
-      );
+      setNotice("Workspace connection unavailable. Current work was not read.");
       import("@tauri-apps/api/core")
-        .then(({ invoke }) =>
-          invoke<{
-            version: string;
-            source_revision: string;
-            build_identity: string;
-            transport: string;
-            state: string;
-          }>("readiness"),
-        )
+        .then(({ invoke }) => invoke<BuildReceipt>("readiness"))
         .then((r) => {
-          if (attached && request.current === current)
-            setNotice(
-              `Native ${r.version} · source ${r.source_revision} · build ${r.build_identity}: ${r.transport} / ${r.state}.`,
-            );
+          if (attached && request.current === current) setBuild(r);
         })
         .catch(() => {
           if (attached && request.current === current)
@@ -416,7 +432,7 @@ export function App() {
     if (!selection) {
       setMission(unavailableMission(null, "EXACT_SELECTION_REQUIRED"));
       setNotice(
-        "Select an exact Program and resolved root pair before any read.",
+        "Choose a Program with one resolved mission before opening the workspace.",
       );
       return () => {
         attached = false;
@@ -428,12 +444,13 @@ export function App() {
       setMission(
         unavailableMission(selection, "QUALIFIED_HOST_READ_UNAVAILABLE"),
       );
-      setNotice("A qualified host read port was not supplied.");
+      setNotice("Workspace connection unavailable. Current work was not read.");
       return () => {
         attached = false;
         controller.abort();
       };
     }
+    setMission(unavailableMission(selection, "SOURCE_READ_PENDING"));
     setNotice("Reading the exact selected mission pair…");
     read({ ...selection, signal: controller.signal })
       .then((raw) => {
@@ -470,9 +487,24 @@ export function App() {
       controller.abort();
     };
   }, [selection, native]);
-  const d = isDoc(mission) ? mission : null,
+  const candidate = isDoc(mission) ? mission : null,
+    d =
+      candidate &&
+      selection &&
+      candidate.program.work_ref === selection.workRef &&
+      (candidate.mission.root_job_id === null ||
+        candidate.mission.root_job_id === selection.rootJobId)
+        ? candidate
+        : null,
     open = (w: string, r: string | null) => {
       if (r) {
+        setMission(
+          unavailableMission(
+            { workRef: w, rootJobId: r },
+            "SOURCE_READ_PENDING",
+          ),
+        );
+        setNotice("Reading the exact selected mission pair…");
         setSelection({ workRef: w, rootJobId: r });
         setActive("Mission Workspace");
       }
@@ -483,8 +515,8 @@ export function App() {
       <section className="card">
         <h2>Today</h2>
         <p className="muted">
-          Choose Programs, then an exact resolved mission pair. Decision-first
-          orientation remains owned by the Control Room source.
+          Open Programs to choose a mission. Current work will appear when an
+          approved workspace source is available.
         </p>
         <button className="primary" onClick={() => setActive("Programs")}>
           Open Programs
@@ -523,8 +555,9 @@ export function App() {
           </div>
         ) : (
           <Empty>
-            No canonical Control Room Program cards are available (
-            {index.reason}).
+            {window.MastermindMissionHost?.controlRoom == null
+              ? "Workspace connection unavailable. Programs will appear when an approved source is available."
+              : `The supplied Programs source did not match the required contract (${index.reason}).`}
           </Empty>
         )}
       </section>
@@ -592,12 +625,14 @@ export function App() {
         <header>
           <div>
             <span className="eyebrow">{active}</span>
-            <h1>{d?.program.title || "Mission workspace"}</h1>
+            <h1>{active}</h1>
             <p>
               {d
-                ? d.mission.root_job_id
+                ? d.mission.root_job_id && d.read_state.state === "CURRENT"
                   ? "A bounded rendering of one exact source-qualified mission."
-                  : "A qualified reconciliation state; no mission root is established."
+                  : d.mission.root_job_id
+                    ? `This mission projection is ${label(d.read_state.state)}; source qualification is not current.`
+                    : "A qualified reconciliation state; no mission root is established."
                 : "No producer document is currently admitted."}
             </p>
           </div>
@@ -606,6 +641,25 @@ export function App() {
         <div className="notice" role="status">
           {notice}
         </div>
+        {build ? (
+          <details className="build-details">
+            <summary>Build details</summary>
+            <dl>
+              <dt>Version</dt>
+              <dd>{build.version}</dd>
+              <dt>Source revision</dt>
+              <dd>
+                <code>{build.source_revision}</code>
+              </dd>
+              <dt>Build identity</dt>
+              <dd>
+                <code>{build.build_identity}</code>
+              </dd>
+              <dt>Transport</dt>
+              <dd>{`${build.transport} / ${build.state}`}</dd>
+            </dl>
+          </details>
+        ) : null}
         {content}
         {d && (
           <section className="card">

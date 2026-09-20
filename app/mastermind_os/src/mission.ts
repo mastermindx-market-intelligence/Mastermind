@@ -52,14 +52,14 @@ export interface AttemptCard {
   error_class: "WITHHELD" | null;
 }
 export interface ChildCard {
-  job_id: string | null;
-  status: (typeof JOB_STATES)[number] | null;
-  parent_job_id: string | null;
-  depth: number | null;
-  orchestration_role: Role | null;
+  job_id: string;
+  status: (typeof JOB_STATES)[number];
+  parent_job_id: string;
+  depth: number;
+  orchestration_role: Role;
   plan_step_id: string | null;
-  attempt_count: number | null;
-  attempt_limit: number | null;
+  attempt_count: number;
+  attempt_limit: number;
   current_attempt_id: string | null;
   latest_attempt: AttemptCard | null;
   worker_id: string | null;
@@ -181,7 +181,8 @@ export interface MissionDocument {
       | "CANCELLED"
       | "FAILED"
       | "LOST"
-      | "RATE_LIMITED";
+      | "RATE_LIMITED"
+      | null;
     summary_present: boolean;
     artifacts: string[];
     errors_present: boolean;
@@ -372,8 +373,8 @@ const ATTEMPT_STATES = [
   "CANCELLED",
 ] as const;
 const PRIVATE =
-  /(?:x-ccr-token|bearer\s+[a-z0-9._-]+|traceback|\b(?:token|secret|password|session_id)\s*[:=]|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b|\b[a-z0-9.-]+\.local\b|\/(?:Users|home|private|Volumes|var|etc)\/|(?:localhost|127\.0\.0\.1|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?::\d+)?)/i;
-const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
+  /(?:\b(?:x-ccr-token|authorization|bearer|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)\b|\b(?:token|secret|password|session_id)\s*[:=]|\b(?:gh[pousr]_|sk-|xox[baprs]-)[a-z0-9_-]+|traceback|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b|\b[a-z0-9.-]+\.(?:local|internal|lan)\b|(?:https?|file|ftp):\/\/|(?:^|[\s"'=(])(?:~\/|\/[A-Za-z0-9._-]+(?:\/[^\s"']*)?|[A-Za-z]:\\|\\\\)|(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?::\d+)?)/i;
+const ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?Z$/;
 const obj = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
 const exact = (v: Record<string, unknown>, ks: readonly string[]) => {
@@ -384,7 +385,10 @@ const exact = (v: Record<string, unknown>, ks: readonly string[]) => {
 const oneOf = <T extends readonly string[]>(v: unknown, x: T): v is T[number] =>
   typeof v === "string" && x.includes(v as T[number]);
 const text = (v: unknown, n = 1024): v is string =>
-  typeof v === "string" && v.length <= n && !PRIVATE.test(v);
+  typeof v === "string" &&
+  v.length <= n &&
+  !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(v) &&
+  !PRIVATE.test(v);
 const ntext = (v: unknown, n = 1024): v is string | null =>
   v === null || text(v, n);
 const token = (v: unknown, n = 256): v is string =>
@@ -392,7 +396,19 @@ const token = (v: unknown, n = 256): v is string =>
   !/:\/\//.test(v) &&
   !/\/(?:Users|home|private|Volumes|var|etc)\//i.test(v) &&
   /^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/.test(v);
-const time = (v: unknown): v is string => typeof v === "string" && ISO.test(v);
+const time = (v: unknown): v is string => {
+  if (typeof v !== "string") return false;
+  const match = ISO.exec(v);
+  if (!match) return false;
+  const [year, month, day, hour, minute, second] = match
+    .slice(1, 7)
+    .map(Number);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59)
+    return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0),
+    days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= days[month - 1];
+};
 const ntime = (v: unknown): v is string | null => v === null || time(v);
 const int = (v: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): v is number =>
   Number.isInteger(v) && Number(v) >= min && Number(v) <= max;
@@ -414,23 +430,6 @@ const strings = (
   Array.isArray(v) &&
   v.length <= count &&
   v.every((x) => (tokens ? token(x, len) : text(x, len)));
-function scalars(
-  v: unknown,
-  max = 32,
-): v is Record<string, string | number | boolean | null> {
-  return (
-    obj(v) &&
-    Object.keys(v).length <= max &&
-    Object.entries(v).every(
-      ([k, x]) =>
-        token(k, 64) &&
-        (x === null ||
-          typeof x === "boolean" ||
-          (typeof x === "number" && Number.isFinite(x)) ||
-          text(x, 256)),
-    )
-  );
-}
 function ev(v: unknown): v is EvidenceRef {
   return (
     obj(v) &&
@@ -544,8 +543,9 @@ function pullRequest(v: unknown) {
     ntext(v.repo, 256) &&
     nint(v.number, 1, 1e9) &&
     (v.url === null ||
-      (text(v.url, 512) &&
-        /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+\/pull\/[1-9][0-9]*$/.test(
+      (typeof v.url === "string" &&
+        v.url.length <= 512 &&
+        /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/.test(
           v.url,
         ))) &&
     ntext(v.title, 1024) &&
@@ -688,14 +688,14 @@ function child(v: unknown): v is ChildCard {
   ];
   return (
     exact(v, keys) &&
-    (v.job_id === null || job(v.job_id)) &&
-    (v.status === null || oneOf(v.status, JOB_STATES)) &&
-    (v.parent_job_id === null || job(v.parent_job_id)) &&
-    nint(v.depth, 0, 256) &&
-    (v.orchestration_role === null || oneOf(v.orchestration_role, ROLES)) &&
+    job(v.job_id) &&
+    oneOf(v.status, JOB_STATES) &&
+    job(v.parent_job_id) &&
+    int(v.depth, 1, 256) &&
+    oneOf(v.orchestration_role, ROLES) &&
     ntext(v.plan_step_id, 128) &&
-    nint(v.attempt_count, 0, 1e6) &&
-    nint(v.attempt_limit, 0, 1e6) &&
+    int(v.attempt_count, 0, 1e6) &&
+    int(v.attempt_limit, 0, 1e6) &&
     (v.current_attempt_id === null || token(v.current_attempt_id)) &&
     (v.latest_attempt === null || att(v.latest_attempt)) &&
     ntext(v.worker_id, 128)
@@ -978,20 +978,48 @@ export function decodeMission(
     !strings(value.children.unjoined_job_ids, 50, 512, true)
   )
     return null;
-  const childItems = value.children.items as ChildCard[];
+  const childItems = value.children.items as ChildCard[],
+    childIds = new Set(childItems.map((x) => x.job_id)),
+    childById = new Map(childItems.map((x) => [x.job_id, x]));
+  const cyclic = childItems.some((start) => {
+    const seen = new Set<string>();
+    let current: ChildCard | undefined = start;
+    while (current && current.parent_job_id !== sel.rootJobId) {
+      if (seen.has(current.job_id)) return true;
+      seen.add(current.job_id);
+      current = childById.get(current.parent_job_id);
+    }
+    return current === undefined;
+  });
   if (
-    childItems.some(
-      (x) =>
-        (x.parent_job_id !== null && x.parent_job_id !== sel.rootJobId) ||
-        x.job_id === sel.rootJobId,
-    ) ||
+    childIds.size !== childItems.length ||
+    cyclic ||
+    childItems.some((x) => {
+      if (
+        x.job_id === sel.rootJobId ||
+        x.parent_job_id === x.job_id ||
+        (x.parent_job_id !== sel.rootJobId && !childIds.has(x.parent_job_id)) ||
+        x.attempt_count > x.attempt_limit
+      )
+        return true;
+      const parentDepth =
+        x.parent_job_id === sel.rootJobId
+          ? 0
+          : childById.get(x.parent_job_id)?.depth;
+      return parentDepth === undefined || x.depth !== parentDepth + 1;
+    }) ||
     (!established && childItems.length !== 0) ||
     (value.children.coverage === "COMPLETE" &&
       (value.children.unjoined_job_count !== 0 ||
         value.children.unjoined_job_ids.length !== 0)) ||
     (value.children.unjoined_job_count !== null &&
       value.children.unjoined_job_count <
-        value.children.unjoined_job_ids.length)
+        value.children.unjoined_job_ids.length) ||
+    new Set(value.children.unjoined_job_ids).size !==
+      value.children.unjoined_job_ids.length ||
+    value.children.unjoined_job_ids.some(
+      (id) => id === sel.rootJobId || childIds.has(id),
+    )
   )
     return null;
   const ex = value.execution;
@@ -1005,15 +1033,18 @@ export function decodeMission(
       "next_actions",
       "evidence",
     ]) ||
-    !oneOf(ex.state, [
-      "NOT_STARTED",
-      "IN_PROGRESS",
-      "ACCEPTED",
-      "CANCELLED",
-      "FAILED",
-      "LOST",
-      "RATE_LIMITED",
-    ] as const) ||
+    !(
+      ex.state === null ||
+      oneOf(ex.state, [
+        "NOT_STARTED",
+        "IN_PROGRESS",
+        "ACCEPTED",
+        "CANCELLED",
+        "FAILED",
+        "LOST",
+        "RATE_LIMITED",
+      ] as const)
+    ) ||
     typeof ex.summary_present !== "boolean" ||
     !strings(ex.artifacts, 50, 1024) ||
     typeof ex.errors_present !== "boolean" ||
@@ -1176,6 +1207,17 @@ export function decodeMission(
   )
     return null;
   if (
+    ex.state === null &&
+    (r.state === "CURRENT" ||
+      !value.missingness.some(
+        (x) =>
+          obj(x) &&
+          x.missingness_class === "DEGRADED" &&
+          x.target_field === "execution",
+      ))
+  )
+    return null;
+  if (
     !strings(value.degraded, 128, 4096) ||
     !obj(value.budget) ||
     Object.keys(value.budget).length !== 0
@@ -1333,6 +1375,12 @@ export function programsFromControlRoom(value: unknown): {
   state: "AVAILABLE" | "UNAVAILABLE";
   reason: string;
 } {
+  if (value === null || value === undefined)
+    return {
+      programs: [],
+      state: "UNAVAILABLE",
+      reason: "SOURCE_UNAVAILABLE",
+    };
   if (
     !obj(value) ||
     !exact(value, CCR) ||
@@ -1344,7 +1392,7 @@ export function programsFromControlRoom(value: unknown): {
     return {
       programs: [],
       state: "UNAVAILABLE",
-      reason: "CONTROL_ROOM_SCHEMA_INVALID",
+      reason: "SCHEMA_INVALID",
     };
   const au = value.autonomy;
   if (
@@ -1374,10 +1422,17 @@ export function programsFromControlRoom(value: unknown): {
     return {
       programs: [],
       state: "UNAVAILABLE",
-      reason: "AUTONOMY_PROJECTION_UNAVAILABLE",
+      reason: "SCHEMA_INVALID",
+    };
+  if (au.generated_at !== value.generated_at)
+    return {
+      programs: [],
+      state: "UNAVAILABLE",
+      reason: "GENERATION_MISMATCH",
     };
   const rows = au.responsibilities as Array<Record<string, unknown>>,
-    out: ProgramCard[] = [];
+    out: ProgramCard[] = [],
+    seenWork = new Set<string>();
   for (const card of value.work) {
     if (
       !obj(card) ||
@@ -1390,6 +1445,13 @@ export function programsFromControlRoom(value: unknown): {
         state: "UNAVAILABLE",
         reason: "WORK_CARD_INVALID",
       };
+    if (seenWork.has(card.work_ref))
+      return {
+        programs: [],
+        state: "UNAVAILABLE",
+        reason: "DUPLICATE_WORK_REF",
+      };
+    seenWork.add(card.work_ref);
     const a = card.agent_os;
     if (
       a &&
@@ -1427,6 +1489,7 @@ export function programsFromControlRoom(value: unknown): {
         row.root_job_candidates.every(job)
           ? (row.root_job_candidates as string[])
           : [],
+      candidatesUnique = new Set(candidates).size === candidates.length,
       state = oneOf(row.runtime_root_state, [
         "RESOLVED",
         "CONFLICT",
@@ -1434,24 +1497,36 @@ export function programsFromControlRoom(value: unknown): {
       ] as const)
         ? row.runtime_root_state
         : "UNKNOWN",
-      root =
+      resolved =
         state === "RESOLVED" &&
+        row.root_job_ambiguous === false &&
         job(row.root_job_id) &&
+        candidatesUnique &&
         candidates.length === 1 &&
         candidates[0] === row.root_job_id
           ? row.root_job_id
-          : null;
+          : null,
+      rootState = resolved
+        ? "RESOLVED"
+        : row.root_job_ambiguous === true ||
+            state === "CONFLICT" ||
+            !candidatesUnique ||
+            (job(row.root_job_id) &&
+              candidates.length > 0 &&
+              !candidates.includes(row.root_job_id))
+          ? "CONFLICT"
+          : "UNKNOWN";
     out.push({
       ...base,
-      rootJobId: root,
-      rootState: root ? "RESOLVED" : state,
+      rootJobId: resolved,
+      rootState,
       rootCandidates: candidates,
     });
   }
   return {
     programs: out,
     state: "AVAILABLE",
-    reason: out.length ? "CONTROL_ROOM_CURRENT" : "NO_PROGRAMS_PROJECTED",
+    reason: out.length ? "CONTROL_ROOM_AVAILABLE" : "NO_PROGRAMS_PROJECTED",
   };
 }
 export function relationshipsForMission(d: MissionDocument): Relationship[] {

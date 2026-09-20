@@ -1,8 +1,8 @@
-import realControlRoom from "./fixtures/control-room-b5-e2dd17d5.json";
-import realMission from "./fixtures/mission-workspace-e2dd17d5.json";
+import realControlRoom from "./fixtures/control-room-b5-c20a3cf8.json";
+import realMission from "./fixtures/mission-workspace-c20a3cf8.json";
 
 // Test-only frozen fixtures. Both originate at reducer commit
-// e2dd17d5f5a96f85f2f945e1e8ae914892d0aa5a. The Control Room fixture was
+// c20a3cf8e6541d894404d6c0f44d0999edd8e142. The Control Room fixture was
 // emitted by tests/test_chairman_control_room_server.py::_b5_navigation_fixture
 // through the real cache composition path. The mission fixture continues that
 // chain through the real Fabric Job View composer and compose_mission_workspace.

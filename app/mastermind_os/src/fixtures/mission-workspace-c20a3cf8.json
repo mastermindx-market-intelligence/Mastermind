@@ -74,6 +74,12 @@
   "generated_at": "2026-09-05T00:00:00Z",
   "missingness": [
     {
+      "missingness_class": "DEGRADED",
+      "producer_owner": null,
+      "reason": "source detail withheld",
+      "target_field": "transport.evidence"
+    },
+    {
       "missingness_class": "EXCLUDED",
       "producer_owner": "executive_os",
       "reason": "source detail withheld",
@@ -102,6 +108,12 @@
       "producer_owner": "executive_os",
       "reason": "source detail withheld",
       "target_field": "mission.title"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": null,
+      "reason": "source detail withheld",
+      "target_field": "source.generation_vector"
     },
     {
       "missingness_class": "MISSING_PRODUCER",
@@ -153,8 +165,8 @@
   },
   "posture": {
     "evidence": [],
-    "rule": "F0",
-    "value": "RETURN_EXECUTION_MISMATCH"
+    "rule": "E3",
+    "value": "CONSUMPTION_UNKNOWN"
   },
   "principal": {
     "accountable_seat": "ceo",
@@ -187,13 +199,15 @@
     "work_ref": "WS:B5"
   },
   "read_state": {
-    "reason_codes": [],
-    "state": "CURRENT",
+    "reason_codes": [
+      "SOURCE_OR_VALIDITY_INCOMPLETE"
+    ],
+    "state": "PARTIAL",
     "usable_sections": [
       "program",
       "mission",
-      "execution",
       "review",
+      "execution",
       "principal",
       "transport",
       "children"
@@ -217,7 +231,7 @@
     ],
     "source_generation": {
       "generation": null,
-      "state": null,
+      "state": "UNKNOWN",
       "version": null
     }
   },
