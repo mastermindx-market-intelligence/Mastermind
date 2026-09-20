@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from integrations.workspace_agent_api import HOST, InvalidObservation
+from integrations.workspace_agent_api import HOST, MAX_BODY_BYTES, InvalidObservation
 from integrations.workspace_agent_trigger import (
     BETA_HEADER,
     MAX_TRIGGER_BODY_BYTES,
