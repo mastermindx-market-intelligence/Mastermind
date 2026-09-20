@@ -45,7 +45,6 @@
       ],
       "output_contract": {
         "kind": "continuity_candidate",
-        "max_result_chars": 900,
         "allowed_status": [
           "PASS",
           "PARTIAL",
@@ -101,7 +100,6 @@
       ],
       "output_contract": {
         "kind": "review_candidate",
-        "max_result_chars": 900,
         "allowed_status": [
           "PASS",
           "PARTIAL",
