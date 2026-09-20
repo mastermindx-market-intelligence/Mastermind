@@ -89,13 +89,19 @@ def _credential_metadata_valid(
     return True
 
 
-def _receipt_metadata_valid(path: Path) -> bool:
+def _receipt_metadata_valid(
+    path: Path, *, workspace_binding_class: str, worker_gid: int
+) -> bool:
     try:
+        expected_uid, expected_gid, expected_mode = readiness.receipt_storage_contract(
+            workspace_binding_class=workspace_binding_class,
+            worker_gid=worker_gid,
+        )
         readiness.lstat_identity(
             path,
-            expected_uid=0,
-            expected_gid=0,
-            expected_mode=0o400,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+            expected_mode=expected_mode,
             require_nonempty=True,
         )
     except (OSError, readiness.ReadinessError):
@@ -140,7 +146,9 @@ def inspect_slot(
         slot.auth_path, worker_uid=slot.worker_uid, worker_gid=slot.worker_gid
     )
     receipt_valid = receipt_present and _receipt_metadata_valid(
-        slot.readiness_receipt
+        slot.readiness_receipt,
+        workspace_binding_class=slot.workspace_binding_class,
+        worker_gid=slot.worker_gid,
     )
 
     readiness_state = "not_ready"

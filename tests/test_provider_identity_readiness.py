@@ -29,6 +29,55 @@ identity = _load("provider_identity_probe_test", "provider_identity_probe.py")
 readiness = _load("provider_readiness_test", "provider_readiness.py")
 
 
+def test_personal_pro_readiness_receipt_storage_is_exact_slot_readable_nonwritable() -> None:
+    uid, gid, mode = readiness.receipt_storage_contract(
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        worker_gid=454,
+    )
+    assert (uid, gid, mode) == (0, 454, 0o440)
+    assert mode & 0o040
+    assert not mode & 0o020
+    assert not mode & 0o004
+
+    assert readiness.receipt_storage_contract(
+        workspace_binding_class=identity_policy.COMPANY_WORKSPACE_BINDING_CLASS,
+        worker_gid=451,
+    ) == (0, 0, 0o400)
+
+
+def test_personal_pro_receipt_persistence_uses_exact_slot_group_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "readiness-personal.json"
+    calls: list[tuple[str, int, int]] = []
+    real_fchmod = readiness.os.fchmod
+
+    monkeypatch.setattr(readiness, "_validate_receipt_directory", lambda _path: None)
+    monkeypatch.setattr(readiness, "_assert_no_macos_acl", lambda _path: None)
+    monkeypatch.setattr(readiness, "_fsync_directory", lambda _path: None)
+
+    def fchown(descriptor: int, uid: int, gid: int) -> None:
+        calls.append(("chown", uid, gid))
+
+    def fchmod(descriptor: int, mode: int) -> None:
+        calls.append(("chmod", mode, 0))
+        real_fchmod(descriptor, mode)
+
+    monkeypatch.setattr(readiness.os, "fchown", fchown)
+    monkeypatch.setattr(readiness.os, "fchmod", fchmod)
+
+    readiness.persist_receipt(
+        path,
+        {"schema_version": readiness.SCHEMA_VERSION},
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        worker_gid=454,
+    )
+
+    assert ("chown", 0, 454) in calls
+    assert ("chmod", 0o440, 0) in calls
+    assert path.stat().st_mode & 0o777 == 0o440
+
+
 def test_readiness_receipt_is_fixed_root_only_and_exclusive_created() -> None:
     source = (
         ROOT / "ops" / "executive_os" / "provider_readiness.py"
@@ -38,8 +87,11 @@ def test_readiness_receipt_is_fixed_root_only_and_exclusive_created() -> None:
     )
     assert 'SCHEMA_VERSION = "mastermind.executive_provider_readiness/v2"' in source
     assert "os.O_EXCL" in source and 'getattr(os, "O_NOFOLLOW", 0)' in source
-    assert "os.fchown(descriptor, 0, 0)" in source
-    assert "os.fchmod(descriptor, 0o400)" in source
+    assert "receipt_storage_contract(" in source
+    assert readiness.receipt_storage_contract(
+        workspace_binding_class=identity_policy.COMPANY_WORKSPACE_BINDING_CLASS,
+        worker_gid=451,
+    ) == (0, 0, 0o400)
     assert "_fsync_directory(path.parent)" in source
 
 

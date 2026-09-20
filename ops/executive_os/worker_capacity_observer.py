@@ -44,7 +44,6 @@ from ops.executive_os import provider_worker_slots as worker_slots
 
 
 _ROOT_UID = 0
-_ROOT_GID = 0
 _MAX_SOURCE_CONFIG_BYTES = 4_096
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -103,14 +102,43 @@ def _pairs_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _load_root_owned_source_config(path: Path) -> WorkerCapacitySourceConfig:
+@dataclasses.dataclass(frozen=True, slots=True)
+class _SourceConfigSnapshot:
+    source: WorkerCapacitySourceConfig
+    identity: tuple[int, ...]
+    content_sha256: str
+
+
+def source_config_storage_contract(*, worker_gid: int) -> tuple[int, int, int]:
+    """Return the authority-owned, exact-slot-readable source-file contract."""
+
+    if (
+        isinstance(worker_gid, bool)
+        or not isinstance(worker_gid, int)
+        or worker_gid < 0
+    ):
+        _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
+    return _ROOT_UID, worker_gid, 0o440
+
+
+def _load_root_owned_source_config(
+    path: Path, *, worker_gid: int
+) -> _SourceConfigSnapshot:
     lexical = Path(path)
     if not lexical.is_absolute():
         _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
+    expected_uid, expected_gid, expected_mode = source_config_storage_contract(
+        worker_gid=worker_gid
+    )
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     if type(nofollow) is not int or nofollow <= 0:
         _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
-    flags = os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0)
+    flags = (
+        os.O_RDONLY
+        | nofollow
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     try:
         descriptor = os.open(lexical, flags)
     except OSError:
@@ -122,9 +150,9 @@ def _load_root_owned_source_config(path: Path) -> WorkerCapacitySourceConfig:
             _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
         if (
             not stat.S_ISREG(before.st_mode)
-            or before.st_uid != _ROOT_UID
-            or before.st_gid != _ROOT_GID
-            or stat.S_IMODE(before.st_mode) != 0o400
+            or before.st_uid != expected_uid
+            or before.st_gid != expected_gid
+            or stat.S_IMODE(before.st_mode) != expected_mode
             or before.st_nlink != 1
             or not 0 < before.st_size <= _MAX_SOURCE_CONFIG_BYTES
         ):
@@ -143,7 +171,10 @@ def _load_root_owned_source_config(path: Path) -> WorkerCapacitySourceConfig:
         total = 0
         while total <= _MAX_SOURCE_CONFIG_BYTES:
             try:
-                chunk = os.read(descriptor, min(65_536, _MAX_SOURCE_CONFIG_BYTES + 1 - total))
+                chunk = os.read(
+                    descriptor,
+                    min(65_536, _MAX_SOURCE_CONFIG_BYTES + 1 - total),
+                )
             except OSError:
                 _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
             if not chunk:
@@ -176,7 +207,22 @@ def _load_root_owned_source_config(path: Path) -> WorkerCapacitySourceConfig:
     source = validate_worker_capacity_source_config(value)
     if raw != canonical_worker_capacity_source_config_json(source):
         _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
-    return source
+    return _SourceConfigSnapshot(
+        source=source,
+        identity=_identity(before),
+        content_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def _revalidate_source_config(
+    path: Path,
+    *,
+    worker_gid: int,
+    expected: _SourceConfigSnapshot,
+) -> None:
+    current = _load_root_owned_source_config(path, worker_gid=worker_gid)
+    if current != expected:
+        _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
 
 
 def _format_observed_at(value: datetime) -> str:
@@ -349,7 +395,10 @@ class WorkerCapacityObserver:
 
         expected_capability = _expected_capability_id(slot.slot_id)
         realm_identity = _validate_realm(slot)
-        source = _load_root_owned_source_config(self.binding.source_config_path)
+        source_snapshot = _load_root_owned_source_config(
+            self.binding.source_config_path, worker_gid=slot.worker_gid
+        )
+        source = source_snapshot.source
         if (
             source.host_ref != self.binding.host_ref
             or source.capacity_capability_id != expected_capability
@@ -401,6 +450,11 @@ class WorkerCapacityObserver:
             raise
         except Exception:
             raise CapacityObservationError("CAPACITY_OBSERVE_INTERNAL") from None
+        _revalidate_source_config(
+            self.binding.source_config_path,
+            worker_gid=slot.worker_gid,
+            expected=source_snapshot,
+        )
         return build_worker_capacity_observation(
             source_config=source,
             readiness=readiness,
@@ -412,4 +466,5 @@ __all__ = [
     "WorkerCapacityObserver",
     "WorkerCapacityObserverBinding",
     "canonical_identity_digest",
+    "source_config_storage_contract",
 ]

@@ -4,6 +4,7 @@ import dataclasses
 import inspect
 import json
 import os
+import plistlib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ from typing import Any
 import pytest
 
 from control_plane.executive_capacity_observation import CapacityObservationError
-from ops.executive_os import provider_readiness, provider_worker_slots
+from ops.executive_os import capacity_broker_topology, provider_readiness, provider_worker_slots
 from ops.executive_os.worker_capacity_observer import (
     WorkerCapacityObserver,
     WorkerCapacityObserverBinding,
@@ -51,7 +52,7 @@ class Harness:
     def write_source(self, value: dict[str, Any] | None = None, *, suffix: bytes = b"") -> None:
         self.source_path.chmod(0o600)
         self.source_path.write_bytes(_canonical(self.source if value is None else value) + suffix)
-        self.source_path.chmod(0o400)
+        self.source_path.chmod(0o440)
 
     def observer(self, **kwargs: Any) -> WorkerCapacityObserver:
         return WorkerCapacityObserver(
@@ -118,10 +119,9 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
         "provider_binary_identity_digest": canonical_identity_digest(binary_identity),
     }
     source_path.write_bytes(_canonical(source))
-    source_path.chmod(0o400)
+    source_path.chmod(0o440)
     source_info = source_path.lstat()
     monkeypatch.setattr(module, "_ROOT_UID", source_info.st_uid)
-    monkeypatch.setattr(module, "_ROOT_GID", source_info.st_gid)
     binding = WorkerCapacityObserverBinding(
         slot_id=slot.slot_id,
         host_ref=source["host_ref"],
@@ -283,14 +283,110 @@ def test_source_config_must_be_exact_canonical_bytes(
     assert raised.value.code == "CAPACITY_OBSERVE_CONFIG_DRIFT"
 
 
-def test_source_config_must_be_root_owned_regular_mode_0400(
+def test_rendered_personal_pro_broker_can_read_both_authority_contracts_without_write() -> None:
+    root = Path(__file__).resolve().parents[1]
+    template = (
+        root
+        / "ops/executive_os/com.mastermind.executive.worker.codex.plist.template"
+    ).read_bytes()
+    topology, _configs, plists = capacity_broker_topology.build_topology(
+        release_root=Path("/Library/Application Support/MastermindExecutive/releases")
+        / ("a" * 40),
+        template_bytes=template,
+        supplementary_gids={
+            "codex-pro-01": [12, 61, 100],
+            "codex-pro-02": [12, 61, 100, 396],
+            "codex-pro-03": [12, 61, 100],
+        },
+        attestation_sha256="b" * 64,
+        legacy_state_digest="c" * 64,
+    )
+    row = topology["brokers"][0]
+    plist = plistlib.loads(plists["codex-pro-01"])
+    assert row["slot_id"] == "codex-pro-01"
+    assert row["worker_uid"] == row["worker_gid"] == 454
+    assert plist["InitGroups"] is False
+    assert plist["UserName"] == row["worker_user"]
+    assert plist["GroupName"] == row["worker_group"]
+
+    import ops.executive_os.worker_capacity_observer as module
+
+    source_contract = module.source_config_storage_contract(
+        worker_gid=row["worker_gid"]
+    )
+    readiness_contract = provider_readiness.receipt_storage_contract(
+        workspace_binding_class=provider_worker_slots.get_slot(
+            "codex-pro-01"
+        ).workspace_binding_class,
+        worker_gid=row["worker_gid"],
+    )
+    assert source_contract == readiness_contract == (0, 454, 0o440)
+
+    file_uid, file_gid, mode = source_contract
+    assert row["worker_uid"] != file_uid
+    assert row["worker_gid"] == file_gid
+    assert mode & 0o040
+    assert not mode & 0o020
+    assert not mode & 0o004
+
+
+def test_source_config_must_be_authority_owned_exact_slot_readable_mode_0440(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     observer = _validated_observer(harness, monkeypatch)
-    monkeypatch.setattr(harness.module, "_ROOT_UID", harness.source_path.lstat().st_uid + 1)
+    assert harness.source_path.stat().st_gid == harness.slot.worker_gid
+    assert harness.source_path.stat().st_mode & 0o777 == 0o440
 
+    observed = observer.observe()
+    assert observed.host_ref == harness.source["host_ref"]
+
+    monkeypatch.setattr(harness.module, "_ROOT_UID", harness.source_path.lstat().st_uid + 1)
     with pytest.raises(CapacityObservationError) as raised:
         observer.observe()
+    assert raised.value.code == "CAPACITY_OBSERVE_CONFIG_DRIFT"
+
+
+def test_valid_source_authority_replacement_during_observation_refuses(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    auth_identity = provider_readiness.current_auth_identity(
+        harness.slot.auth_path,
+        worker_uid=harness.slot.worker_uid,
+        worker_gid=harness.slot.worker_gid,
+    )
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "current_auth_identity",
+        lambda *_args, **_kwargs: dict(auth_identity),
+    )
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "current_binary_identity",
+        lambda _path: dict(harness.binary_identity),
+    )
+
+    def replace_source_with_another_valid_authority(
+        *_args: Any, **_kwargs: Any
+    ) -> dict[str, Any]:
+        old = harness.source_path.with_name("worker-capacity-source-old.json")
+        harness.source_path.rename(old)
+        changed = dict(harness.source)
+        changed["broker_generation"] = int(changed["broker_generation"]) + 1
+        harness.source_path.write_bytes(_canonical(changed))
+        harness.source_path.chmod(0o440)
+        return {
+            "codex_binary": dict(harness.binary_identity),
+            "credential_lstat": dict(auth_identity),
+        }
+
+    monkeypatch.setattr(
+        harness.module.provider_readiness,
+        "validate_receipt_file",
+        replace_source_with_another_valid_authority,
+    )
+
+    with pytest.raises(CapacityObservationError) as raised:
+        harness.observer().observe()
     assert raised.value.code == "CAPACITY_OBSERVE_CONFIG_DRIFT"
 
 
@@ -300,7 +396,7 @@ def test_source_config_symlink_refuses(
     observer = _validated_observer(harness, monkeypatch)
     real = tmp_path / "real.json"
     real.write_bytes(_canonical(harness.source))
-    real.chmod(0o400)
+    real.chmod(0o440)
     link = tmp_path / "link.json"
     link.symlink_to(real)
     observer = WorkerCapacityObserver(
