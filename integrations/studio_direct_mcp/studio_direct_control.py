@@ -11,15 +11,33 @@ from pathlib import Path
 
 ACCOUNT_RE = re.compile(r'[a-z0-9][a-z0-9_-]{0,47}')
 PRIVATE_ROOT = Path.home() / '.local' / 'share' / 'studio-direct-mcp' / 'private'
+INSTALLED_CONTROL_ROOT = Path.home() / '.local' / 'share' / 'studio-direct-mcp' / 'control'
 
 
-def invoke(helper, action, account):
-    command = [sys.executable, str(Path(__file__).with_name(helper)), action,
-               '--account', account]
+def _invoke_from(root, helper, action, account):
+    command = [sys.executable, str(Path(root) / helper), action, '--account', account]
     result = subprocess.run(command, capture_output=True, text=True, timeout=40)
     if result.returncode:
         raise RuntimeError(f'{helper} {action} failed: {result.stderr.strip()}')
     return json.loads(result.stdout)
+
+
+def invoke(helper, action, account):
+    return _invoke_from(Path(__file__).parent, helper, action, account)
+
+
+def installed_status(account):
+    """Read one installed seat through the installed control-helper generation."""
+    gateway = _invoke_from(INSTALLED_CONTROL_ROOT, 'private_service.py', 'status', account)
+    tunnel = _invoke_from(INSTALLED_CONTROL_ROOT, 'private_tunnel_service.py', 'status', account)
+    return {
+        'account': account,
+        'action': 'status',
+        'steps': [],
+        'ready': bool(gateway.get('running') and tunnel.get('ready')),
+        'gateway': gateway,
+        'tunnel': tunnel,
+    }
 
 
 def operate(action, account):
@@ -62,14 +80,15 @@ def installed_accounts(private_root=None):
     return sorted(accounts)
 
 
-def fleet_status(accounts=None):
+def fleet_status(accounts=None, status_reader=None):
     """Aggregate read-only status without adding a fleet lifecycle or bulk action."""
     selected = installed_accounts() if accounts is None else list(accounts)
+    read_status = installed_status if status_reader is None else status_reader
     rows = []
     ready_count = 0
     for account in selected:
         try:
-            row = operate('status', account)
+            row = read_status(account)
         except (ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
             row = {'account': account, 'ready': False, 'error': str(error)}
         rows.append(row)
