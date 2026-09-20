@@ -77,7 +77,7 @@ _PROFILE_KEYS = frozenset(
         "output_contract",
     }
 )
-_OUTPUT_KEYS = frozenset(
+_OUTPUT_INPUT_KEYS = frozenset(
     {
         "kind",
         "allowed_status",
@@ -85,6 +85,7 @@ _OUTPUT_KEYS = frozenset(
         "authority_effect",
     }
 )
+_OUTPUT_NORMALIZED_KEYS = _OUTPUT_INPUT_KEYS | {"max_result_chars"}
 _ECONOMIC_KEYS = frozenset(
     {
         "schema",
@@ -244,9 +245,16 @@ def validate_profile(value: Mapping[str, Any]) -> dict[str, Any]:
         unique=True,
     )
     output = raw["output_contract"]
-    if not isinstance(output, Mapping) or set(output) != _OUTPUT_KEYS:
+    if not isinstance(output, Mapping):
         _refuse("INVALID_PROFILE")
     output = copy.deepcopy(dict(output))
+    if set(output) not in {_OUTPUT_INPUT_KEYS, _OUTPUT_NORMALIZED_KEYS}:
+        _refuse("INVALID_PROFILE")
+    if (
+        "max_result_chars" in output
+        and output["max_result_chars"] != MAX_TEXT_CHARS
+    ):
+        _refuse("INVALID_PROFILE")
     kind = _text(output["kind"], maximum=64)
     if profile_id == "program-continuity-adviser" and kind != "continuity_candidate":
         _refuse("INVALID_PROFILE")
