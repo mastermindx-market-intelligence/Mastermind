@@ -33,9 +33,11 @@ RESERVED_FUNNEL_PORT = 45017
 IDLE_TIMEOUT_MS = 1_800_000
 REQUEST_TIMEOUT_MS = 300_000
 
-# Preserve the live Business-seat capacity already proven on this host. The
-# gateway itself validates up to 1024; this helper owns the installed default.
-MAX_SESSIONS = 64
+# Shared private-seat gateways can serve many short-lived ChatGPT frontend MCP
+# sessions while retaining one bounded backend owner per principal. 64 proved too
+# small under multi-session C2 use and caused capacity 503s despite healthy backend
+# execution. The gateway validates up to 1024; keep a bounded 256 installed default.
+MAX_SESSIONS = 256
 
 # Bounded typed-Git publication policy. These are host-owned values, not CLI
 # inputs, so a ChatGPT caller cannot select another repository, remote, lane,
