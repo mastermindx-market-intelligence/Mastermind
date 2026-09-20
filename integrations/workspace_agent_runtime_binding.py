@@ -8,7 +8,7 @@ that binding from existing canonical owners at call time:
 * immutable root admission owns work_ref / commission_ref / watch_mode.
 * persisted Wake evidence owns the exact physical Agent Dialogue thread.
 
-No Workspace-specific target registry, lifecycle table, retry ledger, cursor,
+No Workspace-specific target registry, lifecycle table, replay controller, cursor,
 or durable mapping is introduced.  A meaningful target change between the two
 Runtime reads refuses the return before Agent Dialogue transport is attempted.
 """
@@ -34,17 +34,17 @@ from control_plane.wake_ledger import (
 )
 from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
 from integrations.mastermind_company_mcp.adapter import DialogueBinding
-from integrations.slack_agent_dialogue.contract import FABLE_MESSAGE_TYPES
 from integrations.workspace_agent_return import WorkspaceReturnError
 
 _OPERATION_KEY = re.compile(r"\Aexec-(job-[0-9]{3,})\Z")
-_ALLOWED_MESSAGE_TYPES = tuple(sorted(FABLE_MESSAGE_TYPES))
+_ALLOWED_MESSAGE_TYPES = ("RESULT",)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class WorkspaceReturnTargetEpoch:
     root_job_id: str
     job_id: str
+    session_ref: str
     attempt_id: str
     worker_id: str
     job_status: JobStatus
@@ -119,6 +119,7 @@ def _read_current_target(runtime: Any, operation_key: str) -> WorkspaceReturnTar
         return WorkspaceReturnTargetEpoch(
             root_job_id=identity.root_job_id,
             job_id=job_id,
+            session_ref=identity.session_ref,
             attempt_id=attempt.attempt_id,
             worker_id=attempt.worker_id,
             job_status=job.status,
@@ -358,9 +359,7 @@ class ExecutiveWorkspaceReturnBindingResolver:
                 actor_ref=actor_ref,
                 work_ref=source.work_ref,
                 commission_ref=source.commission_ref.to_dict(),
-                session_ref=operation_key.replace(
-                    "exec-", "asd-session-exec-", 1
-                ),
+                session_ref=second.session_ref,
                 operation_key=operation_key,
                 watch_mode=source.watch_mode,
                 applies_to=applies_to,
