@@ -1283,11 +1283,22 @@ async def reconcile_persisted_delivered_ack(
             or _projection_obligation_ids(projection) != expected_ids
         ):
             return hold("ACK_PROJECTION_REFUSED")
-        _acknowledge_target_projection(
-            repo,
-            projection,
-            target_registry=target_registry,
-        )
+        # Once an exact provider projection has been authenticated, failure to
+        # durably consume it cannot be downgraded to a clean HOLD.  The target
+        # may already have produced the semantic ACK while local persistence or
+        # current-writer validation failed.  Preserve the incumbent worker
+        # contract and the Web-Sol no-replay boundary as EFFECT_UNKNOWN.
+        try:
+            _acknowledge_target_projection(
+                repo,
+                projection,
+                target_registry=target_registry,
+            )
+        except Exception:
+            return PersistedDeliveredAckResult(
+                PersistedDeliveredAckState.EFFECT_UNKNOWN,
+                "ACK_EFFECT_UNKNOWN",
+            )
     except WakePreSubmitError:
         return hold("ACK_PROVIDER_UNAVAILABLE")
     except (WakeAckIngressError, WakeDispatchError, ValueError):
