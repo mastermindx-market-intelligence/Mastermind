@@ -3939,12 +3939,26 @@ class CodexWorkerAdapter:
         return state.monitor_task
 
     async def _wait_recovered_absence(
-        self, state: _RecoveredRunState, *, timeout: float
+        self,
+        state: _RecoveredRunState,
+        *,
+        timeout: float,
+        wait_for_residual_group: bool = False,
     ) -> _RecoveredPresence:
         deadline = asyncio.get_running_loop().time() + max(0.0, timeout)
         while True:
             presence = self._observe_recovered_ref(state.ref)
-            if presence is not _RecoveredPresence.LIVE:
+            if presence is _RecoveredPresence.ABSENT:
+                return presence
+            if presence not in {
+                _RecoveredPresence.LIVE,
+                _RecoveredPresence.RESIDUAL_GROUP,
+            }:
+                return presence
+            if (
+                presence is _RecoveredPresence.RESIDUAL_GROUP
+                and not wait_for_residual_group
+            ):
                 return presence
             if asyncio.get_running_loop().time() >= deadline:
                 return presence
@@ -4012,6 +4026,7 @@ class CodexWorkerAdapter:
             presence = await self._wait_recovered_absence(
                 state,
                 timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+                wait_for_residual_group=True,
             )
             if presence is not _RecoveredPresence.ABSENT:
                 if presence is _RecoveredPresence.LIVE:
