@@ -144,6 +144,27 @@ test('lost edit subprocess result becomes effect unknown while lost read stays d
   assert.equal(read.value.state, 'PAPER_LOCAL_TIMEOUT');
 });
 
+test('edit spawn refusal before child execution is definite no effect', async () => {
+  let calls = 0;
+  const designer = createPaperDesigner(cfg(), deps(async () => {
+    calls += 1;
+    const err = new Error('spawn ENOENT');
+    err.code = 'ENOENT';
+    throw err;
+  }));
+  const edit = await designer.call('paper_edit', {
+    tool: 'write_html',
+    arguments: { fileId: 'FILE', html: '<div />' },
+    expected_snapshot: 'e'.repeat(64),
+    operation_id: 'paper-spawn-refusal',
+  });
+  assert.equal(calls, 1);
+  assert.equal(edit.isError, true);
+  assert.equal(edit.effectUnknown, false);
+  assert.equal(edit.value.state, 'PAPER_LOCAL_SPAWN_REFUSED');
+  assert.equal(edit.value.retry_allowed, false);
+});
+
 test('bridge hash drift refuses before process dispatch', async () => {
   let calls = 0;
   const designer = createPaperDesigner(cfg(), {
