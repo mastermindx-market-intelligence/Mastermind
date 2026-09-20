@@ -11,6 +11,7 @@ const SNAPSHOT_RE = /^[0-9a-f]{64}$/;
 const MAX_ARGUMENT_BYTES = 1 << 19;
 const MAX_STDIO_BYTES = 12 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 70_000;
+const DEFINITE_SPAWN_FAILURES = new Set(['ENOENT', 'EACCES']);
 const RESOLVED_CONFIGS = new WeakSet();
 
 export const PAPER_INSPECT_TOOL = Object.freeze({
@@ -83,7 +84,7 @@ export const PAPER_EDIT_TOOL = Object.freeze({
   description:
     'Apply one explicitly requested Paper design edit through the guarded adapter. ' +
     'Requires the exact inspected snapshot and a stable operation id. The adapter refuses standalone node-deletion tools, ' +
-    'native host export, file-open transitions and token deletion. A lost or ambiguous response is reported as EFFECT_UNKNOWN with retry_allowed=false; the gateway provides no replay path.',
+    'native host export, file-open transitions and token deletion. A lost or ambiguous response is reported as EFFECT_UNKNOWN with retry_allowed=false; the gateway performs no automatic replay.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -304,6 +305,11 @@ export function createPaperDesigner(config, dependencies = {}) {
           isError: !definitelySuccessful(parsed),
           effectUnknown: state === 'EFFECT_UNKNOWN',
         };
+      }
+      if (DEFINITE_SPAWN_FAILURES.has(err?.code)) {
+        // Node reports these before the configured interpreter can begin executing.
+        // No bridge or Paper request could have been dispatched.
+        return localFailure(false, 'PAPER_LOCAL_SPAWN_REFUSED');
       }
       return localFailure(editing, err?.killed ? 'PAPER_LOCAL_TIMEOUT' : 'PAPER_LOCAL_FAILURE');
     }
