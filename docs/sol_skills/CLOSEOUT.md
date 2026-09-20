@@ -122,10 +122,13 @@ Common Mastermind examples:
 
 ## Step 7 — Create the continuation handoff
 
-A substantive handoff should let the next session answer immediately:
+A substantive handoff must declare whether the parent mission is complete rather than assuming it.
+Use the current ACTIVE_EXECUTION finalization classification when that procedure applies.
 
 ```text
-mission just completed
+FINALIZATION_CLASSIFICATION: <current permitted class>
+MISSION_COMPLETE: true | false
+mission / bounded outcome at this boundary
 state before
 what changed
 what was verified
@@ -135,6 +138,12 @@ exact next actions in order
 do-not-redo laws
 return point / highest-authority sources
 ```
+
+For `CHECKPOINTED_CONTINUATION`, `MISSION_COMPLETE` must be `false`; the handoff describes the
+verified incomplete boundary and continuation, never "mission just completed". For a truly completed
+parent mission, `MISSION_COMPLETE: true` is allowed only when the declared completion/proof law is
+actually satisfied. A bounded child or research assignment may be complete while its parent mission
+remains false; state both scopes explicitly when material.
 
 Use exact PR/SHA/MAS/WS identities. Do not paste private reasoning or secrets.
 
@@ -223,6 +232,8 @@ Skillpack.
 ## Closeout output
 
 ```text
+FINALIZATION_CLASSIFICATION
+MISSION_COMPLETE: true | false
 Capability delta
 Final capability state
 Canonical receipts

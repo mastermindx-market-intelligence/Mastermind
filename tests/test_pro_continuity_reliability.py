@@ -154,3 +154,26 @@ def test_explicit_write_refusal_is_negative_control_not_global_read_only_claim()
     assert "organizational/source-writer authority separate" in p17["pass_requires"]
     assert "dummy mutation" in p17["pass_requires"]
     assert "whole platform read-only" in p17["pass_requires"]
+
+
+def test_closeout_handoff_declares_completion_conditionally():
+    raw = section("CLOSEOUT.md", "Step 7 — Create the continuation handoff")
+    for clause in (
+        "FINALIZATION_CLASSIFICATION",
+        "MISSION_COMPLETE: true | false",
+        "`CHECKPOINTED_CONTINUATION`",
+        "`MISSION_COMPLETE` must be `false`",
+        'never "mission just completed"',
+        "parent mission remains false",
+    ):
+        assert clause in raw
+    assert raw.split("```text", 1)[1].split("```", 1)[0].strip().splitlines()[0].startswith(
+        "FINALIZATION_CLASSIFICATION"
+    )
+
+
+def test_index_enrolls_closeout_for_verified_incomplete_continuation():
+    raw = text("INDEX.md")
+    closeout = raw.split("### `CLOSEOUT.md`", 1)[1].split("\n### ", 1)[0]
+    assert "verified `CHECKPOINTED_CONTINUATION`" in closeout
+    assert "exact mission-completion state" in closeout
