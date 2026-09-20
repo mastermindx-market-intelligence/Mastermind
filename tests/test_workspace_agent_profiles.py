@@ -10,6 +10,7 @@ import unittest
 from integrations.mastermind_secretary_mcp.schemas import TOOL_SPECS as STEWARD_TOOLS
 from integrations.workbench_read_mcp.app import TOOL_NAME as WORKBENCH_READ_TOOL
 from integrations.workspace_agent_return import TOOL_NAME as RETURN_TOOL
+from integrations.workspace_agent_return import tool_spec
 from integrations.workspace_agent_profiles import (
     ACTIVATION_SCHEMA,
     CATALOG_SCHEMA,
@@ -107,6 +108,15 @@ class ProfileCatalogTests(unittest.TestCase):
         self.assertIn("source_write", profile["prohibited_effects"])
         self.assertIn("parent_self_acceptance", profile["prohibited_effects"])
         self.assertEqual(profile["output_contract"]["max_result_chars"], 900)
+        self.assertEqual(
+            sorted(profile["output_contract"]["allowed_status"]),
+            tool_spec()["input_schema"]["properties"]["status"]["enum"],
+        )
+        self.assertEqual(
+            validate_profile(profile),
+            profile,
+            "normalized profile must remain canonical input to digest/activation paths",
+        )
 
     def test_profile_digests_change_on_instruction_or_tool_drift(self):
         profile = profile_by_id(load_catalog(), "program-continuity-adviser")
