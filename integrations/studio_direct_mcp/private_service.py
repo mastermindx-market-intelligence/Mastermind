@@ -52,6 +52,7 @@ TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Maste
 # bridge SHA gets a new directory so one-seat canaries cannot invalidate another
 # seat that still pins the previous bridge bytes.
 PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v2")
+PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
 PAPER_BRIDGE_SHA256 = "83e36b0bcd0acabbf5dd6ace5b708e5797a52e7db732e8dbbf848ded781c231d"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
 
@@ -435,6 +436,51 @@ def _typed_git_config(user_root: Path) -> dict:
         "commandTimeoutMs": 15_000,
         "pushTimeoutMs": 60_000,
     }
+
+
+def _verify_paper_runtime(user_root: Path, *, expected_sha: str | None = None) -> dict:
+    runtime = user_root / PAPER_RUNTIME_REL
+    expected_sha = PAPER_BRIDGE_SHA256 if expected_sha is None else expected_sha
+    source = runtime / "source"
+    bridge = source / "bridge.py"
+    receipt_path = runtime / "RUNTIME.json"
+    python = runtime / "venv" / "bin" / "python"
+
+    for path, label in ((runtime, "runtime"), (source, "source")):
+        if path.is_symlink() or not path.is_dir():
+            raise SystemExit(f"paper {label} missing or unsafe: {path}")
+        info = path.stat()
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            raise SystemExit(f"paper {label} permissions/owner are unsafe: {path}")
+
+    for path, label in ((bridge, "bridge"), (receipt_path, "receipt")):
+        if path.is_symlink() or not path.is_file():
+            raise SystemExit(f"paper {label} missing or unsafe: {path}")
+        info = path.stat()
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            raise SystemExit(f"paper {label} permissions/owner are unsafe: {path}")
+
+    if python.is_symlink() or not python.is_file() or not os.access(python, os.X_OK):
+        raise SystemExit(f"paper runtime python missing or unsafe: {python}")
+    if _sha256_file(bridge) != expected_sha:
+        raise SystemExit("paper bridge hash mismatch")
+
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("paper runtime receipt invalid") from exc
+    expected_sources = {"bridge.py": expected_sha}
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("schema") != PAPER_RUNTIME_SCHEMA
+        or receipt.get("generation") != PAPER_RUNTIME_REL.name
+        or receipt.get("bridge_sha256") != expected_sha
+        or receipt.get("source_sha256") != expected_sources
+        or receipt.get("network_install_performed") is not False
+        or receipt.get("production_acceptance") is not False
+    ):
+        raise SystemExit("paper runtime receipt does not match the required generation")
+    return receipt
 
 
 def _paper_design_config(user_root: Path) -> dict:
@@ -907,6 +953,9 @@ def cmd_stage(args) -> int:
     prior = _preflight_stage(
         source, node_abs, backend_abs, account, label, host, port, roots
     )
+    # The Paper-owned immutable runtime must exist and match before this
+    # lifecycle writes a config/plist that advertises the Paper capability.
+    _verify_paper_runtime(_user_root())
     retained_dependency_hash = (
         prior.get("dependencyTreeHash")
         if isinstance(prior, dict) and prior.get("version") == MANIFEST_VERSION
@@ -1029,6 +1078,9 @@ def cmd_upgrade(args) -> int:
         )
     for path in _stage_dest_files(roots):
         _assert_dest_safe(path)
+    # Upgrade is still pre-effect here. Refuse before replacing any staged
+    # source/config if the Paper generation is missing or no longer exact.
+    _verify_paper_runtime(_user_root())
 
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,

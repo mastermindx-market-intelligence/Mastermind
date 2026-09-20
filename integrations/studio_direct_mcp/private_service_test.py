@@ -14,6 +14,7 @@ All mutations stay inside temp fixtures; subprocess is mocked.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -30,6 +31,40 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import private_service as svc  # noqa: E402
+
+
+PAPER_BRIDGE_FIXTURE = b"fixture-paper-bridge\n"
+PAPER_BRIDGE_FIXTURE_SHA = hashlib.sha256(PAPER_BRIDGE_FIXTURE).hexdigest()
+
+
+def _seed_paper_runtime(home: Path) -> str:
+    runtime = home / svc.PAPER_RUNTIME_REL
+    source = runtime / "source"
+    python_dir = runtime / "venv" / "bin"
+    source.mkdir(parents=True, mode=0o700, exist_ok=True)
+    runtime.chmod(0o700)
+    source.chmod(0o700)
+    python_dir.mkdir(parents=True, exist_ok=True)
+    bridge = source / "bridge.py"
+    bridge.write_bytes(PAPER_BRIDGE_FIXTURE)
+    bridge.chmod(0o600)
+    python = python_dir / "python"
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python.chmod(0o700)
+    receipt = {
+        "schema": svc.PAPER_RUNTIME_SCHEMA,
+        "generation": svc.PAPER_RUNTIME_REL.name,
+        "source_sha256": {"bridge.py": PAPER_BRIDGE_FIXTURE_SHA},
+        "bridge_sha256": PAPER_BRIDGE_FIXTURE_SHA,
+        "python_source": "/usr/bin/python3",
+        "python_version": "fixture",
+        "network_install_performed": False,
+        "production_acceptance": False,
+    }
+    receipt_path = runtime / "RUNTIME.json"
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
+    receipt_path.chmod(0o600)
+    return PAPER_BRIDGE_FIXTURE_SHA
 
 
 def _label_for(account: str) -> str:
@@ -157,8 +192,10 @@ def _do_stage(tmp: Path, home: Path, account: str = "test-account", port: int = 
     node = _make_node(tmp)
     backend = _make_backend(tmp)
     rec = recorder or CmdRecorder()
+    paper_sha = _seed_paper_runtime(home)
     with mock.patch.dict(os.environ, {"HOME": str(home)}):
-        with mock.patch.object(svc, "_run", rec):
+        with mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+             mock.patch.object(svc, "_run", rec):
             _capture_stdout(
                 lambda: svc.cmd_stage(_stage_args(src, node, backend, account, port))
             )
@@ -428,6 +465,66 @@ class TestRuntimeRoots(unittest.TestCase):
 
 
 # -------------------------------------------------------------------
+# Paper runtime admission
+# -------------------------------------------------------------------
+
+class TestPaperRuntimeAdmission(unittest.TestCase):
+    def test_exact_private_runtime_receipt_and_bridge_are_accepted(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            _seed_paper_runtime(home)
+            receipt = svc._verify_paper_runtime(
+                home, expected_sha=PAPER_BRIDGE_FIXTURE_SHA
+            )
+            self.assertEqual(receipt["generation"], "v2")
+
+    def test_bridge_hash_drift_refuses(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            _seed_paper_runtime(home)
+            bridge = home / svc.PAPER_RUNTIME_REL / "source" / "bridge.py"
+            bridge.write_text("drift", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "bridge hash mismatch"):
+                svc._verify_paper_runtime(
+                    home, expected_sha=PAPER_BRIDGE_FIXTURE_SHA
+                )
+
+    def test_receipt_generation_mismatch_refuses(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            _seed_paper_runtime(home)
+            receipt_path = home / svc.PAPER_RUNTIME_REL / "RUNTIME.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["generation"] = "v3"
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            receipt_path.chmod(0o600)
+            with self.assertRaisesRegex(SystemExit, "required generation"):
+                svc._verify_paper_runtime(
+                    home, expected_sha=PAPER_BRIDGE_FIXTURE_SHA
+                )
+
+    def test_stage_refuses_missing_runtime_before_writes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            args = _stage_args(
+                _make_source(tmp), _make_node(tmp), _make_backend(tmp)
+            )
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                 mock.patch.object(svc, "_run", CmdRecorder()):
+                with self.assertRaisesRegex(SystemExit, "paper runtime"):
+                    svc.cmd_stage(args)
+                roots = svc._build_runtime_roots("test-account")
+                self.assertFalse(roots["base"].exists())
+                self.assertFalse(roots["plist"].exists())
+
+
+# -------------------------------------------------------------------
 # Config and plist builders
 # -------------------------------------------------------------------
 
@@ -526,6 +623,11 @@ class TestBuildPlist(unittest.TestCase):
 # -------------------------------------------------------------------
 
 class TestStage(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(svc, "PAPER_BRIDGE_SHA256", PAPER_BRIDGE_FIXTURE_SHA)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_happy_path_writes_private_cli_and_hashes(self):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
@@ -831,6 +933,11 @@ class TestStage(unittest.TestCase):
 # -------------------------------------------------------------------
 
 class TestUpgrade(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(svc, "PAPER_BRIDGE_SHA256", PAPER_BRIDGE_FIXTURE_SHA)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_legacy_install_upgrades_stopped_and_preserves_runtime_state(self):
         self._assert_historical_upgrade(typed_git=False)
 
