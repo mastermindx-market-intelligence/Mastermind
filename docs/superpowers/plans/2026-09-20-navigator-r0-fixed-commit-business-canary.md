@@ -148,6 +148,26 @@ The owner/admin/canary principal identities must bind to the same opaque identit
 digest. Durable evidence must not contain email, token, cookie, browser-profile path,
 session storage, OAuth code, or private credential material.
 
+### GitHub owner-surface binding
+
+The canary tests Navigator's capability reasoning, not whether an unrelated GitHub
+connection happens to exist. Before the fresh-chat proof, bind the target workspace
+to one exact current GitHub app/connector generation and one opaque authenticated
+subject identity, and record the exact Mastermind repository target plus the current
+ChatGPT app permission-mode readback.
+
+A successful repository READ may establish installed/enabled/authenticated/callable
+state for that exact owner surface. It must not be transformed into WRITE evidence.
+Do **not** pre-discover or preflight the GitHub WRITE family inside the fresh canary
+chat before the §8.1 packet is captured; the point of §8.2 is to prove Navigator
+performs that missing safe discovery itself in-turn. Generic workspace/admin
+observation of the connector or permission mode is not
+`requested_action_serviceability = YES`.
+
+If the exact GitHub connection/subject/repository binding changes between §8.1 and
+§8.2, return `GITHUB_OWNER_SURFACE_EPOCH_CHANGED / NOT_APPLIED` rather than
+combining READ evidence from one binding with WRITE evidence from another.
+
 ## 5. Marketplace and plugin policy preimage
 
 Before mutation, capture one complete preimage for the target workspace:
@@ -185,8 +205,14 @@ inventing a nonexistent installation-policy enum. Then require:
 - `mastermind-sol`: plugin disabled, uninstalled, non-installable, non-invokable.
 - `mastermind-operator`: plugin disabled, uninstalled, non-installable, non-invokable.
 - `mastermind-cortex`: plugin disabled, uninstalled, non-installable, non-invokable.
-- `mastermind-navigator`: installation policy `Available` for the isolated
-  one-member Business workspace; `Installed` is forbidden for this canary.
+- `mastermind-navigator`: workspace installation policy `Available` for the
+  isolated one-member Business workspace; administrator-forced policy `Installed`
+  is forbidden for this canary.
+
+Here `Available` / `Installed` names the **workspace installation policy**. It is
+separate from the canary member's actual install state. §7 intentionally performs
+one user installation while the workspace policy remains `Available`; that user
+install must not be misreported as the administrator-forced `Installed` policy.
 
 A plugin's disabled state must be directly observed. App disablement, absence of an
 app, or another plugin's policy never substitutes for the plugin/skill readback.
@@ -302,9 +328,12 @@ Record at minimum:
 - marketplace fixed commit and inventory;
 - plugin policy/install/invocation readbacks;
 - chat identity digest;
-- initial READ evidence identity;
+- exact GitHub app/connector generation, opaque authenticated-subject binding,
+  repository target and current app permission-mode readback;
+- initial READ evidence identity from that same GitHub owner-surface epoch;
 - pre-discovery and post-preflight capability packets;
-- GitHub action-family discovery result;
+- GitHub WRITE action-family discovery result from §8.2, never a pre-seeded READ-era
+  assumption;
 - non-mutating permission/serviceability preflight result;
 - exact target repository digest/identity;
 - whether any human/admin ceremony remains;
@@ -342,6 +371,8 @@ First workspace effect requires a separate action-time Sol START after all of:
 - collision census showing no competing marketplace/install/canary operation;
 - owner-native plugin policy observability;
 - rollback path frozen;
+- exact GitHub app/connector generation + authenticated subject + repository target
+  bound and READ-callable, without pre-probing WRITE in the fresh canary chat;
 - required connected workspace/browser action surface proven callable.
 
 Missing a safe capability observation is unfinished discovery, not automatically a
