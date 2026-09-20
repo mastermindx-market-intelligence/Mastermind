@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 import urllib.parse
@@ -34,6 +36,8 @@ from control_plane.sol_ops_health import (
 PERSONAL_ACCOUNTS = ("chatgpt1", "chatgpt2", "chatgpt3", "chatgpt4")
 TUNNEL_RE = re.compile(r"^tunnel_[0-9a-f]{32}$")
 CONTROL_ROOT = Path.home() / ".local" / "share" / "studio-direct-mcp" / "control"
+MAX_PROFILE_BYTES = 64 * 1024
+MAX_HEALTH_REF_BYTES = 512
 
 BUSINESS_SERVICES = (
     {
@@ -147,8 +151,31 @@ def personal_facts(
     return service, tunnel_fact
 
 
+def _read_regular_bounded_text(path: Path, max_bytes: int) -> str:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except OSError as error:
+        raise ValueError("owner input must be a regular bounded file") from error
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
+            raise ValueError("owner input must be a regular bounded file")
+        data = os.read(fd, max_bytes + 1)
+        if len(data) > max_bytes or os.read(fd, 1):
+            raise ValueError("owner input must be a regular bounded file")
+    finally:
+        os.close(fd)
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("owner input must be UTF-8") from error
+
+
 def read_tunnel_id(profile: Path) -> str:
-    value = json.loads(profile.read_text())
+    value = json.loads(_read_regular_bounded_text(profile, MAX_PROFILE_BYTES))
     if not isinstance(value, dict):
         raise ValueError("tunnel profile must be an object")
     control_plane = value.get("control_plane")
@@ -171,8 +198,8 @@ def probe_health_ref(
     http_get: Callable[[str], int] = _http_get,
 ) -> tuple[bool | None, bool | None, tuple[str, ...]]:
     try:
-        raw = path.read_text().strip()
-    except OSError:
+        raw = _read_regular_bounded_text(path, MAX_HEALTH_REF_BYTES).strip()
+    except (OSError, ValueError):
         return None, None, ("HEALTH_REF_UNAVAILABLE",)
     try:
         parsed = urllib.parse.urlsplit(raw)
