@@ -19,7 +19,6 @@ from control_plane.executive_runtime import (
     WorkerStatus,
 )
 from control_plane.wake_events import mint_obligation_id
-from integrations.slack_agent_dialogue.contract import FABLE_MESSAGE_TYPES
 from integrations.workspace_agent_return import WorkspaceReturnError, binding_digest
 from integrations.workspace_agent_runtime_binding import (
     ExecutiveWorkspaceReturnBindingResolver,
@@ -29,6 +28,7 @@ from integrations.workspace_agent_runtime_binding import (
 
 
 OPERATION = "exec-job-101"
+SESSION = "asd-session-exec-job-101-canonical"
 ROOT_JOB = "JOB-100"
 JOB = "JOB-101"
 ATTEMPT = "ATT-" + "2" * 32
@@ -41,6 +41,7 @@ def target(**changes) -> WorkspaceReturnTargetEpoch:
     value = WorkspaceReturnTargetEpoch(
         root_job_id=ROOT_JOB,
         job_id=JOB,
+        session_ref=SESSION,
         attempt_id=ATTEMPT,
         worker_id=WORKER,
         job_status=JobStatus.RUNNING,
@@ -157,7 +158,7 @@ def test_exact_current_target_reconstructs_company_dialogue_binding() -> None:
 
     assert targets.calls == [OPERATION, OPERATION]
     assert binding.operation_key == OPERATION
-    assert binding.session_ref == "asd-session-exec-job-101"
+    assert binding.session_ref == SESSION
     assert binding.work_ref == "WS:WORKSPACE-AGENT-PROGRAM"
     assert binding.thread_ts == THREAD
     assert binding.actor_ref == {
@@ -172,7 +173,7 @@ def test_exact_current_target_reconstructs_company_dialogue_binding() -> None:
         "attempt_id": ATTEMPT,
         "worker_id": WORKER,
     }
-    assert binding.allowed_message_types == tuple(sorted(FABLE_MESSAGE_TYPES))
+    assert binding.allowed_message_types == ("RESULT",)
     assert binding.reply_to_message_key is None
     second_instance, _ = resolver()
     assert binding_digest(binding) == binding_digest(second_instance.resolve(OPERATION))
