@@ -41,10 +41,12 @@
     workQuery: "",
     selectedWork: null,
     selectedAutonomy: null,
+    selectedFrontier: null,
     paletteItems: [],
     paletteResults: [],
     paletteIndex: 0,
     autonomy: null,
+    frontier: null,
   };
 
   var LAST_DRAWER_OPENER = null;
@@ -618,6 +620,7 @@
     LAST_DRAWER_OPENER = openerCandidate(opener);
     STATE.selectedWork = null;
     STATE.selectedAutonomy = null;
+    STATE.selectedFrontier = null;
     renderAttentionDetail(item, target);
     var drawer = document.getElementById("ccr-detail-drawer");
     drawer.classList.add("is-open");
@@ -1196,6 +1199,7 @@
   function openDetail(card, opener) {
     LAST_DRAWER_OPENER = openerCandidate(opener);
     STATE.selectedAutonomy = null;
+    STATE.selectedFrontier = null;
     STATE.selectedWork = card;
     renderDetail(card);
     var drawer = document.getElementById("ccr-detail-drawer");
@@ -1213,6 +1217,7 @@
     document.getElementById("ccr-drawer-scrim").hidden = true;
     STATE.selectedWork = null;
     STATE.selectedAutonomy = null;
+    STATE.selectedFrontier = null;
     if (wasOpen) {
       var opener = LAST_DRAWER_OPENER;
       LAST_DRAWER_OPENER = null;
@@ -2206,6 +2211,7 @@
   function openAutonomyDetail(card, opener) {
     LAST_DRAWER_OPENER = openerCandidate(opener);
     STATE.selectedWork = null;
+    STATE.selectedFrontier = null;
     STATE.selectedAutonomy = card;
     renderAutonomyDetail(card);
     b5Schedule();
@@ -2262,6 +2268,898 @@
     mount.appendChild(list);
     mount.appendChild(auGapFold(STATE.autonomy));
     if (count) count.textContent = String(cards.length);
+  }
+
+  // attention frontier ------------------------------------------------------
+  // Presentation law for this section (F0G §13):
+  // - the seven groups are rendered in contract order, all seven, always. An
+  //   empty group is a statement about coverage, never an "all clear";
+  // - attention pressure and serviceability are two independent readings drawn
+  //   on two independent tracks. Urgency ink never implies permission, and the
+  //   neutral blocked track never implies low urgency: an INTERRUPT_NOW card
+  //   that is BLOCKED keeps its interrupt ink;
+  // - actor_can_act is a tri-state. "unknown" is drawn as unknown, never as no;
+  // - admission confidence leads the section. When no admission source
+  //   answered, an empty frontier is labelled a dark source plane;
+  // - every compacted demand carries its omission receipt, and every card its
+  //   source receipts. Nothing is hidden without a reason the Chairman can read;
+  // - every word below is source-owned. This surface derives no urgency, no
+  //   ordering weight and no authority of its own.
+  var AF_AUTHORITY_ORDER = [
+    "CHAIRMAN", "SOL", "COO_OR_WORKER", "EXECUTIVE_PLACEMENT",
+    "ADMIN_OR_EXTERNAL", "NONE", "UNKNOWN",
+  ];
+  var AF_AUTHORITY_NAME = {
+    CHAIRMAN: "Chairman",
+    SOL: "Sol",
+    COO_OR_WORKER: "Fable or worker",
+    EXECUTIVE_PLACEMENT: "Executive placement",
+    ADMIN_OR_EXTERNAL: "Admin or external",
+    NONE: "No authority required",
+    UNKNOWN: "Authority unknown",
+  };
+  // CHAIRMAN and SOL are the two headline partitions. That is a partition of
+  // authority and nothing else: a Sol emergency whose target is unavailable
+  // stays a Sol emergency and never becomes Chairman work.
+  var AF_HEADLINE_AUTHORITY = { CHAIRMAN: true, SOL: true };
+
+  // The pressure track. INTERRUPT_NOW is the only place this section raises
+  // its voice, and it raises it for pressure alone — never for permission.
+  var AF_CLASS_NAME = {
+    INTERRUPT_NOW: "Interrupt now",
+    FOCUS_NOW: "Focus now",
+    BATCH_NEXT: "Batch next",
+    AUTONOMOUS_CONTINUE: "Autonomous continuation",
+    VALID_WAIT: "Intentional wait",
+    NON_ACTIONABLE: "Outside current cognition",
+  };
+  var AF_CLASS_VARIANT = {
+    INTERRUPT_NOW: "is-danger",
+    FOCUS_NOW: "is-brass",
+    BATCH_NEXT: "is-slate",
+    AUTONOMOUS_CONTINUE: "is-dim",
+    VALID_WAIT: "is-dim",
+    NON_ACTIONABLE: "is-dim",
+  };
+  // The serviceability track is deliberately a different palette from the
+  // pressure track above: BLOCKED is never drawn in the urgency tone, so a
+  // grey card can still be an interrupt and a red card still needs permission.
+  var AF_SERVICE_NAME = {
+    READY: "Path ready",
+    BLOCKED: "Path blocked",
+    UNKNOWN: "Path unknown",
+    NOT_APPLICABLE: "No path applies",
+  };
+  var AF_SERVICE_VARIANT = {
+    READY: "is-ok",
+    BLOCKED: "is-slate",
+    UNKNOWN: "is-dim",
+    NOT_APPLICABLE: "is-dim",
+  };
+  var AF_SERVICE_SENTENCE = {
+    READY: "The required action path reads as usable now.",
+    BLOCKED: "The required action path is not usable now. This says nothing about how urgent the demand is.",
+    UNKNOWN: "Whether the required action path is usable is unknown. Unknown is not no.",
+    NOT_APPLICABLE: "No action path applies to this demand.",
+  };
+  var AF_PRESSURE_REASON = {
+    ACTIVE_HARM: "A source reports active harm underway.",
+    IMMINENT_IRREVERSIBLE_LOSS: "A source reports imminent irreversible loss.",
+    DECISION_WINDOW_EXPIRED: "The source-owned decision window has already expired.",
+    DECISION_WINDOW_BEFORE_NEXT_FOCUS: "The decision window closes before the next ordinary focus boundary.",
+    DECISION_WINDOW_NEAR: "The source-owned decision window is near.",
+    NO_SAFE_AUTONOMOUS_PROGRESS: "No safe autonomous progress is available without executive cognition.",
+    EXACT_DEPENDENCY_UNBLOCK: "Deciding this unblocks exact named downstream work.",
+    ACTIVE_RESOURCE_BURN: "A resource is burning while this waits.",
+    SAFE_AUTONOMOUS_PROGRESS: "The autonomous path can still make safe progress.",
+    TYPED_WAIT_ACTIVE: "An accepted typed wait is active and its review boundary has not arrived.",
+    TERMINAL_STATE: "A source records this as terminal.",
+    NO_GROUNDED_PRESSURE: "No source-backed pressure fact was supplied for this demand.",
+    PRESSURE_EVIDENCE_CONFLICTED: "Contributing pressure sources disagree; both readings are kept.",
+  };
+  var AF_SERVICE_REASON = {
+    AUTHORITY_SOURCE_CONFLICT: "Authority sources conflict; authority never defaults upward.",
+    IDENTITY_CONFLICT: "Identity conflicts between contributing sources.",
+    STALE_LOAD_BEARING_SOURCE: "A load-bearing source is stale.",
+    UNKNOWN_LOAD_BEARING_SOURCE: "A load-bearing source read as unknown.",
+    ACTION_TARGET_UNAVAILABLE: "The exact action target is unavailable.",
+    ACTION_TARGET_CONFLICT: "Candidate action targets conflict; none is picked.",
+    ACTION_TARGET_UNKNOWN: "The exact action target is unknown.",
+    EFFECT_UNKNOWN: "Effect is unconfirmed — no re-carriering and no failover.",
+    CAPACITY_DEGRADED: "Serving capacity reads as degraded.",
+    EXTERNAL_BLOCKER: "An accepted external blocker holds this.",
+  };
+  var AF_ISSUE = {
+    AUTHORITY_UNKNOWN: "Authority is not established by any accepted source.",
+    AUTHORITY_CONFLICTED: "Accepted authority sources disagree.",
+    READY_AGE_UNKNOWN: "Ready age is unknown — a coverage gap, not an age of zero.",
+    WAIT_REVIEW_BOUNDARY_UNKNOWN: "The wait's review boundary is unknown.",
+    AUTONOMY_UNKNOWN: "Whether the autonomous path can continue is unknown.",
+    WINDOW_UNKNOWN: "No source-owned decision window is recorded.",
+    IMPACT_UNKNOWN: "Actual impact is unknown.",
+    STALE_PRESSURE_SOURCE: "A contributing pressure source is stale.",
+    CONFLICTED_PRESSURE_SOURCE: "Contributing pressure sources conflict.",
+    TARGET_EVIDENCE_UNAVAILABLE: "Action-target evidence is unavailable.",
+  };
+  var AF_RELATION = {
+    ROOT_VISIBLE: "Shown as its own root",
+    COVERED_BY_BUNDLE: "Covered by a bundle root",
+    DOMINATED_BY: "Covered by a stronger demand in the same class",
+    DEFERRED_EQUIVALENT_CONTEXT: "Deferred into an equivalent context batch",
+    DEFERRED_ORDINARY_SERVICE: "Deferred to ordinary service",
+  };
+  var AF_CONCURRENT = {
+    NONE: "No demand recorded",
+    SINGLE: "One independent root",
+    MULTIPLE_INDEPENDENT: "Multiple independent roots",
+    PROVEN_WINDOW_COLLISION: "Proven window collision",
+    FEASIBILITY_UNKNOWN: "Feasibility unknown",
+  };
+  var AF_CONCURRENT_VARIANT = {
+    NONE: "is-dim",
+    SINGLE: "is-slate",
+    MULTIPLE_INDEPENDENT: "is-brass",
+    PROVEN_WINDOW_COLLISION: "is-danger",
+    FEASIBILITY_UNKNOWN: "is-dim",
+  };
+  var AF_FEASIBILITY = {
+    NOT_APPLICABLE: "service feasibility: not applicable",
+    UNKNOWN: "service feasibility: unknown",
+    PROVEN_COLLISION: "service feasibility: proven collision",
+  };
+  var AF_AUTONOMOUS = {
+    FULL_SAFE_PROGRESS: "The autonomous path can make full safe progress without executive cognition now.",
+    PARTIAL_SAFE_PROGRESS: "The autonomous path can make partial safe progress without executive cognition now.",
+    NO_SAFE_PROGRESS: "Nothing can safely continue without executive cognition.",
+    UNKNOWN: "Whether anything can safely continue without you is unknown.",
+  };
+  var AF_BURN = {
+    NONE: "no resource burn recorded",
+    ACTIVE: "a resource is burning while this waits",
+    UNKNOWN: "resource burn unknown",
+  };
+  var AF_CONFIDENCE = {
+    NO_SOURCE: {
+      title: "No admission source answered",
+      text: "This frontier is empty because no admission source answered — the Executive Inbox / Wake obligation plane and the Agent OS decision-gate plane both read as dark. It is NOT a reading that nothing needs executive attention.",
+      variant: "is-brass",
+    },
+    GATES_ONLY: {
+      title: "Agent OS decision gates only",
+      text: "No Executive Inbox or Wake obligation answered this read. Everything below was admitted from Agent OS decision gates alone, so obligation-borne demand is uncovered rather than absent.",
+      variant: "is-brass",
+    },
+    SOURCED: {
+      title: "Admission sources answered",
+      text: "At least one Executive Inbox / Wake obligation answered this read. Coverage gaps below are still reported on their own terms.",
+      variant: "is-slate",
+    },
+  };
+  // The first five groups are the closed attention classes, in contract order.
+  // Groups six and seven are not classes and are built by their own readers.
+  var AF_GROUPS = [
+    {
+      key: "INTERRUPT_NOW",
+      name: "Interrupts now",
+      note: "Source-backed active harm, imminent irreversible loss, or a window that makes waiting until the next focus boundary unsafe. No limit may hide an independent interrupt.",
+      empty: "No demand was admitted into this group in this read. That is a statement about what the sources reported, not a guarantee that nothing is on fire.",
+    },
+    {
+      key: "FOCUS_NOW",
+      name: "Focus now",
+      note: "Should be the next safe executive focus after the current atomic action. Ordinary batching is unsafe here; hard preemption is not justified.",
+      empty: "No demand was admitted into this group in this read.",
+    },
+    {
+      key: "BATCH_NEXT",
+      name: "Context batches next",
+      note: "Executive cognition is genuinely needed and is safely decidable in the next related context batch.",
+      empty: "No demand was admitted into this group in this read.",
+    },
+    {
+      key: "VALID_WAIT",
+      name: "Intentional waits",
+      note: "An accepted wait, evidence or external condition says waiting is deliberate and the review boundary has not arrived. Age alone never converts these into urgency.",
+      empty: "No typed wait was admitted in this read. An unrecorded wait is uncovered, not absent.",
+    },
+    {
+      key: "AUTONOMOUS_CONTINUE",
+      name: "Autonomous continuation",
+      note: "A worker, placement or autonomous path can make safe useful progress without executive cognition now. Observable, and deliberately not an interrupt.",
+      empty: "No demand was admitted into this group in this read.",
+    },
+  ];
+
+  function afList(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function afWords(map, token, fallback) {
+    if (isBlank(token)) return fallback;
+    var key = String(token);
+    return map[key] || key.replace(/_/g, " ").toLowerCase();
+  }
+
+  function afAuthorityName(token) {
+    return afWords(AF_AUTHORITY_NAME, token, "Authority not recorded");
+  }
+
+  // The tri-state, drawn honestly. The wire carries true, false, or the
+  // literal string "unknown"; anything else is also read as unknown. Unknown
+  // is never collapsed into "no".
+  function afCanAct(item) {
+    if (item.actor_can_act === true) return { text: "CAN ACT NOW", variant: "is-ok", words: "An accepted source says the actor can act now." };
+    if (item.actor_can_act === false) return { text: "CANNOT ACT NOW", variant: "is-slate", words: "An accepted source says the actor cannot act now." };
+    return { text: "CAN ACT: UNKNOWN", variant: "is-dim", words: "Whether the actor can act now is unknown. Unknown is not no." };
+  }
+
+  // Unknown is not zero (F0G §11). The nav tally only publishes a number when
+  // the projection actually said how much of the admission plane answered. A
+  // dark, unrecorded or unrecognized plane publishes an em dash rather than a
+  // confident 0, which would read as "nothing needs you".
+  function afTallyIsPublishable(coverage) {
+    return coverage.admission_confidence === "SOURCED" || coverage.admission_confidence === "GATES_ONLY";
+  }
+
+  function afIsInterrupt(item) {
+    return item.attention_class === "INTERRUPT_NOW";
+  }
+
+  // Freshness is read off the card's own receipts — never off a wall clock and
+  // never off the age of this render.
+  function afFreshnessCounts(item) {
+    var counts = { current: 0, stale: 0, unknown: 0 };
+    afList(item.source_receipts).forEach(function (receipt) {
+      var word = receipt && !isBlank(receipt.freshness) ? String(receipt.freshness) : "unknown";
+      if (counts[word] === undefined) counts[word] = 0;
+      counts[word] += 1;
+    });
+    return counts;
+  }
+
+  function afFreshnessLine(item) {
+    var receipts = afList(item.source_receipts);
+    if (!receipts.length) return "no contributing source receipt";
+    var counts = afFreshnessCounts(item);
+    return receipts.length + " receipts · current " + counts.current + " · stale " + counts.stale + " · unknown " + counts.unknown;
+  }
+
+  function afBundleOf(frontier, bundleId) {
+    if (isBlank(bundleId)) return null;
+    var found = null;
+    afList(frontier.bundles).forEach(function (bundle) {
+      if (bundle && bundle.bundle_id === bundleId) found = bundle;
+    });
+    return found;
+  }
+
+  function afLabelled(parent, label, className) {
+    var block = el("div", { className: className });
+    block.appendChild(el("span", { text: label, className: "ccr-af-label" }));
+    parent.appendChild(block);
+    return block;
+  }
+
+  function afReasonList(parent, tokens, map, emptyText) {
+    var rows = afList(tokens);
+    if (!rows.length) {
+      parent.appendChild(el("p", { text: emptyText, className: "ccr-af-text is-quiet" }));
+      return;
+    }
+    var list = el("ul", { className: "ccr-af-reasons" });
+    rows.forEach(function (token) {
+      var li = el("li", { className: "ccr-af-reason" });
+      li.appendChild(el("span", { text: afWords(map, token, "reason not recorded"), className: "ccr-af-reason-text" }));
+      li.appendChild(el("span", { text: safeText(token), className: "ccr-af-reason-code" }));
+      list.appendChild(li);
+    });
+    parent.appendChild(list);
+  }
+
+  // One card, in the exact F0G §13 order: 1 decision/action needed,
+  // 2 attention pressure, 3 authority, 4 can act now + exact target,
+  // 5 why now, 6 what can continue, 7 what it unblocks, 8 evidence/freshness,
+  // 9 bundle/root context, 10 forensic receipts. DOM order is that order.
+  function afCard(item, frontier) {
+    var cls = "ccr-af-card";
+    if (afIsInterrupt(item)) cls += " is-interrupt";
+    else if (item.attention_class === "FOCUS_NOW") cls += " is-focus";
+    if (item.serviceability === "BLOCKED") cls += " is-blocked";
+    var card = el("article", { className: cls, attrs: { tabindex: "0" } });
+
+    // 1 — the decision or action needed.
+    var identity = el("div", { className: "ccr-af-identity" });
+    identity.appendChild(el("div", { text: safeText(item.title, "Untitled demand"), className: "ccr-af-title" }));
+    identity.appendChild(el("div", {
+      text: safeText(item.responsibility_ref, "no responsibility reference") + " · " + safeText(item.demand_id),
+      className: "ccr-af-ref",
+    }));
+
+    // 2 — attention pressure. The only chip on the urgency track.
+    var marks = el("div", { className: "ccr-af-marks" });
+    marks.appendChild(chip(
+      afWords(AF_CLASS_NAME, item.attention_class, "Pressure not recorded").toUpperCase(),
+      AF_CLASS_VARIANT[item.attention_class] || "is-dim"
+    ));
+    if (item.is_fairness_sentinel === true) marks.appendChild(chip("OLDEST READY", "is-dim"));
+    identity.appendChild(marks);
+
+    // 3 — authority. Its own slot, never merged into the pressure reading.
+    var authority = afLabelled(identity, "Authority", "ccr-af-authority");
+    authority.appendChild(el("p", {
+      text: afAuthorityName(item.authority_requirement),
+      className: "ccr-af-authority-name",
+    }));
+    card.appendChild(identity);
+
+    var middle = el("div", { className: "ccr-af-middle" });
+
+    // 4 — can act now, and the exact target when one exists.
+    var path = afLabelled(middle, "Can act now?", "ccr-af-path");
+    var pathMarks = el("div", { className: "ccr-af-marks" });
+    pathMarks.appendChild(chip(
+      afWords(AF_SERVICE_NAME, item.serviceability, "Path not recorded").toUpperCase(),
+      AF_SERVICE_VARIANT[item.serviceability] || "is-dim"
+    ));
+    var canAct = afCanAct(item);
+    pathMarks.appendChild(chip(canAct.text, canAct.variant));
+    path.appendChild(pathMarks);
+    path.appendChild(el("p", {
+      text: afWords(AF_SERVICE_SENTENCE, item.serviceability, "Serviceability was not recorded for this demand."),
+      className: "ccr-af-text",
+    }));
+    path.appendChild(el("p", { text: canAct.words, className: "ccr-af-text is-quiet" }));
+    path.appendChild(el("p", {
+      text: isBlank(item.exact_action_target)
+        ? "No exact action target is available. None is guessed."
+        : "exact target · " + String(item.exact_action_target),
+      className: isBlank(item.exact_action_target) ? "ccr-af-mono is-quiet" : "ccr-af-mono",
+    }));
+    if (afList(item.serviceability_reasons).length) {
+      afReasonList(path, item.serviceability_reasons, AF_SERVICE_REASON, "");
+    }
+
+    // 5 — why now.
+    var why = afLabelled(middle, "Why now", "ccr-af-why");
+    afReasonList(why, item.pressure_reasons, AF_PRESSURE_REASON, "No source-backed pressure reason was recorded.");
+
+    // 6 — what can continue without executive cognition.
+    var factors = item.factor_vector || {};
+    var continues = afLabelled(middle, "What can continue", "ccr-af-continue");
+    continues.appendChild(el("p", {
+      text: afWords(AF_AUTONOMOUS, factors.autonomous_progress, "Whether anything can safely continue is not recorded."),
+      className: "ccr-af-text",
+    }));
+    continues.appendChild(el("p", {
+      text: afWords(AF_BURN, factors.active_resource_burn, "resource burn not recorded"),
+      className: "ccr-af-mono is-quiet",
+    }));
+
+    // 7 — the exact work this unblocks.
+    var unblocks = afList(item.downstream_unblocks);
+    var unblockBlock = afLabelled(middle, "What it unblocks", "ccr-af-unblocks");
+    if (!unblocks.length) {
+      unblockBlock.appendChild(el("p", {
+        text: "No exact downstream unblock is recorded. Fan-out is never inferred from prose.",
+        className: "ccr-af-text is-quiet",
+      }));
+    } else {
+      var unblockList = el("ul", { className: "ccr-af-unblock-list" });
+      unblocks.forEach(function (ref) {
+        unblockList.appendChild(el("li", { text: safeText(ref), className: "ccr-af-mono" }));
+      });
+      unblockBlock.appendChild(unblockList);
+    }
+    card.appendChild(middle);
+
+    var right = el("div", { className: "ccr-af-right" });
+
+    // 8 — evidence and freshness, read from the card's own receipts.
+    var evidence = afLabelled(right, "Evidence", "ccr-af-evidence");
+    evidence.appendChild(el("p", { text: afFreshnessLine(item), className: "ccr-af-mono" }));
+    evidence.appendChild(el("p", {
+      text: isBlank(item.became_actionable_at)
+        ? "ready since · not recorded"
+        : "ready since · " + String(item.became_actionable_at),
+      className: isBlank(item.became_actionable_at) ? "ccr-af-mono is-quiet" : "ccr-af-mono",
+    }));
+    if (afList(item.issues).length) {
+      evidence.appendChild(el("p", {
+        text: afList(item.issues).length + " coverage gap(s) on this demand",
+        className: "ccr-af-mono is-quiet",
+      }));
+    }
+
+    // 9 — bundle and root context.
+    var context = afLabelled(right, "Bundle / root", "ccr-af-context");
+    context.appendChild(el("p", {
+      text: afWords(AF_RELATION, item.projection_relation, "Projection relation not recorded"),
+      className: "ccr-af-text is-quiet",
+    }));
+    var bundle = afBundleOf(frontier, item.bundle_id);
+    if (bundle) {
+      context.appendChild(el("p", {
+        text: "root · " + safeText(bundle.canonical_root_ref, "not recorded") + " · " + afList(bundle.members).length + " members",
+        className: "ccr-af-mono",
+      }));
+    } else {
+      context.appendChild(el("p", { text: "no bundle recorded", className: "ccr-af-mono is-quiet" }));
+    }
+
+    // 10 — forensic source receipts, through the shared drawer.
+    var actions = el("div", { className: "ccr-af-actions" });
+    var openBtn = button("Detail", "ccr-open-button", function (event) {
+      event.stopPropagation();
+      afOpenDetail(item, openBtn);
+    });
+    actions.appendChild(openBtn);
+    right.appendChild(actions);
+    card.appendChild(right);
+
+    card.addEventListener("click", function () { afOpenDetail(item, card); });
+    card.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        afOpenDetail(item, card);
+      }
+    });
+    return card;
+  }
+
+  function afGroupHead(eyebrow, name, note, count) {
+    var head = el("div", { className: "ccr-af-group-head" });
+    var left = el("div");
+    left.appendChild(el("p", { text: eyebrow, className: "ccr-section-eyebrow" }));
+    left.appendChild(el("h3", { text: name }));
+    left.appendChild(el("p", { text: note, className: "ccr-af-group-note" }));
+    head.appendChild(left);
+    head.appendChild(el("span", { text: count, className: "ccr-count" }));
+    return head;
+  }
+
+  // Each group is partitioned by authority_requirement, Chairman and Sol
+  // first. This is a partition, not an ordering: nothing is promoted between
+  // partitions by pressure, age, blast radius or congestion.
+  function afGroup(group, items, frontier) {
+    var members = items.filter(function (item) { return item && item.attention_class === group.key; });
+    var section = el("section", { className: "ccr-af-group" });
+    section.appendChild(afGroupHead("Primary composition", group.name, group.note, String(members.length)));
+    if (!members.length) {
+      section.appendChild(el("p", { text: group.empty, className: "ccr-af-group-empty" }));
+      return section;
+    }
+    var seen = {};
+    members.forEach(function (item) {
+      var authority = isBlank(item.authority_requirement) ? "UNKNOWN" : String(item.authority_requirement);
+      if (!seen[authority]) seen[authority] = [];
+      seen[authority].push(item);
+    });
+    var order = AF_AUTHORITY_ORDER.slice();
+    Object.keys(seen).forEach(function (authority) {
+      if (order.indexOf(authority) === -1) order.push(authority);
+    });
+    order.forEach(function (authority) {
+      var partition = seen[authority];
+      if (!partition || !partition.length) return;
+      var block = el("div", {
+        className: AF_HEADLINE_AUTHORITY[authority] ? "ccr-af-partition is-headline" : "ccr-af-partition",
+      });
+      var head = el("div", { className: "ccr-af-partition-head" });
+      head.appendChild(el("span", { text: afAuthorityName(authority), className: "ccr-af-partition-name" }));
+      head.appendChild(el("span", { text: String(partition.length), className: "ccr-count" }));
+      block.appendChild(head);
+      var list = el("div", { className: "ccr-af-card-list" });
+      partition.forEach(function (item) { list.appendChild(afCard(item, frontier)); });
+      block.appendChild(list);
+      section.appendChild(block);
+    });
+    return section;
+  }
+
+  function afFold(name, count, rows) {
+    var fold = el("details", { className: "ccr-fold" });
+    var summary = el("summary");
+    summary.appendChild(el("span", { text: name }));
+    summary.appendChild(el("span", { text: String(count), className: "ccr-count" }));
+    fold.appendChild(summary);
+    var list = el("ul");
+    rows.forEach(function (text) {
+      list.appendChild(el("li", { text: text, className: "ccr-row ccr-row-id" }));
+    });
+    fold.appendChild(list);
+    return fold;
+  }
+
+  // Group six. Not an attention class: the honest report of where this read
+  // could not see, plus every demand that was compacted out of the groups
+  // above. A card limit is never a lawful omission reason, so the raw rows
+  // stay reachable here.
+  function afIssuesGroup(doc, frontier, items) {
+    var omissions = afList(frontier.omissions);
+    var flagged = items.filter(function (item) { return afList(item.issues).length > 0; });
+    var terminal = items.filter(function (item) { return item.attention_class === "NON_ACTIONABLE"; });
+    var unusable = items.filter(function (item) {
+      return item.serviceability === "BLOCKED" || item.serviceability === "UNKNOWN";
+    });
+    var degraded = afList(doc.degraded);
+    var admission = doc.admission || {};
+    var declined = afList(admission.declined);
+    var stewardCodes = afList(admission.steward_issue_codes);
+    var unresolved = afList(admission.attention_obligations_unresolved);
+    var total = degraded.length + omissions.length + flagged.length + terminal.length +
+      unusable.length + declined.length + stewardCodes.length + unresolved.length;
+
+    var section = el("section", { className: "ccr-af-group ccr-af-issues" });
+    section.appendChild(afGroupHead(
+      "Coverage",
+      "Source & action-path issues",
+      "Where this read could not see, and every demand compacted out of the groups above. Serviceability is reported here separately from pressure: a blocked demand keeps whatever urgency its own class gave it.",
+      String(total)
+    ));
+    if (!total) {
+      section.appendChild(el("p", {
+        text: "No coverage gap, omission or unusable action path was reported in this read.",
+        className: "ccr-af-group-empty",
+      }));
+      return section;
+    }
+
+    if (degraded.length) {
+      section.appendChild(afFold("Degraded source reasons", degraded.length, degraded.map(function (line) {
+        return safeText(line);
+      })));
+    }
+    if (unusable.length) {
+      section.appendChild(afFold("Action path blocked or unknown", unusable.length, unusable.map(function (item) {
+        var reasons = afList(item.serviceability_reasons).join(", ");
+        return safeText(item.demand_id) + " · " + safeText(item.serviceability) + " · " +
+          (reasons || "no reason recorded") + " · pressure " + safeText(item.attention_class);
+      })));
+    }
+    if (flagged.length) {
+      var issueRows = [];
+      flagged.forEach(function (item) {
+        afList(item.issues).forEach(function (code) {
+          issueRows.push(safeText(item.demand_id) + " · " + safeText(code) + " · " + afWords(AF_ISSUE, code, "no description recorded"));
+        });
+      });
+      section.appendChild(afFold("Coverage gaps on admitted demands", issueRows.length, issueRows));
+    }
+    if (omissions.length) {
+      section.appendChild(afFold("Compacted demands, each with its receipt", omissions.length, omissions.map(function (row) {
+        return safeText(row.demand_id) + " · " + afWords(AF_RELATION, row.relation, "relation not recorded") +
+          " · covered by " + safeText(row.covered_by, "not recorded") + " · " + safeText(row.reason, "no reason recorded");
+      })));
+    }
+    if (terminal.length) {
+      section.appendChild(afFold("Outside current cognition allocation", terminal.length, terminal.map(function (item) {
+        return safeText(item.demand_id) + " · " + safeText(item.title, "untitled") + " · " +
+          safeText(item.responsibility_ref, "no responsibility reference");
+      })));
+    }
+    if (declined.length) {
+      section.appendChild(afFold("Obligations declined at admission", declined.length, declined.map(function (row) {
+        return safeText(row.responsibility_ref, "no responsibility reference") + " · " + safeText(row.reason, "no reason recorded");
+      })));
+    }
+    if (unresolved.length) {
+      section.appendChild(afFold("Obligations that did not join a responsibility", unresolved.length, unresolved.map(function (ref) {
+        return safeText(ref);
+      })));
+    }
+    if (stewardCodes.length) {
+      section.appendChild(afFold("Steward-reported issue codes", stewardCodes.length, stewardCodes.map(function (code) {
+        return safeText(code);
+      })));
+    }
+    return section;
+  }
+
+  // Group seven. Per-authority concurrency truth, exactly as F0G §10 words it.
+  // Multiple interrupts prove congestion, never overload, and never grant
+  // delegation, target transfer or escalation.
+  function afConcurrentGroup(frontier, coverage) {
+    var frontiers = afList(frontier.authority_frontiers);
+    var sentinels = afList(frontier.fairness_sentinels);
+    var section = el("section", { className: "ccr-af-group ccr-af-concurrent" });
+    section.appendChild(afGroupHead(
+      "Overload truth",
+      "Concurrent executive pressure",
+      "Per authority: how many independent roots are live, and whether accepted evidence proves they can all be served in their windows. Congestion never grants delegation, target transfer or authority escalation.",
+      String(frontiers.length)
+    ));
+
+    if (!frontiers.length) {
+      section.appendChild(el("p", {
+        text: "No authority partition was reported in this read, so concurrent executive pressure is uncovered rather than zero.",
+        className: "ccr-af-group-empty",
+      }));
+    } else {
+      var track = el("div", { className: "ccr-af-demand-track" });
+      frontiers.forEach(function (row) {
+        var cell = el("div", { className: "ccr-af-demand" });
+        cell.appendChild(el("div", { text: afAuthorityName(row.authority_requirement), className: "ccr-af-demand-name" }));
+        cell.appendChild(chip(
+          afWords(AF_CONCURRENT, row.concurrent_demand, "concurrent demand not recorded").toUpperCase(),
+          AF_CONCURRENT_VARIANT[row.concurrent_demand] || "is-dim"
+        ));
+        cell.appendChild(el("p", {
+          text: safeText(row.interrupt_root_count, "0") + " interrupt roots · " +
+            safeText(row.interrupt_member_count, "0") + " interrupt members · " +
+            afList(row.visible_demand_ids).length + " visible",
+          className: "ccr-af-mono",
+        }));
+        cell.appendChild(el("p", {
+          text: afWords(AF_FEASIBILITY, row.service_feasibility, "service feasibility not recorded"),
+          className: "ccr-af-mono is-quiet",
+        }));
+        var receipts = afList(row.feasibility_receipts);
+        if (receipts.length) {
+          cell.appendChild(afFold("Feasibility receipts", receipts.length, receipts.map(function (line) {
+            return safeText(line);
+          })));
+        } else {
+          cell.appendChild(el("p", { text: "no feasibility receipt recorded", className: "ccr-af-mono is-quiet" }));
+        }
+        track.appendChild(cell);
+      });
+      section.appendChild(track);
+    }
+
+    var fairness = el("div", { className: "ccr-af-fairness" });
+    fairness.appendChild(el("span", { text: "Fairness sentinels", className: "ccr-af-label" }));
+    if (sentinels.length) {
+      fairness.appendChild(el("p", {
+        text: "Oldest-ready visibility protection is holding " + sentinels.length + " demand(s) visible. A sentinel is service protection, never added pressure.",
+        className: "ccr-af-text",
+      }));
+      var list = el("ul", { className: "ccr-af-unblock-list" });
+      sentinels.forEach(function (id) { list.appendChild(el("li", { text: safeText(id), className: "ccr-af-mono" })); });
+      fairness.appendChild(list);
+    } else {
+      fairness.appendChild(el("p", {
+        text: "No oldest-ready sentinel was raised in this read.",
+        className: "ccr-af-text is-quiet",
+      }));
+    }
+    var readyUnknown = (coverage || {}).ready_age_unknown;
+    if (typeof readyUnknown === "number" && readyUnknown > 0) {
+      fairness.appendChild(el("p", {
+        text: readyUnknown + " demand(s) have unknown ready time. That is a coverage gap, never an age of zero, and it can hide starvation from this reading.",
+        className: "ccr-af-text",
+      }));
+    }
+    section.appendChild(fairness);
+    return section;
+  }
+
+  // The admission-confidence band. It leads the section because an empty
+  // frontier means one of two completely different things, and only this
+  // reading tells them apart.
+  function afCoverageBand(doc, coverage, items) {
+    var confidence = isBlank(coverage.admission_confidence) ? "" : String(coverage.admission_confidence);
+    var words = AF_CONFIDENCE[confidence] || {
+      title: "Admission confidence not recorded",
+      text: "This read did not report an admission confidence this surface recognizes, so how much of the admission plane answered is unknown and the frontier below cannot be read as complete.",
+      variant: "is-dim",
+    };
+    var band = el("section", { className: confidence === "SOURCED" ? "ccr-af-band" : "ccr-af-band is-qualified" });
+
+    var head = el("div", { className: "ccr-af-band-head" });
+    var left = el("div");
+    left.appendChild(el("p", { text: "Admission confidence", className: "ccr-section-eyebrow" }));
+    left.appendChild(el("h3", { text: words.title }));
+    head.appendChild(left);
+    head.appendChild(chip(safeText(confidence, "NOT RECORDED"), words.variant));
+    band.appendChild(head);
+    band.appendChild(el("p", { text: words.text, className: "ccr-af-band-text" }));
+
+    var scan = coverage.scan_reduction || {};
+    var track = el("div", { className: "ccr-af-counts" });
+    [
+      ["admitted", coverage.admitted_demands],
+      ["visible roots", coverage.visible_roots],
+      ["omitted with receipt", coverage.omitted_with_receipt],
+      ["interrupts", coverage.interrupts],
+      ["blocked path", coverage.blocked],
+      ["path unknown", coverage.serviceability_unknown],
+      ["authority unknown", coverage.authority_unknown],
+      ["ready age unknown", coverage.ready_age_unknown],
+    ].forEach(function (pair) {
+      var cell = el("div", { className: "ccr-af-count-cell" });
+      cell.appendChild(el("div", {
+        text: typeof pair[1] === "number" ? String(pair[1]) : "—",
+        className: "ccr-af-count-value",
+      }));
+      cell.appendChild(el("div", { text: pair[0], className: "ccr-af-count-name" }));
+      track.appendChild(cell);
+    });
+    band.appendChild(track);
+
+    band.appendChild(el("p", {
+      text: "raw obligations " + safeText(scan.raw_obligations, "not recorded") +
+        " · admitted " + safeText(scan.admitted, "not recorded") +
+        " · compact visible " + safeText(scan.compact_visible, "not recorded") +
+        " · carried on this surface " + items.length,
+      className: "ccr-af-mono is-quiet",
+    }));
+    return band;
+  }
+
+  function afRenderDetail(item) {
+    var frontier = (STATE.frontier || {}).frontier || {};
+    document.getElementById("ccr-detail-ref").textContent = "DEMAND · " + safeText(item.demand_id).toUpperCase();
+    document.getElementById("ccr-detail-title").textContent = safeText(item.title, "Untitled demand");
+    var body = document.getElementById("ccr-detail-body");
+    clear(body);
+
+    var summary = el("section", { className: "ccr-detail-summary" });
+    summary.appendChild(el("span", { text: "Attention pressure", className: "ccr-detail-next-label" }));
+    summary.appendChild(el("p", {
+      text: afWords(AF_CLASS_NAME, item.attention_class, "Pressure not recorded"),
+      className: "ccr-detail-next",
+    }));
+    summary.appendChild(el("p", {
+      text: "Authority " + afAuthorityName(item.authority_requirement) + ". " +
+        afWords(AF_SERVICE_SENTENCE, item.serviceability, "Serviceability was not recorded.") + " " +
+        afCanAct(item).words,
+      className: "ccr-af-detail-sub",
+    }));
+    body.appendChild(summary);
+
+    if (afIsInterrupt(item) && item.serviceability === "BLOCKED") {
+      body.appendChild(el("p", {
+        text: "This is a blocked interrupt. The action path being unusable does not lower the pressure, and the pressure does not grant permission to act around the block.",
+        className: "ccr-af-hold",
+      }));
+    }
+
+    var rails = el("div", { className: "ccr-detail-rails" });
+    detailRail(rails, "Can act now", function (node) {
+      detailLine(node, afWords(AF_SERVICE_SENTENCE, item.serviceability, "Serviceability was not recorded."), false);
+      detailLine(node, afCanAct(item).words, false);
+      detailLine(node, "serviceability " + safeText(item.serviceability) + " · actor_can_act " + safeText(item.actor_can_act), true);
+      detailLine(node, isBlank(item.exact_action_target)
+        ? "exact target · none available; none is guessed"
+        : "exact target · " + String(item.exact_action_target), true);
+      afList(item.serviceability_reasons).forEach(function (code) {
+        detailLine(node, afWords(AF_SERVICE_REASON, code, "reason not recorded") + " (" + safeText(code) + ")", true);
+      });
+    });
+    detailRail(rails, "Why now", function (node) {
+      var reasons = afList(item.pressure_reasons);
+      if (!reasons.length) detailLine(node, "No source-backed pressure reason was recorded.", false);
+      reasons.forEach(function (code) {
+        detailLine(node, afWords(AF_PRESSURE_REASON, code, "reason not recorded") + " (" + safeText(code) + ")", false);
+      });
+    });
+    detailRail(rails, "Factor vector", function (node) {
+      var factors = item.factor_vector || {};
+      [
+        ["decision window", factors.decision_window], ["actual impact", factors.actual_impact],
+        ["blast radius", factors.blast_radius], ["reversibility", factors.reversibility],
+        ["autonomous progress", factors.autonomous_progress], ["active resource burn", factors.active_resource_burn],
+        ["exact unblock count", factors.exact_unblock_count],
+      ].forEach(function (pair) {
+        detailLine(node, pair[0] + " " + safeText(pair[1], "not recorded"), true);
+      });
+      detailLine(node, afWords(AF_AUTONOMOUS, factors.autonomous_progress, "Autonomous progress not recorded."), false);
+    });
+    detailRail(rails, "What it unblocks", function (node) {
+      var unblocks = afList(item.downstream_unblocks);
+      if (!unblocks.length) {
+        detailLine(node, "No exact downstream unblock is recorded.", false);
+        return;
+      }
+      unblocks.forEach(function (ref) { detailLine(node, safeText(ref), true); });
+    });
+    detailRail(rails, "Bundle / root", function (node) {
+      detailLine(node, afWords(AF_RELATION, item.projection_relation, "Projection relation not recorded"), false);
+      var bundle = afBundleOf(frontier, item.bundle_id);
+      if (!bundle) {
+        detailLine(node, "no bundle recorded", true);
+        return;
+      }
+      detailLine(node, "bundle " + safeText(bundle.bundle_id), true);
+      detailLine(node, "canonical root " + safeText(bundle.canonical_root_ref, "not recorded"), true);
+      detailLine(node, "canonical demand " + safeText(bundle.canonical_demand_id, "not recorded"), true);
+      detailLine(node, "interrupt members " + safeText(bundle.interrupt_member_count, "0"), true);
+      afList(bundle.member_boundaries).forEach(function (row) {
+        detailLine(node, "member " + afList(row).join(" · "), true);
+      });
+    });
+    detailRail(rails, "Coverage gaps", function (node) {
+      var issues = afList(item.issues);
+      if (!issues.length) {
+        detailLine(node, "No coverage gap is recorded on this demand.", false);
+        return;
+      }
+      issues.forEach(function (code) {
+        detailLine(node, afWords(AF_ISSUE, code, "not described") + " (" + safeText(code) + ")", false);
+      });
+    });
+    detailRail(rails, "Identity", function (node) {
+      detailLine(node, "demand " + safeText(item.demand_id), true);
+      detailLine(node, "responsibility " + safeText(item.responsibility_ref, "not recorded"), true);
+      detailLine(node, "authority " + safeText(item.authority_requirement), true);
+      detailLine(node, "attention class " + safeText(item.attention_class), true);
+      detailLine(node, "ready since " + safeText(item.became_actionable_at, "not recorded"), true);
+      detailLine(node, "fairness sentinel " + (item.is_fairness_sentinel === true ? "yes" : "no"), true);
+    });
+    body.appendChild(rails);
+
+    // Forensic drilldown reuses the shared receipt fold exactly: one row per
+    // contributing source, owner · ref · observed_at · freshness.
+    var receiptSection = el("section", { className: "ccr-detail-section" });
+    receiptSection.appendChild(el("h3", { text: "Source receipts" }));
+    var receipts = auReceiptFold("Contributing sources", item.source_receipts);
+    if (receipts) receiptSection.appendChild(receipts);
+    else receiptSection.appendChild(el("p", { text: "No contributing source is recorded for this demand.", className: "ccr-empty-line" }));
+    var summaryRow = (frontier.source_freshness_summary || {});
+    receiptSection.appendChild(el("p", {
+      text: "snapshot freshness · current " + safeText(summaryRow.current, "0") +
+        " · stale " + safeText(summaryRow.stale, "0") +
+        " · unknown " + safeText(summaryRow.unknown, "0"),
+      className: "ccr-af-mono is-quiet",
+    }));
+    body.appendChild(receiptSection);
+
+    var explanation = afList(item.explanation_reasons);
+    if (explanation.length) {
+      var explain = el("section", { className: "ccr-detail-section" });
+      explain.appendChild(el("h3", { text: "Explanation reasons as sent" }));
+      explanation.forEach(function (code) {
+        explain.appendChild(el("p", { text: safeText(code), className: "ccr-detail-line mono" }));
+      });
+      body.appendChild(explain);
+    }
+  }
+
+  function afOpenDetail(item, opener) {
+    LAST_DRAWER_OPENER = openerCandidate(opener);
+    STATE.selectedWork = null;
+    STATE.selectedAutonomy = null;
+    STATE.selectedFrontier = item;
+    afRenderDetail(item);
+    var drawer = document.getElementById("ccr-detail-drawer");
+    drawer.classList.add("is-open");
+    drawer.setAttribute("aria-hidden", "false");
+    document.getElementById("ccr-drawer-scrim").hidden = false;
+    document.getElementById("ccr-drawer-close").focus();
+  }
+
+  function afNotWired(mount) {
+    var panel = el("section", { className: "ccr-af-quiet" });
+    panel.appendChild(el("p", { text: "Not wired yet", className: "ccr-af-quiet-title" }));
+    panel.appendChild(el("p", {
+      text: "No attention frontier projection was returned. Its availability and the current executive attention load are unknown — this is not a reading that nothing needs your attention.",
+      className: "ccr-af-quiet-text",
+    }));
+    mount.appendChild(panel);
+  }
+
+  function renderAttentionFrontier(projection) {
+    var mount = document.getElementById("ccr-attention-frontier");
+    if (!mount) return;
+    clear(mount);
+    var count = document.getElementById("nav-attention-frontier-count");
+    STATE.frontier = projection && typeof projection === "object" ? projection : null;
+
+    if (!STATE.frontier) {
+      afNotWired(mount);
+      if (count) count.textContent = "—";
+      return;
+    }
+
+    var frontier = STATE.frontier.frontier || {};
+    var coverage = STATE.frontier.coverage || {};
+    var items = afList(frontier.items);
+
+    mount.appendChild(afCoverageBand(STATE.frontier, coverage, items));
+    AF_GROUPS.forEach(function (group) { mount.appendChild(afGroup(group, items, frontier)); });
+    mount.appendChild(afIssuesGroup(STATE.frontier, frontier, items));
+    mount.appendChild(afConcurrentGroup(frontier, coverage));
+    if (count) count.textContent = afTallyIsPublishable(coverage) ? String(items.length) : "—";
   }
 
   // state -----------------------------------------------------------------
@@ -2441,6 +3339,8 @@
 
     renderAutonomy(doc.autonomy);
     if (STATE.selectedAutonomy) renderAutonomyDetail(STATE.selectedAutonomy);
+    renderAttentionFrontier(doc.attention_frontier);
+    if (STATE.selectedFrontier) afRenderDetail(STATE.selectedFrontier);
     renderWork();
     if (!REMOTE_READ_ONLY) renderSurfaces();
     var loose = renderLooseEnds(doc);
