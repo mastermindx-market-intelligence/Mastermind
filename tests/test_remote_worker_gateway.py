@@ -24,6 +24,10 @@ from tests.test_remote_worker_transport import (
     _openssl_available,
     _request,
 )
+from tests.test_executive_worker_broker import (
+    _fixture as _real_broker_fixture,
+    _request as _broker_request,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -72,6 +76,7 @@ async def _gateway_fixture(
     tmp_path: Path,
     *,
     allowed_operations: set[str] | frozenset[str] = frozenset({"status"}),
+    allowed_worker_ids: set[str] | frozenset[str] = frozenset({"WORKER-001"}),
 ) -> _GatewayFixture:
     ca_key, ca_cert, _ = _certificate_fixture(
         tmp_path,
@@ -108,7 +113,7 @@ async def _gateway_fixture(
         ca_path=ca_cert,
         expected_control_fingerprint=_cert_sha256(control_cert),
         broker_socket_path=broker_socket,
-        allowed_worker_ids={"WORKER-001"},
+        allowed_worker_ids=allowed_worker_ids,
         allowed_operations=allowed_operations,
     )
     gateway = RemoteWorkerGateway(config)
@@ -346,6 +351,61 @@ async def test_nested_start_assignment_retarget_never_reaches_broker(
         assert response["broker_response"] is None
         assert calls == 0
     finally:
+        await _close_gateway(fixture)
+
+
+@pytest.mark.skipif(not _openssl_available(), reason="openssl unavailable")
+async def test_nested_start_retarget_refuses_before_real_broker_adapter_start(
+    tmp_path: Path,
+) -> None:
+    fixture = await _gateway_fixture(
+        tmp_path,
+        allowed_operations={"start"},
+        allowed_worker_ids={"codex-01"},
+    )
+    broker_root = tmp_path / "real-broker"
+    broker_root.mkdir()
+    broker, adapter, _sweeper, peer, launch_spec = _real_broker_fixture(
+        broker_root
+    )
+
+    async def broker_call(operation: str, payload: dict) -> dict:
+        return await broker.execute(
+            _broker_request(operation, payload),
+            peer=peer,
+        )
+
+    fixture.gateway.broker_call = broker_call
+    context = _client_context(
+        ca=fixture.config.ca_path,
+        cert=fixture.control_cert,
+        key=fixture.control_key,
+    )
+    outer_identity = {
+        **IDENTITY,
+        "job_id": "JOB-OUTER",
+        "attempt_id": "ATT-OUTER",
+        "worker_id": "codex-01",
+    }
+    nested_launch = dict(launch_spec)
+    nested_launch["job_id"] = "job-inner"
+    nested_launch["run_id"] = "run-inner"
+    request = build_request(
+        outer_identity,
+        "start",
+        {"launch_spec": nested_launch, "validation_commands": []},
+    )
+    try:
+        response = await _exchange(fixture.endpoint, context, request)
+        if adapter.spec is not None:
+            adapter.finished.set()
+            await asyncio.sleep(0)
+        assert response["outcome"] == "refused"
+        assert response["broker_response"] is None
+        assert adapter.spec is None
+    finally:
+        adapter.finished.set()
+        await asyncio.sleep(0)
         await _close_gateway(fixture)
 
 
