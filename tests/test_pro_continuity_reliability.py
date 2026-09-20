@@ -92,13 +92,65 @@ def test_bootstrap_still_uses_protected_source_and_contains_no_live_operation():
     assert "SAME repository + commit" in raw
     assert "pro-continuity-reliability-20260919-sol-001" not in raw
 
-@pytest.mark.parametrize("scenario_id", [f"PCR{i:02d}" for i in range(1,17)])
+@pytest.mark.parametrize("scenario_id", [f"PCR{i:02d}" for i in range(1,18)])
 def test_pressure_cases_use_existing_fresh_sol_packet(scenario_id):
     rows = json.loads(CORPUS.read_text(encoding="utf-8"))
-    assert [r["scenario_id"] for r in rows] == [f"PCR{i:02d}" for i in range(1,17)]
+    assert [r["scenario_id"] for r in rows] == [f"PCR{i:02d}" for i in range(1,18)]
     row = next(r for r in rows if r["scenario_id"] == scenario_id)
     assert set(row) == {"scenario_id", "prompt", "pass_requires"}
     packet = ScenarioPacket(**row)
     for value in (packet.prompt, packet.pass_requires):
         assert 40 <= len(value) <= 2500
     assert "PASS:" in packet.pass_requires and "FAIL:" in packet.pass_requires
+
+
+def test_negative_capability_claim_requires_current_action_family_evidence():
+    step6 = section("ACTIVE_EXECUTION.md", "Step 6 — Discover exact action capability, then react to evidence")
+    for clause in (
+        "`UNKNOWN` / `UNPROBED` is never equivalent to `UNAVAILABLE`",
+        "successful READ does not prove that a WRITE/ADMIN action is unavailable",
+        "non-mutating permission/capability/binding preflight",
+        "Never perform a dummy mutation solely to prove capability",
+        "requested action family",
+        "discovery result",
+        "exact explicit refusal/error",
+        "technical tool/action exposure",
+        "authenticated resource permission/serviceability",
+        "organizational/source-writer authority",
+        "effect state",
+    ):
+        assert clause in step6
+
+
+def test_terminal_capability_blockers_are_evidence_gated():
+    gate = section("ACTIVE_EXECUTION.md", "Step 8 — Final-response gate")
+    for clause in (
+        "capability-based `EXACT_HUMAN_GATE`",
+        "`PLATFORM_FAILURE`",
+        "`ALL_SCOPED_LANES_BLOCKED`",
+        "current discovery result",
+        "exhausted safe probes",
+        "exact human/admin ceremony",
+        "truthful classification is `MORE_WORK_EXISTS`",
+    ):
+        assert clause in gate
+
+
+def test_github_read_only_observation_cannot_settle_write_capability():
+    rows = {row["scenario_id"]: row for row in json.loads(CORPUS.read_text(encoding="utf-8"))}
+    p12 = rows["PCR12"]
+    assert "GitHub reads have succeeded" in p12["prompt"]
+    assert "WRITE as UNKNOWN/UNPROBED" in p12["pass_requires"]
+    assert "non-mutating repository permission/serviceability preflight" in p12["pass_requires"]
+    assert "source-writer authority separately" in p12["pass_requires"]
+    assert "EXACT_HUMAN_GATE" in p12["pass_requires"]
+
+
+def test_explicit_write_refusal_is_negative_control_not_global_read_only_claim():
+    rows = {row["scenario_id"]: row for row in json.loads(CORPUS.read_text(encoding="utf-8"))}
+    p17 = rows["PCR17"]
+    assert "explicitly refuses WRITE" in p17["prompt"]
+    assert "technical/resource evidence" in p17["pass_requires"]
+    assert "organizational/source-writer authority separate" in p17["pass_requires"]
+    assert "dummy mutation" in p17["pass_requires"]
+    assert "whole platform read-only" in p17["pass_requires"]

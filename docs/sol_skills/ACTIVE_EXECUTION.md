@@ -203,16 +203,46 @@ Unrelated protected-master movement, another session's path-disjoint merge, or a
 not a reason to restart global archaeology. Apply the bounded compatibility rules in
 `RECONCILE_STATE.md` and return to execution.
 
-## Step 6 — Discover tool capability once, then react to evidence
+## Step 6 — Discover exact action capability, then react to evidence
 
-Use the current tool surface rather than assumptions. For host tools, apply the current protected
-host-discovery procedure when present. Within a stable connection/generation:
+Use the current effective tool/action surface rather than assumptions. For host tools, apply the current
+protected host-discovery procedure when present. Within a stable connection/generation:
 
-* discover the needed schema/capability once;
+* classify the exact requested action family before making a capability claim; a route or provider name
+  is too coarse when READ, WRITE, ADMIN, browser, process, or another action class differs;
+* discover the needed schema/action family once and record the discovery result from the current
+  generation;
+* when a non-mutating permission/capability/binding preflight exists, use it before declaring the
+  requested action unavailable;
 * record a tool lane as usable, degraded, refused, or unknown from direct evidence;
 * do not repeatedly rediscover the same failure in place of useful work;
 * re-probe only after a connection/device/schema change, an explicit recovery signal, or when the
   next critical action genuinely requires fresh proof.
+
+`UNKNOWN` / `UNPROBED` is never equivalent to `UNAVAILABLE`. Absence from the tools already used,
+a read-only call path, a failed lookup, or a successful READ does not prove that a WRITE/ADMIN action
+is unavailable. If safe discovery or a non-effectful preflight for the requested action family remains
+possible, perform it in the same turn; the truthful active-turn state remains `MORE_WORK_EXISTS`.
+
+Never perform a dummy mutation solely to prove capability. If only an effectful probe exists and the
+actual action is not yet authorized or safe, keep the requested action `UNKNOWN` / `UNPROBED`
+rather than fabricating a negative claim.
+
+Before emitting a negative capability claim, preserve a compact current-generation evidence record:
+the requested action family; discovery result; permission/capability/binding preflight result or exact
+explicit refusal/error; exact target/binding scope; whether any safe probe remains; and the exact
+human/admin ceremony if one truly remains.
+
+Keep four axes separate:
+
+* technical tool/action exposure;
+* authenticated resource permission/serviceability;
+* organizational/source-writer authority;
+* effect state.
+
+A missing or denied axis must not be rewritten as another. Technical availability never grants
+organizational permission; unknown organizational permission never proves technical absence; and
+`EFFECT_UNKNOWN` remains an effect fact rather than a capability fact.
 
 A listed/online device is not proof its backend can execute. A successful ping is not proof of file,
 process, browser, desktop, or provider-session readiness. Conversely, one degraded connector does not
@@ -311,6 +341,14 @@ A checkpoint is not itself a reason to stop. A permitted continuation protects t
 it never makes a partial delivery PROVEN_OUTCOME. A genuinely safe next unit should continue unless
 one of these verified stop/continuation conditions applies.
 
+A capability-based `EXACT_HUMAN_GATE`, `PLATFORM_FAILURE`, or
+`ALL_SCOPED_LANES_BLOCKED` requires the Step 6 negative-capability evidence for every capability
+claim that materially justifies the stop: exact requested action family, current discovery result,
+permission/preflight result or explicit refusal/error, target/binding scope, exhausted safe probes,
+and the exact human/admin ceremony when applicable. If that evidence is missing and a useful safe
+discovery/preflight is still possible, the truthful classification is `MORE_WORK_EXISTS`, not a
+terminal blocker.
+
 An ambiguous checkpoint-write response is EFFECT_UNKNOWN on that same write carrier. Reconcile the
 exact object/revision before retry. A chat-only or local scratch note is not a durable checkpoint.
 If no authorized persistent path is reachable, avoid further effects that enlarge the unrecoverable
@@ -352,12 +390,23 @@ Installation reaches a native administrator prompt. Source/release qualification
 preflight remain unfinished and path-disjoint. Correct behavior: freeze installation as
 `HUMAN_AUTH`, continue the best unblocked lane, and do not finalize as `EXACT_HUMAN_GATE` yet.
 
-### B — connector write disappears
+### B — GitHub reads observed, write unprobed
 
-A GitHub or Slack write action is unavailable but read/research/host work needed for the same outcome
-remains legal. Correct behavior: record the missing write capability once, keep any effect-unknown
-operation on its original carrier, and continue independent useful work. Do not loop on capability
-rediscovery.
+A session has successfully read GitHub state. The next lawful step requires a GitHub write-class
+action, but the session has not yet inspected the current write action family or repository
+permission/serviceability. Correct behavior: classify WRITE as `UNKNOWN` / `UNPROBED`, discover the
+current GitHub write actions and use a non-mutating permission/preflight when available, then continue
+to the separate organizational/source-writer gate. Do not emit `EXACT_HUMAN_GATE` merely because the
+first calls were read-oriented.
+
+### B2 — exact write refusal is proven
+
+The requested GitHub write action family is current and discovered, and an exact non-mutating
+permission/serviceability preflight returns an explicit refusal for the bound repository scope.
+Correct behavior: preserve that current refusal as technical/resource evidence, keep
+organizational/source-writer authority separate, name the exact remaining admin ceremony when one
+exists, and continue any independent useful lane. Do not issue a dummy mutation to double-check the
+refusal and do not broaden one repository denial into a platform-wide write claim.
 
 ### C — protected master moves on unrelated paths
 
