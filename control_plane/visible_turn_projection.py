@@ -19,10 +19,11 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Mapping
 
 
@@ -130,6 +131,8 @@ class _Prebind:
 class _Grant:
     key: TurnKey
     viewer_id: str
+    binding: tuple[str, str, str, str] | None = None
+    state: str = "ACTIVE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -393,11 +396,84 @@ class VisibleTurnProjection:
             self._create_turn_locked(key)
             return grant
 
+    @staticmethod
+    def _observer_binding(operation_id, profile_digest, permission_digest, viewer_binding_digest):
+        values = (operation_id, profile_digest, permission_digest, viewer_binding_digest)
+        if (not isinstance(operation_id, str) or not 1 <= len(operation_id) <= 256
+                or any(not isinstance(v, str) or re.fullmatch(r"[0-9a-f]{64}", v) is None
+                       for v in values[1:])):
+            raise ProjectionError("OBSERVER_CONFLICT", "OBSERVER_CONFLICT")
+        return values
+
+    def _observer_entry(self, key, binding):
+        for handle, grant in self._grants.items():
+            if grant.binding is not None and grant.binding[0] == binding[0]:
+                if grant.key != key or grant.binding != binding:
+                    raise ProjectionError("OBSERVER_CONFLICT", "OBSERVER_CONFLICT")
+                return handle, grant
+        return None, None
+
+    @staticmethod
+    def _observer_wire(handle, grant):
+        return {"status": grant.state if grant else "ABSENT",
+                "reader_grant": handle if grant and grant.state == "ACTIVE" else None,
+                "turn_key": asdict(grant.key) if grant else None,
+                "grant_generation": handle if grant else None}
+
+    def observer_status(self, key, **binding):
+        bound = self._observer_binding(**binding)
+        with self._lock:
+            handle, grant = self._observer_entry(key, bound)
+            if grant and grant.state == "ACTIVE":
+                record = self._turns.get(key.native_turn_id)
+                if record is None or record.key != key:
+                    grant = replace(grant, state="INVALIDATED")
+                    self._grants[handle] = grant
+            return self._observer_wire(handle, grant)
+
+    def enroll_observer(self, key, **binding):
+        bound = self._observer_binding(**binding)
+        with self._lock:
+            handle, existing = self._observer_entry(key, bound)
+            if existing is not None:
+                return self.observer_status(key, **binding)
+            # Tombstones stay in the existing registry until process restart.
+            # Never evict them and accidentally turn a replay into enrollment.
+            if sum(g.binding is not None for g in self._grants.values()) >= 128:
+                raise ProjectionError("OVER_BUDGET", "observer operation budget is full")
+            handle = self.mint_grant(key)
+            self._grants[handle] = replace(self._grants[handle], binding=bound)
+            return self._observer_wire(handle, self._grants[handle])
+
+    def revoke_observer(self, key, **binding):
+        bound = self._observer_binding(**binding)
+        with self._lock:
+            handle, grant = self._observer_entry(key, bound)
+            if grant and grant.state == "ACTIVE":
+                self.revoke_grant(handle)
+            return self.observer_status(key, **binding)
+
+    def check_observer_binding(self, reader_grant, binding):
+        with self._lock:
+            grant = self._grants.get(reader_grant)
+            if grant is None or grant.state != "ACTIVE":
+                return False
+            if grant.binding is None:
+                return not binding
+            try:
+                return grant.binding == self._observer_binding(**binding)
+            except (TypeError, ProjectionError):
+                return False
+
     def revoke_grant(self, reader_grant: str) -> None:
         with self._lock:
-            grant = self._grants.pop(reader_grant, None)
+            grant = self._grants.get(reader_grant)
             if grant is None:
                 return
+            if grant.binding is None:
+                self._grants.pop(reader_grant, None)
+            else:
+                self._grants[reader_grant] = replace(grant, state="REVOKED")
             viewers = self._viewers_by_turn.get(grant.key)
             if viewers is not None:
                 viewers.discard(reader_grant)
@@ -414,7 +490,7 @@ class VisibleTurnProjection:
             return None
         with self._lock:
             grant = self._grants.get(reader_grant)
-            return grant.key if grant is not None else None
+            return grant.key if grant is not None and grant.state == "ACTIVE" else None
 
     def read(
         self,
@@ -437,7 +513,7 @@ class VisibleTurnProjection:
                 self._grants.get(reader_grant)
                 if isinstance(reader_grant, str) else None
             )
-            if live_grant is None or live_grant.key != key:
+            if live_grant is None or live_grant.state != "ACTIVE" or live_grant.key != key:
                 self._refuse(key, "READER_REVOKED")
             record = self._turns.get(key.native_turn_id)
             if record is None or record.key != key:
@@ -506,6 +582,10 @@ class VisibleTurnProjection:
                 self._turns.pop(key.native_turn_id, None)
                 self._prebind = None
             self._viewers_by_turn.pop(key, None)
+            for handle, grant in list(self._grants.items()):
+                if grant.key == key:
+                    if grant.binding is not None:
+                        self._grants[handle] = replace(grant, state="INVALIDATED")
 
     def refusal_receipts(self) -> tuple[tuple[str, str, int], ...]:
         with self._lock:

@@ -173,6 +173,9 @@ _OHF_OPERATIONS = frozenset(
         "ohf-deliver-attention",
         "ohf-collect-turn",
         "ohf-observe-turn",
+        "ohf-observer-enroll",
+        "ohf-observer-status",
+        "ohf-observer-revoke",
         "ohf-interrupt",
         "ohf-stop",
         "ohf-cancel",
@@ -1480,6 +1483,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
+        if operation in {"ohf-observer-enroll", "ohf-observer-status", "ohf-observer-revoke"}:
+            return await self._ohf_observer_lifecycle(operation, payload)
         if operation == "ohf-observe-turn":
             return await self._ohf_observe_turn(payload)
         if operation == "ohf-interrupt":
@@ -2125,6 +2130,41 @@ class ExecutiveWorkerBroker:
         finally:
             await self._operator_release_busy(state)
 
+    async def _ohf_observer_lifecycle(self, operation, payload):
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        if set(payload) != {"attempt", "epoch", "generation", "turn"} | binding_fields:
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        if any(not isinstance(v, str) or not 1 <= len(v) <= 256 for v in payload.values()):
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        binding = {name: payload[name] for name in binding_fields}
+        async with self._state_lock:
+            active = self._operator_run
+            if active is None:
+                raise BrokerStateError("UNKNOWN_GENERATION")
+            if (payload["attempt"] != active.epoch.attempt_id
+                    or payload["epoch"] != active.epoch.session_epoch_id
+                    or payload["generation"] != active.generation.process_generation_id):
+                raise BrokerStateError("GENERATION_INVALID")
+            state = active.adapter._generations.get(payload["generation"])
+            native = state.turns.get(payload["turn"]) if state else None
+            if not native:
+                raise BrokerStateError("TURN_NOT_BOUND")
+            key = TurnKey(payload["attempt"], payload["epoch"], payload["generation"],
+                          active.generation.generation_number, active.generation.worker_id,
+                          payload["turn"], native)
+            try:
+                if operation == "ohf-observer-enroll":
+                    turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
+                    return active.adapter.mint_observer_grant(turn, binding=binding)
+                projection = getattr(active.adapter, "visible_turn_projection", None)
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None, "turn_key": None, "grant_generation": None}
+                method = projection.revoke_observer if operation == "ohf-observer-revoke" else projection.observer_status
+                return method(key, **binding)
+            except Exception as exc:
+                code = getattr(exc, "code", None)
+                raise BrokerStateError(code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"} else "GRANT_INVALIDATED") from None
+
     async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
         expected = {
             "attempt",
@@ -2135,7 +2175,9 @@ class ExecutiveWorkerBroker:
             "cursor",
             "max_items",
         }
-        if set(payload) != expected:
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        binding = {name: payload[name] for name in binding_fields if name in payload}
+        if set(payload) not in (expected, expected | binding_fields):
             raise BrokerStateError("ohf-observe-turn payload fields are invalid")
         identity_fields = (
             "attempt",
@@ -2171,6 +2213,9 @@ class ExecutiveWorkerBroker:
         if projection is None:
             self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
             raise BrokerStateError("UNKNOWN_GENERATION")
+        if not projection.check_observer_binding(payload["reader_grant"], binding):
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
         grant_key = projection.check_grant(payload["reader_grant"])
         if grant_key is None:
             self._observer_refusals.append((None, "READER_REVOKED"))
