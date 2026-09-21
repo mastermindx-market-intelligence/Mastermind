@@ -248,10 +248,16 @@ def test_v2_approved_review_still_does_not_manufacture_acceptance(tmp_path):
     assert runtime.attempts.claim_job(reviewer.job_id) is not None
     runtime.jobs.complete_job(reviewer.job_id, JobPayload(verdict="approve"))
 
-    doc = fabric_job_view.read_fabric_view_v2(
-        runtime_root,
-        root.job_id,
-        control_config_path=_control(tmp_path, armed=True),
+    # This is the pure execution/acceptance regression. Legacy v1 creation
+    # events no longer grant a bounded network provenance join; the separate
+    # bounded acquisition tests prove their explicit partial visibility.
+    jobs = runtime.jobs.list_jobs()
+    doc = fabric_job_view.compose_fabric_view_v2(
+        root_job_id=root.job_id, root_job=runtime.jobs.get_job(root.job_id),
+        jobs=jobs, attempts_by_job={job.job_id: runtime.attempts.list_attempts(job.job_id) for job in jobs},
+        joined_job_ids={root.job_id, subject.job_id},
+        runtime_identity={"root": str(runtime_root), "db_present": True, "identity": None},
+        armed={"ceo_submit_armed": True}, degraded=[],
     )
     subject_card = next(
         card for card in doc["children"] if card["job_id"] == subject.job_id

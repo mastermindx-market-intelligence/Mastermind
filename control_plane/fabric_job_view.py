@@ -32,12 +32,18 @@ Shape (mirrors the Control Room's own split, ``chairman_control_room.py:11``)
 * :func:`describe_capability` — the A16 capability object with
   ``installed: false`` and **no runtime access at all** (``--describe``).
 
-The exact reads it may call, and no others
-------------------------------------------
+Historical v1 reads
+-------------------
 ``executive_runtime.Runtime.at(runtime_root, create=False)``; ``runtime.jobs.
 get_job(job_id)``; ``runtime.jobs.list_jobs()``; ``runtime.attempts.
 list_attempts(job_id)``; ``runtime.events.list_events(job_id=…)``.  No MCP
 server is started, no socket is opened, no ``launchctl``, no network.
+
+The v2 gather path instead uses only the fixed Runtime owner discovery/root
+snapshot methods and one validated command-id Event point read per eligible
+Job. Its acquisition receipt separates truncation, provenance completeness and
+currentness. A digest alone never qualifies currentness. Legacy provenance with
+no durable command join stays PARTIAL without acquiring Event history.
 
 DEVIATION 1 — a sixth read function, adjudicated (ORCH-WB1, binding).
     :func:`read_fabric_view` also calls ``control_plane.executive_inbox.
@@ -98,6 +104,8 @@ is the ``chairman_control_room.py:1274-1280`` hazard, and it is a red test.
 from __future__ import annotations
 
 import json
+import re
+from types import SimpleNamespace
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -976,20 +984,146 @@ def read_fabric_view(
     )
 
 
+def _bounded_provenance(runtime, job):
+    """Validate durable routing before one Event point read and owner validation.
+
+    The adapter supplies only the immutable Job already in the bounded snapshot
+    and its unique command-id Event. The historical validator receives no real
+    registry, so its compatibility list interface cannot acquire Event history.
+    """
+    from control_plane.executive_runtime import orchestration_digest
+
+    cycle = getattr(job, "orchestration_provenance", None)
+    digest = getattr(job, "orchestration_provenance_digest", None)
+    keys = {"schema_version", "creator", "source_id", "source_digest", "command_id",
+            "job_id", "parent_job_id", "root_job_id", "role"}
+    if not isinstance(cycle, Mapping) or set(cycle) != keys:
+        return None, "durable CEO-intent provenance not projected"
+    source_id = cycle.get("source_id")
+    if not (
+        cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
+        and cycle.get("creator") == "ceo_intent"
+        and isinstance(source_id, str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", source_id)
+        and cycle.get("command_id") == f"ceo-intent:{source_id}"
+        and isinstance(cycle.get("source_digest"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", cycle["source_digest"])
+        and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+        and digest == orchestration_digest(cycle)
+        and cycle.get("job_id") == job.job_id
+        and cycle.get("parent_job_id") is None and job.parent_job_id is None
+        and cycle.get("root_job_id") == job.job_id == job.root_job_id
+        and cycle.get("role") == job.orchestration_role == "aggregation"
+    ):
+        return None, "durable CEO-intent provenance invalid or unsupported"
+    event = runtime.events.get_event_by_command_id(cycle["command_id"])
+    if event is None or event.event_type != "JOB_CREATED":
+        return None, "durable CEO-intent creation Event unavailable"
+    # Only v2 carries the durable cycle needed to prove this bounded join.
+    provenance = event.payload.get("provenance") if isinstance(event.payload, Mapping) else None
+    if not isinstance(provenance, Mapping) or provenance.get("schema") != "mastermind.ceo_intent.v2":
+        return None, "durable CEO-intent creation Event schema unsupported"
+    adapter = SimpleNamespace(
+        jobs=SimpleNamespace(get_job=lambda job_id: job if job_id == job.job_id else None),
+        events=SimpleNamespace(list_events=lambda *, job_id: (event,) if job_id == job.job_id else ()),
+    )
+    return executive_inbox.ceo_intent_provenance(adapter, str(job.job_id))
+
+
+def _acquisition_receipt(*, kind, root_job_id=None, snapshot=None, unjoined=(), projection=False):
+    return {
+        "schema": "mastermind.fabric_runtime_acquisition.v1",
+        "query": {"kind": kind, "root_job_id": root_job_id},
+        "owner": "executive_runtime",
+        "snapshot_digest": getattr(snapshot, "snapshot_digest", None),
+        "budgets": {"roots": 64, "jobs": 17, "attempts_per_job": 20,
+                    "attempts_total": 340, "creation_events_per_job": 1},
+        "truncation": {
+            "jobs": bool(getattr(snapshot, "jobs_truncated", False)),
+            "attempt_job_ids": list(getattr(snapshot, "attempts_truncated_job_ids", ())),
+            "roots": bool(getattr(snapshot, "truncated", False)),
+            "projection": projection,
+        },
+        "provenance": {"state": "PARTIAL" if unjoined or snapshot is None else "COMPLETE",
+                       "unjoined_job_ids": sorted(unjoined)},
+        "generation": {"state": "UNKNOWN", "source_identity": None,
+                       "before": None, "after": None,
+                       "reason": "Runtime owner generation seam not yet supplied"},
+    }
+
+
 def read_fabric_view_v2(
     runtime_root: str | Path,
     root_job_id: str,
     *,
     control_config_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Gather one root and render truthful v2 semantics. Read-only."""
+    """Finite v2 acquisition; no fallback to historical population reads."""
+    from control_plane import executive_runtime
 
-    return _read_fabric_view(
-        runtime_root,
-        root_job_id,
-        control_config_path=control_config_path,
-        composer=compose_fabric_view_v2,
+    runtime_root = Path(runtime_root)
+    root_job_id = str(root_job_id)
+    armed, notes = _read_armed(None if control_config_path is None else Path(control_config_path))
+    db_path = runtime_root / DB_RELATIVE_PATH
+    runtime, present, open_notes = _open_runtime(runtime_root, db_path)
+    notes += open_notes
+    snapshot = None
+    jobs, joined, unjoined = [], set(), []
+    attempts_by_job = {}
+    failed = runtime is None and present
+    try:
+        if runtime is not None:
+            snapshot = runtime.read_job_root_bounded(root_job_id)
+            jobs = list(snapshot.jobs)
+            if (snapshot.root_job_id != root_job_id or not jobs
+                    or jobs[0].job_id != root_job_id or len(jobs) > 17
+                    or len(snapshot.attempts) > 340):
+                raise ValueError("bounded Runtime snapshot identity or budget invalid")
+            ids = {job.job_id for job in jobs}
+            if len(ids) != len(jobs) or any(job.root_job_id != root_job_id for job in jobs):
+                raise ValueError("bounded Runtime snapshot membership invalid")
+            for attempt in snapshot.attempts:
+                if attempt.job_id not in ids:
+                    raise ValueError("bounded Runtime Attempt membership invalid")
+                attempts_by_job[attempt.job_id] = attempts_by_job.get(attempt.job_id, []) + [attempt]
+            if any(len(attempts) > 20 for attempts in attempts_by_job.values()):
+                raise ValueError("bounded Runtime Attempt budget invalid")
+            for job in jobs:
+                provenance, warning = _bounded_provenance(runtime, job)
+                if isinstance(provenance, Mapping) and provenance.get("workstream"):
+                    joined.add(job.job_id)
+                else:
+                    unjoined = unjoined + [job.job_id]
+                    notes = notes + [f"provenance not projected: {job.job_id}: {warning or 'workstream unavailable'}"]
+            if snapshot.jobs_truncated:
+                notes = notes + ["bounded Runtime Job snapshot truncated"]
+            if snapshot.attempts_truncated_job_ids:
+                notes = notes + ["bounded Runtime Attempt snapshot truncated"]
+    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError) as exc:
+        notes = notes + [f"bounded acquisition unavailable: {_failure_first_line(exc)}"]
+        failed = True
+        snapshot, jobs, attempts_by_job, joined, unjoined = None, [], {}, set(), []
+    doc = compose_fabric_view_v2(
+        root_job_id=root_job_id, root_job=jobs[0] if jobs else None,
+        jobs=jobs, attempts_by_job=attempts_by_job, joined_job_ids=joined,
+        runtime_identity={"root": str(runtime_root), "db_present": present, "identity": None},
+        armed=armed, degraded=notes, read_failed=failed,
     )
+    receipt = _acquisition_receipt(kind="root_detail", root_job_id=root_job_id,
+                                   snapshot=snapshot, unjoined=unjoined)
+    doc["runtime"]["acquisition"] = receipt
+    if snapshot is not None and (unjoined or snapshot.jobs_truncated or snapshot.attempts_truncated_job_ids):
+        doc["capability"]["state"] = PARTIAL
+        doc["capability"]["detail"] = "bounded snapshot has omitted rows or unavailable provenance"
+        facts = []
+        if unjoined:
+            facts = facts + [_fact("MISSING_PRODUCER", "runtime.acquisition.provenance", "executive_runtime",
+                               "durable CEO-intent workstream join unavailable for included Jobs")]
+        if snapshot.jobs_truncated or snapshot.attempts_truncated_job_ids:
+            facts = facts + [_fact("OMITTED", "runtime.acquisition.truncation", "executive_runtime",
+                               "owner acquisition budget omits Jobs or Attempts")]
+        doc["missingness"] = _dedupe_facts(doc["missingness"] + facts)
+    return doc
 
 
 def _list_roots(
@@ -1104,12 +1238,39 @@ def list_roots_v2(
     limit: int = LIST_ROOTS_LIMIT,
     control_config_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """V2 root enumeration with truthful submission-arm semantics."""
+    """Discover roots within the fixed Runtime owner budget."""
+    from control_plane import executive_runtime
 
-    return _list_roots(
-        runtime_root,
-        limit=limit,
-        control_config_path=control_config_path,
-        schema=ROOT_LIST_SCHEMA_V2,
-        unarmed_entry=_UNARMED_ENTRY_V2,
-    )
+    if type(limit) is not int or limit <= 0:
+        raise ValueError("limit must be a positive integer")
+    runtime_root = Path(runtime_root)
+    armed, notes = _read_armed(None if control_config_path is None else Path(control_config_path))
+    if armed.get("ceo_submit_armed") is False:
+        notes = notes + [_UNARMED_ENTRY_V2]
+    runtime, present, open_notes = _open_runtime(runtime_root, runtime_root / DB_RELATIVE_PATH)
+    notes += open_notes
+    snapshot, rows, total, truncated, projection = None, [], None, False, False
+    try:
+        if runtime is not None:
+            snapshot = runtime.discover_job_roots_bounded()
+            roots = snapshot.roots
+            if len(roots) > 64 or any(job.root_job_id != job.job_id for job in roots):
+                raise ValueError("bounded Runtime discovery identity or budget invalid")
+            total = None if snapshot.truncated else len(roots)
+            projection = len(roots) > limit
+            truncated = bool(snapshot.truncated or projection)
+            rows = [{"job_id": str(job.job_id), "status": _enum_value(job.status),
+                     "depth": int(job.depth or 0), "parent_job_id": job.parent_job_id,
+                     "orchestration_role": job.orchestration_role} for job in roots[:limit]]
+            if truncated:
+                notes = notes + ["bounded root discovery truncated; omitted roots are not counted"]
+    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError) as exc:
+        notes = notes + [f"bounded acquisition unavailable: {_failure_first_line(exc)}"]
+        snapshot, rows, total, truncated, projection = None, [], None, False, False
+    return {
+        "schema": ROOT_LIST_SCHEMA_V2, "generated_at": _utc_now(),
+        "runtime": {"root": str(runtime_root), "db_present": present, "identity": None,
+                    "acquisition": _acquisition_receipt(kind="root_discovery", snapshot=snapshot, projection=projection)},
+        "roots": rows, "count": len(rows), "total": total,
+        "truncated": truncated, "degraded": sorted(set(notes)),
+    }
