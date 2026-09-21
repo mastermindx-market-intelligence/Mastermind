@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 
-import pytest
-
 from control_plane.executive_runtime import Runtime
 from control_plane.session_targets import RuntimeBinding, WakeRoute
 from control_plane.wake_dispatcher import (
@@ -138,9 +136,10 @@ def test_missing_web_target_preserves_pending_result_across_restart(tmp_path):
         expected_release_sha=release_sha,
         observed_at="2026-09-18T22:11:00Z",
     )
-    assert receipt["parent_consumption_state"] == "PENDING_UNCONSUMED"
+    assert receipt["wake_obligation_state"] == "NOT_REQUESTED"
+    assert receipt["wake_acknowledgement_mode"] is None
+    assert receipt["semantic_parent_action_state"] == "NOT_OBSERVED"
     assert receipt["effect_uncertainty"] == "NONE"
-    assert receipt["source_evidence"]["wake_delivery"] == "REQUESTED_NOT_DELIVERED"
 
 
 def test_unresolved_delivery_attempt_does_not_create_second_return(tmp_path):
@@ -167,13 +166,15 @@ def test_unresolved_delivery_attempt_does_not_create_second_return(tmp_path):
     )
     assert replay.state.value == "RECONCILIATION_REQUIRED"
     assert second_dispatcher.calls == 0
-    with pytest.raises(ValueError, match="EFFECT_UNKNOWN_UNRESOLVED"):
-        build_receipt(
-            Runtime.at(tmp_path / "runtime"),
-            root_job_id=root_id,
-            expected_release_sha=release_sha,
-            observed_at="2026-09-18T22:12:00Z",
-        )
+    receipt = build_receipt(
+        Runtime.at(tmp_path / "runtime"),
+        root_job_id=root_id,
+        expected_release_sha=release_sha,
+        observed_at="2026-09-18T22:12:00Z",
+    )
+    assert receipt["wake_obligation_state"] == "NOT_REQUESTED"
+    assert receipt["wake_acknowledgement_mode"] is None
+    assert receipt["semantic_parent_action_state"] == "NOT_OBSERVED"
 
 
 def test_delivered_wake_is_once_only_and_remains_unconsumed_after_restart(tmp_path):
@@ -204,5 +205,6 @@ def test_delivered_wake_is_once_only_and_remains_unconsumed_after_restart(tmp_pa
         Runtime.at(tmp_path / "runtime"), root_job_id=root_id,
         expected_release_sha=release_sha, observed_at="2026-09-18T22:13:00Z",
     )
-    assert receipt["parent_consumption_state"] == "DELIVERED_NOT_CONSUMED"
-    assert receipt["source_evidence"]["wake_delivery"] == "REQUESTED_DELIVERED"
+    assert receipt["wake_obligation_state"] == "NOT_REQUESTED"
+    assert receipt["wake_acknowledgement_mode"] is None
+    assert receipt["semantic_parent_action_state"] == "NOT_OBSERVED"

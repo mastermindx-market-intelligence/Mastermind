@@ -9,12 +9,30 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from control_plane.executive_dialogue_observation import (
+    CanonicalTerminalWakeCandidate,
+    DialogueObservationFacts,
+    TerminalObservationFacts,
+    TerminalProjectionReceiptFacts,
+    inspect_terminal_return_history,
+    normalize_terminal_return_projection_receipt,
+    read_canonical_terminal_wake,
+    terminal_return_event_material,
+    terminal_return_phase_spec,
+)
 from control_plane.executive_runtime import JobStatus, Runtime, StateConflict
-from control_plane.wake_ledger import LedgerPhase
+from control_plane.executive_terminal_return import reduce_terminal_return
+from control_plane.wake_ledger import (
+    ATTEMPT_PHASES,
+    EFFECT_KNOWN_PHASES,
+    LedgerPhase,
+    assert_causal,
+)
 from control_plane.wake_persist import WakeLedgerRepository
 
 
-RECEIPT_SCHEMA = "mastermind.web_ceo_offline_delivery_canary/v1"
+LEGACY_RECEIPT_SCHEMA = "mastermind.web_ceo_offline_delivery_canary/v1"
+RECEIPT_SCHEMA = "mastermind.web_ceo_offline_delivery_canary/v2"
 ERROR_SCHEMA = "mastermind.web_ceo_offline_delivery_canary.error/v1"
 _SHA1_LENGTH = 40
 _JOB_ID_PREFIX = "JOB-"
@@ -37,16 +55,6 @@ def _utc(value: str | None) -> str:
     if parsed.utcoffset() is not None and parsed.microsecond == 0:
         return value
     raise CanaryReaderError("OBSERVED_AT_INVALID")
-
-
-def _wake_delivery_evidence(states: list[str]) -> str:
-    if not states:
-        return "NOT_REQUESTED"
-    if all(state == "ACKNOWLEDGED" for state in states):
-        return "REQUESTED_ACKNOWLEDGED"
-    if any(state in {"DELIVERED", "ACKNOWLEDGED"} for state in states):
-        return "REQUESTED_DELIVERED"
-    return "REQUESTED_NOT_DELIVERED"
 
 
 def _material(
@@ -75,6 +83,183 @@ def _material(
     return material, material.result_envelope["role_result"]
 
 
+def _unmeasured_interventions() -> dict[str, dict[str, Any]]:
+    return {
+        name: {
+            "state": "UNMEASURED",
+            "reason": "CANONICAL_EVENT_SOURCE_ABSENT",
+            "interval_start": None,
+            "interval_end": None,
+        }
+        for name in (
+            "web_sol_turns_between_admission_and_handoff",
+            "manual_continue_edges",
+        )
+    }
+
+
+def _wake_projection(
+    runtime: Runtime,
+    *,
+    root_job_id: str,
+    terminal_candidate: Any,
+    projection_receipt: TerminalProjectionReceiptFacts,
+) -> tuple[str, str | None]:
+    canonical_candidate = CanonicalTerminalWakeCandidate(
+        root_job_id=terminal_candidate.root_job_id,
+        job_id=terminal_candidate.job_id,
+        attempt_id=terminal_candidate.attempt_id,
+        worker_id=terminal_candidate.worker_id,
+    )
+
+    def facts_provider(_runtime: Any, requested: Any, _connection: Any):
+        if requested != canonical_candidate:
+            return DialogueObservationFacts(complete=False)
+        return DialogueObservationFacts(
+            terminal=(
+                TerminalObservationFacts(
+                    candidate=terminal_candidate,
+                    projection_receipt=projection_receipt,
+                    projection_effect="APPLIED",
+                    binding_revalidated=True,
+                ),
+            )
+        )
+
+    repository = WakeLedgerRepository(runtime)
+    with runtime.store.read() as connection:
+        canonical = read_canonical_terminal_wake(
+            runtime=runtime,
+            source_root_job_id=root_job_id,
+            candidate=canonical_candidate,
+            facts_provider=facts_provider,
+            connection=connection,
+        )
+        if canonical.state == "ABSENT" and canonical.reason == "CORRELATED_WAKE_ABSENT":
+            return "NOT_REQUESTED", None
+        if canonical.state == "AMBIGUOUS":
+            raise CanaryReaderError("WAKE_OBLIGATION_AMBIGUOUS")
+        if canonical.reason == "WAKE_EVENT_BUDGET_EXCEEDED":
+            raise CanaryReaderError("WAKE_EVENT_BUDGET_EXCEEDED")
+        if canonical.reason == "CANONICAL_TERMINAL_UNAVAILABLE":
+            raise CanaryReaderError("WAKE_CORRELATION_UNAVAILABLE")
+        if (
+            canonical.state != "RESOLVED"
+            or canonical.wake is None
+            or canonical.terminal is None
+        ):
+            raise CanaryReaderError("WAKE_OBLIGATION_INVALID")
+
+        records = repository.list_ledger_records_on_connection(
+            connection, canonical.wake.obligation_id
+        )
+        requested = [
+            record for record in records if record.phase is LedgerPhase.WAKE_REQUESTED
+        ]
+        if len(requested) != 1 or requested[0].obligation is None:
+            raise CanaryReaderError("WAKE_OBLIGATION_INVALID")
+        request = requested[0]
+        obligation = request.obligation
+        physical = request.physical_source
+        expected_candidate = {
+            "mode": "TERMINAL_RESULT",
+            "root_job_id": terminal_candidate.root_job_id,
+            "job_id": terminal_candidate.job_id,
+            "attempt_id": terminal_candidate.attempt_id,
+            "worker_id": terminal_candidate.worker_id,
+            "evidence_digest": canonical.terminal.evidence_digest,
+        }
+        if (
+            physical is None
+            or physical.logical_source_ref != obligation.source_ref
+            or physical.obligation_id != obligation.obligation_id
+            or physical.thread_ts != projection_receipt.thread_ts
+            or physical.parent_fingerprint != projection_receipt.parent_fingerprint
+            or physical.operation_key != terminal_candidate.operation_key
+            or physical.predecessor_message_key != terminal_candidate.message_key
+            or physical.predecessor_message_fingerprint
+            != projection_receipt.fingerprint
+            or physical.target_seat != "ceo"
+            or obligation.declared_target_seat != "ceo"
+            or physical.candidate.to_dict() != expected_candidate
+        ):
+            raise CanaryReaderError("WAKE_PHYSICAL_SOURCE_INVALID")
+
+        phases_by_attempt: dict[int, set[LedgerPhase]] = {}
+        for record in records:
+            if record.phase in ATTEMPT_PHASES and record.attempt_n is not None:
+                phases_by_attempt.setdefault(record.attempt_n, set()).add(record.phase)
+        if any(
+            LedgerPhase.DELIVERY_ATTEMPT in phases
+            and not (phases & EFFECT_KNOWN_PHASES)
+            for phases in phases_by_attempt.values()
+        ):
+            raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
+        acknowledgements = [
+            record
+            for record in records
+            if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+        ]
+        if len(acknowledgements) > 1:
+            raise CanaryReaderError("WAKE_OBLIGATION_AMBIGUOUS")
+        acknowledgement_mode = None
+        if acknowledgements:
+            acknowledgement = acknowledgements[0].ack
+            if acknowledgement is None:
+                raise CanaryReaderError("WAKE_OBLIGATION_INVALID")
+            acknowledgement_mode = acknowledgement.ack_mode.value
+        return records[-1].phase.value, acknowledgement_mode
+
+
+def _terminal_projection(
+    runtime: Runtime,
+    material: Any,
+) -> tuple[str, Any, TerminalProjectionReceiptFacts | None]:
+    try:
+        terminal_events = runtime.events.list_events(
+            aggregate_type="terminal_return_projection",
+            aggregate_id=material.attempt.attempt_id,
+        )
+        if sum(
+            event.event_type == "EXECUTIVE_TERMINAL_RETURN_APPLIED"
+            for event in terminal_events
+        ) > 1:
+            raise CanaryReaderError("TERMINAL_PROJECTION_AMBIGUOUS")
+        candidate = reduce_terminal_return(material=material)
+        command_base, event_material = terminal_return_event_material(candidate)
+        projection_receipt = None
+        with runtime.store.read() as connection:
+            phase = inspect_terminal_return_history(
+                runtime,
+                connection,
+                candidate=candidate,
+                material=event_material,
+            )
+            if phase == "APPLIED":
+                applied_command = terminal_return_phase_spec(command_base)[-1][2]
+                applied_event = runtime.store.get_event_by_command_id(
+                    applied_command,
+                    connection=connection,
+                )
+                if applied_event is None:
+                    raise CanaryReaderError("TERMINAL_PROJECTION_INVALID")
+                normalized = normalize_terminal_return_projection_receipt(
+                    applied_event.payload.get("projection_receipt"),
+                    message_key=candidate.message_key,
+                )
+                normalized["duplicate_timestamps"] = tuple(
+                    normalized["duplicate_timestamps"]
+                )
+                projection_receipt = TerminalProjectionReceiptFacts(**normalized)
+    except CanaryReaderError:
+        raise
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise CanaryReaderError("TERMINAL_PROJECTION_INVALID") from exc
+    if phase in {"ATTEMPTED", "EFFECT_UNKNOWN"}:
+        raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
+    return phase or "NOT_ATTEMPTED", candidate, projection_receipt
+
+
 def build_receipt(
     runtime: Runtime,
     *,
@@ -101,7 +286,11 @@ def build_receipt(
 
     creation_events = [
         event
-        for event in runtime.events.list_events(job_id=root_job_id)
+        for event in runtime.events.list_events(
+            job_id=root_job_id,
+            aggregate_type="job",
+            aggregate_id=root_job_id,
+        )
         if event.event_type == "JOB_CREATED"
     ]
     if len(creation_events) != 1:
@@ -251,80 +440,23 @@ def build_receipt(
     ):
         raise CanaryReaderError("INDEPENDENT_REVIEW_INCOMPLETE")
 
-    terminal_events = [
-        event
-        for event in runtime.events.list_events(
-            aggregate_type="terminal_return_projection",
-            aggregate_id=material.attempt.attempt_id,
-        )
-    ]
-    event_types = [event.event_type for event in terminal_events]
-    applied_count = event_types.count("EXECUTIVE_TERMINAL_RETURN_APPLIED")
-    if applied_count > 1:
-        raise CanaryReaderError("TERMINAL_PROJECTION_AMBIGUOUS")
-    projection = (
-        "APPLIED"
-        if "EXECUTIVE_TERMINAL_RETURN_APPLIED" in event_types
-        else "EFFECT_UNKNOWN"
-        if "EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN" in event_types
-        else "ATTEMPTED"
-        if "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED" in event_types
-        else "NOT_ATTEMPTED"
+    projection, terminal_candidate, projection_receipt = _terminal_projection(
+        runtime, material
     )
+
     if projection == "APPLIED":
-        projection_state = "DELIVERED_NOT_CONSUMED"
-    elif projection == "EFFECT_UNKNOWN":
-        raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
+        if projection_receipt is None:
+            raise CanaryReaderError("TERMINAL_PROJECTION_INVALID")
+        wake_state, wake_acknowledgement_mode = _wake_projection(
+            runtime,
+            root_job_id=root_job_id,
+            terminal_candidate=terminal_candidate,
+            projection_receipt=projection_receipt,
+        )
     else:
-        projection_state = "PENDING_UNCONSUMED"
-
-    wake_repository = WakeLedgerRepository(runtime)
-    matched_wake_ids: list[str] = []
-    for persisted in wake_repository.list_wake_events():
-        obligation = persisted.obligation
-        if obligation is None:
-            continue
-        if (
-            obligation.root_job_id == root_job_id
-            and obligation.job_id == root_job_id
-            and obligation.attempt_id == material.attempt.attempt_id
-        ):
-            matched_wake_ids.append(obligation.obligation_id)
-
-    wake_records = []
-    wake_states: list[str] = []
-    for obligation_id in sorted(set(matched_wake_ids)):
-        records = [
-            item.record for item in wake_repository.list_records(obligation_id)
-        ]
-        wake_records.extend(records)
-        phases = {record.phase for record in records}
-        attempts: dict[int, set[LedgerPhase]] = {}
-        for record in records:
-            if record.attempt_n is not None:
-                attempts.setdefault(record.attempt_n, set()).add(record.phase)
-        for attempt_phases in attempts.values():
-            terminal = {
-                LedgerPhase.DELIVERED,
-                LedgerPhase.FAILED,
-                LedgerPhase.TARGET_UNAVAILABLE,
-            }
-            if (
-                LedgerPhase.DELIVERY_ATTEMPT in attempt_phases
-                and not (attempt_phases & terminal)
-            ):
-                raise CanaryReaderError("EFFECT_UNKNOWN_UNRESOLVED")
-        if LedgerPhase.TARGET_ACKNOWLEDGED in phases:
-            wake_states.append("ACKNOWLEDGED")
-        elif LedgerPhase.DELIVERED in phases:
-            wake_states.append("DELIVERED")
-        else:
-            wake_states.append("NOT_DELIVERED")
-
-    if wake_states and all(state == "ACKNOWLEDGED" for state in wake_states):
-        projection_state = "CONSUMED"
-    elif "DELIVERED" in wake_states or "ACKNOWLEDGED" in wake_states:
-        projection_state = "DELIVERED_NOT_CONSUMED"
+        wake_state, wake_acknowledgement_mode = "NOT_REQUESTED", None
+    intervention_measurements = _unmeasured_interventions()
+    semantic_parent_action_state = "NOT_OBSERVED"
 
     return {
         "schema": RECEIPT_SCHEMA,
@@ -335,16 +467,28 @@ def build_receipt(
         "review_revisions": reviews,
         "repair_revisions": repairs,
         "aggregation_result_digest": material.role_result_digest,
-        "web_sol_turns_between_admission_and_handoff": 0,
-        "manual_continue_edges": 0,
-        "parent_consumption_state": projection_state,
+        "web_sol_turns_between_admission_and_handoff": None,
+        "manual_continue_edges": None,
+        "intervention_measurements": intervention_measurements,
+        "terminal_return_projection_state": projection,
+        "wake_obligation_state": wake_state,
+        "wake_acknowledgement_mode": wake_acknowledgement_mode,
+        "semantic_parent_action_state": semantic_parent_action_state,
         "production_acceptance_state": "PENDING",
+        "stage_promotion_eligible": False,
+        "proof_admissibility": {
+            "scope": "SOURCE_LINEAGE_ONLY",
+            "stage_promotion": "HOLD",
+            "legacy_v1": "NON_PROMOTABLE",
+        },
         "effect_uncertainty": "NONE",
         "source_evidence": {
             "aggregation_terminal": "RUNTIME_VALIDATED",
             "independent_review": "QUALIFIED",
             "terminal_projection": projection,
-            "wake_delivery": _wake_delivery_evidence(wake_states),
+            "wake_obligation": wake_state,
+            "semantic_parent_action": semantic_parent_action_state,
+            "intervention_measurements": "UNMEASURED",
         },
         "observed_at": stamp,
     }

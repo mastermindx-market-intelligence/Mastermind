@@ -1,9 +1,9 @@
 # Web-Sol Exact Continuation + Durable Return R3 Implementation Plan
 
-> **Operation:** `web-sol-exact-continuation-return-r3-20260918-sol-001`  
-> **Protected base:** `20dc89a201b9dfa65c2b6a2366072f45d885cb5c`  
-> **Recovered R1/R2 stack:** exact replay through `c1f0341d`  
-> **Authority:** Chairman HANDOFF B, 2026-09-18  
+> **Operation:** `web-sol-exact-continuation-return-r3-20260918-sol-001`
+> **Protected base:** `20dc89a201b9dfa65c2b6a2366072f45d885cb5c`
+> **Recovered R1/R2 stack:** exact replay through `c1f0341d`
+> **Authority:** Chairman HANDOFF B, 2026-09-18
 > **Scope:** smallest existing-owner continuation slice; no new session registry, wake system, transcript reader, arbitrary prompt sender, or browser controller.
 
 ## Outcome
