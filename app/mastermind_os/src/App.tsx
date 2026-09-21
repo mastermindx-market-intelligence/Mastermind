@@ -390,21 +390,33 @@ function Conversation({
   document,
   pending,
   refresh,
+  selection,
 }: {
   document?: WindowDocument | null;
   pending?: boolean;
   refresh?: () => void;
+  selection?: MissionSelection | null;
 }) {
   if (document)
     return (
       <section className="card">
         <div className="section-title">
-          <h2>Conversation</h2>
-          <State value={document.view.coverage} />
+          <h2>Unbound current window</h2>
+          <State value="UNBOUND" />
+        </div>
+        <div className="unjoined" role="note">
+          <b>NOT_LINKED_TO_SELECTED_MISSION</b>
+          <p>
+            {selection
+              ? `No relationship is proven between this current window and ${selection.workRef} / ${selection.rootJobId}.`
+              : "No relationship is proven between this current window and any Mission selection."}
+          </p>
         </div>
         <p className="muted">
-          Current permitted turn · observed {document.view.observed_at}. This
-          window does not establish full history or product acceptance.
+          Global current permitted turn · observed {document.view.observed_at} ·
+          coverage {label(document.view.coverage)}. This window does not
+          establish full history, Mission evidence, action or result
+          correlation, review, or product acceptance.
         </p>
         {document.view.items.map((item) => (
           <article key={item.id}>
@@ -628,6 +640,8 @@ export function App() {
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
+      setWindowDocument(null);
+      setWindowPending(false);
       setMission(
         unavailableMission(
           next,
@@ -755,8 +769,37 @@ export function App() {
         candidate.mission.root_job_id === selection.rootJobId)
         ? candidate
         : null,
+    conversationActive = active === "Conversation",
+    conversationState = windowPending
+      ? "SOURCE_READ_PENDING"
+      : windowDocument && authState?.content
+        ? "UNBOUND"
+        : "UNAVAILABLE",
+    headerState = conversationActive
+      ? conversationState
+      : (d?.read_state.state ?? "UNAVAILABLE"),
+    headerSummary = conversationActive
+      ? windowDocument && authState?.content
+        ? "A global current permitted window. No relationship to the selected Mission is proven."
+        : "No Mission-linked conversation is currently established."
+      : d
+        ? d.mission.root_job_id && d.read_state.state === "CURRENT"
+          ? "A bounded source-qualified mission, current as of its owner observation."
+          : d.mission.root_job_id
+            ? `This mission projection is ${label(d.read_state.state)}; source qualification is not current.`
+            : "A qualified reconciliation state; no mission root is established."
+        : "No producer document is currently admitted.",
+    visibleNotice = conversationActive
+      ? windowDocument && authState?.content
+        ? "This current permitted window is not linked to the selected Mission."
+        : windowPending
+          ? "Reading the unbound current permitted window…"
+          : "No Mission-linked conversation is currently established."
+      : notice,
     open = (w: string, r: string | null) => {
       if (r) {
+        setWindowDocument(null);
+        setWindowPending(false);
         const next = { workRef: w, rootJobId: r },
           location = new URL(window.location.href);
         location.search = new URLSearchParams({
@@ -848,6 +891,7 @@ export function App() {
         document={authState?.content ? windowDocument : null}
         pending={windowPending}
         refresh={() => setWindowRevision((n) => n + 1)}
+        selection={selection}
       />
     );
   else if (!d)
@@ -906,18 +950,10 @@ export function App() {
           <div>
             <span className="eyebrow">{active}</span>
             <h1>{active}</h1>
-            <p>
-              {d
-                ? d.mission.root_job_id && d.read_state.state === "CURRENT"
-                  ? "A bounded source-qualified mission, current as of its owner observation."
-                  : d.mission.root_job_id
-                    ? `This mission projection is ${label(d.read_state.state)}; source qualification is not current.`
-                    : "A qualified reconciliation state; no mission root is established."
-                : "No producer document is currently admitted."}
-            </p>
+            <p>{headerSummary}</p>
           </div>
           <div className="facts">
-            <State value={d?.read_state.state ?? "UNAVAILABLE"} />
+            <State value={headerState} />
             {authState ? (
               <div>
                 <small>
@@ -984,7 +1020,7 @@ export function App() {
           </div>
         </header>
         <div className="notice" role="status">
-          {notice}
+          {visibleNotice}
         </div>
         {build ? (
           <details className="build-details">
@@ -1006,7 +1042,7 @@ export function App() {
           </details>
         ) : null}
         {content}
-        {d && (
+        {d && !conversationActive && (
           <section className="card">
             <h2>Missingness and source state</h2>
             {d.missingness.length ? (
