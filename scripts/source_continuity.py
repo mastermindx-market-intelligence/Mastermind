@@ -275,12 +275,20 @@ def _conditional_semantics(
     payload: object,
     *,
     subject_pull_url: str | None,
+    base_branch_url: str | None,
 ) -> object:
-    """Project only the two changed representations this invocation may re-prove."""
+    """Project only changed representations this invocation may safely re-prove."""
 
     roster = _open_pull_roster_semantics(url, payload)
     if roster is not _UNPROVABLE:
         return ("open_pull_roster", roster)
+    if isinstance(base_branch_url, str) and url == base_branch_url:
+        if not isinstance(payload, dict):
+            return _UNPROVABLE
+        commit = payload.get("commit")
+        if not isinstance(commit, dict) or not _is_sha(commit.get("sha")):
+            return _UNPROVABLE
+        return ("base_branch", commit["sha"])
     if not isinstance(subject_pull_url, str) or url != subject_pull_url:
         return _UNPROVABLE
     identity = _subject_pr_identity(payload)
@@ -295,15 +303,18 @@ class _BoundedHTTPGet:
         transport: HTTPGet,
         *,
         subject_pull_url: str | None = None,
+        base_branch_url: str | None = None,
     ) -> None:
         self._transport = transport
         self._subject_pull_url = subject_pull_url
+        self._base_branch_url = base_branch_url
         self._lock = Lock()
         self._calls = 0
         self._bytes = 0
         self._conditional_observations: list[_ConditionalObservation] = []
         self._semantic_revalidations: list[str] = []
         self._missing_observations: list[str] = []
+        self._base_head_update: tuple[str, str] | None = None
         self.parallel_safe = (
             transport is _stdlib_http_get
             or getattr(transport, "_source_continuity_parallel_safe", False) is True
@@ -396,6 +407,7 @@ class _BoundedHTTPGet:
                 url,
                 representation.payload,
                 subject_pull_url=self._subject_pull_url,
+                base_branch_url=self._base_branch_url,
             )
             with self._lock:
                 self._conditional_observations.append(
@@ -480,16 +492,34 @@ class _BoundedHTTPGet:
                     self._semantic_revalidations.append(observation.url)
                 if observation.semantics is _UNPROVABLE:
                     return False
+                current_semantics = _conditional_semantics(
+                    observation.url,
+                    payload.payload,
+                    subject_pull_url=self._subject_pull_url,
+                    base_branch_url=self._base_branch_url,
+                )
+                if current_semantics == observation.semantics:
+                    continue
                 if (
-                    _conditional_semantics(
-                        observation.url,
-                        payload.payload,
-                        subject_pull_url=self._subject_pull_url,
-                    )
-                    != observation.semantics
+                    observation.url == self._base_branch_url
+                    and isinstance(observation.semantics, tuple)
+                    and len(observation.semantics) == 2
+                    and observation.semantics[0] == "base_branch"
+                    and isinstance(current_semantics, tuple)
+                    and len(current_semantics) == 2
+                    and current_semantics[0] == "base_branch"
                 ):
-                    return False
-                continue
+                    old_head = observation.semantics[1]
+                    new_head = current_semantics[1]
+                    if not _is_sha(old_head) or not _is_sha(new_head):
+                        return False
+                    with self._lock:
+                        update = (old_head, new_head)
+                        if self._base_head_update not in (None, update):
+                            return False
+                        self._base_head_update = update
+                    continue
+                return False
             raise _RemoteProbeError()
         for url in absences:
             call_timeout = self._admit_call(_HTTP_TIMEOUT_SECONDS)
@@ -503,6 +533,10 @@ class _BoundedHTTPGet:
                 self._account_payload(payload.payload)
             return False
         return True
+
+    def base_head_update(self) -> tuple[str, str] | None:
+        with self._lock:
+            return self._base_head_update
 
 
 class _CollisionCensusHTTP:
@@ -2009,6 +2043,92 @@ def _probe_local_and_entries(
     return local_facts, path_entries
 
 
+@dataclass(frozen=True)
+class _RemoteRevalidation:
+    current_base_head: str
+    merge_base_sha: str
+
+
+def _branch_head_sha(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    commit = payload.get("commit")
+    if not isinstance(commit, dict) or not _is_sha(commit.get("sha")):
+        return None
+    return commit["sha"]
+
+
+def _revalidate_moved_base(
+    http_get: HTTPGet,
+    token: str,
+    request: SourceContinuityRequest,
+    *,
+    old_base_head: str,
+    new_base_head: str,
+    remote_head: str,
+    first_merge_base_sha: str,
+) -> _RemoteRevalidation | SourceContinuityRefusal:
+    if not all(
+        _is_sha(value)
+        for value in (old_base_head, new_base_head, remote_head, first_merge_base_sha)
+    ):
+        raise _RemoteProbeError()
+    if old_base_head == new_base_head:
+        return _RemoteRevalidation(new_base_head, first_merge_base_sha)
+
+    forward_endpoint = (
+        f"repos/{request.repository}/compare/{old_base_head}...{new_base_head}"
+    )
+    forward = _api(http_get, token, forward_endpoint)
+    if not isinstance(forward, dict):
+        raise _RemoteProbeError()
+    expected_forward_url = f"{_API_ROOT}/{forward_endpoint}"
+    if forward.get("url") != expected_forward_url:
+        raise _RemoteProbeError()
+    forward_base = forward.get("base_commit")
+    forward_merge_base = forward.get("merge_base_commit")
+    if not isinstance(forward_base, dict) or not isinstance(forward_merge_base, dict):
+        raise _RemoteProbeError()
+    if (
+        forward_base.get("sha") != old_base_head
+        or forward_merge_base.get("sha") != old_base_head
+    ):
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+
+    refreshed_endpoint = (
+        f"repos/{request.repository}/compare/{new_base_head}...{remote_head}"
+    )
+    refreshed = _api(http_get, token, refreshed_endpoint)
+    if not isinstance(refreshed, dict):
+        raise _RemoteProbeError()
+    expected_refreshed_url = f"{_API_ROOT}/{refreshed_endpoint}"
+    if refreshed.get("url") != expected_refreshed_url:
+        raise _RemoteProbeError()
+    refreshed_base = refreshed.get("base_commit")
+    refreshed_merge_base = refreshed.get("merge_base_commit")
+    if not isinstance(refreshed_base, dict) or not isinstance(refreshed_merge_base, dict):
+        raise _RemoteProbeError()
+    if refreshed_base.get("sha") != new_base_head:
+        raise _RemoteProbeError()
+    refreshed_merge_base_sha = refreshed_merge_base.get("sha")
+    if not _is_sha(refreshed_merge_base_sha):
+        raise _RemoteProbeError()
+    if refreshed_merge_base_sha != first_merge_base_sha:
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+
+    final_base = _api(
+        http_get,
+        token,
+        _branch_endpoint(request.repository, request.base_ref),
+    )
+    final_base_head = _branch_head_sha(final_base)
+    if final_base_head is None:
+        raise _RemoteProbeError()
+    if final_base_head != new_base_head:
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+    return _RemoteRevalidation(new_base_head, first_merge_base_sha)
+
+
 def _remote_still_matches(
     http_get: HTTPGet,
     token: str,
@@ -2023,7 +2143,9 @@ def _remote_still_matches(
     first_collisions_complete: bool,
     first_collision_snapshot: tuple[tuple[int, object], ...],
     first_collision_records: tuple[_ForeignCollisionRecord, ...] = (),
-) -> SourceContinuityRefusal | None:
+    *,
+    first_merge_base_sha: str | None = None,
+) -> _RemoteRevalidation | SourceContinuityRefusal | None:
     if getattr(http_get, "conditional_validation_available", False) is True:
         if not http_get.validate_unchanged(token=token):
             return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
@@ -2034,6 +2156,7 @@ def _remote_still_matches(
             return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
         if len(first_collision_snapshot) > 1 and not first_collision_records:
             return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+
         if any(record.identity is None for record in first_collision_records):
             second_details = _collision_census_details(
                 http_get,
@@ -2047,29 +2170,47 @@ def _remote_still_matches(
                 or second_details.state is CollisionState.INCOMPLETE
             ):
                 return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
-            if (
+            collision_matches = (
                 second_details.state is first_collision_state
                 and second_details.colliding_pr_numbers
                 == first_colliding_pr_numbers
                 and second_details.snapshot == first_collision_snapshot
-            ):
-                return None
-            return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+            )
+            if not collision_matches:
+                return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+        else:
+            collision_matches, collision_complete = _revalidate_collision_census(
+                http_get,
+                token,
+                request.repository,
+                request.pr_number,
+                request.owned_paths,
+                first_collision_records,
+                first_colliding_pr_numbers,
+            )
+            if not collision_complete:
+                return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+            if not collision_matches:
+                return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
-        collision_matches, collision_complete = _revalidate_collision_census(
+        update_reader = getattr(http_get, "base_head_update", None)
+        update = update_reader() if callable(update_reader) else None
+        if update is None:
+            return None
+        old_base_head, new_base_head = update
+        if not _is_sha(first_merge_base_sha):
+            raise _RemoteProbeError()
+        if old_base_head != current_base_head:
+            return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+        return _revalidate_moved_base(
             http_get,
             token,
-            request.repository,
-            request.pr_number,
-            request.owned_paths,
-            first_collision_records,
-            first_colliding_pr_numbers,
+            request,
+            old_base_head=old_base_head,
+            new_base_head=new_base_head,
+            remote_head=remote_head,
+            first_merge_base_sha=first_merge_base_sha,
         )
-        if not collision_complete:
-            return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
-        if collision_matches:
-            return None
-        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
     second_pr = _api(http_get, token, pr_endpoint)
@@ -2084,20 +2225,19 @@ def _remote_still_matches(
         token,
         _branch_endpoint(request.repository, request.base_ref),
     )
+    second_base_head = _branch_head_sha(second_base)
     if (
         second_identity is None
         or not isinstance(second_branch, dict)
-        or not isinstance(second_base, dict)
+        or second_base_head is None
     ):
         raise _RemoteProbeError()
     branch_commit = second_branch.get("commit")
-    base_commit = second_base.get("commit")
-    if not isinstance(branch_commit, dict) or not isinstance(base_commit, dict):
+    if not isinstance(branch_commit, dict):
         raise _RemoteProbeError()
     if (
         second_identity != first_identity
         or branch_commit.get("sha") != remote_head
-        or base_commit.get("sha") != current_base_head
     ):
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
@@ -2137,8 +2277,20 @@ def _remote_still_matches(
         or second_collision_snapshot != first_collision_snapshot
     ):
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
-    return None
 
+    if second_base_head == current_base_head:
+        return None
+    if not _is_sha(first_merge_base_sha):
+        raise _RemoteProbeError()
+    return _revalidate_moved_base(
+        http_get,
+        token,
+        request,
+        old_base_head=current_base_head,
+        new_base_head=second_base_head,
+        remote_head=remote_head,
+        first_merge_base_sha=first_merge_base_sha,
+    )
 
 def _is_github_id(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= 2_147_483_647
@@ -2408,6 +2560,10 @@ def main(
             subject_pull_url=(
                 f"{_API_ROOT}/repos/{request.repository}/pulls/{request.pr_number}"
             ),
+            base_branch_url=(
+                f"{_API_ROOT}/"
+                f"{_branch_endpoint(request.repository, request.base_ref)}"
+            ),
         )
         remote_prefix = _probe_remote_prefix(bounded_get, token, request)
         if isinstance(remote_prefix, SourceContinuityRefusal):
@@ -2463,9 +2619,13 @@ def main(
             collisions_complete,
             collision_snapshot,
             collision_records,
+            first_merge_base_sha=merge_base_sha,
         )
-        if remote_refusal is not None:
+        if isinstance(remote_refusal, SourceContinuityRefusal):
             return _emit(remote_refusal)
+        if isinstance(remote_refusal, _RemoteRevalidation):
+            current_base_head = remote_refusal.current_base_head
+            merge_base_sha = remote_refusal.merge_base_sha
 
         remote_facts = RemoteGitFacts(
             repository=remote_repo,
