@@ -404,7 +404,7 @@ class WorkspaceTriggerEffectOwner:
                 effect_fingerprint=fingerprint,
                 terminal_command_id=None,
                 provider_call_invoked=False,
-                provider_request_state="PROVEN_NOT_SENT",
+                provider_request_state="UNKNOWN",
                 replayed=True,
                 terminal_persisted=False,
             )
