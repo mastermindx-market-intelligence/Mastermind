@@ -3,7 +3,7 @@
 # Platform:    linux / x86_64
 # Interpreter: python3.12 resolved on PATH (hosted-CI tool-cache, CPython 3.12.14)
 # Source:      pyproject.toml (extra "dev")
-# pyproject.toml sha256: d5d346c445dfce58fac1a3de82afe333d3eb8eeff4e49e957e402ce26af9a9ae
+# pyproject.toml sha256: f26dbfe12683bdd7eeb3cd15e9fbfe114f76c04e0b71bd650047001f22f58a2c
 #
 # Minted by the bootstrap step of .github/workflows/rwe-shadow.yml (run
 # https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/33580598899)
