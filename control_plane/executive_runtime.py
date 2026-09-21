@@ -15,6 +15,7 @@ included in events or public ``to_dict`` output.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import hashlib
 import fnmatch
@@ -27,7 +28,7 @@ import secrets
 import sqlite3
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Iterator as IteratorABC
+from collections.abc import Iterator as IteratorABC, Sequence as SequenceABC
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from enum import Enum
@@ -136,6 +137,19 @@ OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION = (
 )
 DEFAULT_LEASE_SECONDS = 60
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
+MAX_RUNTIME_ACQUISITION_LIMIT = 2**9
+_MAX_RUNTIME_ACQUISITION_FILTER_IDS = 128
+_MAX_RUNTIME_ACQUISITION_IDENTIFIER_LENGTH = 128
+_MAX_RUNTIME_ACQUISITION_CURSOR_LENGTH = 4_096
+_RUNTIME_ACQUISITION_CURSOR_SCHEMA = "mastermind.executive_runtime_cursor/v1"
+_RUNTIME_ACQUISITION_CAPABILITY = object()
+BOUNDED_RUNTIME_DISCOVERY_SCHEMA = "mastermind.executive_runtime_root_discovery/v1"
+BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA = "mastermind.executive_runtime_root_snapshot/v1"
+RUNTIME_READ_OBSERVATION_SCHEMA = "mastermind.runtime_read_observation.v1"
+BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS = 64
+BOUNDED_RUNTIME_ROOT_MAX_CHILDREN = 16
+BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS = 20
+BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL = ((1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN) * BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS)
 _ROOT = Path(__file__).resolve().parent.parent
 _DB_RELATIVE_PATH = Path("data") / "control_plane" / "executive.sqlite3"
 _WORKER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -1181,6 +1195,51 @@ class Attempt:
         value = dataclasses.asdict(self)
         value["status"] = self.status.value
         return value
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundedRuntimeRootDiscovery:
+    schema_version: str
+    roots: tuple[Job, ...]
+    truncated: bool
+    snapshot_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"schema_version": self.schema_version, "roots": [job.to_dict() for job in self.roots], "truncated": self.truncated, "snapshot_digest": self.snapshot_digest}
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundedRuntimeRootSnapshot:
+    schema_version: str
+    root_job_id: str
+    jobs: tuple[Job, ...]
+    attempts: tuple[Attempt, ...]
+    jobs_truncated: bool
+    attempts_truncated_job_ids: tuple[str, ...]
+    snapshot_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"schema_version": self.schema_version, "root_job_id": self.root_job_id, "jobs": [job.to_dict() for job in self.jobs], "attempts": [attempt.to_dict() for attempt in self.attempts], "jobs_truncated": self.jobs_truncated, "attempts_truncated_job_ids": list(self.attempts_truncated_job_ids), "snapshot_digest": self.snapshot_digest}
+
+
+def _bounded_runtime_snapshot_digest(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_json_dumps(dict(payload)).encode("utf-8")).hexdigest()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BoundedJobPage:
+    """One fully materialized, SQL-bounded Job page from a stable snapshot."""
+
+    items: tuple[Job, ...]
+    next_cursor: str | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BoundedAttemptPage:
+    """One fully materialized, SQL-bounded Attempt page from a stable snapshot."""
+
+    items: tuple[Attempt, ...]
+    next_cursor: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -3605,7 +3664,7 @@ class RuntimeStore:
             raise
 
     @contextmanager
-    def _read_bound(self) -> Iterator[_BoundReadConnection]:
+    def _read_bound(self, *, _observation: "BoundedRuntimeReadObservation | None" = None) -> Iterator[_BoundReadConnection]:
         binding = self.read_binding
         assert binding is not None
         with binding.physical_read(self.path):
@@ -3613,6 +3672,8 @@ class RuntimeStore:
             try:
                 connection = self._open_readonly()
                 assert isinstance(connection, _BoundReadConnection)
+                if _observation is not None:
+                    _observation._before = _observation._sample(connection)
                 connection._owner_execute("BEGIN")
                 # Under real namespace exclusion this detects a wrong handle;
                 # it is explicitly not a pathname-ABA detector without custody.
@@ -3625,6 +3686,8 @@ class RuntimeStore:
                 yield connection
                 binding._validate()
                 connection._owner_finish(commit=True)
+                if _observation is not None:
+                    _observation._after = _observation._sample(connection)
             except sqlite3.Error as exc:
                 if connection is not None and connection.in_transaction:
                     connection._owner_finish(commit=False)
@@ -3637,6 +3700,28 @@ class RuntimeStore:
                 if connection is not None:
                     self._bound_connections.discard(connection)
                     self._close_read_connection(connection)
+
+    @contextmanager
+    def _read_observation(self, observation: "BoundedRuntimeReadObservation") -> Iterator[sqlite3.Connection | _BoundReadConnection]:
+        if self.read_binding is not None:
+            with self._read_bound(_observation=observation) as connection:
+                yield connection
+            return
+        # Even a writable Runtime owner observes through a mode=ro connection.
+        connection = self._open_readonly()
+        try:
+            observation._before = observation._sample(connection)
+            connection.execute("BEGIN")
+            self._verify_current_schema(connection)
+            yield connection
+            connection.commit()
+            observation._after = observation._sample(connection)
+        except BaseException:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            self._close_read_connection(connection)
 
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
@@ -4033,6 +4118,692 @@ def _job_from_row(row: sqlite3.Row) -> Job:
         repair_round=row["repair_round"],
         supersedes_job_id=row["supersedes_job_id"],
     )
+
+
+
+def _bounded_acquisition_limit(value: Any) -> int:
+    if type(value) is not int or not 1 <= value <= MAX_RUNTIME_ACQUISITION_LIMIT:
+        raise StateConflict(
+            "bounded acquisition limit must be an integer between 1 and "
+            f"{MAX_RUNTIME_ACQUISITION_LIMIT}"
+        )
+    return value
+
+
+def _bounded_acquisition_identifier(value: Any, *, name: str) -> str:
+    if (
+        type(value) is not str
+        or value != value.strip()
+        or not value
+        or len(value) > _MAX_RUNTIME_ACQUISITION_IDENTIFIER_LENGTH
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise StateConflict(f"bounded acquisition {name} identifier is invalid")
+    return value
+
+
+def _bounded_acquisition_identifiers(
+    value: Sequence[str] | None, *, name: str
+) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, SequenceABC)
+        or isinstance(value, (str, bytes, bytearray))
+        or not value
+        or len(value) > _MAX_RUNTIME_ACQUISITION_FILTER_IDS
+    ):
+        raise StateConflict(
+            f"bounded acquisition {name} identifiers must be a non-empty bounded sequence"
+        )
+    identifiers = tuple(
+        _bounded_acquisition_identifier(item, name=name) for item in value
+    )
+    if len(set(identifiers)) != len(identifiers):
+        raise StateConflict(f"bounded acquisition {name} identifiers contain a duplicate")
+    return tuple(sorted(identifiers))
+
+
+def _bounded_acquisition_statuses(
+    value: Sequence[Enum | str] | None,
+    *,
+    enum_type: type[Enum],
+    name: str,
+) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, SequenceABC)
+        or isinstance(value, (str, bytes, bytearray))
+        or not value
+        or len(value) > len(enum_type)
+    ):
+        raise StateConflict(
+            f"bounded acquisition {name} status filter must be a non-empty bounded sequence"
+        )
+    normalized: list[str] = []
+    for item in value:
+        if isinstance(item, enum_type):
+            token = str(item.value)
+        elif type(item) is str:
+            token = item
+        else:
+            raise StateConflict(f"bounded acquisition {name} status is invalid")
+        try:
+            normalized.append(str(enum_type(token).value))
+        except ValueError as exc:
+            raise StateConflict(
+                f"bounded acquisition {name} status is invalid"
+            ) from exc
+    if len(set(normalized)) != len(normalized):
+        raise StateConflict(f"bounded acquisition {name} status filter has a duplicate")
+    return tuple(sorted(normalized))
+
+
+def _bounded_acquisition_placeholders(values: Sequence[Any]) -> str:
+    return ",".join("?" for _ in values)
+
+
+class BoundedRuntimeAcquisition:
+    """Canonical finite Job/Attempt reads over one Runtime-owned snapshot.
+
+    The object never exposes its connection.  Every page is bounded in SQL by
+    ``LIMIT n+1`` before any Job or Attempt payload decoder runs.  Cursors are
+    authenticated with a snapshot-local secret, bind the exact normalized query,
+    and cease to be valid when the owning ``Runtime.bounded_acquisition`` context
+    closes.
+    """
+
+    __slots__ = (
+        "_store",
+        "_connection",
+        "_snapshot_id",
+        "_cursor_secret",
+        "_active",
+    )
+
+    def __init__(
+        self,
+        store: RuntimeStore,
+        connection: sqlite3.Connection | _BoundReadConnection,
+        *,
+        _capability: object,
+    ) -> None:
+        if _capability is not _RUNTIME_ACQUISITION_CAPABILITY:
+            raise StateConflict("bounded acquisition is Runtime-owned")
+        store._assert_owned_snapshot_connection(connection)
+        self._store = store
+        self._connection = connection
+        self._snapshot_id = secrets.token_hex(16)
+        self._cursor_secret: bytes | None = secrets.token_bytes(32)
+        self._active = True
+
+    def _require_open(self) -> None:
+        if not self._active or self._cursor_secret is None:
+            raise StateConflict("bounded Runtime acquisition is closed")
+        self._store._assert_owned_snapshot_connection(self._connection)
+
+    def _close(self) -> None:
+        self._active = False
+        self._cursor_secret = None
+
+    @staticmethod
+    def _query_digest(kind: str, query: Mapping[str, Any]) -> str:
+        return hashlib.sha256(
+            (kind + "\0" + _json_dumps(dict(query))).encode("utf-8")
+        ).hexdigest()
+
+    def _encode_cursor(
+        self,
+        *,
+        kind: str,
+        query: Mapping[str, Any],
+        position: Sequence[Any],
+    ) -> str:
+        self._require_open()
+        assert self._cursor_secret is not None
+        payload = {
+            "schema": _RUNTIME_ACQUISITION_CURSOR_SCHEMA,
+            "snapshot": self._snapshot_id,
+            "kind": kind,
+            "query": self._query_digest(kind, query),
+            "position": list(position),
+        }
+        raw = _json_dumps(payload).encode("utf-8")
+        body = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+        signature = hmac.new(
+            self._cursor_secret, body.encode("ascii"), hashlib.sha256
+        ).hexdigest()
+        return f"{body}.{signature}"
+
+    def _decode_cursor(
+        self,
+        cursor: str | None,
+        *,
+        kind: str,
+        query: Mapping[str, Any],
+    ) -> list[Any] | None:
+        self._require_open()
+        if cursor is None:
+            return None
+        try:
+            if (
+                type(cursor) is not str
+                or not cursor
+                or len(cursor) > _MAX_RUNTIME_ACQUISITION_CURSOR_LENGTH
+            ):
+                raise ValueError("invalid cursor token")
+            body, signature = cursor.split(".", 1)
+            if (
+                re.fullmatch(r"[A-Za-z0-9_-]+", body) is None
+                or re.fullmatch(r"[0-9a-f]{64}", signature) is None
+            ):
+                raise ValueError("invalid cursor encoding")
+            assert self._cursor_secret is not None
+            expected = hmac.new(
+                self._cursor_secret, body.encode("ascii"), hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(signature, expected):
+                raise ValueError("cursor authentication failed")
+            padding = "=" * (-len(body) % 4)
+            raw = base64.b64decode(
+                (body + padding).encode("ascii"),
+                altchars=b"-_",
+                validate=True,
+            ).decode("utf-8")
+            payload = _strict_canonical_json_loads(
+                raw, name="bounded acquisition cursor"
+            )
+            if (
+                not isinstance(payload, dict)
+                or set(payload)
+                != {"schema", "snapshot", "kind", "query", "position"}
+                or payload["schema"] != _RUNTIME_ACQUISITION_CURSOR_SCHEMA
+                or payload["snapshot"] != self._snapshot_id
+                or payload["kind"] != kind
+                or payload["query"] != self._query_digest(kind, query)
+                or not isinstance(payload["position"], list)
+            ):
+                raise ValueError("cursor binding mismatch")
+            return payload["position"]
+        except Exception as exc:
+            if isinstance(exc, StateConflict) and str(exc) == "bounded Runtime acquisition is closed":
+                raise
+            raise StateConflict(
+                "bounded acquisition cursor is invalid or stale"
+            ) from exc
+
+    @staticmethod
+    def _require_position(
+        position: list[Any] | None,
+        expected: tuple[type, ...],
+    ) -> tuple[Any, ...] | None:
+        if position is None:
+            return None
+        if len(position) != len(expected):
+            raise StateConflict("bounded acquisition cursor position is invalid")
+        for value, expected_type in zip(position, expected, strict=True):
+            if expected_type is int:
+                if type(value) is not int:
+                    raise StateConflict(
+                        "bounded acquisition cursor position is invalid"
+                    )
+            elif type(value) is not expected_type:
+                raise StateConflict("bounded acquisition cursor position is invalid")
+        return tuple(position)
+
+    def _validate_root(self, root_job_id: str) -> None:
+        row = self._connection.execute(
+            "SELECT job_id,parent_job_id,root_job_id,depth FROM jobs WHERE job_id=?",
+            (root_job_id,),
+        ).fetchone()
+        if (
+            row is None
+            or row["job_id"] != root_job_id
+            or row["parent_job_id"] is not None
+            or row["root_job_id"] != root_job_id
+            or int(row["depth"]) != 0
+        ):
+            raise StateConflict(
+                "bounded acquisition root_job_id is not an existing root Job"
+            )
+
+    @staticmethod
+    def _append_status_filter(
+        clauses: list[str],
+        parameters: list[Any],
+        statuses: tuple[str, ...] | None,
+    ) -> None:
+        if statuses is not None:
+            clauses.append(
+                f"status IN ({_bounded_acquisition_placeholders(statuses)})"
+            )
+            parameters.extend(statuses)
+
+    def list_jobs(
+        self,
+        *,
+        limit: int,
+        cursor: str | None = None,
+        root_job_id: str | None = None,
+        job_ids: Sequence[str] | None = None,
+        roots_only: bool = False,
+        statuses: Sequence[JobStatus | str] | None = None,
+    ) -> BoundedJobPage:
+        """Acquire one deterministic Job page without decoding unrelated history."""
+
+        self._require_open()
+        page_limit = _bounded_acquisition_limit(limit)
+        if type(roots_only) is not bool:
+            raise StateConflict("bounded acquisition roots_only must be boolean")
+        normalized_root = (
+            _bounded_acquisition_identifier(root_job_id, name="root_job_id")
+            if root_job_id is not None
+            else None
+        )
+        normalized_ids = _bounded_acquisition_identifiers(job_ids, name="Job")
+        normalized_statuses = _bounded_acquisition_statuses(
+            statuses, enum_type=JobStatus, name="Job"
+        )
+        if sum(
+            (
+                normalized_root is not None,
+                normalized_ids is not None,
+                roots_only,
+            )
+        ) > 1:
+            raise StateConflict(
+                "bounded acquisition Job query modes are mutually exclusive"
+            )
+        if roots_only and normalized_statuses is not None:
+            raise StateConflict(
+                "bounded acquisition roots_only does not accept a status filter"
+            )
+
+        if normalized_root is not None and normalized_statuses is not None:
+            raise StateConflict(
+                "bounded acquisition Job query cannot combine "
+                "root_job_id and statuses"
+            )
+
+        if normalized_root is not None:
+            mode = "root"
+        elif normalized_ids is not None:
+            mode = "ids"
+        elif roots_only:
+            mode = "roots"
+        else:
+            mode = "global"
+        query = {
+            "mode": mode,
+            "root_job_id": normalized_root,
+            "job_ids": list(normalized_ids or ()),
+            "statuses": list(normalized_statuses or ()),
+        }
+        raw_position = self._decode_cursor(cursor, kind="jobs", query=query)
+
+        if mode == "roots":
+            position = self._require_position(raw_position, (str,))
+            after = "" if position is None else str(position[0])
+            # One MIN-after index seek per root avoids DISTINCT scanning every
+            # child row when a single root owns a very large historical tree.
+            id_rows = self._connection.execute(
+                """
+                WITH RECURSIVE bounded_root_ids(root_job_id) AS (
+                    SELECT MIN(root_job_id) FROM jobs WHERE root_job_id>?
+                    UNION ALL
+                    SELECT (
+                        SELECT MIN(root_job_id) FROM jobs
+                        WHERE root_job_id>bounded_root_ids.root_job_id
+                    )
+                    FROM bounded_root_ids
+                    WHERE root_job_id IS NOT NULL
+                    LIMIT ?
+                )
+                SELECT root_job_id FROM bounded_root_ids
+                WHERE root_job_id IS NOT NULL
+                """,
+                (after, page_limit + 1),
+            ).fetchall()
+            candidate_ids = [
+                _bounded_acquisition_identifier(
+                    row["root_job_id"], name="persisted root_job_id"
+                )
+                for row in id_rows
+            ]
+            selected_ids = candidate_ids[:page_limit]
+            if not selected_ids:
+                return BoundedJobPage(items=(), next_cursor=None)
+            rows = self._connection.execute(
+                "SELECT * FROM jobs WHERE job_id IN ("
+                + _bounded_acquisition_placeholders(selected_ids)
+                + ") ORDER BY job_id",
+                selected_ids,
+            ).fetchall()
+            row_by_id = {str(row["job_id"]): row for row in rows}
+            if set(row_by_id) != set(selected_ids):
+                raise PersistenceError(
+                    "bounded root acquisition lost a canonical root Job"
+                )
+            ordered_rows: list[sqlite3.Row] = []
+            for job_id in selected_ids:
+                row = row_by_id[job_id]
+                if (
+                    row["parent_job_id"] is not None
+                    or row["root_job_id"] != job_id
+                    or int(row["depth"]) != 0
+                ):
+                    raise PersistenceError(
+                        "bounded root acquisition found a non-root identity"
+                    )
+                ordered_rows.append(row)
+            items = tuple(_job_from_row(row) for row in ordered_rows)
+            next_cursor = (
+                self._encode_cursor(
+                    kind="jobs", query=query, position=(selected_ids[-1],)
+                )
+                if len(candidate_ids) > page_limit
+                else None
+            )
+            return BoundedJobPage(items=items, next_cursor=next_cursor)
+
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        preselected_rows: list[sqlite3.Row] | None = None
+        self._append_status_filter(clauses, parameters, normalized_statuses)
+
+        if mode == "root":
+            assert normalized_root is not None
+            self._validate_root(normalized_root)
+            clauses.insert(0, "root_job_id=?")
+            parameters.insert(0, normalized_root)
+            position = self._require_position(raw_position, (int, int, str))
+            if position is not None:
+                depth, created_at_ms, job_id = position
+                clauses.append("(depth,created_at_ms,job_id)>(?,?,?)")
+                parameters.extend((depth, created_at_ms, job_id))
+            order_by = "depth,created_at_ms,job_id"
+        elif mode == "ids":
+            assert normalized_ids is not None
+            clauses.insert(
+                0,
+                "job_id IN ("
+                + _bounded_acquisition_placeholders(normalized_ids)
+                + ")",
+            )
+            parameters[0:0] = list(normalized_ids)
+            position = self._require_position(raw_position, (str,))
+            if position is not None:
+                clauses.append("job_id>?")
+                parameters.append(position[0])
+            order_by = "job_id"
+        else:
+            position = self._require_position(
+                raw_position, (str, int, int, int, str)
+            )
+            order_by = (
+                "status,available_at_ms,priority DESC,created_at_ms,job_id"
+            )
+            if position is not None:
+                status, available_at_ms, priority, created_at_ms, job_id = position
+                base_clauses = tuple(clauses)
+                base_parameters = tuple(parameters)
+
+                def fetch_branch(
+                    clause: str, values: Sequence[Any]
+                ) -> list[sqlite3.Row]:
+                    branch_clauses = [*base_clauses, clause]
+                    branch_parameters = [*base_parameters, *values, page_limit + 1]
+                    branch_sql = (
+                        "SELECT * FROM jobs WHERE "
+                        + " AND ".join(
+                            f"({item})" for item in branch_clauses
+                        )
+                        + f" ORDER BY {order_by} LIMIT ?"
+                    )
+                    return list(
+                        self._connection.execute(
+                            branch_sql, branch_parameters
+                        ).fetchall()
+                    )
+
+                candidates: list[sqlite3.Row] = []
+                for branch_clause, branch_values in (
+                    ("status>?", (status,)),
+                    (
+                        "status=? AND available_at_ms>?",
+                        (status, available_at_ms),
+                    ),
+                    (
+                        "status=? AND available_at_ms=? AND priority<?",
+                        (status, available_at_ms, priority),
+                    ),
+                    (
+                        "status=? AND available_at_ms=? AND priority=? "
+                        "AND created_at_ms>?",
+                        (status, available_at_ms, priority, created_at_ms),
+                    ),
+                    (
+                        "status=? AND available_at_ms=? AND priority=? "
+                        "AND created_at_ms=? AND job_id>?",
+                        (
+                            status,
+                            available_at_ms,
+                            priority,
+                            created_at_ms,
+                            job_id,
+                        ),
+                    ),
+                ):
+                    candidates.extend(fetch_branch(branch_clause, branch_values))
+                preselected_rows = sorted(
+                    candidates,
+                    key=lambda row: (
+                        str(row["status"]),
+                        int(row["available_at_ms"]),
+                        -int(row["priority"]),
+                        int(row["created_at_ms"]),
+                        str(row["job_id"]),
+                    ),
+                )[: page_limit + 1]
+
+        if preselected_rows is None:
+            sql = "SELECT * FROM jobs"
+            if clauses:
+                sql += " WHERE " + " AND ".join(
+                    f"({clause})" for clause in clauses
+                )
+            sql += f" ORDER BY {order_by} LIMIT ?"
+            parameters.append(page_limit + 1)
+            rows = self._connection.execute(sql, parameters).fetchall()
+        else:
+            rows = preselected_rows
+        page_rows = rows[:page_limit]
+        items = tuple(_job_from_row(row) for row in page_rows)
+        next_cursor: str | None = None
+        if len(rows) > page_limit and page_rows:
+            row = page_rows[-1]
+            if mode == "root":
+                next_position = (
+                    int(row["depth"]),
+                    int(row["created_at_ms"]),
+                    str(row["job_id"]),
+                )
+            elif mode == "ids":
+                next_position = (str(row["job_id"]),)
+            else:
+                next_position = (
+                    str(row["status"]),
+                    int(row["available_at_ms"]),
+                    int(row["priority"]),
+                    int(row["created_at_ms"]),
+                    str(row["job_id"]),
+                )
+            next_cursor = self._encode_cursor(
+                kind="jobs", query=query, position=next_position
+            )
+        return BoundedJobPage(items=items, next_cursor=next_cursor)
+
+    def list_attempts(
+        self,
+        *,
+        limit: int,
+        cursor: str | None = None,
+        job_ids: Sequence[str] | None = None,
+        statuses: Sequence[AttemptStatus | str] | None = None,
+    ) -> BoundedAttemptPage:
+        """Acquire one deterministic Attempt page without decoding unrelated history."""
+
+        self._require_open()
+        page_limit = _bounded_acquisition_limit(limit)
+        normalized_ids = _bounded_acquisition_identifiers(job_ids, name="Job")
+        normalized_statuses = _bounded_acquisition_statuses(
+            statuses, enum_type=AttemptStatus, name="Attempt"
+        )
+        if normalized_ids is not None and normalized_statuses is not None:
+            raise StateConflict(
+                "bounded acquisition Attempt query cannot combine job_ids and statuses"
+            )
+        mode = "job_ids" if normalized_ids is not None else "global"
+        query = {
+            "mode": mode,
+            "job_ids": list(normalized_ids or ()),
+            "statuses": list(normalized_statuses or ()),
+        }
+        raw_position = self._decode_cursor(cursor, kind="attempts", query=query)
+        preselected_rows: list[sqlite3.Row] | None = None
+
+        if normalized_ids is not None:
+            position = self._require_position(raw_position, (str, int))
+            select = "SELECT * FROM attempts"
+            order_by = "job_id,attempt_number"
+            if position is None:
+                clauses = [
+                    "job_id IN ("
+                    + _bounded_acquisition_placeholders(normalized_ids)
+                    + ")"
+                ]
+                parameters: list[Any] = list(normalized_ids)
+            else:
+                cursor_job_id, attempt_number = position
+                candidates: list[sqlite3.Row] = []
+                for candidate_job_id in normalized_ids:
+                    if candidate_job_id < cursor_job_id:
+                        continue
+                    if candidate_job_id == cursor_job_id:
+                        clause = "job_id=? AND attempt_number>?"
+                        values: tuple[Any, ...] = (
+                            candidate_job_id,
+                            attempt_number,
+                        )
+                    else:
+                        clause = "job_id=?"
+                        values = (candidate_job_id,)
+                    branch_rows = self._connection.execute(
+                        select
+                        + " WHERE "
+                        + clause
+                        + f" ORDER BY {order_by} LIMIT ?",
+                        (*values, page_limit + 1),
+                    ).fetchall()
+                    candidates.extend(branch_rows)
+                preselected_rows = sorted(
+                    candidates,
+                    key=lambda row: (
+                        str(row["job_id"]),
+                        int(row["attempt_number"]),
+                    ),
+                )[: page_limit + 1]
+                clauses = []
+                parameters = []
+        else:
+            position = self._require_position(raw_position, (str, int, int))
+            select = "SELECT rowid AS _runtime_acquisition_rowid,* FROM attempts"
+            order_by = "status,lease_expires_at_ms,rowid"
+            clauses = []
+            parameters = []
+            self._append_status_filter(clauses, parameters, normalized_statuses)
+            if position is not None:
+                status, lease_expires_at_ms, row_id = position
+                base_clauses = tuple(clauses)
+                base_parameters = tuple(parameters)
+
+                def fetch_branch(
+                    clause: str, values: Sequence[Any]
+                ) -> list[sqlite3.Row]:
+                    branch_clauses = [*base_clauses, clause]
+                    branch_parameters = [
+                        *base_parameters,
+                        *values,
+                        page_limit + 1,
+                    ]
+                    branch_sql = (
+                        select
+                        + " WHERE "
+                        + " AND ".join(
+                            f"({item})" for item in branch_clauses
+                        )
+                        + f" ORDER BY {order_by} LIMIT ?"
+                    )
+                    return list(
+                        self._connection.execute(
+                            branch_sql, branch_parameters
+                        ).fetchall()
+                    )
+
+                candidates = []
+                for branch_clause, branch_values in (
+                    ("status>?", (status,)),
+                    (
+                        "status=? AND lease_expires_at_ms>?",
+                        (status, lease_expires_at_ms),
+                    ),
+                    (
+                        "status=? AND lease_expires_at_ms=? AND rowid>?",
+                        (status, lease_expires_at_ms, row_id),
+                    ),
+                ):
+                    candidates.extend(fetch_branch(branch_clause, branch_values))
+                preselected_rows = sorted(
+                    candidates,
+                    key=lambda row: (
+                        str(row["status"]),
+                        int(row["lease_expires_at_ms"]),
+                        int(row["_runtime_acquisition_rowid"]),
+                    ),
+                )[: page_limit + 1]
+
+        if preselected_rows is None:
+            sql = select
+            if clauses:
+                sql += " WHERE " + " AND ".join(
+                    f"({clause})" for clause in clauses
+                )
+            sql += f" ORDER BY {order_by} LIMIT ?"
+            parameters.append(page_limit + 1)
+            rows = self._connection.execute(sql, parameters).fetchall()
+        else:
+            rows = preselected_rows
+        page_rows = rows[:page_limit]
+        items = tuple(_attempt_from_row(row) for row in page_rows)
+        next_cursor: str | None = None
+        if len(rows) > page_limit and page_rows:
+            row = page_rows[-1]
+            if normalized_ids is not None:
+                next_position = (
+                    str(row["job_id"]),
+                    int(row["attempt_number"]),
+                )
+            else:
+                next_position = (
+                    str(row["status"]),
+                    int(row["lease_expires_at_ms"]),
+                    int(row["_runtime_acquisition_rowid"]),
+                )
+            next_cursor = self._encode_cursor(
+                kind="attempts", query=query, position=next_position
+            )
+        return BoundedAttemptPage(items=items, next_cursor=next_cursor)
 
 
 def _authorize_job_row(row: sqlite3.Row):
@@ -18103,6 +18874,207 @@ class ActiveOperatorBindingFacts:
     owner_seat: str
 
 
+def _discover_job_roots_bounded(acquisition: BoundedRuntimeAcquisition) -> BoundedRuntimeRootDiscovery:
+    """Return the fixed owner root view through the canonical bounded seam."""
+    page = acquisition.list_jobs(limit=BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS, roots_only=True)
+    roots = page.items
+    truncated = page.next_cursor is not None
+    payload = {"schema_version": BOUNDED_RUNTIME_DISCOVERY_SCHEMA, "roots": [job.to_dict() for job in roots], "truncated": truncated}
+    return BoundedRuntimeRootDiscovery(
+        schema_version=BOUNDED_RUNTIME_DISCOVERY_SCHEMA,
+        roots=roots,
+        truncated=truncated,
+        snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+    )
+
+
+def _read_job_root_bounded(acquisition: BoundedRuntimeAcquisition, root_job_id: str) -> BoundedRuntimeRootSnapshot:
+    """Return one fixed owner root view through the canonical bounded seam."""
+    root_token = str(root_job_id or "").strip()
+    if not root_token:
+        raise StateConflict("bounded Runtime read requires an exact root Job")
+    try:
+        jobs_page = acquisition.list_jobs(limit=1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN, root_job_id=root_token)
+    except StateConflict as exc:
+        raise StateConflict("bounded Runtime read requires an exact root Job") from exc
+    jobs = jobs_page.items
+    if not jobs or jobs[0].job_id != root_token:
+        raise PersistenceError("bounded Runtime root membership is invalid")
+    attempts: list[Attempt] = []
+    truncated_attempt_jobs: list[str] = []
+    for job in jobs:
+        page = acquisition.list_attempts(limit=BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS, job_ids=(job.job_id,))
+        attempts.extend(page.items)
+        if page.next_cursor is not None:
+            truncated_attempt_jobs.append(job.job_id)
+    if len(attempts) > BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL:
+        raise PersistenceError("bounded Runtime attempt budget exceeded")
+    attempts_tuple = tuple(attempts)
+    truncated_tuple = tuple(truncated_attempt_jobs)
+    jobs_truncated = jobs_page.next_cursor is not None
+    payload = {
+        "schema_version": BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        "root_job_id": root_token,
+        "jobs": [job.to_dict() for job in jobs],
+        "attempts": [attempt.to_dict() for attempt in attempts_tuple],
+        "jobs_truncated": jobs_truncated,
+        "attempts_truncated_job_ids": list(truncated_tuple),
+    }
+    return BoundedRuntimeRootSnapshot(
+        schema_version=BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        root_job_id=root_token,
+        jobs=jobs,
+        attempts=attempts_tuple,
+        jobs_truncated=jobs_truncated,
+        attempts_truncated_job_ids=truncated_tuple,
+        snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RuntimeReadObservationReceipt:
+    """Same-connection samples; usable only after owner close and validation.
+
+    SAME is as of the sampled observation, not continuous write exclusion.
+    Identity is request-scoped, never a filesystem or cross-request identity.
+    """
+    schema: str
+    state: str
+    source_identity: str | None
+    before: int | None
+    after: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
+class BoundedRuntimeReadObservation:
+    """Runtime-created fixed facade; no connection, SQL or pagination surface."""
+    def __init__(self, store: RuntimeStore, *, _capability: object) -> None:
+        if _capability is not _RUNTIME_ACQUISITION_CAPABILITY:
+            raise StateConflict("bounded observation is Runtime-owned")
+        self._store = store
+        self._active = self._selected = self._failed = False
+        self._before: int | None = None
+        self._after: int | None = None
+        self._identity: str | None = None
+        self._receipt: RuntimeReadObservationReceipt | None = None
+        self._commands: dict[str, tuple[str, str, str]] = {}
+        self._events: dict[str, Event | None] = {}
+
+    @staticmethod
+    def _sample(connection: sqlite3.Connection | _BoundReadConnection) -> int:
+        execute = connection._owner_execute if isinstance(connection, _BoundReadConnection) else connection.execute
+        row = execute("PRAGMA data_version").fetchone()
+        if row is None or len(row) != 1 or type(row[0]) is not int or row[0] < 0:
+            raise RuntimeReadUnavailable("Runtime observation token unavailable")
+        return row[0]
+
+    def _start(self, acquisition: BoundedRuntimeAcquisition, connection: Any) -> None:
+        self._acquisition, self._connection = acquisition, connection
+        self._active = True
+        if self._store.read_binding is not None:
+            self._identity = secrets.token_hex(16)
+
+    def _require_active(self) -> None:
+        if not self._active or self._failed:
+            raise StateConflict("bounded observation is closed or failed")
+
+    def _select(self) -> None:
+        self._require_active()
+        if self._selected:
+            self._failed = True
+            raise StateConflict("bounded observation already acquired a root or discovery")
+        self._selected = True
+
+    def _remember(self, jobs: Sequence[Job]) -> None:
+        keys = {"schema_version", "creator", "source_id", "source_digest", "command_id",
+                "job_id", "parent_job_id", "root_job_id", "role"}
+        for job in jobs:
+            cycle, digest = job.orchestration_provenance, job.orchestration_provenance_digest
+            if not (isinstance(cycle, Mapping) and set(cycle) == keys
+                    and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+                    and digest == orchestration_digest(cycle)
+                    and cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
+                    and cycle.get("creator") == "ceo_intent"
+                    and isinstance(cycle.get("source_id"), str)
+                    and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", cycle["source_id"])
+                    and isinstance(cycle.get("source_digest"), str)
+                    and re.fullmatch(r"[0-9a-f]{64}", cycle["source_digest"])
+                    and cycle.get("command_id") == "ceo-intent:" + cycle["source_id"]
+                    and cycle.get("job_id") == job.job_id
+                    and cycle.get("parent_job_id") is None and job.parent_job_id is None
+                    and cycle.get("root_job_id") == job.job_id == job.root_job_id
+                    and cycle.get("role") == job.orchestration_role == "aggregation"):
+                continue
+            self._commands[cycle["command_id"]] = (job.job_id, digest, cycle["source_digest"])
+
+    def read_job_root_bounded(self, root_job_id: str) -> BoundedRuntimeRootSnapshot:
+        self._select()
+        try:
+            result = _read_job_root_bounded(self._acquisition, root_job_id)
+            self._remember(result.jobs)
+            return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    def discover_job_roots_bounded(self) -> BoundedRuntimeRootDiscovery:
+        self._select()
+        try:
+            result = _discover_job_roots_bounded(self._acquisition)
+            self._remember(result.roots)
+            return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    def get_creation_event_by_command_id(self, command_id: str) -> Event | None:
+        self._require_active()
+        try:
+            if not self._selected:
+                raise StateConflict("bounded observation requires acquisition first")
+            if type(command_id) is not str or command_id not in self._commands:
+                raise StateConflict("command is not authorized by included Job provenance")
+            if command_id in self._events:
+                return self._events[command_id]
+            if len(self._events) >= 17:
+                raise StateConflict("bounded observation point budget exceeded")
+            job_id, digest, source_digest = self._commands[command_id]
+            event = self._store.get_event_by_command_id(command_id, connection=self._connection)
+            if event is not None:
+                payload = event.payload
+                provenance = payload.get("provenance") if isinstance(payload, Mapping) else None
+                if not (event.event_type == "JOB_CREATED" and event.command_id == command_id
+                        and event.job_id == event.aggregate_id == job_id and event.aggregate_type == "job"
+                        and isinstance(provenance, Mapping)
+                        and provenance.get("schema") == "mastermind.ceo_intent.v2"
+                        and "ceo-intent:" + str(provenance.get("intent_id")) == command_id
+                        and provenance.get("fingerprint") == source_digest
+                        and payload.get("orchestration_role") == "aggregation"
+                        and payload.get("orchestration_provenance_digest") == digest):
+                    raise RuntimeReadUnavailable("creation Event identity disagrees with included Job")
+            self._events[command_id] = event
+            return event
+        except BaseException:
+            self._failed = True
+            raise
+
+    def _finalize(self) -> None:
+        if self._failed or not self._selected:
+            return
+        state = ("UNKNOWN" if self._identity is None else
+                 "SAME" if self._before == self._after else "CONFLICT")
+        self._receipt = RuntimeReadObservationReceipt(RUNTIME_READ_OBSERVATION_SCHEMA, state,
+                                                    self._identity, self._before, self._after)
+
+    @property
+    def receipt(self) -> RuntimeReadObservationReceipt:
+        if self._receipt is None or self._failed:
+            raise StateConflict("bounded observation receipt is not finalized")
+        return self._receipt
+
+
 @dataclasses.dataclass(frozen=True)
 class Runtime:
     store: RuntimeStore
@@ -18148,6 +19120,53 @@ class Runtime:
                 read_binding=read_binding,
             )
         )
+
+
+    @contextmanager
+    def bounded_acquisition(self) -> Iterator[BoundedRuntimeAcquisition]:
+        """Own one stable, finite Runtime read snapshot for bounded consumers."""
+
+        with self.store.read() as connection:
+            acquisition = BoundedRuntimeAcquisition(
+                self.store,
+                connection,
+                _capability=_RUNTIME_ACQUISITION_CAPABILITY,
+            )
+            try:
+                yield acquisition
+            finally:
+                acquisition._close()
+
+    def discover_job_roots_bounded(self) -> BoundedRuntimeRootDiscovery:
+        with self.bounded_acquisition() as acquisition:
+            return _discover_job_roots_bounded(acquisition)
+
+    def read_job_root_bounded(self, root_job_id: str) -> BoundedRuntimeRootSnapshot:
+        with self.bounded_acquisition() as acquisition:
+            return _read_job_root_bounded(acquisition, root_job_id)
+
+    @contextmanager
+    def observe_bounded_read(self) -> Iterator["BoundedRuntimeReadObservation"]:
+        """Materialize one sample-bounded observation; finalize only after close.
+
+        SAME compares two data_version samples on one retained connection. It
+        does not exclude commits after the final sample or promise later freshness.
+        A missing namespace capability always yields UNKNOWN.
+        """
+        observation = BoundedRuntimeReadObservation(self.store, _capability=_RUNTIME_ACQUISITION_CAPABILITY)
+        try:
+            with self.store._read_observation(observation) as connection:
+                acquisition = BoundedRuntimeAcquisition(self.store, connection, _capability=_RUNTIME_ACQUISITION_CAPABILITY)
+                observation._start(acquisition, connection)
+                try:
+                    yield observation
+                finally:
+                    acquisition._close()
+                    observation._active = False
+            observation._finalize()
+        except BaseException:
+            observation._failed = True
+            raise
 
     @classmethod
     def read_bound(
@@ -19120,6 +20139,11 @@ __all__ = [
     "AttemptLease",
     "AttemptRegistry",
     "AttemptStatus",
+    "BoundedAttemptPage",
+    "BoundedJobPage",
+    "BoundedRuntimeAcquisition",
+    "BoundedRuntimeReadObservation",
+    "RuntimeReadObservationReceipt",
     "CooRetryMutationOutcome",
     "EXECUTIVE_DIALOGUE_SOURCE_SCHEMA",
     "Event",
@@ -19130,6 +20154,7 @@ __all__ = [
     "JobPayload",
     "JobRegistry",
     "JobStatus",
+    "MAX_RUNTIME_ACQUISITION_LIMIT",
     "OperatorHarnessRegistry",
     "PersistenceError",
     "ResourceBroker",
