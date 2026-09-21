@@ -99,9 +99,16 @@ import {
   resolveGitPublishConfig,
   toolResult as gitToolResult,
 } from './git-publish.mjs';
+import {
+  PAPER_DESIGN_TOOLS,
+  PAPER_DESIGN_TOOL_NAMES,
+  createPaperDesigner,
+  paperToolResult,
+  resolvePaperDesignConfig,
+} from './paper-design.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.5';
+export const GATEWAY_VERSION = '0.1.6';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -185,6 +192,9 @@ const KNOWN_READONLY_TOOL_NAMES = new Set([
   'list_directory',
   'get_file_info',
   'list_allowed_directories',
+  'paper_inspect',
+  'paper_catalog',
+  'paper_read',
 ]);
 
 /**
@@ -350,6 +360,7 @@ export function resolveConfig(partial = {}) {
   }
 
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
+  cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
 
   return cfg;
 }
@@ -820,6 +831,7 @@ class GatewaySession {
     this.transport = null;
     this.server = null;
     this.gitPublisher = cfg.gitPublish ? createGitPublisher(cfg.gitPublish) : null;
+    this.paperDesigner = cfg.paperDesign ? createPaperDesigner(cfg.paperDesign) : null;
     this.owner?.sessions.add(this);
   }
 
@@ -921,9 +933,10 @@ class GatewaySession {
         capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
-          'studio_ping, studio_output_page, and configured studio_git_* tools are gateway-owned. ' +
-          'studio_output_page reads retained output without repeating the original action; ' +
-          'all remaining tools are proxied to the backend.',
+          'studio_ping, studio_output_page, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
+          'studio_output_page reads retained output without repeating the original action. ' +
+          'Paper design tools use the host-pinned guarded Paper adapter and never route through Desktop Commander. ' +
+          'All remaining tools are proxied to the backend.',
       },
     );
 
@@ -938,6 +951,9 @@ class GatewaySession {
         const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
         if (session.gitPublisher) {
           localTools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
+        }
+        if (session.paperDesigner) {
+          localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
         }
         const backendNames = new Set(tools.map((tool) => tool.name));
         for (const localTool of localTools) {
@@ -1009,6 +1025,24 @@ class GatewaySession {
         classification: CLASSIFICATION.OK,
       });
       return result;
+    }
+
+    if (this.paperDesigner && PAPER_DESIGN_TOOL_NAMES.has(name)) {
+      return this.withBackendSlot(async () => {
+        this.bumpTool(name);
+        const result = await this.paperDesigner.call(name, request?.params?.arguments ?? {});
+        if (result.effectUnknown) {
+          this.taint('Paper design mutation effect unknown');
+        }
+        log(result.isError ? 'warn' : 'info', 'tool_call', {
+          sid: this.tag,
+          tool: name,
+          durationMs: Date.now() - started,
+          classification: result.isError ? CLASSIFICATION.TOOL_ERROR : CLASSIFICATION.OK,
+          effect: result.effectUnknown ? 'EFFECT_UNKNOWN' : undefined,
+        });
+        return paperToolResult(result.value, result.isError);
+      }, { kind: 'tools/call', tool: name, started });
     }
 
     if (this.gitPublisher &&
