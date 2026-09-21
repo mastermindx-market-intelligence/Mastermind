@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import inspect
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from dataclasses import replace
 from pathlib import Path
 
 from control_plane.executive_runtime import Runtime
-from control_plane.executive_supervisor import ExecutiveSupervisor
+from control_plane.executive_supervisor import (
+    ExecutiveSupervisor,
+    ProcessPresence,
+    ReconcileStatus,
+)
 from control_plane.executive_worker_broker import (
     BrokerStateError,
     RemoteWorkerBrokerEndpoint,
@@ -144,6 +150,59 @@ class _FakeAdapter:
         return (self.name, "validate", spec.run_id)
 
 
+class _RestartFakeController:
+    """Synchronous restart controller fixture for one exact worker carrier."""
+
+    def __init__(self, name: str, worker_uid: int) -> None:
+        self.name = name
+        self.worker_uid = worker_uid
+        self.calls: list[tuple] = []
+        self._last_sweep = None
+
+    def _sweep(self):
+        return {
+            "schema_version": "mastermind.executive_uid_sweep/v2",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "reason": "status_absence",
+            "worker_uid": self.worker_uid,
+            "broker_pid": 42419,
+            "residual_pids_before": [],
+            "residual_pids_after": [],
+            "signal_name": "SIGKILL",
+            "signal_sent": False,
+            "quiescent_observations": 2,
+            "ambient_pids": [],
+            "ambient_identities": [],
+            "ambient_attribution": "absent",
+            "passed": True,
+            "found_residuals": False,
+        }
+
+    def presence(self, attempt):
+        self.calls.append(("presence", attempt.attempt_id, attempt.worker_id))
+        return ProcessPresence.UNKNOWN
+
+    def cleanup_unbound_run(self, run_id: str):
+        self.calls.append(("cleanup", run_id))
+        self._last_sweep = self._sweep()
+        return self._last_sweep
+
+    def uid_sweep_receipt(self, attempt_or_run_id):
+        run_id = getattr(attempt_or_run_id, "attempt_id", attempt_or_run_id)
+        self.calls.append(("sweep", run_id))
+        if self._last_sweep is None:
+            raise BrokerStateError("fixture has no cleanup sweep")
+        return self._last_sweep
+
+    def absence_verified(self, attempt):
+        self.calls.append(("absence", attempt.attempt_id))
+        return False
+
+    def terminate(self, attempt):
+        self.calls.append(("terminate", attempt.attempt_id))
+        raise AssertionError("unbound restart cleanup must not use terminate")
+
+
 class _FakeController:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -207,11 +266,12 @@ class RemoteWorkerBrokerFleetTest(unittest.IsolatedAsyncioTestCase):
                 Runtime.at(root / "runtime"),
                 fleet,
                 runs_root=root / "runs",
-                process_controller=fleet,
+                process_controller=fleet.process_controller,
                 worker_user="fixture-worker",
             )
             self.assertIs(supervisor.adapter, fleet)
-            self.assertIs(supervisor.process_controller, fleet)
+            self.assertIs(supervisor.process_controller, fleet.process_controller)
+            self.assertIsNot(supervisor.process_controller, fleet)
             self.assertIs(supervisor.inspector, fleet.inspector)
 
     async def test_claimed_worker_routes_all_run_operations_to_one_carrier(self) -> None:
@@ -432,6 +492,92 @@ class RemoteWorkerBrokerFleetTest(unittest.IsolatedAsyncioTestCase):
             [call[0] for call in self.controllers["alibaba-token-01"].calls],
             ["presence", "absence", "terminate"],
         )
+
+    def test_fleet_exposes_distinct_synchronous_restart_process_controller(self) -> None:
+        fleet = self._fleet()
+        controller = fleet.process_controller
+        self.assertIsNot(controller, fleet)
+        self.assertFalse(inspect.iscoroutinefunction(controller.cleanup_unbound_run))
+        self.assertTrue(inspect.iscoroutinefunction(fleet.cleanup_unbound_run))
+
+    def test_restart_process_controller_refuses_missing_or_conflicting_worker_binding(self) -> None:
+        self.controllers = {
+            "codex-01": _RestartFakeController("codex", 451),
+            "alibaba-token-01": _RestartFakeController("alibaba", 458),
+        }
+        fleet = self._fleet()
+        controller = fleet.process_controller
+        with self.assertRaisesRegex(BrokerStateError, "persisted worker observation"):
+            controller.cleanup_unbound_run("ATT-unobserved")
+
+        attempt = types.SimpleNamespace(
+            attempt_id="ATT-fixed-worker", worker_id="alibaba-token-01"
+        )
+        self.assertIs(controller.presence(attempt), ProcessPresence.UNKNOWN)
+        changed = types.SimpleNamespace(
+            attempt_id="ATT-fixed-worker", worker_id="codex-01"
+        )
+        with self.assertRaisesRegex(BrokerStateError, "another worker broker carrier"):
+            controller.presence(changed)
+        self.assertFalse(self.controllers["codex-01"].calls)
+
+    def test_fresh_fleet_restart_unbound_claim_uses_persisted_worker_sync_controller(self) -> None:
+        self.controllers = {
+            "codex-01": _RestartFakeController("codex", 451),
+            "alibaba-token-01": _RestartFakeController("alibaba", 458),
+        }
+        fresh = self._fleet()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = Runtime.at(root / "runtime", lease_seconds=30)
+            runtime.workers.register_worker(
+                "alibaba-token-01",
+                provider="codex",
+                account_label="fixture",
+                worker_type="mock",
+                capabilities=["research"],
+            )
+            workspace = root / "workspace"
+            workspace.mkdir(mode=0o700)
+            job = runtime.jobs.create_job(
+                "reconcile one unbound claimed worker",
+                worktree=str(workspace),
+                requested_authorities=["READ"],
+                attempt_limit=1,
+            )
+            lease = runtime.attempts.claim_job(job.job_id)
+            self.assertIsNotNone(lease)
+            attempt = lease.attempt
+            self.assertEqual(attempt.worker_id, "alibaba-token-01")
+            self.assertIsNone(attempt.pid)
+            self.assertEqual(attempt.launch_metadata, {})
+
+            runs_root = root / "runs"
+            (runs_root / attempt.attempt_id).mkdir(parents=True, mode=0o700)
+            supervisor = ExecutiveSupervisor(
+                runtime,
+                fresh,
+                runs_root=runs_root,
+                isolation_roots=(workspace, runs_root),
+                worker_user="_mastermind_alibaba_token_01",
+                worker_uid=458,
+                worker_gid=458,
+                process_controller=fresh.process_controller,
+                require_complete_launch_attestation=True,
+                instance_id="restart-fixture",
+            )
+
+            outcomes = supervisor.reconcile_restart(requeue_lost=False)
+            self.assertEqual(len(outcomes), 1)
+            self.assertIs(outcomes[0].status, ReconcileStatus.AWAITING_LEASE_EXPIRY)
+            self.assertEqual(outcomes[0].attempt_id, attempt.attempt_id)
+            self.assertEqual(
+                [call[0] for call in self.controllers["alibaba-token-01"].calls],
+                ["presence", "cleanup", "sweep"],
+            )
+            self.assertFalse(self.controllers["codex-01"].calls)
+            self.assertFalse(self.adapters["codex-01"].calls)
+            self.assertFalse(self.adapters["alibaba-token-01"].calls)
 
     def test_restart_controller_uses_persisted_worker_id(self) -> None:
         fleet = self._fleet()

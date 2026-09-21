@@ -4104,6 +4104,96 @@ class RemoteWorkerBrokerEndpoint:
         )
 
 
+class _RemoteWorkerBrokerFleetProcessController:
+    """Restart-only synchronous routing through durable Attempt.worker_id.
+
+    This facade owns no durable carrier state.  It remembers only the worker
+    identity observed from the current durable Attempt during one control
+    process so the subsequent synchronous unbound-run cleanup cannot switch
+    carriers after restart.
+    """
+
+    def __init__(self, fleet: "RemoteWorkerBrokerFleet") -> None:
+        self._fleet = fleet
+        self._observed_workers: dict[str, str] = {}
+
+    def _bind_attempt(self, attempt: Any) -> tuple[str, str]:
+        run_id = getattr(attempt, "attempt_id", None)
+        worker_id = getattr(attempt, "worker_id", None)
+        if not isinstance(run_id, str) or not _ID_RE.fullmatch(run_id):
+            raise BrokerStateError("restart attempt has invalid run identity")
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            raise BrokerStateError("restart attempt has invalid persisted worker identity")
+        # Resolve the configured carrier before recording the observation.  A
+        # missing worker remains a typed refusal and never creates a binding.
+        self._fleet._controller_for_worker(worker_id)
+        existing = self._observed_workers.get(run_id)
+        if existing is not None and existing != worker_id:
+            raise BrokerStateError(
+                "restart run is already bound to another worker broker carrier"
+            )
+        self._observed_workers[run_id] = worker_id
+        return run_id, worker_id
+
+    def _worker_for_observed_run(self, run_id: str) -> str:
+        if not isinstance(run_id, str) or not _ID_RE.fullmatch(run_id):
+            raise BrokerStateError("restart cleanup has invalid run identity")
+        try:
+            return self._observed_workers[run_id]
+        except KeyError as exc:
+            raise BrokerStateError(
+                "restart cleanup has no persisted worker observation"
+            ) from exc
+
+    def presence(self, attempt: Any):
+        _run_id, worker_id = self._bind_attempt(attempt)
+        return self._fleet._controller_for_worker(worker_id).presence(attempt)
+
+    def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
+        worker_id = self._worker_for_observed_run(run_id)
+        controller = self._fleet._controller_for_worker(worker_id)
+        cleanup = getattr(controller, "cleanup_unbound_run", None)
+        if not callable(cleanup):
+            raise BrokerStateError(
+                "bound worker process controller cannot reconcile ambiguous start"
+            )
+        value = cleanup(run_id)
+        if not isinstance(value, Mapping):
+            raise BrokerProtocolError(
+                "bound worker process controller returned invalid cleanup receipt"
+            )
+        return value
+
+    def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
+        if isinstance(attempt_or_run_id, str):
+            run_id = attempt_or_run_id
+            worker_id = self._worker_for_observed_run(run_id)
+        else:
+            run_id, worker_id = self._bind_attempt(attempt_or_run_id)
+        controller = self._fleet._controller_for_worker(worker_id)
+        reader = getattr(controller, "uid_sweep_receipt", None)
+        if not callable(reader):
+            raise BrokerStateError(
+                "bound worker process controller has no UID sweep receipt"
+            )
+        value = reader(attempt_or_run_id)
+        if not isinstance(value, Mapping):
+            raise BrokerProtocolError(
+                "bound worker process controller returned invalid UID sweep receipt"
+            )
+        return value
+
+    def absence_verified(self, attempt: Any) -> bool:
+        _run_id, worker_id = self._bind_attempt(attempt)
+        return bool(
+            self._fleet._controller_for_worker(worker_id).absence_verified(attempt)
+        )
+
+    def terminate(self, attempt: Any) -> None:
+        _run_id, worker_id = self._bind_attempt(attempt)
+        self._fleet._controller_for_worker(worker_id).terminate(attempt)
+
+
 class RemoteWorkerBrokerFleet:
     """Exact worker-id transport binding with no provider selection or failover.
 
@@ -4147,10 +4237,17 @@ class RemoteWorkerBrokerFleet:
         self._endpoints = {row.worker_id: row for row in rows}
         self._adapters = {row.worker_id: adapter_factory(row) for row in rows}
         self._controllers = {row.worker_id: controller_factory(row) for row in rows}
+        self._process_controller = _RemoteWorkerBrokerFleetProcessController(self)
         self._run_workers: dict[str, str] = {}
         self._source_specs: dict[str, WorkerLaunchSpec] = {}
         self._bound_specs: dict[str, WorkerLaunchSpec] = {}
         self.inspector = _UnavailableRemoteInspector()
+
+    @property
+    def process_controller(self) -> _RemoteWorkerBrokerFleetProcessController:
+        """Synchronous restart facade; adapter cleanup remains asynchronous."""
+
+        return self._process_controller
 
     @property
     def worker_ids(self) -> tuple[str, ...]:
