@@ -169,7 +169,12 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
     ):
         assert forbidden not in help_text
 
-    for verb in ("ceo-submit-status", "ceo-submit-arm", "ceo-submit-disarm"):
+    for verb in (
+        "ceo-submit-status",
+        "ceo-submit-arm",
+        "ceo-submit-disarm",
+        "ceo-submit-reconcile",
+    ):
         ceo_help = subparser_actions[0].choices[verb].format_help()
         for forbidden in (
             "--system-root",
@@ -347,6 +352,16 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     assert "must run as root" in wrapper
     assert "exact installed release" in wrapper
     assert "exec " in wrapper
+    for verb in (
+        "status",
+        "arm",
+        "disarm",
+        "ceo-submit-status",
+        "ceo-submit-arm",
+        "ceo-submit-disarm",
+        "ceo-submit-reconcile",
+    ):
+        assert verb in wrapper
     for forbidden in ("eval ", "bash -c", "sh -c", "curl ", "security "):
         assert forbidden not in wrapper
 
@@ -3758,7 +3773,12 @@ def test_ceo_submit_control_boundary_refuses_when_the_launchd_call_does_not_regi
 
 @pytest.mark.parametrize(
     ("state", "expected"),
-    [("disabled", True), ("enabled", False)],
+    [
+        ("disabled", True),
+        ("true", True),
+        ("enabled", False),
+        ("false", False),
+    ],
 )
 def test_ceo_submit_launchd_override_reader_accepts_only_explicit_target_rows(
     monkeypatch, state, expected
@@ -3771,9 +3791,9 @@ def test_ceo_submit_launchd_override_reader_accepts_only_explicit_target_rows(
     ).encode()
 
     monkeypatch.setattr(
-        control.subprocess,
-        "run",
-        lambda *args, **kwargs: mock.Mock(returncode=0, stdout=payload),
+        control.ProductionCeoSubmitHost,
+        "_capture_control_launchd_disabled_output",
+        staticmethod(lambda: payload),
     )
 
     assert control.ProductionCeoSubmitHost._read_control_launchd_disabled_override() is expected
@@ -3801,13 +3821,45 @@ def test_ceo_submit_launchd_override_reader_refuses_missing_duplicate_or_malform
     monkeypatch, payload
 ):
     monkeypatch.setattr(
-        control.subprocess,
-        "run",
-        lambda *args, **kwargs: mock.Mock(returncode=0, stdout=payload),
+        control.ProductionCeoSubmitHost,
+        "_capture_control_launchd_disabled_output",
+        staticmethod(lambda: payload),
     )
 
     with pytest.raises(control.TransactionEffectUnknown):
         control.ProductionCeoSubmitHost._read_control_launchd_disabled_override()
+
+
+def test_ceo_submit_launchd_override_capture_bounds_before_buffering_and_reaps(
+    monkeypatch,
+):
+    real_popen = control.subprocess.Popen
+    spawned = {}
+
+    def oversized_launchctl(argv, **kwargs):
+        assert argv == ["/bin/launchctl", "print-disabled", "system"]
+        process = real_popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys,time;"
+                    "sys.stdout.buffer.write(b'x' * "
+                    f"{control._MAX_LAUNCHCTL_DISABLED_BYTES + 1});"
+                    "sys.stdout.flush();time.sleep(10)"
+                ),
+            ],
+            **kwargs,
+        )
+        spawned["process"] = process
+        return process
+
+    monkeypatch.setattr(control.subprocess, "Popen", oversized_launchctl)
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        control.ProductionCeoSubmitHost._capture_control_launchd_disabled_output()
+
+    assert spawned["process"].poll() is not None
 
 
 def test_ceo_submit_control_boundary_seals_preimage_before_enable(monkeypatch):

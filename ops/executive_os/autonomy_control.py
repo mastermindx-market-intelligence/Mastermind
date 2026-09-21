@@ -25,6 +25,7 @@ import plistlib
 import pwd
 import re
 import secrets
+import selectors
 import stat
 import subprocess
 import sys
@@ -77,11 +78,17 @@ CEO_SUBMIT_RECEIPT_SCHEMA = "mastermind.executive_ceo_submit_receipt/v1"
 CEO_SUBMIT_OPERATIONS = frozenset({"CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"})
 _CONTROL_LAUNCHD_PREIMAGE_FIELD = "control_launchd_disabled_before_reconcile"
 _CONTROL_LAUNCHD_DISABLED_ROW_RE = re.compile(
-    r'^"(?P<label>[^"]+)"\s*=>\s*(?P<state>enabled|disabled)$'
+    r'^"(?P<label>[^"]+)"\s*=>\s*(?P<state>enabled|disabled|true|false)$'
 )
+_CONTROL_LAUNCHD_DISABLED_SPELLINGS = {
+    "disabled": True,
+    "true": True,
+    "enabled": False,
+    "false": False,
+}
 _MAX_LAUNCHCTL_DISABLED_BYTES = 64 * 1024
 # R17 B1: the CEO-submit operation domain as it is reachable from THIS CLI.  A
-# closed set, so `main` can route the three verbs with one membership test and no
+# closed set, so `main` can route the four verbs with one membership test and no
 # string prefix matching.
 CEO_SUBMIT_COMMANDS = frozenset(
     {
@@ -3406,31 +3413,140 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         self._persist_phase(transaction, "RECEIPT_REPLACED")
 
     @staticmethod
+    def _terminate_launchctl_reader(process: subprocess.Popen[bytes]) -> None:
+        """Terminate and reap the fixed read-only launchctl child."""
+
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            if process.poll() is None:
+                raise TransactionEffectUnknown() from exc
+        try:
+            process.wait(timeout=0.5)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        except OSError as exc:
+            raise TransactionEffectUnknown() from exc
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            if process.poll() is None:
+                raise TransactionEffectUnknown() from exc
+        try:
+            process.wait(timeout=0.5)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise TransactionEffectUnknown() from exc
+        if process.poll() is None:
+            raise TransactionEffectUnknown()
+
+    @staticmethod
+    def _capture_control_launchd_disabled_output() -> bytes:
+        """Capture fixed ``print-disabled`` output without unbounded buffering."""
+
+        deadline = time.monotonic() + 5.0
+        try:
+            process = subprocess.Popen(
+                ["/bin/launchctl", "print-disabled", "system"],
+                shell=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=False,
+                close_fds=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise TransactionEffectUnknown() from exc
+        stdout = process.stdout
+        if stdout is None:
+            ProductionCeoSubmitHost._terminate_launchctl_reader(process)
+            raise TransactionEffectUnknown()
+
+        selector: selectors.BaseSelector | None = None
+        payload = bytearray()
+        succeeded = False
+        try:
+            selector = selectors.DefaultSelector()
+            descriptor = stdout.fileno()
+            os.set_blocking(descriptor, False)
+            selector.register(descriptor, selectors.EVENT_READ)
+            eof = False
+            while not eof:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TransactionEffectUnknown()
+                events = selector.select(remaining)
+                if not events:
+                    raise TransactionEffectUnknown()
+                for _key, _mask in events:
+                    while True:
+                        remaining_capacity = (
+                            _MAX_LAUNCHCTL_DISABLED_BYTES + 1 - len(payload)
+                        )
+                        if remaining_capacity <= 0:
+                            raise TransactionEffectUnknown()
+                        try:
+                            chunk = os.read(
+                                descriptor, min(65_536, remaining_capacity)
+                            )
+                        except BlockingIOError:
+                            break
+                        if not chunk:
+                            eof = True
+                            break
+                        payload.extend(chunk)
+                        if len(payload) > _MAX_LAUNCHCTL_DISABLED_BYTES:
+                            raise TransactionEffectUnknown()
+                    if eof:
+                        break
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TransactionEffectUnknown()
+            try:
+                returncode = process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired as exc:
+                raise TransactionEffectUnknown() from exc
+            if returncode != 0 or process.poll() is None:
+                raise TransactionEffectUnknown()
+            succeeded = True
+            return bytes(payload)
+        except TransactionEffectUnknown:
+            raise
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise TransactionEffectUnknown() from exc
+        finally:
+            if not succeeded:
+                ProductionCeoSubmitHost._terminate_launchctl_reader(process)
+            if selector is not None:
+                try:
+                    selector.close()
+                except Exception as exc:
+                    if succeeded:
+                        raise TransactionEffectUnknown() from exc
+            try:
+                stdout.close()
+            except (OSError, ValueError) as exc:
+                if succeeded:
+                    raise TransactionEffectUnknown() from exc
+
+    @staticmethod
     def _read_control_launchd_disabled_override() -> bool:
         """Read one exact persistent launchd override with a closed parser.
 
         ``print-disabled`` is a global table. Before a CEO-submit transaction may
         mutate the fixed control label, every non-empty row must parse, labels must
-        be unique, output must be bounded, and the control label itself must be
-        explicitly present. Missing/ambiguous output is not interpreted as the
-        launchd default because rollback must restore an observed preimage, not an
-        inferred one.
+        be unique, output is acquired under a hard byte/time bound, and the control
+        label itself must be explicitly present. Missing/ambiguous output is not
+        interpreted as the launchd default because rollback must restore an
+        observed preimage, not an inferred one.
         """
 
-        try:
-            completed = subprocess.run(
-                ["/bin/launchctl", "print-disabled", "system"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=5,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise TransactionEffectUnknown() from exc
-        raw = completed.stdout or b""
-        if completed.returncode != 0 or len(raw) > _MAX_LAUNCHCTL_DISABLED_BYTES:
-            raise TransactionEffectUnknown()
+        raw = ProductionCeoSubmitHost._capture_control_launchd_disabled_output()
         try:
             text = raw.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
@@ -3444,9 +3560,10 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             if match is None:
                 raise TransactionEffectUnknown()
             label = match.group("label")
-            if label in observed:
+            state = match.group("state")
+            if label in observed or state not in _CONTROL_LAUNCHD_DISABLED_SPELLINGS:
                 raise TransactionEffectUnknown()
-            observed[label] = match.group("state") == "disabled"
+            observed[label] = _CONTROL_LAUNCHD_DISABLED_SPELLINGS[state]
         if CONTROL_LABEL not in observed:
             raise TransactionEffectUnknown()
         return observed[CONTROL_LABEL]
