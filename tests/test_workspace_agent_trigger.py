@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from integrations.workspace_agent_api import HOST, MAX_BODY_BYTES, InvalidObservation
+from integrations.workspace_agent_api import HOST, InvalidObservation
 from integrations.workspace_agent_trigger import (
     BETA_HEADER,
     MAX_TRIGGER_BODY_BYTES,
@@ -14,37 +14,22 @@ from integrations.workspace_agent_trigger import (
 )
 
 CHANNEL = "agtch_synthetic"
-RUN = "apirun_synthetic"
-URL = "https://chatgpt.com/c/synthetic"
 OPERATION = "workspace-op-001"
 TOKEN = "SYNTHETIC_TOKEN"
-TRIGGER_BODY = {
-    "conversation_url": URL,
-    "agent_trigger_run_id": RUN,
-}
 
 
 class FakeResponse:
-    def __init__(self, *, status=202, data=None):
+    def __init__(self, *, status=202, data=b""):
         self.status = status
-        self.data = (
-            json.dumps(TRIGGER_BODY).encode()
-            if data is None
-            else data
-        )
-        self.content_type = "application/json; charset=utf-8"
-        self.encoding = "identity"
+        self.data = data
         self.read_amount = None
 
-    def getheader(self, name, default=None):
-        return {
-            "Content-Type": self.content_type,
-            "Content-Encoding": self.encoding,
-        }.get(name, default)
+    def getheader(self, _name, default=None):
+        return default
 
     def read(self, amount):
         self.read_amount = amount
-        return self.data[:amount]
+        raise AssertionError("supported trigger success must not read a body")
 
 
 class FakeConnection:
@@ -143,12 +128,12 @@ class TriggerTransportTests(unittest.TestCase):
             **kwargs,
         )
 
-    def test_one_exact_post_uses_beta_and_idempotency_headers(self):
+    def test_one_exact_post_uses_idempotency_and_returns_uncorrelated_acceptance(self):
         connection = FakeConnection()
         result = self.invoke(connection)
         self.assertEqual(
             (result.disposition, result.reason, result.run_id),
-            ("accepted", "ACCEPTED_CORRELATED", RUN),
+            ("accepted", "ACCEPTED_UNCORRELATED", None),
         )
         self.assertEqual(connection.host, HOST)
         self.assertEqual(len(connection.calls), 1)
@@ -162,52 +147,23 @@ class TriggerTransportTests(unittest.TestCase):
         self.assertEqual(headers["Authorization"], "Bearer " + TOKEN)
         self.assertNotIn(TOKEN, path)
         self.assertNotIn(TOKEN.encode(), request["body"])
+        self.assertIsNone(connection.response.read_amount)
         self.assertTrue(connection.closed)
         self.assertNotIn(TOKEN, repr(result))
 
-    def test_accepted_with_bad_representation_never_becomes_no_effect(self):
-        cases = []
-        malformed = FakeConnection()
-        malformed.response.data = b"not-json"
-        cases.append(malformed)
-        wrong_type = FakeConnection()
-        wrong_type.response.content_type = "text/html"
-        cases.append(wrong_type)
-        compressed = FakeConnection()
-        compressed.response.encoding = "gzip"
-        cases.append(compressed)
-        oversize = FakeConnection()
-        oversize.response.data = b"x" * 70000
-        cases.append(oversize)
-        for connection in cases:
-            with self.subTest(
-                content_type=connection.response.content_type,
-                encoding=connection.response.encoding,
-                body_len=len(connection.response.data),
-            ):
-                result = self.invoke(connection)
-                self.assertEqual(result.disposition, "accepted")
-                self.assertEqual(result.reason, "ACCEPTED_CORRELATION_UNAVAILABLE")
-                self.assertIsNone(result.run_id)
-                self.assertEqual(len(connection.calls), 1)
-
-    def test_accepted_body_read_failure_preserves_known_provider_acceptance(self):
+    def test_202_body_is_never_read_or_promoted_to_correlation(self):
         connection = FakeConnection()
-
-        def fail_read(amount):
-            connection.response.read_amount = amount
-            raise OSError("SECRET_BODY_READ")
-
-        connection.response.read = fail_read
-        result = self.invoke(connection)
-        self.assertEqual(
-            (result.disposition, result.reason),
-            ("accepted", "ACCEPTED_CORRELATION_UNAVAILABLE"),
+        connection.response.data = (
+            b'{"agent_trigger_run_id":"apirun_do-not-trust",'
+            b'"conversation_url":"https://chatgpt.com/c/do-not-trust"}'
         )
-        self.assertEqual(connection.response.read_amount, MAX_BODY_BYTES + 1)
-        self.assertEqual(len(connection.calls), 1)
-        self.assertTrue(connection.closed)
-        self.assertNotIn("SECRET_BODY_READ", repr(result))
+        result = self.invoke(connection)
+        self.assertEqual(result.disposition, "accepted")
+        self.assertEqual(result.reason, "ACCEPTED_UNCORRELATED")
+        self.assertIsNone(result.run_id)
+        self.assertIsNone(result.conversation_url)
+        self.assertFalse(result.correlation_available)
+        self.assertIsNone(connection.response.read_amount)
 
     def test_known_provider_rejections_do_not_read_or_copy_error_body(self):
         for status in (401, 403, 404, 409):
@@ -232,8 +188,10 @@ class TriggerTransportTests(unittest.TestCase):
 
     def test_transport_failure_after_request_is_effect_unknown_and_single_attempt(self):
         connection = FakeConnection()
+
         def fail():
             raise OSError("SECRET_TRANSPORT")
+
         connection.getresponse = fail
         result = self.invoke(connection)
         self.assertEqual(
@@ -244,18 +202,21 @@ class TriggerTransportTests(unittest.TestCase):
         self.assertTrue(connection.closed)
         self.assertNotIn("SECRET_TRANSPORT", repr(result))
 
-    def test_close_failure_after_known_response_preserves_provider_disposition(self):
+    def test_close_failure_after_known_response_preserves_acceptance(self):
         connection = FakeConnection()
+
         def fail_close():
             raise OSError("SECRET_CLOSE")
+
         connection.close = fail_close
         result = self.invoke(connection)
         self.assertEqual(result.disposition, "accepted")
-        self.assertEqual(result.reason, "ACCEPTED_CORRELATED")
+        self.assertEqual(result.reason, "ACCEPTED_UNCORRELATED")
         self.assertNotIn("SECRET_CLOSE", repr(result))
 
     def test_invalid_effect_inputs_make_zero_connections(self):
         calls = []
+
         def forbidden(*args, **kwargs):
             calls.append((args, kwargs))
             self.fail("invalid effect input reached network")
