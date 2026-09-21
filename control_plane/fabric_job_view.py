@@ -115,8 +115,57 @@ from control_plane import executive_inbox
 
 SCHEMA = "mastermind.fabric_job_view.v1"
 SCHEMA_V2 = "mastermind.fabric_job_view.v2"
+SCHEMA_V3 = "mastermind.fabric_job_view.v3"
 ROOT_LIST_SCHEMA = "mastermind.fabric_job_root_list.v1"
 ROOT_LIST_SCHEMA_V2 = "mastermind.fabric_job_root_list.v2"
+RESULT_REFERENCE_INDEX_SCHEMA = "mastermind.fabric_result_reference_index.v1"
+ORCHESTRATION_TERMINAL_RECEIPT_SCHEMA = "mastermind.orchestration_terminal_receipt/v1"
+_ORCHESTRATION_ROLES = frozenset({"aggregation", "plan", "work", "review", "repair"})
+_TERMINAL_EXECUTION_MODES = frozenset({"OPERATOR_HARNESS", "SEALED_WORKER"})
+_TERMINAL_RECEIPT_KEYS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "job_id",
+        "attempt_id",
+        "orchestration_role",
+        "execution_mode",
+        "result_seal_command_id",
+        "result_evidence",
+        "result_envelope",
+        "result_envelope_digest",
+        "artifact_receipt_digest",
+        "validation_receipt_digest",
+        "effective_grant_digest",
+        "terminal_evidence_digest",
+    }
+)
+_INDEX_KEYS = frozenset(
+    {
+        "schema",
+        "root_job_id",
+        "snapshot_digest",
+        "generation",
+        "availability",
+        "refs",
+        "absent_job_ids",
+        "omitted_job_ids",
+        "truncated",
+    }
+)
+_REF_KEYS = frozenset(
+    {
+        "root_job_id",
+        "job_id",
+        "attempt_id",
+        "result_envelope_digest",
+        "orchestration_role",
+        "validation",
+    }
+)
+_V3_KEYS = frozenset({"schema", "fabric_view", "result_refs"})
+_GENERATION_KEYS = frozenset({"schema", "state", "source_identity", "before", "after"})
+_DIGEST_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 #: Closed document key set, asserted by the compositor (A14's idiom).
 OUTPUT_KEYS = frozenset(
@@ -228,6 +277,15 @@ _UNARMED_ENTRY = (
 )
 _UNARMED_ENTRY_V2 = (
     "ceo_submit_armed: false; new CEO submissions are unavailable through this arm"
+)
+_ROOT_ENUMERATION_NOTE = (
+    "root enumeration provenance is unjoined; creation provenance requires exact-root acquisition"
+)
+_GENERATION_CONFLICT_NOTE = (
+    "runtime observation generation is CONFLICT; retained rows are not upgraded"
+)
+_BOUNDED_UNAVAILABLE_NOTE = (
+    "bounded acquisition unavailable: owner observation could not be finalized"
 )
 
 
@@ -1089,10 +1147,9 @@ def read_fabric_view_v2_from_runtime(
     )
 
 
-def _read_observed_fabric_view_v2(runtime, root_job_id, *, armed, runtime_identity, notes):
+def _observe_bounded_root(runtime, root_job_id, *, notes, present):
     from control_plane import executive_runtime
 
-    present = runtime_identity.get("db_present") is True
     generation = None
     snapshot = None
     jobs, joined, unjoined = [], set(), []
@@ -1129,21 +1186,37 @@ def _read_observed_fabric_view_v2(runtime, root_job_id, *, armed, runtime_identi
                 if snapshot.attempts_truncated_job_ids:
                     notes = notes + ["bounded Runtime Attempt snapshot truncated"]
             generation = read.receipt.to_dict()
-    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError) as exc:
-        notes = notes + ["bounded acquisition unavailable: owner observation could not be finalized"]
+    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError):
+        notes = notes + [_BOUNDED_UNAVAILABLE_NOTE]
         failed = True
         snapshot, jobs, attempts_by_job, joined, unjoined = None, [], {}, set(), []
         generation = None
+    return {
+        "snapshot": snapshot,
+        "jobs": jobs,
+        "attempts_by_job": attempts_by_job,
+        "joined": joined,
+        "unjoined": unjoined,
+        "notes": notes,
+        "failed": failed,
+        "generation": generation,
+    }
+
+
+def _document_observed_fabric_view_v2(root_job_id, *, armed, runtime_identity, observed):
+    jobs = observed["jobs"]
+    snapshot = observed["snapshot"]
+    unjoined = observed["unjoined"]
     doc = compose_fabric_view_v2(
         root_job_id=root_job_id, root_job=jobs[0] if jobs else None,
-        jobs=jobs, attempts_by_job=attempts_by_job, joined_job_ids=joined,
+        jobs=jobs, attempts_by_job=observed["attempts_by_job"], joined_job_ids=observed["joined"],
         runtime_identity=runtime_identity,
-        armed=armed, degraded=notes, read_failed=failed,
+        armed=armed, degraded=observed["notes"], read_failed=observed["failed"],
     )
     receipt = _acquisition_receipt(kind="root_detail", root_job_id=root_job_id,
                                    snapshot=snapshot, unjoined=unjoined)
-    if generation is not None:
-        receipt["generation"] = generation
+    if observed["generation"] is not None:
+        receipt["generation"] = observed["generation"]
     doc["runtime"]["acquisition"] = receipt
     if snapshot is not None and (unjoined or snapshot.jobs_truncated or snapshot.attempts_truncated_job_ids):
         doc["capability"]["state"] = PARTIAL
@@ -1157,6 +1230,250 @@ def _read_observed_fabric_view_v2(runtime, root_job_id, *, armed, runtime_identi
                                "owner acquisition budget omits Jobs or Attempts")]
         doc["missingness"] = _dedupe_facts(doc["missingness"] + facts)
     return doc
+
+
+def _read_observed_fabric_view_v2(runtime, root_job_id, *, armed, runtime_identity, notes):
+    present = runtime_identity.get("db_present") is True
+    observed = _observe_bounded_root(runtime, root_job_id, notes=notes, present=present)
+    return _document_observed_fabric_view_v2(
+        root_job_id, armed=armed, runtime_identity=runtime_identity, observed=observed,
+    )
+
+
+def _qualified_generation(generation: Any) -> dict[str, Any] | None:
+    if not isinstance(generation, Mapping) or set(generation) != _GENERATION_KEYS:
+        return None
+    if generation.get("schema") != "mastermind.runtime_read_observation.v1":
+        return None
+    state = generation.get("state")
+    if state not in {"SAME", "CONFLICT", "UNKNOWN"}:
+        return None
+    identity = generation.get("source_identity")
+    before = generation.get("before")
+    after = generation.get("after")
+    if identity is not None and (
+        type(identity) is not str or not identity or "/" in identity or "\\" in identity
+    ):
+        return None
+    if state == "UNKNOWN":
+        if before is not None and (type(before) is not int or before < 0):
+            return None
+        if after is not None and (type(after) is not int or after < 0):
+            return None
+        return dict(generation)
+    if type(before) is not int or type(after) is not int or before < 0 or after < 0:
+        return None
+    if type(identity) is not str or not identity:
+        return None
+    if state == "SAME" and before != after:
+        return None
+    if state == "CONFLICT" and before == after:
+        return None
+    return dict(generation)
+
+
+def _snapshot_digest_value(snapshot: Any) -> str | None:
+    digest = getattr(snapshot, "snapshot_digest", None)
+    if digest is None:
+        return None
+    if type(digest) is not str or _DIGEST_RE.fullmatch(digest) is None:
+        raise ValueError("bounded Runtime snapshot digest invalid")
+    return digest
+
+
+def _narrow_terminal_receipt(payload: Any, *, job_id: str, attempt_id: str, role: str) -> bool:
+    if type(payload) is not dict or set(payload) != _TERMINAL_RECEIPT_KEYS:
+        return False
+    if payload.get("schema_version") != ORCHESTRATION_TERMINAL_RECEIPT_SCHEMA:
+        return False
+    if payload.get("status") != "COMPLETED":
+        return False
+    if payload.get("job_id") != job_id or payload.get("attempt_id") != attempt_id:
+        return False
+    if payload.get("orchestration_role") != role:
+        return False
+    if payload.get("execution_mode") not in _TERMINAL_EXECUTION_MODES:
+        return False
+    digest = payload.get("result_envelope_digest")
+    return type(digest) is str and _DIGEST_RE.fullmatch(digest) is not None
+
+
+def _locator_for_completed_job(job: Any, attempts: Sequence[Any], root_job_id: str) -> dict[str, Any] | None:
+    current = getattr(job, "current_attempt_id", None)
+    role = getattr(job, "orchestration_role", None)
+    if type(current) is not str or not current or role not in _ORCHESTRATION_ROLES:
+        return None
+    attempt = next((item for item in attempts if getattr(item, "attempt_id", None) == current), None)
+    if attempt is None or getattr(attempt, "job_id", None) != job.job_id:
+        return None
+    if _enum_value(getattr(attempt, "status", "")) != "COMPLETED":
+        return None
+    job_receipt = getattr(job, "result", None)
+    attempt_receipt = getattr(attempt, "result", None)
+    if not _narrow_terminal_receipt(job_receipt, job_id=job.job_id, attempt_id=current, role=role):
+        return None
+    if not _narrow_terminal_receipt(attempt_receipt, job_id=job.job_id, attempt_id=current, role=role):
+        return None
+    if job_receipt["execution_mode"] != attempt_receipt["execution_mode"]:
+        return None
+    if getattr(attempt, "execution_mode", None) != job_receipt["execution_mode"]:
+        return None
+    if job_receipt["result_envelope_digest"] != attempt_receipt["result_envelope_digest"]:
+        return None
+    row = {
+        "root_job_id": str(root_job_id),
+        "job_id": str(job.job_id),
+        "attempt_id": str(current),
+        "result_envelope_digest": job_receipt["result_envelope_digest"],
+        "orchestration_role": role,
+        "validation": "UNVALIDATED",
+    }
+    assert set(row) == _REF_KEYS
+    return row
+
+
+def _index_document(
+    *,
+    root_job_id: str,
+    snapshot_digest: str | None,
+    generation: Mapping[str, Any],
+    availability: str,
+    refs: Sequence[Mapping[str, Any]],
+    absent: Sequence[str],
+    omitted: Sequence[str],
+    truncated: bool,
+) -> dict[str, Any]:
+    document = {
+        "schema": RESULT_REFERENCE_INDEX_SCHEMA,
+        "root_job_id": root_job_id,
+        "snapshot_digest": snapshot_digest,
+        "generation": dict(generation),
+        "availability": availability,
+        "refs": list(refs),
+        "absent_job_ids": list(absent),
+        "omitted_job_ids": list(omitted),
+        "truncated": bool(truncated),
+    }
+    assert set(document) == _INDEX_KEYS
+    return document
+
+
+def compose_fabric_result_reference_index(snapshot: Any, generation: Any) -> dict[str, Any]:
+    """Pure navigation index over one already-acquired bounded root snapshot."""
+    root_job_id = str(getattr(snapshot, "root_job_id", "") or "")
+    qualified = _qualified_generation(generation)
+    rendered_generation = qualified if qualified is not None else _canonical_unknown_generation()
+    try:
+        digest = _snapshot_digest_value(snapshot)
+    except ValueError:
+        return _index_document(
+            root_job_id=root_job_id, snapshot_digest=None, generation=_canonical_unknown_generation(),
+            availability="UNAVAILABLE", refs=(), absent=(), omitted=(), truncated=False,
+        )
+    jobs = list(getattr(snapshot, "jobs", ()) or ())
+    attempts = list(getattr(snapshot, "attempts", ()) or ())
+    truncated = bool(
+        getattr(snapshot, "jobs_truncated", False)
+        or getattr(snapshot, "attempts_truncated_job_ids", ())
+    )
+    ids = [getattr(job, "job_id", None) for job in jobs]
+    malformed = (
+        not root_job_id
+        or digest is None
+        or len(jobs) > 17
+        or len(attempts) > 340
+        or any(type(job_id) is not str or not job_id for job_id in ids)
+        or len(set(ids)) != len(ids)
+    )
+    same = qualified is not None and qualified.get("state") == "SAME"
+    if malformed or qualified is None or not same:
+        omitted = sorted(str(job_id) for job_id in ids if type(job_id) is str and job_id) if not malformed else []
+        return _index_document(
+            root_job_id=root_job_id,
+            snapshot_digest=None if malformed else digest,
+            generation=rendered_generation,
+            availability="UNAVAILABLE",
+            refs=(),
+            absent=(),
+            omitted=omitted,
+            truncated=False if malformed else truncated,
+        )
+    attempts_by_job: dict[str, list[Any]] = {}
+    for attempt in attempts:
+        job_id = getattr(attempt, "job_id", None)
+        if type(job_id) is str:
+            attempts_by_job[job_id] = attempts_by_job.get(job_id, []) + [attempt]
+    refs: list[dict[str, Any]] = []
+    absent: list[str] = []
+    omitted: list[str] = []
+    for job in jobs:
+        job_id = str(job.job_id)
+        if getattr(job, "root_job_id", None) != root_job_id:
+            omitted = omitted + [job_id]
+            continue
+        status = _enum_value(getattr(job, "status", ""))
+        result = getattr(job, "result", None)
+        if status != "COMPLETED":
+            if result is None:
+                absent = absent + [job_id]
+            else:
+                omitted = omitted + [job_id]
+            continue
+        locator = _locator_for_completed_job(job, attempts_by_job.get(job_id, []), root_job_id)
+        if locator is None:
+            omitted = omitted + [job_id]
+        else:
+            refs = refs + [locator]
+    refs = sorted(refs, key=lambda row: row["job_id"])
+    absent = sorted(absent)
+    omitted = sorted(omitted)
+    availability = "PARTIAL" if omitted or truncated else "AVAILABLE"
+    return _index_document(
+        root_job_id=root_job_id,
+        snapshot_digest=digest,
+        generation=rendered_generation,
+        availability=availability,
+        refs=refs,
+        absent=absent,
+        omitted=omitted,
+        truncated=truncated,
+    )
+
+
+def read_fabric_view_v3_from_runtime(
+    runtime: Any,
+    root_job_id: str,
+    *,
+    armed: Mapping[str, Any],
+    runtime_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Same bounded root observation as v2, plus a pure result-reference index."""
+    root_job_id = str(root_job_id)
+    present = runtime_identity.get("db_present") is True
+    observed = _observe_bounded_root(runtime, root_job_id, notes=[], present=present)
+    fabric_view = _document_observed_fabric_view_v2(
+        root_job_id, armed=armed, runtime_identity=runtime_identity, observed=observed,
+    )
+    snapshot = observed["snapshot"]
+    if snapshot is None:
+        snapshot = SimpleNamespace(
+            root_job_id=root_job_id,
+            jobs=(),
+            attempts=(),
+            jobs_truncated=False,
+            attempts_truncated_job_ids=(),
+            snapshot_digest=None,
+        )
+    result_refs = compose_fabric_result_reference_index(
+        snapshot, fabric_view["runtime"]["acquisition"]["generation"],
+    )
+    companion = {
+        "schema": SCHEMA_V3,
+        "fabric_view": fabric_view,
+        "result_refs": result_refs,
+    }
+    assert set(companion) == _V3_KEYS
+    return companion
 
 
 def _list_roots(
@@ -1307,3 +1624,147 @@ def list_roots_v2(
         "roots": rows, "count": len(rows), "total": total,
         "truncated": truncated, "degraded": sorted(set(notes)),
     }
+
+
+def _project_root_row(job: Any) -> dict[str, Any]:
+    row = {
+        "job_id": str(job.job_id),
+        "status": _enum_value(job.status),
+        "depth": int(job.depth),
+        "parent_job_id": job.parent_job_id,
+        "orchestration_role": job.orchestration_role,
+    }
+    assert set(row.keys()) == ROOT_ROW_KEYS
+    return row
+
+
+def _validate_bounded_discovery(snapshot: Any) -> None:
+    from control_plane import executive_runtime
+
+    if not isinstance(snapshot, executive_runtime.BoundedRuntimeRootDiscovery):
+        raise ValueError("bounded Runtime discovery identity or budget invalid")
+    if snapshot.schema_version != executive_runtime.BOUNDED_RUNTIME_DISCOVERY_SCHEMA:
+        raise ValueError("bounded Runtime discovery identity or budget invalid")
+    if type(snapshot.truncated) is not bool:
+        raise ValueError("bounded Runtime discovery identity or budget invalid")
+    digest = snapshot.snapshot_digest
+    if type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ValueError("bounded Runtime discovery identity or budget invalid")
+    roots = snapshot.roots
+    if not isinstance(roots, (tuple, list)) or len(roots) > 64:
+        raise ValueError("bounded Runtime discovery identity or budget invalid")
+    seen: set[str] = set()
+    for job in roots:
+        job_id = getattr(job, "job_id", None)
+        if type(job_id) is not str or not job_id or job_id in seen:
+            raise ValueError("bounded Runtime discovery identity or budget invalid")
+        seen.add(job_id)
+        if getattr(job, "root_job_id", None) != job_id:
+            raise ValueError("bounded Runtime discovery identity or budget invalid")
+        if getattr(job, "parent_job_id", "missing") is not None:
+            raise ValueError("bounded Runtime discovery identity or budget invalid")
+        depth = getattr(job, "depth", None)
+        if type(depth) is not int or depth != 0:
+            raise ValueError("bounded Runtime discovery identity or budget invalid")
+
+
+def _canonical_unknown_generation() -> dict[str, Any]:
+    return {
+        "schema": "mastermind.runtime_read_observation.v1",
+        "state": "UNKNOWN",
+        "source_identity": None,
+        "before": None,
+        "after": None,
+    }
+
+
+def _root_list_v2_document(
+    *,
+    runtime_identity: Mapping[str, Any],
+    roots: Sequence[Mapping[str, Any]],
+    total: int | None,
+    truncated: bool,
+    projection: bool,
+    snapshot: Any,
+    notes: Sequence[str],
+    generation: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    included = [str(job.job_id) for job in getattr(snapshot, "roots", ())] if snapshot is not None else []
+    receipt = _acquisition_receipt(
+        kind="root_discovery", snapshot=snapshot, unjoined=included, projection=projection,
+    )
+    receipt["provenance"] = {"state": "PARTIAL", "unjoined_job_ids": sorted(included)}
+    if generation is not None:
+        receipt["generation"] = dict(generation)
+    document = {
+        "schema": ROOT_LIST_SCHEMA_V2,
+        "generated_at": _utc_now(),
+        "runtime": {
+            "root": runtime_identity.get("root"),
+            "db_present": runtime_identity.get("db_present") is True,
+            "identity": runtime_identity.get("identity"),
+            "acquisition": receipt,
+        },
+        "roots": list(roots),
+        "count": len(roots),
+        "total": total,
+        "truncated": bool(truncated),
+        "degraded": sorted(set(notes)),
+    }
+    assert set(document.keys()) == ROOT_LIST_KEYS
+    return document
+
+
+def list_roots_v2_from_runtime(
+    runtime: Any,
+    *,
+    armed: Mapping[str, Any],
+    runtime_identity: Mapping[str, Any],
+    limit: int = LIST_ROOTS_LIMIT,
+) -> dict[str, Any]:
+    """Trusted Runtime-owner root enumeration without opening paths or config.
+
+    One ``observe_bounded_read`` scope acquires one ``discover_job_roots_bounded``
+    sample. ``limit`` is a projection bound only. Enumeration provenance is
+    always PARTIAL; Event/creation reads are never taken on this path.
+    """
+    from control_plane import executive_runtime
+
+    if type(limit) is not int or limit <= 0:
+        raise ValueError("limit must be a positive integer")
+    armed_notes = []
+    if armed.get("ceo_submit_armed") is False:
+        armed_notes = [_UNARMED_ENTRY_V2]
+    snapshot, rows, total, truncated, projection, generation = None, [], None, False, False, None
+    notes = list(armed_notes)
+    try:
+        if runtime is None:
+            raise ValueError("bounded Runtime discovery requires a Runtime")
+        with runtime.observe_bounded_read() as read:
+            snapshot = read.discover_job_roots_bounded()
+            _validate_bounded_discovery(snapshot)
+            discovered = list(snapshot.roots)
+            total = None if snapshot.truncated else len(discovered)
+            projection = len(discovered) > limit
+            truncated = bool(snapshot.truncated or projection)
+            rows = [_project_root_row(job) for job in discovered[:limit]]
+            notes = notes + [_ROOT_ENUMERATION_NOTE]
+            if truncated:
+                notes = notes + ["bounded root discovery truncated; omitted roots are not counted"]
+        generation = read.receipt.to_dict()
+        if isinstance(generation, Mapping) and generation.get("state") == "CONFLICT":
+            notes = notes + [_GENERATION_CONFLICT_NOTE]
+    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError, TypeError):
+        snapshot, rows, total, truncated, projection = None, [], None, False, False
+        generation = _canonical_unknown_generation()
+        notes = list(armed_notes) + [_BOUNDED_UNAVAILABLE_NOTE]
+    return _root_list_v2_document(
+        runtime_identity=runtime_identity,
+        roots=rows,
+        total=total,
+        truncated=truncated,
+        projection=projection,
+        snapshot=snapshot,
+        notes=notes,
+        generation=generation,
+    )
