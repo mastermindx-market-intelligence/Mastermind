@@ -4194,6 +4194,72 @@ class RemoteWorkerBrokerFleet:
         self._bound_specs[spec.run_id] = bound_spec
         return await adapter.start(bound_spec)
 
+    def reattach(
+        self,
+        spec: WorkerLaunchSpec,
+        binding: WorkerRecoveryBinding,
+    ) -> WorkerProcessRef:
+        """Recover one exact persisted run on its original worker carrier only."""
+
+        if not isinstance(spec, WorkerLaunchSpec):
+            raise TypeError("spec must be WorkerLaunchSpec")
+        if not isinstance(binding, WorkerRecoveryBinding):
+            raise TypeError("binding must be WorkerRecoveryBinding")
+        if binding.adapter_id != self.adapter_id:
+            raise BrokerStateError("fleet recovery adapter identity changed")
+        try:
+            recovered_spec = binding.recover_launch_spec(type(spec))
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+        if recovered_spec != spec:
+            raise BrokerStateError("fleet recovery launch specification changed")
+
+        endpoint = self._endpoint_for_worker(spec.worker_id)
+        delegate = self._adapter_for_worker(spec.worker_id)
+        reattach = getattr(delegate, "reattach", None)
+        if not callable(reattach):
+            raise BrokerStateError(
+                "bound worker adapter cannot recover existing execution"
+            )
+        delegate_adapter_id = getattr(delegate, "adapter_id", None)
+        if not isinstance(delegate_adapter_id, str) or not delegate_adapter_id.strip():
+            raise BrokerStateError("bound worker recovery adapter identity is invalid")
+
+        bound_spec = endpoint.bind_launch_spec(spec)
+        prompt_path = binding.launch_spec.get("prompt_path")
+        if not isinstance(prompt_path, str) or not prompt_path:
+            raise BrokerStateError("fleet recovery prompt path is invalid")
+        try:
+            delegate_binding = WorkerRecoveryBinding.bind(
+                adapter_id=delegate_adapter_id,
+                spec=bound_spec,
+                process_ref=binding.process_ref,
+                prompt_path=prompt_path,
+            )
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+
+        existing_worker = self._run_workers.get(spec.run_id)
+        if existing_worker is not None and (
+            existing_worker != spec.worker_id
+            or self._source_specs.get(spec.run_id) != spec
+            or self._bound_specs.get(spec.run_id) != bound_spec
+        ):
+            raise BrokerStateError("run is already bound to another worker broker carrier")
+
+        # Bind before delegate I/O so any ambiguous recovery remains fenced to
+        # the exact persisted worker/carrier.  There is no fallback selection.
+        self._run_workers[spec.run_id] = spec.worker_id
+        self._source_specs[spec.run_id] = spec
+        self._bound_specs[spec.run_id] = bound_spec
+
+        recovered_ref = reattach(bound_spec, delegate_binding)
+        if recovered_ref != binding.process_ref:
+            raise BrokerProtocolError(
+                "bound worker recovery changed immutable process identity"
+            )
+        return recovered_ref
+
     def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
         adapter = self._adapter_for_ref(ref)
         reader = getattr(adapter, "launch_attestation", None)

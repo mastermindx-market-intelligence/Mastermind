@@ -15,11 +15,12 @@ from control_plane.executive_worker_broker import (
     WorkerBrokerClient,
     WorkerBrokerError,
 )
-from control_plane.worker_adapter import WorkerExecutionAdapter
+from control_plane.worker_adapter import RecoverableWorkerExecutionAdapter, WorkerExecutionAdapter
 from control_plane.worker_execution_contract import (
     BinaryAttestation,
     WorkerLaunchSpec,
     WorkerProcessRef,
+    WorkerRecoveryBinding,
     WorkerRunStatus,
 )
 
@@ -83,6 +84,9 @@ class _FakeAdapter:
         self.calls: list[tuple] = []
         self.start_specs: list[WorkerLaunchSpec] = []
         self.validation_specs: list[WorkerLaunchSpec] = []
+        self.reattach_specs: list[WorkerLaunchSpec] = []
+        self.reattach_bindings: list[WorkerRecoveryBinding] = []
+        self.adapter_id = f"{name}-adapter"
         self.inspector = object()
 
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
@@ -91,6 +95,18 @@ class _FakeAdapter:
         if self.fail_start:
             raise RuntimeError("ambiguous fixture start")
         return _ref(spec.run_id, self.pid)
+
+    def reattach(
+        self, spec: WorkerLaunchSpec, binding: WorkerRecoveryBinding
+    ) -> WorkerProcessRef:
+        if binding.adapter_id != self.adapter_id:
+            raise RuntimeError("delegate recovery adapter identity changed")
+        if binding.recover_launch_spec(type(spec)) != spec:
+            raise RuntimeError("delegate recovery launch specification changed")
+        self.reattach_specs.append(spec)
+        self.reattach_bindings.append(binding)
+        self.calls.append(("reattach", spec.run_id, spec.worker_id))
+        return binding.process_ref
 
     def launch_attestation(self, ref: WorkerProcessRef):
         self.calls.append(("attestation", ref.run_id))
@@ -305,6 +321,88 @@ class RemoteWorkerBrokerFleetTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(spec.worker_user, "mastermind-worker")
         self.assertIsNone(spec.expected_worker_uid)
         self.assertIsNone(spec.expected_worker_gid)
+
+    def test_fresh_fleet_reattaches_exact_persisted_worker_without_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_dir = root / "run-recovery"
+            input_root = run_dir / "input"
+            input_root.mkdir(parents=True)
+            spec = replace(
+                _spec("run-recovery", "alibaba-token-01"),
+                workspace_path=root / "workspace",
+                run_dir=run_dir,
+                result_schema_path=run_dir / "schema.json",
+            )
+            prompt_path = input_root / "worker-prompt.txt"
+            prompt_path.write_text(spec.prompt, encoding="utf-8")
+            prompt_path.chmod(0o600)
+            process_ref = _ref(spec.run_id, 202)
+            binding = WorkerRecoveryBinding.bind(
+                adapter_id="remote-worker-broker-fleet",
+                spec=spec,
+                process_ref=process_ref,
+                prompt_path=prompt_path,
+            )
+
+            fresh = self._fleet()
+            self.assertIsInstance(fresh, RecoverableWorkerExecutionAdapter)
+            recovered = fresh.reattach(spec, binding)
+
+            self.assertEqual(recovered, process_ref)
+            self.assertFalse(self.adapters["codex-01"].calls)
+            delegate = self.adapters["alibaba-token-01"]
+            self.assertEqual(
+                [call[0] for call in delegate.calls],
+                ["reattach"],
+            )
+            self.assertEqual(delegate.start_specs, [])
+            self.assertEqual(delegate.reattach_specs[0].worker_id, "alibaba-token-01")
+            self.assertEqual(
+                delegate.reattach_specs[0].worker_user,
+                "_mastermind_alibaba_token_01",
+            )
+            self.assertEqual(delegate.reattach_specs[0].expected_worker_uid, 458)
+            self.assertEqual(
+                delegate.reattach_bindings[0].adapter_id,
+                "alibaba-adapter",
+            )
+            self.assertEqual(
+                fresh._worker_for_run("run-recovery"),
+                "alibaba-token-01",
+            )
+
+    def test_fleet_recovery_binding_cannot_switch_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_dir = root / "run-recovery-drift"
+            input_root = run_dir / "input"
+            input_root.mkdir(parents=True)
+            original = replace(
+                _spec("run-recovery-drift", "alibaba-token-01"),
+                workspace_path=root / "workspace",
+                run_dir=run_dir,
+                result_schema_path=run_dir / "schema.json",
+            )
+            prompt_path = input_root / "worker-prompt.txt"
+            prompt_path.write_text(original.prompt, encoding="utf-8")
+            prompt_path.chmod(0o600)
+            binding = WorkerRecoveryBinding.bind(
+                adapter_id="remote-worker-broker-fleet",
+                spec=original,
+                process_ref=_ref(original.run_id, 202),
+                prompt_path=prompt_path,
+            )
+            changed = replace(original, worker_id="codex-01")
+
+            with self.assertRaisesRegex(
+                BrokerStateError,
+                "recovery launch specification changed",
+            ):
+                self._fleet().reattach(changed, binding)
+
+            self.assertFalse(self.adapters["codex-01"].calls)
+            self.assertFalse(self.adapters["alibaba-token-01"].calls)
 
     async def test_fresh_fleet_restart_uses_only_persisted_worker_carrier(self) -> None:
         self.adapters["alibaba-token-01"].fail_start = True
