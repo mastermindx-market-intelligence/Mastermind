@@ -31,7 +31,10 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
-from integrations.business_mcp_auth.audit import DurableAuthAuditSink
+from integrations.business_mcp_auth.audit import (
+    AuditAcquisitionUncertain,
+    DurableAuthAuditSink,
+)
 from integrations.business_mcp_auth.contracts import load_resource_policy
 from integrations.business_mcp_auth.jwks import (
     BoundedJwksCache,
@@ -425,6 +428,10 @@ def _open_audit_sink(path: str, *, policy_id: str) -> DurableAuthAuditSink:
             "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
         ) from close_error
     if primary_error is not None:
+        if isinstance(primary_error, AuditAcquisitionUncertain):
+            raise ServiceConfigurationError(
+                "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+            ) from primary_error
         _refuse()
     assert sink is not None
     return sink
