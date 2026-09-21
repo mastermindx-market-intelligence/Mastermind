@@ -1,19 +1,19 @@
-"""control_plane.fabric_job_view — ``mastermind.fabric_job_view.v1``.
+"""control_plane.fabric_job_view — versioned truthful Fabric projections.
 
-One **read-only** projector that renders a single Executive Runtime root —
-parent Job → child Jobs and Attempts → review → repair → accepted result —
-using ONLY existing Executive read paths, and that renders *explicit unknowns*
-wherever the system has no answer yet.
+One **read-only** projector family renders a single Executive Runtime root —
+parent Job → child Jobs and Attempts → review → repair → result state — using
+ONLY existing Executive read paths and explicit unknowns wherever the system
+has no producer.
 
-Why the view exists
--------------------
-Census §1 (``orch/fabric/WB0_TRUTHFUL_VIEW_CENSUS.md``) is the load-bearing
-finding: at this base no Chairman-authenticated admitted job exists and none
-can exist yet (the production CEO-intent submit fence is closed and every arm
-bit in the shipped control template is ``false``).  The only truthful
-rendering available today is an **empty tree with named reasons** — never a
-sample, a fixture relabelled as production, or a placeholder card.  The view
-is therefore judged mainly on how it renders *nothing yet*.
+``mastermind.fabric_job_view.v1`` remains the historical contract.
+``mastermind.fabric_job_view.v2`` separates execution completion from product
+acceptance: Runtime ``COMPLETED`` stays ``COMPLETED`` and acceptance is
+``NOT_PROJECTED`` until a real acceptance owner exists. The v2 root-list
+projection also treats ``ceo_submit_armed=false`` only as new-submission
+unavailability; it never claims that an earlier admitted Job cannot exist.
+
+The projection never fabricates production state, product acceptance, or an
+empty company when an input is missing. Fixture data remains fixture data.
 
 It is not a write path, not an arm, not an install, and not an edit to the
 Control Room document (that document's key set is closed and asserted at
@@ -32,12 +32,18 @@ Shape (mirrors the Control Room's own split, ``chairman_control_room.py:11``)
 * :func:`describe_capability` — the A16 capability object with
   ``installed: false`` and **no runtime access at all** (``--describe``).
 
-The exact reads it may call, and no others
-------------------------------------------
+Historical v1 reads
+-------------------
 ``executive_runtime.Runtime.at(runtime_root, create=False)``; ``runtime.jobs.
 get_job(job_id)``; ``runtime.jobs.list_jobs()``; ``runtime.attempts.
 list_attempts(job_id)``; ``runtime.events.list_events(job_id=…)``.  No MCP
 server is started, no socket is opened, no ``launchctl``, no network.
+
+The v2 gather path instead uses only the fixed Runtime owner discovery/root
+snapshot methods and one validated command-id Event point read per eligible
+Job. Its acquisition receipt separates truncation, provenance completeness and
+currentness. A digest alone never qualifies currentness. Legacy provenance with
+no durable command join stays PARTIAL without acquiring Event history.
 
 DEVIATION 1 — a sixth read function, adjudicated (ORCH-WB1, binding).
     :func:`read_fabric_view` also calls ``control_plane.executive_inbox.
@@ -98,6 +104,8 @@ is the ``chairman_control_room.py:1274-1280`` hazard, and it is a red test.
 from __future__ import annotations
 
 import json
+import re
+from types import SimpleNamespace
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,7 +114,9 @@ from typing import Any
 from control_plane import executive_inbox
 
 SCHEMA = "mastermind.fabric_job_view.v1"
+SCHEMA_V2 = "mastermind.fabric_job_view.v2"
 ROOT_LIST_SCHEMA = "mastermind.fabric_job_root_list.v1"
+ROOT_LIST_SCHEMA_V2 = "mastermind.fabric_job_root_list.v2"
 
 #: Closed document key set, asserted by the compositor (A14's idiom).
 OUTPUT_KEYS = frozenset(
@@ -143,6 +153,8 @@ JOB_CARD_KEYS = frozenset(
         "result",
     }
 )
+JOB_CARD_KEYS_V2 = JOB_CARD_KEYS | {"acceptance"}
+ACCEPTANCE_KEYS = frozenset({"state", "producer_owner", "reason"})
 ATTEMPT_CARD_KEYS = frozenset(
     {
         "attempt_id",
@@ -202,10 +214,20 @@ _TERMINAL_RESULT_STATES = {
     "LOST": "LOST",
     "RATE_LIMITED": "RATE_LIMITED",
 }
+_TERMINAL_EXECUTION_STATES_V2 = {
+    "COMPLETED": "COMPLETED",
+    "CANCELLED": "CANCELLED",
+    "FAILED": "FAILED",
+    "LOST": "LOST",
+    "RATE_LIMITED": "RATE_LIMITED",
+}
 _VERDICTS = ("approve", "reject")
 
 _UNARMED_ENTRY = (
     "ceo_submit_armed: false; no Chairman-authenticated admitted job can exist yet"
+)
+_UNARMED_ENTRY_V2 = (
+    "ceo_submit_armed: false; new CEO submissions are unavailable through this arm"
 )
 
 
@@ -438,6 +460,31 @@ def _result_state(job: Any, attempts: Sequence[Any]) -> str:
     return "IN_PROGRESS"
 
 
+def _result_state_v2(job: Any, attempts: Sequence[Any]) -> str:
+    """Execution state only; never aliases completion to product acceptance."""
+
+    status = _enum_value(getattr(job, "status", ""))
+    if status in _TERMINAL_EXECUTION_STATES_V2:
+        return _TERMINAL_EXECUTION_STATES_V2[status]
+    if (
+        not attempts
+        and not getattr(job, "current_attempt_id", None)
+        and not int(getattr(job, "attempt_count", 0) or 0)
+    ):
+        return "NOT_STARTED"
+    return "IN_PROGRESS"
+
+
+def _acceptance_v2() -> tuple[dict[str, Any], dict[str, Any]]:
+    """No product-acceptance producer exists in the current Fabric owner."""
+
+    reason = "product acceptance has no producer in this projection"
+    return (
+        {"state": "NOT_PROJECTED", "producer_owner": None, "reason": reason},
+        _fact("MISSING_PRODUCER", "acceptance.state", None, reason),
+    )
+
+
 def _reviewers_by_subject(jobs: Sequence[Any]) -> dict[str, Any]:
     """subject job id -> the review Job that reviews it.
 
@@ -515,28 +562,37 @@ def _review_block(job: Any, reviewers_by_subject: Mapping[str, Any]):
     return {"required": required, "reviews_job_id": reviews_job_id, "verdict": verdict}, facts
 
 
-def _job_card(job: Any, attempts: Sequence[Any], reviewers_by_subject):
+def _job_card(
+    job: Any,
+    attempts: Sequence[Any],
+    reviewers_by_subject,
+    *,
+    contract_version: int = 1,
+):
     attempt_cards = [_attempt_card(attempt) for attempt in attempts]
     review, facts = _review_block(job, reviewers_by_subject)
     status = _enum_value(getattr(job, "status", ""))
     result = getattr(job, "result", None)
+    state = (
+        _result_state_v2(job, attempts)
+        if contract_version == 2
+        else _result_state(job, attempts)
+    )
     result_block = {
-        "state": _result_state(job, attempts),
+        "state": state,
         "summary": _payload_str(result, "summary"),
         "artifacts": _payload_list(result, "artifacts"),
         "errors": _payload_list(result, "errors"),
         "next_actions": _payload_list(result, "next_actions"),
     }
     if status == "COMPLETED" and not (isinstance(result, Mapping) and result):
-        # A9 requires a non-null accepted result for COMPLETED, so this
-        # combination is itself evidence of damage.
+        reason = (
+            "COMPLETED job carries no result payload"
+            if contract_version == 2
+            else "COMPLETED job carries no accepted result payload"
+        )
         facts = facts + [
-            _fact(
-                "DEGRADED",
-                "result.summary",
-                str(job.job_id),
-                "COMPLETED job carries no accepted result payload",
-            )
+            _fact("DEGRADED", "result.summary", str(job.job_id), reason)
         ]
     card = {
         "job_id": str(job.job_id),
@@ -558,11 +614,18 @@ def _job_card(job: Any, attempts: Sequence[Any], reviewers_by_subject):
         },
         "result": result_block,
     }
-    assert set(card.keys()) == JOB_CARD_KEYS
+    if contract_version == 2:
+        acceptance, missing = _acceptance_v2()
+        card["acceptance"] = acceptance
+        facts = facts + [missing]
+        assert set(acceptance.keys()) == ACCEPTANCE_KEYS
+        assert set(card.keys()) == JOB_CARD_KEYS_V2
+    else:
+        assert set(card.keys()) == JOB_CARD_KEYS
     return card, facts
 
 
-def compose_fabric_view(
+def _compose_fabric_view(
     *,
     root_job_id: str,
     root_job: Any,
@@ -574,6 +637,9 @@ def compose_fabric_view(
     degraded: Iterable[str],
     read_failed: bool = False,
     generated_at: str | None = None,
+    schema: str,
+    contract_version: int,
+    unarmed_entry: str,
 ) -> dict[str, Any]:
     """PURE: render one root's truthful view document.  No I/O whatsoever."""
 
@@ -587,7 +653,10 @@ def compose_fabric_view(
     facts: list[dict[str, Any]] = [_return_path_fact(), _runtime_identity_fact()]
     for job in ([root_job] if root_job is not None else []) + children:
         card, card_facts = _job_card(
-            job, attempts_by_job.get(str(job.job_id), []), reviewers
+            job,
+            attempts_by_job.get(str(job.job_id), []),
+            reviewers,
+            contract_version=contract_version,
         )
         cards = cards + [card]
         facts = facts + card_facts
@@ -633,13 +702,13 @@ def compose_fabric_view(
         ]
 
     if armed.get("ceo_submit_armed") is False:
-        entries = entries + [_UNARMED_ENTRY]
+        entries = entries + [unarmed_entry]
 
     root_card = cards[0] if root_job is not None and cards else None
     child_cards = cards[1:] if root_job is not None and cards else cards
 
     doc = {
-        "schema": SCHEMA,
+        "schema": schema,
         "generated_at": generated_at or _utc_now(),
         "runtime": {
             "root": runtime_identity.get("root"),
@@ -666,6 +735,70 @@ def compose_fabric_view(
     }
     assert set(doc.keys()) == OUTPUT_KEYS  # self-check: closed set, like A14
     return doc
+
+
+def compose_fabric_view(
+    *,
+    root_job_id: str,
+    root_job: Any,
+    jobs: Sequence[Any],
+    attempts_by_job: Mapping[str, Sequence[Any]],
+    joined_job_ids: Iterable[str],
+    runtime_identity: Mapping[str, Any],
+    armed: Mapping[str, Any],
+    degraded: Iterable[str],
+    read_failed: bool = False,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Historical v1 projection; retained byte-semantically for old consumers."""
+
+    return _compose_fabric_view(
+        root_job_id=root_job_id,
+        root_job=root_job,
+        jobs=jobs,
+        attempts_by_job=attempts_by_job,
+        joined_job_ids=joined_job_ids,
+        runtime_identity=runtime_identity,
+        armed=armed,
+        degraded=degraded,
+        read_failed=read_failed,
+        generated_at=generated_at,
+        schema=SCHEMA,
+        contract_version=1,
+        unarmed_entry=_UNARMED_ENTRY,
+    )
+
+
+def compose_fabric_view_v2(
+    *,
+    root_job_id: str,
+    root_job: Any,
+    jobs: Sequence[Any],
+    attempts_by_job: Mapping[str, Sequence[Any]],
+    joined_job_ids: Iterable[str],
+    runtime_identity: Mapping[str, Any],
+    armed: Mapping[str, Any],
+    degraded: Iterable[str],
+    read_failed: bool = False,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Truthful v2: execution completion and product acceptance stay separate."""
+
+    return _compose_fabric_view(
+        root_job_id=root_job_id,
+        root_job=root_job,
+        jobs=jobs,
+        attempts_by_job=attempts_by_job,
+        joined_job_ids=joined_job_ids,
+        runtime_identity=runtime_identity,
+        armed=armed,
+        degraded=degraded,
+        read_failed=read_failed,
+        generated_at=generated_at,
+        schema=SCHEMA_V2,
+        contract_version=2,
+        unarmed_entry=_UNARMED_ENTRY_V2,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -807,19 +940,18 @@ def _gather_jobs(runtime_root: str | Path, root_job_id: str) -> dict[str, Any]:
     )
 
 
-def read_fabric_view(
+def _read_fabric_view(
     runtime_root: str | Path,
     root_job_id: str,
     *,
-    control_config_path: str | Path | None = None,
+    control_config_path: str | Path | None,
+    composer,
 ) -> dict[str, Any]:
-    """Gather one root and render the truthful document.  Read-only."""
-
     armed, armed_degraded = _read_armed(
         None if control_config_path is None else Path(control_config_path)
     )
     gathered = _gather_jobs(runtime_root, str(root_job_id))
-    return compose_fabric_view(
+    return composer(
         root_job_id=str(root_job_id),
         root_job=gathered["root_job"],
         jobs=gathered["jobs"],
@@ -836,13 +968,206 @@ def read_fabric_view(
     )
 
 
-def list_roots(
+def read_fabric_view(
     runtime_root: str | Path,
+    root_job_id: str,
     *,
-    limit: int = LIST_ROOTS_LIMIT,
     control_config_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Bounded enumerator (seat ruling R2): the self-rooted Jobs of one runtime."""
+    """Gather one root and render historical v1. Read-only."""
+
+    return _read_fabric_view(
+        runtime_root,
+        root_job_id,
+        control_config_path=control_config_path,
+        composer=compose_fabric_view,
+    )
+
+
+def _bounded_provenance(runtime, job, *, creation_event_reader=None):
+    """Validate durable routing before one Event point read and owner validation.
+
+    The adapter supplies only the immutable Job already in the bounded snapshot
+    and its unique command-id Event. The historical validator receives no real
+    registry, so its compatibility list interface cannot acquire Event history.
+    """
+    from control_plane.executive_runtime import orchestration_digest
+
+    cycle = getattr(job, "orchestration_provenance", None)
+    digest = getattr(job, "orchestration_provenance_digest", None)
+    keys = {"schema_version", "creator", "source_id", "source_digest", "command_id",
+            "job_id", "parent_job_id", "root_job_id", "role"}
+    if not isinstance(cycle, Mapping) or set(cycle) != keys:
+        return None, "durable CEO-intent provenance not projected"
+    source_id = cycle.get("source_id")
+    if not (
+        cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
+        and cycle.get("creator") == "ceo_intent"
+        and isinstance(source_id, str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", source_id)
+        and cycle.get("command_id") == f"ceo-intent:{source_id}"
+        and isinstance(cycle.get("source_digest"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", cycle["source_digest"])
+        and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+        and digest == orchestration_digest(cycle)
+        and cycle.get("job_id") == job.job_id
+        and cycle.get("parent_job_id") is None and job.parent_job_id is None
+        and cycle.get("root_job_id") == job.job_id == job.root_job_id
+        and cycle.get("role") == job.orchestration_role == "aggregation"
+    ):
+        return None, "durable CEO-intent provenance invalid or unsupported"
+    point_read = creation_event_reader or runtime.events.get_event_by_command_id
+    event = point_read(cycle["command_id"])
+    if event is None or event.event_type != "JOB_CREATED":
+        return None, "durable CEO-intent creation Event unavailable"
+    # Only v2 carries the durable cycle needed to prove this bounded join.
+    provenance = event.payload.get("provenance") if isinstance(event.payload, Mapping) else None
+    if not isinstance(provenance, Mapping) or provenance.get("schema") != "mastermind.ceo_intent.v2":
+        return None, "durable CEO-intent creation Event schema unsupported"
+    adapter = SimpleNamespace(
+        jobs=SimpleNamespace(get_job=lambda job_id: job if job_id == job.job_id else None),
+        events=SimpleNamespace(list_events=lambda *, job_id: (event,) if job_id == job.job_id else ()),
+    )
+    return executive_inbox.ceo_intent_provenance(adapter, str(job.job_id))
+
+
+def _acquisition_receipt(*, kind, root_job_id=None, snapshot=None, unjoined=(), projection=False):
+    return {
+        "schema": "mastermind.fabric_runtime_acquisition.v1",
+        "query": {"kind": kind, "root_job_id": root_job_id},
+        "owner": "executive_runtime",
+        "snapshot_digest": getattr(snapshot, "snapshot_digest", None),
+        "budgets": {"roots": 64, "jobs": 17, "attempts_per_job": 20,
+                    "attempts_total": 340, "creation_events_per_job": 1},
+        "truncation": {
+            "jobs": bool(getattr(snapshot, "jobs_truncated", False)),
+            "attempt_job_ids": list(getattr(snapshot, "attempts_truncated_job_ids", ())),
+            "roots": bool(getattr(snapshot, "truncated", False)),
+            "projection": projection,
+        },
+        "provenance": {"state": "PARTIAL" if unjoined or snapshot is None else "COMPLETE",
+                       "unjoined_job_ids": sorted(unjoined)},
+        "generation": {"schema": "mastermind.runtime_read_observation.v1",
+                       "state": "UNKNOWN", "source_identity": None,
+                       "before": None, "after": None},
+    }
+
+
+def read_fabric_view_v2(
+    runtime_root: str | Path,
+    root_job_id: str,
+    *,
+    control_config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Path-based CLI adapter; a missing namespace owner cannot attest SAME."""
+    runtime_root = Path(runtime_root)
+    armed, notes = _read_armed(None if control_config_path is None else Path(control_config_path))
+    runtime, present, open_notes = _open_runtime(runtime_root, runtime_root / DB_RELATIVE_PATH)
+    return _read_observed_fabric_view_v2(
+        runtime, str(root_job_id), armed=armed,
+        runtime_identity={"root": str(runtime_root), "db_present": present, "identity": None},
+        notes=notes + open_notes,
+    )
+
+
+def read_fabric_view_v2_from_runtime(
+    runtime: Any,
+    root_job_id: str,
+    *,
+    armed: Mapping[str, Any],
+    runtime_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Trusted Runtime-owner acquisition without opening paths or config files.
+
+    Jobs, Attempts and eligible creation Events share one owner observation.
+    Its finalized receipt describes the bounded sample interval, not freshness
+    after return or write exclusion after the final data_version sample.
+    The service supplies its existing Runtime, flags and public identity.
+    """
+    return _read_observed_fabric_view_v2(
+        runtime, str(root_job_id), armed=armed, runtime_identity=runtime_identity, notes=[],
+    )
+
+
+def _read_observed_fabric_view_v2(runtime, root_job_id, *, armed, runtime_identity, notes):
+    from control_plane import executive_runtime
+
+    present = runtime_identity.get("db_present") is True
+    generation = None
+    snapshot = None
+    jobs, joined, unjoined = [], set(), []
+    attempts_by_job = {}
+    failed = runtime is None and present
+    try:
+        if runtime is not None:
+            with runtime.observe_bounded_read() as read:
+                snapshot = read.read_job_root_bounded(root_job_id)
+                jobs = list(snapshot.jobs)
+                if (snapshot.root_job_id != root_job_id or not jobs
+                        or jobs[0].job_id != root_job_id or len(jobs) > 17
+                        or len(snapshot.attempts) > 340):
+                    raise ValueError("bounded Runtime snapshot identity or budget invalid")
+                ids = {job.job_id for job in jobs}
+                if len(ids) != len(jobs) or any(job.root_job_id != root_job_id for job in jobs):
+                    raise ValueError("bounded Runtime snapshot membership invalid")
+                for attempt in snapshot.attempts:
+                    if attempt.job_id not in ids:
+                        raise ValueError("bounded Runtime Attempt membership invalid")
+                    attempts_by_job[attempt.job_id] = attempts_by_job.get(attempt.job_id, []) + [attempt]
+                if any(len(attempts) > 20 for attempts in attempts_by_job.values()):
+                    raise ValueError("bounded Runtime Attempt budget invalid")
+                for job in jobs:
+                    provenance, warning = _bounded_provenance(
+                            runtime, job, creation_event_reader=read.get_creation_event_by_command_id)
+                    if isinstance(provenance, Mapping) and provenance.get("workstream"):
+                        joined.add(job.job_id)
+                    else:
+                        unjoined = unjoined + [job.job_id]
+                        notes = notes + [f"provenance not projected: {job.job_id}: {warning or 'workstream unavailable'}"]
+                if snapshot.jobs_truncated:
+                    notes = notes + ["bounded Runtime Job snapshot truncated"]
+                if snapshot.attempts_truncated_job_ids:
+                    notes = notes + ["bounded Runtime Attempt snapshot truncated"]
+            generation = read.receipt.to_dict()
+    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError) as exc:
+        notes = notes + ["bounded acquisition unavailable: owner observation could not be finalized"]
+        failed = True
+        snapshot, jobs, attempts_by_job, joined, unjoined = None, [], {}, set(), []
+        generation = None
+    doc = compose_fabric_view_v2(
+        root_job_id=root_job_id, root_job=jobs[0] if jobs else None,
+        jobs=jobs, attempts_by_job=attempts_by_job, joined_job_ids=joined,
+        runtime_identity=runtime_identity,
+        armed=armed, degraded=notes, read_failed=failed,
+    )
+    receipt = _acquisition_receipt(kind="root_detail", root_job_id=root_job_id,
+                                   snapshot=snapshot, unjoined=unjoined)
+    if generation is not None:
+        receipt["generation"] = generation
+    doc["runtime"]["acquisition"] = receipt
+    if snapshot is not None and (unjoined or snapshot.jobs_truncated or snapshot.attempts_truncated_job_ids):
+        doc["capability"]["state"] = PARTIAL
+        doc["capability"]["detail"] = "bounded snapshot has omitted rows or unavailable provenance"
+        facts = []
+        if unjoined:
+            facts = facts + [_fact("MISSING_PRODUCER", "runtime.acquisition.provenance", "executive_runtime",
+                               "durable CEO-intent workstream join unavailable for included Jobs")]
+        if snapshot.jobs_truncated or snapshot.attempts_truncated_job_ids:
+            facts = facts + [_fact("OMITTED", "runtime.acquisition.truncation", "executive_runtime",
+                               "owner acquisition budget omits Jobs or Attempts")]
+        doc["missingness"] = _dedupe_facts(doc["missingness"] + facts)
+    return doc
+
+
+def _list_roots(
+    runtime_root: str | Path,
+    *,
+    limit: int,
+    control_config_path: str | Path | None,
+    schema: str,
+    unarmed_entry: str,
+) -> dict[str, Any]:
+    """Historical acquisition path shared by versioned root-list semantics."""
 
     from control_plane import executive_runtime
 
@@ -856,7 +1181,7 @@ def list_roots(
     db_path = runtime_root / DB_RELATIVE_PATH
     entries = list(armed_degraded)
     if armed.get("ceo_submit_armed") is False:
-        entries = entries + [_UNARMED_ENTRY]
+        entries = entries + [unarmed_entry]
     try:
         runtime, db_present, open_degraded = _open_runtime(runtime_root, db_path)
         if runtime is None:
@@ -865,7 +1190,7 @@ def list_roots(
                     "jobs unreadable: runtime database absent; no root can be enumerated"
                 ]
             return {
-                "schema": ROOT_LIST_SCHEMA,
+                "schema": schema,
                 "generated_at": _utc_now(),
                 "runtime": {"root": str(runtime_root), "db_present": db_present, "identity": None},
                 "roots": [],
@@ -894,7 +1219,7 @@ def list_roots(
         for row in rows:
             assert set(row.keys()) == ROOT_ROW_KEYS
         document = {
-            "schema": ROOT_LIST_SCHEMA,
+            "schema": schema,
             "generated_at": _utc_now(),
             "runtime": {"root": str(runtime_root), "db_present": db_present, "identity": None},
             "roots": rows,
@@ -905,7 +1230,7 @@ def list_roots(
         }
     except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError) as exc:
         document = {
-            "schema": ROOT_LIST_SCHEMA,
+            "schema": schema,
             "generated_at": _utc_now(),
             "runtime": {
                 "root": str(runtime_root),
@@ -922,3 +1247,63 @@ def list_roots(
         }
     assert set(document.keys()) == ROOT_LIST_KEYS
     return document
+
+def list_roots(
+    runtime_root: str | Path,
+    *,
+    limit: int = LIST_ROOTS_LIMIT,
+    control_config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Historical v1 root enumeration; retained for old consumers."""
+
+    return _list_roots(
+        runtime_root,
+        limit=limit,
+        control_config_path=control_config_path,
+        schema=ROOT_LIST_SCHEMA,
+        unarmed_entry=_UNARMED_ENTRY,
+    )
+
+
+def list_roots_v2(
+    runtime_root: str | Path,
+    *,
+    limit: int = LIST_ROOTS_LIMIT,
+    control_config_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Discover roots within the fixed Runtime owner budget."""
+    from control_plane import executive_runtime
+
+    if type(limit) is not int or limit <= 0:
+        raise ValueError("limit must be a positive integer")
+    runtime_root = Path(runtime_root)
+    armed, notes = _read_armed(None if control_config_path is None else Path(control_config_path))
+    if armed.get("ceo_submit_armed") is False:
+        notes = notes + [_UNARMED_ENTRY_V2]
+    runtime, present, open_notes = _open_runtime(runtime_root, runtime_root / DB_RELATIVE_PATH)
+    notes += open_notes
+    snapshot, rows, total, truncated, projection = None, [], None, False, False
+    try:
+        if runtime is not None:
+            snapshot = runtime.discover_job_roots_bounded()
+            roots = snapshot.roots
+            if len(roots) > 64 or any(job.root_job_id != job.job_id for job in roots):
+                raise ValueError("bounded Runtime discovery identity or budget invalid")
+            total = None if snapshot.truncated else len(roots)
+            projection = len(roots) > limit
+            truncated = bool(snapshot.truncated or projection)
+            rows = [{"job_id": str(job.job_id), "status": _enum_value(job.status),
+                     "depth": int(job.depth or 0), "parent_job_id": job.parent_job_id,
+                     "orchestration_role": job.orchestration_role} for job in roots[:limit]]
+            if truncated:
+                notes = notes + ["bounded root discovery truncated; omitted roots are not counted"]
+    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError) as exc:
+        notes = notes + [f"bounded acquisition unavailable: {_failure_first_line(exc)}"]
+        snapshot, rows, total, truncated, projection = None, [], None, False, False
+    return {
+        "schema": ROOT_LIST_SCHEMA_V2, "generated_at": _utc_now(),
+        "runtime": {"root": str(runtime_root), "db_present": present, "identity": None,
+                    "acquisition": _acquisition_receipt(kind="root_discovery", snapshot=snapshot, projection=projection)},
+        "roots": rows, "count": len(rows), "total": total,
+        "truncated": truncated, "degraded": sorted(set(notes)),
+    }
