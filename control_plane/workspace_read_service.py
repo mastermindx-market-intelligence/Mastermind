@@ -10,10 +10,12 @@ import asyncio
 from control_plane.workspace_owned_task import await_owned
 import copy
 import math
+import re
 import secrets
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from integrations.mastermind_workspace_app.contract import (
@@ -94,26 +96,159 @@ def _join(document, selection):
     return rows[0]
 
 
+def _qualified_empty_programs(doc, validity):
+    """An empty list needs positive canonical source evidence, not all([]).
+
+    These fields are emitted by the existing CCR compositor from its inputs.
+    They are not a new health flag or a replacement for cache publication gates.
+    Missing navigation bindings remain optional and cannot decide source health.
+    """
+    from control_plane import chairman_control_room as ccr
+    sources, autonomy, degraded = doc.get("sources"), doc.get("autonomy"), doc.get("degraded")
+    if (type(sources) is not dict or type(autonomy) is not dict
+            or type(degraded) is not list or not all(type(reason) is str for reason in degraded)
+            or doc.get("work") != [] or validity.get("cards") != []
+            or autonomy.get("schema") != "mastermind.autonomy_control_room.v1"
+            or autonomy.get("generated_at") != doc.get("generated_at")
+            or autonomy.get("source_failures") != []):
+        return False
+    counts = autonomy.get("counts")
+    if (type(counts) is not dict or type(counts.get("total")) is not int
+            or counts["total"] != 0 or counts.get("empty") is not True):
+        return False
+    core = ("boot_packet:", "executive_inbox:", "executive_runtime:",
+            "agent_os_state:", "active_builds:", "autonomy:")
+    if any(reason.startswith(core) for reason in degraded):
+        return False
+    schemas = {"executive_inbox_schema": ccr.EXECUTIVE_INBOX_SCHEMA,
+               "agent_os_brief_schema": ccr.AGENT_OS_BRIEF_SCHEMA,
+               "agent_os_state_schema": ccr.AGENT_OS_STATE_SCHEMA,
+               "active_builds_schema": ccr.ACTIVE_BUILDS_SCHEMA}
+    if any(sources.get(key) != expected for key, expected in schemas.items()):
+        return False
+    if sources.get("runtime_db_present") is not True:
+        return False
+    for key in ("mastermind_sha", "macro_sha"):
+        value = sources.get(key)
+        if type(value) is not str or re.fullmatch(r"[0-9a-f]{40}", value) is None:
+            return False
+    if type(sources.get("macro_root")) is not str or not sources["macro_root"].strip():
+        return False
+    for stamp in (doc.get("generated_at"), sources.get("agent_os_state_generated_at"),
+                  sources.get("active_builds_collected_at")):
+        try:
+            if type(stamp) is not str or datetime.fromisoformat(stamp.replace("Z", "+00:00")).utcoffset() is None:
+                return False
+        except ValueError:
+            return False
+    return True
+
+
+_CCR_SCHEMA = "mastermind.chairman_control_room.v1"
+_AUTONOMY_SCHEMA = "mastermind.autonomy_control_room.v1"
+#: Canonical freshness states the mapper may emit. Anything else on a row is a
+#: malformed fact and fails closed; ``stale``/``unknown`` are the recognized
+#: non-current states an explicit unqualified receipt may still serve.
+_FRESHNESS_CURRENT = "current"
+_FRESHNESS_NONCURRENT = ("stale", "unknown")
+
+
+def _admitted_row(row, *, doc_generated_at, validity):
+    """Only the canonical ``card`` fact gates reading this responsibility row.
+
+    Dispatch, owed-open-age and actionability never decide admission here.
+    A current row needs a live int budget/receipt pair from the real paired
+    publication; a recognized non-current row is readable only as an explicit
+    unqualified receipt whose budget and remaining values are null. An expired
+    receipt, a current row paired with an unqualified component, unknown
+    freshness or missing metadata never reads. The row is inspected in place
+    and never promoted, sanitized or rewritten.
+    """
+    from control_plane.mission_workspace import (
+        AUTONOMY_VALIDITY_POLICY, AUTONOMY_VALIDITY_SCHEMA, _HEX_64,
+        _mapping, _mapping_rows, _safe_timestamp,
+    )
+    ref, root = row.get("responsibility_ref"), row.get("root_job_id")
+    freshness = row.get("freshness")
+    if (not isinstance(ref, str) or not ref
+            or freshness not in (_FRESHNESS_CURRENT, *_FRESHNESS_NONCURRENT)
+            or (root is not None and (not isinstance(root, str) or not root))):
+        return False
+    entries = [entry for entry in _mapping_rows(validity.get("cards"))
+               if entry.get("responsibility_ref") == ref and entry.get("root_job_id") == root]
+    if len(entries) != 1:
+        return False
+    receipt = _mapping(_mapping(entries[0].get("components")).get("card"))
+    meta = _mapping(_mapping(row.get("validity")).get("card"))
+    proof_ref, budget = meta.get("proof_ref"), meta.get("valid_for_ms")
+    qualified_at = _safe_timestamp(meta.get("qualified_at"))
+    if (meta.get("schema") != AUTONOMY_VALIDITY_SCHEMA
+            or meta.get("policy") != AUTONOMY_VALIDITY_POLICY
+            or not isinstance(proof_ref, str) or _HEX_64.fullmatch(proof_ref) is None
+            or receipt.get("proof_ref") != proof_ref
+            or qualified_at is None
+            or qualified_at != _safe_timestamp(receipt.get("qualified_at"))
+            or qualified_at != doc_generated_at):
+        return False
+    remaining, state = receipt.get("remaining_ms"), receipt.get("state")
+    if freshness == _FRESHNESS_CURRENT:
+        return (type(budget) is int and budget > 0
+                and type(remaining) is int and 0 < remaining <= budget
+                and state == "current")
+    return budget is None and remaining is None and state == "unqualified"
+
+
 def _qualified(snapshot, selected=None):
-    from control_plane.mission_workspace import _qualified_current
+    from control_plane.mission_workspace import (
+        SOURCE_VALIDITY_PROFILE, SOURCE_VALIDITY_SCHEMA,
+    )
     doc = snapshot.document
     autonomy = doc.get("autonomy")
-    if type(autonomy) is not dict or type(autonomy.get("responsibilities")) is not list:
+    work = doc.get("work")
+    if (doc.get("schema") != _CCR_SCHEMA or type(work) is not list
+            or type(autonomy) is not dict
+            or autonomy.get("schema") != _AUTONOMY_SCHEMA
+            or type(autonomy.get("responsibilities")) is not list
+            or type(doc.get("generated_at")) is not str
+            or autonomy.get("generated_at") != doc.get("generated_at")):
+        return False
+    try:
+        if datetime.fromisoformat(doc["generated_at"].replace("Z", "+00:00")).utcoffset() is None:
+            return False
+    except ValueError:
         return False
     rows = [_join(doc, selected)] if selected else autonomy["responsibilities"]
     # A qualified empty publication may represent zero Programs. A missing or
     # malformed source-validity envelope may never qualify as that empty state.
     validity = snapshot.validity
-    if (validity.get("schema") != "mastermind.control_room_source_validity.v1"
-            or validity.get("publication_seq") != snapshot.publication
-            or validity.get("profile") != "b5.darwin-chrome-paired-v1"
-            or type(validity.get("cards")) is not list):
+    publication_seq = validity.get("publication_seq")
+    if (validity.get("schema") != SOURCE_VALIDITY_SCHEMA
+            or type(publication_seq) is not int or publication_seq <= 0
+            or publication_seq != snapshot.publication
+            or validity.get("profile") != SOURCE_VALIDITY_PROFILE
+            or type(validity.get("cards")) is not list
+            or snapshot.currentness.get("state") != "fresh"
+            or type(snapshot.currentness.get("publication_seq")) is not int
+            or snapshot.currentness.get("publication_seq") != publication_seq):
         return False
-    return all(type(row) is dict and _qualified_current(
-        validity=validity, cache=snapshot.currentness, responsibility=row,
-        responsibility_ref=row.get("responsibility_ref"), root_job_id=row.get("root_job_id"),
-        control_generated_at=doc.get("generated_at"), autonomy_generated_at=autonomy.get("generated_at"),
-    ) for row in rows)
+    if selected is None and not rows and not _qualified_empty_programs(doc, validity):
+        return False
+    if not all(type(row) is dict for row in rows) or not all(
+            type(item) is dict and isinstance(item.get("work_ref"), str) and item["work_ref"]
+            for item in work):
+        return False
+    work_refs = [item["work_ref"] for item in work]
+    refs = [row.get("responsibility_ref") for row in rows]
+    if len(set(work_refs)) != len(work_refs) or len(set(refs)) != len(refs):
+        return False
+    # Every responsibility must cite exactly one genuine work row. Orphan or
+    # duplicated identities never read as a healthy absence of Programs.
+    if any(refs.count(ref) != 1 or work_refs.count(ref) != 1 for ref in refs):
+        return False
+    if selected is None and set(work_refs) != set(refs):
+        return False
+    return all(_admitted_row(row, doc_generated_at=doc.get("generated_at"),
+                             validity=validity) for row in rows)
 
 
 def _observation(before, after, selected, runtime):

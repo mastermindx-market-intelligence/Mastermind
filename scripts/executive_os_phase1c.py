@@ -1152,6 +1152,7 @@ def _service_from_config(
     content_profile_loader: Callable[[], Any] | None = None,
     workspace_acquisition_loader: Callable[[], Any] | None = None,
     exact_target_source: _ExactWorkerTargetSource | None = None,
+    workspace_bindings_path: Path | None = None,
 ) -> ExecutiveControlService:
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
@@ -1373,13 +1374,42 @@ def _service_from_config(
                 raise ServiceError("sealed current workspace acquisition loader is required")
             policy = load_resource_policy(raw["workspace_resource_policy"])
             _, authorize = workspace_authorizers(policy=policy, load_bindings=workspace_acquisition_loader)
+            # Installed source join: the trusted parent builds the composer from
+            # the same sealed roots the readers use, never from the public App.
+            # The collector is the existing installed one, constructed directly
+            # with the attested boot interpreter and sealed source SHA.  The
+            # custody callback stays late-bound: it closes over the local
+            # ``service`` built below and is only ever invoked by the off-demand
+            # refresh, after that service has started.  A ``None`` bindings path
+            # stays an explicit unavailable binding — no HOME expansion.
+            if "ceo_ingress_app_boot_python" not in raw:
+                raise ServiceError("workspace acquisition requires the sealed boot interpreter")
+            from control_plane.workspace_source_join import build_workspace_composer
+            from integrations.executive_mcp.installed import InstalledBootPacketCollector
+            packet_collector = InstalledBootPacketCollector(
+                source_root=Path(raw["proof_source_repository"]),
+                macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+                code_root=Path(__file__).resolve().parents[1],
+                python_executable=_attest_app_boot_runtime(
+                    Path(raw["ceo_ingress_app_boot_python"])),
+                expected_source_sha=str(raw["proof_base_sha"]),
+            )
+            compose_inputs = build_workspace_composer(
+                packet_collector=packet_collector,
+                repo_root=Path(raw["proof_source_repository"]),
+                macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+                bounded_runtime=lambda: service._namespace_custody.bound_runtime(
+                    service._require_runtime()),
+                bindings_path=workspace_bindings_path,
+            )
             # Existing source paths and existing controller permissions only.
             # Bind the installation-selected incumbent topology before publishing.
             port = raw["workspace_control_room"]["port"]
             workspace_control_room = HostedControlRoom(ServerConfig(
                 repo_root=Path(raw["proof_source_repository"]),
-                macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=None,
-                token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port))
+                macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=workspace_bindings_path,
+                token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port,
+                compose_inputs=compose_inputs))
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},

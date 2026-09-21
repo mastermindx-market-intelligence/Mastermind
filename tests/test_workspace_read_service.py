@@ -29,8 +29,9 @@ def cache_fixture(tmp_path):
             "qualified_at": STAMP, "proof_ref": "a" * 64, "valid_for_ms": 60000}
     doc = {"schema": "mastermind.chairman_control_room.v1", "generated_at": STAMP,
         "degraded": [], "work": [{"work_ref": "WS:ONE", "agent_os": {"title": "One"}}],
-        "autonomy": {"generated_at": STAMP, "responsibilities": [{
-            "responsibility_ref": "WS:ONE", "root_job_id": "JOB-001",
+        "autonomy": {"schema": "mastermind.autonomy_control_room.v1", "generated_at": STAMP,
+            "responsibilities": [{
+            "responsibility_ref": "WS:ONE", "root_job_id": "JOB-001", "freshness": "current",
             "root_job_candidates": ["JOB-001"], "root_job_ambiguous": False,
             "runtime_root_state": "RESOLVED", "validity": {key: dict(meta) for key in
                 ("card", "decision_current", "dispatch", "owed_open_age")}}]}}

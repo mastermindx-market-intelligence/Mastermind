@@ -595,6 +595,16 @@ class ServerConfig:
     #: ``None``. Cleared on the next successful recompose. Never raised into
     #: a serving thread — surfaced only in the ``/api/state`` envelope.
     state_refresh_error: str | None = None
+    #: Trusted installed source join (parent-injected before start): given the
+    #: composition's ``generated_at``, returns the canonical
+    #: ``mastermind.chairman_control_room.v1`` document built from
+    #: pre-acquired bounded inputs. Called ONLY from ``_compose_state_doc``
+    #: within the existing off-demand refresh/publication bracket. A
+    #: configured callback that fails is never answered with the legacy
+    #: gather — the failure propagates to the existing refresh-error path and
+    #: the last good composition (or explicit unavailability) stands. The
+    #: default ``None`` keeps the exact standalone legacy behavior.
+    compose_inputs: Callable[[str], dict[str, Any]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -620,8 +630,23 @@ def _compose_state_doc(
     cost now runs off the request path, so it can afford to wait out the
     real host's measured 94-206s brief cost rather than the 60s bound that
     always timed out on the request path (F1/F2).
+
+    A trusted ``ServerConfig.compose_inputs`` callback (installed source
+    join, injected by the parent before start) is honored here FIRST: it
+    receives this composition's ``generated_at`` and returns the canonical
+    document from pre-acquired bounded inputs, so the legacy gather below is
+    never entered while it is configured.  Its failure is this composition's
+    failure — there is no fallback to the legacy source-root gather, the
+    exception reaches the existing refresh-error path, and an empty/default
+    document is never substituted for a configured source.
     """
     generated_at = config.now_fn()
+    if config.compose_inputs is not None:
+        doc = config.compose_inputs(generated_at)
+        if (not isinstance(doc, dict)
+                or doc.get("schema") != ccr.SCHEMA):
+            raise ValueError("configured compose_inputs returned a non-canonical document")
+        return doc
     build_kwargs: dict[str, Any] = {
         "repo_root": config.repo_root,
         "macro_root_flag": config.macro_root,

@@ -33,6 +33,8 @@ def test_real_http_runtime_owner_receipt_and_deny_before_read(
     document = json.loads(json.dumps(args["control_room"]).replace("JOB-1", job_id).replace("2026-09-20", "2026-09-21"))
     document["generated_at"] = owners[0].state_cache["doc"]["generated_at"]
     document["autonomy"]["generated_at"] = document["generated_at"]
+    document["autonomy"]["schema"] = "mastermind.autonomy_control_room.v1"
+    document["autonomy"]["responsibilities"][0]["freshness"] = "current"
     document["autonomy"]["responsibilities"][0]["validity"] = owners[0].state_cache["doc"]["autonomy"]["responsibilities"][0]["validity"]
     owners[0].state_cache["doc"] = document
     owners[0].state_cache.pop("source_validity_bounds", None)
