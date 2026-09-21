@@ -1504,3 +1504,192 @@ def test_module_has_no_acquisition_clock_randomness_or_authority_imports():
     }
     assert not calls & {"open", "exec", "eval", "__import__"}
     assert not attributes & {"read_text", "write_text", "run", "Popen", "request", "post", "connect"}
+
+
+# Ratified workspace owner observation: fixture construction is test-only. The
+# service, not the HTTP/model caller, supplies this receipt to the pure reducer.
+def _owner_observation_inputs():
+    import hashlib
+
+    args = _inputs_v2()
+    def digest(value):
+        return hashlib.sha256(json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False,
+        ).encode()).hexdigest()
+    generation = {
+        "schema": "mastermind.runtime_read_observation.v1", "state": "SAME",
+        "source_identity": "runtime_fixture_123456", "before": 7, "after": 7,
+    }
+    args["fabric_view"]["runtime"]["acquisition"] = {
+        "schema": "mastermind.fabric_runtime_acquisition.v1",
+        "owner": "executive_runtime",
+        "query": {"kind": "root_detail", "root_job_id": args["root_job_id"]},
+        "snapshot_digest": "c" * 64,
+        "generation": copy.deepcopy(generation),
+        "truncation": {"jobs": False, "attempt_job_ids": [], "roots": False, "projection": False},
+        "provenance": {"state": "COMPLETE", "unjoined_job_ids": []},
+    }
+    args["owner_observation"] = {
+        "schema": "mastermind.workspace_source_observation.v1", "state": "SAME",
+        "selection": {"work_ref": args["work_ref"], "root_job_id": args["root_job_id"]},
+        "control_room": {
+            "instance_before": "control_fixture_123456", "instance_after": "control_fixture_123456",
+            "publication_before": 1, "publication_after": 1,
+            "document_digest": digest(args["control_room"]),
+            "source_validity_digest": digest(args["source_validity"]),
+            "cache_currentness_digest": digest(args["cache_currentness"]),
+        },
+        "runtime": dict(generation, snapshot_digest="c" * 64),
+    }
+    return args
+
+
+def _refresh_observation_digests(args):
+    import hashlib
+    for name, key in (("control_room", "document_digest"), ("source_validity", "source_validity_digest"), ("cache_currentness", "cache_currentness_digest")):
+        args["owner_observation"]["control_room"][key] = hashlib.sha256(json.dumps(
+            args[name], sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False,
+        ).encode()).hexdigest()
+
+
+def test_v2_bound_owner_observation_makes_current_reachable_without_acceptance():
+    args = _owner_observation_inputs()
+    before = copy.deepcopy(args)
+    doc = compose_mission_workspace_v2(**args)
+    assert args == before
+    assert doc["read_state"]["state"] == "CURRENT"
+    assert doc["source"]["owner_observation"] == args["owner_observation"]
+    assert doc["execution"]["state"] == "COMPLETED"
+    assert doc["acceptance"]["state"] == "NOT_PROJECTED"
+    assert not any(f["target_field"] == "source.generation_vector" for f in doc["missingness"])
+
+
+@pytest.mark.parametrize("branch,field,value", [
+    (None, "schema", "foreign"), (None, "state", []), (None, "extra", "private data"),
+    ("selection", "root_job_id", "JOB-OTHER"), ("selection", "work_ref", "WS:OTHER"),
+    ("selection", "extra", True),
+    ("control_room", "instance_after", "different_instance_123456"),
+    ("control_room", "publication_after", 2), ("control_room", "publication_before", True),
+    ("control_room", "document_digest", "d" * 64),
+    ("control_room", "source_validity_digest", "d" * 64),
+    ("control_room", "cache_currentness_digest", "d" * 64),
+    ("control_room", "instance_before", "/private/host/path"),
+    ("control_room", "extra", True),
+    ("runtime", "schema", "foreign"), ("runtime", "state", "UNKNOWN"),
+    ("runtime", "before", True), ("runtime", "after", 8),
+    ("runtime", "source_identity", "different_runtime_123456"),
+    ("runtime", "source_identity", "sk-secret-token-123456789"),
+    ("runtime", "snapshot_digest", "e" * 64), ("runtime", "extra", True),
+])
+def test_v2_owner_receipt_each_mismatch_refuses_current(branch, field, value):
+    args = _owner_observation_inputs()
+    target = args["owner_observation"] if branch is None else args["owner_observation"][branch]
+    target[field] = value
+    doc = compose_mission_workspace_v2(**args)
+    assert doc["read_state"]["state"] != "CURRENT"
+    assert doc["source"]["owner_observation"]["state"] == "UNKNOWN"
+    assert "private data" not in json.dumps(doc)
+    assert "sk-secret-token" not in json.dumps(doc)
+
+
+@pytest.mark.parametrize("branch", ["runtime", "control_room"])
+def test_v2_same_requires_both_owner_components(branch):
+    args = _owner_observation_inputs()
+    args["owner_observation"][branch] = None
+    assert compose_mission_workspace_v2(**args)["read_state"]["state"] == "PARTIAL"
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda a: a["fabric_view"]["runtime"].pop("acquisition"),
+    lambda a: a["fabric_view"]["runtime"]["acquisition"].update(schema="foreign"),
+    lambda a: a["fabric_view"]["runtime"]["acquisition"].update(owner="viewer"),
+    lambda a: a["fabric_view"]["runtime"]["acquisition"].update(query={"kind": "root_discovery", "root_job_id": "JOB-1"}),
+    lambda a: a["fabric_view"]["runtime"]["acquisition"].update(snapshot_digest="d" * 64),
+    lambda a: a["fabric_view"]["runtime"]["acquisition"].pop("generation"),
+    lambda a: a["fabric_view"]["runtime"]["acquisition"]["generation"].update(state="UNKNOWN"),
+    lambda a: a["fabric_view"]["runtime"]["acquisition"]["generation"].update(before=True, after=True),
+    lambda a: a["fabric_view"].update(generated_at=None),
+])
+def test_v2_owner_receipt_requires_actual_fabric_acquisition_binding(mutation):
+    args = _owner_observation_inputs()
+    mutation(args)
+    assert compose_mission_workspace_v2(**args)["read_state"]["state"] == "PARTIAL"
+
+
+def test_v2_fresh_digests_do_not_override_expired_existing_validity():
+    args = _owner_observation_inputs()
+    args["source_validity"]["cards"][0]["components"]["dispatch"].update(remaining_ms=0, state="expired")
+    _refresh_observation_digests(args)
+    assert compose_mission_workspace_v2(**args)["read_state"]["state"] == "PARTIAL"
+
+
+def test_v2_changed_input_invalidates_receipt_even_when_schema_is_valid():
+    args = _owner_observation_inputs()
+    args["control_room"]["work"][0]["agent_os"]["title"] = "Changed after observation"
+    doc = compose_mission_workspace_v2(**args)
+    assert doc["read_state"]["state"] == "PARTIAL"
+    assert doc["source"]["owner_observation"]["state"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("owner", ["runtime", "control_room"])
+def test_v2_real_owner_conflict_is_preserved_in_conflict_posture(owner):
+    args = _owner_observation_inputs()
+    args["owner_observation"]["state"] = "CONFLICT"
+    if owner == "runtime":
+        args["owner_observation"]["runtime"].update(state="CONFLICT", after=8)
+    else:
+        args["owner_observation"]["control_room"]["instance_after"] = "new_instance_123456789"
+    doc = compose_mission_workspace_v2(**args)
+    assert doc["source"]["owner_observation"]["state"] == "CONFLICT"
+    assert doc["read_state"]["state"] == "PARTIAL"
+    assert doc["posture"]["value"] == "RECONCILIATION_REQUIRED"
+
+
+@pytest.mark.parametrize("state", ["STALE", "CONFLICT"])
+def test_v2_owner_same_does_not_override_existing_generation_diagnostic_conflict(state):
+    args = _owner_observation_inputs()
+    args["source_generation"] = {"state": state, "version": 1, "generation": 3}
+    assert compose_mission_workspace_v2(**args)["read_state"]["state"] == "PARTIAL"
+
+
+def test_v2_unknown_receipt_cannot_hide_or_upgrade_missingness():
+    args = _owner_observation_inputs()
+    args["owner_observation"]["state"] = "UNKNOWN"
+    doc = compose_mission_workspace_v2(**args)
+    assert doc["source"]["owner_observation"]["state"] == "UNKNOWN"
+    assert doc["read_state"]["state"] == "PARTIAL"
+    assert any(f["target_field"] == "source.generation_vector" for f in doc["missingness"])
+
+
+def test_v2_source_currentness_and_child_completeness_remain_distinct():
+    args = _owner_observation_inputs()
+    args["fabric_view"].update(unjoined_job_count=1, unjoined_job_ids=["JOB-CHILD"])
+    args["fabric_view"]["runtime"]["acquisition"]["provenance"].update(state="PARTIAL", unjoined_job_ids=["JOB-CHILD"])
+    doc = compose_mission_workspace_v2(**args)
+    assert doc["read_state"]["state"] == "CURRENT"
+    assert doc["children"]["coverage"] == "INCOMPLETE"
+    assert doc["children"]["unjoined_job_count"] == 1
+    assert doc["acceptance"]["state"] == "NOT_PROJECTED"
+
+
+def test_v2_real_fabric_without_finalized_owner_generation_cannot_be_promoted(tmp_path):
+    from control_plane.executive_runtime import Runtime
+    from control_plane.fabric_job_view import read_fabric_view_v2
+
+    runtime = Runtime.at(tmp_path)
+    job = runtime.jobs.create_job("Bounded producer composition fixture")
+    fabric = read_fabric_view_v2(tmp_path, job.job_id)
+    args = _owner_observation_inputs()
+    args["fabric_view"] = fabric
+    args["root_job_id"] = job.job_id
+    args["owner_observation"]["selection"]["root_job_id"] = job.job_id
+    responsibility = args["control_room"]["autonomy"]["responsibilities"][0]
+    responsibility.update(root_job_id=job.job_id, root_job_candidates=[job.job_id])
+    args["source_validity"]["cards"][0]["root_job_id"] = job.job_id
+    _refresh_observation_digests(args)
+    doc = compose_mission_workspace_v2(**args)
+    assert doc["mission"]["root_job_id"] == job.job_id
+    assert doc["read_state"]["state"] == "PARTIAL"
+    assert doc["source"]["owner_observation"]["state"] == "UNKNOWN"

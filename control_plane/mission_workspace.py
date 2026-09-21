@@ -7,6 +7,8 @@ allowlist, and fails closed when identity, freshness, or shape is not proven.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -23,6 +25,10 @@ SOURCE_VALIDITY_SCHEMA = "mastermind.control_room_source_validity.v1"
 SOURCE_VALIDITY_PROFILE = "b5.darwin-chrome-paired-v1"
 AUTONOMY_VALIDITY_SCHEMA = "mastermind.autonomy_validity.v1"
 AUTONOMY_VALIDITY_POLICY = "mapper-inclusive-48h-future-1h.v1"
+OWNER_OBSERVATION_SCHEMA = "mastermind.workspace_source_observation.v1"
+RUNTIME_OBSERVATION_SCHEMA = "mastermind.runtime_read_observation.v1"
+FABRIC_RUNTIME_ACQUISITION_SCHEMA = "mastermind.fabric_runtime_acquisition.v1"
+OWNER_OBSERVATION_STATES = frozenset({"SAME", "CONFLICT", "UNKNOWN"})
 
 READ_STATES = frozenset({"CURRENT", "PARTIAL", "HISTORICAL", "UNAVAILABLE"})
 SECTION_STATES = frozenset({"AVAILABLE", "EMPTY", "PARTIAL", "HISTORICAL", "UNAVAILABLE"})
@@ -109,6 +115,20 @@ SOURCE_KEYS = frozenset(
         "control_room_schema", "control_room_generated_at", "fabric_view_schema",
         "fabric_view_generated_at", "source_generation", "source_coverage",
     }
+)
+SOURCE_KEYS_V2 = SOURCE_KEYS | {"owner_observation"}
+OWNER_OBSERVATION_KEYS = frozenset(
+    {"schema", "state", "selection", "control_room", "runtime"}
+)
+OWNER_OBSERVATION_CONTROL_ROOM_KEYS = frozenset(
+    {
+        "instance_before", "instance_after",
+        "publication_before", "publication_after",
+        "document_digest", "source_validity_digest", "cache_currentness_digest",
+    }
+)
+OWNER_OBSERVATION_RUNTIME_KEYS = frozenset(
+    {"schema", "state", "source_identity", "before", "after", "snapshot_digest"}
 )
 PROGRAM_KEYS = frozenset(
     {
@@ -218,6 +238,7 @@ FABRIC_V2_NOT_PROJECTED_REASON = "product acceptance has no producer in this pro
 SOURCE_GENERATION_STATES = frozenset({"CURRENT", "STALE", "CONFLICT", "UNKNOWN"})
 
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
+_OPAQUE_REF = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _UTC_TIMESTAMP = re.compile(
     r"^(?P<year>[0-9]{4})-(?P<month>[0-9]{2})-(?P<day>[0-9]{2})"
     r"T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})"
@@ -250,6 +271,17 @@ def _sequence(value: object) -> list[object]:
 
 def _mapping_rows(value: object) -> list[Mapping[str, Any]]:
     return [item for item in _sequence(value) if isinstance(item, Mapping)]
+
+
+def _canonical_json_digest(value: object) -> str:
+    """SHA256 over canonical JSON with the ratified strict settings."""
+
+    payload = value if isinstance(value, Mapping) else {}
+    text = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False, allow_nan=False,
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _safe_text(value: object) -> str | None:
@@ -751,6 +783,124 @@ def _qualified_current(
     return True
 
 
+def _validate_owner_observation(
+    owner_observation: object,
+    *,
+    selected_work_ref: object,
+    selected_root_job_id: object,
+    control_room_doc: object,
+    source_validity_doc: object,
+    cache_currentness_doc: object,
+    fabric_view_doc: object,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Check an internally supplied owner receipt against these exact inputs.
+
+    The service owns acquisition/authentication. This pure validator cannot mint
+    source authority from an HTTP/model argument. SAME describes the two owner
+    samples, with successful final namespace validation and close; it does not
+    assert write exclusion after the final sample or freshness during transport.
+    """
+    selection = {"work_ref": selected_work_ref, "root_job_id": selected_root_job_id}
+    selection_valid = all(
+        isinstance(value, str) and _safe_identifier(value) == value
+        for value in selection.values()
+    )
+    unknown = {
+        "schema": OWNER_OBSERVATION_SCHEMA, "state": "UNKNOWN",
+        "selection": selection if selection_valid else None,
+        "control_room": None, "runtime": None,
+    }
+
+    def invalid(reason="owner observation is invalid", *, missing=False):
+        return unknown, [_fact(
+            "MISSING_PRODUCER" if missing else "DEGRADED",
+            "source.owner_observation", None, reason,
+        )]
+
+    def optional_ref(value):
+        return value is None or (isinstance(value, str) and _OPAQUE_REF.fullmatch(value) is not None and _safe_identifier(value) == value)
+
+    def optional_number(value, minimum):
+        return value is None or (type(value) is int and value >= minimum)
+
+    def optional_digest(value):
+        return value is None or (isinstance(value, str) and _HEX_64.fullmatch(value) is not None)
+
+    if owner_observation is None:
+        return invalid("owner observation is absent", missing=True)
+    row = _mapping(owner_observation)
+    state = row.get("state")
+    if (set(row) != OWNER_OBSERVATION_KEYS or row.get("schema") != OWNER_OBSERVATION_SCHEMA
+            or not isinstance(state, str) or state not in OWNER_OBSERVATION_STATES
+            or not selection_valid or not isinstance(row.get("selection"), Mapping)
+            or dict(row["selection"]) != selection):
+        return invalid()
+
+    control = row.get("control_room")
+    runtime = row.get("runtime")
+    if control is not None:
+        if not isinstance(control, Mapping) or set(control) != OWNER_OBSERVATION_CONTROL_ROOM_KEYS:
+            return invalid()
+        if (not all(optional_ref(control[key]) for key in ("instance_before", "instance_after"))
+                or not all(optional_number(control[key], 1) for key in ("publication_before", "publication_after"))
+                or not all(optional_digest(control[key]) for key in ("document_digest", "source_validity_digest", "cache_currentness_digest"))):
+            return invalid()
+        try:
+            for key, document in (
+                ("document_digest", control_room_doc),
+                ("source_validity_digest", source_validity_doc),
+                ("cache_currentness_digest", cache_currentness_doc),
+            ):
+                if control[key] is not None and control[key] != _canonical_json_digest(document):
+                    return invalid("owner observation input digest does not bind")
+        except (TypeError, ValueError, RecursionError, OverflowError):
+            return invalid("owner observation inputs are not canonical JSON")
+    if runtime is not None:
+        if (not isinstance(runtime, Mapping) or set(runtime) != OWNER_OBSERVATION_RUNTIME_KEYS
+                or runtime.get("schema") != RUNTIME_OBSERVATION_SCHEMA
+                or not isinstance(runtime.get("state"), str)
+                or runtime["state"] not in OWNER_OBSERVATION_STATES
+                or not optional_ref(runtime["source_identity"])
+                or not optional_number(runtime["before"], 0)
+                or not optional_number(runtime["after"], 0)
+                or not optional_digest(runtime["snapshot_digest"])):
+            return invalid()
+
+    if state == "SAME":
+        if (control is None or runtime is None
+                or any(value is None for value in control.values())
+                or any(value is None for value in runtime.values())
+                or control["instance_before"] != control["instance_after"]
+                or control["publication_before"] != control["publication_after"]
+                or runtime["state"] != "SAME" or runtime["before"] != runtime["after"]):
+            return invalid("owner observation SAME is not fully qualified")
+        for document in (source_validity_doc, cache_currentness_doc):
+            publication = _mapping(document).get("publication_seq")
+            if type(publication) is not int or publication != control["publication_after"]:
+                return invalid("owner observation publication does not bind")
+        acquisition = _mapping(_mapping(fabric_view_doc).get("runtime")).get("acquisition")
+        acquisition = _mapping(acquisition)
+        generation = _mapping(acquisition.get("generation"))
+        core_keys = OWNER_OBSERVATION_RUNTIME_KEYS - {"snapshot_digest"}
+        if (acquisition.get("schema") != FABRIC_RUNTIME_ACQUISITION_SCHEMA
+                or acquisition.get("owner") != "executive_runtime"
+                or acquisition.get("query") != {"kind": "root_detail", "root_job_id": selected_root_job_id}
+                or acquisition.get("snapshot_digest") != runtime["snapshot_digest"]
+                or set(generation) != core_keys
+                or any(generation[key] != runtime[key] or type(generation[key]) is not type(runtime[key]) for key in core_keys)):
+            return invalid("owner observation Runtime receipt does not bind Fabric acquisition")
+    elif state == "UNKNOWN":
+        # No unverified partial payload or unknown fields become source identity.
+        return invalid("owner observation is unavailable", missing=True)
+
+    sanitized = {
+        "schema": OWNER_OBSERVATION_SCHEMA, "state": state, "selection": selection,
+        "control_room": dict(control) if control is not None else None,
+        "runtime": dict(runtime) if runtime is not None else None,
+    }
+    return sanitized, []
+
+
 def _posture(
     *, execution: str, dispatch: str, current: bool, conflict: bool, blocker: bool,
     acceptance: Mapping[str, Any], review: str,
@@ -1068,6 +1218,8 @@ def _compose_mission_workspace(
     execution_states: frozenset[str],
     result_validator: Any,
     posture_composer: Any,
+    owner_observation: Mapping[str, Any] | None = None,
+    emit_owner_observation: bool = False,
 ) -> dict[str, Any]:
     """Pure deterministic read-only mission workspace projection."""
 
@@ -1080,6 +1232,19 @@ def _compose_mission_workspace(
     control_generation = _safe_timestamp(control.get("generated_at"))
     fabric_generation = _safe_timestamp(fabric.get("generated_at"))
     generation_projection = _source_generation(source_generation)
+
+    sanitized_owner_observation, observation_facts = (
+        _validate_owner_observation(
+            owner_observation,
+            selected_work_ref=work_ref,
+            selected_root_job_id=root_job_id,
+            control_room_doc=control,
+            source_validity_doc=validity,
+            cache_currentness_doc=cache,
+            fabric_view_doc=fabric,
+        ) if emit_owner_observation else ({"state": "UNKNOWN"}, [])
+    )
+    observation_state = sanitized_owner_observation["state"]
 
     safe_work_ref = _safe_identifier(work_ref)
     matching_work = (
@@ -1141,10 +1306,15 @@ def _compose_mission_workspace(
         control_generated_at=control_generation,
         autonomy_generated_at=_safe_timestamp(autonomy.get("generated_at")),
     )
-    # G8 remains open: no owner-issued cross-owner generation-vector contract
-    # exists.  Caller-supplied generation diagnostics are retained below but
-    # cannot prove a current Control Room/Fabric observation.
-    cross_owner_generation_current = False
+    # Cross-owner currentness is bound to the validated owner observation
+    # receipt (SAME ⇒ True).  Anything else (UNKNOWN, malformed, structurally
+    # valid CONFLICT) keeps the previous hard-coded False; the v1 path always
+    # sees no owner observation at all, preserving v1 byte semantics.
+    cross_owner_generation_current = (
+        emit_owner_observation and observation_state == "SAME"
+        and fabric_generation is not None
+        and generation_projection["state"] not in {"STALE", "CONFLICT"}
+    )
     observation_current = (
         control_current
         and cross_owner_generation_current
@@ -1166,12 +1336,13 @@ def _compose_mission_workspace(
         "evidence": [],
     }
     generation_conflict = generation_projection["state"] == "CONFLICT"
+    observation_conflict = observation_state == "CONFLICT"
     blocker = bool(responsibility.get("blocker") or responsibility.get("declared_blocker"))
     posture_value, posture_rule = posture_composer(
         execution=execution_state or "UNKNOWN",
         dispatch=dispatch_state,
         current=observation_current,
-        conflict=(runtime_root_state == "CONFLICT" or generation_conflict),
+        conflict=(runtime_root_state == "CONFLICT" or generation_conflict or observation_conflict),
         blocker=blocker,
         acceptance=acceptance,
         review=review_verdict,
@@ -1244,12 +1415,20 @@ def _compose_mission_workspace(
         _fact("MISSING_PRODUCER", "mission.title", "executive_os", "mission title is not projected"),
         _fact("MISSING_PRODUCER", "transport.continued", "slack", "continuation is not projected"),
         _fact("MISSING_PRODUCER", "transport.stopped", "slack", "terminal stop is not projected"),
-        _fact(
-            "MISSING_PRODUCER", "source.generation_vector", None,
-            "cross-owner generation vector is not projected",
-        ),
         _fact("EXCLUDED", "conversation", "executive_os", "mission tree content is excluded"),
     ]
+    # source.generation_vector missingness is conditioned on the lack of a
+    # qualified owner receipt: SAME ⇒ vector is projected; everything else
+    # (UNKNOWN / malformed / CONFLICT / absent) keeps the historical fact.
+    if observation_state != "SAME":
+        extra_facts.append(
+            _fact(
+                "MISSING_PRODUCER", "source.generation_vector", None,
+                "cross-owner generation vector is not projected",
+            )
+        )
+    for fact in observation_facts:
+        extra_facts.append(fact)
     if duplicate_program:
         extra_facts.append(_fact("DEGRADED", "program", "control_room_cache", "duplicate program identity"))
     if duplicate_responsibility:
@@ -1426,6 +1605,8 @@ def _compose_mission_workspace(
             if available
         ],
     }
+    if emit_owner_observation:
+        source["owner_observation"] = sanitized_owner_observation
 
     output = {
         "schema": schema,
@@ -1470,7 +1651,8 @@ def _compose_mission_workspace(
     }
 
     assert set(output) == OUTPUT_KEYS
-    assert set(output["source"]) == SOURCE_KEYS
+    expected_source_keys = SOURCE_KEYS_V2 if emit_owner_observation else SOURCE_KEYS
+    assert set(output["source"]) == expected_source_keys
     assert set(output["source"]["source_generation"]) == SOURCE_GENERATION_KEYS
     assert set(output["read_state"]) == READ_STATE_KEYS
     assert set(output["program"]) == PROGRAM_KEYS
@@ -1540,6 +1722,8 @@ def compose_mission_workspace(
         execution_states=EXECUTION_STATES,
         result_validator=_valid_result,
         posture_composer=_posture,
+        owner_observation=None,
+        emit_owner_observation=False,
     )
 
 
@@ -1552,6 +1736,7 @@ def compose_mission_workspace_v2(
     source_validity: Mapping[str, Any] | None,
     cache_currentness: Mapping[str, Any] | None,
     source_generation: Mapping[str, Any] | None,
+    owner_observation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compose Mission-v2 from only the exact frozen Fabric-v2 public contract."""
 
@@ -1569,4 +1754,6 @@ def compose_mission_workspace_v2(
         execution_states=EXECUTION_STATES_V2,
         result_validator=_valid_result_v2,
         posture_composer=_posture_v2,
+        owner_observation=owner_observation,
+        emit_owner_observation=True,
     )
