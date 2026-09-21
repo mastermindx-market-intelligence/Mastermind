@@ -20,6 +20,9 @@ tools.push({name: 'list_directory', description: 'Fixture local reader.',
     idempotentHint: true, openWorldHint: false}});
 tools.push({name: 'unknown_capability', description: 'Fixture unknown.',
   inputSchema: {type: 'object', properties: {}, additionalProperties: false}});
+tools.push({name: 'partial_unknown', description: 'Fixture incomplete safety labels.',
+  inputSchema: {type: 'object', properties: {}, additionalProperties: false},
+  annotations: {destructiveHint: false, idempotentHint: true, openWorldHint: false}});
 const server = new Server({name: 'metadata-fixture', version: '0.0.0'},
   {capabilities: {tools: {}}});
 server.setRequestHandler(ListToolsRequestSchema, async () => ({tools}));

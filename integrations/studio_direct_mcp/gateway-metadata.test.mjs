@@ -90,3 +90,9 @@ test('catalog hardening preserves caller schemas and the existing page reader', 
   assert.equal(tools.has('studio_output_page'), true);
   assert.equal(tools.get('studio_output_page').annotations.readOnlyHint, true);
 });
+
+test('missing read-only evidence preserves the prior destructive default', () => {
+  const a = tools.get('partial_unknown').annotations;
+  assert.equal(a.readOnlyHint, false);
+  assert.equal(a.destructiveHint, true);
+});

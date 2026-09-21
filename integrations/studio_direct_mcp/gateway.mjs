@@ -617,35 +617,54 @@ function handleStudioPing(session) {
  * Tool metadata proxying
  * ------------------------------------------------------------------ */
 
-/**
- * The backend ships accurate annotations for every tool it registers
- * (readOnlyHint true for read_file / list_directory / get_file_info / ... and
- * destructiveHint true for write_file / edit_block / start_process /
- * kill_process / ...), so they are forwarded byte-for-byte. This only fills a
- * gap, and fills it conservatively: a tool that arrives with no annotations at
- * all is declared mutating and destructive, never read-only.
+/** Reviewed effect floors for existing backend capabilities, not permissions.
+ * Missing hints are explicit and conservative. Upstream labels cannot turn a
+ * known write, arbitrary shell command, or external request into a harmless read.
+ * Authorization and actual execution remain with their existing owners.
  */
+const MUTATING_BACKEND_TOOL_NAMES = new Set([
+  'set_config_value', 'write_file', 'write_pdf', 'create_directory', 'move_file',
+  'edit_block', 'start_process', 'interact_with_process', 'force_terminate',
+  'kill_process', 'give_feedback_to_desktop_commander',
+]);
+const DESTRUCTIVE_BACKEND_TOOL_NAMES = new Set([
+  'set_config_value', 'write_file', 'write_pdf', 'move_file', 'edit_block',
+  'start_process', 'interact_with_process', 'force_terminate', 'kill_process',
+]);
+const NONIDEMPOTENT_BACKEND_TOOL_NAMES = new Set([
+  'write_file', 'write_pdf', 'edit_block', 'start_process', 'interact_with_process',
+  'force_terminate', 'kill_process', 'give_feedback_to_desktop_commander',
+]);
+const OPEN_WORLD_BACKEND_TOOL_NAMES = new Set([
+  'read_file', 'start_process', 'interact_with_process',
+  'give_feedback_to_desktop_commander',
+]);
+
 function conservativeAnnotations(tool) {
-  const existing = tool && typeof tool === 'object' ? tool.annotations : undefined;
-  if (existing && typeof existing === 'object') {
-    // Trust the backend, but never let an absent readOnlyHint default to true.
-    if (typeof existing.readOnlyHint !== 'boolean') {
-      return { ...existing, readOnlyHint: false, destructiveHint: true };
-    }
-    return existing;
-  }
+  const raw = tool?.annotations;
+  const existing = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const booleanOr = (key, fallback) =>
+    typeof existing[key] === 'boolean' ? existing[key] : fallback;
+  const readOnlyHint = !MUTATING_BACKEND_TOOL_NAMES.has(tool?.name)
+    && booleanOr('readOnlyHint', false);
   return {
-    title: typeof tool?.title === 'string' ? tool.title : tool?.name,
-    readOnlyHint: false,
-    destructiveHint: true,
-    idempotentHint: false,
-    openWorldHint: true,
+    ...existing,
+    ...(Object.keys(existing).length === 0
+      ? {title: typeof tool?.title === 'string' ? tool.title : tool?.name} : {}),
+    readOnlyHint,
+    destructiveHint: typeof existing.readOnlyHint !== 'boolean'
+      || DESTRUCTIVE_BACKEND_TOOL_NAMES.has(tool?.name)
+      || booleanOr('destructiveHint', !readOnlyHint),
+    idempotentHint: !NONIDEMPOTENT_BACKEND_TOOL_NAMES.has(tool?.name)
+      && booleanOr('idempotentHint', false),
+    openWorldHint: OPEN_WORLD_BACKEND_TOOL_NAMES.has(tool?.name)
+      || booleanOr('openWorldHint', true),
   };
 }
 
 const NEUTRAL_BACKEND_TOOL_DESCRIPTIONS = Object.freeze({
   get_config: 'Returns Desktop Commander configuration, access bounds, runtime metadata, and client information.',
-  set_config_value: 'Updates one supported Desktop Commander configuration value.',
+  set_config_value: "Updates one Desktop Commander setting, including filesystem access bounds, blocked commands, or the default shell. Security-related changes affect later tool calls and do not override operating-system permissions.",
   read_file: 'Reads one allowed local file or supported URL, with bounded paging for supported formats.',
   read_multiple_files: 'Reads multiple allowed local files and returns contents or per-file errors.',
   write_file: 'Creates, replaces, or appends content in one allowed local file.',
@@ -660,16 +679,16 @@ const NEUTRAL_BACKEND_TOOL_DESCRIPTIONS = Object.freeze({
   get_file_info: 'Returns metadata for an allowed local file or directory.',
   list_allowed_directories: 'Returns the local filesystem directories allowed for file operations.',
   edit_block: 'Applies an exact text or supported document-block replacement in one allowed local file.',
-  start_process: 'Starts a local terminal process for a caller-supplied command and returns initial output with process state.',
+  start_process: "Runs a caller-supplied shell command on the connected computer with the host user's permissions. Commands may change files, launch programs, or access the network; file-tool directory limits are not a shell sandbox. Returns output and process state.",
   read_process_output: 'Reads bounded output from an existing terminal process.',
-  interact_with_process: 'Sends input to an existing terminal process and returns subsequent output with process state.',
+  interact_with_process: "Sends input to an existing terminal process and returns output and process state. The input may execute commands, modify files, or access the network with that process's permissions.",
   force_terminate: 'Terminates an existing terminal session by process identifier.',
   list_sessions: 'Lists terminal sessions owned by the Desktop Commander runtime.',
   list_processes: 'Lists operating-system processes visible to the Desktop Commander runtime.',
   kill_process: 'Terminates a running operating-system process by process identifier.',
   get_usage_stats: 'Returns Desktop Commander usage and performance statistics.',
-  get_recent_tool_calls: 'Returns recent locally retained Desktop Commander tool-call metadata and bounded outputs.',
-  give_feedback_to_desktop_commander: 'Opens the Desktop Commander feedback form in the local browser.',
+  get_recent_tool_calls: "Returns locally retained tool-call metadata, arguments, and bounded outputs, which may contain sensitive user data.",
+  give_feedback_to_desktop_commander: "Opens the Desktop Commander feedback form in the local browser and sends usage statistics, platform information, and a client identifier to the feedback service. Survey answers are entered in the form.",
   get_prompts: 'Returns one Desktop Commander onboarding prompt by identifier.',
   search_files: 'Searches allowed local directories for files matching a bounded query.',
 });
