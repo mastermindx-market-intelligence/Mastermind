@@ -1,6 +1,6 @@
 import type { AuthState, MissionHost } from "./host";
 import type { WindowDocument } from "./workspace-contract";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   allEvidence,
   decodeMission,
@@ -509,6 +509,16 @@ export function App() {
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
+  const routeHeading = useRef<HTMLHeadingElement>(null),
+    previousView = useRef(active);
+  useLayoutEffect(() => {
+    if (previousView.current === active) return;
+    previousView.current = active;
+    // A removed content action leaves focus on body. Preserve connected
+    // controls (including navigation), and never move focus for data refreshes.
+    if (!document.activeElement || document.activeElement === document.body)
+      routeHeading.current?.focus();
+  }, [active]);
   useEffect(
     () =>
       window.MastermindMissionHost?.auth?.subscribe((state) => {
@@ -932,6 +942,7 @@ export function App() {
             <button
               key={x}
               className={active === x ? "active" : ""}
+              aria-current={active === x ? "page" : undefined}
               onClick={() => setActive(x)}
             >
               {x}
@@ -949,7 +960,9 @@ export function App() {
         <header>
           <div>
             <span className="eyebrow">{active}</span>
-            <h1>{active}</h1>
+            <h1 ref={routeHeading} tabIndex={-1}>
+              {active}
+            </h1>
             <p>{headerSummary}</p>
           </div>
           <div className="facts">

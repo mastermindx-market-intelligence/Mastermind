@@ -727,3 +727,68 @@ describe("installed authentication and permitted content", () => {
     expect(screen.queryByText("Permitted fixture response")).toBeNull();
   });
 });
+
+describe("route focus handoff", () => {
+  it("moves keyboard focus from a removed Open Programs action to the route heading", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    expect(document.activeElement).toBe(document.body);
+    screen.getByRole("button", { name: "Open Programs" }).focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Programs", level: 1 }),
+    );
+  });
+
+  it("retains persistent navigation focus and exposes the current route", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const programs = screen.getByRole("button", { name: "Programs" });
+    programs.focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(programs);
+    expect(programs.getAttribute("aria-current")).toBe("page");
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(programs);
+  });
+
+  it("hands program selection to the Mission heading without stealing focus when data resolves", async () => {
+    const pending = deferred<unknown>();
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      readPrograms,
+      readMission: ({ workRef }) =>
+        workRef === "WS:BETA"
+          ? pending.promise
+          : Promise.resolve(missionFixture("WS:ALPHA", "JOB-A")),
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    screen.getByRole("button", { name: "Open Programs" }).focus();
+    await user.keyboard("{Enter}");
+    (await screen.findByRole("button", { name: /Beta program/ })).focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Mission Workspace", level: 1 }),
+    );
+    const connections = screen.getByRole("button", { name: "Connections" });
+    connections.focus();
+    await act(async () => pending.resolve(missionFixture("WS:BETA", "JOB-B")));
+    expect(document.activeElement).toBe(connections);
+  });
+
+  it("does not focus a heading on initial render or a late Programs read", async () => {
+    const pending = deferred<unknown>();
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      readPrograms: () => pending.promise,
+      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+    };
+    render(<App />);
+    expect(document.activeElement).toBe(document.body);
+    const action = screen.getByRole("button", { name: "Open Programs" });
+    action.focus();
+    await act(async () => pending.resolve(controlRoomFixture()));
+    expect(document.activeElement).toBe(action);
+  });
+});
