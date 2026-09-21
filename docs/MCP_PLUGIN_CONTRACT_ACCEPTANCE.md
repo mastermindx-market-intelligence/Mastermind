@@ -80,11 +80,16 @@ labels, understated known mutations, command/network/idempotency effects, preser
 reader labels, conservative unknowns, clear disclosures, and the existing output-page tool.
 The fixture performs no host commands or provider calls.
 
-Run `tests/test_executive_mcp_metadata.py` and the existing Executive read, submit, mutation,
-and composition regressions. The separate executable-contract digest covers names, input
-schemas, read/write status, and effect labels. Descriptions may change only alongside an
-intentional public `SCHEMA_SNAPSHOT_SHA256` update. Input and permission changes are not
-smuggled into a metadata release.
+For a Studio-only release, keep the complete Executive schema source and public metadata
+fingerprint unchanged. Run the existing Executive read, submit, mutation, app-composition,
+static-fence, and Business installation regressions. Their exact frozen digest assertions
+remain in place; Studio metadata work does not migrate or relax them.
+
+An Executive description change is a separate coordinated contract migration because its
+public fingerprint includes descriptions. That migration must qualify every existing
+installation consumer and approved app publication together, while independently proving
+that invocation, effect, and authorization contracts remain unchanged. A Studio-only
+release does not authorize that migration or claim it was delivered.
 
 Keep the existing gateway auth, principal isolation, output paging, timeout/effect-unknown,
 no-replay, Git, and Paper regressions. Test reports must disclose failures and skips.
@@ -96,10 +101,17 @@ for an explicitly selected safe canary. Preserve the installed rollback identity
 active operation/handle custody. Do not restart all seats from a metadata task.
 
 The app publisher then compares the accepted live catalog to the approved app snapshot.
-Workspace-managed apps need an administrator's supported review/refresh/publication flow;
-new or changed actions retain the host's consent and access controls. Personal-app flows
-must use the actual supported account interface. A new chat alone is not a guaranteed
-catalog refresh. Do not uninstall working apps indiscriminately or rotate app identities
+Workspace-managed apps need their plan-specific administrator publication flow. Current
+Business guidance requires recreating and republishing a published app to change tools or
+metadata; Enterprise/Edu provide action-refresh controls. New or changed actions retain
+the host's consent and access controls. Personal-app flows must use the actual supported
+account interface. A new chat alone is not a guaranteed catalog refresh.
+
+Qualify plan eligibility separately from metadata. Current published OpenAI guidance limits
+Pro custom-MCP access to read/fetch and lists full write support for Business and
+Enterprise/Edu. A plugin display name, historical tool exposure, or permissive app setting
+is not proof of plan entitlement. Record the actual supported surface and observed action
+set without trying another account to perform a refused action. Do not uninstall working apps indiscriminately or rotate app identities
 to attempt to erase a restriction.
 
 A fresh-session acceptance check must verify the expected exact actions and their current
