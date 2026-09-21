@@ -104,6 +104,7 @@ def run(argv: list[str]) -> dict[str, Any]:
         binding,
         catalog=catalog,
         now_ms=args.now_ms,
+        expected_return_subject_digest=args.return_subject_digest,
     )
     return {
         "ok": True,
@@ -113,6 +114,7 @@ def run(argv: list[str]) -> dict[str, Any]:
             validated,
             catalog=catalog,
             now_ms=args.now_ms,
+            expected_return_subject_digest=args.return_subject_digest,
         ),
         "provider_effect_performed": False,
         "authority_granted": False,
