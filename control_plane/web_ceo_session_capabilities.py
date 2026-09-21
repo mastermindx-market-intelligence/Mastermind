@@ -12,8 +12,8 @@ The important asymmetry is deliberate:
 
 * an absent required capability may exclude a PRE_START/effect=NONE candidate;
 * an unknown capability never widens authority or causes automatic rebinding;
-* a positive capability must be backed by an effective-schema observation or a
-  no-effect probe, never by free-form model prose;
+* schema presence alone never proves a positive capability; a successful
+  current-generation no-effect serviceability probe is required;
 * after START, or while an effect is unknown, the current binding stays sticky.
 
 The real effectful consumer is still the existing Capacity-C2 commitment
@@ -74,6 +74,20 @@ KNOWN_EFFECTIVE_CAPABILITIES = (
     "studio_direct_read",
     "studio_direct_write",
 )
+
+CAPABILITY_FAMILIES = {
+    "desktop_commander_command": "desktop_commander",
+    "desktop_commander_read": "desktop_commander",
+    "desktop_commander_write": "desktop_commander",
+    "executive_read": "executive",
+    "executive_submit": "executive",
+    "github_read": "github",
+    "github_write": "github",
+    "studio_direct_command": "studio_direct",
+    "studio_direct_read": "studio_direct",
+    "studio_direct_write": "studio_direct",
+}
+SERVICEABILITY_FAMILIES = frozenset(CAPABILITY_FAMILIES.values())
 
 
 class WebCeoSessionCapabilityError(ValueError):
@@ -267,6 +281,13 @@ class CapabilityObservation:
             code="CAPABILITY_PROOF_CLASS_INVALID",
         )
         if (
+            self.state is CapabilityObservationState.PRESENT
+            and self.proof_class is not CapabilityProofClass.NO_EFFECT_PROBE
+        ):
+            raise WebCeoSessionCapabilityError(
+                "PRESENT_REQUIRES_SERVICEABILITY_PROOF"
+            )
+        if (
             self.state is CapabilityObservationState.ABSENT
             and self.proof_class is not CapabilityProofClass.EFFECTIVE_SCHEMA
         ):
@@ -374,13 +395,19 @@ def build_receipt_from_effective_tool_schema(
     binding_generation: int,
     observed_at_ms: int,
     expires_at_ms: int,
+    family_serviceability: Mapping[str, bool] | None = None,
 ) -> WebCeoSessionCapabilityReceipt:
-    """Derive the closed Web-CEO action-capability vocabulary from one schema.
+    """Derive capability evidence from schema plus no-effect serviceability.
 
-    The caller supplies the effective tool names actually exposed to the exact
-    Web session. The raw names are hashed but are not copied into the receipt.
-    This producer cannot grant an unknown capability because it emits only the
-    closed KNOWN_EFFECTIVE_CAPABILITIES vocabulary.
+    A complete effective schema may prove that a capability is absent. It may
+    not prove that a visible connector is actually usable. Positive capability
+    therefore requires a successful current-generation no-effect serviceability
+    probe for that connector family. Failed or unprobed serviceability remains
+    UNKNOWN and cannot cross the placement commitment fence.
+
+    family_serviceability is deliberately coarse to connector families, never
+    organizational permission. It says only whether a safe read or health probe
+    for that exact current family generation succeeded.
     """
 
     if isinstance(tool_names, (str, bytes)) or not isinstance(tool_names, Sequence):
@@ -391,18 +418,48 @@ def build_receipt_from_effective_tool_schema(
     effective = _capabilities_from_effective_tool_schema(normalized)
     if tuple(sorted(effective)) != KNOWN_EFFECTIVE_CAPABILITIES:
         raise WebCeoSessionCapabilityError("EFFECTIVE_CAPABILITY_MAP_INVALID")
-    observations = tuple(
-        CapabilityObservation(
-            name=name,
-            state=(
-                CapabilityObservationState.PRESENT
-                if effective[name]
-                else CapabilityObservationState.ABSENT
-            ),
-            proof_class=CapabilityProofClass.EFFECTIVE_SCHEMA,
+
+    if family_serviceability is None:
+        probes: dict[str, bool] = {}
+    elif isinstance(family_serviceability, Mapping):
+        probes = dict(family_serviceability)
+    else:
+        raise WebCeoSessionCapabilityError("SERVICEABILITY_PROBES_INVALID")
+    if any(
+        family not in SERVICEABILITY_FAMILIES or type(result) is not bool
+        for family, result in probes.items()
+    ):
+        raise WebCeoSessionCapabilityError("SERVICEABILITY_PROBES_INVALID")
+    for family, result in probes.items():
+        if result and not any(
+            effective[name]
+            for name in KNOWN_EFFECTIVE_CAPABILITIES
+            if CAPABILITY_FAMILIES[name] == family
+        ):
+            raise WebCeoSessionCapabilityError(
+                "SERVICEABILITY_PROBE_WITHOUT_SURFACE"
+            )
+
+    observations: list[CapabilityObservation] = []
+    for name in KNOWN_EFFECTIVE_CAPABILITIES:
+        if not effective[name]:
+            state = CapabilityObservationState.ABSENT
+            proof = CapabilityProofClass.EFFECTIVE_SCHEMA
+        else:
+            probe = probes.get(CAPABILITY_FAMILIES[name])
+            if probe is True:
+                state = CapabilityObservationState.PRESENT
+                proof = CapabilityProofClass.NO_EFFECT_PROBE
+            elif probe is False:
+                state = CapabilityObservationState.UNKNOWN
+                proof = CapabilityProofClass.NO_EFFECT_PROBE
+            else:
+                state = CapabilityObservationState.UNKNOWN
+                proof = CapabilityProofClass.EFFECTIVE_SCHEMA
+        observations.append(
+            CapabilityObservation(name=name, state=state, proof_class=proof)
         )
-        for name in KNOWN_EFFECTIVE_CAPABILITIES
-    )
+
     return WebCeoSessionCapabilityReceipt(
         worker_id=worker_id,
         quota_class=quota_class,
@@ -413,7 +470,7 @@ def build_receipt_from_effective_tool_schema(
         expires_at_ms=expires_at_ms,
         schema_complete=True,
         tool_schema_digest=_digest({"tool_names": list(normalized)}),
-        observations=observations,
+        observations=tuple(observations),
     )
 
 

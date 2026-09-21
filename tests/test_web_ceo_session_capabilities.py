@@ -149,17 +149,17 @@ def test_exact_fresh_action_capabilities_allow_guarded_commitment() -> None:
         _observation(
             "executive_submit",
             wcap.CapabilityObservationState.PRESENT,
-            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+            wcap.CapabilityProofClass.NO_EFFECT_PROBE,
         ),
         _observation(
             "studio_direct_write",
             wcap.CapabilityObservationState.PRESENT,
-            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+            wcap.CapabilityProofClass.NO_EFFECT_PROBE,
         ),
         _observation(
             "desktop_commander_write",
             wcap.CapabilityObservationState.PRESENT,
-            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+            wcap.CapabilityProofClass.NO_EFFECT_PROBE,
         ),
         _observation(
             "github_read",
@@ -246,7 +246,7 @@ def test_unknown_required_capability_requires_more_proof_not_rebind() -> None:
         _observation(
             "executive_submit",
             wcap.CapabilityObservationState.PRESENT,
-            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+            wcap.CapabilityProofClass.NO_EFFECT_PROBE,
         ),
         _observation(
             "studio_direct_write",
@@ -296,7 +296,7 @@ def test_stale_capability_evidence_never_commits_or_rebinds() -> None:
         _observation(
             "executive_submit",
             wcap.CapabilityObservationState.PRESENT,
-            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+            wcap.CapabilityProofClass.NO_EFFECT_PROBE,
         ),
         expires_at_ms=1_789_870_030_000,
     )
@@ -326,7 +326,7 @@ def test_exact_identity_or_binding_mismatch_requires_reconciliation(
         _observation(
             "executive_submit",
             wcap.CapabilityObservationState.PRESENT,
-            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+            wcap.CapabilityProofClass.NO_EFFECT_PROBE,
         )
     )
     kwargs = {change: value}
@@ -379,7 +379,7 @@ def test_prestart_applied_effect_is_reconciliation_required() -> None:
         _observation(
             "executive_submit",
             wcap.CapabilityObservationState.PRESENT,
-            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+            wcap.CapabilityProofClass.NO_EFFECT_PROBE,
         )
     )
     preflight = _assess(
@@ -396,7 +396,7 @@ def test_receipt_wire_round_trip_is_closed_and_deterministic() -> None:
         _observation(
             "studio_direct_write",
             wcap.CapabilityObservationState.PRESENT,
-            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+            wcap.CapabilityProofClass.NO_EFFECT_PROBE,
         ),
         _observation(
             "executive_submit",
@@ -423,7 +423,7 @@ def test_guard_rejects_preflight_for_different_selected_candidate() -> None:
         _observation(
             "executive_submit",
             wcap.CapabilityObservationState.PRESENT,
-            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+            wcap.CapabilityProofClass.NO_EFFECT_PROBE,
         )
     )
     preflight = _assess(
@@ -487,6 +487,12 @@ def test_effective_tool_schema_producer_maps_real_tool_families() -> None:
         binding_generation=7,
         observed_at_ms=1_789_870_000_000,
         expires_at_ms=1_789_870_120_000,
+        family_serviceability={
+            "github": True,
+            "executive": True,
+            "studio_direct": True,
+            "desktop_commander": True,
+        },
     )
     states = {item.name: item.state for item in receipt.observations}
     assert states["github_read"] is wcap.CapabilityObservationState.PRESENT
@@ -500,7 +506,7 @@ def test_effective_tool_schema_producer_maps_real_tool_families() -> None:
     assert states["desktop_commander_write"] is wcap.CapabilityObservationState.PRESENT
     assert states["desktop_commander_command"] is wcap.CapabilityObservationState.PRESENT
     assert all(
-        item.proof_class is wcap.CapabilityProofClass.EFFECTIVE_SCHEMA
+        item.proof_class is wcap.CapabilityProofClass.NO_EFFECT_PROBE
         for item in receipt.observations
     )
 
@@ -519,6 +525,7 @@ def test_effective_tool_schema_producer_turns_github_read_only_astra_into_rebind
         binding_generation=7,
         observed_at_ms=1_789_870_000_000,
         expires_at_ms=1_789_870_120_000,
+        family_serviceability={"github": True},
     )
     states = {item.name: item.state for item in receipt.observations}
     assert states["github_read"] is wcap.CapabilityObservationState.PRESENT
@@ -567,4 +574,142 @@ def test_effective_tool_schema_rejects_duplicate_tool_names() -> None:
             binding_generation=7,
             observed_at_ms=1_789_870_000_000,
             expires_at_ms=1_789_870_120_000,
+        )
+
+
+def test_visible_tools_without_serviceability_remain_unknown_and_cannot_commit() -> None:
+    receipt = wcap.build_receipt_from_effective_tool_schema(
+        tool_names=(
+            "mcp__Mastermind_Executive_v2__executive_state",
+            "mcp__Mastermind_Executive_v2__submit_ceo_intent",
+            "mcp__Studio_Direct___C2_Personal__get_config",
+            "mcp__Studio_Direct___C2_Personal__write_file",
+            "mcp__Remote_Desktop_Commander__read_file",
+            "mcp__Remote_Desktop_Commander__write_file",
+        ),
+        worker_id="web-ceo-c3-astra",
+        quota_class="chatgpt-pro",
+        session_ref="websol-c3-session-17",
+        binding_ref="runtimebinding-websol-c3-17",
+        binding_generation=7,
+        observed_at_ms=1_789_870_000_000,
+        expires_at_ms=1_789_870_120_000,
+    )
+    states = {item.name: item.state for item in receipt.observations}
+    assert states["executive_submit"] is wcap.CapabilityObservationState.UNKNOWN
+    assert states["studio_direct_write"] is wcap.CapabilityObservationState.UNKNOWN
+    assert states["desktop_commander_write"] is wcap.CapabilityObservationState.UNKNOWN
+
+    preflight = _assess(receipt)
+    assert preflight.state is wcap.PreflightState.CAPABILITY_PROOF_REQUIRED
+    assert preflight.rebind_allowed is False
+    assert preflight.unknown_capabilities == (
+        "desktop_commander_write",
+        "executive_submit",
+        "studio_direct_write",
+    )
+
+
+def test_failed_executive_serviceability_does_not_false_green_visible_submit() -> None:
+    receipt = wcap.build_receipt_from_effective_tool_schema(
+        tool_names=(
+            "mcp__Mastermind_Executive_v2__executive_state",
+            "mcp__Mastermind_Executive_v2__submit_ceo_intent",
+            "mcp__Studio_Direct___C2_Personal__get_config",
+            "mcp__Studio_Direct___C2_Personal__write_file",
+            "mcp__Remote_Desktop_Commander__read_file",
+            "mcp__Remote_Desktop_Commander__write_file",
+        ),
+        worker_id="web-ceo-c3-astra",
+        quota_class="chatgpt-pro",
+        session_ref="websol-c3-session-17",
+        binding_ref="runtimebinding-websol-c3-17",
+        binding_generation=7,
+        observed_at_ms=1_789_870_000_000,
+        expires_at_ms=1_789_870_120_000,
+        family_serviceability={
+            "executive": False,
+            "studio_direct": True,
+            "desktop_commander": True,
+        },
+    )
+    observations = {item.name: item for item in receipt.observations}
+    assert (
+        observations["executive_submit"].state
+        is wcap.CapabilityObservationState.UNKNOWN
+    )
+    assert (
+        observations["executive_submit"].proof_class
+        is wcap.CapabilityProofClass.NO_EFFECT_PROBE
+    )
+    assert (
+        observations["studio_direct_write"].state
+        is wcap.CapabilityObservationState.PRESENT
+    )
+    assert (
+        observations["desktop_commander_write"].state
+        is wcap.CapabilityObservationState.PRESENT
+    )
+
+    preflight = _assess(receipt)
+    assert preflight.state is wcap.PreflightState.CAPABILITY_PROOF_REQUIRED
+    assert preflight.rebind_allowed is False
+    assert preflight.unknown_capabilities == ("executive_submit",)
+
+
+def test_successful_serviceability_without_exposed_surface_is_refused() -> None:
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="SERVICEABILITY_PROBE_WITHOUT_SURFACE",
+    ):
+        wcap.build_receipt_from_effective_tool_schema(
+            tool_names=("mcp__GitHub__fetch_file",),
+            worker_id="web-ceo-c3-astra",
+            quota_class="chatgpt-pro",
+            session_ref="websol-c3-session-17",
+            binding_ref="runtimebinding-websol-c3-17",
+            binding_generation=7,
+            observed_at_ms=1_789_870_000_000,
+            expires_at_ms=1_789_870_120_000,
+            family_serviceability={"executive": True},
+        )
+
+
+@pytest.mark.parametrize(
+    "family_serviceability",
+    (
+        {"unknown_family": True},
+        {"github": 1},
+        {"github": "yes"},
+    ),
+)
+def test_invalid_serviceability_probe_shapes_are_refused(
+    family_serviceability: object,
+) -> None:
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="SERVICEABILITY_PROBES_INVALID",
+    ):
+        wcap.build_receipt_from_effective_tool_schema(
+            tool_names=("mcp__GitHub__fetch_file",),
+            worker_id="web-ceo-c3-astra",
+            quota_class="chatgpt-pro",
+            session_ref="websol-c3-session-17",
+            binding_ref="runtimebinding-websol-c3-17",
+            binding_generation=7,
+            observed_at_ms=1_789_870_000_000,
+            expires_at_ms=1_789_870_120_000,
+            family_serviceability=family_serviceability,
+        )
+
+
+def test_positive_capability_requires_serviceability_probe_proof() -> None:
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="PRESENT_REQUIRES_SERVICEABILITY_PROOF",
+    ):
+        _observation(
+            "executive_submit",
+            wcap.CapabilityObservationState.PRESENT,
+            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
         )
