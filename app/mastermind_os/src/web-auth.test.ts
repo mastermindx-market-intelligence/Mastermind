@@ -46,15 +46,13 @@ function setup(
     }),
   };
   const messages = new Set<(e: MessageEvent) => void>();
-  const fetcher = vi
-    .fn<typeof fetch>()
-    .mockImplementation(async () =>
-      response({
-        token_type: "Bearer",
-        access_token: "private-token",
-        expires_in: 3600,
-      }),
-    );
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+    response({
+      token_type: "Bearer",
+      access_token: "private-token",
+      expires_in: 3600,
+    }),
+  );
   const open = vi.fn(() => (options.blocked ? null : popup));
   const client = createWebAuth({
     config: {
@@ -426,5 +424,92 @@ describe("callback cleanup and handoff", () => {
     vi.restoreAllMocks();
     history.replaceState(null, "", "/os/auth/callback/");
     expect(handleWebAuthCallback()).toBe(false);
+  });
+});
+
+// Fixed structured-result transport uses the existing acquisition token only.
+import { bindMissionHost } from "./host";
+import resultUnavailable from "./fixtures/result-design-unavailable-source_changed.json";
+const resultRequest = () => ({
+  workRef: resultUnavailable.selection.work_ref,
+  rootJobId: resultUnavailable.selection.root_job_id,
+  jobId: resultUnavailable.selection.job_id,
+  attemptId: resultUnavailable.selection.attempt_id,
+  resultEnvelopeDigest: resultUnavailable.selection.result_envelope_digest,
+  signal: new AbortController().signal,
+});
+describe("fixed structured-result browser transport", () => {
+  it("preserves validated typed503 on only the fixed result path", async () => {
+    const e = setup();
+    await e.login();
+    e.fetcher.mockResolvedValueOnce(
+      new Response(JSON.stringify(resultUnavailable), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const host = bindMissionHost(e.client);
+    expect(await host.readResult!(resultRequest())).toEqual(resultUnavailable);
+    const [url, options] = e.fetcher.mock.calls.at(-1)!;
+    expect(new URL(String(url)).pathname).toBe("/workspace/result/current");
+    expect([...new URL(String(url)).searchParams.keys()]).toEqual([
+      "work_ref",
+      "root_job_id",
+      "job_id",
+      "attempt_id",
+      "result_envelope_digest",
+    ]);
+    expect(options?.redirect).toBe("error");
+    expect(options?.credentials).toBe("omit");
+  });
+  it.each([401, 403, 500])(
+    "does not admit a result body from status %s",
+    async (status) => {
+      const e = setup();
+      await e.login();
+      e.fetcher.mockResolvedValueOnce(
+        new Response(JSON.stringify(resultUnavailable), {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      await expect(
+        bindMissionHost(e.client).readResult!(resultRequest()),
+      ).rejects.toThrow();
+    },
+  );
+  it("refuses malformed typed503 and oversize bytes before display", async () => {
+    const e = setup();
+    await e.login();
+    const host = bindMissionHost(e.client);
+    e.fetcher.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ...resultUnavailable, unexpected: true }), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await expect(host.readResult!(resultRequest())).rejects.toThrow(
+      "RESULT_RESPONSE_INVALID",
+    );
+    e.fetcher.mockResolvedValueOnce(
+      new Response(" ".repeat(16385), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await expect(host.readResult!(resultRequest())).rejects.toThrow();
+  });
+  it("rejects noncanonical new Mission selectors before HTTP", async () => {
+    const e = setup();
+    await e.login();
+    e.fetcher.mockClear();
+    await expect(
+      e.client.readMissionV3!({
+        workRef: "WS:AB",
+        rootJobId: "JOB-x",
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("SELECTION_INVALID");
+    expect(e.fetcher).not.toHaveBeenCalled();
   });
 });

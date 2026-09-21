@@ -9,6 +9,8 @@ const text = (v: unknown, max = 256): v is string =>
   v.length > 0 &&
   v.length <= max &&
   !/[\u0000-\u001f\u007f]/.test(v);
+// Mission companions reuse the same opaque owner-reference grammar.
+export { text as isOwnerObservationReference };
 const hash = (v: unknown): v is string =>
   typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
 const integer = (v: unknown, min = 0): v is number =>

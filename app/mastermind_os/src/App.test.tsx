@@ -10,11 +10,19 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { bindMissionHost, type AuthState } from "./host";
+import { createWebAuth } from "./web-auth";
 import {
   bothUnavailableMissionFixture,
   controlRoomFixture,
   missionFixture,
 } from "./test-fixtures";
+import v3Current17 from "./fixtures/mission-v3-design-current-17-slots.json";
+import v3Partial from "./fixtures/mission-v3-design-partial-truncated.json";
+import v3Unavailable from "./fixtures/mission-v3-design-unavailable.json";
+import resultAvailable from "./fixtures/result-design-available-at-16384-socket-bytes.json";
+import resultUnavailableSource from "./fixtures/result-design-unavailable-source_changed.json";
+import resultContentOverBudget from "./fixtures/result-design-content-over-budget-preserves-reject.json";
 
 const invoke = vi.fn().mockResolvedValue({
   version: "0.1.0",
@@ -790,5 +798,236 @@ describe("route focus handoff", () => {
     action.focus();
     await act(async () => pending.resolve(controlRoomFixture()));
     expect(document.activeElement).toBe(action);
+  });
+});
+
+// Synthetic contract-only fixtures; actual producer joining is a separate gate.
+function resultHost(result: unknown = resultAvailable) {
+  const mission = structuredClone(v3Current17);
+  const selected = resultAvailable.selection;
+  mission.program.work_ref = selected.work_ref;
+  // Keep every existing selection join consistent in this synthetic document.
+  const renamed = JSON.parse(
+    JSON.stringify(mission)
+      .replaceAll("WS:B5", selected.work_ref)
+      .replaceAll("JOB-100", selected.root_job_id),
+  );
+  renamed.result_refs.refs = [
+    {
+      root_job_id: selected.root_job_id,
+      job_id: selected.job_id,
+      attempt_id: selected.attempt_id,
+      result_envelope_digest: selected.result_envelope_digest,
+      orchestration_role: "review",
+      validation: "UNVALIDATED",
+    },
+  ];
+  renamed.result_refs.absent_job_ids = [];
+  renamed.result_refs.omitted_job_ids = [];
+  const signed: AuthState = {
+    status: "signed_in",
+    reason: null,
+    acquisition: true,
+    content: false,
+  };
+  let listener = (_state: AuthState) => {};
+  const legacy = vi.fn(async () => {
+    throw new Error("legacy route must not be read");
+  });
+  const detail = vi.fn(async () => result);
+  window.MastermindMissionHost = {
+    readPrograms: programsFor(selected.work_ref, selected.root_job_id),
+    readMission: legacy,
+    readMissionV3: vi.fn(async () => renamed),
+    readResult: detail,
+    auth: {
+      getState: () => signed,
+      subscribe: (fn) => {
+        listener = fn;
+        return () => {};
+      },
+      signIn: async () => {},
+      signOut: async () => {},
+    },
+  };
+  history.replaceState(null, "", "/?work_ref=WS%3ADESIGN&root_job_id=JOB-001");
+  return {
+    legacy,
+    detail,
+    mission: renamed,
+    notify: (state: AuthState) => listener(state),
+  };
+}
+async function openResult() {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Mission Workspace" }));
+  const summary = await screen.findByText("1 result refs");
+  await user.click(within(summary.closest("section")!).getByRole("button"));
+  return user;
+}
+describe("result card and same-observation Mission lifecycle", () => {
+  it("uses one live v3 acquisition without a v2 prerequisite or eager detail read", async () => {
+    const h = resultHost();
+    render(<App />);
+    await waitFor(() =>
+      expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(
+        1,
+      ),
+    );
+    expect(h.detail).not.toHaveBeenCalled();
+    await openResult();
+    expect(h.legacy).not.toHaveBeenCalled();
+    expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(h.detail).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Result detail")).toBeTruthy();
+  });
+  it("does not fall back to legacy data after v3 refusal", async () => {
+    const h = resultHost();
+    window.MastermindMissionHost!.readMissionV3 = async () => {
+      throw new Error("refused");
+    };
+    render(<App />);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Mission Workspace" }));
+    expect(await screen.findByText("SOURCE_UNAVAILABLE")).toBeTruthy();
+    expect(h.legacy).not.toHaveBeenCalled();
+    expect(h.detail).not.toHaveBeenCalled();
+  });
+  it("renders permitted findings and exact envelope/review target identities as inert detail", async () => {
+    resultHost();
+    render(<App />);
+    await openResult();
+    const card = (await screen.findByText("Result detail")).closest("section")!;
+    await waitFor(() =>
+      expect(card.textContent).toContain("DESIGN_ONLY_FINDING"),
+    );
+    expect(card.textContent).toContain(
+      resultAvailable.selection.result_envelope_digest,
+    );
+    expect(card.textContent).toContain(
+      resultAvailable.result.review.reviewed_job_id,
+    );
+    expect(card.textContent).toContain(
+      resultAvailable.result.review.reviewed_attempt_id,
+    );
+    expect(card.textContent).toContain(
+      resultAvailable.result.review.reviewed_result_digest,
+    );
+    expect(card.textContent).toContain("evidence_digests");
+    expect(card.querySelector("a")).toBeNull();
+  });
+  it("preserves a typed SOURCE_CHANGED response with no fabricated content", async () => {
+    const value = structuredClone(resultUnavailableSource);
+    value.selection = structuredClone(resultAvailable.selection);
+    value.source_observation.selection = structuredClone(
+      resultAvailable.selection,
+    );
+    resultHost(value);
+    render(<App />);
+    await openResult();
+    expect(
+      (await screen.findAllByText(/SOURCE_CHANGED/)).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("Structured role result")).toBeNull();
+  });
+  it("keeps oversize content unavailable while preserving reject and counts", async () => {
+    const value = structuredClone(resultContentOverBudget);
+    value.selection = structuredClone(resultAvailable.selection);
+    value.source_observation.selection = structuredClone(
+      resultAvailable.selection,
+    );
+    value.result.selection = {
+      ...value.result.selection,
+      result_envelope_digest: resultAvailable.selection.result_envelope_digest,
+    };
+    resultHost(value);
+    render(<App />);
+    await openResult();
+    expect(await screen.findByText(/Content omitted by owner/)).toBeTruthy();
+    expect(screen.getByText(/verdict: reject/)).toBeTruthy();
+    expect(screen.queryByText("Structured role result")).toBeNull();
+  });
+  it("ignores an abort-ignoring detail reply after changing the selected Mission", async () => {
+    const pending = deferred<unknown>();
+    resultHost();
+    window.MastermindMissionHost!.readResult = () => pending.promise;
+    render(<App />);
+    await openResult();
+    await act(async () => {
+      history.replaceState(null, "", "/?work_ref=WS%3AOTHER&root_job_id=JOB-2");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await act(async () => pending.resolve(resultAvailable));
+    expect(screen.queryByText("Structured role result")).toBeNull();
+    expect(screen.queryByText("Result detail")).toBeNull();
+  });
+});
+
+describe("result permission and detached-read fences", () => {
+  it("does not restore detail from a late reply after logout", async () => {
+    const pending = deferred<unknown>();
+    const h = resultHost();
+    window.MastermindMissionHost!.readResult = () => pending.promise;
+    render(<App />);
+    await openResult();
+    act(() =>
+      h.notify({
+        status: "signed_out",
+        reason: null,
+        acquisition: false,
+        content: false,
+      }),
+    );
+    await act(async () => pending.resolve(resultAvailable));
+    expect(screen.queryByText("Result detail")).toBeNull();
+    expect(screen.queryByText("Structured role result")).toBeNull();
+  });
+  it("aborts pending detail when the component unmounts", async () => {
+    const pending = deferred<unknown>();
+    resultHost();
+    let signal: AbortSignal | undefined;
+    window.MastermindMissionHost!.readResult = (request) => {
+      signal = request.signal;
+      return pending.promise;
+    };
+    const page = render(<App />);
+    await openResult();
+    page.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(resultAvailable));
+    expect(screen.queryByText("Result detail")).toBeNull();
+  });
+});
+
+describe("actual unconfigured web owner lifecycle", () => {
+  it("does not turn a token refusal notification into repeated Program reads", async () => {
+    history.replaceState(null, "", "/os/");
+    const client = createWebAuth({ config: { webClientId: undefined } });
+    const actualRead = client.readPrograms;
+    let calls = 0;
+    client.readPrograms = async (args) => {
+      // Bound the unchanged failure so an actual feedback loop cannot hang CI.
+      if (++calls > 4) throw new Error("TEST_FEEDBACK_LOOP_BOUND");
+      return actualRead(args);
+    };
+    window.MastermindMissionHost = bindMissionHost(client);
+    render(<App />);
+    await act(async () => {
+      for (let i = 0; i < 16; i++) await Promise.resolve();
+    });
+    expect(calls).toBe(0);
+    expect(
+      screen.getByRole("button", { name: "Sign in" }).hasAttribute("disabled"),
+    ).toBe(true);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Open Programs" }));
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Programs", level: 1 }),
+    );
+    expect(calls).toBe(0);
   });
 });

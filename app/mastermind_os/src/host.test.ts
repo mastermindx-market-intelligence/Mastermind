@@ -6,6 +6,8 @@ import {
   type AuthState,
 } from "./host";
 import current from "./fixtures/mission-v2-current-128c46f6.json";
+import v3Current17 from "./fixtures/mission-v3-design-current-17-slots.json";
+import resultAvailable from "./fixtures/result-design-available-at-16384-socket-bytes.json";
 const signed: AuthState = {
   status: "signed_in",
   reason: null,
@@ -35,6 +37,8 @@ function raw() {
     signOut: vi.fn(async () => {}),
     readPrograms: vi.fn(async () => ({})),
     readMission: vi.fn(async () => current),
+    readMissionV3: vi.fn(async () => v3Current17),
+    readResult: vi.fn(async () => resultAvailable),
     readCurrentWindow: vi.fn(async () => ({})),
   };
   return { client, notify: (s: AuthState) => listener(s) };
@@ -61,6 +65,56 @@ describe("installed typed host", () => {
     await expect(
       host.readMission!({ workRef: "WS:OTHER", rootJobId: "JOB-1", signal }),
     ).rejects.toThrow("MISSION_RESPONSE_INVALID");
+  });
+  it("consumes the fixed readMissionV3 envelope from the index schema", async () => {
+    const e = raw(),
+      host = bindMissionHost(e.client);
+    const signal = new AbortController().signal;
+    const decoded = await host.readMissionV3!({
+      workRef: "WS:B5",
+      rootJobId: "JOB-100",
+      signal,
+    });
+    expect(decoded).toMatchObject({
+      schema: "mastermind.mission_workspace.v3",
+    });
+    expect(decoded).toMatchObject({
+      result_refs: { refs: expect.any(Array), availability: "AVAILABLE" },
+    });
+    expect(e.client.readMissionV3).toHaveBeenCalledWith({
+      workRef: "WS:B5",
+      rootJobId: "JOB-100",
+      signal,
+    });
+  });
+  it("consumes the fixed readResult envelope and preserves source failure without mislabeling cancellation", async () => {
+    const e = raw(),
+      host = bindMissionHost(e.client);
+    const signal = new AbortController().signal;
+    const ready = await host.readResult!({
+      workRef: "WS:DESIGN",
+      rootJobId: "JOB-001",
+      jobId: "JOB-004",
+      attemptId: "ATT-44444444444444444444444444444444",
+      resultEnvelopeDigest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      signal,
+    });
+    expect(ready).toMatchObject({ availability: "AVAILABLE" });
+    e.client.readResult = vi.fn(async () => {
+      throw new Error("READ_FAILED");
+    });
+    const err = await host.readResult!({
+      workRef: "WS:DESIGN",
+      rootJobId: "JOB-001",
+      jobId: "JOB-004",
+      attemptId: "ATT-44444444444444444444444444444444",
+      resultEnvelopeDigest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      signal,
+    }).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe("READ_FAILED");
   });
   it("does not unwrap arbitrary Programs or content responses", async () => {
     const e = raw(),
@@ -143,5 +197,70 @@ describe("native fixed command adapter", () => {
     await expect(read).rejects.toThrow("READ_CANCELLED");
     listener({ payload: { ...signed, token: "forbidden" } });
     expect(client.getState()).toEqual(out);
+  });
+  it("routes the fixed native readMissionV3/readResult commands and refuses arbitrary URL selectors", async () => {
+    let listener!: (e: { payload: unknown }) => void;
+    let lastMissionV3: unknown, lastResult: unknown;
+    const invoke = vi.fn(async (command: string, args: unknown) => {
+      if (command === "auth_status") return signed;
+      if (command === "read_mission_v3") {
+        lastMissionV3 = args;
+        return v3Current17;
+      }
+      if (command === "read_result") {
+        lastResult = args;
+        return resultAvailable;
+      }
+      return {};
+    });
+    const client = await createNativeClient(
+      invoke as never,
+      async (_event, fn) => {
+        listener = fn;
+        return () => {};
+      },
+    );
+    const v3 = await client.readMissionV3!({
+      workRef: "WS:B5",
+      rootJobId: "JOB-100",
+      signal: new AbortController().signal,
+    });
+    expect(v3).toMatchObject({ schema: "mastermind.mission_workspace.v3" });
+    expect(invoke).toHaveBeenCalledWith("read_mission_v3", {
+      selection: { work_ref: "WS:B5", root_job_id: "JOB-100" },
+    });
+    const res = await client.readResult!({
+      workRef: "WS:DESIGN",
+      rootJobId: "JOB-001",
+      jobId: "JOB-004",
+      attemptId: "ATT-44444444444444444444444444444444",
+      resultEnvelopeDigest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      signal: new AbortController().signal,
+    });
+    expect(res).toMatchObject({ availability: "AVAILABLE" });
+    expect(invoke).toHaveBeenCalledWith("read_result", {
+      selection: resultAvailable.selection,
+    });
+    // Only fixed paths and selection-key selectors are accepted
+    expect(lastMissionV3).toEqual({
+      selection: { work_ref: "WS:B5", root_job_id: "JOB-100" },
+    });
+    expect((lastResult as { selection: object }).selection).toEqual({
+      work_ref: "WS:DESIGN",
+      root_job_id: "JOB-001",
+      job_id: "JOB-004",
+      attempt_id: "ATT-44444444444444444444444444444444",
+      result_envelope_digest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+    });
+    await expect(
+      client.readMissionV3!({
+        workRef: "WS:B5",
+        rootJobId: "https://other",
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("SELECTION_INVALID");
+    expect(listener).toBeTypeOf("function");
   });
 });

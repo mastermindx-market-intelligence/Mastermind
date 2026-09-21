@@ -16,7 +16,8 @@ import {
   readWebAuthConfig,
   type WebAuthConfig,
 } from "./public-config";
-import { normalizeSelection } from "./mission";
+import { normalizeSelection, normalizeWorkspaceSelection } from "./mission";
+import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
 import type { AuthState, RawClient } from "./host";
 export type { AuthState } from "./host";
 export interface WebPopup {
@@ -437,7 +438,24 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     emit();
     return getState();
   }
-  async function read(resource: Resource, url: string, signal: AbortSignal) {
+  /**
+   * Fixed-route read. The default policy keeps the established behavior:
+   * any non-OK status (including 401/403 auth refusal and 503) fails closed
+   * with READ_FAILED before a body is read. Only the result route opts into
+   * the single allowed typed error body: a 503 whose body parses under the
+   * exact 16KiB result cap and presents the closed unavailable envelope
+   * shape. Nothing else may surface error JSON, and the full closed-body
+   * validation stays in the host decoder.
+   */
+  async function read(
+    resource: Resource,
+    url: string,
+    signal: AbortSignal,
+    policy: { cap: number; allowTypedUnavailable: boolean } = {
+      cap: MAX_RESPONSE_BYTES,
+      allowTypedUnavailable: false,
+    },
+  ) {
     const ticket = generation,
       token = tokens[resource];
     if (!token || !valid(resource)) {
@@ -461,8 +479,28 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         },
         signal: controller.signal,
       });
+      if (response.status === 503 && policy.allowTypedUnavailable) {
+        const body = await boundedJson(response, policy.cap);
+        if (
+          body === null ||
+          typeof body !== "object" ||
+          Array.isArray(body) ||
+          (body as Record<string, unknown>).schema !==
+            "mastermind.workspace_role_result.v1" ||
+          (body as Record<string, unknown>).availability !== "UNAVAILABLE"
+        )
+          throw new Error("RESPONSE_INVALID");
+        if (
+          signal.aborted ||
+          controller.signal.aborted ||
+          ticket !== generation ||
+          !valid(resource)
+        )
+          throw new Error("READ_CANCELLED");
+        return body;
+      }
       if (!response.ok) throw new Error("READ_FAILED");
-      const result = await boundedJson(response, MAX_RESPONSE_BYTES);
+      const result = await boundedJson(response, policy.cap);
       if (
         signal.aborted ||
         controller.signal.aborted ||
@@ -495,6 +533,52 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         "acquisition",
         `${ORIGIN}/workspace/mission/current?${new URLSearchParams({ work_ref, root_job_id })}`,
         signal,
+      );
+    },
+    readMissionV3: ({ workRef, rootJobId, signal }) => {
+      if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
+        return Promise.reject(new Error("SELECTION_INVALID"));
+      return read(
+        "acquisition",
+        `${ORIGIN}/workspace/mission/v3/current?${new URLSearchParams({ work_ref: workRef, root_job_id: rootJobId })}`,
+        signal,
+      );
+    },
+    readResult: ({
+      workRef,
+      rootJobId,
+      jobId,
+      attemptId,
+      resultEnvelopeDigest,
+      signal,
+    }) => {
+      if (
+        !normalizeSelection({ workRef, rootJobId }) ||
+        !normalizeResultSelection({
+          workRef,
+          rootJobId,
+          jobId,
+          attemptId,
+          resultEnvelopeDigest,
+        })
+      )
+        return Promise.reject(new Error("SELECTION_INVALID"));
+      // Web and native emit the canonical selection keys in the order the
+      // contract table prescribes. No additional selectors, no cursor, no
+      // arbitrary URL — the path is the fixed /workspace/result/current. The
+      // route reads under the exact 16KiB result body cap and is the one
+      // route allowed to surface the typed 503 unavailable envelope.
+      return read(
+        "acquisition",
+        `${ORIGIN}/workspace/result/current?${new URLSearchParams({
+          work_ref: workRef,
+          root_job_id: rootJobId,
+          job_id: jobId,
+          attempt_id: attemptId,
+          result_envelope_digest: resultEnvelopeDigest,
+        })}`,
+        signal,
+        { cap: RESULT_HTTP_BODY_BYTES, allowTypedUnavailable: true },
       );
     },
     readCurrentWindow: ({ signal }) =>

@@ -1,5 +1,6 @@
 import {
   decodeOwnerObservation,
+  isOwnerObservationReference,
   type OwnerObservation,
 } from "./workspace-contract";
 export type ReadState = "CURRENT" | "PARTIAL" | "HISTORICAL" | "UNAVAILABLE";
@@ -1076,9 +1077,9 @@ export function decodeMission(
         value.children.unjoined_job_ids.length) ||
     new Set(value.children.unjoined_job_ids).size !==
       value.children.unjoined_job_ids.length ||
-    value.children.unjoined_job_ids.some(
-      (id) => id === sel.rootJobId || childIds.has(id),
-    )
+    // Global provenance-unjoined scope includes the root; only actual
+    // joined child rows must be disjoint from this list.
+    value.children.unjoined_job_ids.some((id) => childIds.has(id))
   )
     return null;
   const ex = value.execution;
@@ -1677,4 +1678,291 @@ export function allEvidence(
   return groups.flatMap(([facet, refs]) =>
     refs.map((evidence) => ({ facet, evidence })),
   );
+}
+
+/**
+ * Mission v3 result reference companion wrapper.
+ *
+ * The v3 reducer schema is `mastermind.mission_workspace.v3`. It carries the
+ * same closed v2 fields plus exactly one additional `result_refs` index.
+ * The index is a presentation-only navigation affordance: it lists the
+ * refs that ARE available in the SAME observation snapshot, the IDs that
+ * were included but absent (non-COMPLETED with result None), and the IDs
+ * that had to be omitted. The D frontend never builds a click target out of
+ * a row, only out of an explicit tuple resolved by the bounded detail read.
+ */
+export type ResultRole = "aggregation" | "plan" | "work" | "review" | "repair";
+export interface MissionResultRef {
+  root_job_id: string;
+  job_id: string;
+  attempt_id: string;
+  result_envelope_digest: string;
+  orchestration_role: ResultRole;
+  validation: "UNVALIDATED";
+}
+export interface MissionResultReferenceIndex {
+  schema: "mastermind.fabric_result_reference_index.v1";
+  root_job_id: string;
+  snapshot_digest: string | null;
+  generation: {
+    schema: "mastermind.runtime_read_observation.v1";
+    state: "SAME" | "CONFLICT" | "UNKNOWN";
+    source_identity: string | null;
+    before: number | null;
+    after: number | null;
+  };
+  availability: "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
+  refs: MissionResultRef[];
+  absent_job_ids: string[];
+  omitted_job_ids: string[];
+  truncated: boolean;
+}
+export interface Missionv3Document extends Omit<MissionDocument, "schema"> {
+  schema: "mastermind.mission_workspace.v3";
+  result_refs: MissionResultReferenceIndex;
+}
+
+const ROLE_VALUES: ReadonlyArray<ResultRole> = [
+  "aggregation",
+  "plan",
+  "work",
+  "review",
+  "repair",
+];
+
+const workspaceJob = (value: unknown): value is string =>
+  typeof value === "string" && /^JOB-[0-9]{1,9}$/.test(value);
+export function normalizeWorkspaceSelection(
+  value: unknown,
+): MissionSelection | null {
+  if (
+    !obj(value) ||
+    !exact(value, ["workRef", "rootJobId"]) ||
+    typeof value.workRef !== "string" ||
+    !/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(value.workRef) ||
+    !workspaceJob(value.rootJobId)
+  )
+    return null;
+  return { workRef: value.workRef, rootJobId: value.rootJobId };
+}
+
+function decodeResultRef(
+  value: unknown,
+  expectedRoot: string,
+): MissionResultRef | null {
+  if (
+    !obj(value) ||
+    !exact(value, [
+      "root_job_id",
+      "job_id",
+      "attempt_id",
+      "result_envelope_digest",
+      "orchestration_role",
+      "validation",
+    ])
+  )
+    return null;
+  if (
+    typeof value.root_job_id !== "string" ||
+    value.root_job_id !== expectedRoot ||
+    !workspaceJob(value.root_job_id) ||
+    !workspaceJob(value.job_id) ||
+    !(
+      typeof value.attempt_id === "string" &&
+      /^ATT-[0-9a-f]{32}$/.test(value.attempt_id)
+    ) ||
+    !(
+      typeof value.result_envelope_digest === "string" &&
+      /^[0-9a-f]{64}$/.test(value.result_envelope_digest)
+    ) ||
+    !ROLE_VALUES.includes(value.orchestration_role as ResultRole) ||
+    value.validation !== "UNVALIDATED"
+  )
+    return null;
+  return value as unknown as MissionResultRef;
+}
+
+function decodeResultIndex(
+  value: unknown,
+  expectedRoot: string,
+  parentObservation: OwnerObservation | null,
+): MissionResultReferenceIndex | null {
+  if (
+    !obj(value) ||
+    !exact(value, [
+      "schema",
+      "root_job_id",
+      "snapshot_digest",
+      "generation",
+      "availability",
+      "refs",
+      "absent_job_ids",
+      "omitted_job_ids",
+      "truncated",
+    ]) ||
+    value.schema !== "mastermind.fabric_result_reference_index.v1" ||
+    value.root_job_id !== expectedRoot ||
+    !workspaceJob(value.root_job_id) ||
+    typeof value.truncated !== "boolean"
+  )
+    return null;
+  if (
+    value.snapshot_digest !== null &&
+    !(
+      typeof value.snapshot_digest === "string" &&
+      /^[0-9a-f]{64}$/.test(value.snapshot_digest)
+    )
+  )
+    return null;
+  if (
+    !oneOf(value.availability, ["AVAILABLE", "PARTIAL", "UNAVAILABLE"] as const)
+  )
+    return null;
+  const gen = value.generation;
+  if (
+    !obj(gen) ||
+    !exact(gen, ["schema", "state", "source_identity", "before", "after"]) ||
+    gen.schema !== "mastermind.runtime_read_observation.v1" ||
+    !oneOf(gen.state, ["SAME", "CONFLICT", "UNKNOWN"] as const) ||
+    !(
+      gen.source_identity === null ||
+      isOwnerObservationReference(gen.source_identity)
+    ) ||
+    !(gen.before === null || int(gen.before, 0)) ||
+    !(gen.after === null || int(gen.after, 0))
+  )
+    return null;
+  if (!Array.isArray(value.refs) || value.refs.length > 17) return null;
+  const refs: MissionResultRef[] = [];
+  const seen = new Set<string>();
+  for (const ref of value.refs) {
+    const decoded = decodeResultRef(ref, expectedRoot);
+    if (!decoded) return null;
+    const key = `${decoded.job_id}|${decoded.attempt_id}|${decoded.result_envelope_digest}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    refs.push(decoded);
+  }
+  // Deterministic lexicographic job_id order applies to every group,
+  // including refs themselves.
+  for (let i = 1; i < refs.length; i++) {
+    if (refs[i - 1].job_id >= refs[i].job_id) return null;
+  }
+  for (const list of [value.absent_job_ids, value.omitted_job_ids]) {
+    if (!Array.isArray(list) || list.length > 17) return null;
+    for (const id of list) {
+      if (!workspaceJob(id)) return null;
+    }
+  }
+  const absent = value.absent_job_ids as string[];
+  const omitted = value.omitted_job_ids as string[];
+  if (
+    refs.length + absent.length + omitted.length > 17 ||
+    new Set(absent).size !== absent.length ||
+    new Set(omitted).size !== omitted.length
+  )
+    return null;
+  const overlap = new Set<string>();
+  for (const id of absent) overlap.add(id);
+  for (const id of omitted) overlap.add(id);
+  if (overlap.size !== absent.length + omitted.length) return null;
+  for (const ref of refs) overlap.add(ref.job_id);
+  if (overlap.size !== absent.length + omitted.length + refs.length)
+    return null;
+  const sortedAbsent = [...absent].sort();
+  const sortedOmitted = [...omitted].sort();
+  for (let i = 0; i < absent.length; i++) {
+    if (sortedAbsent[i] !== absent[i]) return null;
+  }
+  for (let i = 0; i < omitted.length; i++) {
+    if (sortedOmitted[i] !== omitted[i]) return null;
+  }
+  // OWNER_JOIN_CLARIFICATION: result_refs.generation is the five-field
+  // receipt. Its five fields must equal source.owner_observation.runtime's
+  // five-field subset, and index.snapshot_digest must separately equal the
+  // owner runtime's sixth field. Whole-object equality is the wrong join, and
+  // source.source_generation is a different vocabulary entirely.
+  const ownerRuntime = parentObservation?.runtime ?? null;
+  if (ownerRuntime === null) {
+    // No joinable owner receipt: the index may not present a fabricated SAME
+    // generation or a digest it cannot prove against the owner observation.
+    if (gen.state === "SAME") return null;
+    if (value.snapshot_digest !== null) return null;
+  } else {
+    if (
+      gen.schema !== ownerRuntime.schema ||
+      gen.state !== ownerRuntime.state ||
+      gen.source_identity !== ownerRuntime.source_identity ||
+      gen.before !== ownerRuntime.before ||
+      gen.after !== ownerRuntime.after
+    )
+      return null;
+    if (value.snapshot_digest !== ownerRuntime.snapshot_digest) return null;
+  }
+  if (value.availability === "AVAILABLE") {
+    if (gen.state !== "SAME") return null;
+    if (omitted.length !== 0 || value.truncated) return null;
+  } else if (value.availability === "PARTIAL") {
+    if (gen.state !== "SAME") return null;
+    // PARTIAL is caused by an omitted job slot or owner jobs/attempts
+    // truncation; a causeless PARTIAL is not contract-coherent.
+    if (omitted.length === 0 && !value.truncated) return null;
+  } else {
+    // UNAVAILABLE: emits no selectable refs and no known-absence claim.
+    // Trustworthy included IDs may be listed omitted; nothing is invented.
+    if (refs.length !== 0) return null;
+    if (absent.length !== 0) return null;
+  }
+  // Non-CURRENT Mission: the reducer downgrades navigation availability to
+  // UNAVAILABLE and clears selectable refs while retaining the diagnostic
+  // owner observation. A CURRENT-looking index under a non-CURRENT Mission is
+  // refused; refs are never promoted as currently available.
+  if (
+    parentObservation !== null &&
+    parentObservation.state !== "SAME" &&
+    (value.availability !== "UNAVAILABLE" || refs.length !== 0)
+  )
+    return null;
+  return value as unknown as MissionResultReferenceIndex;
+}
+
+export function decodeMissionv3(
+  value: unknown,
+  sel: MissionSelection,
+): Missionv3Document | null {
+  if (!normalizeWorkspaceSelection(sel)) return null;
+  // The v3 document is a companion wrapper around an unchanged v2 portion:
+  // exactly the v2 top-level fields plus result_refs, and its nested source
+  // is the v2 source shape (fabric_view_schema v2, owner_observation).
+  if (
+    !obj(value) ||
+    !exact(value, [...TOP, "result_refs"]) ||
+    value.schema !== "mastermind.mission_workspace.v3"
+  )
+    return null;
+  // Adapt the closed v3 wrapper to its v2 portion explicitly: strip the
+  // companion key and re-name the schema, so the strict legacy decoder runs
+  // unchanged on exactly its own closed shape. The v2 decoder itself is not
+  // relaxed, and the input value is never mutated.
+  const adapted: Record<string, unknown> = { ...value };
+  delete adapted.result_refs;
+  adapted.schema = "mastermind.mission_workspace.v2";
+  const v2 = decodeMission(adapted, sel);
+  if (!v2) return null;
+  const observation = decodeOwnerObservation(
+    (value.source as Record<string, unknown>).owner_observation,
+    { work_ref: sel.workRef, root_job_id: sel.rootJobId },
+  );
+  if (!observation) return null;
+  const index = decodeResultIndex(
+    value.result_refs,
+    sel.rootJobId,
+    observation,
+  );
+  if (
+    !index ||
+    (v2.read_state.state !== "CURRENT" && index.availability !== "UNAVAILABLE")
+  )
+    return null;
+  return value as unknown as Missionv3Document;
 }

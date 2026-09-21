@@ -353,7 +353,7 @@ pub fn sign_in(app: AppHandle) -> Result<AuthStatus> {
     let result = state.lock()?.status();
     Ok(result)
 }
-async fn bounded_json(mut response: reqwest::Response, cap: usize) -> Result<Value> {
+async fn bounded_json(response: reqwest::Response, cap: usize) -> Result<Value> {
     if !response.status().is_success() {
         return Err(match response.status().as_u16() {
             401 => "AUTHENTICATION_REQUIRED",
@@ -363,6 +363,13 @@ async fn bounded_json(mut response: reqwest::Response, cap: usize) -> Result<Val
         }
         .into());
     }
+    read_json_body(response, cap).await
+}
+
+/// Body half of the bounded read: JSON content type, declared and streamed
+/// length caps, then parse. No status handling, so the single allowed typed
+/// 503 body can flow through it under the same exact cap.
+async fn read_json_body(mut response: reqwest::Response, cap: usize) -> Result<Value> {
     if response.content_length().is_some_and(|n| n > cap as u64) {
         return Err("RESPONSE_BOUND".into());
     }
@@ -494,6 +501,48 @@ impl MissionSelection {
         }
     }
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultSelection {
+    work_ref: String,
+    root_job_id: String,
+    job_id: String,
+    attempt_id: String,
+    result_envelope_digest: String,
+}
+fn validate_workspace_pair(work_ref: &str, root_job_id: &str) -> Result<()> {
+    let work = work_ref.strip_prefix("WS:").ok_or("SELECTION_INVALID")?;
+    let job = root_job_id.strip_prefix("JOB-").ok_or("SELECTION_INVALID")?;
+    if !(2..=64).contains(&work.len())
+        || !(work.as_bytes()[0].is_ascii_uppercase() || work.as_bytes()[0].is_ascii_digit())
+        || !work.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+        || !(1..=9).contains(&job.len()) || !job.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("SELECTION_INVALID".into());
+    }
+    Ok(())
+}
+fn lowercase_hex(value: &str, size: usize) -> bool {
+    value.len() == size && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+impl ResultSelection {
+    fn validate(&self) -> Result<()> {
+        validate_workspace_pair(&self.work_ref, &self.root_job_id)?;
+        validate_workspace_pair(&self.work_ref, &self.job_id)?;
+        if !self.attempt_id.strip_prefix("ATT-").is_some_and(|value| lowercase_hex(value, 32))
+            || !lowercase_hex(&self.result_envelope_digest, 64) {
+            return Err("SELECTION_INVALID".into());
+        }
+        Ok(())
+    }
+}
+
+const RESULT_RESPONSE_CAP: usize = 16_384;
+const MISSION_V3_RESPONSE_CAP: usize = 2_000_000;
+const RESULT_MISSION_V3_PATH: &str = "/workspace/mission/v3/current";
+const RESULT_DETAIL_PATH: &str = "/workspace/result/current";
+const MISSION_V3_SCHEMA: &str = "mastermind.mission_workspace.v3";
+const RESULT_SCHEMA: &str = "mastermind.workspace_role_result.v1";
 async fn read(
     app: AppHandle,
     resource: Resource,
@@ -561,6 +610,113 @@ pub async fn read_mission(app: AppHandle, selection: MissionSelection) -> Result
         Some(selection),
     )
     .await
+}
+#[tauri::command]
+pub async fn read_mission_v3(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+    let mut url =
+        Url::parse(&format!("{ORIGIN}{RESULT_MISSION_V3_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    validate_workspace_pair(&selection.work_ref, &selection.root_job_id)?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (
+            inner
+                .token(Resource::Acquisition)
+                .ok_or("AUTHENTICATION_REQUIRED")?
+                .value
+                .clone(),
+            inner.generation,
+        )
+    };
+    let response = state
+        .http
+        .get(url)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send()
+        .await
+        .map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = bounded_json(response, MISSION_V3_RESPONSE_CAP).await;
+    if !state
+        .lock()?
+        .release_allowed(generation, Resource::Acquisition)
+    {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !value.is_object() || value.get("schema").and_then(Value::as_str) != Some(MISSION_V3_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+#[tauri::command]
+pub async fn read_result(app: AppHandle, selection: ResultSelection) -> Result<Value> {
+    let mut url = Url::parse(&format!("{ORIGIN}{RESULT_DETAIL_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    selection.validate()?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id)
+        .append_pair("job_id", &selection.job_id)
+        .append_pair("attempt_id", &selection.attempt_id)
+        .append_pair("result_envelope_digest", &selection.result_envelope_digest);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (
+            inner
+                .token(Resource::Acquisition)
+                .ok_or("AUTHENTICATION_REQUIRED")?
+                .value
+                .clone(),
+            inner.generation,
+        )
+    };
+    let response = state
+        .http
+        .get(url)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send()
+        .await
+        .map_err(|_| "SOURCE_UNAVAILABLE")?;
+    // The fixed result route is the one route allowed to surface a typed
+    // error body: a 503 whose body parses under the exact 16KiB cap and is
+    // the closed unavailable envelope with a null result. 401/403 and every
+    // other non-OK status keep the established refusal in bounded_json.
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, RESULT_RESPONSE_CAP)
+            .await
+            .and_then(|v| {
+                if !v.is_object()
+                    || v.get("schema").and_then(Value::as_str) != Some(RESULT_SCHEMA)
+                    || v.get("availability").and_then(Value::as_str) != Some("UNAVAILABLE")
+                    || !v.get("result").map(|r| r.is_null()).unwrap_or(false)
+                {
+                    Err("RESPONSE_INVALID".into())
+                } else {
+                    Ok(v)
+                }
+            })
+    } else {
+        bounded_json(response, RESULT_RESPONSE_CAP).await
+    };
+    if !state
+        .lock()?
+        .release_allowed(generation, Resource::Acquisition)
+    {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !value.is_object() || value.get("schema").and_then(Value::as_str) != Some(RESULT_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
 }
 #[tauri::command]
 pub async fn read_current_window(app: AppHandle) -> Result<Value> {
@@ -728,4 +884,16 @@ mod tests {
             assert!(parse_token(serde_json::json!({"access_token":"secret","token_type":"Bearer","expires_in":seconds}),Resource::Acquisition).is_err());
         }
     }
+    #[test]
+    fn structured_result_selectors_use_exact_new_contract() {
+        let valid = serde_json::json!({"work_ref":"WS:AB", "root_job_id":"JOB-1", "job_id":"JOB-2", "attempt_id":format!("ATT-{}", "a".repeat(32)), "result_envelope_digest":"b".repeat(64)});
+        assert!(serde_json::from_value::<ResultSelection>(valid.clone()).unwrap().validate().is_ok());
+        for (key, value) in [("work_ref", "WS:aB"), ("work_ref", "WS:A"), ("root_job_id", "JOB-x"), ("job_id", "JOB-1234567890"), ("attempt_id", "ATT-gggggggggggggggggggggggggggggggg"), ("attempt_id", "ATT-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")] {
+            let mut candidate = valid.clone(); candidate[key] = value.into();
+            assert!(serde_json::from_value::<ResultSelection>(candidate).unwrap().validate().is_err(), "{key}: {value}");
+        }
+        let mut extra = valid; extra["url"] = "https://other.example".into();
+        assert!(serde_json::from_value::<ResultSelection>(extra).is_err());
+    }
+
 }
