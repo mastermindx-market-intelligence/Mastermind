@@ -924,6 +924,11 @@ def _macro_sparse_fixture(tmp_path: Path) -> tuple[Path, str]:
     (macro / "data/probe/nested/payload.json").write_text("{}\n", encoding="utf-8")
     (macro / "unrelated/large.bin").write_bytes(b"x" * 1024)
     (macro / "agentos/decisions/DEC-ONE.md").write_text("---\nkey: ONE\n---\n", encoding="utf-8")
+    # Git cannot bind empty directories. Keep the fixture's canonical Agent OS
+    # namespaces represented by tracked records so the full path-set verifier
+    # is testing source behavior rather than fixture-only empty-directory drift.
+    (macro / "agentos/discoveries/DISC-ONE.md").write_text("---\nkey: DISC-ONE\n---\n", encoding="utf-8")
+    (macro / "agentos/handoffs/HANDOFF-ONE.md").write_text("---\nkey: HANDOFF-ONE\n---\n", encoding="utf-8")
     (macro / "agentos/workstreams/WS-SPARSE.md").write_text(
         """---
 key: SPARSE
@@ -1067,6 +1072,14 @@ def _direct_pair_collector(tmp_path: Path):
     return collector, source, macro, source_sha, macro_sha
 
 
+def test_inner_packet_timeout_uses_reviewed_subsecond_settlement_reserve():
+    from integrations.executive_mcp.installed import _inner_packet_timeout
+
+    # The outer installed-reader budget remains 28s inside the 30s gateway.
+    # Only the nested child settlement reserve changes, per production proof.
+    assert _inner_packet_timeout(28.0) == pytest.approx(27.25)
+
+
 def test_installed_collector_pre_snapshots_overlap_for_direct_repositories(
     tmp_path: Path, monkeypatch,
 ):
@@ -1175,3 +1188,239 @@ def test_installed_collector_synthetic_snapshot_pair_stays_sequential(
         "a" * 40, "b" * 40, "a-seal", "b-seal",
     )
     assert calls == [source, macro]
+
+
+def test_clean_snapshot_uses_buffered_type_only_object_probes(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+
+    repo, _tracked = _clean_repo(tmp_path)
+    commands: list[tuple[str, ...]] = []
+
+    def runner(argv, **kwargs):
+        normalized = tuple(str(item) for item in argv)
+        commands.append(normalized)
+        return _default_packet_runner(argv, **kwargs)
+
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    _clean_git_snapshot(
+        repo, runner=runner, env=env, label="Mastermind source",
+    )
+
+    probes = [
+        command for command in commands
+        if command[:2] == ("git", "cat-file")
+    ]
+    assert probes
+    assert all("--buffer" in command for command in probes)
+    assert all(
+        "--batch-check=%(objectname) %(objecttype)" in command
+        for command in probes
+    )
+    assert all(
+        not any("objectsize" in argument for argument in command)
+        for command in probes
+    )
+
+
+def test_macro_materialization_plan_reuses_verified_tree(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _build_macro_materialization_plan,
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+
+    macro, head = _macro_sparse_fixture(tmp_path)
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    commands: list[tuple[str, ...]] = []
+    captures = []
+
+    def runner(argv, **kwargs):
+        normalized = tuple(str(item) for item in argv)
+        commands.append(normalized)
+        return _default_packet_runner(argv, **kwargs)
+
+    observed = _clean_git_snapshot(
+        macro, runner=runner, env=env, label="Macro source",
+        content_scope="macro_brief", include_seal=True,
+        snapshot_capture=captures,
+    )
+    assert observed[0] == head
+    assert len(captures) == 1
+
+    plan = _build_macro_materialization_plan(
+        macro, runner=runner, env=env, deadline=None,
+        verified_snapshot=captures[0],
+    )
+
+    assert plan.head == head
+    assert set(plan.file_objects) == set(plan.files)
+    assert sum(
+        command[1:4] == ("ls-tree", "-r", "-z")
+        for command in commands
+    ) == 1
+
+
+def test_materialized_macro_verifier_uses_preverified_object_map(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _build_macro_materialization_plan,
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+        _materialized_macro_root,
+        _verify_materialized_macro_root,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    macro, head = _macro_sparse_fixture(tmp_path)
+    live_env = _installed_child_env(code_root=macro, macro_root=macro)
+    captures = []
+    _clean_git_snapshot(
+        macro, runner=_default_packet_runner, env=live_env,
+        label="Macro source", content_scope="macro_brief", include_seal=True,
+        snapshot_capture=captures,
+    )
+    plan = _build_macro_materialization_plan(
+        macro, runner=_default_packet_runner, env=live_env, deadline=None,
+        verified_snapshot=captures[0],
+    )
+
+    with _materialized_macro_root(macro, timeout=5.0, plan=plan) as materialized:
+        child_env = _installed_child_env(code_root=macro, macro_root=materialized)
+        commands: list[tuple[str, ...]] = []
+
+        def runner(argv, **kwargs):
+            normalized = tuple(str(item) for item in argv)
+            commands.append(normalized)
+            return _default_packet_runner(argv, **kwargs)
+
+        observed = _verify_materialized_macro_root(
+            materialized, plan=plan, runner=runner, env=child_env,
+            deadline=None,
+        )
+        assert observed[0] == head
+        assert not any(command[1:2] == ("rev-list",) for command in commands)
+        assert not any(command[1:2] == ("ls-tree",) for command in commands)
+
+        target = materialized / "agentos/workstreams/WS-SPARSE.md"
+        original = target.read_bytes()
+        target.write_bytes(original + b"mutated\n")
+        with pytest.raises(GatewayError, match="worktree bytes differ"):
+            _verify_materialized_macro_root(
+                materialized, plan=plan, runner=_default_packet_runner,
+                env=child_env, deadline=None,
+            )
+
+
+def test_installed_collector_reuses_single_macro_tree_proof_before_child(tmp_path: Path):
+    """Collector composition: one live Macro ls-tree, no materialized tree walk,
+    child starts only after both proofs. Fixture-scale only.
+    """
+    import json
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+
+    mastermind_parent = tmp_path / "mastermind-fixture"
+    mastermind_parent.mkdir()
+    repo, _tracked = _clean_repo(mastermind_parent)
+    macro, macro_sha = _macro_sparse_fixture(tmp_path)
+    code = tmp_path / "immutable-release"
+    (code / "scripts").mkdir(parents=True)
+    python = tmp_path / "python"
+    python.write_text("fixture", encoding="utf-8")
+    source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    live_macro = macro.resolve()
+    live_source = repo.resolve()
+    events: list[tuple[str, ...]] = []
+
+    def runner(argv, **kwargs):
+        argv_s = tuple(str(item) for item in argv)
+        cwd = Path(kwargs["cwd"]).resolve()
+        if argv_s[0] == "git":
+            if argv_s[1:4] == ("ls-tree", "-r", "-z"):
+                events.append(("ls-tree", str(cwd)))
+            else:
+                events.append(("git", argv_s[1], str(cwd)))
+            return _default_packet_runner(argv, **kwargs)
+        child_macro = Path(argv_s[argv_s.index("--macro-root") + 1]).resolve()
+        events.append(("child", str(child_macro)))
+        return {
+            "code": 0,
+            "stdout": json.dumps({
+                "schema": "mastermind.ceo_boot_packet.v1",
+                "mastermind": {"root": str(repo), "sha": source_sha, "branch": "HEAD"},
+                "macro": {
+                    "root": str(child_macro), "sha": macro_sha,
+                    "resolved_via": "flag", "candidates_tried": [],
+                },
+            }),
+            "stderr": "", "timed_out": False,
+            "limit_exceeded": False, "invalid_utf8": False,
+        }
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo, macro_root=macro, code_root=code,
+        python_executable=python, runner=runner, expected_source_sha=source_sha,
+    )
+    packet = collector(
+        repo_root=repo, macro_root_flag=str(macro), now=None, timeout=8.0,
+    )
+
+    child_indexes = [index for index, event in enumerate(events) if event[0] == "child"]
+    assert len(child_indexes) == 1
+    child_index = child_indexes[0]
+    child_root = events[child_index][1]
+    live_ls_tree = [
+        index for index, event in enumerate(events)
+        if event[0] == "ls-tree" and event[1] == str(live_macro)
+    ]
+    materialized_ls_tree = [
+        index for index, event in enumerate(events)
+        if event[0] == "ls-tree" and event[1] not in {str(live_macro), str(live_source)}
+    ]
+    pre_child_materialized = [
+        event for index, event in enumerate(events)
+        if index < child_index and event[-1] == child_root
+    ]
+
+    assert len(live_ls_tree) == 1, live_ls_tree
+    assert live_ls_tree[0] < child_index
+    assert materialized_ls_tree == []
+    assert pre_child_materialized
+    assert child_root != str(live_macro)
+    assert Path(child_root).exists() is False
+    assert packet["mastermind"]["sha"] == source_sha
+    assert packet["macro"]["sha"] == macro_sha
+    assert packet["macro"]["root"] == str(macro)
+
+
+def test_installed_collector_refuses_after_cleanup_exhausts_budget(tmp_path, monkeypatch):
+    """A completed cleanup cannot turn an expired collection into success."""
+    from integrations.executive_mcp import installed
+    from integrations.executive_mcp.schemas import GatewayError
+
+    original_cleanup = installed.tempfile.TemporaryDirectory.cleanup
+    original_clock = installed.time.monotonic
+    cleaned_roots = []
+
+    def cleanup(directory):
+        original_cleanup(directory)
+        cleaned_roots.append(Path(directory.name))
+
+    monkeypatch.setattr(installed.tempfile.TemporaryDirectory, "cleanup", cleanup)
+    monkeypatch.setattr(
+        installed.time,
+        "monotonic",
+        lambda: original_clock() + (100.0 if cleaned_roots else 0.0),
+    )
+    with pytest.raises(GatewayError, match="cumulative deadline"):
+        test_installed_collector_reuses_single_macro_tree_proof_before_child(tmp_path)
+
+    assert cleaned_roots
+    assert all(not root.exists() for root in cleaned_roots)

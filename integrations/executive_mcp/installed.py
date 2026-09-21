@@ -20,6 +20,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable, Iterator, Mapping
 
 from control_plane import ceo_boot_packet, executive_ceo_ingress, executive_inbox
@@ -36,7 +37,7 @@ PacketRunner = Callable[..., Mapping[str, Any]]
 
 
 _default_packet_runner = ceo_boot_packet.bounded_subprocess_runner
-_PACKET_SETTLEMENT_MARGIN_SECONDS = 2.0
+_PACKET_SETTLEMENT_MARGIN_SECONDS = 0.75
 _INSTALLED_PACKET_TOTAL_TIMEOUT_SECONDS = READ_TIMEOUT_SECONDS - 2.0
 
 
@@ -432,12 +433,25 @@ def _macro_brief_content_paths(paths: set[str]) -> set[str]:
 
 
 @dataclass(frozen=True)
+class _VerifiedRepositorySnapshot:
+    """One complete repository proof reusable inside a single packet build."""
+
+    root: Path
+    head: str
+    expected: Mapping[str, tuple[str, str]]
+    worktree_seal: str
+    generation_seal: str
+    sealed_to_caller: bool = False
+
+
+@dataclass(frozen=True)
 class _MacroMaterializationPlan:
     """Exact sparse worktree required by ``agentos.py brief --json --no-remember``."""
 
     head: str
     files: frozenset[str]
     directories: frozenset[str]
+    file_objects: Mapping[str, tuple[str, str]]
 
 
 def _bounded_git_text(
@@ -509,6 +523,64 @@ def _git_head_tree(
     ).strip() != head:
         raise GatewayError("backend_unavailable", f"installed {label} HEAD changed")
     return head, expected
+
+
+def _require_git_object_types(
+    path: Path, expected_types: Mapping[str, str], *, runner: PacketRunner,
+    env: Mapping[str, str], deadline: float | None, label: str,
+) -> None:
+    """Prove exact object existence/type without inflating packed object headers."""
+    if not expected_types:
+        return
+    object_input = ("\n".join(sorted(expected_types)) + "\n").encode("ascii")
+    try:
+        object_result = runner(
+            [
+                "git", "cat-file", "--buffer",
+                "--batch-check=%(objectname) %(objecttype)",
+            ],
+            cwd=path,
+            timeout=_remaining_deadline_seconds(
+                deadline, label=label, ceiling=10.0,
+            ),
+            max_bytes=32 * 1024 * 1024, env=env, input_bytes=object_input,
+        )
+    except Exception as exc:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        ) from exc
+    if not isinstance(object_result, Mapping) or any(
+        object_result.get(flag) is True
+        for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
+    ):
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
+    object_stdout = object_result.get("stdout")
+    if object_result.get("code") != 0 or type(object_stdout) is not str:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
+    observed_objects: dict[str, str] = {}
+    for line in object_stdout.splitlines():
+        parts = line.split()
+        if (
+            len(parts) != 2
+            or not _valid_sha(parts[0])
+            or parts[1] not in {"blob", "commit", "tree", "tag"}
+            or parts[0] in observed_objects
+        ):
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            )
+        observed_objects[parts[0]] = parts[1]
+    if set(observed_objects) != set(expected_types) or any(
+        observed_objects.get(object_id) != expected_type
+        for object_id, expected_type in expected_types.items()
+    ):
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
 
 
 def _frontmatter_scalar(raw: str) -> str:
@@ -629,12 +701,19 @@ def _directory_closure(paths: set[str]) -> set[str]:
 def _build_macro_materialization_plan(
     source: Path, *, runner: PacketRunner, env: Mapping[str, str],
     deadline: float | None,
+    verified_snapshot: _VerifiedRepositorySnapshot | None = None,
 ) -> _MacroMaterializationPlan:
     label = "Macro source"
     try:
-        head, expected = _git_head_tree(
-            source, runner=runner, env=env, deadline=deadline, label=label,
-        )
+        if verified_snapshot is None:
+            head, expected = _git_head_tree(
+                source, runner=runner, env=env, deadline=deadline, label=label,
+            )
+        else:
+            if verified_snapshot.root != source.resolve():
+                raise ValueError("verified Macro snapshot root differs")
+            head = verified_snapshot.head
+            expected = dict(verified_snapshot.expected)
         tracked_paths = set(expected)
         files = _macro_brief_content_paths(tracked_paths)
         tree_directories = _tree_directory_paths(tracked_paths)
@@ -668,6 +747,7 @@ def _build_macro_materialization_plan(
             head=head,
             files=frozenset(files),
             directories=frozenset(directories),
+            file_objects=MappingProxyType({rel: expected[rel] for rel in files}),
         )
     except GatewayError:
         raise
@@ -706,9 +786,12 @@ def _clean_git_snapshot(
     verify_repository_closure: bool = True, deadline: float | None = None,
     admitted_worktree_files: set[str] | None = None,
     admitted_worktree_directories: set[str] | None = None,
+    snapshot_capture: list[_VerifiedRepositorySnapshot] | None = None,
     _allow_synthetic_fixture: bool = False,
 ) -> str | tuple[str, str]:
     """Bind one explicitly admitted direct repository to its raw consumed bytes."""
+    if snapshot_capture is not None and not include_seal:
+        raise ValueError("snapshot capture requires include_seal")
     git_metadata = _direct_git_directory(path, label=label)
     if git_metadata is None and not _allow_synthetic_fixture:
         raise GatewayError(
@@ -840,69 +923,19 @@ def _clean_git_snapshot(
             raise GatewayError("backend_unavailable", f"installed {label} tree is unsupported")
         expected[rel] = (mode, oid)
 
-    def require_object_types(expected_types: Mapping[str, str]) -> None:
-        if not expected_types:
-            return
-        object_input = ("\n".join(sorted(expected_types)) + "\n").encode("ascii")
-        try:
-            object_result = runner(
-                [
-                    "git", "cat-file",
-                    "--batch-check=%(objectname) %(objecttype) %(objectsize)",
-                ],
-                cwd=path,
-                timeout=_remaining_deadline_seconds(
-                    deadline, label=label, ceiling=10.0,
-                ),
-                max_bytes=32 * 1024 * 1024, env=env, input_bytes=object_input,
-            )
-        except Exception as exc:
-            raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
-            ) from exc
-        if not isinstance(object_result, Mapping) or any(
-            object_result.get(flag) is True
-            for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
-        ):
-            raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
-            )
-        object_stdout = object_result.get("stdout")
-        if object_result.get("code") != 0 or type(object_stdout) is not str:
-            raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
-            )
-        observed_objects: dict[str, str] = {}
-        for line in object_stdout.splitlines():
-            parts = line.split()
-            if (
-                len(parts) != 3
-                or not _valid_sha(parts[0])
-                or parts[1] not in {"blob", "commit", "tree", "tag"}
-                or not parts[2].isdigit()
-                or parts[0] in observed_objects
-            ):
-                raise GatewayError(
-                    "backend_unavailable", f"installed {label} repository objects are incomplete"
-                )
-            observed_objects[parts[0]] = parts[1]
-        if set(observed_objects) != set(expected_types) or any(
-            observed_objects.get(object_id) != expected_type
-            for object_id, expected_type in expected_types.items()
-        ):
-            raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
-            )
-
     # Commit graphs can enumerate missing parents as bare object IDs, so every
     # ancestry commit still crosses the no-lazy-fetch object database boundary.
     # Historical trees/blobs are not consumed by installed reads and can number in
     # the millions; current HEAD bytes are instead bound by the complete ls-tree
     # inventory and a second bounded batch over every current blob.
     if verify_repository_closure:
-        require_object_types({object_id: "commit" for object_id in ancestry_commits})
-        require_object_types(
-            {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()}
+        _require_git_object_types(
+            path, {object_id: "commit" for object_id in ancestry_commits},
+            runner=runner, env=env, deadline=deadline, label=label,
+        )
+        _require_git_object_types(
+            path, {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()},
+            runner=runner, env=env, deadline=deadline, label=label,
         )
 
     all_tree_directories = _tree_directory_paths(set(expected))
@@ -989,6 +1022,18 @@ def _clean_git_snapshot(
             raise GatewayError(
                 "backend_unavailable", f"installed {label} generation seal failed"
             ) from exc
+        if snapshot_capture is not None:
+            if snapshot_capture:
+                raise ValueError("snapshot capture must be empty")
+            snapshot_capture.append(
+                _VerifiedRepositorySnapshot(
+                    root=path.resolve(),
+                    head=head,
+                    expected=MappingProxyType(dict(expected)),
+                    worktree_seal=metadata_seal,
+                    generation_seal=generation_seal,
+                )
+            )
         return head, generation_seal
     return head
 
@@ -1107,6 +1152,73 @@ def _clone_tree(source: Path, destination: Path, *, deadline: float) -> None:
         destination.symlink_to(os.readlink(source), target_is_directory=False)
         return
     raise OSError(f"unsupported repository materialization entry: {source}")
+
+
+def _verify_materialized_macro_root(
+    path: Path, *, plan: _MacroMaterializationPlan, runner: PacketRunner,
+    env: Mapping[str, str], deadline: float | None,
+) -> tuple[str, str]:
+    """Verify the sparse child root against the already-proved canonical tree."""
+    label = "materialized Macro source"
+    git_metadata = _direct_git_directory(path, label=label)
+    if git_metadata is None:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository topology is unsafe"
+        )
+    head = _bounded_git_text(
+        path, ["rev-parse", "--verify", "HEAD^{commit}"],
+        runner=runner, env=env, deadline=deadline, label=label, max_bytes=256,
+    ).strip()
+    if head != plan.head:
+        raise GatewayError(
+            "backend_unavailable", "installed Macro materialization SHA differs"
+        )
+    _require_git_object_types(
+        path, {oid: "blob" for _mode, oid in plan.file_objects.values()},
+        runner=runner, env=env, deadline=deadline, label=label,
+    )
+    expected_types = {rel: "regular" for rel in plan.files}
+    try:
+        actual_types, actual_directories, worktree_seal = _worktree_path_sets(
+            path, deadline=deadline, label=label,
+        )
+    except (OSError, TimeoutError) as exc:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} worktree observation failed"
+        ) from exc
+    if actual_types != expected_types or actual_directories != set(plan.directories):
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} worktree path set differs"
+        )
+    for rel in sorted(plan.files):
+        mode, expected_oid = plan.file_objects[rel]
+        try:
+            observed_oid = _raw_worktree_blob_oid(
+                path / rel, mode=mode, deadline=deadline, label=label,
+            )
+        except (OSError, TimeoutError) as exc:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} worktree observation failed"
+            ) from exc
+        if observed_oid != expected_oid:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} worktree bytes differ"
+            )
+    post_head = _bounded_git_text(
+        path, ["rev-parse", "--verify", "HEAD^{commit}"],
+        runner=runner, env=env, deadline=deadline, label=label, max_bytes=256,
+    ).strip()
+    if post_head != head:
+        raise GatewayError("backend_unavailable", f"installed {label} HEAD changed")
+    try:
+        generation_seal = _git_generation_seal(
+            git_metadata, worktree_seal=worktree_seal, deadline=deadline, label=label,
+        )
+    except (OSError, TimeoutError) as exc:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} generation seal failed"
+        ) from exc
+    return head, generation_seal
 
 
 @contextmanager
@@ -1308,6 +1420,7 @@ class InstalledBootPacketCollector:
 
     def _snapshot_pair(
         self, env: Mapping[str, str], *, deadline: float | None,
+        snapshot_capture: list[_VerifiedRepositorySnapshot] | None = None,
     ) -> tuple[str, str, str, str]:
         source_observation, macro_observation = self._repository_observation_pair(
             lambda: _clean_git_snapshot(
@@ -1320,6 +1433,7 @@ class InstalledBootPacketCollector:
                 self._macro_root, runner=self._runner, env=env,
                 label="Macro source", content_scope="macro_brief", include_seal=True,
                 deadline=deadline,
+                snapshot_capture=snapshot_capture,
                 _allow_synthetic_fixture=self._allow_synthetic_fixture,
             ),
             deadline=deadline, label="snapshot pair",
@@ -1379,13 +1493,25 @@ class InstalledBootPacketCollector:
         live_env = _installed_child_env(
             code_root=self._code_root, macro_root=self._macro_root,
         )
+        macro_snapshots: list[_VerifiedRepositorySnapshot] = []
         pre_source_sha, pre_macro_sha, pre_source_seal, pre_macro_seal = (
-            self._snapshot_pair(live_env, deadline=deadline)
+            self._snapshot_pair(
+                live_env, deadline=deadline,
+                snapshot_capture=(
+                    None if self._allow_synthetic_fixture else macro_snapshots
+                ),
+            )
         )
         materialization_plan = None
         if not self._allow_synthetic_fixture:
+            if len(macro_snapshots) != 1:
+                raise GatewayError(
+                    "backend_unavailable",
+                    "installed Macro verified snapshot is unavailable",
+                )
             materialization_plan = _build_macro_materialization_plan(
                 self._macro_root, runner=self._runner, env=live_env, deadline=deadline,
+                verified_snapshot=macro_snapshots[0],
             )
             if materialization_plan.head != pre_macro_sha:
                 raise GatewayError(
@@ -1400,26 +1526,15 @@ class InstalledBootPacketCollector:
             )
             materialized_observation: tuple[str, str] | None = None
             if packet_macro_root != self._macro_root:
-                observed_materialized = _clean_git_snapshot(
-                    packet_macro_root, runner=self._runner, env=child_env,
-                    label="materialized Macro source", content_scope="macro_brief",
-                    include_seal=True, verify_repository_closure=False,
-                    deadline=deadline,
-                    admitted_worktree_files=(
-                        set(materialization_plan.files)
-                        if materialization_plan is not None else None
-                    ),
-                    admitted_worktree_directories=(
-                        set(materialization_plan.directories)
-                        if materialization_plan is not None else None
-                    ),
-                    _allow_synthetic_fixture=self._allow_synthetic_fixture,
-                )
-                if not isinstance(observed_materialized, tuple):
+                if materialization_plan is None:
                     raise GatewayError(
-                        "backend_unavailable", "installed Macro materialization seal is unavailable"
+                        "backend_unavailable",
+                        "installed Macro materialization plan is unavailable",
                     )
-                materialized_observation = observed_materialized
+                materialized_observation = _verify_materialized_macro_root(
+                    packet_macro_root, plan=materialization_plan,
+                    runner=self._runner, env=child_env, deadline=deadline,
+                )
                 if materialized_observation[0] != pre_macro_sha:
                     raise GatewayError(
                         "backend_unavailable", "installed Macro materialization SHA differs"
@@ -1506,6 +1621,7 @@ class InstalledBootPacketCollector:
             packet = _project_macro_identity(
                 packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
             )
+        remaining()
         return packet
 
 
