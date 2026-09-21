@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from control_plane.executive_runtime import JobStatus, Runtime, StateConflict
+from control_plane.executive_runtime import JobStatus, Runtime, RuntimeProofError, StateConflict
 from control_plane.wake_ledger import LedgerPhase
 from control_plane.wake_persist import WakeLedgerRepository
 
@@ -327,6 +328,7 @@ def _parser() -> argparse.ArgumentParser:
         description="Read one finite CEO-offline Executive delivery proof.",
     )
     parser.add_argument("--runtime-root", required=True)
+    parser.add_argument("--control-socket", required=True)
     parser.add_argument("--root-job-id", required=True)
     parser.add_argument("--expected-release-sha", required=True)
     parser.add_argument("--observed-at")
@@ -339,13 +341,28 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parser.parse_args(argv)
         root_job_id = args.root_job_id
-        receipt = build_receipt(
-            Runtime.at(Path(args.runtime_root)),
-            root_job_id=root_job_id,
-            expected_release_sha=args.expected_release_sha,
-            observed_at=args.observed_at,
-        )
-    except (argparse.ArgumentTypeError, CanaryReaderError, OSError, StateConflict):
+        from control_plane.executive_service import send_control_request
+        async def read_installed():
+            return await asyncio.wait_for(send_control_request(
+                args.control_socket, "offline-delivery-observation", {
+                    "runtime_root": args.runtime_root,
+                    "root_job_id": root_job_id,
+                    "expected_release_sha": args.expected_release_sha,
+                    "observed_at": args.observed_at,
+                },
+            ), timeout=5.0)
+        response = asyncio.run(read_installed())
+        if response.get("ok") is not True or not isinstance(response.get("result"), dict):
+            raise CanaryReaderError("INPUT_REFUSED")
+        receipt = response["result"]
+    except (
+        argparse.ArgumentTypeError,
+        CanaryReaderError,
+        OSError,
+        RuntimeProofError,
+        TimeoutError,
+        asyncio.IncompleteReadError,
+    ):
         json.dump(_error(root_job_id, "INPUT_REFUSED"), sys.stdout, sort_keys=True)
         sys.stdout.write("\n")
         return 2

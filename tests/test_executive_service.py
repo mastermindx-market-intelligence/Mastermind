@@ -1873,7 +1873,8 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
         observation_path = short_socket_root / "canary-defaults" / "dialogue.sock"
         service = ExecutiveControlService(
-            _config(tmp_path / "service", socket_root=short_socket_root / "operator"),
+            _config(tmp_path / "service", socket_root=short_socket_root / "operator",
+                    runtime_root=runtime.store.root),
             runtime_factory=lambda _root: runtime,
             supervisor_factory=lambda opened: _FakeSupervisor(opened),
             dialogue_observation_socket_path=observation_path,

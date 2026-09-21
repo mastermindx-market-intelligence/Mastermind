@@ -36,6 +36,8 @@ from uuid import uuid4
 
 from control_plane.executive_runtime import (
     _MIGRATIONS,
+    _DB_RELATIVE_PATH,
+    DEFAULT_BUSY_TIMEOUT_MS,
     _migration_checksum,
     SCHEMA_VERSION,
     PersistenceError,
@@ -1276,7 +1278,7 @@ def _restore_rollback_set(target: Path, rollback: Path) -> None:
 
 
 def restore_backup_offline(
-    store: RuntimeStore,
+    store: RuntimeStore | str | Path,
     database_path: str | Path,
     manifest_path: str | Path,
     *,
@@ -1301,7 +1303,12 @@ def restore_backup_offline(
     ):  # pragma: no cover - manifest is required above
         raise BackupVerificationError("offline restore requires a verified manifest")
 
-    target_candidate = store.path.expanduser()
+    # A pure root locator must not open SQLite before maintenance owns the lock.
+    existing_store = store if isinstance(store, RuntimeStore) else None
+    runtime_root = existing_store.root if existing_store is not None else Path(store).expanduser().absolute()
+    busy_timeout_ms = existing_store.busy_timeout_ms if existing_store is not None else DEFAULT_BUSY_TIMEOUT_MS
+    target_candidate = (existing_store.path if existing_store is not None
+                        else runtime_root / _DB_RELATIVE_PATH)
     if not os.path.lexists(target_candidate):
         raise RestoreSafetyError(
             "Executive runtime database does not exist; refuse restore without rollback"
@@ -1329,7 +1336,7 @@ def restore_backup_offline(
                 raise RestoreSafetyError(
                     f"{label} override must be the canonical runtime-state path"
                 )
-    runtime_directory = _ensure_private_directory(target.parent)
+    runtime_directory = target.parent
     marker = canonical_marker
     lock = canonical_lock
     source = Path(verified.database_path)
@@ -1346,6 +1353,7 @@ def restore_backup_offline(
     # Always hold the canonical lock.  The schema upgrader uses the same inode,
     # so it cannot create its barrier between our last check and the live swap.
     with _offline_restore_lock(lock, marker):
+        runtime_directory = _ensure_private_directory(target.parent)
         try:
             if os.path.lexists(canonical_upgrade_barrier):
                 raise RestoreSafetyError(
@@ -1366,8 +1374,8 @@ def restore_backup_offline(
             # the old authority or an already-invalidated replacement, never a
             # raw restored OHF writer authority at the live path.
             staged_store = RuntimeStore(
-                store.root,
-                busy_timeout_ms=store.busy_timeout_ms,
+                runtime_root,
+                busy_timeout_ms=busy_timeout_ms,
                 database_path=staged,
             )
             invalidated = Runtime.from_store(
@@ -1400,7 +1408,8 @@ def restore_backup_offline(
                 raise BackupVerificationError(
                     "restored database hash differs from staged invalidated runtime"
                 )
-            store._schema_ready = False
+            if existing_store is not None:
+                existing_store._schema_ready = False
             return RestoreReceipt(
                 restored_database_path=str(target),
                 restored_sha256=restored.database_sha256,
@@ -1419,7 +1428,8 @@ def restore_backup_offline(
             if live_mutated and rollback.exists():
                 try:
                     _restore_rollback_set(target, rollback)
-                    store._schema_ready = False
+                    if existing_store is not None:
+                        existing_store._schema_ready = False
                     with _readonly_database(target) as rollback_connection:
                         _verify_connection(rollback_connection)
                 except (OSError, sqlite3.Error, RuntimeProofError) as rollback_exc:

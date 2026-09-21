@@ -81,7 +81,8 @@ def test_signed_concurrent_clients_withdrawal_history_and_restart(tmp_path, shor
             profile_loader=lambda: envelope, now=lambda: clock.value // 1000,
         )
         service = ExecutiveControlService(
-            _config(tmp_path, socket_root=short_socket_root, socket_path=short_socket_root / 'control.sock'),
+            _config(tmp_path, socket_root=short_socket_root, socket_path=short_socket_root / 'control.sock',
+                    runtime_root=runtime.store.root),
             runtime_factory=lambda _: runtime, supervisor_factory=lambda _: _FakeSupervisor(),
             ceo_ingress_socket_path=short_socket_root / 'ceo.sock',
             ceo_ingress_peer_uid=os.geteuid() + 1000,

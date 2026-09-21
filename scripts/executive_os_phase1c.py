@@ -30,7 +30,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
-from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
+from control_plane.executive_runtime import RuntimeProofError
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
     validate_runtime_guard_file,
@@ -1383,7 +1383,11 @@ def _service_from_config(
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
-                runtime_identity={"root": None, "db_present": True, "identity": None})
+                runtime_identity={"root": None, "db_present": True, "identity": None},
+                # The factory is inert until the actual service has started.
+                # Namespace custody belongs to that service and validates the
+                # exact Runtime supplied by its App request handler.
+                bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime))
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
@@ -1441,7 +1445,7 @@ def _service_from_config(
                     "terminal-return Relay socket must be distinct from every "
                     "activated listener"
                 )
-    return ExecutiveControlService(
+    service = ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
         operator_supervisor_factory=operator_supervisor_factory,
@@ -1457,6 +1461,7 @@ def _service_from_config(
         **dialogue_observation_kwargs,
         **terminal_return_kwargs,
     )
+    return service
 
 
 async def _request_boot_autonomy_canary(
@@ -1605,13 +1610,8 @@ def _offline_restore(args: argparse.Namespace) -> Any:
     database, manifest = _backup_paths(config, args.name)
     if args.command == "restore-verify":
         return verify_restore_drill(database, manifest)
-    store = RuntimeStore(config["runtime_root"])
     return restore_backup_offline(
-        store,
-        database,
-        manifest,
-        service_marker_path=store.path.parent / "executive-service.running",
-        service_lock_path=store.path.parent / "executive-service.lock",
+        Path(config["runtime_root"]), database, manifest,
     )
 
 

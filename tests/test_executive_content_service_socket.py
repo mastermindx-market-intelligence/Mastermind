@@ -130,7 +130,7 @@ def test_content_page_48k_succeeds_only_on_authorized_app_peer(
                     now=lambda: clock.value // 1000,
                 )
                 service = ExecutiveControlService(
-                    _config(tmp_path, socket_root=short_socket_root),
+                    _config(tmp_path, socket_root=short_socket_root, runtime_root=runtime.store.root),
                     runtime_factory=lambda _path: runtime,
                     supervisor_factory=lambda runtime: _FakeSupervisor(),
                     ceo_ingress_socket_path=short_socket_root / "ceo.sock",
@@ -343,6 +343,7 @@ def test_content_lifecycle_commands_are_control_uid_only(
                 socket_root=short_socket_root,
                 allowed_peer_uids=(os.geteuid(), os.geteuid() + 1000),
                 socket_path=short_socket_root / "operator.sock",
+                runtime_root=runtime.store.root,
             ),
             runtime_factory=lambda _path: runtime,
             supervisor_factory=lambda runtime: _FakeSupervisor(),
