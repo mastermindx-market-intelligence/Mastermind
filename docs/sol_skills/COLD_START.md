@@ -41,6 +41,24 @@ Then identify the canonical owner for each fact. Do not use title similarity to 
 
 If the semantic registry lacks a lawful parent, report the gap. Do not create an approximate workstream merely to make the portfolio neat.
 
+## Step 2A — Recover the current checkpoint before history
+
+After the current compatible Skillpack pin and exact program/operation are established, resolve the
+explicit continuation reference or one exact existing-owner lookup. Read the latest verified cumulative checkpoint.
+Verify its owner, identity and committed revision; then inspect only material invalidators that can
+change the next action: relevant source/procedure changes, current runtime/effect state, custody,
+dependency interfaces and material returns. The checkpoint is navigation, not fresh execution authority.
+
+If no valid checkpoint exists, perform bounded canonical recovery using Step 3 once and establish a
+verified checkpoint before substantial new effects. If it does exist, do not follow a handoff history chain,
+re-fetch accepted evidence or enumerate unrelated programs by habit. Retrieve deeper canonical evidence
+when the next decision genuinely requires it; never suppress evidence required for correct acceptance.
+
+Telling a model to ignore earlier messages does not prove host-side transcript compaction. Bound new
+retrieval in the current chat. When fresh context is needed, use a genuinely new chat with the verified
+continuation reference, not an assumed-empty transcript branch. Project history may still be supplied
+by the host and remains advisory. A new chat does not transfer a lease, STARTed operation or source writer.
+
 ## Step 3 — Read canonical sources in a bounded ladder
 
 Use the smallest ladder sufficient for the task:

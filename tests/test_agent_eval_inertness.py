@@ -699,6 +699,12 @@ ALLOWED_PATHS = frozenset(
         "scripts/agent_eval_host_factor_lock.py",
         "tests/test_agent_eval_host_factor_lock.py",
         "docs/superpowers/plans/2026-09-17-agent-eval-host-factor-boundary-repair.md",
+        # H1/H2 provider-free evidence-contract ratchet. Exact paths only;
+        # no control-plane/config/workflow/provider-execution authority.
+        "docs/superpowers/plans/2026-09-19-agent-eval-h1-h2-provider-free-vertical.md",
+        "evidence/CHAIRMAN_C2_RULING_AND_SELF_REVIEW.md",
+        "scripts/agent_eval/harness_convergence.py",
+        "tests/test_agent_eval_harness_convergence.py",
     }
 )
 
