@@ -73,12 +73,23 @@ def _source_files(source: Path) -> dict[str, Path]:
     return rows
 
 
+def _bundle_digest(files: dict[str, str], launcher_hash: str) -> str:
+    payload = json.dumps(
+        {"files": dict(sorted(files.items())), "launcherHash": launcher_hash},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _manifest_payload(source: Path, files: dict[str, Path], launcher: Path) -> dict:
+    digests = {name: _sha256(path) for name, path in sorted(files.items())}
+    launcher_hash = _sha256(launcher)
     return {
         "schema": SCHEMA,
-        "files": {name: _sha256(path) for name, path in sorted(files.items())},
+        "files": digests,
         "launcher": str(launcher),
-        "launcherHash": _sha256(launcher),
+        "launcherHash": launcher_hash,
+        "bundleDigest": _bundle_digest(digests, launcher_hash),
         "source": str(source),
     }
 
@@ -89,9 +100,26 @@ def _read_manifest(path: Path) -> dict:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError) as exc:
         raise Refusal("CONTROL_MANIFEST_INVALID") from exc
-    if not isinstance(value, dict) or value.get("schema") != SCHEMA:
+    expected_keys = {"schema", "files", "launcher", "launcherHash", "bundleDigest", "source"}
+    if not isinstance(value, dict) or set(value) != expected_keys or value.get("schema") != SCHEMA:
         raise Refusal("CONTROL_MANIFEST_INVALID")
-    if set(value.get("files", {})) != set(CONTROL_FILES):
+    files = value.get("files")
+    if not isinstance(files, dict) or set(files) != set(CONTROL_FILES):
+        raise Refusal("CONTROL_MANIFEST_INVALID")
+    if any(not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) for digest in files.values()):
+        raise Refusal("CONTROL_MANIFEST_INVALID")
+    launcher = value.get("launcher")
+    launcher_hash = value.get("launcherHash")
+    source = value.get("source")
+    bundle_digest = value.get("bundleDigest")
+    if (not isinstance(launcher, str) or not Path(launcher).is_absolute()
+            or not isinstance(source, str) or not Path(source).is_absolute()
+            or not isinstance(launcher_hash, str) or len(launcher_hash) != 64
+            or any(c not in "0123456789abcdef" for c in launcher_hash)
+            or not isinstance(bundle_digest, str) or len(bundle_digest) != 64
+            or any(c not in "0123456789abcdef" for c in bundle_digest)):
+        raise Refusal("CONTROL_MANIFEST_INVALID")
+    if bundle_digest != _bundle_digest(files, launcher_hash):
         raise Refusal("CONTROL_MANIFEST_INVALID")
     return value
 
@@ -113,6 +141,7 @@ def verify(*, control_root: Path, launcher: Path) -> dict:
         "schema": SCHEMA,
         "files": observed,
         "launcherHash": _sha256(launcher),
+        "bundleDigest": manifest["bundleDigest"],
         "source": manifest.get("source"),
     }
 

@@ -33,11 +33,13 @@ class BundleTests(unittest.TestCase):
         self.launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         self.launcher.chmod(0o700)
         old_files = {name: bundle._sha256(self.control / name) for name in bundle.CONTROL_FILES}
+        launcher_hash = bundle._sha256(self.launcher)
         manifest = {
             "schema": bundle.SCHEMA,
             "files": old_files,
             "launcher": str(self.launcher),
-            "launcherHash": bundle._sha256(self.launcher),
+            "launcherHash": launcher_hash,
+            "bundleDigest": bundle._bundle_digest(old_files, launcher_hash),
             "source": "/old/source",
         }
         (self.control / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -59,6 +61,26 @@ class BundleTests(unittest.TestCase):
     def test_verify_detects_stale_manifest_after_helper_drift(self):
         (self.control / "studio_direct_control.py").write_text("drift\n")
         with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_MISMATCH"):
+            bundle.verify(control_root=self.control, launcher=self.launcher)
+
+    def test_malformed_manifest_files_shape_refuses_closed(self):
+        manifest_path = self.control / "manifest.json"
+        value = json.loads(manifest_path.read_text())
+        value["files"] = list(bundle.CONTROL_FILES)
+        manifest_path.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(bundle.Refusal, "CONTROL_MANIFEST_INVALID"):
+            bundle.verify(control_root=self.control, launcher=self.launcher)
+
+    def test_bundle_digest_binds_helpers_and_launcher(self):
+        bundle.install(source=self.source, control_root=self.control, launcher=self.launcher)
+        verified = bundle.verify(control_root=self.control, launcher=self.launcher)
+        expected = bundle._bundle_digest(verified["files"], verified["launcherHash"])
+        self.assertEqual(verified["bundleDigest"], expected)
+        manifest_path = self.control / "manifest.json"
+        value = json.loads(manifest_path.read_text())
+        value["bundleDigest"] = "0" * 64
+        manifest_path.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(bundle.Refusal, "CONTROL_MANIFEST_INVALID"):
             bundle.verify(control_root=self.control, launcher=self.launcher)
 
     def test_install_is_idempotent(self):
