@@ -352,7 +352,11 @@ def _published_bundle_matches(
                     return False
         if set(names) != set(expected):
             return False
-        file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        file_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
         for name in names:
             expected_digest, expected_size = expected[name]
             file_fd = os.open(name, file_flags, dir_fd=directory_fd)

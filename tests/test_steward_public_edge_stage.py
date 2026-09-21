@@ -338,6 +338,23 @@ def test_published_verifier_refuses_size_mismatch_before_hashing(tmp_path, monke
     assert subject._published_bundle_matches(output, expected) is False
 
 
+def test_published_verifier_opens_expected_children_nonblocking(tmp_path, monkeypatch):
+    output, expected = _published_fixture(tmp_path)
+    open_file = os.open
+    child_flags = []
+
+    def record_open(path, flags, *, dir_fd=None):
+        if dir_fd is not None:
+            child_flags.append(flags)
+            return open_file(path, flags, dir_fd=dir_fd)
+        return open_file(path, flags)
+
+    monkeypatch.setattr(subject.os, "open", record_open)
+    assert subject._published_bundle_matches(output, expected) is True
+    assert len(child_flags) == len(expected)
+    assert all(flags & os.O_NONBLOCK for flags in child_flags)
+
+
 def test_replace_that_publishes_then_errors_is_effect_unknown(tmp_path, monkeypatch):
     repo, commit, tree = _fixture_repo(tmp_path)
     output = tmp_path / "staged"
