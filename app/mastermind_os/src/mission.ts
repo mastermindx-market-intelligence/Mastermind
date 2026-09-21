@@ -1,3 +1,7 @@
+import {
+  decodeOwnerObservation,
+  type OwnerObservation,
+} from "./workspace-contract";
 export type ReadState = "CURRENT" | "PARTIAL" | "HISTORICAL" | "UNAVAILABLE";
 export type SectionState =
   "AVAILABLE" | "EMPTY" | "PARTIAL" | "HISTORICAL" | "UNAVAILABLE";
@@ -96,7 +100,7 @@ export interface RuntimeCard {
   movement_reason_code: string | null;
 }
 export interface MissionDocument {
-  schema: "mastermind.mission_workspace.v1";
+  schema: "mastermind.mission_workspace.v1" | "mastermind.mission_workspace.v2";
   generated_at: string | null;
   source: {
     control_room_schema: string | null;
@@ -105,6 +109,7 @@ export interface MissionDocument {
     fabric_view_generated_at: string | null;
     source_generation: Record<string, string | number | boolean | null>;
     source_coverage: string[];
+    owner_observation?: OwnerObservation;
   };
   read_state: {
     state: ReadState;
@@ -178,6 +183,7 @@ export interface MissionDocument {
       | "NOT_STARTED"
       | "IN_PROGRESS"
       | "ACCEPTED"
+      | "COMPLETED"
       | "CANCELLED"
       | "FAILED"
       | "LOST"
@@ -272,7 +278,9 @@ export interface UnavailableMission {
 export type MissionRead = (
   selection: MissionSelection & { signal: AbortSignal },
 ) => Promise<unknown>;
-export type ProgramRead = (request: { signal: AbortSignal }) => Promise<unknown>;
+export type ProgramRead = (request: {
+  signal: AbortSignal;
+}) => Promise<unknown>;
 export interface ProgramCard {
   workRef: string;
   title: string | null;
@@ -752,9 +760,11 @@ export function decodeMission(
   if (
     !obj(value) ||
     !exact(value, TOP) ||
-    value.schema !== "mastermind.mission_workspace.v1"
+    (value.schema !== "mastermind.mission_workspace.v1" &&
+      value.schema !== "mastermind.mission_workspace.v2")
   )
     return null;
+  const v2 = value.schema === "mastermind.mission_workspace.v2";
   const s = value.source;
   if (
     !obj(s) ||
@@ -765,6 +775,7 @@ export function decodeMission(
       "fabric_view_generated_at",
       "source_generation",
       "source_coverage",
+      ...(v2 ? ["owner_observation"] : []),
     ]) ||
     !(
       s.control_room_schema === null ||
@@ -773,7 +784,8 @@ export function decodeMission(
     !ntime(s.control_room_generated_at) ||
     !(
       s.fabric_view_schema === null ||
-      s.fabric_view_schema === "mastermind.fabric_job_view.v1"
+      s.fabric_view_schema ===
+        (v2 ? "mastermind.fabric_job_view.v2" : "mastermind.fabric_job_view.v1")
     ) ||
     !ntime(s.fabric_view_generated_at) ||
     !obj(s.source_generation) ||
@@ -794,6 +806,13 @@ export function decodeMission(
     new Set(s.source_coverage).size !== s.source_coverage.length
   )
     return null;
+  const observation = v2
+    ? decodeOwnerObservation(s.owner_observation, {
+        work_ref: sel.workRef,
+        root_job_id: sel.rootJobId,
+      })
+    : null;
+  if (v2 && !observation) return null;
   const r = value.read_state;
   if (
     !obj(r) ||
@@ -1078,7 +1097,7 @@ export function decodeMission(
       oneOf(ex.state, [
         "NOT_STARTED",
         "IN_PROGRESS",
-        "ACCEPTED",
+        v2 ? "COMPLETED" : "ACCEPTED",
         "CANCELLED",
         "FAILED",
         "LOST",
@@ -1137,6 +1156,7 @@ export function decodeMission(
       "evidence",
     ]) ||
     !oneOf(ac.state, ["NOT_PROJECTED", "ACCEPTED"] as const) ||
+    (v2 && ac.state !== "NOT_PROJECTED") ||
     !strings(ac.reason_codes, 32, 128, true) ||
     !ntext(ac.owner, 128) ||
     !ntext(ac.artifact_revision, 128) ||
@@ -1264,7 +1284,32 @@ export function decodeMission(
     )
   )
     return null;
-  if (r.state === "CURRENT") return null;
+  // The fixed authenticated service proves the original input digest/validity
+  // binding. This consumer checks the receipt and all facts present in this DTO;
+  // it does not invent copies of the absent full CCR/Runtime source documents.
+  if (
+    r.state === "CURRENT" &&
+    (!v2 ||
+      observation?.state !== "SAME" ||
+      tr.historical !== false ||
+      !established ||
+      ex.state === null ||
+      s.control_room_schema !== "mastermind.chairman_control_room.v1" ||
+      s.fabric_view_schema !== "mastermind.fabric_job_view.v2" ||
+      s.source_coverage.length !== 2 ||
+      !s.source_coverage.includes("control_room") ||
+      !s.source_coverage.includes("fabric_view") ||
+      !time(s.control_room_generated_at) ||
+      !time(s.fabric_view_generated_at) ||
+      r.reason_codes.length !== 0 ||
+      !["program", "mission", "execution", "review"].every((section) =>
+        (r.usable_sections as string[]).includes(section),
+      ) ||
+      value.missingness.some(
+        (x) => obj(x) && x.target_field === "source.generation_vector",
+      ))
+  )
+    return null;
   if (
     ex.state === null &&
     established &&
@@ -1337,9 +1382,10 @@ export function selectionFromLocation(
     r = map.get("root_job_id");
   return ws(w) && job(r) ? { workRef: w, rootJobId: r } : null;
 }
-export function locationSelectionInput(
-  search = window.location.search,
-): { hasIdentity: boolean; selection: MissionSelection | null } {
+export function locationSelectionInput(search = window.location.search): {
+  hasIdentity: boolean;
+  selection: MissionSelection | null;
+} {
   const raw = search.startsWith("?") ? search.slice(1) : search;
   if (!raw) return { hasIdentity: false, selection: null };
   const hasIdentity = raw.split("&").some((pair) => {

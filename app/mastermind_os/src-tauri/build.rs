@@ -14,6 +14,7 @@ fn required(name: &str) -> String {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=MM_NATIVE_CLIENT_ID");
     println!("cargo:rerun-if-env-changed=MM_SOURCE_REVISION");
     println!("cargo:rerun-if-env-changed=MM_BUILD_IDENTITY");
     let revision = required("MM_SOURCE_REVISION");

@@ -1,3 +1,5 @@
+import type { AuthState, MissionHost } from "./host";
+import type { WindowDocument } from "./workspace-contract";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   allEvidence,
@@ -9,9 +11,7 @@ import {
   selectionFromLocation,
   unavailableMission,
   type MissionDocument,
-  type MissionRead,
   type MissionSelection,
-  type ProgramRead,
   type UnavailableMission,
 } from "./mission";
 export const navigation = [
@@ -32,11 +32,7 @@ interface BuildReceipt {
 }
 declare global {
   interface Window {
-    MastermindMissionHost?: {
-      readMission?: MissionRead;
-      readPrograms?: ProgramRead;
-      selection?: unknown;
-    };
+    MastermindMissionHost?: MissionHost;
   }
 }
 type ProgramIndex =
@@ -390,19 +386,62 @@ function Evidence({ d }: { d: MissionDocument }) {
     </>
   );
 }
-function Conversation() {
+function Conversation({
+  document,
+  pending,
+  refresh,
+}: {
+  document?: WindowDocument | null;
+  pending?: boolean;
+  refresh?: () => void;
+}) {
+  if (document)
+    return (
+      <section className="card">
+        <div className="section-title">
+          <h2>Conversation</h2>
+          <State value={document.view.coverage} />
+        </div>
+        <p className="muted">
+          Current permitted turn · observed {document.view.observed_at}. This
+          window does not establish full history or product acceptance.
+        </p>
+        {document.view.items.map((item) => (
+          <article key={item.id}>
+            <State value={item.state} />
+            {item.kind === "withheld" ? (
+              <Empty>Content withheld by its owner.</Empty>
+            ) : (
+              <pre className="visible-text">{item.text}</pre>
+            )}
+          </article>
+        ))}
+        {document.view.items.length === 0 ? (
+          <Empty>
+            No visible response was returned in this observed window.
+          </Empty>
+        ) : null}
+        {document.view.gaps.length ? (
+          <p className="muted">The source reported gaps in this window.</p>
+        ) : null}
+        <button onClick={refresh}>Refresh window</button>
+      </section>
+    );
   return (
     <section className="card">
       <div className="section-title">
         <h2>Conversation</h2>
-        <State value="UNAVAILABLE" />
+        <State value={pending ? "SOURCE_READ_PENDING" : "UNAVAILABLE"} />
       </div>
       <p className="muted">
-        This app has no connected conversation source yet.
+        {window.MastermindMissionHost?.readCurrentWindow
+          ? "The current permitted conversation window is unavailable."
+          : "This app has no connected conversation source yet."}
       </p>
       <Empty>
-        No conversation content is shown until a connected source is installed.
-        Existing owner and effect boundaries remain unchanged.
+        {window.MastermindMissionHost?.readCurrentWindow
+          ? "Sign in with permitted conversation access, then open this view again."
+          : "No conversation content is shown until a connected source is installed. Existing owner and effect boundaries remain unchanged."}
       </Empty>
       <details className="reason-details">
         <summary>Technical details</summary>
@@ -436,11 +475,20 @@ export function App() {
     ),
     [notice, setNotice] = useState("A qualified source has not been read."),
     [build, setBuild] = useState<BuildReceipt | null>(null),
+    [authState, setAuthState] = useState<AuthState | null>(
+      () => window.MastermindMissionHost?.auth?.getState() ?? null,
+    ),
+    [authRevision, setAuthRevision] = useState(0),
+    [windowDocument, setWindowDocument] = useState<WindowDocument | null>(null),
+    [windowPending, setWindowPending] = useState(false),
+    [windowRevision, setWindowRevision] = useState(0),
     missionRequest = useRef(0),
     programRequest = useRef(0),
-    missionSelectionState = native ? "NATIVE" : index.state,
+    missionSelectionState =
+      native && !window.MastermindMissionHost?.readPrograms
+        ? "NATIVE"
+        : index.state,
     selectionRefused =
-      !native &&
       index.state === "AVAILABLE" &&
       !!selection &&
       !index.programs.some(
@@ -449,6 +497,44 @@ export function App() {
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
+  useEffect(
+    () =>
+      window.MastermindMissionHost?.auth?.subscribe((state) => {
+        setAuthState(state);
+        setAuthRevision((n) => n + 1);
+        setWindowDocument(null);
+        if (!state.acquisition)
+          setMission(unavailableMission(null, "AUTHENTICATION_REQUIRED"));
+      }),
+    [],
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    let attached = true;
+    setWindowDocument(null);
+    setWindowPending(false);
+    const read = window.MastermindMissionHost?.readCurrentWindow;
+    if (active !== "Conversation" || !read || !authState?.content)
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    setWindowPending(true);
+    read({ signal: controller.signal })
+      .then((value) => {
+        if (attached && !controller.signal.aborted) setWindowDocument(value);
+      })
+      .catch(() => {
+        if (attached) setWindowDocument(null);
+      })
+      .finally(() => {
+        if (attached) setWindowPending(false);
+      });
+    return () => {
+      attached = false;
+      controller.abort();
+    };
+  }, [active, selection, authRevision, windowRevision, authState?.content]);
   useEffect(() => {
     if (!initialLocation.hasIdentity && initial) {
       const location = new URL(window.location.href);
@@ -465,9 +551,10 @@ export function App() {
   }, [initial, initialLocation.hasIdentity]);
   useEffect(() => {
     let attached = true;
-    if (!native) return () => {
-      attached = false;
-    };
+    if (!native)
+      return () => {
+        attached = false;
+      };
     import("@tauri-apps/api/core")
       .then(({ invoke }) => invoke<BuildReceipt>("readiness"))
       .then((r) => {
@@ -487,7 +574,7 @@ export function App() {
     let attached = true;
     const current = ++programRequest.current,
       controller = new AbortController();
-    if (native) {
+    if (native && !window.MastermindMissionHost?.readPrograms) {
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -537,7 +624,7 @@ export function App() {
       attached = false;
       controller.abort();
     };
-  }, [native]);
+  }, [native, authRevision]);
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
@@ -557,7 +644,7 @@ export function App() {
     let attached = true;
     const current = ++missionRequest.current,
       controller = new AbortController();
-    if (native) {
+    if (native && !window.MastermindMissionHost?.readMission) {
       setMission(
         unavailableMission(selection, "NATIVE_TRANSPORT_UNCONFIGURED"),
       );
@@ -651,10 +738,17 @@ export function App() {
       attached = false;
       controller.abort();
     };
-  }, [selection, native, missionSelectionState, selectionRefused]);
+  }, [
+    selection,
+    native,
+    missionSelectionState,
+    selectionRefused,
+    authRevision,
+  ]);
   const candidate = isDoc(mission) ? mission : null,
     d =
       candidate &&
+      (!authState || authState.acquisition) &&
       selection &&
       candidate.program.work_ref === selection.workRef &&
       (candidate.mission.root_job_id === null ||
@@ -674,12 +768,7 @@ export function App() {
           "",
           `${location.pathname}${location.search}${location.hash}`,
         );
-        setMission(
-          unavailableMission(
-            next,
-            "SOURCE_READ_PENDING",
-          ),
-        );
+        setMission(unavailableMission(next, "SOURCE_READ_PENDING"));
         setNotice("Reading the exact selected mission pair…");
         setSelection(next);
         setActive("Mission Workspace");
@@ -704,7 +793,11 @@ export function App() {
       <section className="card">
         <div className="section-title">
           <h2>Programs</h2>
-          <State value={index.state === "PENDING" ? "SOURCE_READ_PENDING" : index.state} />
+          <State
+            value={
+              index.state === "PENDING" ? "SOURCE_READ_PENDING" : index.state
+            }
+          />
         </div>
         {index.state === "PENDING" ? (
           <Empty>Reading the bounded Control Room projection…</Empty>
@@ -749,7 +842,14 @@ export function App() {
         ) : null}
       </section>
     );
-  else if (active === "Conversation") content = <Conversation />;
+  else if (active === "Conversation")
+    content = (
+      <Conversation
+        document={authState?.content ? windowDocument : null}
+        pending={windowPending}
+        refresh={() => setWindowRevision((n) => n + 1)}
+      />
+    );
   else if (!d)
     content = (
       <section className="card empty-panel">
@@ -809,14 +909,79 @@ export function App() {
             <p>
               {d
                 ? d.mission.root_job_id && d.read_state.state === "CURRENT"
-                  ? "A bounded rendering of one exact source-qualified mission."
+                  ? "A bounded source-qualified mission, current as of its owner observation."
                   : d.mission.root_job_id
                     ? `This mission projection is ${label(d.read_state.state)}; source qualification is not current.`
                     : "A qualified reconciliation state; no mission root is established."
                 : "No producer document is currently admitted."}
             </p>
           </div>
-          <State value={d?.read_state.state ?? "UNAVAILABLE"} />
+          <div className="facts">
+            <State value={d?.read_state.state ?? "UNAVAILABLE"} />
+            {authState ? (
+              <div>
+                <small>
+                  {authState.status === "unconfigured"
+                    ? "Sign-in setup pending"
+                    : authState.status.replaceAll("_", " ")}
+                </small>
+                {authState.reason && authState.status !== "unconfigured" ? (
+                  <p className="muted">
+                    {authState.reason === "POPUP_BLOCKED"
+                      ? "Allow the sign-in popup and try again."
+                      : authState.reason === "POPUP_CLOSED"
+                        ? "Sign-in window closed. Try again when ready."
+                        : authState.reason.includes("EXPIRED") ||
+                            authState.reason.includes("TIMEOUT")
+                          ? "Sign-in timed out. Please try again."
+                          : authState.acquisition
+                            ? "Workspace connected. Conversation access is unavailable."
+                            : "Sign-in could not complete. Please try again."}
+                  </p>
+                ) : null}
+                <button
+                  disabled={authState.status === "unconfigured"}
+                  onClick={() => {
+                    const auth = window.MastermindMissionHost?.auth;
+                    if (!auth) return;
+                    const signingOut =
+                      authState.acquisition ||
+                      authState.content ||
+                      authState.status === "signing_in";
+                    if (signingOut) {
+                      setWindowDocument(null);
+                      setMission(
+                        unavailableMission(
+                          selection,
+                          "AUTHENTICATION_REQUIRED",
+                        ),
+                      );
+                    }
+                    try {
+                      const request = signingOut
+                        ? auth.signOut()
+                        : auth.signIn();
+                      request.catch(() =>
+                        setNotice(
+                          "Sign-in could not complete. Please try again.",
+                        ),
+                      );
+                    } catch {
+                      setNotice(
+                        "Sign-in could not complete. Please try again.",
+                      );
+                    }
+                  }}
+                >
+                  {authState.status === "signing_in"
+                    ? "Cancel sign in"
+                    : authState.acquisition || authState.content
+                      ? "Sign out"
+                      : "Sign in"}
+                </button>
+              </div>
+            ) : null}
+          </div>
         </header>
         <div className="notice" role="status">
           {notice}

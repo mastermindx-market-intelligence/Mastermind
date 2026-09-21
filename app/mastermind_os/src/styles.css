@@ -548,3 +548,5 @@ code {
     display: none;
   }
 }
+
+.visible-text { white-space: pre-wrap; overflow-wrap: anywhere; }

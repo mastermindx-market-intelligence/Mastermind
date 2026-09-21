@@ -202,7 +202,9 @@ describe("React read lifecycle fences", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Open Programs" }));
-    expect(screen.getByText(/Reading the bounded Control Room projection/)).toBeTruthy();
+    expect(
+      screen.getByText(/Reading the bounded Control Room projection/),
+    ).toBeTruthy();
     const empty: any = controlRoomFixture();
     empty.work = [];
     empty.autonomy.responsibilities = [];
@@ -383,11 +385,7 @@ describe("native and interaction contracts", () => {
     expect(screen.queryByText(/cannot pass as a producer document/)).toBeNull();
     expect(screen.getByText("Technical details")).toBeTruthy();
     await act(async () => {
-      history.replaceState(
-        null,
-        "",
-        "/?work_ref=WS%3AALPHA&root_job_id=JOB-A",
-      );
+      history.replaceState(null, "", "/?work_ref=WS%3AALPHA&root_job_id=JOB-A");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     expect(
@@ -402,10 +400,14 @@ describe("native and interaction contracts", () => {
     expect(
       screen.getByRole("heading", { name: "Programs", level: 1 }),
     ).toBeTruthy();
-    expect(await screen.findByText("QUALIFIED_PROGRAM_READ_UNAVAILABLE")).toBeTruthy();
+    expect(
+      await screen.findByText("QUALIFIED_PROGRAM_READ_UNAVAILABLE"),
+    ).toBeTruthy();
     cleanup();
 
-    window.MastermindMissionHost = { readPrograms: async () => ({ invalid: true }) };
+    window.MastermindMissionHost = {
+      readPrograms: async () => ({ invalid: true }),
+    };
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Open Programs" }));
     expect(await screen.findByText("SCHEMA_INVALID")).toBeTruthy();
@@ -525,5 +527,114 @@ describe("native and interaction contracts", () => {
     await waitFor(() => expect(screen.getByText("Count unknown")).toBeTruthy());
     expect(screen.getByText("JOB-UNJOINED")).toBeTruthy();
     expect(screen.getByText(/Known-subset evidence/)).toBeTruthy();
+  });
+});
+
+describe("installed authentication and permitted content", () => {
+  it("calls sign-in directly from the header gesture and names missing public configuration", async () => {
+    const signIn = vi.fn(async () => {});
+    window.MastermindMissionHost = {
+      auth: {
+        getState: () => ({
+          status: "signed_out",
+          reason: null,
+          acquisition: false,
+          content: false,
+        }),
+        subscribe: () => () => {},
+        signIn,
+        signOut: async () => {},
+      },
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(signIn).toHaveBeenCalledTimes(1);
+    cleanup();
+    window.MastermindMissionHost.auth!.getState = () => ({
+      status: "unconfigured",
+      reason: "CLIENT_NOT_REGISTERED",
+      acquisition: false,
+      content: false,
+    });
+    render(<App />);
+    expect(screen.getByText("Sign-in setup pending")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+  it("consumes the fixed content callback and clears visible text on sign-out", async () => {
+    let listener!: (state: import("./host").AuthState) => void;
+    const h = "a".repeat(64),
+      readCurrentWindow = vi.fn(async () => ({
+        schema: "mastermind.workspace.window_read_candidate.v1" as const,
+        selection_ref: "managed-window:fixture",
+        mode: "observed-turn-window" as const,
+        view: {
+          schema: "mastermind.workspace.visible_window_candidate.v1" as const,
+          source_ref: "managed-window:fixture",
+          scope: "one-managed-turn-window" as const,
+          observed_at: "2026-09-21T07:00:00Z",
+          epoch: h,
+          terminal: false,
+          coverage: "OBSERVED_WINDOW" as const,
+          history: "NOT_PROVEN" as const,
+          acceptance: "NOT_PROJECTED" as const,
+          capabilities: {
+            send: false as const,
+            provider_control: false as const,
+            history: false as const,
+          },
+          items: [
+            {
+              id: `visible:${h}`,
+              source_sequence: 0,
+              publication_sequence: 1,
+              state: "completed" as const,
+              kind: "visible-response" as const,
+              text: "Permitted fixture response",
+              representation: "VISIBLE_TEXT" as const,
+              display_sha256: h,
+            },
+          ],
+          gaps: [],
+        },
+      }));
+    window.MastermindMissionHost = {
+      readPrograms,
+      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+      readCurrentWindow,
+      auth: {
+        getState: () => ({
+          status: "signed_in",
+          reason: null,
+          acquisition: true,
+          content: true,
+        }),
+        subscribe(fn) {
+          listener = fn;
+          return () => {};
+        },
+        signIn: async () => {},
+        signOut: async () => {
+          listener({
+            status: "signed_out",
+            reason: null,
+            acquisition: false,
+            content: false,
+          });
+        },
+      },
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    expect(await screen.findByText("Permitted fixture response")).toBeTruthy();
+    expect(readCurrentWindow).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+    });
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(screen.queryByText("Permitted fixture response")).toBeNull();
   });
 });
