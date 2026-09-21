@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
 import control_plane.executive_coo_cycle as executive_coo_cycle
 import control_plane.ceo_intent as ceo_intent
@@ -1627,6 +1628,63 @@ def _plan_body() -> dict:
     }
 
 
+@pytest.mark.parametrize("plan_version", [1, 2, 3])
+@pytest.mark.parametrize("step_version", [1, 2, 3])
+def test_plan_body_schema_selects_matching_step_shape(plan_version, step_version):
+    from control_plane.executive_orchestration_result import _role_body_schema
+
+    body = _plan_body()
+    body["schema_version"] = f"mastermind.execution_plan/v{plan_version}"
+    if step_version >= 2:
+        body["steps"][0]["placement"] = {
+            "provider_realm": "codex",
+            "quota_class": "codex-hf1q-step",
+        }
+    if step_version == 3:
+        body["steps"][0]["prerequisite_step_ids"] = []
+
+    schema = _role_body_schema("plan")
+    Draft202012Validator.check_schema(schema)
+    assert Draft202012Validator(schema).is_valid(body) is (
+        plan_version == step_version
+    )
+
+
+@pytest.mark.parametrize("plan_version, other_version", [(1, 2), (2, 3), (3, 1)])
+def test_plan_body_schema_refuses_mixed_step_shapes(plan_version, other_version):
+    from control_plane.executive_orchestration_result import _role_body_schema
+
+    body = _plan_body()
+    body["schema_version"] = f"mastermind.execution_plan/v{plan_version}"
+    second = dict(body["steps"][0], ordinal=1, step_id="step-2")
+    body["steps"].append(second)
+    for step, version in zip(body["steps"], (plan_version, other_version)):
+        if version >= 2:
+            step["placement"] = {
+                "provider_realm": "codex",
+                "quota_class": "codex-hf1q-step",
+            }
+        if version == 3:
+            step["prerequisite_step_ids"] = []
+
+    assert not Draft202012Validator(_role_body_schema("plan")).is_valid(body)
+
+
+@pytest.mark.parametrize("missing_field", ["placement", "prerequisite_step_ids"])
+def test_plan_body_schema_requires_v3_fields(missing_field):
+    from control_plane.executive_orchestration_result import _role_body_schema
+
+    body = _plan_body()
+    body["schema_version"] = "mastermind.execution_plan/v3"
+    body["steps"][0].update(
+        placement={"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        prerequisite_step_ids=[],
+    )
+    del body["steps"][0][missing_field]
+
+    assert not Draft202012Validator(_role_body_schema("plan")).is_valid(body)
+
+
 def test_plan_result_closed_wire_round_trips_and_rejects_authority_path_and_duplicates():
     envelope = _result_envelope("plan", _plan_body())
     validated = validate_envelope(
@@ -1733,7 +1791,7 @@ def test_t2v2_v1_and_closed_v2_plan_schema_refusals():
 
     wrong_version = json.loads(json.dumps(v2))
     wrong_version["role_result"]["schema_version"] = "mastermind.execution_plan/v3"
-    with pytest.raises(OrchestrationResultError, match="unsupported plan schema"):
+    with pytest.raises(OrchestrationResultError, match="does not match its closed schema"):
         validate_envelope(wrong_version, **expected)
 
     missing_version = json.loads(json.dumps(v2))
@@ -1743,6 +1801,281 @@ def test_t2v2_v1_and_closed_v2_plan_schema_refusals():
         match="plan role_result does not match its closed schema",
     ):
         validate_envelope(missing_version, **expected)
+
+
+def _v3_plan_body(root_job_id: str, plan_attempt_id: str) -> dict:
+    return {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": root_job_id,
+        "plan_attempt_id": plan_attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Acquire source evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Run independent analysis.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 2,
+                "step_id": "step-2",
+                "objective": "Consume accepted step-0 evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-0"],
+            },
+        ],
+    }
+
+
+def test_execution_plan_v3_prerequisite_valid():
+    """V3 plan with valid prerequisite_step_ids (lower-ordinal) passes."""
+    expected = {
+        "expected_job_id": "JOB-100",
+        "expected_run_id": "ATT-100",
+        "expected_worker_id": "worker-1",
+        "expected_role": "plan",
+        "expected_root_job_id": "JOB-001",
+    }
+    envelope = _result_envelope("plan", _v3_plan_body("JOB-001", "ATT-100"))
+    validated = validate_envelope(envelope, **expected)
+    assert validated["role_result"]["schema_version"] == "mastermind.execution_plan/v3"
+    assert validated["role_result"]["steps"][2]["prerequisite_step_ids"] == ["step-0"]
+
+
+def test_execution_plan_v3_prerequisite_unknown_step():
+    """prerequisite_step_ids naming an unknown step_id raises."""
+    envelope = _result_envelope("plan", {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-100",
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Acquire source evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": ["missing-step"],
+            },
+        ],
+    })
+    with pytest.raises(OrchestrationResultError, match="unknown step"):
+        validate_envelope(
+            envelope,
+            expected_job_id="JOB-100",
+            expected_run_id="ATT-100",
+            expected_worker_id="worker-1",
+            expected_role="plan",
+            expected_root_job_id="JOB-001",
+        )
+
+
+def test_execution_plan_v3_prerequisite_self_reference():
+    """A step cannot depend on itself."""
+    envelope = _result_envelope("plan", {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-100",
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-1",
+                "objective": "Do something.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-1"],
+            },
+        ],
+    })
+    with pytest.raises(OrchestrationResultError, match="lower-ordinal"):
+        validate_envelope(
+            envelope,
+            expected_job_id="JOB-100",
+            expected_run_id="ATT-100",
+            expected_worker_id="worker-1",
+            expected_role="plan",
+            expected_root_job_id="JOB-001",
+        )
+
+
+def test_execution_plan_v3_prerequisite_forward_reference():
+    """A step cannot depend on a higher-ordinal step."""
+    envelope = _result_envelope("plan", {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-100",
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "First step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Second step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-2"],
+            },
+            {
+                "ordinal": 2,
+                "step_id": "step-2",
+                "objective": "Third step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+        ],
+    })
+    with pytest.raises(OrchestrationResultError, match="lower-ordinal"):
+        validate_envelope(
+            envelope,
+            expected_job_id="JOB-100",
+            expected_run_id="ATT-100",
+            expected_worker_id="worker-1",
+            expected_role="plan",
+            expected_root_job_id="JOB-001",
+        )
+
+
+def test_execution_plan_v3_prerequisite_duplicate():
+    """Duplicate entries in prerequisite_step_ids raise."""
+    envelope = _result_envelope("plan", {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-100",
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "First step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Second step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-0", "step-0"],
+            },
+        ],
+    })
+    with pytest.raises(OrchestrationResultError, match="duplicate"):
+        validate_envelope(
+            envelope,
+            expected_job_id="JOB-100",
+            expected_run_id="ATT-100",
+            expected_worker_id="worker-1",
+            expected_role="plan",
+            expected_root_job_id="JOB-001",
+        )
 
 
 def test_t2v2_two_step_placement_projection_and_exact_claim_refusal(tmp_path):
