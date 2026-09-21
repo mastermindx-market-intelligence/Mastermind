@@ -36,8 +36,8 @@ from control_plane import executive_placement_selection as c1
 from control_plane.executive_steward import EffectState
 
 
-RECEIPT_SCHEMA = "mastermind.web_ceo_session_capability_receipt.v1"
-PREFLIGHT_SCHEMA = "mastermind.web_ceo_session_capability_preflight.v1"
+RECEIPT_SCHEMA = "mastermind.web_ceo_session_capability_receipt.v2"
+PREFLIGHT_SCHEMA = "mastermind.web_ceo_session_capability_preflight.v2"
 MAX_RECEIPT_TTL_MS = 300_000
 
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -56,6 +56,9 @@ _RECEIPT_KEYS = frozenset(
         "expires_at_ms",
         "schema_complete",
         "tool_schema_digest",
+        "capability_contract_digest",
+        "observer_evidence_digest",
+        "serviceability_evidence_digest",
         "observations",
         "evidence_digest",
     }
@@ -74,8 +77,7 @@ KNOWN_EFFECTIVE_CAPABILITIES = (
     "studio_direct_read",
     "studio_direct_write",
 )
-
-SERVICEABILITY_CAPABILITIES = frozenset(KNOWN_EFFECTIVE_CAPABILITIES)
+_KNOWN_EFFECTIVE_CAPABILITY_SET = frozenset(KNOWN_EFFECTIVE_CAPABILITIES)
 
 
 class WebCeoSessionCapabilityError(ValueError):
@@ -106,10 +108,16 @@ class SessionStartState(_ValueEnum):
     STARTED = "started"
 
 
+class ReceiverBindingMode(_ValueEnum):
+    CAPACITY_SELECTABLE = "capacity_selectable"
+    EXACT_SESSION_REQUIRED = "exact_session_required"
+
+
 class PreflightState(_ValueEnum):
     READY = "ready"
     CAPABILITY_PROOF_REQUIRED = "capability_proof_required"
     PRESTART_REBIND_REQUIRED = "prestart_rebind_required"
+    EXACT_SESSION_BLOCKED = "exact_session_blocked"
     STICKY_DEGRADED = "sticky_degraded"
     STARTED_STICKY = "started_sticky"
     STALE_EVIDENCE = "stale_evidence"
@@ -140,6 +148,8 @@ def _token(value: object, *, code: str) -> str:
 def _capability(value: object) -> str:
     if not isinstance(value, str) or _CAPABILITY_RE.fullmatch(value) is None:
         raise WebCeoSessionCapabilityError("CAPABILITY_NAME_INVALID")
+    if value not in _KNOWN_EFFECTIVE_CAPABILITY_SET:
+        raise WebCeoSessionCapabilityError("CAPABILITY_OUTSIDE_CLOSED_SET")
     return value
 
 
@@ -166,86 +176,160 @@ def _tool_name(value: object) -> str:
     return value
 
 
-def _family_action_present(
-    tool_names: tuple[str, ...],
+def _schema_digest(value: object) -> str:
+    if not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None:
+        raise WebCeoSessionCapabilityError("INVOCATION_SCHEMA_DIGEST_INVALID")
+    return value
+
+
+@dataclasses.dataclass(frozen=True, slots=True, order=True)
+class EffectiveToolDescriptor:
+    """One exact connector action plus its reviewed invocation-contract digest."""
+
+    tool_name: str
+    invocation_schema_digest: str
+
+    def __post_init__(self) -> None:
+        _tool_name(self.tool_name)
+        _schema_digest(self.invocation_schema_digest)
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "tool_name": self.tool_name,
+            "invocation_schema_digest": self.invocation_schema_digest,
+        }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ActionServiceabilityFact:
+    """One exact no-effect connector/serviceability observation."""
+
+    tool: EffectiveToolDescriptor
+    session_ref: str
+    binding_ref: str
+    binding_generation: int
+    observed_at_ms: int
+    expires_at_ms: int
+    serviceable: bool
+    evidence_digest: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.tool, EffectiveToolDescriptor):
+            raise WebCeoSessionCapabilityError("SERVICEABILITY_FACT_INVALID")
+        _token(self.session_ref, code="SERVICEABILITY_SESSION_REF_INVALID")
+        _token(self.binding_ref, code="SERVICEABILITY_BINDING_REF_INVALID")
+        _positive_int(
+            self.binding_generation,
+            code="SERVICEABILITY_BINDING_GENERATION_INVALID",
+        )
+        observed = _positive_int(
+            self.observed_at_ms,
+            code="SERVICEABILITY_OBSERVED_AT_INVALID",
+        )
+        expires = _positive_int(
+            self.expires_at_ms,
+            code="SERVICEABILITY_EXPIRES_AT_INVALID",
+        )
+        if expires < observed or expires - observed > MAX_RECEIPT_TTL_MS:
+            raise WebCeoSessionCapabilityError("SERVICEABILITY_FACT_TTL_INVALID")
+        if type(self.serviceable) is not bool:
+            raise WebCeoSessionCapabilityError("SERVICEABILITY_RESULT_INVALID")
+        if (
+            not isinstance(self.evidence_digest, str)
+            or _DIGEST_RE.fullmatch(self.evidence_digest) is None
+        ):
+            raise WebCeoSessionCapabilityError("SERVICEABILITY_EVIDENCE_DIGEST_INVALID")
+
+    def evidence_projection(self) -> dict[str, Any]:
+        return {
+            "tool": self.tool.to_dict(),
+            "session_ref": self.session_ref,
+            "binding_ref": self.binding_ref,
+            "binding_generation": self.binding_generation,
+            "observed_at_ms": self.observed_at_ms,
+            "expires_at_ms": self.expires_at_ms,
+            "serviceable": self.serviceable,
+            "evidence_digest": self.evidence_digest,
+        }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CapabilityActionContract:
+    """Existing-owner exact action contract for one closed capability."""
+
+    capability: str
+    required_actions: tuple[EffectiveToolDescriptor, ...]
+
+    def __post_init__(self) -> None:
+        _capability(self.capability)
+        if not isinstance(self.required_actions, tuple) or not self.required_actions:
+            raise WebCeoSessionCapabilityError("CAPABILITY_ACTION_CONTRACT_INVALID")
+        if any(
+            not isinstance(item, EffectiveToolDescriptor)
+            for item in self.required_actions
+        ):
+            raise WebCeoSessionCapabilityError("CAPABILITY_ACTION_CONTRACT_INVALID")
+        normalized = tuple(sorted(self.required_actions))
+        if len(set(normalized)) != len(normalized):
+            raise WebCeoSessionCapabilityError("CAPABILITY_ACTION_CONTRACT_INVALID")
+        if len({item.tool_name for item in normalized}) != len(normalized):
+            raise WebCeoSessionCapabilityError("CAPABILITY_ACTION_NAME_DUPLICATE")
+        object.__setattr__(self, "required_actions", normalized)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "capability": self.capability,
+            "required_actions": [item.to_dict() for item in self.required_actions],
+        }
+
+
+def _normalize_tool_descriptors(
+    values: Sequence[EffectiveToolDescriptor],
+) -> tuple[EffectiveToolDescriptor, ...]:
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        raise WebCeoSessionCapabilityError("EFFECTIVE_TOOL_SCHEMA_INVALID")
+    if any(not isinstance(item, EffectiveToolDescriptor) for item in values):
+        raise WebCeoSessionCapabilityError("EFFECTIVE_TOOL_SCHEMA_INVALID")
+    normalized = tuple(sorted(values))
+    if len(set(normalized)) != len(normalized):
+        raise WebCeoSessionCapabilityError("DUPLICATE_EFFECTIVE_TOOL_DESCRIPTOR")
+    if len({item.tool_name for item in normalized}) != len(normalized):
+        raise WebCeoSessionCapabilityError("DUPLICATE_EFFECTIVE_TOOL_NAME")
+    return normalized
+
+
+def _normalize_capability_contracts(
+    values: Sequence[CapabilityActionContract],
+) -> tuple[CapabilityActionContract, ...]:
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        raise WebCeoSessionCapabilityError("CAPABILITY_ACTION_CONTRACTS_INVALID")
+    if any(not isinstance(item, CapabilityActionContract) for item in values):
+        raise WebCeoSessionCapabilityError("CAPABILITY_ACTION_CONTRACTS_INVALID")
+    by_name = {item.capability: item for item in values}
+    if len(by_name) != len(values):
+        raise WebCeoSessionCapabilityError("DUPLICATE_CAPABILITY_ACTION_CONTRACT")
+    if set(by_name) != _KNOWN_EFFECTIVE_CAPABILITY_SET:
+        raise WebCeoSessionCapabilityError("CAPABILITY_ACTION_CONTRACTS_INCOMPLETE")
+    return tuple(by_name[name] for name in KNOWN_EFFECTIVE_CAPABILITIES)
+
+
+def _surface_state_for_contract(
     *,
-    family_prefix: str,
-    actions: frozenset[str],
-) -> bool:
-    return any(
-        name.startswith(family_prefix)
-        and any(name.endswith("__" + action) for action in actions)
-        for name in tool_names
-    )
-
-
-def _capabilities_from_effective_tool_schema(
-    tool_names: tuple[str, ...],
-) -> dict[str, bool]:
-    github_prefix = "mcp__GitHub__"
-    executive_prefix = "mcp__Mastermind_Executive"
-    studio_prefix = "mcp__Studio_Direct"
-    desktop_prefix = "mcp__Remote_Desktop_Commander__"
-    return {
-        "github_read": _family_action_present(
-            tool_names,
-            family_prefix=github_prefix,
-            actions=frozenset({"fetch", "fetch_file", "search"}),
-        ),
-        "github_write": _family_action_present(
-            tool_names,
-            family_prefix=github_prefix,
-            actions=frozenset(
-                {
-                    "create_file",
-                    "update_file",
-                    "delete_file",
-                    "create_pull_request",
-                    "merge_pull_request",
-                }
-            ),
-        ),
-        "executive_read": _family_action_present(
-            tool_names,
-            family_prefix=executive_prefix,
-            actions=frozenset({"executive_state", "executive_inbox", "executive_job"}),
-        ),
-        "executive_submit": _family_action_present(
-            tool_names,
-            family_prefix=executive_prefix,
-            actions=frozenset({"submit_ceo_intent"}),
-        ),
-        "studio_direct_read": _family_action_present(
-            tool_names,
-            family_prefix=studio_prefix,
-            actions=frozenset({"get_config", "read_file", "list_directory"}),
-        ),
-        "studio_direct_write": _family_action_present(
-            tool_names,
-            family_prefix=studio_prefix,
-            actions=frozenset({"write_file", "edit_block", "move_file"}),
-        ),
-        "studio_direct_command": _family_action_present(
-            tool_names,
-            family_prefix=studio_prefix,
-            actions=frozenset({"start_process"}),
-        ),
-        "desktop_commander_read": _family_action_present(
-            tool_names,
-            family_prefix=desktop_prefix,
-            actions=frozenset({"get_config", "read_file", "list_directory"}),
-        ),
-        "desktop_commander_write": _family_action_present(
-            tool_names,
-            family_prefix=desktop_prefix,
-            actions=frozenset({"write_file", "edit_block", "move_file"}),
-        ),
-        "desktop_commander_command": _family_action_present(
-            tool_names,
-            family_prefix=desktop_prefix,
-            actions=frozenset({"start_process"}),
-        ),
-    }
+    effective: tuple[EffectiveToolDescriptor, ...],
+    contract: CapabilityActionContract,
+) -> CapabilityObservationState:
+    by_name = {item.tool_name: item for item in effective}
+    saw_missing = False
+    for required in contract.required_actions:
+        actual = by_name.get(required.tool_name)
+        if actual is None:
+            saw_missing = True
+            continue
+        if actual.invocation_schema_digest != required.invocation_schema_digest:
+            return CapabilityObservationState.UNKNOWN
+    if saw_missing:
+        return CapabilityObservationState.ABSENT
+    return CapabilityObservationState.PRESENT
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -308,6 +392,9 @@ class WebCeoSessionCapabilityReceipt:
     expires_at_ms: int
     schema_complete: bool
     tool_schema_digest: str
+    capability_contract_digest: str
+    observer_evidence_digest: str
+    serviceability_evidence_digest: str
     observations: tuple[CapabilityObservation, ...]
 
     def __post_init__(self) -> None:
@@ -322,11 +409,23 @@ class WebCeoSessionCapabilityReceipt:
             raise WebCeoSessionCapabilityError("CAPABILITY_RECEIPT_TTL_INVALID")
         if type(self.schema_complete) is not bool:
             raise WebCeoSessionCapabilityError("SCHEMA_COMPLETENESS_INVALID")
-        if (
-            not isinstance(self.tool_schema_digest, str)
-            or _DIGEST_RE.fullmatch(self.tool_schema_digest) is None
+        for digest_value, code in (
+            (self.tool_schema_digest, "TOOL_SCHEMA_DIGEST_INVALID"),
+            (
+                self.capability_contract_digest,
+                "CAPABILITY_CONTRACT_DIGEST_INVALID",
+            ),
+            (self.observer_evidence_digest, "OBSERVER_EVIDENCE_DIGEST_INVALID"),
+            (
+                self.serviceability_evidence_digest,
+                "SERVICEABILITY_EVIDENCE_DIGEST_INVALID",
+            ),
         ):
-            raise WebCeoSessionCapabilityError("TOOL_SCHEMA_DIGEST_INVALID")
+            if (
+                not isinstance(digest_value, str)
+                or _DIGEST_RE.fullmatch(digest_value) is None
+            ):
+                raise WebCeoSessionCapabilityError(code)
         if not isinstance(self.observations, tuple):
             raise WebCeoSessionCapabilityError("CAPABILITY_OBSERVATIONS_INVALID")
         normalized: list[CapabilityObservation] = []
@@ -336,6 +435,10 @@ class WebCeoSessionCapabilityReceipt:
                 raise WebCeoSessionCapabilityError("CAPABILITY_OBSERVATIONS_INVALID")
             if item.name in names:
                 raise WebCeoSessionCapabilityError("DUPLICATE_CAPABILITY_OBSERVATION")
+            if item.name not in _KNOWN_EFFECTIVE_CAPABILITY_SET:
+                raise WebCeoSessionCapabilityError(
+                    "CAPABILITY_OUTSIDE_CLOSED_SET"
+                )
             if (
                 item.state is CapabilityObservationState.ABSENT
                 and not self.schema_complete
@@ -345,6 +448,10 @@ class WebCeoSessionCapabilityReceipt:
                 )
             names.add(item.name)
             normalized.append(item)
+        if self.schema_complete and names != _KNOWN_EFFECTIVE_CAPABILITY_SET:
+            raise WebCeoSessionCapabilityError(
+                "COMPLETE_SCHEMA_OBSERVATIONS_INCOMPLETE"
+            )
         normalized.sort(key=lambda item: item.name)
         object.__setattr__(self, "observations", tuple(normalized))
 
@@ -360,6 +467,9 @@ class WebCeoSessionCapabilityReceipt:
             "expires_at_ms": self.expires_at_ms,
             "schema_complete": self.schema_complete,
             "tool_schema_digest": self.tool_schema_digest,
+            "capability_contract_digest": self.capability_contract_digest,
+            "observer_evidence_digest": self.observer_evidence_digest,
+            "serviceability_evidence_digest": self.serviceability_evidence_digest,
             "observations": [item.to_dict() for item in self.observations],
         }
 
@@ -375,7 +485,9 @@ class WebCeoSessionCapabilityReceipt:
 
 def build_receipt_from_effective_tool_schema(
     *,
-    tool_names: Sequence[str],
+    effective_tools: Sequence[EffectiveToolDescriptor],
+    capability_contracts: Sequence[CapabilityActionContract],
+    observer_evidence_digest: str,
     worker_id: str,
     quota_class: str,
     session_ref: str,
@@ -383,139 +495,137 @@ def build_receipt_from_effective_tool_schema(
     binding_generation: int,
     observed_at_ms: int,
     expires_at_ms: int,
-    capability_serviceability: Mapping[str, bool] | None = None,
+    action_serviceability: Sequence[ActionServiceabilityFact] | None = None,
 ) -> WebCeoSessionCapabilityReceipt:
-    """Derive capability evidence from schema plus exact-action preflight.
+    """Compose one short-lived exact-session capability receipt.
 
-    A complete effective schema may prove that a capability is absent. It may
-    not prove that a visible action is actually usable. Positive capability
-    therefore requires a successful current-generation no-effect permission /
-    capability / binding / serviceability preflight for that EXACT capability.
-    A successful READ probe never promotes sibling WRITE/ADMIN/COMMAND actions.
-    Failed or unprobed action serviceability remains UNKNOWN.
-
-    capability_serviceability is technical/resource evidence only. It never
-    grants organizational or source-writer authority.
+    Existing owners supply the exact effective action descriptors, the reviewed
+    closed capability contracts, and no-effect serviceability facts. This pure
+    compositor verifies their identity/generation/schema/TTL intersection and
+    emits only bounded digests plus closed capability observations. It owns no
+    registry, lifecycle, permission, retry, or provider discovery.
     """
 
-    if isinstance(tool_names, (str, bytes)) or not isinstance(tool_names, Sequence):
-        raise WebCeoSessionCapabilityError("EFFECTIVE_TOOL_SCHEMA_INVALID")
-    normalized = tuple(sorted(_tool_name(item) for item in tool_names))
-    if len(set(normalized)) != len(normalized):
-        raise WebCeoSessionCapabilityError("DUPLICATE_EFFECTIVE_TOOL_NAME")
-    effective = _capabilities_from_effective_tool_schema(normalized)
-    if tuple(sorted(effective)) != KNOWN_EFFECTIVE_CAPABILITIES:
-        raise WebCeoSessionCapabilityError("EFFECTIVE_CAPABILITY_MAP_INVALID")
-
-    if capability_serviceability is None:
-        probes: dict[str, bool] = {}
-    elif isinstance(capability_serviceability, Mapping):
-        probes = dict(capability_serviceability)
-    else:
-        raise WebCeoSessionCapabilityError("SERVICEABILITY_PROBES_INVALID")
-    if any(
-        capability not in SERVICEABILITY_CAPABILITIES or type(result) is not bool
-        for capability, result in probes.items()
+    effective = _normalize_tool_descriptors(effective_tools)
+    contracts = _normalize_capability_contracts(capability_contracts)
+    if (
+        not isinstance(observer_evidence_digest, str)
+        or _DIGEST_RE.fullmatch(observer_evidence_digest) is None
     ):
-        raise WebCeoSessionCapabilityError("SERVICEABILITY_PROBES_INVALID")
-    for capability, result in probes.items():
-        if result and not effective[capability]:
+        raise WebCeoSessionCapabilityError("OBSERVER_EVIDENCE_DIGEST_INVALID")
+
+    if action_serviceability is None:
+        serviceability: tuple[ActionServiceabilityFact, ...] = ()
+    elif (
+        isinstance(action_serviceability, (str, bytes))
+        or not isinstance(action_serviceability, Sequence)
+        or any(
+            not isinstance(item, ActionServiceabilityFact)
+            for item in action_serviceability
+        )
+    ):
+        raise WebCeoSessionCapabilityError("SERVICEABILITY_FACTS_INVALID")
+    else:
+        serviceability = tuple(
+            sorted(action_serviceability, key=lambda item: item.tool.tool_name)
+        )
+    if len({item.tool.tool_name for item in serviceability}) != len(serviceability):
+        raise WebCeoSessionCapabilityError("DUPLICATE_SERVICEABILITY_FACT")
+
+    all_contract_actions = {
+        action.tool_name: action
+        for contract in contracts
+        for action in contract.required_actions
+    }
+    if len(all_contract_actions) != sum(len(c.required_actions) for c in contracts):
+        raise WebCeoSessionCapabilityError("CAPABILITY_ACTION_OWNERSHIP_AMBIGUOUS")
+
+    facts_by_name: dict[str, ActionServiceabilityFact] = {}
+    for fact in serviceability:
+        expected = all_contract_actions.get(fact.tool.tool_name)
+        if expected is None:
             raise WebCeoSessionCapabilityError(
-                "SERVICEABILITY_PROBE_WITHOUT_SURFACE"
+                "SERVICEABILITY_FACT_OUTSIDE_CONTRACT"
             )
+        if fact.tool != expected:
+            raise WebCeoSessionCapabilityError(
+                "SERVICEABILITY_FACT_SCHEMA_MISMATCH"
+            )
+        if (
+            fact.session_ref != session_ref
+            or fact.binding_ref != binding_ref
+            or fact.binding_generation != binding_generation
+        ):
+            raise WebCeoSessionCapabilityError(
+                "SERVICEABILITY_FACT_BINDING_MISMATCH"
+            )
+        if (
+            fact.observed_at_ms > observed_at_ms
+            or fact.expires_at_ms < observed_at_ms
+            or fact.expires_at_ms < expires_at_ms
+        ):
+            raise WebCeoSessionCapabilityError(
+                "SERVICEABILITY_FACT_NOT_CURRENT_FOR_RECEIPT"
+            )
+        facts_by_name[fact.tool.tool_name] = fact
 
     observations: list[CapabilityObservation] = []
-    for name in KNOWN_EFFECTIVE_CAPABILITIES:
-        if not effective[name]:
+    for contract in contracts:
+        surface_state = _surface_state_for_contract(
+            effective=effective, contract=contract
+        )
+        bound_facts = [
+            facts_by_name.get(action.tool_name)
+            for action in contract.required_actions
+        ]
+        if surface_state is CapabilityObservationState.ABSENT:
+            if any(item is not None for item in bound_facts):
+                raise WebCeoSessionCapabilityError(
+                    "SERVICEABILITY_FACT_WITHOUT_SURFACE"
+                )
             state = CapabilityObservationState.ABSENT
             proof = CapabilityProofClass.EFFECTIVE_SCHEMA
+        elif surface_state is CapabilityObservationState.UNKNOWN:
+            if any(item is not None for item in bound_facts):
+                raise WebCeoSessionCapabilityError(
+                    "SERVICEABILITY_FACT_WITH_SCHEMA_DRIFT"
+                )
+            state = CapabilityObservationState.UNKNOWN
+            proof = CapabilityProofClass.EFFECTIVE_SCHEMA
         else:
-            probe = probes.get(name)
-            if probe is True:
+            if all(
+                item is not None and item.serviceable is True
+                for item in bound_facts
+            ):
                 state = CapabilityObservationState.PRESENT
                 proof = CapabilityProofClass.NO_EFFECT_PROBE
-            elif probe is False:
+            elif any(
+                item is not None and item.serviceable is False
+                for item in bound_facts
+            ):
                 state = CapabilityObservationState.UNKNOWN
                 proof = CapabilityProofClass.NO_EFFECT_PROBE
             else:
                 state = CapabilityObservationState.UNKNOWN
                 proof = CapabilityProofClass.EFFECTIVE_SCHEMA
         observations.append(
-            CapabilityObservation(name=name, state=state, proof_class=proof)
+            CapabilityObservation(
+                name=contract.capability, state=state, proof_class=proof
+            )
         )
 
-    return WebCeoSessionCapabilityReceipt(
-        worker_id=worker_id,
-        quota_class=quota_class,
-        session_ref=session_ref,
-        binding_ref=binding_ref,
-        binding_generation=binding_generation,
-        observed_at_ms=observed_at_ms,
-        expires_at_ms=expires_at_ms,
-        schema_complete=True,
-        tool_schema_digest=_digest({"tool_names": list(normalized)}),
-        observations=tuple(observations),
+    tool_schema_digest = _digest(
+        {"tools": [item.to_dict() for item in effective]}
     )
-
-
-def build_receipt_from_negative_schema_projection(
-    *,
-    absent_capabilities: Sequence[str],
-    tool_schema_digest: str,
-    worker_id: str,
-    quota_class: str,
-    session_ref: str,
-    binding_ref: str,
-    binding_generation: int,
-    observed_at_ms: int,
-    expires_at_ms: int,
-) -> WebCeoSessionCapabilityReceipt:
-    """Consume a complete-schema, negative-only exact-session projection.
-
-    This seam exists for transports that can attribute one finished turn to an
-    exact RuntimeBinding but must not expose raw transcript or raw tool names.
-    The projection may remove capabilities from eligibility only. Every closed
-    capability not declared absent remains UNKNOWN; this function can never
-    mint PRESENT or grant authority.
-
-    absent_capabilities MUST be the complete absent subset of the closed
-    KNOWN_EFFECTIVE_CAPABILITIES vocabulary for the observed schema generation,
-    not merely the current demand's missing subset.
-    """
-
-    if (
-        isinstance(absent_capabilities, (str, bytes))
-        or not isinstance(absent_capabilities, Sequence)
-    ):
-        raise WebCeoSessionCapabilityError(
-            "NEGATIVE_SCHEMA_PROJECTION_INVALID"
-        )
-    absent = tuple(sorted(_capability(item) for item in absent_capabilities))
-    if not absent or len(set(absent)) != len(absent):
-        raise WebCeoSessionCapabilityError(
-            "NEGATIVE_SCHEMA_PROJECTION_INVALID"
-        )
-    if any(item not in KNOWN_EFFECTIVE_CAPABILITIES for item in absent):
-        raise WebCeoSessionCapabilityError(
-            "NEGATIVE_CAPABILITY_OUTSIDE_CLOSED_SET"
-        )
-    if (
-        not isinstance(tool_schema_digest, str)
-        or _DIGEST_RE.fullmatch(tool_schema_digest) is None
-    ):
-        raise WebCeoSessionCapabilityError("TOOL_SCHEMA_DIGEST_INVALID")
-
-    observations = tuple(
-        CapabilityObservation(
-            name=name,
-            state=(
-                CapabilityObservationState.ABSENT
-                if name in absent
-                else CapabilityObservationState.UNKNOWN
-            ),
-            proof_class=CapabilityProofClass.EFFECTIVE_SCHEMA,
-        )
-        for name in KNOWN_EFFECTIVE_CAPABILITIES
+    capability_contract_digest = _digest(
+        {"contracts": [item.to_dict() for item in contracts]}
+    )
+    serviceability_evidence_digest = _digest(
+        {
+            "facts": [
+                item.evidence_projection() for item in serviceability
+            ]
+        }
     )
     return WebCeoSessionCapabilityReceipt(
         worker_id=worker_id,
@@ -527,20 +637,46 @@ def build_receipt_from_negative_schema_projection(
         expires_at_ms=expires_at_ms,
         schema_complete=True,
         tool_schema_digest=tool_schema_digest,
-        observations=observations,
+        capability_contract_digest=capability_contract_digest,
+        observer_evidence_digest=observer_evidence_digest,
+        serviceability_evidence_digest=serviceability_evidence_digest,
+        observations=tuple(observations),
     )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class WebCeoCapabilityPreflightDecision:
-    """Machine-readable pre-START fence; never a placement commitment."""
+class CurrentSessionBindingFacts:
+    """Action-time current facts from the existing RuntimeBinding owner."""
 
-    state: PreflightState
     worker_id: str
     quota_class: str
     session_ref: str
     binding_ref: str
     binding_generation: int
+
+    def __post_init__(self) -> None:
+        _token(self.worker_id, code="CURRENT_WORKER_ID_INVALID")
+        _token(self.quota_class, code="CURRENT_QUOTA_CLASS_INVALID")
+        _token(self.session_ref, code="CURRENT_SESSION_REF_INVALID")
+        _token(self.binding_ref, code="CURRENT_BINDING_REF_INVALID")
+        _positive_int(
+            self.binding_generation,
+            code="CURRENT_BINDING_GENERATION_INVALID",
+        )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class WebCeoCapabilityPreflightDecision:
+    """Machine-readable assessment; never effect authority by itself."""
+
+    state: PreflightState
+    receiver_binding_mode: ReceiverBindingMode
+    worker_id: str
+    quota_class: str
+    session_ref: str
+    binding_ref: str
+    binding_generation: int
+    capability_contract_digest: str
     required_capabilities: tuple[str, ...]
     proven_capabilities: tuple[str, ...]
     missing_capabilities: tuple[str, ...]
@@ -552,16 +688,27 @@ class WebCeoCapabilityPreflightDecision:
 
     def __post_init__(self) -> None:
         _enum(self.state, PreflightState, code="PREFLIGHT_STATE_INVALID")
+        _enum(
+            self.receiver_binding_mode,
+            ReceiverBindingMode,
+            code="RECEIVER_BINDING_MODE_INVALID",
+        )
         _token(self.worker_id, code="WORKER_ID_INVALID")
         _token(self.quota_class, code="QUOTA_CLASS_INVALID")
         _token(self.session_ref, code="SESSION_REF_INVALID")
         _token(self.binding_ref, code="BINDING_REF_INVALID")
         _positive_int(self.binding_generation, code="BINDING_GENERATION_INVALID")
-        if (
-            not isinstance(self.evidence_digest, str)
-            or _DIGEST_RE.fullmatch(self.evidence_digest) is None
+        for digest_value, code in (
+            (self.capability_contract_digest, "CAPABILITY_CONTRACT_DIGEST_INVALID"),
+            (self.evidence_digest, "EVIDENCE_DIGEST_INVALID"),
         ):
-            raise WebCeoSessionCapabilityError("EVIDENCE_DIGEST_INVALID")
+            if (
+                not isinstance(digest_value, str)
+                or _DIGEST_RE.fullmatch(digest_value) is None
+            ):
+                raise WebCeoSessionCapabilityError(code)
+
+        sets: list[set[str]] = []
         for field in (
             self.required_capabilities,
             self.proven_capabilities,
@@ -574,32 +721,73 @@ class WebCeoCapabilityPreflightDecision:
                 raise WebCeoSessionCapabilityError("PREFLIGHT_CAPABILITY_SET_INVALID")
             for item in field:
                 _capability(item)
+            sets.append(set(field))
+        required, proven, missing, unknown = sets
+        if not required:
+            raise WebCeoSessionCapabilityError("PREFLIGHT_REQUIRED_EMPTY")
+        if (proven & missing) or (proven & unknown) or (missing & unknown):
+            raise WebCeoSessionCapabilityError("PREFLIGHT_PARTITION_INVALID")
+        if proven | missing | unknown != required:
+            raise WebCeoSessionCapabilityError("PREFLIGHT_PARTITION_INVALID")
+
         if type(self.rebind_allowed) is not bool:
             raise WebCeoSessionCapabilityError("REBIND_FLAG_INVALID")
         if self.selection_is_commitment is not False:
             raise WebCeoSessionCapabilityError("PREFLIGHT_CANNOT_BE_COMMITMENT")
-        if self.rebind_allowed:
-            expected = {
-                "worker_id": self.worker_id,
-                "quota_class": self.quota_class,
-                "reason": "effective_capability_missing",
-            }
-            if self.state is not PreflightState.PRESTART_REBIND_REQUIRED:
+
+        expected_exclusion = {
+            "worker_id": self.worker_id,
+            "quota_class": self.quota_class,
+            "reason": "effective_capability_missing",
+        }
+        if self.state is PreflightState.READY:
+            if proven != required or missing or unknown or self.rebind_allowed:
+                raise WebCeoSessionCapabilityError("READY_PREFLIGHT_INVALID")
+        elif self.state is PreflightState.PRESTART_REBIND_REQUIRED:
+            if (
+                self.receiver_binding_mode
+                is not ReceiverBindingMode.CAPACITY_SELECTABLE
+                or not missing
+                or not self.rebind_allowed
+                or self.exclusion != expected_exclusion
+            ):
                 raise WebCeoSessionCapabilityError("REBIND_STATE_INVALID")
-            if self.exclusion != expected:
+        elif self.state is PreflightState.EXACT_SESSION_BLOCKED:
+            if (
+                self.receiver_binding_mode
+                is not ReceiverBindingMode.EXACT_SESSION_REQUIRED
+                or not missing
+                or self.rebind_allowed
+                or self.exclusion is not None
+            ):
+                raise WebCeoSessionCapabilityError("EXACT_SESSION_BLOCK_STATE_INVALID")
+        elif self.state is PreflightState.CAPABILITY_PROOF_REQUIRED:
+            if not unknown or missing or self.rebind_allowed:
+                raise WebCeoSessionCapabilityError("CAPABILITY_PROOF_STATE_INVALID")
+        elif self.state is PreflightState.STICKY_DEGRADED:
+            if not missing or self.rebind_allowed:
+                raise WebCeoSessionCapabilityError("STICKY_DEGRADED_STATE_INVALID")
+        elif self.state is PreflightState.STARTED_STICKY:
+            if missing or unknown or proven != required or self.rebind_allowed:
+                raise WebCeoSessionCapabilityError("STARTED_STICKY_STATE_INVALID")
+        elif self.rebind_allowed:
+            raise WebCeoSessionCapabilityError("REBIND_STATE_INVALID")
+
+        if self.state is not PreflightState.PRESTART_REBIND_REQUIRED:
+            if self.exclusion is not None:
                 raise WebCeoSessionCapabilityError("REBIND_EXCLUSION_INVALID")
-        elif self.exclusion is not None:
-            raise WebCeoSessionCapabilityError("REBIND_EXCLUSION_INVALID")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": PREFLIGHT_SCHEMA,
             "state": self.state.value,
+            "receiver_binding_mode": self.receiver_binding_mode.value,
             "worker_id": self.worker_id,
             "quota_class": self.quota_class,
             "session_ref": self.session_ref,
             "binding_ref": self.binding_ref,
             "binding_generation": self.binding_generation,
+            "capability_contract_digest": self.capability_contract_digest,
             "required_capabilities": list(self.required_capabilities),
             "proven_capabilities": list(self.proven_capabilities),
             "missing_capabilities": list(self.missing_capabilities),
@@ -654,6 +842,9 @@ def validate_session_capability_receipt(
         expires_at_ms=raw["expires_at_ms"],
         schema_complete=raw["schema_complete"],
         tool_schema_digest=raw["tool_schema_digest"],
+        capability_contract_digest=raw["capability_contract_digest"],
+        observer_evidence_digest=raw["observer_evidence_digest"],
+        serviceability_evidence_digest=raw["serviceability_evidence_digest"],
         observations=tuple(observations),
     )
     if raw["evidence_digest"] != receipt.evidence_digest:
@@ -664,6 +855,7 @@ def validate_session_capability_receipt(
 def _decision(
     *,
     state: PreflightState,
+    receiver_binding_mode: ReceiverBindingMode,
     receipt: WebCeoSessionCapabilityReceipt,
     required: tuple[str, ...],
     proven: tuple[str, ...],
@@ -682,11 +874,13 @@ def _decision(
     )
     return WebCeoCapabilityPreflightDecision(
         state=state,
+        receiver_binding_mode=receiver_binding_mode,
         worker_id=receipt.worker_id,
         quota_class=receipt.quota_class,
         session_ref=receipt.session_ref,
         binding_ref=receipt.binding_ref,
         binding_generation=receipt.binding_generation,
+        capability_contract_digest=receipt.capability_contract_digest,
         required_capabilities=required,
         proven_capabilities=proven,
         missing_capabilities=missing,
@@ -701,22 +895,31 @@ def assess_web_ceo_session_capabilities(
     *,
     receipt: WebCeoSessionCapabilityReceipt,
     required_capabilities: frozenset[str],
+    receiver_binding_mode: ReceiverBindingMode,
     expected_worker_id: str,
     expected_quota_class: str,
     expected_session_ref: str,
     expected_binding_ref: str,
     expected_binding_generation: int,
+    expected_capability_contract_digest: str,
+    expected_observer_evidence_digest: str,
+    expected_serviceability_evidence_digest: str,
     now_ms: int,
     start_state: SessionStartState,
     effect_state: EffectState,
 ) -> WebCeoCapabilityPreflightDecision:
-    """Assess exact-session effective tools without reading clocks or tools."""
+    """Re-assess one exact-session receipt against action-time owner facts."""
 
     if not isinstance(receipt, WebCeoSessionCapabilityReceipt):
         raise WebCeoSessionCapabilityError("CAPABILITY_RECEIPT_INVALID")
     if not isinstance(required_capabilities, frozenset) or not required_capabilities:
         raise WebCeoSessionCapabilityError("REQUIRED_CAPABILITIES_INVALID")
     required = tuple(sorted(_capability(item) for item in required_capabilities))
+    _enum(
+        receiver_binding_mode,
+        ReceiverBindingMode,
+        code="RECEIVER_BINDING_MODE_INVALID",
+    )
     _token(expected_worker_id, code="EXPECTED_WORKER_ID_INVALID")
     _token(expected_quota_class, code="EXPECTED_QUOTA_CLASS_INVALID")
     _token(expected_session_ref, code="EXPECTED_SESSION_REF_INVALID")
@@ -725,6 +928,23 @@ def assess_web_ceo_session_capabilities(
         expected_binding_generation,
         code="EXPECTED_BINDING_GENERATION_INVALID",
     )
+    if (
+        not isinstance(expected_capability_contract_digest, str)
+        or _DIGEST_RE.fullmatch(expected_capability_contract_digest) is None
+    ):
+        raise WebCeoSessionCapabilityError("EXPECTED_CAPABILITY_CONTRACT_DIGEST_INVALID")
+    if (
+        not isinstance(expected_observer_evidence_digest, str)
+        or _DIGEST_RE.fullmatch(expected_observer_evidence_digest) is None
+    ):
+        raise WebCeoSessionCapabilityError("EXPECTED_OBSERVER_EVIDENCE_DIGEST_INVALID")
+    if (
+        not isinstance(expected_serviceability_evidence_digest, str)
+        or _DIGEST_RE.fullmatch(expected_serviceability_evidence_digest) is None
+    ):
+        raise WebCeoSessionCapabilityError(
+            "EXPECTED_SERVICEABILITY_EVIDENCE_DIGEST_INVALID"
+        )
     current_ms = _positive_int(now_ms, code="CURRENT_TIME_INVALID")
     _enum(start_state, SessionStartState, code="SESSION_START_STATE_INVALID")
     if not isinstance(effect_state, EffectState):
@@ -738,9 +958,10 @@ def assess_web_ceo_session_capabilities(
         item = observed.get(name)
         if item is None:
             if receipt.schema_complete:
-                missing.append(name)
-            else:
-                unknown.append(name)
+                raise WebCeoSessionCapabilityError(
+                    "COMPLETE_SCHEMA_OBSERVATIONS_INCOMPLETE"
+                )
+            unknown.append(name)
         elif item.state is CapabilityObservationState.PRESENT:
             proven.append(name)
         elif item.state is CapabilityObservationState.ABSENT:
@@ -751,111 +972,66 @@ def assess_web_ceo_session_capabilities(
     missing_tuple = tuple(missing)
     unknown_tuple = tuple(unknown)
 
-    if (
-        receipt.worker_id != expected_worker_id
-        or receipt.quota_class != expected_quota_class
-        or receipt.session_ref != expected_session_ref
-        or receipt.binding_ref != expected_binding_ref
-        or receipt.binding_generation != expected_binding_generation
-    ):
-        return _decision(
-            state=PreflightState.RECONCILIATION_REQUIRED,
-            receipt=receipt,
-            required=required,
-            proven=proven_tuple,
-            missing=missing_tuple,
-            unknown=unknown_tuple,
-        )
-
-    if effect_state is EffectState.EFFECT_UNKNOWN:
-        return _decision(
-            state=PreflightState.EFFECT_UNKNOWN,
-            receipt=receipt,
-            required=required,
-            proven=proven_tuple,
-            missing=missing_tuple,
-            unknown=unknown_tuple,
-        )
-
-    if current_ms < receipt.observed_at_ms or current_ms > receipt.expires_at_ms:
-        return _decision(
-            state=PreflightState.STALE_EVIDENCE,
-            receipt=receipt,
-            required=required,
-            proven=proven_tuple,
-            missing=missing_tuple,
-            unknown=unknown_tuple,
-        )
-
-    if (
-        start_state is SessionStartState.PRE_START
-        and effect_state is not EffectState.NONE
-    ):
-        return _decision(
-            state=PreflightState.RECONCILIATION_REQUIRED,
-            receipt=receipt,
-            required=required,
-            proven=proven_tuple,
-            missing=missing_tuple,
-            unknown=unknown_tuple,
-        )
-
-    # A proven required absence is dispositive: the candidate cannot satisfy
-    # the accepted demand even if sibling required capabilities are still
-    # UNKNOWN. Before START with no effect, exclude/rebind now rather than
-    # waiting for irrelevant positive proof. After START the same known
-    # absence is sticky degradation and never authorizes carrier movement.
-    if missing_tuple:
-        if (
-            start_state is SessionStartState.PRE_START
-            and effect_state is EffectState.NONE
-        ):
-            return _decision(
-                state=PreflightState.PRESTART_REBIND_REQUIRED,
-                receipt=receipt,
-                required=required,
-                proven=proven_tuple,
-                missing=missing_tuple,
-                unknown=unknown_tuple,
-                rebind_allowed=True,
-            )
-        return _decision(
-            state=PreflightState.STICKY_DEGRADED,
-            receipt=receipt,
-            required=required,
-            proven=proven_tuple,
-            missing=missing_tuple,
-            unknown=unknown_tuple,
-        )
-
-    if unknown_tuple:
-        return _decision(
-            state=PreflightState.CAPABILITY_PROOF_REQUIRED,
-            receipt=receipt,
-            required=required,
-            proven=proven_tuple,
-            missing=missing_tuple,
-            unknown=unknown_tuple,
-        )
-
-    if start_state is SessionStartState.STARTED:
-        return _decision(
-            state=PreflightState.STARTED_STICKY,
-            receipt=receipt,
-            required=required,
-            proven=proven_tuple,
-            missing=missing_tuple,
-            unknown=unknown_tuple,
-        )
-
-    return _decision(
-        state=PreflightState.READY,
+    common = dict(
+        receiver_binding_mode=receiver_binding_mode,
         receipt=receipt,
         required=required,
         proven=proven_tuple,
         missing=missing_tuple,
         unknown=unknown_tuple,
     )
+
+    if (
+        receipt.worker_id != expected_worker_id
+        or receipt.quota_class != expected_quota_class
+        or receipt.session_ref != expected_session_ref
+        or receipt.binding_ref != expected_binding_ref
+        or receipt.binding_generation != expected_binding_generation
+        or receipt.capability_contract_digest
+        != expected_capability_contract_digest
+        or receipt.observer_evidence_digest
+        != expected_observer_evidence_digest
+        or receipt.serviceability_evidence_digest
+        != expected_serviceability_evidence_digest
+    ):
+        return _decision(state=PreflightState.RECONCILIATION_REQUIRED, **common)
+
+    if effect_state is EffectState.EFFECT_UNKNOWN:
+        return _decision(state=PreflightState.EFFECT_UNKNOWN, **common)
+
+    if current_ms < receipt.observed_at_ms or current_ms > receipt.expires_at_ms:
+        return _decision(state=PreflightState.STALE_EVIDENCE, **common)
+
+    if (
+        start_state is SessionStartState.PRE_START
+        and effect_state is not EffectState.NONE
+    ):
+        return _decision(state=PreflightState.RECONCILIATION_REQUIRED, **common)
+
+    if missing_tuple:
+        if (
+            start_state is SessionStartState.PRE_START
+            and effect_state is EffectState.NONE
+        ):
+            if receiver_binding_mode is ReceiverBindingMode.EXACT_SESSION_REQUIRED:
+                return _decision(
+                    state=PreflightState.EXACT_SESSION_BLOCKED,
+                    **common,
+                )
+            return _decision(
+                state=PreflightState.PRESTART_REBIND_REQUIRED,
+                rebind_allowed=True,
+                **common,
+            )
+        return _decision(state=PreflightState.STICKY_DEGRADED, **common)
+
+    if unknown_tuple:
+        return _decision(state=PreflightState.CAPABILITY_PROOF_REQUIRED, **common)
+
+    if start_state is SessionStartState.STARTED:
+        return _decision(state=PreflightState.STARTED_STICKY, **common)
+
+    return _decision(state=PreflightState.READY, **common)
 
 
 def build_guarded_commitment_plan_from_selection_decision(
@@ -864,27 +1040,56 @@ def build_guarded_commitment_plan_from_selection_decision(
     expected_source_root_revision: int,
     placement_selection: c1.PlacementSelectionDecision,
     validated_target_facts: Any,
-    capability_preflight: WebCeoCapabilityPreflightDecision,
+    capability_receipt: WebCeoSessionCapabilityReceipt,
+    required_capabilities: frozenset[str],
+    receiver_binding_mode: ReceiverBindingMode,
+    current_binding: CurrentSessionBindingFacts,
+    expected_capability_contract_digest: str,
+    expected_observer_evidence_digest: str,
+    expected_serviceability_evidence_digest: str,
+    now_ms: int,
+    start_state: SessionStartState,
+    effect_state: EffectState,
 ) -> c2.PlacementCommitmentPlan:
-    """Call existing C2 commitment only after an exact READY preflight."""
+    """Re-read capability/binding facts at effect boundary, then call C2."""
 
-    if not isinstance(capability_preflight, WebCeoCapabilityPreflightDecision):
-        raise WebCeoSessionCapabilityError("CAPABILITY_PREFLIGHT_INVALID")
-    if capability_preflight.state is not PreflightState.READY:
-        raise WebCeoSessionCapabilityError("CAPABILITY_PREFLIGHT_NOT_READY")
     if not isinstance(placement_selection, c1.PlacementSelectionDecision):
         raise WebCeoSessionCapabilityError("PLACEMENT_SELECTION_INVALID")
+    if not isinstance(current_binding, CurrentSessionBindingFacts):
+        raise WebCeoSessionCapabilityError("CURRENT_BINDING_INVALID")
     wire = placement_selection.to_dict()
     selected = wire.get("selected")
     if not isinstance(selected, Mapping):
         raise WebCeoSessionCapabilityError("PLACEMENT_SELECTION_INVALID")
     if (
-        selected.get("worker_id") != capability_preflight.worker_id
-        or selected.get("quota_class") != capability_preflight.quota_class
+        selected.get("worker_id") != current_binding.worker_id
+        or selected.get("quota_class") != current_binding.quota_class
     ):
         raise WebCeoSessionCapabilityError(
             "CAPABILITY_PREFLIGHT_SELECTION_MISMATCH"
         )
+
+    preflight = assess_web_ceo_session_capabilities(
+        receipt=capability_receipt,
+        required_capabilities=required_capabilities,
+        receiver_binding_mode=receiver_binding_mode,
+        expected_worker_id=current_binding.worker_id,
+        expected_quota_class=current_binding.quota_class,
+        expected_session_ref=current_binding.session_ref,
+        expected_binding_ref=current_binding.binding_ref,
+        expected_binding_generation=current_binding.binding_generation,
+        expected_capability_contract_digest=expected_capability_contract_digest,
+        expected_observer_evidence_digest=expected_observer_evidence_digest,
+        expected_serviceability_evidence_digest=(
+            expected_serviceability_evidence_digest
+        ),
+        now_ms=now_ms,
+        start_state=start_state,
+        effect_state=effect_state,
+    )
+    if preflight.state is not PreflightState.READY:
+        raise WebCeoSessionCapabilityError("CAPABILITY_PREFLIGHT_NOT_READY")
+
     return c2.build_commitment_plan_from_selection_decision(
         source_root_job_id=source_root_job_id,
         expected_source_root_revision=expected_source_root_revision,
@@ -894,14 +1099,19 @@ def build_guarded_commitment_plan_from_selection_decision(
 
 
 __all__ = [
+    "ActionServiceabilityFact",
+    "CapabilityActionContract",
     "CapabilityObservation",
     "CapabilityObservationState",
     "CapabilityProofClass",
+    "CurrentSessionBindingFacts",
+    "EffectiveToolDescriptor",
     "KNOWN_EFFECTIVE_CAPABILITIES",
     "MAX_RECEIPT_TTL_MS",
     "PREFLIGHT_SCHEMA",
     "PreflightState",
     "RECEIPT_SCHEMA",
+    "ReceiverBindingMode",
     "SessionStartState",
     "WebCeoCapabilityPreflightDecision",
     "WebCeoSessionCapabilityError",
@@ -909,6 +1119,5 @@ __all__ = [
     "assess_web_ceo_session_capabilities",
     "build_guarded_commitment_plan_from_selection_decision",
     "build_receipt_from_effective_tool_schema",
-    "build_receipt_from_negative_schema_projection",
     "validate_session_capability_receipt",
 ]
