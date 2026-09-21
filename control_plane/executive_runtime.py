@@ -145,6 +145,7 @@ _RUNTIME_ACQUISITION_CURSOR_SCHEMA = "mastermind.executive_runtime_cursor/v1"
 _RUNTIME_ACQUISITION_CAPABILITY = object()
 BOUNDED_RUNTIME_DISCOVERY_SCHEMA = "mastermind.executive_runtime_root_discovery/v1"
 BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA = "mastermind.executive_runtime_root_snapshot/v1"
+RUNTIME_READ_OBSERVATION_SCHEMA = "mastermind.runtime_read_observation.v1"
 BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS = 64
 BOUNDED_RUNTIME_ROOT_MAX_CHILDREN = 16
 BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS = 20
@@ -3663,7 +3664,7 @@ class RuntimeStore:
             raise
 
     @contextmanager
-    def _read_bound(self) -> Iterator[_BoundReadConnection]:
+    def _read_bound(self, *, _observation: "BoundedRuntimeReadObservation | None" = None) -> Iterator[_BoundReadConnection]:
         binding = self.read_binding
         assert binding is not None
         with binding.physical_read(self.path):
@@ -3671,6 +3672,8 @@ class RuntimeStore:
             try:
                 connection = self._open_readonly()
                 assert isinstance(connection, _BoundReadConnection)
+                if _observation is not None:
+                    _observation._before = _observation._sample(connection)
                 connection._owner_execute("BEGIN")
                 # Under real namespace exclusion this detects a wrong handle;
                 # it is explicitly not a pathname-ABA detector without custody.
@@ -3683,6 +3686,8 @@ class RuntimeStore:
                 yield connection
                 binding._validate()
                 connection._owner_finish(commit=True)
+                if _observation is not None:
+                    _observation._after = _observation._sample(connection)
             except sqlite3.Error as exc:
                 if connection is not None and connection.in_transaction:
                     connection._owner_finish(commit=False)
@@ -3695,6 +3700,28 @@ class RuntimeStore:
                 if connection is not None:
                     self._bound_connections.discard(connection)
                     self._close_read_connection(connection)
+
+    @contextmanager
+    def _read_observation(self, observation: "BoundedRuntimeReadObservation") -> Iterator[sqlite3.Connection | _BoundReadConnection]:
+        if self.read_binding is not None:
+            with self._read_bound(_observation=observation) as connection:
+                yield connection
+            return
+        # Even a writable Runtime owner observes through a mode=ro connection.
+        connection = self._open_readonly()
+        try:
+            observation._before = observation._sample(connection)
+            connection.execute("BEGIN")
+            self._verify_current_schema(connection)
+            yield connection
+            connection.commit()
+            observation._after = observation._sample(connection)
+        except BaseException:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            self._close_read_connection(connection)
 
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
@@ -18847,6 +18874,207 @@ class ActiveOperatorBindingFacts:
     owner_seat: str
 
 
+def _discover_job_roots_bounded(acquisition: BoundedRuntimeAcquisition) -> BoundedRuntimeRootDiscovery:
+    """Return the fixed owner root view through the canonical bounded seam."""
+    page = acquisition.list_jobs(limit=BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS, roots_only=True)
+    roots = page.items
+    truncated = page.next_cursor is not None
+    payload = {"schema_version": BOUNDED_RUNTIME_DISCOVERY_SCHEMA, "roots": [job.to_dict() for job in roots], "truncated": truncated}
+    return BoundedRuntimeRootDiscovery(
+        schema_version=BOUNDED_RUNTIME_DISCOVERY_SCHEMA,
+        roots=roots,
+        truncated=truncated,
+        snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+    )
+
+
+def _read_job_root_bounded(acquisition: BoundedRuntimeAcquisition, root_job_id: str) -> BoundedRuntimeRootSnapshot:
+    """Return one fixed owner root view through the canonical bounded seam."""
+    root_token = str(root_job_id or "").strip()
+    if not root_token:
+        raise StateConflict("bounded Runtime read requires an exact root Job")
+    try:
+        jobs_page = acquisition.list_jobs(limit=1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN, root_job_id=root_token)
+    except StateConflict as exc:
+        raise StateConflict("bounded Runtime read requires an exact root Job") from exc
+    jobs = jobs_page.items
+    if not jobs or jobs[0].job_id != root_token:
+        raise PersistenceError("bounded Runtime root membership is invalid")
+    attempts: list[Attempt] = []
+    truncated_attempt_jobs: list[str] = []
+    for job in jobs:
+        page = acquisition.list_attempts(limit=BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS, job_ids=(job.job_id,))
+        attempts.extend(page.items)
+        if page.next_cursor is not None:
+            truncated_attempt_jobs.append(job.job_id)
+    if len(attempts) > BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL:
+        raise PersistenceError("bounded Runtime attempt budget exceeded")
+    attempts_tuple = tuple(attempts)
+    truncated_tuple = tuple(truncated_attempt_jobs)
+    jobs_truncated = jobs_page.next_cursor is not None
+    payload = {
+        "schema_version": BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        "root_job_id": root_token,
+        "jobs": [job.to_dict() for job in jobs],
+        "attempts": [attempt.to_dict() for attempt in attempts_tuple],
+        "jobs_truncated": jobs_truncated,
+        "attempts_truncated_job_ids": list(truncated_tuple),
+    }
+    return BoundedRuntimeRootSnapshot(
+        schema_version=BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        root_job_id=root_token,
+        jobs=jobs,
+        attempts=attempts_tuple,
+        jobs_truncated=jobs_truncated,
+        attempts_truncated_job_ids=truncated_tuple,
+        snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RuntimeReadObservationReceipt:
+    """Same-connection samples; usable only after owner close and validation.
+
+    SAME is as of the sampled observation, not continuous write exclusion.
+    Identity is request-scoped, never a filesystem or cross-request identity.
+    """
+    schema: str
+    state: str
+    source_identity: str | None
+    before: int | None
+    after: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
+class BoundedRuntimeReadObservation:
+    """Runtime-created fixed facade; no connection, SQL or pagination surface."""
+    def __init__(self, store: RuntimeStore, *, _capability: object) -> None:
+        if _capability is not _RUNTIME_ACQUISITION_CAPABILITY:
+            raise StateConflict("bounded observation is Runtime-owned")
+        self._store = store
+        self._active = self._selected = self._failed = False
+        self._before: int | None = None
+        self._after: int | None = None
+        self._identity: str | None = None
+        self._receipt: RuntimeReadObservationReceipt | None = None
+        self._commands: dict[str, tuple[str, str, str]] = {}
+        self._events: dict[str, Event | None] = {}
+
+    @staticmethod
+    def _sample(connection: sqlite3.Connection | _BoundReadConnection) -> int:
+        execute = connection._owner_execute if isinstance(connection, _BoundReadConnection) else connection.execute
+        row = execute("PRAGMA data_version").fetchone()
+        if row is None or len(row) != 1 or type(row[0]) is not int or row[0] < 0:
+            raise RuntimeReadUnavailable("Runtime observation token unavailable")
+        return row[0]
+
+    def _start(self, acquisition: BoundedRuntimeAcquisition, connection: Any) -> None:
+        self._acquisition, self._connection = acquisition, connection
+        self._active = True
+        if self._store.read_binding is not None:
+            self._identity = secrets.token_hex(16)
+
+    def _require_active(self) -> None:
+        if not self._active or self._failed:
+            raise StateConflict("bounded observation is closed or failed")
+
+    def _select(self) -> None:
+        self._require_active()
+        if self._selected:
+            self._failed = True
+            raise StateConflict("bounded observation already acquired a root or discovery")
+        self._selected = True
+
+    def _remember(self, jobs: Sequence[Job]) -> None:
+        keys = {"schema_version", "creator", "source_id", "source_digest", "command_id",
+                "job_id", "parent_job_id", "root_job_id", "role"}
+        for job in jobs:
+            cycle, digest = job.orchestration_provenance, job.orchestration_provenance_digest
+            if not (isinstance(cycle, Mapping) and set(cycle) == keys
+                    and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+                    and digest == orchestration_digest(cycle)
+                    and cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
+                    and cycle.get("creator") == "ceo_intent"
+                    and isinstance(cycle.get("source_id"), str)
+                    and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", cycle["source_id"])
+                    and isinstance(cycle.get("source_digest"), str)
+                    and re.fullmatch(r"[0-9a-f]{64}", cycle["source_digest"])
+                    and cycle.get("command_id") == "ceo-intent:" + cycle["source_id"]
+                    and cycle.get("job_id") == job.job_id
+                    and cycle.get("parent_job_id") is None and job.parent_job_id is None
+                    and cycle.get("root_job_id") == job.job_id == job.root_job_id
+                    and cycle.get("role") == job.orchestration_role == "aggregation"):
+                continue
+            self._commands[cycle["command_id"]] = (job.job_id, digest, cycle["source_digest"])
+
+    def read_job_root_bounded(self, root_job_id: str) -> BoundedRuntimeRootSnapshot:
+        self._select()
+        try:
+            result = _read_job_root_bounded(self._acquisition, root_job_id)
+            self._remember(result.jobs)
+            return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    def discover_job_roots_bounded(self) -> BoundedRuntimeRootDiscovery:
+        self._select()
+        try:
+            result = _discover_job_roots_bounded(self._acquisition)
+            self._remember(result.roots)
+            return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    def get_creation_event_by_command_id(self, command_id: str) -> Event | None:
+        self._require_active()
+        try:
+            if not self._selected:
+                raise StateConflict("bounded observation requires acquisition first")
+            if type(command_id) is not str or command_id not in self._commands:
+                raise StateConflict("command is not authorized by included Job provenance")
+            if command_id in self._events:
+                return self._events[command_id]
+            if len(self._events) >= 17:
+                raise StateConflict("bounded observation point budget exceeded")
+            job_id, digest, source_digest = self._commands[command_id]
+            event = self._store.get_event_by_command_id(command_id, connection=self._connection)
+            if event is not None:
+                payload = event.payload
+                provenance = payload.get("provenance") if isinstance(payload, Mapping) else None
+                if not (event.event_type == "JOB_CREATED" and event.command_id == command_id
+                        and event.job_id == event.aggregate_id == job_id and event.aggregate_type == "job"
+                        and isinstance(provenance, Mapping)
+                        and provenance.get("schema") == "mastermind.ceo_intent.v2"
+                        and "ceo-intent:" + str(provenance.get("intent_id")) == command_id
+                        and provenance.get("fingerprint") == source_digest
+                        and payload.get("orchestration_role") == "aggregation"
+                        and payload.get("orchestration_provenance_digest") == digest):
+                    raise RuntimeReadUnavailable("creation Event identity disagrees with included Job")
+            self._events[command_id] = event
+            return event
+        except BaseException:
+            self._failed = True
+            raise
+
+    def _finalize(self) -> None:
+        if self._failed or not self._selected:
+            return
+        state = ("UNKNOWN" if self._identity is None else
+                 "SAME" if self._before == self._after else "CONFLICT")
+        self._receipt = RuntimeReadObservationReceipt(RUNTIME_READ_OBSERVATION_SCHEMA, state,
+                                                    self._identity, self._before, self._after)
+
+    @property
+    def receipt(self) -> RuntimeReadObservationReceipt:
+        if self._receipt is None or self._failed:
+            raise StateConflict("bounded observation receipt is not finalized")
+        return self._receipt
+
+
 @dataclasses.dataclass(frozen=True)
 class Runtime:
     store: RuntimeStore
@@ -18910,61 +19138,35 @@ class Runtime:
                 acquisition._close()
 
     def discover_job_roots_bounded(self) -> BoundedRuntimeRootDiscovery:
-        """Return the fixed owner root view through the canonical bounded seam."""
         with self.bounded_acquisition() as acquisition:
-            page = acquisition.list_jobs(limit=BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS, roots_only=True)
-            roots = page.items
-            truncated = page.next_cursor is not None
-        payload = {"schema_version": BOUNDED_RUNTIME_DISCOVERY_SCHEMA, "roots": [job.to_dict() for job in roots], "truncated": truncated}
-        return BoundedRuntimeRootDiscovery(
-            schema_version=BOUNDED_RUNTIME_DISCOVERY_SCHEMA,
-            roots=roots,
-            truncated=truncated,
-            snapshot_digest=_bounded_runtime_snapshot_digest(payload),
-        )
+            return _discover_job_roots_bounded(acquisition)
 
     def read_job_root_bounded(self, root_job_id: str) -> BoundedRuntimeRootSnapshot:
-        """Return one fixed owner root view through the canonical bounded seam."""
-        root_token = str(root_job_id or "").strip()
-        if not root_token:
-            raise StateConflict("bounded Runtime read requires an exact root Job")
         with self.bounded_acquisition() as acquisition:
-            try:
-                jobs_page = acquisition.list_jobs(limit=1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN, root_job_id=root_token)
-            except StateConflict as exc:
-                raise StateConflict("bounded Runtime read requires an exact root Job") from exc
-            jobs = jobs_page.items
-            if not jobs or jobs[0].job_id != root_token:
-                raise PersistenceError("bounded Runtime root membership is invalid")
-            attempts: list[Attempt] = []
-            truncated_attempt_jobs: list[str] = []
-            for job in jobs:
-                page = acquisition.list_attempts(limit=BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS, job_ids=(job.job_id,))
-                attempts.extend(page.items)
-                if page.next_cursor is not None:
-                    truncated_attempt_jobs.append(job.job_id)
-        if len(attempts) > BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL:
-            raise PersistenceError("bounded Runtime attempt budget exceeded")
-        attempts_tuple = tuple(attempts)
-        truncated_tuple = tuple(truncated_attempt_jobs)
-        jobs_truncated = jobs_page.next_cursor is not None
-        payload = {
-            "schema_version": BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
-            "root_job_id": root_token,
-            "jobs": [job.to_dict() for job in jobs],
-            "attempts": [attempt.to_dict() for attempt in attempts_tuple],
-            "jobs_truncated": jobs_truncated,
-            "attempts_truncated_job_ids": list(truncated_tuple),
-        }
-        return BoundedRuntimeRootSnapshot(
-            schema_version=BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
-            root_job_id=root_token,
-            jobs=jobs,
-            attempts=attempts_tuple,
-            jobs_truncated=jobs_truncated,
-            attempts_truncated_job_ids=truncated_tuple,
-            snapshot_digest=_bounded_runtime_snapshot_digest(payload),
-        )
+            return _read_job_root_bounded(acquisition, root_job_id)
+
+    @contextmanager
+    def observe_bounded_read(self) -> Iterator["BoundedRuntimeReadObservation"]:
+        """Materialize one sample-bounded observation; finalize only after close.
+
+        SAME compares two data_version samples on one retained connection. It
+        does not exclude commits after the final sample or promise later freshness.
+        A missing namespace capability always yields UNKNOWN.
+        """
+        observation = BoundedRuntimeReadObservation(self.store, _capability=_RUNTIME_ACQUISITION_CAPABILITY)
+        try:
+            with self.store._read_observation(observation) as connection:
+                acquisition = BoundedRuntimeAcquisition(self.store, connection, _capability=_RUNTIME_ACQUISITION_CAPABILITY)
+                observation._start(acquisition, connection)
+                try:
+                    yield observation
+                finally:
+                    acquisition._close()
+                    observation._active = False
+            observation._finalize()
+        except BaseException:
+            observation._failed = True
+            raise
 
     @classmethod
     def read_bound(
@@ -19940,6 +20142,8 @@ __all__ = [
     "BoundedAttemptPage",
     "BoundedJobPage",
     "BoundedRuntimeAcquisition",
+    "BoundedRuntimeReadObservation",
+    "RuntimeReadObservationReceipt",
     "CooRetryMutationOutcome",
     "EXECUTIVE_DIALOGUE_SOURCE_SCHEMA",
     "Event",
