@@ -68,7 +68,7 @@
  *    a test worker that wants `port: 0` for an ephemeral loopback port.
  */
 
-import { TextOutputPager, OUTPUT_PAGE_TOOL, projectOutputSafely } from './output-budget.mjs';
+import { TextOutputPager, OUTPUT_PAGE_TOOL, OUTPUT_COMPAT_READ_PREFIX, projectOutputSafely } from './output-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -922,7 +922,9 @@ class GatewaySession {
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
           'studio_ping, studio_output_page, and configured studio_git_* tools are gateway-owned. ' +
-          'studio_output_page reads retained output without repeating the original action; ' +
+          'studio_output_page reads retained output without repeating the original action. ' +
+          'Frozen app snapshots may read the same retained receipt through existing read_file using the ' +
+          'studio-output://receipt/<receipt_id> compat path and byte offset from next_offset; ' +
           'all remaining tools are proxied to the backend.',
       },
     );
@@ -993,6 +995,18 @@ class GatewaySession {
   async callTool(request, extra) {
     const name = request?.params?.name;
     const started = Date.now();
+    const args = request?.params?.arguments ?? {};
+
+    // Compatibility path for provider-frozen app snapshots that predate
+    // studio_output_page. This is the same owner-bound retained receipt read,
+    // reached through the already-approved read_file schema. It never calls
+    // the Desktop Commander backend and never replays the source tool.
+    if (name === 'read_file' && isJsonObject(args) &&
+        typeof args.path === 'string' && args.path.startsWith(OUTPUT_COMPAT_READ_PREFIX)) {
+      this.touch();
+      this.bumpTool(name);
+      return this.outputPager.readCompat(args);
+    }
 
     if (name === OUTPUT_PAGE_TOOL.name) {
       this.touch();
