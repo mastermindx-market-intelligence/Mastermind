@@ -150,6 +150,16 @@ BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS = 64
 BOUNDED_RUNTIME_ROOT_MAX_CHILDREN = 16
 BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS = 20
 BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL = ((1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN) * BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS)
+# Frozen read-admission budgets for one bounded role-result selection.  These
+# bound how much durable material a selection may touch before it refuses; they
+# never redefine canonical lifecycle or result validity law.
+BOUNDED_ROLE_RESULT_MAX_NODES = 6
+BOUNDED_ROLE_RESULT_MAX_STATEMENTS = 256
+BOUNDED_ROLE_RESULT_MAX_ROWS = 512
+BOUNDED_ROLE_RESULT_MAX_CELL_BYTES = 8_388_608
+BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES = 33_554_432
+BOUNDED_ROLE_RESULT_MAX_VM_STEPS = 200_000
+_BOUNDED_FETCH_BATCH = 32
 _ROOT = Path(__file__).resolve().parent.parent
 _DB_RELATIVE_PATH = Path("data") / "control_plane" / "executive.sqlite3"
 _WORKER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -2672,6 +2682,22 @@ class RuntimeReadUnavailable(PersistenceError):
     """A bound read cannot establish or retain its trusted namespace custody."""
 
 
+class RuntimeRoleResultOverBudget(RuntimeReadUnavailable):
+    """One bounded role-result selection exhausted a fixed admission budget.
+
+    The closed ``code`` is the whole payload: a refused selection returns no
+    snapshot, no validated counts, no digests, and no partially validated
+    material, and it can never leave a finalized observation receipt behind.
+    """
+
+    code = "OVER_BUDGET"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "bounded role-result read exceeded a fixed admission budget"
+        )
+
+
 class RuntimeNamespaceCapability(ABC):
     """Server-owned contract; there is deliberately no installed implementation.
 
@@ -2808,6 +2834,71 @@ class RuntimeReadBinding:
             self._validate()
 
 
+class _RuntimeReadProgressGuard:
+    """One fixed SQLite VM-step budget for a single fresh read connection.
+
+    Only ``RuntimeStore._open_readonly`` — the owner that constructs the fresh
+    private observation connection — may install this handler, and only the
+    same owner seam may remove it.  The guard never exposes the connection and
+    never replaces an unknown caller handler: installation is refused outright
+    when the wrapper already carries one.  Interruption surfaces as SQLite's
+    ordinary ``OperationalError('interrupted')``; the translating owner checks
+    :attr:`tripped` and deactivates the result budget before teardown. The
+    fresh owner removes its handler when closing the connection. Legacy
+    selections leave the installed handler inert throughout.
+    """
+
+    __slots__ = ("_limit", "_steps", "_tripped", "_native", "_wrapper", "_removed", "_active")
+
+    def __init__(self, limit: int = BOUNDED_ROLE_RESULT_MAX_VM_STEPS) -> None:
+        if type(limit) is not int or limit <= 0:
+            raise RuntimeReadUnavailable("bound read VM budget is invalid")
+        self._limit = limit
+        self._steps = 0
+        self._tripped = False
+        self._native: sqlite3.Connection | None = None
+        self._wrapper: "_BoundReadConnection | None" = None
+        self._removed = False
+        self._active = False
+
+    def activate(self) -> None:
+        if self._native is None or self._removed or self._active:
+            raise RuntimeReadUnavailable("result read progress ownership is unavailable")
+        self._steps = 0
+        self._tripped = False
+        self._active = True
+
+    def deactivate(self) -> None:
+        self._active = False
+
+    def __call__(self) -> int:
+        if not self._active:
+            return 0
+        self._steps += 1
+        if self._steps >= self._limit:
+            self._tripped = True
+            return 1
+        return 0
+
+    @property
+    def tripped(self) -> bool:
+        return self._tripped
+
+    @property
+    def steps(self) -> int:
+        return self._steps
+
+    def _record_install(
+        self, native: sqlite3.Connection, wrapper: "_BoundReadConnection | None"
+    ) -> None:
+        if self._native is not None or self._removed:
+            raise RuntimeReadUnavailable("bound read progress guard is not fresh")
+        self._native, self._wrapper = native, wrapper
+
+    def _record_removal(self) -> None:
+        self._removed = True
+
+
 class _BoundReadCursor:
     """Owned statement view, never a native Cursor compatibility surface."""
 
@@ -2900,14 +2991,35 @@ class _BoundReadConnection:
     """
 
     __slots__ = ("_native", "_store", "_binding", "_cursors", "_pending_cursor",
-                 "_closed", "_owner_control", "_drain_uncertain")
+                 "_closed", "_owner_control", "_drain_uncertain", "_progress_guard")
 
     def __init__(self, connection: sqlite3.Connection, store: "RuntimeStore") -> None:
         self._native, self._store, self._binding = connection, store, store.read_binding
         self._cursors: list[_BoundReadCursor] = []
         self._pending_cursor: sqlite3.Cursor | None = None
         self._closed = self._owner_control = self._drain_uncertain = False
+        self._progress_guard: _RuntimeReadProgressGuard | None = None
         connection.set_authorizer(self._authorize)
+
+    def _install_progress_guard(self, guard: _RuntimeReadProgressGuard) -> None:
+        # Owner installation on the wrapper this connection itself constructed;
+        # an already-present handler is never replaced or silently reused.
+        if self._closed or self._progress_guard is not None:
+            raise RuntimeReadUnavailable("bound read progress guard is not available")
+        guard._record_install(self._native, self)
+        self._native.set_progress_handler(guard, 1)
+        self._progress_guard = guard
+
+    def _remove_progress_guard(self, guard: _RuntimeReadProgressGuard) -> None:
+        if self._progress_guard is None:
+            return
+        if guard is not self._progress_guard:
+            raise RuntimeReadUnavailable(
+                "bound read progress guard is not this connection's handler"
+            )
+        self._native.set_progress_handler(None, 0)
+        self._progress_guard = None
+        guard._record_removal()
 
     def _authorize(self, action: int, first: Any, second: Any, database: Any, source: Any) -> int:
         if not self._owner_control and action in (
@@ -2980,6 +3092,10 @@ class _BoundReadConnection:
             # A failed finalization is not retried at context exit.
             raise RuntimeReadUnavailable("bound cursor drain remains uncertain")
         try:
+            # The owner removes its own VM budget handler before any close-time
+            # rollback can run, so a tripped guard cannot fault physical close.
+            if self._progress_guard is not None:
+                self._remove_progress_guard(self._progress_guard)
             if self._pending_cursor is not None:
                 self._pending_cursor.close()
                 self._pending_cursor = None
@@ -3312,7 +3428,11 @@ class RuntimeStore:
                 "supplied connection is not the stable database owned by this RuntimeStore"
             )
 
-    def _open_readonly(self) -> sqlite3.Connection | _BoundReadConnection:
+    def _open_readonly(
+        self,
+        *,
+        _progress_guard: _RuntimeReadProgressGuard | None = None,
+    ) -> sqlite3.Connection | _BoundReadConnection:
         """Open an EXISTING database read-only: no create, no chmod, no migration.
 
         SQLite's ``mode=ro`` makes the guarantee structural rather than
@@ -3324,6 +3444,11 @@ class RuntimeStore:
         The schema is then verified rather than assumed.  Without this check an
         empty, truncated, or foreign file reads as a valid database with no rows,
         which a caller would report as "nothing is running".
+
+        ``_progress_guard`` is the only sanctioned progress-handler seam: the
+        fresh connection this owner just constructed receives the fixed VM-step
+        handler before its first statement. It remains inert until the new
+        result selection activates its budget; legacy reads keep their law.
         """
         if self.read_binding is not None:
             self.read_binding._require_physical_read(self.path)
@@ -3339,9 +3464,14 @@ class RuntimeStore:
             connection.row_factory = sqlite3.Row
             if self.read_binding is not None:
                 connection = _BoundReadConnection(connection, self)
+                if _progress_guard is not None:
+                    connection._install_progress_guard(_progress_guard)
                 connection._owner_execute("PRAGMA foreign_keys=ON")
                 connection._owner_execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
             else:
+                if _progress_guard is not None:
+                    _progress_guard._record_install(connection, None)
+                    connection.set_progress_handler(_progress_guard, 1)
                 connection.execute("PRAGMA foreign_keys=ON")
                 connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
         except BaseException as exc:
@@ -3663,6 +3793,28 @@ class RuntimeStore:
                 self.read_binding._retain_unclosed(connection)
             raise
 
+    def _remove_read_progress_guard(self, guard: _RuntimeReadProgressGuard) -> None:
+        """Owner-only uninstall proving the handler's exact lifetime.
+
+        Removal is fail-closed: a guard that was never installed, or already
+        removed outside its wrapper, is a custody error rather than a no-op.
+        """
+
+        if not isinstance(guard, _RuntimeReadProgressGuard):
+            raise RuntimeReadUnavailable("bound read progress guard is unavailable")
+        if guard._wrapper is not None:
+            guard._wrapper._remove_progress_guard(guard)
+            return
+        if guard._native is None:
+            raise RuntimeReadUnavailable(
+                "bound read progress guard lifetime is not proven"
+            )
+        if guard._removed:
+            # This exact guard was already uninstalled by its owner.
+            return
+        guard._native.set_progress_handler(None, 0)
+        guard._record_removal()
+
     @contextmanager
     def _read_bound(self, *, _observation: "BoundedRuntimeReadObservation | None" = None) -> Iterator[_BoundReadConnection]:
         binding = self.read_binding
@@ -3670,7 +3822,11 @@ class RuntimeStore:
         with binding.physical_read(self.path):
             connection: _BoundReadConnection | None = None
             try:
-                connection = self._open_readonly()
+                connection = self._open_readonly(
+                    _progress_guard=(
+                        None if _observation is None else _observation._vm_progress
+                    )
+                )
                 assert isinstance(connection, _BoundReadConnection)
                 if _observation is not None:
                     _observation._before = _observation._sample(connection)
@@ -3708,7 +3864,7 @@ class RuntimeStore:
                 yield connection
             return
         # Even a writable Runtime owner observes through a mode=ro connection.
-        connection = self._open_readonly()
+        connection = self._open_readonly(_progress_guard=observation._vm_progress)
         try:
             observation._before = observation._sample(connection)
             connection.execute("BEGIN")
@@ -3721,7 +3877,12 @@ class RuntimeStore:
                 connection.rollback()
             raise
         finally:
-            self._close_read_connection(connection)
+            # Owner removal precedes close so a tripped VM budget can never
+            # fault the physical close of this fresh connection.
+            try:
+                self._remove_read_progress_guard(observation._vm_progress)
+            finally:
+                self._close_read_connection(connection)
 
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
@@ -8079,13 +8240,109 @@ def _review_attempt_is_independent(
     return True
 
 
+def _validated_role_completion_snapshot(
+    connection: "sqlite3.Connection | _BoundedRoleResultLoader",
+    *,
+    job_token: str,
+    attempt_token: str,
+) -> ValidatedRoleCompletion:
+    """The connection-local body of the public terminal completion projection.
+
+    ``Runtime.validated_role_completion`` owns token handling and the read
+    transaction and delegates here; the bounded role-result selection calls
+    this same private helper with its bounded material loader in place of the
+    connection, so both paths run one unchanged canonical validator set and
+    inherit every future canonical envelope extension (for example plan-v3)
+    without duplicated per-role logic.
+    """
+
+    job_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (job_token,)
+    ).fetchone()
+    if job_row is None:
+        raise StateConflict(
+            f"terminal completion Job {job_token!r} does not exist"
+        )
+    role = str(job_row["orchestration_role"] or "")
+    if (
+        role not in {"plan", "work", "review", "repair", "aggregation"}
+        or job_row["current_attempt_id"] != attempt_token
+    ):
+        raise StateConflict("terminal completion binding is not current")
+    attempt_row, seal, terminal, role_result_digest = (
+        _validated_role_completion_material(
+            connection,
+            job_row=job_row,
+            expected_role=role,
+            root_job_id=str(job_row["root_job_id"]),
+        )
+    )
+    if attempt_row["attempt_id"] != attempt_token:
+        raise StateConflict(
+            "terminal completion validator returned another Attempt"
+        )
+    try:
+        job_result = _strict_canonical_json_loads(
+            str(job_row["result_json"]), name="terminal completion Job result"
+        )
+        attempt_result = _strict_canonical_json_loads(
+            str(attempt_row["result_json"]),
+            name="terminal completion Attempt result",
+        )
+        job = _job_from_row(job_row)
+        attempt = _attempt_from_row(attempt_row)
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"terminal completion durable material is invalid: {exc}"
+        ) from exc
+    if job_result != terminal or attempt_result != terminal:
+        raise StateConflict("terminal completion Job/Attempt receipt drifted")
+    envelope = seal.get("result_envelope")
+    result_envelope_digest = seal.get("result_envelope_digest")
+    if (
+        not isinstance(envelope, dict)
+        or not isinstance(result_envelope_digest, str)
+        or not isinstance(role_result_digest, str)
+    ):
+        raise StateConflict(
+            "terminal completion validated material is incomplete"
+        )
+    dialogue_source = _dialogue_source_from_root_creation(
+        connection,
+        root_job_id=job.root_job_id,
+    )
+    return ValidatedRoleCompletion(
+        job=job,
+        attempt=attempt,
+        result_envelope=dict(envelope),
+        terminal_receipt=dict(terminal),
+        result_digest=result_envelope_digest,
+        role_result_digest=role_result_digest,
+        execution_mode=str(
+            attempt_row["execution_mode"]
+            or AttemptExecutionMode.SEALED_WORKER.value
+        ),
+        dialogue_source=dialogue_source,
+    )
+
+
 def _validated_role_completion_material(
-    connection: sqlite3.Connection,
+    connection: "sqlite3.Connection | _BoundedRoleResultLoader",
     *,
     job_row: sqlite3.Row,
     expected_role: str,
     root_job_id: str,
 ) -> tuple[sqlite3.Row, dict[str, Any], dict[str, Any], str]:
+    # A bounded selection routes this exact canonical closure through its
+    # private material loader: the loader carries the shared statement/row/
+    # byte budget, the fully validated-node memo, and the active-cycle guard,
+    # so the same unchanged validator body serves both paths.  A loader hit
+    # returns the memoized fully validated node; nothing partial is cached.
+    loader = connection if isinstance(connection, _BoundedRoleResultLoader) else None
+    if loader is not None:
+        memoized = loader._node_begin(str(job_row["job_id"]))
+        if memoized is not None:
+            return memoized
     attempt_id = job_row["current_attempt_id"]
     attempt = connection.execute(
         "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
@@ -8239,7 +8496,10 @@ def _validated_role_completion_material(
         expected_role=expected_role,
         seal=seal,
     )
-    return attempt, seal, terminal, str(seal["role_result_digest"])
+    material = (attempt, seal, terminal, str(seal["role_result_digest"]))
+    if loader is not None:
+        loader._node_validated(str(job_row["job_id"]), material)
+    return material
 
 
 def _current_orchestration_tree_material_for_dispatch(
@@ -18948,6 +19208,374 @@ class RuntimeReadObservationReceipt:
         return dataclasses.asdict(self)
 
 
+@dataclasses.dataclass(frozen=True)
+class BoundedRoleResultRootMetadata:
+    """Frozen narrow creation provenance of the exact aggregation self-root.
+
+    Derived only from the root Job's own strict v2 provenance and its unique
+    immutable creation Event — never from the selected child.
+    """
+
+    job_id: str
+    root_job_id: str
+    orchestration_role: str
+    creation_command_id: str
+    work_ref: str | None
+    orchestration_provenance_digest: str
+    source_digest: str
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundedRoleResultSnapshot:
+    """One bounded selection whose completion is the unchanged canonical one."""
+
+    root_job_id: str
+    job_id: str
+    attempt_id: str
+    result_envelope_digest: str
+    completion: ValidatedRoleCompletion
+    root_metadata: BoundedRoleResultRootMetadata
+    observation_source_identity: str | None = None
+
+
+class _BoundedRoleResultRows:
+    """Row-accounted fetch surface over one guarded statement cursor."""
+
+    __slots__ = ("_cursor", "_loader")
+
+    def __init__(
+        self,
+        cursor: Any,
+        loader: "_BoundedRoleResultLoader",
+    ) -> None:
+        self._cursor, self._loader = cursor, loader
+
+    def fetchone(self) -> Any:
+        row = self._cursor.fetchone()
+        if row is not None:
+            self._loader._count_rows(1)
+        return row
+
+    def fetchall(self) -> list[Any]:
+        # Chunked accumulation enforces the returned-row ceiling while rows
+        # stream out of SQLite; it never materializes past the budget, and a
+        # duplicate finding is still delivered rather than erased.
+        rows: list[Any] = []
+        while True:
+            batch = self._cursor.fetchmany(_BOUNDED_FETCH_BATCH)
+            if not batch:
+                return rows
+            self._loader._count_rows(len(batch))
+            rows.extend(batch)
+
+    def __iter__(self) -> "_BoundedRoleResultRows":
+        return self
+
+    def __next__(self) -> Any:
+        row = self.fetchone()
+        if row is None:
+            raise StopIteration
+        return row
+
+
+class _BoundedRoleResultLoader:
+    """Private bounded material loader routed through the canonical validators.
+
+    The loader presents exactly the ``execute`` surface the canonical
+    completion closure already consumes, so every per-role validator,
+    terminal-evidence check, and canonical envelope law in this module runs
+    unchanged for a bounded selection — including envelope extensions added
+    later by the separately owned orchestration-result contract.  Before any
+    value of a guarded statement returns to Python, one server-side size-only
+    projection counts the exact raw UTF-8/BLOB bytes of every selected column
+    (``length(CAST(column AS BLOB))``, never ``len`` of a decoded str),
+    refuses an oversized cell, and accumulates raw material bytes against the
+    fixed cumulative ceiling.  Statement, returned-row, completed-node, memo,
+    and active-cycle state are shared across the entire recursive closure; any
+    validation failure aborts the whole selection, so an abandoned node is
+    never re-entered and no partial node is ever cached.
+    """
+
+    __slots__ = (
+        "_connection",
+        "_statements",
+        "_rows",
+        "_total_bytes",
+        "_node_ids",
+        "_node_memo",
+        "_active_nodes",
+    )
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+        self._statements = 0
+        self._rows = 0
+        self._total_bytes = 0
+        self._node_ids: set[str] = set()
+        self._node_memo: dict[
+            str, tuple[sqlite3.Row, dict[str, Any], dict[str, Any], str]
+        ] = {}
+        self._active_nodes: set[str] = set()
+
+    def _count_statement(self) -> None:
+        self._statements += 1
+        if self._statements > BOUNDED_ROLE_RESULT_MAX_STATEMENTS:
+            raise RuntimeRoleResultOverBudget()
+
+    def _count_rows(self, count: int) -> None:
+        self._rows += count
+        if self._rows > BOUNDED_ROLE_RESULT_MAX_ROWS:
+            raise RuntimeRoleResultOverBudget()
+
+    def execute(self, sql: Any, parameters: Any = ()) -> Any:
+        statement = str(sql)
+        self._count_statement()
+        cursor = self._connection.execute(statement, parameters)
+        description = getattr(cursor, "description", None)
+        if not description:
+            # A non-row statement carries no text/blob cells to guard; the
+            # shared statement count above still accounts for it.
+            return cursor
+        columns: list[str] = []
+        for column in description:
+            name = str(column[0])
+            if name not in columns:
+                columns.append(name)
+        cell_bytes = [
+            f'COALESCE(length(CAST(t."{name}" AS BLOB)),0)' for name in columns
+        ]
+        guard_sql = (
+            "SELECT COUNT(*),"
+            + ",".join(f"MAX({expr})" for expr in cell_bytes)
+            + ",COALESCE(SUM("
+            + "+".join(cell_bytes)
+            + "),0)"
+            + f" FROM ({statement}) AS t"
+        )
+        # The size-only projection is itself an actual metadata statement and
+        # its single aggregate row is actual returned metadata work.
+        self._count_statement()
+        guard = self._connection.execute(guard_sql, parameters).fetchone()
+        self._count_rows(1)
+        if int(guard[0]) > BOUNDED_ROLE_RESULT_MAX_ROWS - self._rows:
+            raise RuntimeRoleResultOverBudget()
+        for size in guard[1:-1]:
+            if int(size or 0) > BOUNDED_ROLE_RESULT_MAX_CELL_BYTES:
+                raise RuntimeRoleResultOverBudget()
+        self._total_bytes += int(guard[-1])
+        if self._total_bytes > BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES:
+            raise RuntimeRoleResultOverBudget()
+        return _BoundedRoleResultRows(cursor, self)
+
+    def _node_begin(
+        self, job_id: str
+    ) -> tuple[sqlite3.Row, dict[str, Any], dict[str, Any], str] | None:
+        if job_id in self._active_nodes:
+            raise StateConflict(
+                "bounded role-result validation closure contains an active cycle"
+            )
+        memoized = self._node_memo.get(job_id)
+        if memoized is not None:
+            return memoized
+        if job_id not in self._node_ids:
+            if len(self._node_ids) >= BOUNDED_ROLE_RESULT_MAX_NODES:
+                raise RuntimeRoleResultOverBudget()
+            self._node_ids.add(job_id)
+        self._active_nodes.add(job_id)
+        return None
+
+    def _node_validated(
+        self,
+        job_id: str,
+        material: tuple[sqlite3.Row, dict[str, Any], dict[str, Any], str],
+    ) -> None:
+        self._active_nodes.discard(job_id)
+        self._node_memo[job_id] = material
+
+
+def _bounded_role_result_material(
+    loader: _BoundedRoleResultLoader,
+    *,
+    root_token: str,
+    job_token: str,
+    attempt_token: str,
+    digest_token: str,
+) -> BoundedRoleResultSnapshot:
+    """Identity/root/digest law for one selection, before any payload return."""
+
+    # Narrow identity columns first: membership, role, terminal status, and
+    # the exact current Attempt precede every projected payload column.
+    selected = loader.execute(
+        "SELECT job_id,parent_job_id,root_job_id,orchestration_role,status,"
+        "current_attempt_id FROM jobs WHERE job_id=?",
+        (job_token,),
+    ).fetchone()
+    if selected is None:
+        raise StateConflict(
+            f"terminal completion Job {job_token!r} does not exist"
+        )
+    if (
+        selected["orchestration_role"] not in {"plan", "work", "review", "repair", "aggregation"}
+        or selected["status"] != JobStatus.COMPLETED.value
+        or selected["root_job_id"] != root_token
+        or (
+            selected["orchestration_role"] == "aggregation"
+            and (job_token != root_token or selected["parent_job_id"] is not None)
+        )
+        or (
+            selected["orchestration_role"] != "aggregation"
+            and selected["parent_job_id"] != root_token
+        )
+        or selected["current_attempt_id"] != attempt_token
+    ):
+        raise StateConflict("terminal completion binding is not current")
+
+    # The frozen narrow root metadata comes from the aggregation self-root's
+    # own validated provenance and its unique immutable creation Event.
+    root_row = loader.execute(
+        "SELECT job_id,parent_job_id,root_job_id,orchestration_role,"
+        "orchestration_provenance_json,orchestration_provenance_digest,"
+        "plan_attempt_id,plan_digest,plan_step_id,repair_round,supersedes_job_id "
+        "FROM jobs WHERE job_id=?",
+        (root_token,),
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("terminal completion lost its strict v2 root")
+    root_role, root_provenance, root_provenance_digest = (
+        _decode_orchestration_job_fields(root_row)
+    )
+    if (
+        root_role != "aggregation"
+        or not isinstance(root_provenance, dict)
+        or root_row["root_job_id"] != root_token
+        or not isinstance(root_provenance.get("source_id"), str)
+        or re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", root_provenance["source_id"]
+        )
+        is None
+        or root_provenance.get("command_id")
+        != "ceo-intent:" + root_provenance["source_id"]
+    ):
+        raise StateConflict("terminal completion root is not a strict v2 root")
+    creation_rows = loader.execute(
+        """SELECT * FROM events
+           WHERE event_type='JOB_CREATED' AND job_id=?
+           ORDER BY event_id""",
+        (root_token,),
+    ).fetchall()
+    if len(creation_rows) != 1:
+        # A matching second Event under another command stays a refusal; it is
+        # never silently collapsed away by a LIMIT-1 style shortcut.
+        raise StateConflict(
+            "terminal completion root creation cardinality is not exact"
+        )
+    creation_event = creation_rows[0]
+    if (
+        creation_event["command_id"] != root_provenance.get("command_id")
+        or creation_event["aggregate_type"] != "job"
+        or creation_event["aggregate_id"] != root_token
+    ):
+        raise StateConflict("terminal completion root creation Event drifted")
+    creation_payload = _strict_canonical_json_loads(
+        str(creation_event["payload_json"]),
+        name="terminal completion root JOB_CREATED payload",
+    )
+    host_provenance = (
+        creation_payload.get("provenance")
+        if isinstance(creation_payload, dict)
+        else None
+    )
+    if not isinstance(host_provenance, dict):
+        raise StateConflict("terminal completion root lost its host provenance")
+    if (
+        host_provenance.get("schema") != "mastermind.ceo_intent.v2"
+        or "ceo-intent:" + str(host_provenance.get("intent_id"))
+        != root_provenance["command_id"]
+        or host_provenance.get("fingerprint") != root_provenance["source_digest"]
+    ):
+        raise StateConflict(
+            "terminal completion root creation provenance is not strict v2"
+        )
+    work_ref = host_provenance.get("workstream")
+    if work_ref is not None and (
+        not isinstance(work_ref, str) or not str(work_ref).strip()
+    ):
+        raise StateConflict("terminal completion root workstream is invalid")
+
+    completion = _validated_role_completion_snapshot(
+        loader,
+        job_token=job_token,
+        attempt_token=attempt_token,
+    )
+    if digest_token != completion.result_digest:
+        raise StateConflict(
+            "terminal completion result envelope digest is not the "
+            "expected canonical digest"
+        )
+    if (
+        completion.dialogue_source is not None
+        and completion.dialogue_source.work_ref != work_ref
+    ):
+        raise StateConflict("terminal completion dialogue source drifted")
+    root_metadata = BoundedRoleResultRootMetadata(
+        job_id=root_token,
+        root_job_id=root_token,
+        orchestration_role="aggregation",
+        creation_command_id=str(root_provenance["command_id"]),
+        work_ref=work_ref if isinstance(work_ref, str) else None,
+        orchestration_provenance_digest=str(root_provenance_digest),
+        source_digest=str(root_provenance["source_digest"]),
+    )
+    return BoundedRoleResultSnapshot(
+        root_job_id=root_token,
+        job_id=job_token,
+        attempt_id=attempt_token,
+        result_envelope_digest=completion.result_digest,
+        completion=completion,
+        root_metadata=root_metadata,
+    )
+
+
+def _read_role_result_bounded(
+    acquisition: BoundedRuntimeAcquisition,
+    vm_guard: _RuntimeReadProgressGuard,
+    *,
+    root_job_id: str,
+    job_id: str,
+    expected_attempt_id: str,
+    expected_result_envelope_digest: str,
+) -> BoundedRoleResultSnapshot:
+    """One bounded role-result selection over the retained observation read."""
+
+    root_token = _bounded_acquisition_identifier(root_job_id, name="root")
+    job_token = _bounded_acquisition_identifier(job_id, name="Job")
+    attempt_token = _bounded_acquisition_identifier(expected_attempt_id, name="Attempt")
+    digest_token = expected_result_envelope_digest
+    if type(digest_token) is not str or _DIGEST_RE.fullmatch(digest_token) is None:
+        raise StateConflict(
+            "bounded role-result read requires the canonical envelope digest"
+        )
+    acquisition._require_open()
+    loader = _BoundedRoleResultLoader(acquisition._connection)
+    vm_guard.activate()
+    try:
+        return _bounded_role_result_material(
+            loader,
+            root_token=root_token,
+            job_token=job_token,
+            attempt_token=attempt_token,
+            digest_token=digest_token,
+        )
+    except sqlite3.OperationalError as exc:
+        if vm_guard.tripped:
+            # The finally block deactivates this exact owner's budget
+            # before transaction cleanup or physical close.
+            raise RuntimeRoleResultOverBudget() from exc
+        raise
+    finally:
+        vm_guard.deactivate()
+
+
 class BoundedRuntimeReadObservation:
     """Runtime-created fixed facade; no connection, SQL or pagination surface."""
     def __init__(self, store: RuntimeStore, *, _capability: object) -> None:
@@ -18961,6 +19589,9 @@ class BoundedRuntimeReadObservation:
         self._receipt: RuntimeReadObservationReceipt | None = None
         self._commands: dict[str, tuple[str, str, str]] = {}
         self._events: dict[str, Event | None] = {}
+        # Fixed VM budget handed to the fresh private connection this
+        # observation's owner opens; it is never a caller-facing callback.
+        self._vm_progress = _RuntimeReadProgressGuard()
 
     @staticmethod
     def _sample(connection: sqlite3.Connection | _BoundReadConnection) -> int:
@@ -19025,6 +19656,43 @@ class BoundedRuntimeReadObservation:
             result = _discover_job_roots_bounded(self._acquisition)
             self._remember(result.roots)
             return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_role_result_bounded(
+        self,
+        root_job_id: str,
+        job_id: str,
+        *,
+        expected_attempt_id: str,
+        expected_result_envelope_digest: str,
+    ) -> BoundedRoleResultSnapshot:
+        """Select one completed role result under fixed read-admission budgets.
+
+        This consumes the same one-selection allowance as a root or discovery
+        read.  The whole canonical recursive completion closure runs unchanged
+        through one private bounded loader sharing statement, returned-row,
+        raw-byte, completed-node, memo, cycle, and VM-step budgets.  Identity,
+        root, current-Attempt, and expected envelope-digest law all precede the
+        returned payload.  An exhausted budget is the typed closed
+        ``RuntimeRoleResultOverBudget`` refusal with no snapshot, counts,
+        digests, or finalized receipt.
+        """
+
+        self._select()
+        try:
+            result = _read_role_result_bounded(
+                self._acquisition,
+                self._vm_progress,
+                root_job_id=root_job_id,
+                job_id=job_id,
+                expected_attempt_id=expected_attempt_id,
+                expected_result_envelope_digest=expected_result_envelope_digest,
+            )
+            return dataclasses.replace(
+                result, observation_source_identity=self._identity
+            )
         except BaseException:
             self._failed = True
             raise
@@ -19562,73 +20230,10 @@ class Runtime:
                 "terminal completion requires exact Job and Attempt ids"
             )
         with self.store.read() as connection:
-            job_row = connection.execute(
-                "SELECT * FROM jobs WHERE job_id=?", (job_token,)
-            ).fetchone()
-            if job_row is None:
-                raise StateConflict(
-                    f"terminal completion Job {job_token!r} does not exist"
-                )
-            role = str(job_row["orchestration_role"] or "")
-            if (
-                role not in {"plan", "work", "review", "repair", "aggregation"}
-                or job_row["current_attempt_id"] != attempt_token
-            ):
-                raise StateConflict("terminal completion binding is not current")
-            attempt_row, seal, terminal, role_result_digest = (
-                _validated_role_completion_material(
-                    connection,
-                    job_row=job_row,
-                    expected_role=role,
-                    root_job_id=str(job_row["root_job_id"]),
-                )
-            )
-            if attempt_row["attempt_id"] != attempt_token:
-                raise StateConflict(
-                    "terminal completion validator returned another Attempt"
-                )
-            try:
-                job_result = _strict_canonical_json_loads(
-                    str(job_row["result_json"]), name="terminal completion Job result"
-                )
-                attempt_result = _strict_canonical_json_loads(
-                    str(attempt_row["result_json"]),
-                    name="terminal completion Attempt result",
-                )
-                job = _job_from_row(job_row)
-                attempt = _attempt_from_row(attempt_row)
-            except PersistenceError as exc:
-                raise StateConflict(
-                    f"terminal completion durable material is invalid: {exc}"
-                ) from exc
-            if job_result != terminal or attempt_result != terminal:
-                raise StateConflict("terminal completion Job/Attempt receipt drifted")
-            envelope = seal.get("result_envelope")
-            result_envelope_digest = seal.get("result_envelope_digest")
-            if (
-                not isinstance(envelope, dict)
-                or not isinstance(result_envelope_digest, str)
-                or not isinstance(role_result_digest, str)
-            ):
-                raise StateConflict(
-                    "terminal completion validated material is incomplete"
-                )
-            dialogue_source = _dialogue_source_from_root_creation(
+            return _validated_role_completion_snapshot(
                 connection,
-                root_job_id=job.root_job_id,
-            )
-            return ValidatedRoleCompletion(
-                job=job,
-                attempt=attempt,
-                result_envelope=dict(envelope),
-                terminal_receipt=dict(terminal),
-                result_digest=result_envelope_digest,
-                role_result_digest=role_result_digest,
-                execution_mode=str(
-                    attempt_row["execution_mode"]
-                    or AttemptExecutionMode.SEALED_WORKER.value
-                ),
-                dialogue_source=dialogue_source,
+                job_token=job_token,
+                attempt_token=attempt_token,
             )
 
     def current_harness_binding_source(
@@ -20143,7 +20748,10 @@ __all__ = [
     "BoundedJobPage",
     "BoundedRuntimeAcquisition",
     "BoundedRuntimeReadObservation",
+    "BoundedRoleResultRootMetadata",
+    "BoundedRoleResultSnapshot",
     "RuntimeReadObservationReceipt",
+    "RuntimeRoleResultOverBudget",
     "CooRetryMutationOutcome",
     "EXECUTIVE_DIALOGUE_SOURCE_SCHEMA",
     "Event",
