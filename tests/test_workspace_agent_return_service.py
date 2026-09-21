@@ -38,6 +38,7 @@ def config_document(tmp_path: Path, **changes):
         "schema": SERVICE_SCHEMA,
         "policy_file": str(tmp_path / "policy.json"),
         "ticket_key_file": str(tmp_path / "ticket.key"),
+        "audit_directory": str(tmp_path / "auth-audit"),
         "executive_runtime_root": str(tmp_path / "executive-runtime"),
         "dialogue_socket_path": str(tmp_path / "agent-dialogue.sock"),
         "bind_host": "127.0.0.1",
@@ -74,6 +75,9 @@ def policy_document(*, subjects=None, scopes=None):
 def write_service_files(tmp_path: Path, *, subjects=None, scopes=None):
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "executive-runtime").mkdir(exist_ok=True)
+    audit = tmp_path / "auth-audit"
+    audit.mkdir(exist_ok=True)
+    audit.chmod(0o700)
     policy = tmp_path / "policy.json"
     policy.write_text(
         json.dumps(
@@ -170,6 +174,10 @@ def test_runtime_composition_opens_existing_executive_runtime_only(
     assert runtime.gateway._socket_path == Path(config.dialogue_socket_path)
     assert runtime.gateway._codec._key == bytes.fromhex("ab" * 32)
     assert runtime.server is not None
+    audit_file = tmp_path / "auth-audit" / "auth-audit.jsonl"
+    assert audit_file.is_file()
+    assert audit_file.stat().st_mode & 0o777 == 0o600
+    runtime.audit_sink.close()
 
 
 @pytest.mark.parametrize(
@@ -212,6 +220,7 @@ def test_readiness_is_passive_and_requires_live_dialogue_socket(tmp_path: Path) 
         gateway=object(),
         server=object(),
         dialogue_socket_path=dialogue,
+        audit_sink=object(),
     )
     state = ServiceState(
         lifespan_started=True,
@@ -306,6 +315,7 @@ def test_service_app_has_only_health_readiness_and_authenticated_mcp_mount(
         gateway=object(),
         server=Server(),
         dialogue_socket_path=tmp_path / "dialogue.sock",
+        audit_sink=object(),
     )
     app = build_service_app(runtime, ServiceState())
     paths = [route.path for route in app.routes]
@@ -326,6 +336,9 @@ def test_service_source_reuses_owners_and_adds_no_workspace_state_plane() -> Non
     assert "WorkspaceCandidateReturnGateway" in source
     assert "create_authenticated_return_server" in source
     assert "WorkspaceReturnTicketCodec" in source
+    assert "DurableAuthAuditSink" in source
+    assert "audit_directory" in source
+    assert "_StderrAuditSink" not in source
 
     for forbidden in (
         "CREATE TABLE",
