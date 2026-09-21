@@ -23,6 +23,7 @@ from control_plane.wake_ack_ingress import (
     TrustedWorkerWakeAckProjection,
     WakeAckClaim,
     WakeAckIngressError,
+    WEB_SOL_WAKE_TRANSPORT,
     WebSolWakeAckLeaseError,
     acknowledge_consumed_web_sol_wakes,
     acknowledge_consumed_wakes,
@@ -35,6 +36,7 @@ from control_plane.wake_events import (
     utc_now_iso,
 )
 from control_plane.wake_ledger import (
+    AckMode,
     DeliveryAttempt,
     LedgerPhase,
     ObligationStatus,
@@ -51,6 +53,7 @@ from control_plane.wake_ledger import (
     reconstruct_status,
     requested_record,
     unfinished_attempt_n,
+    web_sol_nudge_group_digest,
 )
 from control_plane.wake_persist import WakeLedgerRepository
 from control_plane.wake_transport import (
@@ -1201,6 +1204,8 @@ async def reconcile_persisted_delivered_ack(
         return hold("ACK_DUPLICATE_OBLIGATION_REFUSED")
 
     attempt_records: list[WakeLedgerRecord] = []
+    delivered_records: list[WakeLedgerRecord] = []
+    ack_records: list[WakeLedgerRecord | None] = []
     already_recorded: list[bool] = []
     for obligation, route in pairs:
         if route.obligation_id != obligation.obligation_id:
@@ -1217,16 +1222,27 @@ async def reconcile_persisted_delivered_ack(
             for record in records
             if record.phase is LedgerPhase.DELIVERY_ATTEMPT
         )
+        deliveries = tuple(
+            record for record in records if record.phase is LedgerPhase.DELIVERED
+        )
+        acknowledgements = tuple(
+            record
+            for record in records
+            if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+        )
         phases = tuple(record.phase for record in records)
         if (
             phases.count(LedgerPhase.WAKE_REQUESTED) != 1
             or len(attempts) != 1
-            or phases.count(LedgerPhase.DELIVERED) != 1
+            or len(deliveries) != 1
+            or len(acknowledgements) > 1
             or LedgerPhase.FAILED in phases
             or LedgerPhase.TARGET_UNAVAILABLE in phases
         ):
             return hold("ACK_HISTORY_INELIGIBLE")
         attempt_records.append(attempts[0])
+        delivered_records.append(deliveries[0])
+        ack_records.append(acknowledgements[0] if acknowledgements else None)
         already_recorded.append(
             LedgerPhase.TARGET_ACKNOWLEDGED in phases
             or LedgerPhase.SOURCE_RESOLVED in phases
@@ -1251,6 +1267,53 @@ async def reconcile_persisted_delivered_ack(
         first_route = pairs[0][1]
         coalesce_nudge([route for _obligation, route in pairs])
         if all(already_recorded):
+            if first_route.wake_transport != WEB_SOL_WAKE_TRANSPORT:
+                return PersistedDeliveredAckResult(
+                    PersistedDeliveredAckState.RECORDED, "ACK_ALREADY_RECORDED"
+                )
+            expected_claims = tuple(sorted(obligation_ids))
+            expected_group_digest = web_sol_nudge_group_digest(
+                nudge_id=nudge_attempt.nudge_id,
+                attempt_command_ids=tuple(
+                    sorted(
+                        attempt.attempt_command_id
+                        for attempt in nudge_attempt.attempts
+                    )
+                ),
+                obligation_ids=expected_claims,
+            )
+            common_provenance = None
+            for (
+                (obligation, _route),
+                delivered,
+                persisted_ack,
+            ) in zip(
+                pairs,
+                delivered_records,
+                ack_records,
+                strict=True,
+            ):
+                ack = None if persisted_ack is None else persisted_ack.ack
+                provenance = None if ack is None else ack.semantic_provenance
+                if (
+                    ack is None
+                    or ack.ack_mode is not AckMode.REASONING_SESSION
+                    or provenance is None
+                    or ack.claimed_obligation_ids != expected_claims
+                    or ack.target_seat != obligation.declared_target_seat
+                    or ack.session_alias != delivered.session_alias
+                    or ack.reasoning_surface != delivered.reasoning_surface
+                    or ack.binding_id != delivered.binding_id
+                    or ack.binding_generation != delivered.binding_generation
+                    or ack.delivered_command_id != delivered.command_id
+                    or provenance.nudge_id != nudge_attempt.nudge_id
+                    or provenance.nudge_group_digest != expected_group_digest
+                ):
+                    return hold("SEMANTIC_ACK_NOT_PROVEN")
+                if common_provenance is None:
+                    common_provenance = provenance
+                elif provenance != common_provenance:
+                    return hold("SEMANTIC_ACK_NOT_PROVEN")
             return PersistedDeliveredAckResult(
                 PersistedDeliveredAckState.RECORDED, "ACK_ALREADY_RECORDED"
             )

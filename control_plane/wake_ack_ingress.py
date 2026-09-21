@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 
 from control_plane.executive_runtime import Runtime, StateConflict
@@ -11,17 +12,21 @@ from control_plane.session_targets import (
     SessionTargetError,
     SessionTargetRegistry,
 )
-from control_plane.wake_events import ATTEMPT_ID_RE, WAKE_ID_RE
+from control_plane.wake_events import ATTEMPT_ID_RE, WAKE_ID_RE, canonical_json_bytes
 from control_plane.wake_ledger import (
     NUDGE_ID_RE,
     AckMode,
     LedgerPhase,
     TrustedAckContext,
+    WEB_SOL_SEMANTIC_ACK_PRODUCER_KIND,
+    WEB_SOL_SEMANTIC_ACK_PROVENANCE_SCHEMA,
     WakeLedgerError,
     WakeLedgerRecord,
+    WebSolSemanticAckProvenance,
     ack_record,
     acknowledge,
     ledger_command_id,
+    web_sol_nudge_group_digest,
 )
 from control_plane.wake_persist import PersistedWakeEvent, WakeLedgerRepository
 
@@ -457,6 +462,57 @@ class TrustedWebSolWakeAckProjection:
             )
 
 
+def _web_sol_semantic_ack_provenance(
+    trusted: TrustedWebSolWakeAckProjection,
+    *,
+    attempt_command_ids: tuple[str, ...],
+) -> WebSolSemanticAckProvenance:
+    projection_payload = {
+        "schema": "mastermind.web_sol_semantic_ack_projection/v1",
+        "session_alias": trusted.session_alias,
+        "reasoning_surface": trusted.reasoning_surface,
+        "binding_id": trusted.binding_id,
+        "binding_generation": trusted.binding_generation,
+        "native_handle": trusted.native_handle,
+        "runtime_binding_fingerprint": trusted.runtime_binding_fingerprint,
+        "conversation_fingerprint": trusted.conversation_fingerprint,
+        "provider_native_turn_id": trusted.provider_native_turn_id,
+        "nudge_id": trusted.nudge_id,
+        "obligation_ids": list(trusted.obligation_ids),
+        "terminal_ack_trailer": trusted.terminal_ack_trailer,
+    }
+    native_life_payload = {
+        "schema": "mastermind.web_sol_native_host_life/v1",
+        "native_handle": trusted.native_handle,
+        "binding_generation": trusted.binding_generation,
+        "runtime_binding_fingerprint": trusted.runtime_binding_fingerprint,
+    }
+    return WebSolSemanticAckProvenance(
+        schema=WEB_SOL_SEMANTIC_ACK_PROVENANCE_SCHEMA,
+        producer_kind=WEB_SOL_SEMANTIC_ACK_PRODUCER_KIND,
+        producer_version=1,
+        nudge_id=trusted.nudge_id,
+        nudge_group_digest=web_sol_nudge_group_digest(
+            nudge_id=trusted.nudge_id,
+            attempt_command_ids=attempt_command_ids,
+            obligation_ids=trusted.obligation_ids,
+        ),
+        provider_turn_digest=hashlib.sha256(
+            b"web-sol-provider-turn\0"
+            + trusted.provider_native_turn_id.encode("utf-8")
+        ).hexdigest(),
+        conversation_fingerprint=trusted.conversation_fingerprint,
+        runtime_binding_fingerprint=trusted.runtime_binding_fingerprint,
+        native_host_life_digest=hashlib.sha256(
+            canonical_json_bytes(native_life_payload)
+        ).hexdigest(),
+        projection_digest=hashlib.sha256(
+            canonical_json_bytes(projection_payload)
+        ).hexdigest(),
+        terminal_ack_trailer=True,
+    )
+
+
 def _require_exact_web_sol_lease(
     lease: object,
     *,
@@ -619,6 +675,9 @@ def acknowledge_consumed_web_sol_wakes(
             _require_exact_web_sol_lease(lease, trusted=trusted)
 
             group = tuple(prepared[0][1].nudge_attempt_command_ids)
+            semantic_provenance = _web_sol_semantic_ack_provenance(
+                trusted, attempt_command_ids=group
+            )
             expected_members = set()
             records_to_append = []
             for obligation, delivered, _existing in prepared:
@@ -665,6 +724,9 @@ def acknowledge_consumed_web_sol_wakes(
                     claimed_obligation_ids=claim.obligation_ids,
                     delivered_command_id=delivered.command_id,
                 )
+                ack = dataclasses.replace(
+                    ack, semantic_provenance=semantic_provenance
+                )
                 records_to_append.append((ack_record(obligation, ack), None))
 
             if not group or expected_members != set(group):
@@ -696,8 +758,13 @@ def _reconcile_existing_web_sol_ack(
         raise WakeAckIngressError(
             "existing acknowledgement is not a reasoning-session ACK"
         )
+    expected_provenance = _web_sol_semantic_ack_provenance(
+        trusted,
+        attempt_command_ids=tuple(delivered.nudge_attempt_command_ids),
+    )
     if (
-        ack.claimed_obligation_ids != claim.obligation_ids
+        ack.semantic_provenance != expected_provenance
+        or ack.claimed_obligation_ids != claim.obligation_ids
         or ack.target_seat != obligation.declared_target_seat
         or ack.session_alias != delivered.session_alias
         or ack.reasoning_surface != delivered.reasoning_surface
