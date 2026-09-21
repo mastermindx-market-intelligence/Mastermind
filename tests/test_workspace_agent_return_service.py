@@ -10,11 +10,13 @@ import socket
 
 import pytest
 
+from integrations.business_mcp_auth.audit import AuditAcquisitionUncertain
 from integrations.workspace_agent_return_service import (
     SERVICE_SCHEMA,
     ServiceConfigurationError,
     ServiceState,
     WorkspaceReturnServiceRuntime,
+    _open_audit_sink,
     _secure_ticket_key,
     _trusted_dialogue_call,
     build_service_app,
@@ -144,6 +146,31 @@ def test_ticket_key_requires_exact_owner_only_hex_key(tmp_path: Path) -> None:
     key.write_text("not-a-key", encoding="ascii")
     with pytest.raises(ServiceConfigurationError):
         _secure_ticket_key(str(key))
+
+
+def test_audit_acquisition_uncertainty_stays_distinct(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audit = tmp_path / "auth-audit"
+    audit.mkdir()
+    audit.chmod(0o700)
+
+    import integrations.workspace_agent_return_service as module
+
+    def uncertain(*_args, **_kwargs):
+        raise AuditAcquisitionUncertain(
+            "synthetic audit acquisition uncertainty",
+            primary_error=RuntimeError("primary"),
+            cleanup_errors=(RuntimeError("cleanup"),),
+        )
+
+    monkeypatch.setattr(module.DurableAuthAuditSink, "open", uncertain)
+    with pytest.raises(
+        ServiceConfigurationError,
+        match="SERVICE_STARTUP_CLEANUP_UNCERTAIN",
+    ):
+        _open_audit_sink(str(audit), policy_id="workspace.return.fixture")
 
 
 def test_runtime_composition_opens_existing_executive_runtime_only(
