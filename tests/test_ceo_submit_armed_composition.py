@@ -257,6 +257,58 @@ def _line_mentions_identity_name(line: str) -> bool:
     )
 
 
+def _import_bindings(names: str) -> list[tuple[str, str]]:
+    """Return (exported, local) names from a bounded Python/JS named import."""
+    bindings: list[tuple[str, str]] = []
+    identifier = r"[^\W\d]\w*"
+    for item in names.strip().strip("()").split(","):
+        match = re.fullmatch(
+            rf"\s*({identifier})(?:\s+as\s+({identifier}))?\s*;?\s*",
+            unicodedata.normalize("NFKC", item), flags=re.UNICODE,
+        )
+        if match:
+            exported = match.group(1)
+            bindings.append((exported, match.group(2) or exported))
+    return bindings
+
+
+def _python_import_source_paths(importer: str, module: str) -> tuple[str, ...]:
+    """Resolve a Python ``from`` module to its repository source spellings."""
+    level = len(module) - len(module.lstrip("."))
+    remainder = module[level:]
+    if level:
+        package = list(Path(importer).parent.parts)
+        if level - 1 > len(package):
+            return ()
+        parts = package[:len(package) - (level - 1)]
+    else:
+        parts = []
+    if remainder:
+        parts.extend(remainder.split("."))
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        return ()
+    stem = "/".join(parts)
+    # Python resolves a package before a same-named module file.
+    return (f"{stem}/__init__.py", f"{stem}.py")
+
+
+def _js_import_source_paths(importer: str, specifier: str) -> tuple[str, ...]:
+    """Resolve a relative named JavaScript import without package aliases."""
+    if not specifier.startswith(("./", "../")):
+        return ()
+    combined = os.path.normpath(os.path.join(os.path.dirname(importer), specifier))
+    if combined == ".." or combined.startswith("../") or os.path.isabs(combined):
+        return ()
+    suffix = Path(combined).suffix.lower()
+    extensions = (".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx")
+    if suffix:
+        return (combined,) if suffix in extensions else ()
+    return tuple(
+        [combined + extension for extension in extensions]
+        + [f"{combined}/index{extension}" for extension in extensions]
+    )
+
+
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
@@ -362,19 +414,47 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
     }
 
     definitions: dict[str, set[str]] = {path: set() for path in production}
-    imported: dict[str, set[str]] = {path: set() for path in production}
+    import_edges: dict[str, dict[str, set[tuple[str, str]]]] = {
+        path: {} for path in production
+    }
     for path, lines in production.items():
         for line in lines:
             normalized = unicodedata.normalize("NFKC", line)
             left, separator, right = normalized.partition("=")
             if separator:
                 definitions[path].update(_source_identifiers(left))
-            python_import = re.match(r"\s*from\s+[.\w]+\s+import\s+(.+)", normalized)
-            js_import = re.match(r"\s*import\s*\{([^}]+)\}\s*from\s*['\"]", normalized)
+            python_import = re.match(
+                r"\s*from\s+([.\w]+)\s+import\s+(.+)", normalized,
+            )
+            js_import = re.match(
+                r"\s*import\s*\{([^}]+)\}\s*from\s*['\"]([^'\"]+)['\"]",
+                normalized,
+            )
             if python_import:
-                imported[path].update(_source_identifiers(python_import.group(1)))
+                candidates = _python_import_source_paths(path, python_import.group(1))
+                # The first present candidate follows Python package/module precedence.
+                source_path = next((item for item in candidates if item in production), None)
+                if source_path:
+                    for exported, local in _import_bindings(python_import.group(2)):
+                        import_edges[path].setdefault(local, set()).add(
+                            (source_path, exported)
+                        )
             elif js_import:
-                imported[path].update(_source_identifiers(js_import.group(1)))
+                candidates = [
+                    item for item in _js_import_source_paths(path, js_import.group(2))
+                    if item in production
+                ]
+                # Extensionless imports are accepted only when the added diff has one
+                # unambiguous module target; explicit extensions already yield one path.
+                if len(candidates) == 1:
+                    for exported, local in _import_bindings(js_import.group(1)):
+                        import_edges[path].setdefault(local, set()).add(
+                            (candidates[0], exported)
+                        )
+
+    imported: dict[str, set[str]] = {
+        path: set(edges) for path, edges in import_edges.items()
+    }
 
     aliases: dict[str, set[str]] = {path: set() for path in production}
     for path, lines in production.items():
@@ -401,14 +481,14 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
                 )
                 changed = changed or len(aliases[path]) != before
 
-            # An explicit import is the only cross-file name edge. Trace an imported
-            # alias back to matching added definitions, then continue within that file.
-            for name in aliases[path] & imported[path]:
-                for source_path, source_definitions in definitions.items():
-                    if source_path == path or name not in source_definitions:
+            # Cross-file taint follows the resolved import module and exported binding;
+            # a same-named definition in any other file has no dataflow edge.
+            for local_name in aliases[path] & imported[path]:
+                for source_path, source_name in import_edges[path][local_name]:
+                    if source_name not in definitions[source_path]:
                         continue
                     before = len(aliases[source_path])
-                    aliases[source_path].add(name)
+                    aliases[source_path].add(source_name)
                     changed = changed or len(aliases[source_path]) != before
 
     flagged: list[str] = []
@@ -887,6 +967,35 @@ def test_d8_same_spelling_without_an_import_or_dataflow_edge_does_not_taint():
         ("app/mastermind_os/src/mission.ts", "const config = 512;"),
     ])
     assert _scan_added_identity_diff(diff) == []
+
+
+def test_d8_import_edges_are_qualified_by_their_python_module_source():
+    diff = _d8_frozen_added_diff([
+        ("common/defaults.py", "FALLBACK = 501"),
+        ("control_plane/credentials.py", "from common.defaults import FALLBACK"),
+        ("control_plane/credentials.py", "worker_uid = FALLBACK"),
+        ("app/constants.py", "FALLBACK = 512"),
+    ])
+    assert _scan_added_identity_diff(diff) == ["501"]
+
+
+@pytest.mark.parametrize("entries, expected", [
+    ([
+        ("common/defaults.py", "FALLBACK = 501"),
+        ("common/credentials.py", "from .defaults import FALLBACK as WORKER"),
+        ("common/credentials.py", "worker_uid = WORKER"),
+        ("app/constants.py", "FALLBACK = 512"),
+    ], ["501"]),
+    ([
+        ("integrations/config/defaults.ts", "export const FALLBACK = 459;"),
+        ("integrations/config/credentials.ts",
+         "import { FALLBACK as WORKER } from './defaults';"),
+        ("integrations/config/credentials.ts", "const peerUid = WORKER;"),
+        ("app/constants.ts", "const FALLBACK = 512;"),
+    ], ["459"]),
+])
+def test_d8_relative_import_edges_follow_only_the_resolved_source(entries, expected):
+    assert _scan_added_identity_diff(_d8_frozen_added_diff(entries)) == expected
 
 
 def test_d8_identity_context_normalizes_camelcase_and_unicode_names():
