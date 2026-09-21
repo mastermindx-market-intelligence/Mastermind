@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from control_plane.workspace_owned_task import await_owned
 import copy
+import dataclasses
 import math
 import re
 import secrets
@@ -19,9 +20,38 @@ from datetime import datetime
 from typing import Any
 
 from integrations.mastermind_workspace_app.contract import (
-    MAX_RESPONSE_BYTES, OBSERVATION_SCHEMA, PROGRAMS_SCHEMA, canonical, digest,
-    error, validate_frame, bounded_canonical, permission_stamp,
+    FABRIC_VIEW_SCHEMA_V3,
+    MAX_RESPONSE_BYTES,
+    MAX_RESULT_RESPONSE_BYTES,
+    OBSERVATION_SCHEMA,
+    PROGRAMS_SCHEMA,
+    PROJECTION_SCHEMA,
+    RESULT_BODY_SCHEMA,
+    RESULT_OBSERVATION_SCHEMA,
+    canonical,
+    digest,
+    error,
+    validate_frame,
+    validate_v2_frame,
+    bounded_canonical,
+    permission_stamp,
 )
+
+
+# Reason vocabulary exactly per the frozen v2 contract.  A v2 route emits
+# one of these per non-AVAILABLE response; nothing else may be returned.
+_REASON_CONTENT_OVER_BUDGET = "CONTENT_OVER_BUDGET"
+_REASON_OVER_BUDGET = "OVER_BUDGET"
+_REASON_SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
+_REASON_SOURCE_CHANGED = "SOURCE_CHANGED"
+_REASON_RESPONSE_OVER_BUDGET = "RESPONSE_OVER_BUDGET"
+_VALID_REASONS = frozenset({
+    _REASON_CONTENT_OVER_BUDGET,
+    _REASON_OVER_BUDGET,
+    _REASON_SOURCE_UNAVAILABLE,
+    _REASON_SOURCE_CHANGED,
+    _REASON_RESPONSE_OVER_BUDGET,
+})
 
 
 @dataclass(frozen=True)
@@ -286,7 +316,9 @@ class WorkspaceReadService:
     """
 
     def __init__(self, *, cache, runtime, authorize, armed, runtime_identity,
-                 acquire=None, compose=None, bounded_runtime=None):
+                 acquire=None, compose=None, bounded_runtime=None,
+                 result_acquire=None, result_project=None, mission_v3_acquire=None,
+                 mission_v3_compose=None):
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -295,6 +327,14 @@ class WorkspaceReadService:
         self._acquire = acquire
         self._compose = compose
         self._bounded_runtime = bounded_runtime
+        # Producer callables for the v2 routes.  All four are constructor
+        # injected and optional; the production result path resolves the
+        # canonical Runtime/Fabric and Mission owners. Missing producers fail
+        # closed through typed transport refusal, never through a local DTO.
+        self._result_acquire = result_acquire
+        self._result_project = result_project
+        self._mission_v3_acquire = mission_v3_acquire
+        self._mission_v3_compose = mission_v3_compose
 
     def _read(self, frame):
         selected = frame["selection"]
@@ -341,7 +381,286 @@ class WorkspaceReadService:
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
 
+    def _read_result(self, frame):
+        """Read one bounded role result through the actual Fabric seam.
+
+        The selection is the frozen five-field tuple.  The bracket is exact:
+        the initial CCR work/root join is 404 before Runtime, one bounded
+        Runtime acquisition whose receipt finalizes only after the physical
+        context close, pre-projection binding verification, the after-close
+        CCR recheck, then projection through the shared Fabric owner and the
+        closed budget ladder.  Acquisition ``OVER_BUDGET`` never reaches the
+        projector.  Every refusal below is one typed unavailable body with
+        null result, null control_room and null runtime.
+        """
+        selected = frame["selection"]
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        try:
+            _join(before.document, selected)
+        except LookupError:
+            raise LookupError("selection_not_found") from None
+        if not _qualified(before, selected):
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        try:
+            snapshot, receipt = self._bounded_result_acquire(selected)
+        except _ResultOverBudget:
+            return self._result_unavailable_body(selected, _REASON_OVER_BUDGET)
+        except _ResultSourceUnavailable:
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        try:
+            after = self.cache.snapshot()
+        except Exception:
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        # A positive CCR change proof — owner instance, publication sequence
+        # or canonical document moved between the two samples — is the only
+        # SOURCE_CHANGED; every other failure below is SOURCE_UNAVAILABLE.
+        if (before.owner is not after.owner or before.instance != after.instance
+                or before.publication != after.publication
+                or digest(before.document) != digest(after.document)):
+            return self._result_unavailable_body(selected, _REASON_SOURCE_CHANGED)
+        if not _qualified(after, selected):
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        if not self._result_binding_verified(snapshot, receipt, selected):
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        try:
+            projection = self._bounded_result_project(snapshot, receipt)
+        except Exception:
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        # The shared documents are served unchanged; their embedded selector
+        # must already equal the request's four fields.  It is compared,
+        # never overwritten.
+        shared = self._result_shared_selection(selected)
+        if (type(projection.complete) is not dict
+                or type(projection.content_over_budget) is not dict
+                or projection.complete.get("selection") != shared
+                or projection.content_over_budget.get("selection") != shared):
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        observation = self._result_observation(before, after, selected, receipt)
+        # Budget ladder over the whole canonical {ok:true,result:BODY} + LF:
+        # the complete document, then the projector's own content_over_budget
+        # fallback, then discard.  Only the Workspace wrapper is rebuilt; the
+        # shared nested documents never are.
+        body = {
+            "schema": RESULT_BODY_SCHEMA,
+            "selection": dict(selected),
+            "availability": "AVAILABLE",
+            "reason_codes": [],
+            "source_observation": observation,
+            "result": projection.complete,
+        }
+        if self._result_envelope_fits(body):
+            return {"ok": True, "result": body}
+        body = {
+            "schema": RESULT_BODY_SCHEMA,
+            "selection": dict(selected),
+            "availability": "CONTENT_OVER_BUDGET",
+            "reason_codes": [_REASON_CONTENT_OVER_BUDGET],
+            "source_observation": observation,
+            "result": projection.content_over_budget,
+        }
+        if self._result_envelope_fits(body):
+            return {"ok": True, "result": body}
+        # Neither shared document fits: discard all content.  No successful
+        # source receipt is retained with the refusal.
+        raise _ResultResponseOverBudget()
+
+    def _bounded_result_acquire(self, selected):
+        """One bounded role-result acquisition via the actual Runtime seam.
+
+        Returns ``(snapshot, receipt)`` exactly once, with the receipt read
+        only after the bounded observation context has physically closed —
+        reading it inside the with-block is the preserved lifetime defect.
+        The production path resolves the canonical ``read_role_result_bounded``
+        over the existing bounded runtime facade (exactly one selection per
+        observation, no ambient Runtime reopen, root scan or source fallback);
+        a constructor-injected ``result_acquire`` is the interface fixture
+        path and is used directly.
+        """
+        if self._result_acquire is not None:
+            try:
+                return self._result_acquire(self.runtime, selected,
+                                            armed=self.armed,
+                                            runtime_identity=self.runtime_identity)
+            except _ResultOverBudget:
+                raise
+            except Exception as exc:
+                raise self._result_acquire_refusal(exc) from exc
+        from control_plane.executive_runtime import RuntimeRoleResultOverBudget
+        bounded_runtime = (self._bounded_runtime(self.runtime)
+                           if self._bounded_runtime else self.runtime)
+        try:
+            with bounded_runtime.observe_bounded_read() as observation:
+                snapshot = observation.read_role_result_bounded(
+                    selected["root_job_id"],
+                    selected["job_id"],
+                    expected_attempt_id=selected["attempt_id"],
+                    expected_result_envelope_digest=selected["result_envelope_digest"],
+                )
+                # The receipt finalizes when this block physically closes; it
+                # is deliberately not read here.
+            receipt = observation.receipt
+        except RuntimeRoleResultOverBudget as exc:
+            raise _ResultOverBudget() from exc
+        except Exception as exc:
+            raise self._result_acquire_refusal(exc) from exc
+        return snapshot, receipt
+
+    @staticmethod
+    def _result_acquire_refusal(exc):
+        """Map an actual acquisition error to the service's typed refusal.
+
+        ``RuntimeRoleResultOverBudget`` is OVER_BUDGET; every other
+        StateConflict, RuntimeReadUnavailable or generic error — authority
+        mismatch, missing root or Attempt, digest disagreement, unfinalized
+        observation — is SOURCE_UNAVAILABLE.  None of them positively prove
+        a CCR change.
+        """
+        from control_plane.executive_runtime import RuntimeRoleResultOverBudget
+        if isinstance(exc, RuntimeRoleResultOverBudget):
+            return _ResultOverBudget()
+        return _ResultSourceUnavailable()
+
+    def _bounded_result_project(self, snapshot, receipt):
+        """Project one bounded snapshot through the actual shared Fabric owner."""
+        if self._result_project is not None:
+            return self._result_project(snapshot, receipt)
+        from control_plane.fabric_result_projection import project_fabric_role_result
+        return project_fabric_role_result(snapshot, receipt)
+
+    @staticmethod
+    def _result_binding_verified(snapshot, receipt, selected):
+        """Pre-projection binding law over the actual Runtime material.
+
+        Exact snapshot root/job/attempt/envelope-digest tuple, non-null
+        source identity equal to the finalized receipt's identity, a final
+        SAME receipt, and root metadata work_ref agreement when present.
+        """
+        root_metadata = getattr(snapshot, "root_metadata", None)
+        work_ref = getattr(root_metadata, "work_ref", None)
+        identity = getattr(snapshot, "observation_source_identity", None)
+        return ((getattr(snapshot, "root_job_id", None),
+                 getattr(snapshot, "job_id", None),
+                 getattr(snapshot, "attempt_id", None),
+                 getattr(snapshot, "result_envelope_digest", None))
+                == (selected["root_job_id"], selected["job_id"],
+                    selected["attempt_id"], selected["result_envelope_digest"])
+                and getattr(receipt, "state", None) == "SAME"
+                and type(identity) is str and bool(identity)
+                and identity == getattr(receipt, "source_identity", None)
+                and (work_ref is None or work_ref == selected["work_ref"]))
+
+    def _result_observation(self, before, after, selected, receipt):
+        """Assemble the closed ``mastermind.workspace_result_observation.v1``.
+
+        The runtime field is the finalized receipt's own public dictionary;
+        the control_room bracket carries the two sampled CCR digests.
+        """
+        generation = receipt.to_dict()
+        return {
+            "schema": RESULT_OBSERVATION_SCHEMA,
+            "state": "SAME" if generation.get("state") == "SAME" else "UNKNOWN",
+            "selection": {key: selected[key] for key in sorted(selected)},
+            "control_room": {
+                "instance_before": before.instance,
+                "instance_after": after.instance,
+                "publication_before": before.publication,
+                "publication_after": after.publication,
+                "document_digest": digest(before.document),
+                "source_validity_digest": digest(after.validity),
+                "cache_currentness_digest": digest(after.currentness),
+            },
+            "runtime": generation,
+        }
+
+    def _result_shared_selection(self, selected):
+        """The four-field selection embedded in shared result documents."""
+        return {
+            "root_job_id": selected["root_job_id"],
+            "job_id": selected["job_id"],
+            "attempt_id": selected["attempt_id"],
+            "result_envelope_digest": selected["result_envelope_digest"],
+        }
+
+    @staticmethod
+    def _result_envelope_fits(body):
+        """Whole ``{"ok":true,"result":BODY}`` UTF-8 + LF within 16384 bytes."""
+        try:
+            bounded_canonical({"ok": True, "result": body},
+                              limit=MAX_RESULT_RESPONSE_BYTES - 1)
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    def _result_unavailable_body(self, selected, reason):
+        """One typed unavailable body, pinned by the frozen design fixtures.
+
+        ``result``, ``source_observation.control_room`` and
+        ``source_observation.runtime`` are all null; the observation state is
+        CONFLICT only for the positively proven SOURCE_CHANGED refusal, else
+        UNKNOWN.  No successful source receipt is retained.
+        """
+        body = {
+            "schema": RESULT_BODY_SCHEMA,
+            "selection": dict(selected),
+            "availability": "UNAVAILABLE",
+            "reason_codes": [reason],
+            "source_observation": {
+                "schema": RESULT_OBSERVATION_SCHEMA,
+                "state": "CONFLICT" if reason == _REASON_SOURCE_CHANGED else "UNKNOWN",
+                "selection": {key: selected[key] for key in sorted(selected)},
+                "control_room": None,
+                "runtime": None,
+            },
+            "result": None,
+        }
+        bounded_canonical({"ok": True, "result": body},
+                          limit=MAX_RESULT_RESPONSE_BYTES - 1)
+        return {"ok": True, "result": body}
+
+    def _read_mission_v3(self, frame):
+        """Join the canonical v3 companion and reducer through existing custody."""
+        selected = frame["selection"]
+        before = self.cache.snapshot()
+        _join(before.document, selected)
+        if not _qualified(before, selected):
+            raise ValueError("source_unavailable")
+        acquire, compose = self._mission_v3_acquire, self._mission_v3_compose
+        if acquire is None:
+            from control_plane.fabric_job_view import read_fabric_view_v3_from_runtime
+            acquire = read_fabric_view_v3_from_runtime
+        if compose is None:
+            from control_plane.mission_workspace import compose_mission_workspace_v3
+            compose = compose_mission_workspace_v3
+        observed_runtime = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
+        companion = acquire(observed_runtime, selected["root_job_id"],
+                            armed=self.armed, runtime_identity=self.runtime_identity)
+        acquisition = companion.get("fabric_view", {}).get("runtime", {}).get("acquisition", {})
+        generation = acquisition.get("generation")
+        runtime = (dict(generation, snapshot_digest=acquisition.get("snapshot_digest"))
+                   if type(generation) is dict else None)
+        # The canonical Fabric owner returns only after observation physical
+        # close. The cache bracket and canonical reducer retain state authority.
+        after = self.cache.snapshot()
+        _join(after.document, selected)
+        if not _qualified(after, selected):
+            raise ValueError("source_unavailable")
+        observation = _observation(before, after, selected, runtime)
+        result = compose(control_room=before.document, fabric_view=companion,
+                         **selected, source_validity=after.validity,
+                         cache_currentness=after.currentness, source_generation=None,
+                         owner_observation=observation)
+        response = {"ok": True, "result": result}
+        bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
+        return response
+
     async def handle_frame(self, frame):
+        # v2 frames take the closed v2 validation path; v1 frames keep their
+        # existing envelope.  The two are mutually exclusive — never both.
+        if isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v2":
+            return await self._handle_v2_frame(frame)
         try:
             validate_frame(frame)
         except (TypeError, ValueError):
@@ -374,6 +693,64 @@ class WorkspaceReadService:
                 return {"ok": True, "result": {"schema": PROGRAMS_SCHEMA, "availability": "UNAVAILABLE",
                     "control_room": None, "source_observation": receipt, "reason_codes": ["source_unavailable"]}}
             return error("source_unavailable", 503)
+
+    async def _handle_v2_frame(self, frame):
+        try:
+            validate_v2_frame(frame)
+        except (TypeError, ValueError):
+            return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True:
+                return error("access_denied", 403)
+        except Exception:
+            return error("access_denied", 403)
+        try:
+            permission_before = permission_stamp(self.authorize, frame["principal"])
+        except Exception:
+            return error("access_denied", 403)
+        operation = frame["operation"]
+        if operation == "result":
+            worker = self._read_result
+        elif operation == "mission_v3":
+            worker = self._read_mission_v3
+        else:
+            return error("invalid_input", 400)
+        task = asyncio.create_task(asyncio.to_thread(worker, frame))
+        try:
+            result = await await_owned(task)
+        except LookupError:
+            return error("selection_not_found", 404)
+        except _ResultResponseOverBudget:
+            # Neither shared document fits the closed ceiling: discard all
+            # content through the fixture-pinned minimal unavailable body.
+            result = self._result_unavailable_body(
+                frame["selection"], _REASON_RESPONSE_OVER_BUDGET)
+        except Exception:
+            if operation != "result":
+                # Producer failure is a typed transport refusal; the adapter
+                # never manufactures a Mission body.
+                return error("source_unavailable", 503)
+            result = self._result_unavailable_body(
+                frame["selection"], _REASON_SOURCE_UNAVAILABLE)
+        try:
+            if (self.authorize(frame["principal"]) is not True
+                    or permission_stamp(self.authorize, frame["principal"]) != permission_before):
+                return error("access_denied", 403)
+        except Exception:
+            return error("access_denied", 403)
+        return result
+
+
+class _ResultOverBudget(Exception):
+    """Typed refusal for RuntimeRoleResultOverBudget inside the read service."""
+
+
+class _ResultSourceUnavailable(Exception):
+    """Typed refusal for any non-overbudget Runtime acquisition error."""
+
+
+class _ResultResponseOverBudget(Exception):
+    """Typed refusal when neither shared document fits the 16384 ceiling."""
 
 
 def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None):

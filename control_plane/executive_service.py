@@ -3947,9 +3947,23 @@ class ExecutiveControlService:
                     writer, "invalid_json", "request is not valid JSON"
                 )
                 return
-            from integrations.mastermind_workspace_app.contract import FRAME_SCHEMA, MAX_RESPONSE_BYTES as WORKSPACE_MAX_RESPONSE_BYTES, error as workspace_error, bounded_canonical as workspace_encode
-            if app_peer and isinstance(parsed, dict) and parsed.get("schema") == FRAME_SCHEMA:
+            from integrations.mastermind_workspace_app.contract import (
+                FRAME_SCHEMA, FRAME_SCHEMA_V2,
+                MAX_RESPONSE_BYTES as WORKSPACE_MAX_RESPONSE_BYTES,
+                MAX_RESULT_RESPONSE_BYTES,
+                response_ceiling_for,
+                error as workspace_error,
+                bounded_canonical as workspace_encode,
+            )
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2}:
                 factory = app_binding.workspace_read_provider_factory
+                # Pick the operation-specific ceiling BEFORE any work so an
+                # unknown or malformed frame never widens to a larger ceiling.
+                operation = parsed.get("operation") if isinstance(parsed, dict) else None
+                if parsed.get("schema") == FRAME_SCHEMA_V2:
+                    ceiling = response_ceiling_for(operation)
+                else:
+                    ceiling = WORKSPACE_MAX_RESPONSE_BYTES
                 if factory is None or self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
                     result = workspace_error("source_unavailable", 503)
                 else:
@@ -3960,10 +3974,10 @@ class ExecutiveControlService:
                     if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
                         result = workspace_error("source_unavailable", 503)
                 try:
-                    workspace_encode(result, limit=WORKSPACE_MAX_RESPONSE_BYTES - 1)
+                    workspace_encode(result, limit=ceiling - 1)
                 except (TypeError, ValueError):
                     result = workspace_error("source_unavailable", 503)
-                await self._send_ceo_ingress_response(writer, result, response_ceiling=WORKSPACE_MAX_RESPONSE_BYTES)
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=ceiling)
                 return
             from integrations.executive_content_contract import ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA, MAX_PAGE_BYTES
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA}:

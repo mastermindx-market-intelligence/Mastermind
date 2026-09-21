@@ -59,8 +59,13 @@ from control_plane.mission_workspace import (
     _safe_timestamp,
     compose_mission_workspace,
     compose_mission_workspace_v2,
+    compose_mission_workspace_v3,
 )
 from tests import test_chairman_control_room_server as control_room_server_tests
+from tests.test_fabric_result_projection import (  # noqa: E402
+    bound_max_chain,
+    bound_sealed_worker_planner,
+)
 
 
 STAMP = "2026-09-20T00:00:00Z"
@@ -1704,3 +1709,917 @@ def test_v2_same_owner_receipt_requires_exact_nonhistorical_dispatch(historical)
     assert doc["source"]["owner_observation"]["state"] == "SAME"
     assert doc["read_state"]["state"] == "PARTIAL"
     assert doc["posture"]["value"] == "CONSUMPTION_UNKNOWN"
+
+
+# ---------------------------------------------------------------------------
+# Unit M — Mission v3 reducer (compose_mission_workspace_v3)
+# ---------------------------------------------------------------------------
+SCHEMA_V3 = "mastermind.mission_workspace.v3"
+FABRIC_VIEW_SCHEMA_V3 = "mastermind.fabric_job_view.v3"
+FABRIC_VIEW_SCHEMA_V2 = "mastermind.fabric_job_view.v2"
+RESULT_REFERENCE_INDEX_SCHEMA = "mastermind.fabric_result_reference_index.v1"
+
+_V3_OUTPUT_KEYS = OUTPUT_KEYS | {"result_refs"}
+_V3_WRAPPER_KEYS = ("schema", "fabric_view", "result_refs")
+_V3_INDEX_KEYS = frozenset(
+    {
+        "schema", "root_job_id", "snapshot_digest", "generation",
+        "availability", "refs", "absent_job_ids", "omitted_job_ids", "truncated",
+    }
+)
+_V3_REF_KEYS = frozenset(
+    {
+        "root_job_id", "job_id", "attempt_id", "result_envelope_digest",
+        "orchestration_role", "validation",
+    }
+)
+_V3_GENERATION_KEYS = frozenset({"schema", "state", "source_identity", "before", "after"})
+_V3_OWNER_OBSERVATION_RUNTIME_KEYS = frozenset(
+    {"schema", "state", "source_identity", "before", "after", "snapshot_digest"}
+)
+
+
+def test_mission_v3_api_is_present():
+    from control_plane import mission_workspace as mw
+    assert callable(getattr(mw, "compose_mission_workspace_v3", None))
+
+
+def _v2_to_v3_wrapper(v2_fabric_view):
+    """Build a synthetic v3 wrapper from a v2 fabric_view fixture (index is sentinel)."""
+
+    # Ensure nested v2 carries an acquisition so v2 owner-observation can validate.
+    if "acquisition" not in v2_fabric_view.get("runtime", {}):
+        root_id = v2_fabric_view.get("root", {}).get("job_id")
+        v2_fabric_view.setdefault("runtime", {})["acquisition"] = {
+            "schema": "mastermind.fabric_runtime_acquisition.v1",
+            "owner": "executive_runtime",
+            "query": {"kind": "root_detail", "root_job_id": root_id},
+            "snapshot_digest": "a" * 64,
+            "generation": {
+                "schema": "mastermind.runtime_read_observation.v1",
+                "state": "SAME",
+                "source_identity": "rt_owner_1234567890",
+                "before": 1,
+                "after": 1,
+            },
+            "truncation": {"jobs": False, "attempt_job_ids": [], "roots": False, "projection": False},
+            "provenance": {"state": "COMPLETE", "unjoined_job_ids": []},
+        }
+    digest = v2_fabric_view["runtime"]["acquisition"]["snapshot_digest"]
+    generation = dict(v2_fabric_view["runtime"]["acquisition"]["generation"])
+    return {
+        "schema": FABRIC_VIEW_SCHEMA_V3,
+        "fabric_view": v2_fabric_view,
+        "result_refs": {
+            "schema": RESULT_REFERENCE_INDEX_SCHEMA,
+            "root_job_id": v2_fabric_view["root"]["job_id"],
+            "snapshot_digest": digest,
+            "generation": generation,
+            "availability": "AVAILABLE",
+            "refs": [],
+            "absent_job_ids": [],
+            "omitted_job_ids": [],
+            "truncated": False,
+        },
+    }
+
+
+def _v3_inputs(**changes):
+    args = _inputs_v2()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    args.update(changes)
+    return args
+
+
+def _v3_acquisition(args):
+    """Return the nested v2 acquisition for use in matched index construction."""
+
+    nested = args["fabric_view"]["fabric_view"]
+    return nested["runtime"]["acquisition"]
+
+
+def _compose_v3(**changes):
+    args = _v3_inputs()
+    args.update(changes)
+    return compose_mission_workspace_v3(**args)
+
+
+def _current_args_for_wrapper(wrapper, *, work_ref="WS:ONE"):
+    """Retarget the truthful CCR/owner-observation fixture onto a real F2 wrapper.
+
+    The control-room receipts and the bound Runtime owner receipt are the
+    test's own explicit custody: the responsibility, validity card, selection
+    and runtime receipt all join the real producer acquisition so the Mission
+    currentness gates can be met truthfully (never relaxed).
+    """
+
+    args = _owner_observation_inputs()
+    args["fabric_view"] = wrapper
+    args["work_ref"] = work_ref
+    root_id = wrapper["result_refs"]["root_job_id"]
+    args["root_job_id"] = root_id
+    args["owner_observation"]["selection"]["root_job_id"] = root_id
+    responsibility = args["control_room"]["autonomy"]["responsibilities"][0]
+    responsibility.update(root_job_id=root_id, root_job_candidates=[root_id])
+    args["source_validity"]["cards"][0]["root_job_id"] = root_id
+    acq = wrapper["fabric_view"]["runtime"]["acquisition"]
+    args["owner_observation"]["runtime"] = {
+        **acq["generation"], "snapshot_digest": acq["snapshot_digest"],
+    }
+    _refresh_observation_digests(args)
+    return args
+
+
+def _index_with_refs(refs, *, availability="AVAILABLE", absent=(), omitted=(), truncated=False,
+                     root_job_id="JOB-1", snapshot_digest=None, generation_state="SAME",
+                     generation=None):
+    digest = snapshot_digest or ("a" * 64)
+    if generation is None:
+        generation = {
+            "schema": "mastermind.runtime_read_observation.v1",
+            "state": generation_state,
+            "source_identity": "rt_owner_1234567890" if generation_state == "SAME" else None,
+            "before": 1 if generation_state == "SAME" else None,
+            "after": 1 if generation_state == "SAME" else None,
+        }
+    return {
+        "schema": RESULT_REFERENCE_INDEX_SCHEMA,
+        "root_job_id": root_job_id,
+        "snapshot_digest": digest,
+        "generation": generation,
+        "availability": availability,
+        "refs": refs,
+        "absent_job_ids": list(absent),
+        "omitted_job_ids": list(omitted),
+        "truncated": truncated,
+    }
+
+
+def _ref(*, root_job_id="JOB-1", job_id="JOB-CHILD", attempt_id="ATT-1", role="work",
+         digest="b" * 64):
+    return {
+        "root_job_id": root_job_id,
+        "job_id": job_id,
+        "attempt_id": attempt_id,
+        "result_envelope_digest": digest,
+        "orchestration_role": role,
+        "validation": "UNVALIDATED",
+    }
+
+
+def test_mission_v3_emits_exact_closed_top_level_and_index_keys():
+    document = _compose_v3()
+    assert document["schema"] == SCHEMA_V3
+    assert set(document) == _V3_OUTPUT_KEYS
+    assert "result_refs" in document
+    index = document["result_refs"]
+    assert set(index) == _V3_INDEX_KEYS
+    assert index["schema"] == RESULT_REFERENCE_INDEX_SCHEMA
+
+
+def test_mission_v3_rejects_v2_companion_shape_without_companion_keys():
+    args = _v3_inputs()
+    args["fabric_view"] = args["fabric_view"]["fabric_view"]  # raw v2 nested
+    with pytest.raises(ValueError, match="v3 companion"):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_rejects_extra_and_missing_companion_keys():
+    args = _v3_inputs()
+    args["fabric_view"]["extra"] = "noise"
+    with pytest.raises(ValueError, match="v3 companion"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    args["fabric_view"].pop("result_refs")
+    with pytest.raises(ValueError, match="v3 companion"):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_rejects_extra_and_missing_index_keys():
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["extra"] = "noise"
+    with pytest.raises(ValueError, match="result_refs index"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"].pop("refs")
+    with pytest.raises(ValueError, match="result_refs index"):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_rejects_wrong_index_and_ref_schemas_and_enums():
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["schema"] = "mastermind.fabric_result_reference_index.v2"
+    with pytest.raises(ValueError, match="result_refs index"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["availability"] = "MAYBE"
+    with pytest.raises(ValueError, match="result_refs index"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["refs"] = [{**_ref(), "validation": "APPROVED"}]
+    with pytest.raises(ValueError, match="result_refs ref"):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_rejects_seventeen_slot_overflow():
+    args = _v3_inputs()
+    refs = [_ref(job_id=f"JOB-C{i:02d}") for i in range(18)]
+    args["fabric_view"]["result_refs"] = _index_with_refs(refs)
+    with pytest.raises(ValueError, match="at most 17"):
+        compose_mission_workspace_v3(**args)
+
+    # The cap is on the TOTAL partition: 17 refs + 1 known-absent = 18 slots.
+    args = _v3_inputs()
+    refs = [_ref(job_id=f"JOB-C{i:02d}") for i in range(17)]
+    args["fabric_view"]["result_refs"] = _index_with_refs(refs, absent=("JOB-ZZ",))
+    with pytest.raises(ValueError, match="at most 17"):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_rejects_duplicate_or_unsorted_or_overlapping_partition():
+    args = _v3_inputs()
+    refs = [_ref(job_id="JOB-A"), _ref(job_id="JOB-B"), _ref(job_id="JOB-C")]
+    index = _index_with_refs(refs, absent=("JOB-C",), omitted=())
+    args["fabric_view"]["result_refs"] = index
+    with pytest.raises(ValueError, match="partition"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    index = _index_with_refs(
+        [_ref(job_id="JOB-C"), _ref(job_id="JOB-A")], absent=(), omitted=()
+    )
+    args["fabric_view"]["result_refs"] = index
+    with pytest.raises(ValueError, match="sorted"):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_rejects_foreign_root_digest_and_generation_mismatch():
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["root_job_id"] = "JOB-foreign"
+    with pytest.raises(ValueError, match="root_job_id"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["snapshot_digest"] = "0" * 64
+    with pytest.raises(ValueError, match="snapshot_digest"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["generation"]["state"] = "CONFLICT"
+    with pytest.raises(ValueError, match="generation"):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_rejects_malformed_digest_and_generation_types():
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["snapshot_digest"] = None
+    with pytest.raises(ValueError, match="digest"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["snapshot_digest"] = "not-hex"
+    with pytest.raises(ValueError, match="digest"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["generation"] = {"schema": "wrong"}
+    with pytest.raises(ValueError, match="generation"):
+        compose_mission_workspace_v3(**args)
+
+
+def _v3_mutate_joined(args, *, digest=..., generation=...):
+    """Mutate a value on BOTH the index and the nested acquisition at once.
+
+    Keeping the two sides joined isolates index-structure validation from the
+    join checks: a refusal can then only come from the index contract itself.
+    """
+
+    index = args["fabric_view"]["result_refs"]
+    acquisition = args["fabric_view"]["fabric_view"]["runtime"]["acquisition"]
+    if digest is not ...:
+        index["snapshot_digest"] = digest
+        acquisition["snapshot_digest"] = digest
+    if generation is not ...:
+        index["generation"] = copy.deepcopy(generation)
+        acquisition["generation"] = copy.deepcopy(generation)
+    return args
+
+
+def test_mission_v3_malformed_digest_does_not_bypass_remaining_structure_validation():
+    """A malformed snapshot_digest degrades availability; it never skips validation."""
+
+    args = _v3_inputs()
+    _v3_mutate_joined(args, digest="z" * 64)
+    args["fabric_view"]["result_refs"]["truncated"] = "yes"
+    with pytest.raises(ValueError, match="truncated"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    _v3_mutate_joined(args, digest="z" * 64, generation={"schema": "wrong"})
+    with pytest.raises(ValueError, match="generation"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    _v3_mutate_joined(args, digest="z" * 64)
+    args["fabric_view"]["result_refs"]["refs"] = [
+        _ref(job_id="JOB-B"), _ref(job_id="JOB-A"),
+    ]
+    with pytest.raises(ValueError, match="sorted"):
+        compose_mission_workspace_v3(**args)
+
+    args = _v3_inputs()
+    _v3_mutate_joined(args, digest="z" * 64)
+    args["fabric_view"]["result_refs"]["availability"] = "MAYBE"
+    with pytest.raises(ValueError, match="availability"):
+        compose_mission_workspace_v3(**args)
+
+
+@pytest.mark.parametrize(
+    "field,value,match",
+    [
+        pytest.param("before", True, "sample", id="same-before-bool"),
+        pytest.param("after", True, "sample", id="same-after-bool"),
+        pytest.param("before", -1, "sample", id="same-before-negative"),
+        pytest.param("before", None, "generation", id="same-before-null"),
+        pytest.param("source_identity", "", "identity", id="same-identity-empty"),
+        pytest.param("source_identity", "a/b", "identity", id="same-identity-slash"),
+        pytest.param("source_identity", None, "identity", id="same-identity-null"),
+        pytest.param("after", 2, "SAME", id="same-samples-unequal"),
+    ],
+)
+def test_mission_v3_generation_samples_and_identity_follow_owner_law(field, value, match):
+    args = _v3_inputs()
+    generation = dict(args["fabric_view"]["result_refs"]["generation"])
+    generation[field] = value
+    _v3_mutate_joined(args, generation=generation)
+    with pytest.raises(ValueError, match=match):
+        compose_mission_workspace_v3(**args)
+
+
+@pytest.mark.parametrize(
+    "field,value,match",
+    [
+        pytest.param("after", 1, "CONFLICT", id="conflict-samples-equal"),
+        pytest.param("source_identity", None, "identity", id="conflict-identity-null"),
+    ],
+)
+def test_mission_v3_conflict_generation_follows_owner_law(field, value, match):
+    args = _v3_inputs()
+    generation = dict(args["fabric_view"]["result_refs"]["generation"])
+    generation.update(state="CONFLICT", before=1, after=2)
+    generation[field] = value
+    _v3_mutate_joined(args, generation=generation)
+    with pytest.raises(ValueError, match=match):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_unknown_generation_rejects_bool_samples():
+    args = _v3_inputs()
+    _v3_mutate_joined(args, generation={
+        "schema": "mastermind.runtime_read_observation.v1",
+        "state": "UNKNOWN", "source_identity": None, "before": True, "after": None,
+    })
+    with pytest.raises(ValueError, match="sample"):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_rejects_invalid_ref_and_partition_identifiers_cleanly():
+    """Invalid, unhashable or mixed identifiers refuse with ValueError, never TypeError."""
+
+    def with_index(refs=None, absent=(), omitted=()):
+        args = _v3_inputs()
+        args["fabric_view"]["result_refs"] = _index_with_refs(
+            refs if refs is not None else [], absent=absent, omitted=omitted,
+        )
+        return args
+
+    with pytest.raises(ValueError, match="job_id"):
+        compose_mission_workspace_v3(**with_index(refs=[_ref(job_id=["unhashable"])]))
+    with pytest.raises(ValueError, match="job_id"):
+        compose_mission_workspace_v3(**with_index(refs=[_ref(job_id=123)]))
+    with pytest.raises(ValueError, match="job_id"):
+        compose_mission_workspace_v3(**with_index(
+            refs=[_ref(job_id=123), _ref(job_id="JOB-A")],
+        ))
+    with pytest.raises(ValueError, match="job_id"):
+        compose_mission_workspace_v3(**with_index(refs=[_ref(job_id=None)]))
+
+    with pytest.raises(ValueError, match="attempt_id"):
+        compose_mission_workspace_v3(**with_index(refs=[_ref(attempt_id=123)]))
+    with pytest.raises(ValueError, match="attempt_id"):
+        compose_mission_workspace_v3(**with_index(refs=[_ref(attempt_id=None)]))
+    with pytest.raises(ValueError, match="attempt_id"):
+        compose_mission_workspace_v3(**with_index(refs=[_ref(attempt_id=["x"])]))
+
+    with pytest.raises(ValueError, match="absent_job_ids"):
+        compose_mission_workspace_v3(**with_index(absent=[1, "JOB-A"]))
+    with pytest.raises(ValueError, match="absent_job_ids"):
+        compose_mission_workspace_v3(**with_index(absent=[None]))
+    with pytest.raises(ValueError, match="omitted_job_ids"):
+        compose_mission_workspace_v3(**with_index(omitted=[["nested"]]))
+    with pytest.raises(ValueError, match="omitted_job_ids"):
+        compose_mission_workspace_v3(**with_index(omitted=[3.5]))
+
+
+def test_mission_v3_index_root_must_join_nested_v2_root_card():
+    args = _v3_inputs()
+    index = args["fabric_view"]["result_refs"]
+    query = args["fabric_view"]["fabric_view"]["runtime"]["acquisition"]["query"]
+    for target in (index, query):
+        target["root_job_id"] = "JOB-9"
+    with pytest.raises(ValueError, match="root"):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_current_available_claim_with_omissions_or_truncation_becomes_partial():
+    args = _owner_observation_inputs()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    acq = _v3_acquisition(args)
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [_ref(job_id="JOB-CHILD")],
+        omitted=("JOB-MISSING",), availability="AVAILABLE",
+        snapshot_digest=acq["snapshot_digest"], generation=dict(acq["generation"]),
+    )
+    document = compose_mission_workspace_v3(**args)
+    assert document["read_state"]["state"] == "CURRENT"
+    assert document["result_refs"]["availability"] == "PARTIAL"
+    assert [row["job_id"] for row in document["result_refs"]["refs"]] == ["JOB-CHILD"]
+    assert document["result_refs"]["omitted_job_ids"] == ["JOB-MISSING"]
+
+    args = _owner_observation_inputs()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    acq = _v3_acquisition(args)
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [_ref(job_id="JOB-CHILD")],
+        availability="AVAILABLE", truncated=True,
+        snapshot_digest=acq["snapshot_digest"], generation=dict(acq["generation"]),
+    )
+    document = compose_mission_workspace_v3(**args)
+    assert document["read_state"]["state"] == "CURRENT"
+    assert document["result_refs"]["availability"] == "PARTIAL"
+    assert document["result_refs"]["truncated"] is True
+    assert [row["job_id"] for row in document["result_refs"]["refs"]] == ["JOB-CHILD"]
+
+
+def test_mission_v3_current_unavailable_claim_retains_no_refs_or_known_absence():
+    args = _owner_observation_inputs()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    acq = _v3_acquisition(args)
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [_ref(job_id="JOB-CHILD")],
+        absent=("JOB-IDLE",), availability="UNAVAILABLE",
+        snapshot_digest=acq["snapshot_digest"], generation=dict(acq["generation"]),
+    )
+    document = compose_mission_workspace_v3(**args)
+    assert document["read_state"]["state"] == "CURRENT"
+    assert document["result_refs"]["availability"] == "UNAVAILABLE"
+    assert document["result_refs"]["refs"] == []
+    assert document["result_refs"]["absent_job_ids"] == []
+    assert document["result_refs"]["omitted_job_ids"] == []
+    # valid retained diagnostics survive the clearing
+    assert document["result_refs"]["generation"]["state"] == "SAME"
+    assert document["result_refs"]["snapshot_digest"] == acq["snapshot_digest"]
+
+
+def test_mission_v3_missing_or_malformed_digest_never_promotes_refs_under_current():
+    for bad in (None, "z" * 64):
+        args = _owner_observation_inputs()
+        args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+        acq = args["fabric_view"]["fabric_view"]["runtime"]["acquisition"]
+        acq["snapshot_digest"] = bad
+        args["fabric_view"]["result_refs"] = _index_with_refs(
+            [_ref(job_id="JOB-CHILD")],
+            absent=("JOB-IDLE",),
+            generation=dict(acq["generation"]),
+        )
+        args["fabric_view"]["result_refs"]["snapshot_digest"] = bad
+        document = compose_mission_workspace_v3(**args)
+        assert document["result_refs"]["availability"] == "UNAVAILABLE"
+        assert document["result_refs"]["refs"] == []
+        assert document["result_refs"]["absent_job_ids"] == []
+
+
+def test_mission_v3_preserves_v1_v2_output_byte_for_byte():
+    v1_args = _inputs()
+    v1_doc = compose_mission_workspace(**v1_args)
+
+    v2_args = _inputs_v2()
+    v2_doc = compose_mission_workspace_v2(**v2_args)
+
+    assert v1_doc["schema"] == SCHEMA
+    assert v2_doc["schema"] == SCHEMA_V2
+    assert set(v1_doc) == OUTPUT_KEYS
+    assert set(v2_doc) == OUTPUT_KEYS
+    assert "result_refs" not in v1_doc and "result_refs" not in v2_doc
+
+
+def test_mission_v3_rejects_v1_v2_fabric_view_schemas_and_extra_kwargs():
+    args = _v3_inputs()
+    args["fabric_view"]["fabric_view"]["schema"] = FABRIC_VIEW_SCHEMA = (
+        "mastermind.fabric_job_view.v1"
+    )
+    with pytest.raises(ValueError):
+        compose_mission_workspace_v3(**args)
+
+
+def test_mission_v3_returns_nested_v2_fields_with_added_result_refs():
+    document = _compose_v3()
+    nested = document["result_refs"]
+    assert nested["root_job_id"] == "JOB-1"
+    # Base fixture is nonCURRENT so navigation downgrades to UNAVAILABLE
+    assert nested["availability"] == "UNAVAILABLE"
+    assert nested["refs"] == []
+    # All v2 top-level fields except schema are preserved; only result_refs is new
+    nested_v2 = {key: value for key, value in document.items() if key != "result_refs"}
+    assert set(nested_v2) == OUTPUT_KEYS
+    assert document["acceptance"]["state"] == "NOT_PROJECTED"
+
+
+def test_mission_v3_root_digest_generation_join_with_enclosing_v2_acquisition():
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [_ref(job_id="JOB-CHILD", attempt_id="ATT-CHILD")],
+        snapshot_digest=args["fabric_view"]["fabric_view"]["runtime"]["acquisition"]["snapshot_digest"],
+    )
+    document = compose_mission_workspace_v3(**args)
+    nested = document["result_refs"]
+    # source.fabric_view_schema reflects the nested v2 fabric schema
+    assert document["source"]["fabric_view_schema"] == FABRIC_VIEW_SCHEMA_V2
+    inner = args["fabric_view"]["fabric_view"]
+    assert nested["snapshot_digest"] == inner["runtime"]["acquisition"]["snapshot_digest"]
+    assert nested["generation"] == inner["runtime"]["acquisition"]["generation"]
+    assert nested["root_job_id"] == inner["runtime"]["acquisition"]["query"]["root_job_id"]
+
+
+def test_mission_v3_index_generation_uses_only_five_receipt_fields():
+    args = _v3_inputs()
+    document = compose_mission_workspace_v3(**args)
+    generation = document["result_refs"]["generation"]
+    assert set(generation) == _V3_GENERATION_KEYS
+    assert "snapshot_digest" not in generation
+    # and the sixth key belongs separately
+    assert document["result_refs"]["snapshot_digest"] is not None
+
+
+def test_mission_v3_source_owner_observation_runtime_has_six_keys():
+    args = _owner_observation_inputs()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    document = compose_mission_workspace_v3(**args)
+    runtime = document["source"]["owner_observation"]["runtime"]
+    assert set(runtime) == _V3_OWNER_OBSERVATION_RUNTIME_KEYS
+    assert len(runtime) == 6
+
+
+def test_mission_v3_references_remain_unvalidated():
+    args = _owner_observation_inputs()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    acq = _v3_acquisition(args)
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [_ref(job_id="JOB-CHILD", role="review")],
+        snapshot_digest=acq["snapshot_digest"],
+        generation=dict(acq["generation"]),
+    )
+    document = compose_mission_workspace_v3(**args)
+    refs = document["result_refs"]["refs"]
+    assert refs and all(row["validation"] == "UNVALIDATED" for row in refs)
+
+
+def test_mission_v3_acceptance_never_becomes_projected_even_with_valid_refs():
+    args = _owner_observation_inputs()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    acq = _v3_acquisition(args)
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [_ref(job_id="JOB-CHILD")],
+        snapshot_digest=acq["snapshot_digest"],
+        generation=dict(acq["generation"]),
+    )
+    document = compose_mission_workspace_v3(**args)
+    assert document["acceptance"]["state"] == "NOT_PROJECTED"
+
+
+def test_mission_v3_missing_null_malformed_digest_never_available_or_partial():
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["snapshot_digest"] = None
+    args["fabric_view"]["fabric_view"]["runtime"]["acquisition"]["snapshot_digest"] = None
+    document = compose_mission_workspace_v3(**args)
+    assert document["result_refs"]["availability"] == "UNAVAILABLE"
+
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"]["snapshot_digest"] = "z" * 64  # non-hex
+    args["fabric_view"]["fabric_view"]["runtime"]["acquisition"]["snapshot_digest"] = "z" * 64
+    document = compose_mission_workspace_v3(**args)
+    assert document["result_refs"]["availability"] == "UNAVAILABLE"
+
+
+def test_mission_v3_known_absence_vs_completed_missing_partition():
+    """17 jobs all NONCOMPLETED + result None → AVAILABLE, absent=17; refs=[].
+
+    The Mission must be genuinely CURRENT: truthful CCR receipts and the
+    bound Runtime owner receipt are supplied by the test (the production
+    CURRENT gates themselves are never relaxed).
+    """
+    args = _owner_observation_inputs()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    acq = _v3_acquisition(args)
+    absent = [f"JOB-{i:02d}" for i in range(17)]
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [], absent=absent, omitted=(),
+        snapshot_digest=acq["snapshot_digest"],
+        generation=dict(acq["generation"]),
+    )
+    document = compose_mission_workspace_v3(**args)
+    assert document["read_state"]["state"] == "CURRENT"
+    assert document["result_refs"]["availability"] == "AVAILABLE"
+    assert len(document["result_refs"]["absent_job_ids"]) == 17
+    assert document["result_refs"]["refs"] == []
+    assert document["result_refs"]["omitted_job_ids"] == []
+    assert document["result_refs"]["truncated"] is False
+
+    args = _owner_observation_inputs()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    acq = _v3_acquisition(args)
+    omitted = [f"JOB-{i:02d}" for i in range(17)]
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [], absent=(), omitted=omitted, availability="PARTIAL",
+        snapshot_digest=acq["snapshot_digest"],
+        generation=dict(acq["generation"]),
+    )
+    document = compose_mission_workspace_v3(**args)
+    assert document["read_state"]["state"] == "CURRENT"
+    assert document["result_refs"]["availability"] == "PARTIAL"
+    assert len(document["result_refs"]["omitted_job_ids"]) == 17
+    assert document["result_refs"]["refs"] == []
+    assert document["result_refs"]["absent_job_ids"] == []
+
+
+def test_mission_v3_noncurrent_mission_clears_selectable_refs_and_known_absence():
+    args = _owner_observation_inputs()
+    args["fabric_view"] = _v2_to_v3_wrapper(args["fabric_view"])
+    inner = args["fabric_view"]["fabric_view"]
+    acq = inner["runtime"]["acquisition"]
+    # One ref plus sixteen known-absent Jobs: exactly 17 total included slots.
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [_ref(job_id="JOB-CHILD")],
+        absent=[f"JOB-{i:02d}" for i in range(16)],
+        snapshot_digest=acq["snapshot_digest"],
+        generation=dict(acq["generation"]),
+    )
+    # Make Mission currentness fail: cache historical
+    args["cache_currentness"] = {
+        "state": "historical_refresh_error", "publication_seq": 1,
+    }
+    _refresh_observation_digests(args)
+    document = compose_mission_workspace_v3(**args)
+    assert document["read_state"]["state"] == "HISTORICAL"
+    assert document["result_refs"]["availability"] == "UNAVAILABLE"
+    assert document["result_refs"]["refs"] == []
+    assert document["result_refs"]["absent_job_ids"] == []
+    # diagnostic owner observation is preserved
+    assert document["source"]["owner_observation"]["state"] in {"SAME", "UNKNOWN"}
+
+
+def test_mission_v3_actual_conflict_is_unavailable_and_preserved():
+    args = _v3_inputs()
+    inner = args["fabric_view"]["fabric_view"]
+    acq = inner["runtime"]["acquisition"]
+    inner["runtime"]["acquisition"]["generation"] = {
+        "schema": "mastermind.runtime_read_observation.v1",
+        "state": "CONFLICT",
+        "source_identity": "rt_owner_1234567890",
+        "before": 1,
+        "after": 2,
+    }
+    args["fabric_view"]["result_refs"] = {
+        "schema": RESULT_REFERENCE_INDEX_SCHEMA,
+        "root_job_id": acq["query"]["root_job_id"],
+        "snapshot_digest": acq["snapshot_digest"],
+        "generation": {
+            "schema": "mastermind.runtime_read_observation.v1",
+            "state": "CONFLICT",
+            "source_identity": "rt_owner_1234567890",
+            "before": 1,
+            "after": 2,
+        },
+        "availability": "UNAVAILABLE",
+        "refs": [],
+        "absent_job_ids": [],
+        "omitted_job_ids": [],
+        "truncated": False,
+    }
+    document = compose_mission_workspace_v3(**args)
+    assert document["result_refs"]["availability"] == "UNAVAILABLE"
+    assert document["result_refs"]["generation"]["state"] == "CONFLICT"
+    assert document["result_refs"]["refs"] == []
+    assert document["result_refs"]["absent_job_ids"] == []
+
+
+def test_mission_v3_unknown_generation_is_unavailable_and_preserved():
+    args = _v3_inputs()
+    inner = args["fabric_view"]["fabric_view"]
+    acq = inner["runtime"]["acquisition"]
+    inner["runtime"]["acquisition"]["generation"] = {
+        "schema": "mastermind.runtime_read_observation.v1",
+        "state": "UNKNOWN",
+        "source_identity": None,
+        "before": None,
+        "after": None,
+    }
+    args["fabric_view"]["result_refs"] = {
+        "schema": RESULT_REFERENCE_INDEX_SCHEMA,
+        "root_job_id": acq["query"]["root_job_id"],
+        "snapshot_digest": acq["snapshot_digest"],
+        "generation": {
+            "schema": "mastermind.runtime_read_observation.v1",
+            "state": "UNKNOWN",
+            "source_identity": None,
+            "before": None,
+            "after": None,
+        },
+        "availability": "UNAVAILABLE",
+        "refs": [],
+        "absent_job_ids": [],
+        "omitted_job_ids": [],
+        "truncated": False,
+    }
+    document = compose_mission_workspace_v3(**args)
+    assert document["result_refs"]["availability"] == "UNAVAILABLE"
+    assert document["result_refs"]["generation"]["state"] == "UNKNOWN"
+    assert document["result_refs"]["refs"] == []
+
+
+def test_mission_v3_finds_real_bound_via_real_accepted_F2_producer_in_both_modes(
+    bound_max_chain, bound_sealed_worker_planner, monkeypatch,
+):
+    """Real joined proof: actual Runtime → accepted F2 → Mission v3 in both modes.
+
+    Reuses immutable tests/test_fabric_result_projection fixtures and confirms
+    Mission v3 carries the producer index without re-acquiring the snapshot.
+    """
+    from control_plane import fabric_job_view as fv
+    from control_plane import fabric_result_projection as frp
+
+    def _joined(runtime, root_id):
+        seen = {}
+        encode = er.RuntimeReadObservationReceipt.to_dict
+        def finalized(receipt):
+            seen["receipt"] = encode(receipt)
+            return encode(receipt)
+        monkeypatch.setattr(er.RuntimeReadObservationReceipt, "to_dict", finalized)
+        identity = {"db_present": True}
+        document = fv.read_fabric_view_v3_from_runtime(
+            runtime, root_id, armed={}, runtime_identity=identity,
+        )
+        return document, seen.get("receipt")
+
+    # OPERATOR_HARNESS six-node chain
+    runtime, root, nodes, expected, reader = bound_max_chain
+    from control_plane import executive_runtime as er
+    v3 = _joined(reader, root.job_id)[0]
+    assert v3["schema"] == FABRIC_VIEW_SCHEMA_V3
+    nested_v2 = v3["fabric_view"]
+    index = v3["result_refs"]
+    assert nested_v2["schema"] == "mastermind.fabric_job_view.v2"
+    assert nested_v2["runtime"]["acquisition"]["generation"]["state"] == "SAME"
+    assert index["snapshot_digest"] == nested_v2["runtime"]["acquisition"]["snapshot_digest"]
+    assert index["generation"] == nested_v2["runtime"]["acquisition"]["generation"]
+    refs = {row["job_id"]: row for row in index["refs"]}
+    assert refs, "operator harness chain should yield at least one ref"
+    completion = expected[0]
+    raw = runtime.jobs.get_job(completion.job.job_id)
+    assert raw.result["schema_version"] == "mastermind.orchestration_terminal_receipt/v1"
+    assert refs[completion.job.job_id]["result_envelope_digest"] == raw.result["result_envelope_digest"]
+    assert refs[completion.job.job_id]["validation"] == "UNVALIDATED"
+
+    # Compose a genuinely CURRENT Mission from the same real wrapper with
+    # explicit valid test CCR/owner receipts (not a schema-only UNKNOWN read).
+    document = compose_mission_workspace_v3(**_current_args_for_wrapper(v3))
+    assert document["schema"] == SCHEMA_V3
+    assert document["read_state"]["state"] == "CURRENT"
+    assert document["source"]["owner_observation"]["state"] == "SAME"
+    assert document["acceptance"]["state"] == "NOT_PROJECTED"
+    assert document["result_refs"]["availability"] in {"AVAILABLE", "PARTIAL"}
+    assert document["result_refs"]["refs"] == index["refs"]
+    assert document["result_refs"]["absent_job_ids"] == index["absent_job_ids"]
+    assert document["result_refs"]["omitted_job_ids"] == index["omitted_job_ids"]
+    assert document["result_refs"]["snapshot_digest"] == index["snapshot_digest"]
+
+    # SEALED_WORKER planner
+    sw_runtime, sw_root, sw_expected, sw_reader = bound_sealed_worker_planner
+    v3_sw = _joined(sw_reader, sw_root.job_id)[0]
+    assert v3_sw["schema"] == FABRIC_VIEW_SCHEMA_V3
+    index_sw = v3_sw["result_refs"]
+    assert index_sw["generation"]["state"] == "SAME"
+    refs_sw = {row["job_id"]: row for row in index_sw["refs"]}
+    raw_sw = sw_runtime.jobs.get_job(sw_expected.job.job_id)
+    assert raw_sw.result["execution_mode"] == "SEALED_WORKER"
+    assert refs_sw[sw_expected.job.job_id]["result_envelope_digest"] == raw_sw.result["result_envelope_digest"]
+
+    # And the same genuinely CURRENT composition for the sealed-worker family.
+    document_sw = compose_mission_workspace_v3(**_current_args_for_wrapper(v3_sw))
+    assert document_sw["read_state"]["state"] == "CURRENT"
+    assert document_sw["source"]["owner_observation"]["state"] == "SAME"
+    assert document_sw["result_refs"]["availability"] in {"AVAILABLE", "PARTIAL"}
+    assert document_sw["result_refs"]["refs"] == index_sw["refs"]
+    selected_sw = document_sw["result_refs"]["refs"]
+    assert any(
+        row["job_id"] == sw_expected.job.job_id
+        and row["result_envelope_digest"] == raw_sw.result["result_envelope_digest"]
+        for row in selected_sw
+    )
+    assert document_sw["acceptance"]["state"] == "NOT_PROJECTED"
+
+
+def test_mission_v3_separate_selected_detail_via_shared_projector(bound_max_chain, monkeypatch):
+    """Confirm index digest matches raw receipt and selected-detail canonical digest."""
+    from control_plane import fabric_job_view as fv
+    from control_plane import fabric_result_projection as frp
+    from control_plane import executive_runtime as er
+    runtime, root, nodes, expected, reader = bound_max_chain
+    v3 = fv.read_fabric_view_v3_from_runtime(
+        reader, root.job_id, armed={}, runtime_identity={"db_present": True},
+    )
+    index = v3["result_refs"]
+    completion = expected[0]
+    raw = runtime.jobs.get_job(completion.job.job_id)
+    refs = {row["job_id"]: row for row in index["refs"]}
+    ref_row = refs[completion.job.job_id]
+    assert ref_row["result_envelope_digest"] == raw.result["result_envelope_digest"]
+
+    # Separately selected detail (its own bounded read) — shared projector.
+    # The receipt is finalized only by successful physical context exit, so it
+    # is read AFTER the with-scope closes, exactly like the owner's own
+    # ``_select_bound`` idiom.
+    def _select():
+        with reader.observe_bounded_read() as observation:
+            snapshot = observation.read_role_result_bounded(
+                root.job_id,
+                completion.job.job_id,
+                expected_attempt_id=completion.attempt.attempt_id,
+                expected_result_envelope_digest=completion.result_digest,
+            )
+        receipt = observation.receipt
+        return snapshot, receipt
+
+    snapshot, receipt = _select()
+    projection = frp.project_fabric_role_result(snapshot, receipt)
+    assert (
+        ref_row["result_envelope_digest"]
+        == projection.complete["selection"]["result_envelope_digest"]
+    )
+
+
+def test_mission_v3_does_not_invoke_runtime_paths_or_clocks_or_randomness():
+    source = Path("control_plane/mission_workspace.py").read_text()
+    tree = ast.parse(source)
+    names = {
+        name.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for name in node.names
+    }
+    modules = {
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    forbidden = {
+        "os", "subprocess", "socket", "random", "time", "datetime", "requests", "httpx",
+        "executive_runtime", "executive_worker_broker",
+    }
+    assert not (names | modules) & forbidden
+
+
+def test_mission_v3_does_not_call_full_result_fanout(monkeypatch):
+    """Reducer must never call the shared selected-detail projector."""
+    from control_plane import fabric_result_projection as frp
+    monkeypatch.setattr(
+        frp, "project_fabric_role_result",
+        lambda *a, **k: pytest.fail("Mission v3 reducer must not fan out per-result"),
+    )
+    args = _v3_inputs()
+    args["fabric_view"]["result_refs"] = _index_with_refs(
+        [_ref(job_id="JOB-CHILD")],
+        snapshot_digest=args["fabric_view"]["fabric_view"]["runtime"]["acquisition"]["snapshot_digest"],
+    )
+    document = compose_mission_workspace_v3(**args)
+    assert document["schema"] == SCHEMA_V3
+
+
+@pytest.mark.parametrize("field", ["state", "availability", "validation", "orchestration_role"])
+@pytest.mark.parametrize("value", [[], {}])
+def test_mission_v3_enum_input_refused_as_value_error(field, value):
+    args = _v3_inputs()
+    index = args["fabric_view"]["result_refs"]
+    if field == "state":
+        index["generation"][field] = value
+    elif field == "availability":
+        index[field] = value
+    else:
+        index["refs"] = [_ref()]
+        index["refs"][0][field] = value
+    with pytest.raises(ValueError):
+        compose_mission_workspace_v3(**args)
