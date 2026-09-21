@@ -110,13 +110,20 @@ class _SourceConfigSnapshot:
 
 
 def source_config_storage_contract(*, worker_gid: int) -> tuple[int, int, int]:
-    """Return the authority-owned, exact-slot-readable source-file contract."""
+    """Return the authority-owned contract for one reviewed Personal-Pro slot."""
 
-    if (
-        isinstance(worker_gid, bool)
-        or not isinstance(worker_gid, int)
-        or worker_gid < 0
-    ):
+    if isinstance(worker_gid, bool) or not isinstance(worker_gid, int):
+        _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
+    try:
+        personal_slot_gids = {
+            slot.worker_gid
+            for slot in worker_slots.all_slots()
+            if slot.workspace_binding_class
+            == provider_readiness.PERSONAL_PRO_WORKER_BINDING_CLASS
+        }
+    except (AttributeError, worker_slots.SlotCatalogError):
+        _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
+    if worker_gid not in personal_slot_gids:
         _refuse("CAPACITY_OBSERVE_CONFIG_DRIFT")
     return _ROOT_UID, worker_gid, 0o440
 

@@ -89,7 +89,16 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
         provider_home=provider_home,
         readiness_receipt=receipt,
     )
-    monkeypatch.setattr(module.worker_slots, "get_slot", lambda slot_id: slot if slot_id == slot.slot_id else None)
+    canonical_catalog = tuple(
+        slot if row.slot_id == slot.slot_id else row
+        for row in provider_worker_slots.all_slots()
+    )
+    monkeypatch.setattr(module.worker_slots, "all_slots", lambda: canonical_catalog)
+    monkeypatch.setattr(
+        module.worker_slots,
+        "get_slot",
+        lambda slot_id: slot if slot_id == slot.slot_id else None,
+    )
 
     binary_identity = {
         "path": str(binary),
@@ -328,6 +337,25 @@ def test_rendered_personal_pro_broker_can_read_both_authority_contracts_without_
     assert mode & 0o040
     assert not mode & 0o020
     assert not mode & 0o004
+
+
+def test_source_config_storage_contract_is_exact_personal_pro_slot_catalog_only() -> None:
+    import ops.executive_os.worker_capacity_observer as module
+
+    reviewed = tuple(
+        slot
+        for slot in provider_worker_slots.all_slots()
+        if slot.oauth_seat_ref is not None
+    )
+    assert reviewed
+    for slot in reviewed:
+        assert module.source_config_storage_contract(
+            worker_gid=slot.worker_gid
+        ) == (0, slot.worker_gid, 0o440)
+
+    with pytest.raises(CapacityObservationError) as raised:
+        module.source_config_storage_contract(worker_gid=499)
+    assert raised.value.code == "CAPACITY_OBSERVE_CONFIG_DRIFT"
 
 
 def test_source_config_must_be_authority_owned_exact_slot_readable_mode_0440(
