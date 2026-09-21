@@ -8587,6 +8587,208 @@ def _current_orchestration_tree_material_for_dispatch(
     return result
 
 
+def _accepted_current_step_revision(
+    connection: sqlite3.Connection,
+    *,
+    root_row: sqlite3.Row,
+    admission: dict[str, Any],
+    plan_body: dict[str, Any],
+    plan_step_id: str,
+) -> dict[str, Any]:
+    """Return the canonical accepted current revision for one plan step.
+
+    Consumes ``_validated_role_completion_material`` and
+    ``_review_attempt_is_independent`` along with reservation/review limits.
+    Produces the exact current-revision fields consumed by aggregation.
+
+    Raises StateConflict when:
+      - the step has no initial work revision;
+      - revision lineage is non-contiguous or forked;
+      - revision exceeds its review ceiling;
+      - step consumed another step's slot budget;
+      - an unresolved independent reject is present;
+      - a required independent approval is missing.
+    """
+
+    reservation_by_step = {
+        str(item["plan_step_id"]): item for item in admission["steps"]
+    }
+    reservation = reservation_by_step[plan_step_id]
+
+    children = connection.execute(
+        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY job_id",
+        (root_row["job_id"],),
+    ).fetchall()
+
+    policy = CooCyclePolicy.load()
+    revisions = [
+        row
+        for row in children
+        if row["orchestration_role"] in {"work", "repair"}
+        and str(row["plan_step_id"]) == plan_step_id
+    ]
+    revisions.sort(key=lambda row: (int(row["repair_round"]), str(row["job_id"])))
+
+    if not revisions or revisions[0]["orchestration_role"] != "work":
+        raise StateConflict("plan step has no initial work revision")
+
+    for index, revision in enumerate(revisions):
+        if (
+            int(revision["repair_round"]) != index
+            or revision["plan_attempt_id"] != admission["plan_attempt_id"]
+            or revision["plan_digest"] != admission["plan_digest"]
+            or (index == 0 and revision["supersedes_job_id"] is not None)
+            or (
+                index > 0
+                and revision["supersedes_job_id"] != revisions[index - 1]["job_id"]
+            )
+        ):
+            raise StateConflict("plan-step revision lineage is forked or skipped")
+
+    review_rows = [
+        row
+        for row in children
+        if row["orchestration_role"] == "review"
+        and str(row["plan_step_id"]) == plan_step_id
+    ]
+
+    for revision in revisions:
+        if (
+            len(
+                [
+                    row
+                    for row in review_rows
+                    if str(row["reviews_job_id"]) == str(revision["job_id"])
+                ]
+            )
+            > policy.max_review_attempts_per_job
+        ):
+            raise StateConflict("revision exceeds its review Job record ceiling")
+
+    used_slots = len(revisions) + len(review_rows)
+    if used_slots > int(reservation["step_slots"]):
+        raise StateConflict("plan step consumed another step's reserved slot")
+
+    if not reservation["review_required"] and (len(revisions) != 1 or review_rows):
+        raise StateConflict(
+            "unreviewed plan step cannot consume review/repair slots"
+        )
+
+    current = revisions[-1]
+    current_attempt, current_seal, current_terminal, current_result_digest = (
+        _validated_role_completion_material(
+            connection,
+            job_row=current,
+            expected_role=str(current["orchestration_role"]),
+            root_job_id=str(root_row["job_id"]),
+        )
+    )
+
+    qualifying: tuple[sqlite3.Row, sqlite3.Row, dict[str, Any], str] | None = None
+    current_independent_reject = False
+
+    for review in review_rows:
+        attempt_id = review["current_attempt_id"]
+        if review["status"] != JobStatus.COMPLETED.value:
+            continue
+        review_attempt, review_seal, _review_terminal, review_digest = (
+            _validated_role_completion_material(
+                connection,
+                job_row=review,
+                expected_role="review",
+                root_job_id=str(root_row["job_id"]),
+            )
+        )
+        body = review_seal["result_envelope"]["role_result"]
+        independent = _review_attempt_is_independent(
+            connection,
+            review_attempt_id=str(review_attempt["attempt_id"]),
+            reviewed_attempt_id=str(body["reviewed_attempt_id"]),
+        )
+        exact_target = bool(
+            str(review["reviews_job_id"]) == str(current["job_id"])
+            and body.get("reviewed_job_id") == current["job_id"]
+            and body.get("reviewed_attempt_id") == current_attempt["attempt_id"]
+            and body.get("reviewed_result_digest") == current_result_digest
+            and body.get("repair_round") == current["repair_round"]
+        )
+        if (
+            exact_target
+            and independent
+            and body.get("verdict") == "approve"
+            and qualifying is None
+        ):
+            qualifying = (review, review_attempt, review_seal, review_digest)
+        elif exact_target and independent and body.get("verdict") == "reject":
+            current_independent_reject = True
+
+    if current_independent_reject:
+        raise StateConflict(
+            "current revision has an unresolved independent reject verdict"
+        )
+    if reservation["review_required"] and qualifying is None:
+        raise StateConflict(
+            "current revision lacks a qualifying independent approval"
+        )
+
+    if qualifying is None:
+        qualifying_fields: dict[str, Any] = {
+            "qualifying_review_job_id": None,
+            "qualifying_review_attempt_id": None,
+            "qualifying_review_result_digest": None,
+            "qualifying_review_effective_grant_digest": None,
+            "qualifying_review_principal_snapshot_digest": None,
+        }
+    else:
+        review, review_attempt, _review_seal, review_digest = qualifying
+        qualifying_fields = {
+            "qualifying_review_job_id": str(review["job_id"]),
+            "qualifying_review_attempt_id": str(review_attempt["attempt_id"]),
+            "qualifying_review_result_digest": review_digest,
+            "qualifying_review_effective_grant_digest": str(
+                review_attempt["effective_grant_digest"]
+            ),
+            "qualifying_review_principal_snapshot_digest": str(
+                review_attempt["execution_principal_snapshot_digest"]
+            ),
+        }
+
+    # Determine ordinal from plan_body
+    ordinal = next(
+        i for i, step in enumerate(plan_body["steps"])
+        if str(step["step_id"]) == plan_step_id
+    )
+
+    return {
+        "ordinal": ordinal,
+        "plan_step_id": plan_step_id,
+        "current_job_id": str(current["job_id"]),
+        "current_attempt_id": str(current_attempt["attempt_id"]),
+        "current_result_digest": current_result_digest,
+        "current_raw_result_digest": str(
+            current_seal["raw_result_observation_digest"]
+        ),
+        "effective_grant_digest": str(
+            current_attempt["effective_grant_digest"]
+        ),
+        "artifact_receipt_digest": str(
+            current_terminal["artifact_receipt_digest"]
+        ),
+        "validation_receipt_digest": str(
+            current_terminal["validation_receipt_digest"]
+        ),
+        "placement_snapshot_digest": str(
+            current_attempt["placement_snapshot_digest"]
+        ),
+        "execution_principal_snapshot_digest": str(
+            current_attempt["execution_principal_snapshot_digest"]
+        ),
+        "repair_round": int(current["repair_round"]),
+        "review_required": bool(reservation["review_required"]),
+        **qualifying_fields,
+    }
+
+
 def _current_orchestration_tree_material(
     connection: sqlite3.Connection,
     root_row: sqlite3.Row,
@@ -8627,18 +8829,21 @@ def _current_orchestration_tree_material(
         or plan_rows[0]["current_attempt_id"] != admission["plan_attempt_id"]
     ):
         raise StateConflict("orchestration tree planner identity drifted")
-    policy = CooCyclePolicy.load()
     if len(children) > int(admission["reserved_children_total"]):
         raise StateConflict("orchestration tree exceeds its total reservation")
 
     revisions_out: list[dict[str, Any]] = []
     history_out: list[dict[str, Any]] = []
-    reservation_by_step = {
-        str(item["plan_step_id"]): item for item in admission["steps"]
-    }
-    for ordinal, step in enumerate(plan_body["steps"]):
+
+    for step in plan_body["steps"]:
         step_id = str(step["step_id"])
-        reservation = reservation_by_step[step_id]
+        current_revision = _accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=plan_body,
+            plan_step_id=step_id,
+        )
         revisions = [
             row
             for row in children
@@ -8646,44 +8851,11 @@ def _current_orchestration_tree_material(
             and row["plan_step_id"] == step_id
         ]
         revisions.sort(key=lambda row: (int(row["repair_round"]), str(row["job_id"])))
-        if not revisions or revisions[0]["orchestration_role"] != "work":
-            raise StateConflict("plan step has no initial work revision")
-        for index, revision in enumerate(revisions):
-            if (
-                int(revision["repair_round"]) != index
-                or revision["plan_attempt_id"] != admission["plan_attempt_id"]
-                or revision["plan_digest"] != admission["plan_digest"]
-                or (index == 0 and revision["supersedes_job_id"] is not None)
-                or (
-                    index > 0
-                    and revision["supersedes_job_id"] != revisions[index - 1]["job_id"]
-                )
-            ):
-                raise StateConflict("plan-step revision lineage is forked or skipped")
         review_rows = [
             row
             for row in children
             if row["orchestration_role"] == "review" and row["plan_step_id"] == step_id
         ]
-        for revision in revisions:
-            if (
-                len(
-                    [
-                        row
-                        for row in review_rows
-                        if row["reviews_job_id"] == revision["job_id"]
-                    ]
-                )
-                > policy.max_review_attempts_per_job
-            ):
-                raise StateConflict("revision exceeds its review Job record ceiling")
-        used_slots = len(revisions) + len(review_rows)
-        if used_slots > int(reservation["step_slots"]):
-            raise StateConflict("plan step consumed another step's reserved slot")
-        if not reservation["review_required"] and (len(revisions) != 1 or review_rows):
-            raise StateConflict(
-                "unreviewed plan step cannot consume review/repair slots"
-            )
         for revision in revisions[:-1]:
             attempt, _seal, _terminal, result_digest = (
                 _validated_role_completion_material(
@@ -8704,21 +8876,9 @@ def _current_orchestration_tree_material(
                     "independent": None,
                 }
             )
-        current = revisions[-1]
-        current_attempt, current_seal, current_terminal, current_result_digest = (
-            _validated_role_completion_material(
-                connection,
-                job_row=current,
-                expected_role=str(current["orchestration_role"]),
-                root_job_id=str(root_row["job_id"]),
-            )
-        )
-        current_reviews = sorted(
-            [row for row in review_rows if row["reviews_job_id"] == current["job_id"]],
-            key=lambda row: str(row["job_id"]),
-        )
-        qualifying: tuple[sqlite3.Row, sqlite3.Row, dict[str, Any], str] | None = None
-        current_independent_reject = False
+        selected_job = current_revision["qualifying_review_job_id"]
+        selected_attempt = current_revision["qualifying_review_attempt_id"]
+        selected_digest = current_revision["qualifying_review_result_digest"]
         for review in review_rows:
             attempt_id = review["current_attempt_id"]
             if review["status"] != JobStatus.COMPLETED.value:
@@ -8742,99 +8902,31 @@ def _current_orchestration_tree_material(
                     root_job_id=str(root_row["job_id"]),
                 )
             )
+            if (
+                str(review["job_id"]) == selected_job
+                and str(review_attempt["attempt_id"]) == selected_attempt
+                and review_digest == selected_digest
+            ):
+                continue
             body = review_seal["result_envelope"]["role_result"]
             independent = _review_attempt_is_independent(
                 connection,
                 review_attempt_id=str(review_attempt["attempt_id"]),
                 reviewed_attempt_id=str(body["reviewed_attempt_id"]),
             )
-            exact_target = bool(
-                review["reviews_job_id"] == current["job_id"]
-                and body.get("reviewed_job_id") == current["job_id"]
-                and body.get("reviewed_attempt_id") == current_attempt["attempt_id"]
-                and body.get("reviewed_result_digest") == current_result_digest
-                and body.get("repair_round") == current["repair_round"]
+            history_out.append(
+                {
+                    "kind": "review",
+                    "job_id": str(review["job_id"]),
+                    "attempt_id": str(review_attempt["attempt_id"]),
+                    "status": "COMPLETED",
+                    "verdict": body.get("verdict"),
+                    "result_digest": review_digest,
+                    "independent": bool(independent),
+                }
             )
-            if (
-                exact_target
-                and independent
-                and body.get("verdict") == "approve"
-                and qualifying is None
-            ):
-                qualifying = (review, review_attempt, review_seal, review_digest)
-            else:
-                if exact_target and independent and body.get("verdict") == "reject":
-                    current_independent_reject = True
-                history_out.append(
-                    {
-                        "kind": "review",
-                        "job_id": str(review["job_id"]),
-                        "attempt_id": str(review_attempt["attempt_id"]),
-                        "status": "COMPLETED",
-                        "verdict": body.get("verdict"),
-                        "result_digest": review_digest,
-                        "independent": bool(independent),
-                    }
-                )
-        if current_independent_reject:
-            raise StateConflict(
-                "current revision has an unresolved independent reject verdict"
-            )
-        if reservation["review_required"] and qualifying is None:
-            raise StateConflict(
-                "current revision lacks a qualifying independent approval"
-            )
-        if qualifying is None:
-            qualifying_fields: dict[str, Any] = {
-                "qualifying_review_job_id": None,
-                "qualifying_review_attempt_id": None,
-                "qualifying_review_result_digest": None,
-                "qualifying_review_effective_grant_digest": None,
-                "qualifying_review_principal_snapshot_digest": None,
-            }
-        else:
-            review, review_attempt, _review_seal, review_digest = qualifying
-            qualifying_fields = {
-                "qualifying_review_job_id": str(review["job_id"]),
-                "qualifying_review_attempt_id": str(review_attempt["attempt_id"]),
-                "qualifying_review_result_digest": review_digest,
-                "qualifying_review_effective_grant_digest": str(
-                    review_attempt["effective_grant_digest"]
-                ),
-                "qualifying_review_principal_snapshot_digest": str(
-                    review_attempt["execution_principal_snapshot_digest"]
-                ),
-            }
-        revisions_out.append(
-            {
-                "ordinal": ordinal,
-                "plan_step_id": step_id,
-                "current_job_id": str(current["job_id"]),
-                "current_attempt_id": str(current_attempt["attempt_id"]),
-                "current_result_digest": current_result_digest,
-                "current_raw_result_digest": str(
-                    current_seal["raw_result_observation_digest"]
-                ),
-                "effective_grant_digest": str(
-                    current_attempt["effective_grant_digest"]
-                ),
-                "artifact_receipt_digest": str(
-                    current_terminal["artifact_receipt_digest"]
-                ),
-                "validation_receipt_digest": str(
-                    current_terminal["validation_receipt_digest"]
-                ),
-                "placement_snapshot_digest": str(
-                    current_attempt["placement_snapshot_digest"]
-                ),
-                "execution_principal_snapshot_digest": str(
-                    current_attempt["execution_principal_snapshot_digest"]
-                ),
-                "repair_round": int(current["repair_round"]),
-                "review_required": bool(reservation["review_required"]),
-                **qualifying_fields,
-            }
-        )
+        revisions_out.append(current_revision)
+
     history_out.sort(
         key=lambda item: (
             str(item["job_id"]),

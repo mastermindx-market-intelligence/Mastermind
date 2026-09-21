@@ -4262,3 +4262,866 @@ def test_fph0_d7_composition_and_v2_constant_are_byte_preserved():
             "routing_policy_version",
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 2: accepted_current_step_revision — RED tests (Step 1)
+# ---------------------------------------------------------------------------
+
+def _reviewed_work_reject_and_repair(
+    tmp_path: Path,
+    *,
+    intent_id: str,
+    review_workers: list[str],
+):
+    """Shared fixture: work complete → independent reject → repair created + dispatched + completed."""
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(runtime, _v2_intent(intent_id=intent_id))
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+    review_index = 0
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        nonlocal review_index
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        if job.orchestration_role == "review":
+            worker = review_workers[review_index]
+            review_index += 1
+        else:
+            worker = "worker-a"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-1",
+                "objective": "Bounded reviewed work for repair path.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            }
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=5101)
+    admission = cycle.run_once(root.job_id)
+    assert admission.action == "PLAN_ADMITTED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    work = dispatches[-1]
+    work_body = {
+        "schema_version": "mastermind.work_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-1",
+        "repair_round": 0,
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    work_seal, _ = _complete_ohf_role(runtime, work, work_body, identity_seed=5102)
+
+    # First review: reject
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    rejecting_review = dispatches[-1]
+    plan_digest = runtime.jobs.get_job(work.attempt.job_id).plan_digest
+    reject_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="reject",
+    )
+    reject_seal, _ = _complete_ohf_role(
+        runtime, rejecting_review, reject_body, identity_seed=5103
+    )
+
+    # Repair created and dispatched
+    repair_created = cycle.run_once(root.job_id)
+    assert repair_created.action == "REPAIR_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    repair = dispatches[-1]
+    repair_body = {
+        "schema_version": "mastermind.repair_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "plan_digest": str(plan_digest),
+        "plan_step_id": "step-1",
+        "repair_round": 1,
+        "supersedes_job_id": work.attempt.job_id,
+        "rejected_review_job_id": rejecting_review.attempt.job_id,
+        "rejected_review_result_digest": reject_seal["role_result_digest"],
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    repair_seal, _ = _complete_ohf_role(
+        runtime, repair, repair_body, identity_seed=5104
+    )
+    return (
+        runtime, cycle, dispatches, root, planner, work, repair,
+        rejecting_review, work_seal, repair_seal, plan_body,
+    )
+
+
+def test_accepted_current_step_revision_work_complete_review_queued_raises_StateConflict(
+    tmp_path: Path,
+) -> None:
+    """Helper raises StateConflict when work is complete but review is only queued."""
+    runtime, cycle, dispatches, root, planner, work, _, _, work_seal, _, plan_body = (
+        _reviewed_work_reject_and_repair(
+            tmp_path,
+            intent_id="CEO-T2-QUEUED",
+            review_workers=["worker-b", "worker-b"],
+        )
+    )
+    # Review for the repair is still queued (not yet completed)
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+
+    admission = runtime.events.get_event_by_command_id(
+        f"coo-cycle:{root.job_id}:admit-plan:{planner.attempt.attempt_id}"
+    )
+    assert admission is not None
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        from control_plane.executive_runtime import (
+            _accepted_current_step_revision,
+        )
+        with pytest.raises(
+            executive_runtime.StateConflict,
+            match="current revision lacks a qualifying independent approval",
+        ):
+            _accepted_current_step_revision(
+                connection,
+                root_row=root_row,
+                admission=admission.payload,
+                plan_body=plan_body,
+                plan_step_id="step-1",
+            )
+
+
+def test_accepted_current_step_revision_work_complete_independent_reject_raises_StateConflict(
+    tmp_path: Path,
+) -> None:
+    """Helper raises StateConflict when work has an unresolved independent reject."""
+    runtime, cycle, dispatches, root, planner, work, _, rejecting_review, work_seal, _, plan_body = (
+        _reviewed_work_reject_and_repair(
+            tmp_path,
+            intent_id="CEO-T2-REJECT",
+            review_workers=["worker-b", "worker-b"],
+        )
+    )
+    # The fixture already completed the rejecting review and created the repair.
+    # At this point work is superseded and the current revision (repair) has no
+    # reviews at all yet — calling the helper on the *work* step would raise
+    # "plan step has no initial work revision".  We test the reject on the
+    # work revision by setting up a fresh work+reject scenario manually so the
+    # reject is on the current (work) revision, not a superseded one.
+
+    # Manually: create a simple work-only cycle with an independent reject
+    runtime2 = Runtime.at(tmp_path / "rt2")
+    _register(runtime2, "worker-a")
+    _register(runtime2, "worker-b")
+    receipt2 = submit_intent(
+        runtime2, _v2_intent(intent_id="CEO-T2-MANUAL-REJECT")
+    )
+    root2 = runtime2.jobs.get_job(receipt2["job_id"])
+    dispatches2: list[OrchestrationDispatchOutcome] = []
+
+    def dispatch2(job_id: str, command_id: str):
+        job = runtime2.jobs.get_job(job_id)
+        worker = "worker-b" if job and job.orchestration_role == "review" else "worker-a"
+        outcome = runtime2.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches2.append(outcome)
+        return outcome
+
+    cycle2 = CooCycle(runtime2, dispatcher=dispatch2)
+    assert cycle2.run_once(root2.job_id).action == "PLANNER_CREATED"
+    assert cycle2.run_once(root2.job_id).action == "DISPATCHED"
+    planner2 = dispatches2[-1]
+    plan_body2 = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root2.job_id,
+        "plan_attempt_id": planner2.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-1",
+                "objective": "Bounded work for reject test.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            }
+        ],
+    }
+    _complete_ohf_role(runtime2, planner2, plan_body2, identity_seed=5501)
+    admitted2 = cycle2.run_once(root2.job_id)
+    assert admitted2.action == "PLAN_ADMITTED"
+
+    assert cycle2.run_once(root2.job_id).action == "DISPATCHED"
+    work2 = dispatches2[-1]
+    work_body2 = {
+        "schema_version": "mastermind.work_result/v1",
+        "root_job_id": root2.job_id,
+        "plan_attempt_id": planner2.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body2),
+        "plan_step_id": "step-1",
+        "repair_round": 0,
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    work_seal2, _ = _complete_ohf_role(runtime2, work2, work_body2, identity_seed=5502)
+
+    # Create and complete an independent reject review
+    assert cycle2.run_once(root2.job_id).action == "REVIEW_CREATED"
+    assert cycle2.run_once(root2.job_id).action == "DISPATCHED"
+    reject_review2 = dispatches2[-1]
+    reject_body2 = _review_body(
+        root_id=root2.job_id,
+        plan_attempt_id=planner2.attempt.attempt_id,
+        plan_digest=str(result_digest(plan_body2)),
+        target_job_id=work2.attempt.job_id,
+        target_attempt_id=work2.attempt.attempt_id,
+        target_result_digest=work_seal2["role_result_digest"],
+        repair_round=0,
+        verdict="reject",
+    )
+    _complete_ohf_role(runtime2, reject_review2, reject_body2, identity_seed=5503)
+
+    admission_event2 = runtime2.events.get_event_by_command_id(
+        f"coo-cycle:{root2.job_id}:admit-plan:{planner2.attempt.attempt_id}"
+    )
+    with runtime2.store.read() as connection:
+        root_row2 = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root2.job_id,)
+        ).fetchone()
+        from control_plane.executive_runtime import (
+            _accepted_current_step_revision,
+        )
+        with pytest.raises(
+            executive_runtime.StateConflict,
+            match="current revision has an unresolved independent reject verdict",
+        ):
+            _accepted_current_step_revision(
+                connection,
+                root_row=root_row2,
+                admission=admission_event2.payload,
+                plan_body=plan_body2,
+                plan_step_id="step-1",
+            )
+
+
+def test_accepted_current_step_revision_repair_complete_independent_approve_returns_revision(
+    tmp_path: Path,
+) -> None:
+    """Helper returns repair revision after independent approval; manifest names repair not predecessor."""
+    (
+        runtime, cycle, dispatches, root, planner, work, repair,
+        _, work_seal, repair_seal, plan_body,
+    ) = _reviewed_work_reject_and_repair(
+        tmp_path,
+        intent_id="CEO-T2-REPAIR-APPROVE",
+        review_workers=["worker-b", "worker-b"],
+    )
+
+    # Approve the repair (worker-b != repair's worker-a so independent)
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    repair_review = dispatches[-1]
+    plan_digest = runtime.jobs.get_job(work.attempt.job_id).plan_digest
+    approve_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(plan_digest),
+        target_job_id=repair.attempt.job_id,
+        target_attempt_id=repair.attempt.attempt_id,
+        target_result_digest=repair_seal["role_result_digest"],
+        repair_round=1,
+        verdict="approve",
+    )
+    _complete_ohf_role(runtime, repair_review, approve_body, identity_seed=5305)
+
+    admission = runtime.events.get_event_by_command_id(
+        f"coo-cycle:{root.job_id}:admit-plan:{planner.attempt.attempt_id}"
+    )
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        from control_plane.executive_runtime import (
+            _accepted_current_step_revision,
+        )
+        result = _accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission.payload,
+            plan_body=plan_body,
+            plan_step_id="step-1",
+        )
+
+    # Manifest names the repair, not the rejected work
+    assert result["current_job_id"] == repair.attempt.job_id
+    assert result["current_attempt_id"] == repair.attempt.attempt_id
+    assert result["current_result_digest"] == repair_seal["role_result_digest"]
+    assert result["repair_round"] == 1
+    # Must not be the rejected predecessor's values
+    assert result["current_job_id"] != work.attempt.job_id
+    assert result["current_attempt_id"] != work.attempt.attempt_id
+
+
+def test_accepted_current_step_revision_aggregation_non_regression(
+    tmp_path: Path,
+) -> None:
+    """Aggregation output is byte-for-byte identical after extracting helper."""
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime, _v2_intent(intent_id="CEO-T2-AGGREGATION-CHECK")
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        worker = "worker-b" if job and job.orchestration_role == "review" else "worker-a"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner_dispatch = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner_dispatch.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Bounded work for aggregation check.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            }
+        ],
+    }
+    _complete_ohf_role(runtime, planner_dispatch, plan_body, identity_seed=5401)
+    admitted = cycle.run_once(root.job_id)
+    assert admitted.action == "PLAN_ADMITTED"
+
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    work_dispatch = dispatches[-1]
+    work_body = {
+        "schema_version": "mastermind.work_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner_dispatch.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-0",
+        "repair_round": 0,
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    work_seal, _ = _complete_ohf_role(
+        runtime, work_dispatch, work_body, identity_seed=5402
+    )
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review_dispatch = dispatches[-1]
+    review_body = {
+        "schema_version": "mastermind.review_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner_dispatch.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-0",
+        "reviewed_job_id": work_dispatch.attempt.job_id,
+        "reviewed_attempt_id": work_dispatch.attempt.attempt_id,
+        "reviewed_result_digest": work_seal["role_result_digest"],
+        "repair_round": 0,
+        "verdict": "approve",
+        "evidence_digests": [],
+        "findings": [],
+    }
+    _complete_ohf_role(runtime, review_dispatch, review_body, identity_seed=5403)
+
+    handoff_outcome = cycle.run_once(root.job_id)
+    assert handoff_outcome.action == "HANDOFF_CREATED"
+
+    admission_event = runtime.events.get_event_by_command_id(
+        f"coo-cycle:{root.job_id}:admit-plan:{planner_dispatch.attempt.attempt_id}"
+    )
+    assert admission_event is not None
+    admission_payload = admission_event.payload
+
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+
+        from control_plane.executive_runtime import (
+            _accepted_current_step_revision,
+            _current_orchestration_tree_material,
+        )
+
+        # Full aggregation before helper extraction
+        revisions_before, _ = _current_orchestration_tree_material(
+            connection,
+            root_row,
+            admission_payload,
+            plan_body,
+        )
+
+        # Per-step helper result
+        helper_result = _accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission_payload,
+            plan_body=plan_body,
+            plan_step_id="step-0",
+        )
+
+        # Must be byte-equivalent for step-0
+        assert revisions_before[0] == helper_result
+
+
+def test_accepted_current_step_revision_cancelled_unclaimed_review_keeps_json_null(
+    tmp_path: Path,
+) -> None:
+    """Terminal unclaimed review history keeps JSON null, not the string 'None'."""
+    runtime, _cycle, _dispatches, root, planner, work, work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="CEO-T2-CANCELLED-UNCLAIMED",
+            review_workers=["worker-b", "worker-b"],
+        )
+    )
+    queued = runtime.jobs.create_cycle_review(
+        root.job_id,
+        work.attempt.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-review:{work.attempt.job_id}:1",
+    )
+    assert queued.current_attempt_id is None
+    runtime.jobs.cancel_job(queued.job_id)
+    replacement = runtime.jobs.create_cycle_review(
+        root.job_id,
+        work.attempt.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-review:{work.attempt.job_id}:2",
+    )
+    dispatched = runtime.attempts.dispatch_cycle_job(
+        replacement.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{replacement.job_id}:attempt:1",
+        worker_id="worker-b",
+    )
+    assert dispatched is not None
+    plan_digest = runtime.jobs.get_job(work.attempt.job_id).plan_digest
+    approve_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-1",
+    )
+    _complete_ohf_role(runtime, dispatched, approve_body, identity_seed=6101)
+
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        admission, plan_body = executive_runtime._validated_plan_admission(
+            connection, root_row
+        )
+        revisions, history = executive_runtime._current_orchestration_tree_material(
+            connection, root_row, admission, plan_body
+        )
+        helper = executive_runtime._accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=plan_body,
+            plan_step_id="step-1",
+        )
+
+    cancelled = [item for item in history if item["job_id"] == queued.job_id]
+    assert len(cancelled) == 1
+    assert cancelled[0]["kind"] == "review"
+    assert cancelled[0]["status"] == "CANCELLED"
+    assert cancelled[0]["attempt_id"] is None
+    assert cancelled[0]["verdict"] is None
+    assert cancelled[0]["result_digest"] is None
+    assert cancelled[0]["independent"] is False
+    assert revisions[0] == helper
+    assert helper["qualifying_review_job_id"] == replacement.job_id
+
+
+def test_accepted_current_step_revision_second_canonical_approval_is_retained_in_history(
+    tmp_path: Path,
+) -> None:
+    """Exclude only the helper's selected approval; retain a later canonical approval.
+
+    Current public create_cycle_review refuses a second post-approval review.
+    The two-approval discriminator uses the existing private insertion owner
+    plus normal dispatch/seal/complete owners. This is a stored-state history
+    identity check, not a current public stale-approval bypass.
+    """
+    runtime, cycle, dispatches, root, planner, work, work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="CEO-T2-TWO-CANONICAL-APPROVALS",
+            review_workers=["worker-b", "worker-b"],
+        )
+    )
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    first_review = dispatches[-1]
+    plan_digest = runtime.jobs.get_job(work.attempt.job_id).plan_digest
+    approve_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-1",
+    )
+    _complete_ohf_role(runtime, first_review, approve_body, identity_seed=6201)
+
+    with pytest.raises(StateConflict, match="replacement review"):
+        runtime.jobs.create_cycle_review(
+            root.job_id,
+            work.attempt.job_id,
+            command_id=f"coo-cycle:{root.job_id}:create-review:{work.attempt.job_id}:2",
+        )
+
+    with runtime.store.transaction() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        admission, _plan_body = executive_runtime._validated_plan_admission(
+            connection, root_row
+        )
+        inserted = executive_runtime._insert_cycle_child(
+            connection,
+            runtime.store,
+            root_row=root_row,
+            role="review",
+            objective="Hermetic second review.",
+            requested_authorities=["READ"],
+            allowed_write_paths=[],
+            validation_commands=[],
+            cost_class="small",
+            attempt_limit=(
+                executive_runtime.CooCyclePolicy.load().review_job_attempt_limit
+            ),
+            review_required=False,
+            command_id=(
+                f"coo-cycle:{root.job_id}:create-review:{work.attempt.job_id}:2"
+            ),
+            plan_attempt_id=admission["plan_attempt_id"],
+            plan_digest=admission["plan_digest"],
+            plan_step_id="step-1",
+            repair_round=0,
+            reviews_job_id=work.attempt.job_id,
+            provenance_source_id=work.attempt.job_id,
+            provenance_source_digest=work_seal["role_result_digest"],
+            creation_evidence={
+                "reviewed_result_digest": work_seal["role_result_digest"]
+            },
+        )
+        second_id = str(inserted["job_id"])
+
+    second = runtime.attempts.dispatch_cycle_job(
+        second_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{second_id}:attempt:1",
+        worker_id="worker-b",
+    )
+    assert second is not None
+    _complete_ohf_role(runtime, second, approve_body, identity_seed=6202)
+
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        admission, plan_body = executive_runtime._validated_plan_admission(
+            connection, root_row
+        )
+        revisions, history = executive_runtime._current_orchestration_tree_material(
+            connection, root_row, admission, plan_body
+        )
+        helper = executive_runtime._accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=plan_body,
+            plan_step_id="step-1",
+        )
+
+    assert revisions[0] == helper
+    assert helper["qualifying_review_job_id"] == first_review.attempt.job_id
+    assert helper["qualifying_review_attempt_id"] == first_review.attempt.attempt_id
+    assert len(history) == 1
+    assert history[0]["kind"] == "review"
+    assert history[0]["job_id"] == second_id
+    assert history[0]["attempt_id"] == second.attempt.attempt_id
+    assert history[0]["status"] == "COMPLETED"
+    assert history[0]["verdict"] == "approve"
+    assert history[0]["independent"] is True
+    assert history[0]["result_digest"] is not None
+
+
+def test_accepted_current_step_revision_repaired_multistep_nonzero_ordinal_matches_aggregation(
+    tmp_path: Path,
+) -> None:
+    """Two-step repair: helper matches aggregation at ordinal 1 and original history."""
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-T2-REPAIRED-MULTISTEP",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        worker = "worker-b" if job and job.orchestration_role == "review" else "worker-a"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Unreviewed bounded work.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Reviewed bounded work that will be repaired.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=6301)
+    admitted = cycle.run_once(root.job_id)
+    assert admitted.action == "PLAN_ADMITTED"
+    work_by_step = {}
+    work_seals = {}
+    for work_id in admitted.receipt["work_job_ids"]:
+        job = runtime.jobs.get_job(work_id)
+        assert job is not None
+        outcome = runtime.attempts.dispatch_cycle_job(
+            work_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{work_id}:attempt:1",
+            worker_id="worker-a",
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        body = {
+            "schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": job.plan_step_id,
+            "repair_round": 0,
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        work_by_step[str(job.plan_step_id)] = outcome
+        work_seals[str(job.plan_step_id)] = _complete_ohf_role(
+            runtime,
+            outcome,
+            body,
+            identity_seed=6302 if job.plan_step_id == "step-0" else 6303,
+        )[0]
+
+    current = work_by_step["step-1"]
+    current_seal = work_seals["step-1"]
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    rejecting = dispatches[-1]
+    reject_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=current.attempt.job_id,
+        target_attempt_id=current.attempt.attempt_id,
+        target_result_digest=current_seal["role_result_digest"],
+        repair_round=0,
+        verdict="reject",
+        plan_step_id="step-1",
+    )
+    reject_seal, _ = _complete_ohf_role(
+        runtime, rejecting, reject_body, identity_seed=6304
+    )
+
+    repair_created = cycle.run_once(root.job_id)
+    assert repair_created.action == "REPAIR_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    repair = dispatches[-1]
+    repair_body = {
+        "schema_version": "mastermind.repair_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-1",
+        "repair_round": 1,
+        "supersedes_job_id": current.attempt.job_id,
+        "rejected_review_job_id": rejecting.attempt.job_id,
+        "rejected_review_result_digest": reject_seal["role_result_digest"],
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    repair_seal, _ = _complete_ohf_role(
+        runtime, repair, repair_body, identity_seed=6305
+    )
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    approving = dispatches[-1]
+    approve_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=repair.attempt.job_id,
+        target_attempt_id=repair.attempt.attempt_id,
+        target_result_digest=repair_seal["role_result_digest"],
+        repair_round=1,
+        verdict="approve",
+        plan_step_id="step-1",
+    )
+    _complete_ohf_role(runtime, approving, approve_body, identity_seed=6306)
+
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        admission, admitted_plan = executive_runtime._validated_plan_admission(
+            connection, root_row
+        )
+        revisions, history = executive_runtime._current_orchestration_tree_material(
+            connection, root_row, admission, admitted_plan
+        )
+        helper_0 = executive_runtime._accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=admitted_plan,
+            plan_step_id="step-0",
+        )
+        helper_1 = executive_runtime._accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=admitted_plan,
+            plan_step_id="step-1",
+        )
+
+    assert len(revisions) == 2
+    assert revisions[0] == helper_0
+    assert revisions[1] == helper_1
+    assert helper_0["ordinal"] == 0
+    assert helper_0["review_required"] is False
+    assert helper_0["qualifying_review_job_id"] is None
+    assert helper_0["current_job_id"] == work_by_step["step-0"].attempt.job_id
+    assert helper_1["ordinal"] == 1
+    assert helper_1["repair_round"] == 1
+    assert helper_1["current_job_id"] == repair.attempt.job_id
+    assert helper_1["current_attempt_id"] == repair.attempt.attempt_id
+    assert helper_1["current_result_digest"] == repair_seal["role_result_digest"]
+    assert helper_1["qualifying_review_job_id"] == approving.attempt.job_id
+    assert helper_1["current_job_id"] != current.attempt.job_id
+    assert len(history) == 2
+    kinds = {item["kind"] for item in history}
+    assert kinds == {"superseded_revision", "review"}
+    superseded = next(item for item in history if item["kind"] == "superseded_revision")
+    rejected = next(item for item in history if item["kind"] == "review")
+    assert superseded["job_id"] == current.attempt.job_id
+    assert superseded["attempt_id"] == current.attempt.attempt_id
+    assert superseded["status"] == "COMPLETED"
+    assert superseded["verdict"] is None
+    assert superseded["independent"] is None
+    assert rejected["job_id"] == rejecting.attempt.job_id
+    assert rejected["attempt_id"] == rejecting.attempt.attempt_id
+    assert rejected["status"] == "COMPLETED"
+    assert rejected["verdict"] == "reject"
+    assert rejected["independent"] is True
+    for item in history:
+        assert item["attempt_id"] is None or item["attempt_id"] != "None"
