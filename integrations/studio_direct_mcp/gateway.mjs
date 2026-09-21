@@ -625,26 +625,57 @@ function handleStudioPing(session) {
 const MUTATING_BACKEND_TOOL_NAMES = new Set([
   'set_config_value', 'write_file', 'write_pdf', 'create_directory', 'move_file',
   'edit_block', 'start_process', 'interact_with_process', 'force_terminate',
-  'kill_process', 'give_feedback_to_desktop_commander',
+  'kill_process', 'give_feedback_to_desktop_commander', 'stop_search',
 ]);
 const DESTRUCTIVE_BACKEND_TOOL_NAMES = new Set([
   'set_config_value', 'write_file', 'write_pdf', 'move_file', 'edit_block',
   'start_process', 'interact_with_process', 'force_terminate', 'kill_process',
 ]);
-const NONIDEMPOTENT_BACKEND_TOOL_NAMES = new Set([
-  'write_file', 'write_pdf', 'edit_block', 'start_process', 'interact_with_process',
-  'force_terminate', 'kill_process', 'give_feedback_to_desktop_commander',
-]);
-const OPEN_WORLD_BACKEND_TOOL_NAMES = new Set([
-  'read_file', 'start_process', 'interact_with_process',
-  'give_feedback_to_desktop_commander',
-]);
+// Known 0.2.50 capabilities: [openWorldHint, idempotentHint]. These are
+// reviewed metadata defaults, not grants or assertions about future versions.
+// Local readers are closed-world even when the upstream hint is omitted.
+// Handle creation/consumption, arbitrary commands, moves, overwrites and process
+// termination stay non-idempotent. Read idempotence does not promise stable data
+// or authorize retry after an unknown effect. Ordinary logging is not the job.
+const REVIEWED_BACKEND_EFFECT_PROFILES = Object.freeze(Object.fromEntries(
+  Object.entries({
+    get_config: [false, true],
+    set_config_value: [false, true],
+    read_file: [true, true],
+    read_multiple_files: [false, true],
+    write_file: [false, false],
+    write_pdf: [false, false],
+    create_directory: [false, true],
+    list_directory: [false, true],
+    move_file: [false, false],
+    start_search: [false, false],
+    get_more_search_results: [false, false],
+    stop_search: [false, true],
+    list_searches: [false, true],
+    get_file_info: [false, true],
+    edit_block: [false, false],
+    start_process: [true, false],
+    read_process_output: [false, false],
+    interact_with_process: [true, false],
+    force_terminate: [false, false],
+    list_sessions: [false, true],
+    list_processes: [false, true],
+    kill_process: [false, false],
+    get_usage_stats: [false, true],
+    get_recent_tool_calls: [false, true],
+    give_feedback_to_desktop_commander: [true, false],
+    get_prompts: [false, true],
+  }).map(([name, [openWorldHint, idempotentHint]]) =>
+    [name, Object.freeze({openWorldHint, idempotentHint})]),
+));
 
 function conservativeAnnotations(tool) {
   const raw = tool?.annotations;
   const existing = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const booleanOr = (key, fallback) =>
     typeof existing[key] === 'boolean' ? existing[key] : fallback;
+  const profile = Object.hasOwn(REVIEWED_BACKEND_EFFECT_PROFILES, tool?.name)
+    ? REVIEWED_BACKEND_EFFECT_PROFILES[tool.name] : undefined;
   const readOnlyHint = !MUTATING_BACKEND_TOOL_NAMES.has(tool?.name)
     && booleanOr('readOnlyHint', false);
   return {
@@ -655,10 +686,10 @@ function conservativeAnnotations(tool) {
     destructiveHint: typeof existing.readOnlyHint !== 'boolean'
       || DESTRUCTIVE_BACKEND_TOOL_NAMES.has(tool?.name)
       || booleanOr('destructiveHint', !readOnlyHint),
-    idempotentHint: !NONIDEMPOTENT_BACKEND_TOOL_NAMES.has(tool?.name)
-      && booleanOr('idempotentHint', false),
-    openWorldHint: OPEN_WORLD_BACKEND_TOOL_NAMES.has(tool?.name)
-      || booleanOr('openWorldHint', true),
+    idempotentHint: profile?.idempotentHint !== false
+      && booleanOr('idempotentHint', profile?.idempotentHint ?? false),
+    openWorldHint: profile?.openWorldHint === true
+      || booleanOr('openWorldHint', profile?.openWorldHint ?? true),
   };
 }
 

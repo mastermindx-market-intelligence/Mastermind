@@ -55,6 +55,62 @@ Unknown backend tools do not acquire a reviewed safety guarantee from a generic 
 description. A new production capability needs an explicit behavior/effect review before
 publication. This patch does not broaden the backend's capability set.
 
+## Reviewed sparse backend metadata
+
+The installed Desktop Commander 0.2.50 catalog commonly omits `openWorldHint`
+and `idempotentHint`. Missing fields are not evidence that a known local reader
+uses the public internet or that a pure lookup changes user state. The existing
+metadata projection supplies reviewed defaults for the 26 known backend names.
+It does not add tools, change input schemas, or alter dispatch or permissions.
+
+The known external-capability set is `read_file` (URL support), `start_process`,
+`interact_with_process`, and `give_feedback_to_desktop_commander`. The other
+reviewed tools operate on the connected local filesystem, local configuration,
+process/search handles, or locally retained records. This scope classification
+is not a confidentiality claim: local history/configuration can be sensitive and
+returned text remains untrusted data.
+
+Repeat-effect-free defaults cover simple file/configuration/status/prompt reads,
+setting the same configuration value, creating an already-existing directory,
+and stopping the same bounded search handle. They do not promise identical
+results over time. Search creation, result reads that refresh handle retention, cursor-consuming
+process-output reads, arbitrary commands, file moves/edits/writes, feedback, and process
+termination retain non-idempotent labels. Process identifiers may be reused;
+no automatic retry or effect reconciliation rule is changed.
+
+Explicit upstream higher-risk annotations remain visible: an explicit
+open-world true, destructive true, read-only false, or idempotent false is not
+suppressed by a local default. Known mutation/destructive/external and
+non-idempotent floors still reject understated upstream labels. Unknown names
+with incomplete metadata retain conservative defaults. The table is qualified
+against the reviewed 0.2.50 behavior, not a guarantee for a future backend release;
+new names, changed schemas or changed behavior require contract review through
+the existing release/publication owners.
+
+Version-specific rationale was checked against public upstream source at
+`wonderwhy-er/DesktopCommanderMCP` tag `v0.2.50`, with these immutable Git blobs:
+
+- `src/tools/filesystem.ts` / `0476a7ca11cd212a88cc30dbe194716ef6cbd073`:
+  local multi-file reads use validated paths, directory creation uses recursive
+  mkdir, moves use rename, and only the URL-capable reader selects URL fetching.
+- `src/tools/config.ts` / `6d681da59c236a931eab8849a794961278830d7a`:
+  the setter assigns the same validated key/value rather than incrementing it.
+- `src/search-manager.ts` / `cd897d16c31a702a4dae5b43631e81f716247a34`:
+  range result reads refresh `lastReadTime`; stop checks the bounded child handle's
+  killed state before sending a signal. Retention-refreshing reads are deliberately
+  not labeled repeat-effect-free.
+- `src/tools/prompts.ts` / `2018b78c66f0b9773ea06045ecd389da242dac82`:
+  prompt retrieval reads bundled content and logs use, rather than running it.
+
+This is public-source behavior review, not verification of installed vendor-file
+bytes. Publication still needs the existing installed-release and fresh-session proof.
+
+The sparse-catalog test uses all 26 observed annotation shapes plus the two
+core gateway tools. It deliberately does not import the production profile for
+its expected values. Its inert empty argument schemas test metadata projection,
+not production-schema parity. The original adversarial fixture remains to test
+understated mutation labels, unknown capabilities and missing read-only evidence.
+
 ## Distinguish five layers
 
 1. **Source:** reviewed metadata and exact executable/input contracts in GitHub.

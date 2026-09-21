@@ -46,7 +46,7 @@ test('every exposed tool declares all four effect hints as booleans', () => {
 test('known mutations cannot inherit an understated read-only claim', () => {
   for (const name of ['start_process', 'interact_with_process', 'write_file',
     'write_pdf', 'edit_block', 'move_file', 'set_config_value', 'kill_process',
-    'force_terminate', 'create_directory', 'give_feedback_to_desktop_commander']) {
+    'force_terminate', 'create_directory', 'give_feedback_to_desktop_commander', 'stop_search']) {
     assert.equal(tools.get(name).annotations.readOnlyHint, false, name);
   }
 });
@@ -95,4 +95,90 @@ test('missing read-only evidence preserves the prior destructive default', () =>
   const a = tools.get('partial_unknown').annotations;
   assert.equal(a.readOnlyHint, false);
   assert.equal(a.destructiveHint, true);
+});
+
+
+async function sparseCatalog(t, mode = 'installed-sparse') {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const dir = await mkdtemp(join(tmpdir(), 'studio-sparse-metadata-'));
+  let gw, reader;
+  t.after(async () => {
+    try { await reader?.close(); } finally {
+      try { await gw?.close(); } finally { await rm(dir, {recursive: true, force: true}); }
+    }
+  });
+  const auth = {mount() {}, middleware(req, _res, next) {
+    if (req.headers.authorization !== 'Bearer fixture-only') {
+      const error = new Error('unauthorized'); error.statusCode = 401; return next(error);
+    }
+    req.auth = {principal: 'sparse-fixture', clientId: 'sparse-test', scopes: ['studio.control']};
+    next();
+  }};
+  gw = await startGateway({host: '127.0.0.1', port: 0, testMode: true,
+    command: process.execPath, args: [join(here, 'fixtures/metadata-backend.mjs')],
+    childEnv: {METADATA_FIXTURE_MODE: mode}, cwd: here, stateDir: dir,
+    requestTimeoutMs: 10000}, auth);
+  reader = new Client({name: 'sparse-metadata-test', version: '0.0.0'}, {capabilities: {}});
+  await reader.connect(new StreamableHTTPClientTransport(new URL(gw.url), {
+    requestInit: {headers: {authorization: 'Bearer fixture-only'}},
+  }));
+  return new Map((await reader.listTools()).tools.map(tool => [tool.name, tool]));
+}
+
+test('sparse installed catalog resolves all 26 backend tools and both gateway tools', async t => {
+  // Independent expected values: read-only, destructive, repeat-effect-free, open-world.
+  // Creating/consuming process or search handles is not a repeat-effect-free lookup.
+  const expected = {
+    get_config: [true, false, true, false],
+    set_config_value: [false, true, true, false],
+    read_file: [true, false, true, true],
+    read_multiple_files: [true, false, true, false],
+    write_file: [false, true, false, false],
+    write_pdf: [false, true, false, false],
+    create_directory: [false, false, true, false],
+    list_directory: [true, false, true, false],
+    move_file: [false, true, false, false],
+    start_search: [true, false, false, false],
+    get_more_search_results: [true, false, false, false],
+    stop_search: [false, false, true, false],
+    list_searches: [true, false, true, false],
+    get_file_info: [true, false, true, false],
+    edit_block: [false, true, false, false],
+    start_process: [false, true, false, true],
+    read_process_output: [true, false, false, false],
+    interact_with_process: [false, true, false, true],
+    force_terminate: [false, true, false, false],
+    list_sessions: [true, false, true, false],
+    list_processes: [true, false, true, false],
+    kill_process: [false, true, false, false],
+    get_usage_stats: [true, false, true, false],
+    get_recent_tool_calls: [true, false, true, false],
+    give_feedback_to_desktop_commander: [false, true, false, true],
+    get_prompts: [true, false, true, false],
+    studio_ping: [true, false, true, false],
+    studio_output_page: [true, false, true, false],
+  };
+  const catalog = await sparseCatalog(t);
+  assert.deepEqual([...catalog.keys()].sort(), Object.keys(expected).sort());
+  for (const [name, values] of Object.entries(expected)) await t.test(name, () => {
+    const a = catalog.get(name).annotations;
+    assert.deepEqual([a.readOnlyHint, a.destructiveHint, a.idempotentHint, a.openWorldHint], values);
+  });
+});
+
+test('known local profiles do not suppress explicitly higher upstream risk', async t => {
+  const catalog = await sparseCatalog(t, 'explicit-risk');
+  for (const [name, tool] of catalog) {
+    if (name.startsWith('studio_')) continue;
+    const a = tool.annotations;
+    assert.deepEqual([a.readOnlyHint, a.destructiveHint, a.idempotentHint, a.openWorldHint],
+      [false, true, false, true], name);
+  }
+});
+
+
+test('stateful reads cannot inherit an understated repeat-effect-free claim', () => {
+  for (const name of ['start_search', 'get_more_search_results', 'read_process_output']) {
+    assert.equal(tools.get(name).annotations.idempotentHint, false, name);
+  }
 });
