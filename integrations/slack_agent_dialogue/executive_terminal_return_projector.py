@@ -277,8 +277,19 @@ def _build_message(
     context: Mapping[str, Any],
     *,
     synopsis_version: str = "v1",
+    include_root_job_id: bool = True,
 ) -> dict[str, Any]:
+    """Build one canonical RESULT through the existing contract owner.
+
+    ``include_root_job_id`` is the one explicit historical formatting
+    parameter: the pre-locator v2 wire committed before the root-locator
+    repair is rebuilt by passing ``False``.  It changes no default bytes —
+    v1 ignores it and new v2 keeps the canonical root locator.
+    """
+
     if synopsis_version not in {"v1", "v2"}:
+        _refuse("DIALOGUE_REFUSED")
+    if not isinstance(include_root_job_id, bool):
         _refuse("DIALOGUE_REFUSED")
     if (
         not isinstance(candidate, TerminalReturnCandidate)
@@ -429,6 +440,8 @@ def _build_message(
                 "grant": candidate.effective_grant_digest,
             },
         }
+        if include_root_job_id:
+            result["root_job_id"] = candidate.root_job_id
         if include_summary:
             result["summary"] = candidate.summary
         else:
@@ -505,6 +518,87 @@ def _build_message(
         except DialogueContractError:
             continue
     _refuse("DIALOGUE_REFUSED")
+
+
+_SUPPORTED_SYNOPSIS_SHAPES = (
+    # Every RESULT wire this projector has lawfully committed for one
+    # ``message_key``.  The key derives only from the terminal evidence
+    # digest, so the legacy v1, the pre-locator v2, and the current
+    # root-locator v2 shapes share it and must all remain reusable.
+    ("v1", False),
+    ("v2", False),
+    ("v2", True),
+)
+
+
+def _committed_message_variants(
+    candidate: TerminalReturnCandidate,
+    context: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    """Rebuild every supported synopsis shape for this exact candidate.
+
+    Validation by full equality against these rebuilds proves a persisted
+    message carries the resolved context, the canonical candidate digests and
+    semantics, and a fingerprint recomputed by the existing canonical message
+    owner — never trust in the ``message_key`` alone.
+    """
+
+    variants: list[dict[str, Any]] = []
+    for synopsis_version, include_root_job_id in _SUPPORTED_SYNOPSIS_SHAPES:
+        try:
+            variant = _build_message(
+                candidate,
+                context,
+                synopsis_version=synopsis_version,
+                include_root_job_id=include_root_job_id,
+            )
+        except TerminalReturnProjectionError:
+            # This candidate cannot commit that shape (for example a synopsis
+            # that fits no bounded fallback rung); it is not a supported
+            # shape for reuse either.
+            continue
+        if variant not in variants:
+            variants.append(variant)
+    return tuple(variants)
+
+
+def _claims_candidate_result(
+    message: Mapping[str, Any],
+    candidate: TerminalReturnCandidate,
+    context: Mapping[str, Any],
+) -> bool:
+    """Identify a related RESULT before treating another key as unrelated.
+
+    This is only a conflict check. Reuse still requires full equality with a
+    supported canonical message, including its original key and fingerprint.
+    """
+
+    if message.get("message_type") != "RESULT":
+        return False
+    if (
+        message.get("actor_ref") == context["actor_ref"]
+        and message.get("applies_to") == context["applies_to"]
+    ):
+        return True
+    body = message.get("body")
+    result = body.get("result") if isinstance(body, dict) else None
+    if not isinstance(result, str):
+        return False
+    try:
+        synopsis = json.loads(result)
+    except ValueError:
+        return False
+    if not isinstance(synopsis, dict):
+        return False
+    schema = synopsis.get("schema")
+    if schema == "mastermind.executive_terminal_result_synopsis/v1":
+        terminal_digest = synopsis.get("terminal_evidence_digest")
+    elif schema == "mastermind.executive_terminal_result_synopsis/v2":
+        digests = synopsis.get("digests")
+        terminal_digest = digests.get("terminal") if isinstance(digests, dict) else None
+    else:
+        return False
+    return terminal_digest == candidate.terminal_evidence_digest
 
 
 def _receipt(
@@ -661,6 +755,28 @@ class ExecutiveTerminalReturnProjector:
             context=context,
             thread_ts=expected_thread_ts,
         )
+        committed = await self._read_committed_result(
+            candidate=candidate,
+            context=context,
+            parent=parent,
+        )
+        if committed is not None:
+            # One validated canonical RESULT already holds this key — whether
+            # the legacy v1, the pre-locator v2, or the current v2 wire.
+            # Activation must not submit a regenerated conflicting body
+            # against it: recover the committed identity with its original
+            # fingerprint and send nothing.  DUPLICATE is the receipt action
+            # the Executive service accepts for a no-write completion.
+            return TerminalReturnProjectionReceipt(
+                action="DUPLICATE",
+                message_key=str(committed["message"]["message_key"]),
+                fingerprint=str(committed["message"]["fingerprint"]),
+                message_ts=str(committed["primary_ts"]),
+                duplicate_timestamps=(),
+                thread_ts=parent.thread_ts,
+                parent_author_user_id=parent.parent_author_user_id,
+                parent_fingerprint=parent.parent_fingerprint,
+            )
         request = {
             "version": CONTROL_VERSION_V2,
             "operation": "send_message",
@@ -697,21 +813,24 @@ class ExecutiveTerminalReturnProjector:
             _refuse("SERVICE_UNAVAILABLE")
         return _receipt(response, message=message, parent=parent)
 
-    async def reconcile(
+    async def _read_committed_result(
         self,
+        *,
         candidate: TerminalReturnCandidate,
-    ) -> TerminalReturnProjectionReceipt | None:
-        """Read-only reconciliation after a durable projection intent.
+        context: Mapping[str, Any],
+        parent: _RelayParentAttestation,
+    ) -> dict[str, Any] | None:
+        """Read one bound thread and validate any persisted RESULT for the key.
 
-        This method never calls ``send_message``.  Absence is returned as
-        ``None`` so the service preserves EFFECT_UNKNOWN instead of retrying.
+        Read-only: this method never sends.  The actual persisted message from
+        the existing authenticated ``read_thread`` owner is validated by full
+        equality against every supported synopsis shape rebuilt from the
+        resolved context and the canonical candidate — key-only trust,
+        mutated, foreign-context, wrong-digest, duplicate, and unreadable
+        evidence all refuse.  Returns the single validated persisted item, or
+        ``None`` when the thread holds no message under the candidate key.
         """
 
-        context, expected_thread_ts, message = self._resolve(candidate)
-        parent = await self._bind(
-            context=context,
-            thread_ts=expected_thread_ts,
-        )
         request = {
             "version": CONTROL_VERSION_V2,
             "operation": "read_thread",
@@ -762,7 +881,10 @@ class ExecutiveTerminalReturnProjector:
             or type(result.get("ineligible_count")) is not int
             or type(result.get("mutated_count")) is not int
             or result["ineligible_count"] < 0
-            or result["mutated_count"] < 0
+            # Any mutation evidence in the thread — even an engine-reconstructable
+            # edit — means the persisted bytes are no longer immutable proof.
+            # Refuse rather than reuse; a refusal never sends.
+            or result["mutated_count"] != 0
         ):
             _refuse("EFFECT_UNKNOWN")
         matches: list[dict[str, Any]] = []
@@ -774,8 +896,12 @@ class ExecutiveTerminalReturnProjector:
                 or not isinstance(item.get("message"), dict)
             ):
                 _refuse("EFFECT_UNKNOWN")
-            if item["message"].get("message_key") == message["message_key"]:
+            if item["message"].get("message_key") == candidate.message_key:
                 matches.append(item)
+            elif _claims_candidate_result(item["message"], candidate, context):
+                # A changed key cannot turn the same attempt or terminal
+                # evidence into fresh input, or hide an ambiguous sibling.
+                _refuse("EFFECT_UNKNOWN")
         if not matches:
             return None
         if len(matches) != 1:
@@ -783,7 +909,9 @@ class ExecutiveTerminalReturnProjector:
         match = matches[0]
         duplicates = match["duplicate_timestamps"]
         if (
-            match["message"] != message
+            match["message"] not in _committed_message_variants(
+                candidate, context
+            )
             or not isinstance(match.get("primary_ts"), str)
             or _THREAD_TS_RE.fullmatch(match["primary_ts"]) is None
             or not isinstance(duplicates, list)
@@ -795,12 +923,39 @@ class ExecutiveTerminalReturnProjector:
             )
         ):
             _refuse("EFFECT_UNKNOWN")
+        return match
+
+    async def reconcile(
+        self,
+        candidate: TerminalReturnCandidate,
+    ) -> TerminalReturnProjectionReceipt | None:
+        """Read-only reconciliation after a durable projection intent.
+
+        This method never calls ``send_message``.  Absence is returned as
+        ``None`` so the service preserves EFFECT_UNKNOWN instead of retrying.
+        A validated persisted message yields RECOVERED with its original
+        fingerprint, regardless of the synopsis version a new message would
+        currently carry.
+        """
+
+        context, expected_thread_ts, message = self._resolve(candidate)
+        parent = await self._bind(
+            context=context,
+            thread_ts=expected_thread_ts,
+        )
+        committed = await self._read_committed_result(
+            candidate=candidate,
+            context=context,
+            parent=parent,
+        )
+        if committed is None:
+            return None
         return TerminalReturnProjectionReceipt(
             action="RECOVERED",
-            message_key=str(message["message_key"]),
-            fingerprint=str(message["fingerprint"]),
-            message_ts=str(match["primary_ts"]),
-            duplicate_timestamps=tuple(duplicates),
+            message_key=str(committed["message"]["message_key"]),
+            fingerprint=str(committed["message"]["fingerprint"]),
+            message_ts=str(committed["primary_ts"]),
+            duplicate_timestamps=(),
             thread_ts=parent.thread_ts,
             parent_author_user_id=parent.parent_author_user_id,
             parent_fingerprint=parent.parent_fingerprint,
