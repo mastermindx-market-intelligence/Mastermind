@@ -1387,6 +1387,178 @@ class ValidatedRoleCompletion:
     dialogue_source: ExecutiveDialogueSource | None
 
 
+# The capability stays inside the trusted control-service composition. It is
+# not a wire token, registry, or a substitute for Job/Worker authorization.
+_EXACT_WORKER_TARGET_PRODUCER = object()
+_NO_EXACT_WORKER_TARGET = object()
+_EXACT_WORKER_TARGET_SCHEMA = "mastermind.exact_worker_claim_target/v1"
+_EXACT_WORKER_TARGET_OBSERVATION_SCHEMA = "mastermind.exact_worker_target_observation/v1"
+_EXACT_WORKER_TARGET_EVIDENCE_SCHEMA = "mastermind.exact_worker_claim_evidence/v1"
+
+
+def _normalise_exact_worker_target_documents(
+    definition: Any, observation: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from scripts.ohf.redaction import evidence_contains_secret
+
+    keys = {"schema_version", "operation_key", "root_job_id", "job_id", "worker_id",
+            "quota_class", "expected_provider", "expected_account_label", "expected_model",
+            "expected_effort", "expected_cost_class", "expected_capabilities", "excluded_worker_ids",
+            "source_owner", "source_generation", "authority_policy_hash", "expires_at_ms"}
+    observation_keys = {"schema_version", "source_sha256", "control_attestation_sha256",
+                        "observed_at_ms", "max_age_ms"}
+    if not isinstance(definition, Mapping) or set(definition) != keys:
+        raise StateConflict("exact worker target definition fields drifted")
+    if not isinstance(observation, Mapping) or set(observation) != observation_keys:
+        raise StateConflict("exact worker target observation fields drifted")
+    d, o = dict(definition), dict(observation)
+    if d["schema_version"] != _EXACT_WORKER_TARGET_SCHEMA or o["schema_version"] != _EXACT_WORKER_TARGET_OBSERVATION_SCHEMA:
+        raise StateConflict("exact worker target schema is unsupported")
+    if d["source_owner"] != "executive-control":
+        raise StateConflict("exact worker target source owner is not control")
+    def identifier(value: Any) -> str:
+        if (not isinstance(value, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value) is None
+            or evidence_contains_secret({"value": value})):
+            raise StateConflict("exact worker target identifier is invalid")
+        return value
+    for key in keys - {"schema_version", "expected_capabilities", "excluded_worker_ids", "authority_policy_hash", "expires_at_ms"}:
+        d[key] = identifier(d[key])
+    if d["quota_class"] != d["quota_class"].lower():
+        raise StateConflict("exact worker target quota must be canonical")
+    for key in ("expected_capabilities", "excluded_worker_ids"):
+        values = d[key]
+        if not isinstance(values, (list, tuple)) or len(values) > 64:
+            raise StateConflict("exact worker target vector is invalid")
+        items = [identifier(item) for item in values]
+        if len(set(items)) != len(items):
+            raise StateConflict("exact worker target vector contains duplicates")
+        d[key] = sorted(items)
+    for value in (d["authority_policy_hash"], o["source_sha256"], o["control_attestation_sha256"]):
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise StateConflict("exact worker target digest is invalid")
+    for value in (d["expires_at_ms"], o["observed_at_ms"], o["max_age_ms"]):
+        if type(value) is not int or value <= 0 or value > 2**63 - 1:
+            raise StateConflict("exact worker target time is invalid")
+    if o["max_age_ms"] > 60 * 1000:
+        raise StateConflict("exact worker target observation exceeds one minute")
+    return d, o
+
+
+@dataclasses.dataclass(frozen=True)
+class ExactWorkerClaimTarget:
+    """Immutable trusted composition input, never accepted as caller JSON.
+
+    The definition's operation_key is the root's immutable CEO intent source_id,
+    not the implementation workstream or the current provider invocation.
+    """
+
+    _definition_json: str
+    _observation_json: str
+    _producer: object = dataclasses.field(repr=False, compare=False)
+    _revalidate: Callable[[], None] = dataclasses.field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._producer is not _EXACT_WORKER_TARGET_PRODUCER or not callable(self._revalidate):
+            raise StateConflict("exact worker target lacks its trusted producer")
+        d, o = _normalise_exact_worker_target_documents(
+            _strict_canonical_json_loads(self._definition_json, name="exact target definition"),
+            _strict_canonical_json_loads(self._observation_json, name="exact target observation"),
+        )
+        if _json_dumps(d) != self._definition_json or _json_dumps(o) != self._observation_json:
+            raise StateConflict("exact worker target is not canonical")
+
+    @property
+    def definition(self) -> dict[str, Any]:
+        return json.loads(self._definition_json)
+
+    @property
+    def observation(self) -> dict[str, Any]:
+        return json.loads(self._observation_json)
+
+    def evidence(self) -> dict[str, Any]:
+        d, o = self.definition, self.observation
+        return {"schema_version": _EXACT_WORKER_TARGET_EVIDENCE_SCHEMA,
+                "definition": d, "definition_sha256": orchestration_digest(d),
+                "observation": o, "observation_sha256": orchestration_digest(o)}
+
+    def require_fresh(self, now_ms: int) -> None:
+        d, o = self.definition, self.observation
+        age = now_ms - o["observed_at_ms"]
+        if age < 0 or age > o["max_age_ms"] or now_ms >= d["expires_at_ms"]:
+            raise StateConflict("exact worker target observation or grant expired")
+
+    def revalidate_source(self) -> None:
+        # Called outside the database transaction by the trusted supervisor.
+        self._revalidate()
+
+
+def _issue_exact_worker_claim_target(
+    definition: Mapping[str, Any], observation: Mapping[str, Any], *,
+    _producer_capability: object, revalidate: Callable[[], None],
+) -> ExactWorkerClaimTarget:
+    if _producer_capability is not _EXACT_WORKER_TARGET_PRODUCER:
+        raise StateConflict("exact worker target producer is not admitted")
+    d, o = _normalise_exact_worker_target_documents(definition, observation)
+    return ExactWorkerClaimTarget(_json_dumps(d), _json_dumps(o), _producer_capability, revalidate)
+
+
+def _require_exact_worker_target(value: Any) -> ExactWorkerClaimTarget:
+    if type(value) is not ExactWorkerClaimTarget or value._producer is not _EXACT_WORKER_TARGET_PRODUCER:
+        raise StateConflict("exact worker target must be owner-issued, not caller data")
+    value.__post_init__()
+    return value
+
+
+def _validate_exact_worker_target_replay(payload: Mapping[str, Any], target: ExactWorkerClaimTarget | None) -> None:
+    has_target = "exact_worker_target" in payload
+    if not has_target and target is None:
+        return
+    if not has_target or target is None:
+        raise StateConflict("dispatch command targeted/untargeted history conflict")
+    stored = payload["exact_worker_target"]
+    if (not isinstance(stored, dict)
+        or set(stored) != {"schema_version", "definition", "definition_sha256", "observation", "observation_sha256"}
+        or stored["schema_version"] != _EXACT_WORKER_TARGET_EVIDENCE_SCHEMA):
+        raise StateConflict("exact worker target history is malformed")
+    d, o = _normalise_exact_worker_target_documents(stored["definition"], stored["observation"])
+    if (d != stored["definition"] or o != stored["observation"]
+        or orchestration_digest(d) != stored["definition_sha256"]
+        or orchestration_digest(o) != stored["observation_sha256"]
+        or d != target.definition):
+        raise StateConflict("dispatch command complete target drifted")
+    # History is read under its current caller authorization. It never re-ages
+    # the original observation or supplies a new first-issuance right.
+
+
+def _validate_exact_worker_target_selection(
+    connection: sqlite3.Connection, target: ExactWorkerClaimTarget,
+    job_row: sqlite3.Row, capacity: sqlite3.Row, authority_policy_hash: str,
+) -> None:
+    d = target.definition
+    if (job_row["orchestration_role"] != "work"
+        or job_row["job_id"] != d["job_id"] or job_row["root_job_id"] != d["root_job_id"]
+        or authority_policy_hash != d["authority_policy_hash"]):
+        raise StateConflict("exact worker target Job/root/authority binding differs")
+    root_row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (d["root_job_id"],)).fetchone()
+    if root_row is None:
+        raise StateConflict("exact worker target root is unavailable")
+    root = _job_from_row(root_row)
+    if (root.orchestration_role != "aggregation" or root.parent_job_id is not None
+        or root.orchestration_provenance.get("creator") != "ceo_intent"
+        or root.orchestration_provenance.get("source_id") != d["operation_key"]):
+        raise StateConflict("exact worker target operation is not its admitted root")
+    for field, expected in (("worker_id", "worker_id"), ("quota_class", "quota_class"),
+                            ("provider", "expected_provider"), ("worker_provider", "expected_provider"),
+                            ("account_label", "expected_account_label"), ("model", "expected_model"),
+                            ("effort", "expected_effort"), ("cost_class", "expected_cost_class")):
+        if capacity[field] != d[expected]:
+            raise StateConflict("exact worker target selected metadata differs")
+    capabilities = sorted(_normalise_capabilities(_json_loads(capacity["capabilities_json"], fallback=[])))
+    if capabilities != d["expected_capabilities"] or capacity["worker_id"] in d["excluded_worker_ids"]:
+        raise StateConflict("exact worker target capability or exclusion differs")
+
+
 @dataclasses.dataclass(frozen=True)
 class OrchestrationDispatchOutcome:
     """Command-bound active lease or immutable terminal dispatch outcome."""
@@ -1396,8 +1568,11 @@ class OrchestrationDispatchOutcome:
     attempt: Attempt
     outcome: str
     lease_token: str | None = dataclasses.field(default=None, repr=False)
+    claimed_now: bool = dataclasses.field(default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if type(self.claimed_now) is not bool or (self.claimed_now and (self.outcome != "ACTIVE" or self.attempt.status is not AttemptStatus.CLAIMED)):
+            raise StateConflict("fresh dispatch must originate in a new CLAIMED Attempt")
         if self.outcome == "ACTIVE":
             if (
                 self.attempt.status not in _LEASE_ACTIVE_ATTEMPT_STATUSES
@@ -11033,6 +11208,7 @@ class AttemptRegistry:
         placement_snapshot_digest: str | None,
         carrier_claim: _CarrierClaimSpec | None = None,
         _c2_capability: object | None = None,
+        exact_target: ExactWorkerClaimTarget | None = None,
     ) -> AttemptLease | None:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
 
@@ -11083,6 +11259,8 @@ class AttemptRegistry:
         elif _c2_capability is not None:
             raise StateConflict("private C2 capability requires carrier claim evidence")
 
+        if exact_target is not None:
+            _validate_exact_worker_target_selection(connection, exact_target, job_row, capacity, authority_policy_hash)
         job_id = str(job_row["job_id"])
         attempt_id = f"ATT-{uuid4().hex}"
         lease_token = secrets.token_urlsafe(32)
@@ -11229,6 +11407,8 @@ class AttemptRegistry:
                     carrier_claim.carrier_authority_fingerprint
                 ),
             }
+        if exact_target is not None:
+            claim_payload["exact_worker_target"] = exact_target.evidence()
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -11264,6 +11444,7 @@ class AttemptRegistry:
         lease_owner: str = "local-supervisor",
         command_id: str | None = None,
         _coo_cycle_dispatch_capability: object | None = None,
+        exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -11283,6 +11464,17 @@ class AttemptRegistry:
             raise StateConflict(
                 "command-bound claim requires the COO dispatch boundary"
             )
+        if exact_target is _NO_EXACT_WORKER_TARGET:
+            exact_target = None
+        else:
+            exact_target = _require_exact_worker_target(exact_target)
+        if exact_target is not None:
+            d = exact_target.definition
+            if worker_id not in (None, d["worker_id"]) or selected_quota not in (None, d["quota_class"]):
+                raise StateConflict("exact worker target selectors conflict")
+            worker_id, selected_quota = d["worker_id"], d["quota_class"]
+            if command_id is None:
+                raise StateConflict("exact worker target requires command-bound child dispatch")
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
             if command_id is not None:
@@ -11311,6 +11503,7 @@ class AttemptRegistry:
                         raise StateConflict(
                             "dispatch command replay semantic target drifted"
                         )
+                    _validate_exact_worker_target_replay(payload, exact_target)
                     attempt_row = connection.execute(
                         "SELECT * FROM attempts WHERE attempt_id=?",
                         (existing_dispatch["attempt_id"],),
@@ -11363,6 +11556,9 @@ class AttemptRegistry:
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
                 raise StateConflict(f"job {job_id} exhausted its attempt limit")
             authority = _authorize_job_row(job_row)
+            if exact_target is not None:
+                timestamp = self.store.now_ms()
+                exact_target.require_fresh(timestamp)
             orchestration_role = job_row["orchestration_role"]
             quarantined_workers: set[str] = set()
             if orchestration_role is not None:
@@ -11573,8 +11769,48 @@ class AttemptRegistry:
                 effective_grant_digest=effective_grant_digest,
                 placement_snapshot=placement_snapshot,
                 placement_snapshot_digest=placement_snapshot_digest,
+                exact_target=exact_target,
             )
         return claimed
+
+    def _validate_exact_target_launch(
+        self, target: ExactWorkerClaimTarget, lease: AttemptLease,
+    ) -> None:
+        """Recheck the existing lease and target before the original issuance.
+
+        This read grants no lease or replay permission. Only the supervisor's
+        fresh-claim branch may call through to its adapter after this fence.
+        """
+        target = _require_exact_worker_target(target)
+        with self.store.read() as connection:
+            timestamp = self.store.now_ms()
+            target.require_fresh(timestamp)
+            row = self._leased_row(
+                connection, attempt_id=lease.attempt.attempt_id,
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token, timestamp=timestamp,
+                statuses={AttemptStatus.CLAIMED},
+            )
+            job_row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+            capacity = connection.execute(
+                "SELECT q.*, w.provider AS worker_provider, w.account_label, w.identity_status "
+                "FROM worker_quota_classes q JOIN workers w ON w.worker_id=q.worker_id "
+                "WHERE q.worker_id=? AND q.quota_class=?", (row["worker_id"], row["quota_class"]),
+            ).fetchone()
+            if job_row is None or capacity is None or capacity["identity_status"] != "ONLINE":
+                raise StateConflict("exact worker target disappeared before launch")
+            authority = _authorize_job_row(job_row)
+            _validate_exact_worker_target_selection(connection, target, job_row, capacity, authority.policy_sha256)
+            event = connection.execute(
+                "SELECT payload_json FROM events WHERE event_type='JOB_CLAIMED' AND attempt_id=?",
+                (row["attempt_id"],),
+            ).fetchall()
+            if len(event) != 1:
+                raise StateConflict("exact worker target lost its original claim evidence")
+            payload = _strict_canonical_json_loads(str(event[0]["payload_json"]), name="exact target claim")
+            _validate_exact_worker_target_replay(payload, target)
+            if payload["exact_worker_target"] != target.evidence():
+                raise StateConflict("exact worker target first-issuance observation differs")
 
     def dispatch_cycle_job(
         self,
@@ -11585,6 +11821,7 @@ class AttemptRegistry:
         quota_class: str | None = None,
         lease_seconds: int | None = None,
         lease_owner: str = "executive-coo-cycle",
+        exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
     ) -> OrchestrationDispatchOutcome | None:
         """Claim exactly one persisted orchestration Job under one command."""
 
@@ -11611,6 +11848,7 @@ class AttemptRegistry:
             lease_owner=lease_owner,
             command_id=command_id,
             _coo_cycle_dispatch_capability=_COO_CYCLE_DISPATCH_CAPABILITY,
+            **({"exact_target": exact_target} if exact_target is not _NO_EXACT_WORKER_TARGET else {}),
         )
         if claimed is None:
             return None
@@ -11622,6 +11860,7 @@ class AttemptRegistry:
             attempt=claimed.attempt,
             outcome="ACTIVE",
             lease_token=claimed.lease_token,
+            claimed_now=True,
         )
 
     def _leased_row(

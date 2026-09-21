@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import hashlib
 import json
 import os
@@ -135,6 +136,7 @@ _CONFIG_REQUIRED = frozenset(
 _CONFIG_OPTIONAL = frozenset(
     {
         "proof_branch",
+        "exact_worker_claim_target",
         "worker_id",
         "worker_account_label",
         "quota_class",
@@ -342,6 +344,150 @@ def _integer(value: Any, name: str) -> int:
     return value
 
 
+_CONTROL_TARGET_COMPOSITION = object()
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class _TargetConfigSnapshot:
+    path: Path
+    raw: bytes
+    identity: tuple[int, ...]
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.raw).hexdigest()
+
+
+class _LoadedTargetConfig(dict):
+    """A startup-only snapshot; never accepted as serialized authority."""
+    def __init__(self, value, snapshot: _TargetConfigSnapshot):
+        super().__init__(value)
+        self._target_snapshot = snapshot
+        self._normalized_sha256 = ""
+
+
+def _target_file_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _read_target_config_snapshot(path: Path) -> tuple[dict[str, Any], _TargetConfigSnapshot]:
+    """Read one bounded owner-controlled file and hash the very bytes parsed."""
+    if not path.is_absolute():
+        raise ServiceError("exact worker target config path must be absolute")
+    fd = -1
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+            or before.st_uid not in {0, os.geteuid()} or stat.S_IMODE(before.st_mode) & 0o022
+            or before.st_size <= 0 or before.st_size > 256 * 1024):
+            raise ServiceError("exact worker target source identity is invalid")
+        parts, size = [], 0
+        while True:
+            part = os.read(fd, min(65536, 256 * 1024 + 1 - size))
+            if not part:
+                break
+            size += len(part)
+            if size > 256 * 1024:
+                raise ServiceError("exact worker target config exceeds byte bound")
+            parts.append(part)
+        raw = b"".join(parts)
+        after = os.fstat(fd)
+        if (_target_file_identity(before) != _target_file_identity(after)
+            or _target_file_identity(after) != _target_file_identity(path.lstat())
+            or len(raw) != after.st_size):
+            raise ServiceError("exact worker target source changed during read")
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ServiceError("exact worker target config contains duplicate keys")
+                result[key] = value
+            return result
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
+        if not isinstance(value, dict):
+            raise ServiceError("exact worker target config is not an object")
+        return value, _TargetConfigSnapshot(path, raw, _target_file_identity(after))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ServiceError("exact worker target source is unavailable or malformed") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _target_config_mode(config: Mapping[str, Any]) -> str:
+    value = config.get("exact_worker_claim_target", {"mode": "disabled"})
+    if value == {"mode": "disabled"}:
+        return "disabled"
+    if (not isinstance(value, dict) or set(value) != {"mode", "definition", "max_age_ms"}
+        or value.get("mode") != "fixed"):
+        raise ServiceError("exact worker target configuration is not closed")
+    from control_plane.executive_runtime import _normalise_exact_worker_target_documents
+    try:
+        definition, _ = _normalise_exact_worker_target_documents(value["definition"], {
+            "schema_version": "mastermind.exact_worker_target_observation/v1",
+            "source_sha256": "0" * 64, "control_attestation_sha256": "0" * 64,
+            "observed_at_ms": 1, "max_age_ms": value["max_age_ms"],
+        })
+    except (ValueError, RuntimeProofError) as exc:
+        raise ServiceError("exact worker target definition is invalid") from exc
+    if (definition["worker_id"] != config.get("worker_id", "codex-01")
+        or definition["expected_account_label"] != config.get("worker_account_label", "dedicated-codex-home")):
+        raise ServiceError("exact worker target does not match the fixed broker identity")
+    return "fixed"
+
+
+class _ExactWorkerTargetSource:
+    """Private adapter of the existing attested config into the claim owner."""
+    def __init__(self, raw, attestation, attestation_loader, *, capability):
+        if capability is not _CONTROL_TARGET_COMPOSITION or type(raw) is not _LoadedTargetConfig:
+            raise ServiceError("exact worker target lacks attested source composition")
+        self._raw = raw
+        self._snapshot = raw._target_snapshot
+        self._attestation = dict(attestation)
+        self._attestation_loader = attestation_loader
+        self._target = json.loads(self._snapshot.raw)["exact_worker_claim_target"]
+        self.require_current()
+
+    def require_current(self) -> None:
+        if _canonical_sha256(_jsonable(self._raw)) != self._raw._normalized_sha256:
+            raise ServiceError("exact worker target loaded composition was modified")
+        _, current = _read_target_config_snapshot(self._snapshot.path)
+        if current != self._snapshot:
+            raise ServiceError("exact worker target consumed source snapshot changed")
+        attestation = self._attestation_loader()
+        if (not isinstance(attestation, Mapping)
+            or attestation.get("config_sha256") != self._snapshot.sha256
+            or self._attestation.get("config_sha256") != self._snapshot.sha256
+            or _canonical_sha256(attestation) != _canonical_sha256(self._attestation)):
+            raise ServiceError("exact worker target source/attestation binding differs")
+
+    def for_job(self, job_id: str, *, now_ms: int):
+        from control_plane.executive_runtime import (
+            _issue_exact_worker_claim_target, _EXACT_WORKER_TARGET_PRODUCER,
+        )
+        if job_id != self._target["definition"]["job_id"]:
+            raise ServiceError("exact worker target does not select this Job")
+        self.require_current()
+        return _issue_exact_worker_claim_target(
+            self._target["definition"], {
+                "schema_version": "mastermind.exact_worker_target_observation/v1",
+                "source_sha256": self._snapshot.sha256,
+                "control_attestation_sha256": _canonical_sha256(self._attestation),
+                "observed_at_ms": now_ms, "max_age_ms": self._target["max_age_ms"],
+            }, _producer_capability=_EXACT_WORKER_TARGET_PRODUCER,
+            revalidate=self.require_current,
+        )
+
+
+def _bind_exact_worker_target_source(raw, attestation, *, _producer_capability, attestation_loader):
+    if _target_config_mode(raw) == "disabled":
+        return None
+    return _ExactWorkerTargetSource(raw, attestation, attestation_loader,
+                                   capability=_producer_capability)
+
+
 def load_control_config(
     path: str | Path, *, enforce_current_uid: bool = True
 ) -> dict[str, Any]:
@@ -357,6 +503,11 @@ def load_control_config(
     if not enforce_current_uid and os.geteuid() != 0:
         raise ServiceError("static control config validation requires root")
     config = _private_json(Path(path), label="Executive control config", root_owned=True)
+    if _target_config_mode(config) == "fixed":
+        parsed, snapshot = _read_target_config_snapshot(Path(path))
+        if parsed != config:
+            raise ServiceError("exact worker target config moved between observations")
+        config = _LoadedTargetConfig(parsed, snapshot)
     if config.get("schema_version") != CONTROL_CONFIG_SCHEMA_VERSION:
         raise ServiceError("unsupported Executive control config schema")
     keys = set(config)
@@ -617,6 +768,8 @@ def load_control_config(
         raise ServiceError(
             "control config coo_tick_interval_seconds must be numeric"
         )
+    if type(config) is _LoadedTargetConfig:
+        config._normalized_sha256 = _canonical_sha256(_jsonable(config))
     return config
 
 
@@ -957,6 +1110,7 @@ def _service_from_config(
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     autonomy_guard: Callable[[], None] | None = None,
     initial_canary: Mapping[str, Any] | None = None,
+    exact_target_source: _ExactWorkerTargetSource | None = None,
 ) -> ExecutiveControlService:
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
@@ -970,6 +1124,13 @@ def _service_from_config(
         RemoteWorkerProcessController,
         WorkerBrokerClient,
     )
+
+    if _target_config_mode(raw) == "fixed":
+        if type(exact_target_source) is not _ExactWorkerTargetSource or exact_target_source._raw is not raw:
+            raise ServiceError("exact worker target has no attested composition")
+        exact_target_source.require_current()
+    elif exact_target_source is not None:
+        raise ServiceError("exact worker target source conflicts with disabled config")
 
     client = WorkerBrokerClient(
         raw["worker_broker_socket_path"],
@@ -1065,6 +1226,10 @@ def _service_from_config(
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
             process_controller=RemoteWorkerProcessController(client),
+            exact_target_provider=(
+                (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
+                if exact_target_source is not None else None
+            ),
         )
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
@@ -1252,6 +1417,13 @@ async def _serve_from_config(config_path: Path) -> None:
         config_path=config_path,
         expected_release_sha=str(raw["proof_base_sha"]),
     )
+    exact_target_source = _bind_exact_worker_target_source(
+        raw, control_attestation, _producer_capability=_CONTROL_TARGET_COMPOSITION,
+        attestation_loader=lambda: _load_control_environment_attestation(
+            Path(raw["control_environment_attestation_path"]), config_path=config_path,
+            expected_release_sha=str(raw["proof_base_sha"]),
+        ),
+    )
     canary_path = Path(raw["secret_canary_receipt_path"])
 
     def load_canary() -> Mapping[str, Any]:
@@ -1296,6 +1468,7 @@ async def _serve_from_config(config_path: Path) -> None:
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         initial_canary=initial_canary,
+        **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
 
