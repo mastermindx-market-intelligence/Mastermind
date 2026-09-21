@@ -496,6 +496,7 @@ def validate_activation_binding(
     *,
     catalog: Mapping[str, Any],
     now_ms: int,
+    expected_return_subject_digest: str,
 ) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != _ACTIVATION_KEYS:
         _refuse("INVALID_ACTIVATION_BINDING")
@@ -504,6 +505,11 @@ def validate_activation_binding(
     raw = copy.deepcopy(dict(value))
     if raw["schema"] != ACTIVATION_SCHEMA:
         _refuse("INVALID_ACTIVATION_BINDING")
+    expected_subject_digest = _text(expected_return_subject_digest, maximum=64)
+    if _SHA256.fullmatch(expected_subject_digest) is None:
+        _refuse("INVALID_ACTIVATION_BINDING")
+    if raw["return_subject_digest"] != expected_subject_digest:
+        _refuse("RETURN_SUBJECT_CHANGED")
     rebuilt = build_activation_binding(
         catalog=catalog,
         profile_id=raw["profile_id"],
@@ -527,8 +533,14 @@ def activation_binding_digest(
     *,
     catalog: Mapping[str, Any],
     now_ms: int,
+    expected_return_subject_digest: str,
 ) -> str:
-    normalized = validate_activation_binding(value, catalog=catalog, now_ms=now_ms)
+    normalized = validate_activation_binding(
+        value,
+        catalog=catalog,
+        now_ms=now_ms,
+        expected_return_subject_digest=expected_return_subject_digest,
+    )
     return hashlib.sha256(_canonical_json(normalized)).hexdigest()
 
 
