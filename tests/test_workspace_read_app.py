@@ -1050,3 +1050,15 @@ def test_malformed_or_oversize_internal_reply_is_closed(rsa_key, envelope):
     client, fake = _make_app(rsa_key, client=_FakeWorkspaceClient(envelope=envelope))
     response = client.get("/workspace/programs/current", headers={"Authorization": f"Bearer {_workspace_token(rsa_key)}"})
     assert response.status_code == 503 and "/private/secret" not in response.text
+
+
+@pytest.mark.parametrize("route", ["/workspace/programs/current", "/workspace/mission/current?work_ref=WS:ONE&root_job_id=JOB-001"])
+@pytest.mark.parametrize("stage", ["before", "after"])
+def test_configured_permission_stamp_unavailable_refuses(rsa_key, route, stage):
+    fake = _FakeWorkspaceClient(envelope={"ok": True, "result": {"fixture": True}})
+    authorize = lambda principal: True
+    authorize.binding_digest = lambda principal: None if stage == "before" or fake.calls else "a" * 64
+    client, _ = _make_app(rsa_key, client=fake, authorize=authorize)
+    response = client.get(route, headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
+    assert response.status_code == 403 and _body_code(response) == "access_denied"
+    assert len(fake.calls) == (stage == "after")

@@ -160,3 +160,18 @@ def test_cancellation_waits_for_owner_close(tmp_path):
         with pytest.raises(asyncio.CancelledError): await task
         assert closed.is_set()
     asyncio.run(check())
+
+
+@pytest.mark.parametrize("stage", ["before", "after"])
+def test_configured_permission_stamp_unavailable_refuses(stage, tmp_path):
+    _, _, cache = cache_fixture(tmp_path)
+    acquired = []
+    authorize = lambda principal: True
+    authorize.binding_digest = lambda principal: None if stage == "before" or acquired else "a" * 64
+    baseline = service(cache)._acquire
+    def acquire(*args, **kwargs):
+        acquired.append(True)
+        return baseline(*args, **kwargs)
+    result = run(service(cache, acquire=acquire, authorize=authorize))
+    assert result["status"] == 403 and result["error"]["code"] == "access_denied"
+    assert len(acquired) == (stage == "after")

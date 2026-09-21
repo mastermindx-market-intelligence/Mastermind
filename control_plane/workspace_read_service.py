@@ -7,6 +7,7 @@ private bracket is request scoped, and is not an installation/currentness regist
 from __future__ import annotations
 
 import asyncio
+from control_plane.workspace_owned_task import await_owned
 import copy
 import math
 import secrets
@@ -215,22 +216,20 @@ class WorkspaceReadService:
                 return error("access_denied", 403)
         except Exception:
             return error("access_denied", 403)
-        permission_before = permission_stamp(self.authorize, frame["principal"])
+        try:
+            permission_before = permission_stamp(self.authorize, frame["principal"])
+        except Exception:
+            return error("access_denied", 403)
         task = asyncio.create_task(asyncio.to_thread(self._read, frame))
         try:
-            result = await asyncio.shield(task)
-            if (self.authorize(frame["principal"]) is not True
-                    or permission_stamp(self.authorize, frame["principal"]) != permission_before):
+            result = await await_owned(task)
+            try:
+                if (self.authorize(frame["principal"]) is not True
+                        or permission_stamp(self.authorize, frame["principal"]) != permission_before):
+                    return error("access_denied", 403)
+            except Exception:
                 return error("access_denied", 403)
             return result
-        except asyncio.CancelledError:
-            # The bounded owner must finish its close boundary before this
-            # request relinquishes custody; never abandon an observer thread.
-            try:
-                await asyncio.shield(task)
-            except Exception:
-                pass
-            raise
         except LookupError:
             return error("selection_not_found", 404)
         except Exception:

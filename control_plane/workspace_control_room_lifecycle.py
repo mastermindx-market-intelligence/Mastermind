@@ -7,6 +7,7 @@ accompanying narrow CCR refresh-handle patch; installation belongs to the host.
 from __future__ import annotations
 
 import asyncio
+from control_plane.workspace_owned_task import await_owned
 import math
 import threading
 import time
@@ -63,12 +64,11 @@ class HostedControlRoom:
     async def start(self):
         task = asyncio.create_task(asyncio.to_thread(self._start))
         try:
-            await asyncio.shield(task)
+            await await_owned(task)
         except asyncio.CancelledError:
-            try:
-                await asyncio.shield(task)
-            finally:
-                await self.close()
+            # await_owned only releases cancellation after startup is terminal.
+            # Cleanup cannot race unfinished server construction.
+            await self.close()
             raise
 
     def _close(self):
@@ -96,8 +96,4 @@ class HostedControlRoom:
 
     async def close(self):
         task = asyncio.create_task(asyncio.to_thread(self._close))
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            await asyncio.shield(task)
-            raise
+        await await_owned(task)

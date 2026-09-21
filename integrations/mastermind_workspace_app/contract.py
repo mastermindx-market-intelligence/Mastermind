@@ -167,4 +167,12 @@ def workspace_authorizers(*, policy, load_bindings):
 def permission_stamp(authorizer, principal):
     """Request-owned stamp for the existing sealed permission receipt, if supplied."""
     stamp = getattr(authorizer, "binding_digest", None)
-    return stamp(principal) if callable(stamp) else None
+    if not callable(stamp):
+        return None
+    try:
+        value = stamp(principal)
+    except Exception:
+        raise ValueError("access_denied") from None
+    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ValueError("access_denied")
+    return value

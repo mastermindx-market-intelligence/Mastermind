@@ -57,3 +57,20 @@ def test_two_distinct_clients_keep_independent_revocation():
     assert authorize(principal("web")) and authorize(principal("mac"))
     source["profiles"]["web"]["enabled"] = False
     assert not authorize(principal("web")) and authorize(principal("mac"))
+
+
+@pytest.mark.parametrize("value", [None, "", "A" * 64, 17, "a" * 63])
+def test_configured_stamp_requires_closed_digest(value):
+    gate = lambda principal: True
+    gate.binding_digest = lambda principal: value
+    with pytest.raises(ValueError, match="access_denied"):
+        permission_stamp(gate, {})
+
+
+def test_configured_stamp_loader_exception_is_denial():
+    gate = lambda principal: True
+    def unavailable(principal):
+        raise RuntimeError("fixture source unavailable")
+    gate.binding_digest = unavailable
+    with pytest.raises(ValueError, match="access_denied"):
+        permission_stamp(gate, {})

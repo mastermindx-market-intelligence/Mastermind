@@ -295,8 +295,8 @@ async def programs_current(
     if permit is not None:
         return permit
 
-    permission_before = contract.permission_stamp(config.authorize_principal, principal)
     try:
+        permission_before = contract.permission_stamp(config.authorize_principal, principal)
         principal_frame = contract.principal_frame(principal)
     except ValueError:
         return _refuse_json(403, "access_denied")
@@ -331,7 +331,10 @@ async def programs_current(
     if permit_after is not None:
         return permit_after
 
-    if contract.permission_stamp(config.authorize_principal, principal) != permission_before:
+    try:
+        if contract.permission_stamp(config.authorize_principal, principal) != permission_before:
+            return _refuse_json(403, "access_denied")
+    except Exception:
         return _refuse_json(403, "access_denied")
     return _envelope_response(envelope)
 
@@ -369,8 +372,8 @@ async def mission_current(
     if permit is not None:
         return permit
 
-    permission_before = contract.permission_stamp(config.authorize_principal, principal)
     try:
+        permission_before = contract.permission_stamp(config.authorize_principal, principal)
         principal_frame = contract.principal_frame(principal)
     except ValueError:
         return _refuse_json(403, "access_denied")
@@ -401,7 +404,10 @@ async def mission_current(
     if permit_after is not None:
         return permit_after
 
-    if contract.permission_stamp(config.authorize_principal, principal) != permission_before:
+    try:
+        if contract.permission_stamp(config.authorize_principal, principal) != permission_before:
+            return _refuse_json(403, "access_denied")
+    except Exception:
         return _refuse_json(403, "access_denied")
     return _envelope_response(envelope)
 
