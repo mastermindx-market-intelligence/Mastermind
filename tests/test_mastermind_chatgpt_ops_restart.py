@@ -1,3 +1,4 @@
+import contextlib
 import json
 import subprocess
 import sys
@@ -93,6 +94,24 @@ class OpsRestartTests(unittest.TestCase):
             reason_code="health_recovery",
         )
 
+    def restart(self, request, **kwargs):
+        kwargs.setdefault("lock_fn", contextlib.nullcontext)
+        return ops.restart_exact_service(request, **kwargs)
+
+    def test_lock_contention_refuses_before_observation_or_owner_effect(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            owner = SequenceOwner([self.observation()])
+            with patch.object(ops, "CONTROL_ROOT", root):
+                with ops._restart_lock():
+                    with self.assertRaisesRegex(RuntimeError, "restart already in progress"):
+                        ops.restart_exact_service(
+                            self.request(), observe_fn=owner.observe, action_fn=owner.action
+                        )
+            self.assertEqual(owner.actions, [])
+            self.assertEqual(len(owner.observations), 1)
+
     def test_service_mapping_is_closed_to_four_personal_seats(self):
         self.assertEqual(
             ops.SERVICE_TO_ACCOUNT,
@@ -141,14 +160,14 @@ class OpsRestartTests(unittest.TestCase):
         before = self.observation()
         after = self.observation(instance="3" * 64)
         owner = SequenceOwner([before, after])
-        result = ops.restart_exact_service(
+        result = self.restart(
             self.request(), observe_fn=owner.observe, action_fn=owner.action
         )
         self.assertEqual(result.state, RestartState.APPLIED)
         self.assertTrue(result.ready)
         self.assertEqual(owner.actions, [("chatgpt1", "stop"), ("chatgpt1", "start")])
 
-        duplicate = ops.restart_exact_service(
+        duplicate = self.restart(
             self.request(), observe_fn=lambda _: after, action_fn=owner.action
         )
         self.assertEqual(duplicate.state, RestartState.NOT_APPLIED)
@@ -159,7 +178,7 @@ class OpsRestartTests(unittest.TestCase):
         before = self.observation()
         after = self.observation(instance="4" * 64)
         owner = SequenceOwner([before, after], fail_after=1)
-        result = ops.restart_exact_service(
+        result = self.restart(
             self.request(), observe_fn=owner.observe, action_fn=owner.action
         )
         self.assertEqual(result.state, RestartState.APPLIED)
@@ -169,7 +188,7 @@ class OpsRestartTests(unittest.TestCase):
     def test_lost_response_without_generation_change_is_effect_unknown(self):
         before = self.observation()
         owner = SequenceOwner([before, before], fail_after=1)
-        result = ops.restart_exact_service(
+        result = self.restart(
             self.request(), observe_fn=owner.observe, action_fn=owner.action
         )
         self.assertEqual(result.state, RestartState.EFFECT_UNKNOWN)
@@ -179,7 +198,7 @@ class OpsRestartTests(unittest.TestCase):
         before = self.observation()
         after = self.observation(instance="5" * 64, build="6" * 64)
         owner = SequenceOwner([before, after])
-        result = ops.restart_exact_service(
+        result = self.restart(
             self.request(), observe_fn=owner.observe, action_fn=owner.action
         )
         self.assertEqual(result.state, RestartState.APPLIED)
@@ -196,13 +215,13 @@ class OpsRestartTests(unittest.TestCase):
                 expected_build_identity=before.build_identity,
                 reason_code="release_canary",
             )
-            result = ops.restart_exact_service(
+            result = self.restart(
                 request, observe_fn=owner.observe, action_fn=owner.action
             )
             self.assertEqual(result.state, RestartState.APPLIED)
             self.assertNotEqual(result.instance_identity, before.instance_identity)
             calls = list(owner.actions)
-            duplicate = ops.restart_exact_service(
+            duplicate = self.restart(
                 request, observe_fn=owner.observe, action_fn=owner.action
             )
             self.assertEqual(duplicate.state, RestartState.NOT_APPLIED)

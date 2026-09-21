@@ -8,6 +8,8 @@ server chooses the fixed account mapping and existing service-manager helper.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -44,6 +46,7 @@ PRIVATE_ROOT = Path.home() / ".local" / "share" / "studio-direct-mcp" / "private
 MANIFEST_NAME = "manifest.json"
 MAX_MANIFEST_BYTES = 64 * 1024
 OWNER_ACTION_TIMEOUT_SECONDS = 96
+RESTART_LOCK_NAME = ".scf-ops-restart.lock"
 _TUNNEL = re.compile(r"^tunnel_[0-9a-f]{32}$")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 
@@ -227,6 +230,46 @@ def _run_owner_action(account: str, action: str) -> dict[str, object]:
     return value
 
 
+@contextlib.contextmanager
+def _restart_lock():
+    """Serialize SCF restart attempts without owning service lifecycle state."""
+    try:
+        root_info = CONTROL_ROOT.lstat()
+    except OSError as exc:
+        raise RuntimeError("existing Studio Direct control root is unavailable") from exc
+    if (
+        CONTROL_ROOT.is_symlink()
+        or not stat.S_ISDIR(root_info.st_mode)
+        or root_info.st_uid != os.getuid()
+        or stat.S_IMODE(root_info.st_mode) & 0o077
+    ):
+        raise RuntimeError("existing Studio Direct control root is unsafe")
+    path = CONTROL_ROOT / RESTART_LOCK_NAME
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise RuntimeError("restart serialization lock is unavailable") from exc
+    try:
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+            or stat.S_IMODE(info.st_mode) & 0o077
+        ):
+            raise RuntimeError("restart serialization lock is unsafe")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("restart already in progress") from exc
+        yield
+    finally:
+        os.close(fd)
+
+
 def _effect_unknown(request: RestartRequest, code: str, observed: RestartObservation | None) -> RestartResult:
     return RestartResult(
         RestartState.EFFECT_UNKNOWN,
@@ -253,19 +296,12 @@ def _applied(request: RestartRequest, observed: RestartObservation, code: str) -
     )
 
 
-def restart_exact_service(
+def _restart_exact_service_locked(
     request: RestartRequest,
     *,
-    observe_fn: Callable[[str], RestartObservation] = observe_exact_service,
-    action_fn: Callable[[str, str], dict[str, object]] = _run_owner_action,
+    observe_fn: Callable[[str], RestartObservation],
+    action_fn: Callable[[str, str], dict[str, object]],
 ) -> RestartResult:
-    """Restart exactly one allowlisted service through its incumbent owner.
-
-    The expected instance identity is also the no-duplicate fence: after a
-    successful restart the generation changes, so replaying the same request
-    refuses before any second owner action.
-    """
-    request = validate_request(request)
     account = _closed_service(request.service_ref)
     before = observe_fn(request.service_ref)
     refusal = preflight_restart(request, before)
@@ -295,6 +331,26 @@ def restart_exact_service(
     if not after.ready:
         return _applied(request, after, "APPLIED_NOT_READY")
     return _applied(request, after, "APPLIED_READY")
+
+
+def restart_exact_service(
+    request: RestartRequest,
+    *,
+    observe_fn: Callable[[str], RestartObservation] = observe_exact_service,
+    action_fn: Callable[[str, str], dict[str, object]] = _run_owner_action,
+    lock_fn=None,
+) -> RestartResult:
+    """Restart one exact service while serializing duplicate SCF effects.
+
+    The lock is invocation-local synchronization only; Studio Direct remains the
+    lifecycle owner. The instance identity still fences replay after completion.
+    """
+    request = validate_request(request)
+    lock_factory = _restart_lock if lock_fn is None else lock_fn
+    with lock_factory():
+        return _restart_exact_service_locked(
+            request, observe_fn=observe_fn, action_fn=action_fn
+        )
 
 
 def _request_from_args(args: argparse.Namespace) -> RestartRequest:
