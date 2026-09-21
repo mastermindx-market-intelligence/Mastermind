@@ -9940,3 +9940,49 @@ def test_ambient_process_and_invalid_provider_result_fail_job_keep_service_ready
             await service.close()
 
     asyncio.run(exercise())
+
+def test_service_schedules_recovered_runs_through_existing_dispatch_registry() -> None:
+    async def scenario() -> None:
+        attempt = type(
+            "AttemptFixture",
+            (),
+            {"attempt_id": "ATT-recovered", "job_id": "JOB-recovered"},
+        )()
+        active = type(
+            "ActiveFixture",
+            (),
+            {"lease": type("LeaseFixture", (), {"attempt": attempt})()},
+        )()
+
+        class Supervisor:
+            def __init__(self) -> None:
+                self.values = [active]
+                self.finished: list[object] = []
+
+            def take_recovered_runs(self):
+                values = tuple(self.values)
+                self.values.clear()
+                return values
+
+            async def finish_job(self, value):
+                self.finished.append(value)
+
+        supervisor = Supervisor()
+        service = object.__new__(es_mod.ExecutiveControlService)
+        service.supervisor = supervisor
+        service._dispatch_tasks = {}
+        service._dispatch_errors = {}
+        service._service_state = "READY"
+
+        async def no_projection(_job_id, *, expected_attempt_id):
+            assert expected_attempt_id == "ATT-recovered"
+
+        service._project_terminal_return = no_projection
+        await service._schedule_recovered_runs()
+        tasks = tuple(service._dispatch_tasks.values())
+        assert len(tasks) == 1
+        await asyncio.gather(*tasks)
+        assert supervisor.finished == [active]
+        assert service._dispatch_tasks == {}
+
+    asyncio.run(scenario())
