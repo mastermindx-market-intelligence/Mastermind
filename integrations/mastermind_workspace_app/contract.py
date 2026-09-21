@@ -11,11 +11,31 @@ from control_plane.wake_events import JOB_ID_RE
 RESOURCE = "https://mcp.mastermind-x.com/workspace/read"
 SCOPE = "mastermind.workspace.read"
 FRAME_SCHEMA = "mastermind.executive_workspace_read.v1"
+#: v2 frame schema and result observation schema for the result-detail and
+#: Mission v3 routes.  Frozen by the parent-ratified workspace contract.
+FRAME_SCHEMA_V2 = "mastermind.executive_workspace_read.v2"
 PROGRAMS_SCHEMA = "mastermind.workspace_programs.v1"
 OBSERVATION_SCHEMA = "mastermind.workspace_source_observation.v1"
+RESULT_OBSERVATION_SCHEMA = "mastermind.workspace_result_observation.v1"
+RESULT_BODY_SCHEMA = "mastermind.workspace_role_result.v1"
+PROJECTION_SCHEMA = "mastermind.fabric_role_result_view.v1"
+FABRIC_VIEW_SCHEMA_V2 = "mastermind.fabric_job_view.v2"
+FABRIC_VIEW_SCHEMA_V3 = "mastermind.fabric_job_view.v3"
 MAX_REQUEST_BYTES = 8192
 MAX_RESPONSE_BYTES = 2_000_000
+#: Result response ceiling — the entire canonical UTF-8 socket
+#: ``{ok:true,result:BODY}`` serialization including the trailing LF must fit
+#: in this many bytes, and the public BODY serialization must also fit alone.
+MAX_RESULT_RESPONSE_BYTES = 16_384
 _WORK_REF = re.compile(r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}")
+#: Frozen v2 C public shape JOB-[0-9]{1,9} with the existing max16-character
+#: guard.  Differs from the legacy ``wake_events.JOB_ID_RE`` (3+ digits) only
+#: in the lower bound, which the v2 contract freezes to 1+ to match the
+#: ``D_IMPLEMENTATION_PACKET`` job ID grammar.
+_JOB_ID_RE_V2 = re.compile(r"^JOB-[0-9]{1,9}$")
+_JOB_ID_MAX = 16
+_ATTEMPT_ID = re.compile(r"^ATT-[0-9a-f]{32}$")
+_DIGEST_64 = re.compile(r"^[0-9a-f]{64}$")
 PRINCIPAL_KEYS = frozenset({"policy_id", "issuer_digest", "subject_digest", "client_ref", "resource", "scopes"})
 
 
@@ -34,6 +54,89 @@ def selection(value):
             or not JOB_ID_RE.fullmatch(value["root_job_id"])):
         raise ValueError("invalid_input")
     return dict(value)
+
+
+# ---------------------------------------------------------------------------
+# v2 frozen selector grammar — same work_ref/job/attempt/digest patterns.
+# ---------------------------------------------------------------------------
+
+
+def _check_work_ref(value):
+    return type(value) is str and _WORK_REF.fullmatch(value) is not None
+
+
+def _check_job_id(value):
+    return (type(value) is str and len(value) <= _JOB_ID_MAX
+            and _JOB_ID_RE_V2.fullmatch(value) is not None)
+
+
+def _check_attempt_id(value):
+    return type(value) is str and _ATTEMPT_ID.fullmatch(value) is not None
+
+
+def _check_envelope_digest(value):
+    return type(value) is str and _DIGEST_64.fullmatch(value) is not None
+
+
+def v2_selection(value, operation):
+    """Validate the v2 selection exactly against the closed operation grammar.
+
+    Returns a detached dict.  Raises ``ValueError("invalid_input")`` on any
+    shape deviation, missing/extra/duplicate field, malformed selector token,
+    or operation/grammar confusion.  These are selectors, not authority —
+    Runtime remains the actual acceptor.
+    """
+    if type(value) is not dict:
+        raise ValueError("invalid_input")
+    keys = set(value)
+    if operation == "result":
+        expected = {"work_ref", "root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
+    elif operation == "mission_v3":
+        expected = {"work_ref", "root_job_id"}
+    else:
+        raise ValueError("invalid_input")
+    if keys != expected:
+        raise ValueError("invalid_input")
+    if not _check_work_ref(value["work_ref"]):
+        raise ValueError("invalid_input")
+    if not _check_job_id(value["root_job_id"]):
+        raise ValueError("invalid_input")
+    if operation == "result":
+        if not _check_job_id(value["job_id"]):
+            raise ValueError("invalid_input")
+        if not _check_attempt_id(value["attempt_id"]):
+            raise ValueError("invalid_input")
+        if not _check_envelope_digest(value["result_envelope_digest"]):
+            raise ValueError("invalid_input")
+    return {key: value[key] for key in sorted(expected)}
+
+
+def validate_v2_frame(frame):
+    """Validate one frozen v2 frame: schema, operation, selection, principal."""
+    if (type(frame) is not dict or set(frame) != {"schema", "operation", "selection", "principal"}
+            or frame["schema"] != FRAME_SCHEMA_V2
+            or frame["operation"] not in ("mission_v3", "result")
+            or type(frame["principal"]) is not dict or set(frame["principal"]) != PRINCIPAL_KEYS
+            or frame["principal"]["resource"] != RESOURCE or frame["principal"]["scopes"] != [SCOPE]
+            or any(type(frame["principal"][key]) is not str or not 1 <= len(frame["principal"][key]) <= 256
+                   for key in PRINCIPAL_KEYS - {"scopes"})):
+        raise ValueError("invalid_input")
+    v2_selection(frame["selection"], frame["operation"])
+    if len(canonical(frame)) + 1 > MAX_REQUEST_BYTES:
+        raise ValueError("invalid_input")
+    return frame
+
+
+def response_ceiling_for(operation):
+    """Return the frozen response ceiling for the supplied v2 operation.
+
+    Returns the existing Mission v2 ``MAX_RESPONSE_BYTES`` for unknown or
+    v1 operations and the 16384-byte result ceiling for ``"result"`` so the
+    caller cannot widen an unknown frame to a larger ceiling.
+    """
+    if operation == "result":
+        return MAX_RESULT_RESPONSE_BYTES
+    return MAX_RESPONSE_BYTES
 
 
 def principal_frame(principal):

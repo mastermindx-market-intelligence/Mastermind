@@ -333,8 +333,18 @@ class _ExecutivePathFence:
         self._workspace_routes = set()
         self._public_routes = set()
         if workspace_app is not None:
-            self._workspace_routes.update(("/workspace/programs/current", "/workspace/mission/current"))
-            self._query_routes.add("/workspace/mission/current")
+            self._workspace_routes.update((
+                "/workspace/programs/current",
+                "/workspace/mission/current",
+                "/workspace/mission/v3/current",
+                "/workspace/result/current",
+            ))
+            # v2 routes carry a query string; the legacy v1 mission route does too.
+            self._query_routes.update((
+                "/workspace/mission/current",
+                "/workspace/mission/v3/current",
+                "/workspace/result/current",
+            ))
         if content_app is not None:
             self._workspace_routes.add("/workspace/window/current")
         self._routes.update({path: "GET" for path in self._workspace_routes})
@@ -708,7 +718,10 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any,
     ]
     if workspace_app is not None:
         outer_routes.extend(Route(path, workspace_app, methods=["GET"]) for path in
-                            ("/workspace/programs/current", "/workspace/mission/current"))
+                            ("/workspace/programs/current",
+                             "/workspace/mission/current",
+                             "/workspace/mission/v3/current",
+                             "/workspace/result/current"))
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))
     if os_app is not None:

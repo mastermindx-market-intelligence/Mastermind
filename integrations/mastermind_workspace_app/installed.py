@@ -9,7 +9,14 @@ import asyncio
 import json
 from pathlib import Path
 
-from .contract import MAX_RESPONSE_BYTES, canonical, validate_frame
+from .contract import (
+    MAX_RESPONSE_BYTES,
+    MAX_RESULT_RESPONSE_BYTES,
+    canonical,
+    response_ceiling_for,
+    validate_frame,
+    validate_v2_frame,
+)
 
 
 class CeoIngressWorkspaceClient:
@@ -21,16 +28,27 @@ class CeoIngressWorkspaceClient:
         self.timeout_seconds = timeout_seconds
 
     async def request(self, frame):
-        validate_frame(frame)
+        # Frozen v2 frames use the exact same wire envelope as v1; only the
+        # schema name and selection grammar differ.  Operation-driven response
+        # ceiling selection happens BEFORE the socket is opened so a misrouted
+        # result frame can never widen into the larger Mission ceiling.
+        if isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v2":
+            validate_v2_frame(frame)
+            ceiling = response_ceiling_for(frame.get("operation"))
+        else:
+            validate_frame(frame)
+            ceiling = MAX_RESPONSE_BYTES
         encoded = canonical(frame) + b"\n"
 
         async def exchange():
-            reader, writer = await asyncio.open_unix_connection(str(self.socket_path), limit=MAX_RESPONSE_BYTES)
+            # The receive limit mirrors the operation's closed ceiling so an
+            # oversized socket envelope never materializes in this client.
+            reader, writer = await asyncio.open_unix_connection(str(self.socket_path), limit=ceiling)
             try:
                 writer.write(encoded)
                 await writer.drain()
                 raw = await reader.readuntil(b"\n")
-                if len(raw) > MAX_RESPONSE_BYTES:
+                if len(raw) > ceiling:
                     raise ValueError("source_unavailable")
                 value = json.loads(raw)
                 if type(value) is not dict:
@@ -50,3 +68,7 @@ class CeoIngressWorkspaceClient:
             return await asyncio.wait_for(exchange(), self.timeout_seconds)
         except Exception:
             raise ValueError("source_unavailable") from None
+
+
+# Re-exported for tests and the App to import the operation-specific ceiling.
+__all__ = ["CeoIngressWorkspaceClient", "MAX_RESULT_RESPONSE_BYTES"]
