@@ -1638,6 +1638,9 @@ class CeoIngressAppBinding:
     armed: bool
     grounding_provider: ceo_ingress.GroundingProvider
     read_provider: Any | None = None
+    content_provider_factory: Callable[[Runtime], Any] | None = None
+    steward_provider_factory: Callable[[Runtime], Any] | None = None
+    workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
 
     def __post_init__(self) -> None:
@@ -1678,6 +1681,7 @@ class ExecutiveControlService:
         ) = None,
         ceo_ingress_armed: bool = False,
         ceo_ingress_app_binding: CeoIngressAppBinding | None = None,
+        workspace_control_room: Any | None = None,
         ceo_ingress_activated_socket: socket.socket | None = None,
         terminal_return_projector: TerminalReturnProjector | None = None,
         terminal_return_projector_factory: (
@@ -1695,6 +1699,7 @@ class ExecutiveControlService:
     ) -> None:
         self.config = config
         self._runtime_factory = runtime_factory
+        self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
         self._operator_supervisor_factory = operator_supervisor_factory
         self._operator_identity_verifier = operator_identity_verifier
@@ -1787,6 +1792,12 @@ class ExecutiveControlService:
         self._coo_last_error: str | None = None
         self._coo_last_tick_at: str | None = None
         self._closing = False
+        self._namespace_custody = None
+        self._operator_handlers: set[asyncio.Task[Any]] = set()
+        self._operator_writers: set[asyncio.StreamWriter] = set()
+        self._physical_workers: set[asyncio.Task[Any]] = set()
+        self._listener_drains: set[asyncio.Task[Any]] = set()
+        self._read_provider_drain: asyncio.Task[Any] | None = None
         self._startup_reconciliation: list[Any] = []
         self._started_at: str | None = None
         if service_state not in {"READY", "AWAITING_CANARY"}:
@@ -2191,10 +2202,18 @@ class ExecutiveControlService:
             raise ServiceError("Executive supervisor cannot activate a complete canary")
         supervisor.secret_canary_verdict = validated
         supervisor.require_complete_launch_attestation = True
-        self._startup_reconciliation = await asyncio.to_thread(
+        self._startup_reconciliation = await self._run_physical(
             supervisor.reconcile_restart,
             requeue_lost=False,
         )
+        await self._schedule_recovered_runs()
+        if self._reconciliation_requires_quarantine(
+            self._startup_reconciliation
+        ):
+            self._service_state = "QUARANTINED"
+            raise StateConflict(
+                "Executive restart reconciliation was quarantined"
+            )
         # Activation is the first moment this bootstrap-quarantined instance
         # may resume durable terminal obligations.  Replay while admission is
         # still closed; exposing READY first would create a race and omitting
@@ -2611,6 +2630,8 @@ class ExecutiveControlService:
     async def start(self) -> None:
         if self._server is not None:
             raise ServiceError("Executive control service is already started")
+        if self._namespace_custody is not None and not self._namespace_custody._closed:
+            raise ServiceError("previous Runtime namespace custody is still retained")
         self._closing = False
         self._require_current_autonomy()
         self._prepare_socket()
@@ -2619,6 +2640,13 @@ class ExecutiveControlService:
             health = self._database_health()
             if not health["ok"]:
                 raise ServiceError(f"Executive database health check failed: {health!r}")
+            from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+            self._namespace_custody = ServiceRuntimeNamespaceCustody(
+                runtime=self.runtime, service_lock_fd=self._lock_fd,
+                lock_path=self.service_lock_path, marker_path=self.running_marker_path,
+                instance_id=self.instance_id,
+            )
+            self._namespace_custody.start()
             if self._supervisor_factory is None:
                 raise ServiceError("supervisor_factory is required for startup reconciliation")
             self.supervisor = self._supervisor_factory(self.runtime)
@@ -2638,17 +2666,24 @@ class ExecutiveControlService:
             # Startup reconciliation must never auto-requeue.  LOST work returns
             # to QUEUED only through the explicit requeue command.
             if self._service_state == "READY":
-                self._startup_reconciliation = await asyncio.to_thread(
+                self._startup_reconciliation = await self._run_physical(
                     self.supervisor.reconcile_restart, requeue_lost=False
                 )
                 if self.operator_supervisor is not None:
                     self._startup_reconciliation.extend(
-                        await asyncio.to_thread(
+                        await self._run_physical(
                             self.operator_supervisor.reconcile_restart,
                             requeue_lost=False,
                         )
                     )
+                await self._schedule_recovered_runs()
+                if self._reconciliation_requires_quarantine(
+                    self._startup_reconciliation
+                ):
+                    self._service_state = "QUARANTINED"
                 await self._replay_terminal_returns_on_startup()
+            if self._workspace_control_room is not None:
+                await self._workspace_control_room.start()
             if (
                 self._ceo_ingress_socket_path is not None
                 or self._dialogue_observation_socket_path is not None
@@ -2682,7 +2717,10 @@ class ExecutiveControlService:
             # (Operator starts second, so this line already runs after both),
             # unchanged single-listener timing otherwise.
             self._started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            if self.config.coo_autonomy_armed:
+            if (
+                self.config.coo_autonomy_armed
+                and self._service_state == "READY"
+            ):
                 self._coo_shutdown_event = asyncio.Event()
                 self._coo_tick_task = asyncio.create_task(
                     self._coo_tick_loop(),
@@ -2723,19 +2761,24 @@ class ExecutiveControlService:
             observation_server.close()
         if ceo_ingress_server is not None:
             ceo_ingress_server.close()
-        if server is not None:
-            await server.wait_closed()
-        if observation_server is not None:
-            await observation_server.wait_closed()
-        if ceo_ingress_server is not None:
-            await ceo_ingress_server.wait_closed()
+        # Python 3.12 Server.wait_closed also waits for accepted transports.
+        # Close/drain those transports before awaiting listener completion.
+        for listener in (server, observation_server, ceo_ingress_server):
+            if listener is not None:
+                self._listener_drains.add(asyncio.create_task(listener.wait_closed()))
 
-        coo_tick, self._coo_tick_task = self._coo_tick_task, None
+        for writer in tuple(self._operator_writers):
+            writer.close()
+        await self._drain_service_tasks(self._operator_handlers)
+        await self._drain_service_tasks(self._physical_workers)
+
+        coo_tick = self._coo_tick_task
         if coo_tick is not None:
             # A CooCycle action can cross a durable mutation/claim boundary in
             # its worker thread.  Cancellation would not stop that thread, so
             # shutdown drains the one bounded action to a real return point.
-            await asyncio.gather(coo_tick, return_exceptions=True)
+            await self._drain_service_tasks([coo_tick])
+        self._coo_tick_task = None
         self._coo_shutdown_event = None
         current_task = asyncio.current_task()
         coo_actions = [
@@ -2744,7 +2787,7 @@ class ExecutiveControlService:
             if task is not current_task and not task.done()
         ]
         if coo_actions:
-            await asyncio.gather(*coo_actions, return_exceptions=True)
+            await self._drain_service_tasks(coo_actions)
         self._coo_action_tasks.clear()
 
         # Dispatch finishers are terminal-return producers.  Stop/drain them
@@ -2756,6 +2799,13 @@ class ExecutiveControlService:
         if runtime is not None:
             for job_id, task in list(self._dispatch_tasks.items()):
                 if task.done():
+                    continue
+                if task.get_name().startswith(
+                    "executive-recovered-finish-"
+                ):
+                    # A service restart relinquishes only the in-memory
+                    # collector. The exact worker remains owned by its durable
+                    # Attempt and will be reattached by the replacement.
                     continue
                 try:
                     job = runtime.jobs.get_job(job_id)
@@ -2776,7 +2826,7 @@ class ExecutiveControlService:
             for task in pending:
                 task.cancel()
             if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
+                await self._drain_service_tasks(pending)
         self._dispatch_tasks.clear()
 
         # A terminal-return flight may already have crossed the durable
@@ -2790,42 +2840,39 @@ class ExecutiveControlService:
             if task is not current_task and not task.done()
         ]
         if terminal_flights:
-            terminal_drain = asyncio.gather(
-                *terminal_flights,
-                return_exceptions=True,
-            )
-            try:
-                await asyncio.shield(terminal_drain)
-            except asyncio.CancelledError as exc:
-                # ``close()`` is itself caller-owned and may be cancelled,
-                # but the already-ATTEMPTED Relay flight is service-owned.
-                # Defer the caller cancellation until the flight reaches a
-                # durable terminal phase and all service cleanup below has
-                # completed.  Shield every subsequent wait so a repeated
-                # cancellation request still cannot reach the owned flight.
-                deferred_terminal_cancel = exc
-                while not terminal_drain.done():
-                    try:
-                        await asyncio.shield(terminal_drain)
-                    except asyncio.CancelledError:
-                        continue
+            # Preserve deferred caller cancellation for an already-attempted
+            # Relay flight, while bounding the drain by one monotonic deadline.
+            deadline = asyncio.get_running_loop().time() + self.config.shutdown_grace_seconds
+            pending = set(terminal_flights)
+            while pending:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise ServiceError("terminal service work has not drained; custody retained")
+                try:
+                    _, pending = await asyncio.wait(pending, timeout=remaining)
+                except asyncio.CancelledError as exc:
+                    deferred_terminal_cancel = exc
         self._terminal_return_flights.clear()
 
         # §14.2 — CeoIngress handler tasks are NEVER cancelled here, unlike the
         # dispatch tasks above.  A handler whose sync ``submit_intent`` thread
         # has already started cannot be safely cancelled (cancelling the
         # awaiting coroutine does not cancel the underlying thread/
-        # transaction), so ``close()`` waits every already-started handler to
-        # a REAL terminal outcome with no grace-period timeout.  The service
-        # lock/marker below is not released until this drains.
+        # transaction), so timeout retains the service lock and Runtime until
+        # each already-started handler and its physical worker have drained.
         ceo_ingress_tasks = [task for task in self._ceo_ingress_tasks if not task.done()]
         if ceo_ingress_tasks:
-            await asyncio.gather(*ceo_ingress_tasks, return_exceptions=True)
+            await self._drain_service_tasks(ceo_ingress_tasks)
         self._ceo_ingress_tasks.clear()
+        if self._workspace_control_room is not None:
+            await self._workspace_control_room.close()
         if self._ceo_ingress_app_binding is not None:
             read_provider = self._ceo_ingress_app_binding.read_provider
             if read_provider is not None:
-                await read_provider.aclose()
+                if self._read_provider_drain is None:
+                    self._read_provider_drain = asyncio.create_task(read_provider.aclose())
+                await self._drain_service_tasks([self._read_provider_drain])
+                self._read_provider_drain.result()
         observation_task_set = getattr(self, "_dialogue_observation_tasks", None)
         observation_tasks = [
             task
@@ -2833,9 +2880,19 @@ class ExecutiveControlService:
             if task is not current_task and not task.done()
         ]
         if observation_tasks:
-            await asyncio.gather(*observation_tasks, return_exceptions=True)
+            await self._drain_service_tasks(observation_tasks)
         if observation_task_set is not None:
             observation_task_set.clear()
+
+        await self._drain_service_tasks(self._physical_workers)
+        await self._drain_service_tasks(self._listener_drains)
+        for listener_drain in self._listener_drains:
+            listener_drain.result()
+        self._listener_drains.clear()
+        if self._namespace_custody is not None:
+            self._namespace_custody.close(
+                timeout_seconds=min(30.0, self.config.shutdown_grace_seconds)
+            )
 
         if not self._launchd_activated:
             try:
@@ -2904,10 +2961,42 @@ class ExecutiveControlService:
             == _PRODUCTION_CONTROL_SOCKET.resolve(strict=False)
         )
 
+    async def _run_physical(self, function, /, *args, **kwargs):
+        return await self._run_owned_coroutine(asyncio.to_thread(function, *args, **kwargs))
+
+    async def _run_owned_coroutine(self, coroutine):
+        # Includes the Operator supervisor's internal physical thread. The task
+        # belongs to the service even if its request is cancelled twice.
+        task = asyncio.create_task(coroutine)
+        self._physical_workers.add(task)
+
+        def finished(completed):
+            self._physical_workers.discard(completed)
+            if not completed.cancelled():
+                completed.exception()
+
+        task.add_done_callback(finished)
+        return await asyncio.shield(task)
+
+    async def _drain_service_tasks(self, tasks) -> None:
+        pending = {task for task in tasks
+                   if task is not asyncio.current_task() and not task.done()}
+        if pending:
+            _, pending = await asyncio.wait(
+                pending, timeout=self.config.shutdown_grace_seconds
+            )
+        if pending:
+            raise ServiceError("physical service work has not drained; custody retained")
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        task = asyncio.current_task()
+        self._operator_handlers.add(task)
+        self._operator_writers.add(writer)
         try:
+            if self._closing:
+                return
             connection = writer.get_extra_info("socket")
             if connection is None:
                 raise ServiceError("control connection has no local socket identity")
@@ -2927,7 +3016,8 @@ class ExecutiveControlService:
                     "platform exposes no trusted local peer uid",
                 )
                 return
-            if peer not in self._allowed_peer_uids():
+            control_peer = peer == os.geteuid()
+            if peer not in self._allowed_peer_uids() and not control_peer:
                 await self._send_error(writer, "peer_denied", "peer uid is not authorized")
                 return
             try:
@@ -2944,6 +3034,41 @@ class ExecutiveControlService:
                 request = json.loads(raw.decode("utf-8", errors="strict"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 await self._send_error(writer, "invalid_json", "request is not valid UTF-8 JSON")
+                return
+            lifecycle_commands = {"content-observer-enroll": "enroll", "content-observer-status": "status", "content-observer-revoke": "revoke"}
+            if isinstance(request, dict) and isinstance(request.get("command"), str) and request["command"] in lifecycle_commands:
+                if not control_peer:
+                    await self._send_error(writer, "peer_denied", "content enrollment requires control uid")
+                    return
+                try:
+                    command, args = self._request(request)
+                    # profile_key is optional; None means legacy single-profile
+                    profile_key = None
+                    if "profile_key" in args:
+                        from integrations.executive_content_contract import ContentProfileKey
+                        pk = args["profile_key"]
+                        if isinstance(pk, str) and pk in (ContentProfileKey.web, ContentProfileKey.mac):
+                            profile_key = ContentProfileKey(pk)
+                        else:
+                            raise ValueError("INVALID_REQUEST")
+                        self._exact_args(args, {"profile_key"})
+                    else:
+                        self._exact_args(args, set())
+                    binding = self._ceo_ingress_app_binding
+                    if (binding is None or binding.content_provider_factory is None
+                            or self._service_state not in {"READY", "AWAITING_CANARY"}):
+                        raise ValueError("CONTENT_UNAVAILABLE")
+                    provider = binding.content_provider_factory(self._require_runtime())
+                    result = await getattr(provider, lifecycle_commands[command])(profile_key)
+                    from integrations.executive_content_contract import digest
+                    public = {"status": result["status"], "binding_digest": digest({
+                        "turn_key": result.get("turn_key"), "grant_generation": result.get("grant_generation")})}
+                    await self._send(writer, {"ok": True, "result": public})
+                except Exception:
+                    await self._send_error(writer, "content_observer_refused", "content observer action refused")
+                return
+            if peer not in self._allowed_peer_uids():
+                await self._send_error(writer, "peer_denied", "peer uid is not authorized")
                 return
             try:
                 result = await self._dispatch_request(request)
@@ -2983,6 +3108,8 @@ class ExecutiveControlService:
                 return
             await self._send(writer, {"ok": True, "result": result})
         finally:
+            self._operator_handlers.discard(task)
+            self._operator_writers.discard(writer)
             writer.close()
             try:
                 await writer.wait_closed()
@@ -3525,7 +3652,7 @@ class ExecutiveControlService:
                     type(wake_handler) is ExecutiveDialogueWakeBridge
                     and wake_handler.canary_profile is not None
                 ):
-                    source_result = await asyncio.to_thread(
+                    source_result = await self._run_physical(
                         wake_handler.reconcile_dialogue_sources,
                         runtime,
                         source_request,
@@ -3563,7 +3690,7 @@ class ExecutiveControlService:
                 )
                 if callable(provider):
                     try:
-                        facts = await asyncio.to_thread(
+                        facts = await self._run_physical(
                             provider, runtime, wake_request.parent
                         )
                         source_response = reduce_dialogue_observation(
@@ -3627,7 +3754,7 @@ class ExecutiveControlService:
                     }
                 else:
                     try:
-                        facts = await asyncio.to_thread(
+                        facts = await self._run_physical(
                             provider, runtime, request.parent
                         )
                         response = reduce_dialogue_observation(
@@ -3671,15 +3798,18 @@ class ExecutiveControlService:
         )
 
     async def _send_ceo_ingress_response(
-        self, writer: asyncio.StreamWriter, payload: Mapping[str, Any]
+        self, writer: asyncio.StreamWriter, payload: Mapping[str, Any],
+        *, response_ceiling: int = ceo_ingress.MAX_RESPONSE_BYTES,
     ) -> None:
         """Dedicated bounded sender (§7.4) — the 32 KiB ingress ceiling, never
         the generic ``_send()``'s ``ServiceConfig.max_response_bytes``.  A
         successful canonical receipt above the ingress bound is a protocol/
-        backend defect and refuses; it is never truncated."""
+        backend defect and refuses; it is never truncated.  ``response_ceiling``
+        widens that bound only for the installed App's framed content pages,
+        whose own contract ceiling is ``MAX_PAGE_BYTES``."""
 
         raw = _canonical_json(payload)
-        if len(raw) > ceo_ingress.MAX_RESPONSE_BYTES:
+        if len(raw) > response_ceiling:
             raw = _canonical_json(
                 {
                     "ok": False,
@@ -3806,6 +3936,40 @@ class ExecutiveControlService:
                 await self._send_ceo_ingress_error(
                     writer, "invalid_json", "request is not valid JSON"
                 )
+                return
+            from integrations.mastermind_workspace_app.contract import FRAME_SCHEMA, MAX_RESPONSE_BYTES as WORKSPACE_MAX_RESPONSE_BYTES, error as workspace_error, bounded_canonical as workspace_encode
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") == FRAME_SCHEMA:
+                factory = app_binding.workspace_read_provider_factory
+                if factory is None or self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                    result = workspace_error("source_unavailable", 503)
+                else:
+                    try:
+                        result = await factory(self._require_runtime()).handle_frame(parsed)
+                    except Exception:
+                        result = workspace_error("source_unavailable", 503)
+                    if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                        result = workspace_error("source_unavailable", 503)
+                try:
+                    workspace_encode(result, limit=WORKSPACE_MAX_RESPONSE_BYTES - 1)
+                except (TypeError, ValueError):
+                    result = workspace_error("source_unavailable", 503)
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=WORKSPACE_MAX_RESPONSE_BYTES)
+                return
+            from integrations.executive_content_contract import ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA, MAX_PAGE_BYTES
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA}:
+                factory = (app_binding.steward_provider_factory if parsed["schema"] == STEWARD_SCHEMA
+                           else app_binding.content_provider_factory)
+                if factory is None or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                    result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
+                else:
+                    try:
+                        result = await factory(self._require_runtime()).handle_frame(parsed)
+                    except Exception:
+                        result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
+                    if self._service_state not in {"READY", "AWAITING_CANARY"}:
+                        result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=(
+                    MAX_PAGE_BYTES if parsed["schema"] == PAGE_SCHEMA else ceo_ingress.MAX_RESPONSE_BYTES))
                 return
             if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
                 app_binding.read_schema, ceo_ingress.APP_GROUNDING_SCHEMA,
@@ -4163,7 +4327,7 @@ class ExecutiveControlService:
             nonce = uuid4().hex
             workspace_name = f"proof-{nonce}"
             branch = f"{self.config.proof_branch}-{nonce}"
-            receipt = await asyncio.to_thread(
+            receipt = await self._run_physical(
                 prepare_credentialless_clone,
                 self.config.proof_source_repository,
                 self.config.proof_workspace_root,
@@ -4563,8 +4727,8 @@ class ExecutiveControlService:
             job = runtime.jobs.get_job(job_id)
             if job is None or not self._is_fixed_proof_job(job):
                 raise StateConflict("service requeue accepts only its fixed harmless proof job")
-            rotation = await asyncio.to_thread(self._rotate_proof_workspace, job)
-            requeued = await asyncio.to_thread(runtime.jobs.requeue_job, job_id)
+            rotation = await self._run_physical(self._rotate_proof_workspace, job)
+            requeued = await self._run_physical(runtime.jobs.requeue_job, job_id)
             result = requeued.to_dict()
             result["workspace_rotation"] = rotation
             return result
@@ -4861,13 +5025,13 @@ class ExecutiveControlService:
         ]
         if not active:
             return
-        receipts = await asyncio.to_thread(
+        receipts = await self._run_physical(
             self._require_supervisor().reconcile_restart,
             requeue_lost=False,
         )
         if self.operator_supervisor is not None:
             receipts.extend(
-                await asyncio.to_thread(
+                await self._run_physical(
                     self.operator_supervisor.reconcile_restart,
                     requeue_lost=False,
                 )
@@ -4926,8 +5090,8 @@ class ExecutiveControlService:
                     else self._require_supervisor()
                 )
                 try:
-                    started = await supervisor.start_cycle_job(
-                        job_id, command_id=command_id
+                    started = await self._run_owned_coroutine(
+                        supervisor.start_cycle_job(job_id, command_id=command_id)
                     )
                 except Exception as exc:
                     current = runtime.jobs.get_job(job_id)
@@ -5008,7 +5172,7 @@ class ExecutiveControlService:
                 )
                 return future.result()
 
-            outcome = await asyncio.to_thread(
+            outcome = await self._run_physical(
                 CooCycle(self._require_runtime(), dispatcher=dispatch).run_once,
                 root_id,
             )
@@ -5198,6 +5362,50 @@ class ExecutiveControlService:
             current = asyncio.current_task()
             if self._dispatch_tasks.get(job_id) is current:
                 self._dispatch_tasks.pop(job_id, None)
+
+    @staticmethod
+    def _reconciliation_requires_quarantine(values: list[Any]) -> bool:
+        blocked = {
+            "IDENTITY_AMBIGUOUS",
+            "LIVE_QUARANTINED",
+            "LEASE_EXPIRED_QUARANTINED",
+            "STALE_FENCE_QUARANTINED",
+        }
+        for value in values:
+            status = getattr(value, "status", None)
+            rendered = getattr(status, "value", status)
+            if rendered in blocked:
+                return True
+        return False
+
+    async def _schedule_recovered_runs(self) -> None:
+        supervisor = self._require_supervisor()
+        take = getattr(supervisor, "take_recovered_runs", None)
+        if not callable(take):
+            return
+        for active in take():
+            lease = getattr(active, "lease", None)
+            attempt = getattr(lease, "attempt", None)
+            job_id = getattr(attempt, "job_id", None)
+            attempt_id = getattr(attempt, "attempt_id", None)
+            if not isinstance(job_id, str) or not isinstance(
+                attempt_id, str
+            ):
+                self._service_state = "QUARANTINED"
+                raise ServiceError(
+                    "recovered worker has no exact Job/Attempt identity"
+                )
+            existing = self._dispatch_tasks.get(job_id)
+            if existing is not None and not existing.done():
+                self._service_state = "QUARANTINED"
+                raise ServiceError(
+                    "recovered worker conflicts with an existing finisher"
+                )
+            task = asyncio.create_task(
+                self._finish_dispatched(job_id, active),
+                name=f"executive-recovered-finish-{job_id}",
+            )
+            self._dispatch_tasks[job_id] = task
 
     async def _replay_terminal_returns_on_startup(self) -> None:
         """Re-offer durable terminal facts in canonical JobRegistry order."""
@@ -6004,6 +6212,8 @@ class ExecutiveControlService:
         return path
 
     async def _dispatch_request(self, raw_request: Any) -> Any:
+        if self._closing:
+            raise ServiceError("Executive service is closing")
         command, args = self._request(raw_request)
         runtime = self._require_runtime()
 
@@ -6034,6 +6244,19 @@ class ExecutiveControlService:
                     "last_error": self._coo_last_error,
                 },
             }
+        if command == "offline-delivery-observation":
+            self._exact_args(args, {"runtime_root", "root_job_id", "expected_release_sha", "observed_at"})
+            if not isinstance(args["runtime_root"], str) or Path(args["runtime_root"]).absolute() != self.config.runtime_root.absolute():
+                raise ValueError("observation requires this installed Runtime root")
+            if self._namespace_custody is None:
+                raise ServiceError("Runtime namespace custody unavailable")
+            from scripts.web_ceo_offline_delivery_canary import build_receipt
+            bound = self._namespace_custody.bound_runtime(runtime)
+            return await self._run_physical(
+                build_receipt, bound, root_job_id=args["root_job_id"],
+                expected_release_sha=args["expected_release_sha"],
+                observed_at=args["observed_at"],
+            )
         if command == "health":
             self._exact_args(args, set())
             return self._database_health()
@@ -6043,7 +6266,7 @@ class ExecutiveControlService:
                 raise StateConflict("Executive control service is not awaiting a canary")
             if self._canary_loader is None:
                 raise ServiceError("Executive control service has no canary loader")
-            verdict = await asyncio.to_thread(self._canary_loader)
+            verdict = await self._run_physical(self._canary_loader)
             await self.activate_canary(verdict)
             return {"service_state": self._service_state}
         if self._service_state != "READY":
@@ -6102,7 +6325,7 @@ class ExecutiveControlService:
             # opaque `internal_error` path.
             self._exact_args(args, {"intent"})
             return _jsonable(
-                await asyncio.to_thread(self._submit_service_intent, args["intent"])
+                await self._run_physical(self._submit_service_intent, args["intent"])
             )
         if command == "ceo-intent-status":
             # Read-back only.  The durable JOB_CREATED event plus the Job row are
@@ -6110,7 +6333,7 @@ class ExecutiveControlService:
             self._exact_args(args, {"intent_id"})
             intent_id = self._id(args["intent_id"], "intent_id")
             return _jsonable(
-                await asyncio.to_thread(
+                await self._run_physical(
                     ceo_intent.resolve_intent,
                     runtime,
                     intent_id,
@@ -6124,7 +6347,7 @@ class ExecutiveControlService:
             if any(not task.done() for task in self._dispatch_tasks.values()):
                 raise StateConflict("cannot reconcile while this service owns an active dispatch")
             return _jsonable(
-                await asyncio.to_thread(
+                await self._run_physical(
                     self._require_supervisor().reconcile_restart,
                     requeue_lost=False,
                 )
@@ -6140,7 +6363,7 @@ class ExecutiveControlService:
             self.config.backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
             self.config.backup_root.chmod(0o700)
             return _jsonable(
-                await asyncio.to_thread(
+                await self._run_physical(
                     self._backup_backend.create_online_backup,
                     runtime.store,
                     self.config.backup_root,
@@ -6153,7 +6376,7 @@ class ExecutiveControlService:
             if not manifest_path.is_file() or manifest_path.is_symlink():
                 raise ServiceError("backup has no canonical manifest and is not restorable")
             return _jsonable(
-                await asyncio.to_thread(
+                await self._run_physical(
                     self._backup_backend.verify_backup,
                     database_path,
                     manifest_path,

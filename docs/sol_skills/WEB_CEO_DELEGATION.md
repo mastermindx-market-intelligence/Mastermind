@@ -60,3 +60,24 @@ Adjust verification to consequence. The principal must not redo every worker ste
 Use existing Executive/COO/Dialogue/Wake and Agent OS continuation. Maintain enough recoverable state after material decisions and before dependency waits that a lawful successor can recover the objective, decisions, exact artifacts, incumbent effects and next action. Do not rely on predicting a hidden model ceiling or saving everything for the last minute. A Web turn is not a daemon; source merge, delivery and native execution are not parent consumption or production acceptance.
 
 Prefer exact existing event-driven return handling; do not keep Pro generating unchanged status checks. A change of principal requires current assignment, source/effect reconciliation and existing fencing. Role preference is not assignment, and a native harness result is not a served-model or Web Pro attestation. Empirical role evaluation must preserve actual surface/mode identity and distinguish observed completion from waiting, truncation and platform failure.
+
+## 8. Resource-aware work profiles and decision depth
+
+Use the requested work profile separately from observed model/mode and available tools. These are
+working approaches, not a minimum run length, tool entitlement, provider selection or new admission
+receipt. Unobserved limits remain UNKNOWN. Current cognition/routing and economic gates stay controlling;
+a Chairman preference requires reconciliation by that existing owner rather than an inferred mode switch.
+
+Sustained delivery advances successive useful units while safe, checkpointing material progress without
+forcing a user request after every milestone. Bounded execution chooses a narrow result with targeted
+verification and persists before slow/effectful/high-output work; it does not pretend to know a hidden
+Web timeout. Concentrated judgment must be decision-ready: relevant primary evidence, credible alternatives,
+the strongest counterargument, uncertainties/falsifiers and discriminating acceptance criteria. Do not
+stop at a first plausible outline, but do not invent research or expand a research-only commission into
+unauthorized delivery. Completed bounded research is not a shipped product.
+
+ACTIVE_EXECUTION alone defines CHECKPOINTED_CONTINUATION and its verification conditions. A checkpoint
+is not an excuse to stop productive work; elapsed time is not quality, and a long turn is not proof of
+more reasoning. Use the existing fresh-session evaluation owner to test actual behavior, preserving exact
+observed surface identity and distinguishing context symptoms, transport errors, quota, safety refusal
+and voluntary premature stopping. Neither source-contract tests nor model labels prove native adoption.

@@ -141,9 +141,11 @@ class AppSettings:
     #: E1's temporary runtime projection root.  It is required only for the
     #: read-only capability and never comes from a request body.
     runtime_root: "Path | str | None" = None
-    #: ``None`` (the production default) builds one independent
-    #: ``BoundedJwksCache`` per policy inside :func:`create_app`; tests inject
-    #: a single stateless fake here instead.
+    #: ``None`` lets :func:`create_app` build bounded production JWKS cache
+    #: state, sharing one generation when read and submit have the same JWKS
+    #: authority/refresh contract. Native MCP may inject that same cache here
+    #: so its outer and inner auth layers reuse one generation. Tests can also
+    #: inject a stateless fake.
     jwks_cache: JwksKeySource | None = None
     clock: Callable[[], int] = lambda: int(time.time())
     connect_timeout: float = 5.0
