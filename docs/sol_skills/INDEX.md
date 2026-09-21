@@ -128,8 +128,8 @@ Use when sources disagree, a modifying response is ambiguous, transport reconnec
 stale, a duplicate appears, or a projection may be false-green.
 
 ### `CLOSEOUT.md`
-Use after accepted implementation/production proof to update the correct durable homes and
-leave the exact next action recoverable by a new session.
+Use after a material ruling, accepted implementation/production proof, verified `CHECKPOINTED_CONTINUATION`, or substantive operator handoff to update the correct durable homes
+and leave the exact mission-completion state and next action recoverable by a new session.
 
 ### `BOOTSTRAP_KERNEL.md`
 The compact text intended for Shared Project instructions. It is constitutional boot logic,
@@ -218,8 +218,11 @@ specific law.
 23. Forward execution. After current-source recovery, keep advancing the highest-leverage unblocked
     dependency in the Chairman-authorized scope. A genuine blocker freezes that lane, not the whole
     turn, while another useful independent lane remains. Supporting artifacts do not substitute for
-    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`; durable
-    work may outlive the turn only through a production-proven external owner with a real return path.
+    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`.
+    ACTIVE_EXECUTION alone defines the verified CHECKPOINTED_CONTINUATION exception: mission
+    incomplete, current checkpoint readback, justified boundary and exact next action, without
+    transferring custody or inventing a wake. Durable execution after a turn still requires a
+    production-proven external owner with a real return path.
 
 ## Modification handshake
 

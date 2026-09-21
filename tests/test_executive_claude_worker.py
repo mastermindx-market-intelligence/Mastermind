@@ -7,6 +7,7 @@ import inspect
 import json
 import os
 from pathlib import Path
+import pwd
 import platform
 import signal
 import subprocess
@@ -130,12 +131,15 @@ def _spec(tmp_path: Path, **changes: object) -> WorkerLaunchSpec:
 
 
 def _adapter(tmp_path: Path, binary: Path | None = None) -> ClaudeCodeWorkerAdapter:
+    """One reviewed adapter with a valid typed consumer-side observer fake."""
+
     binary = binary or _fixture_claude_binary(tmp_path)
     return ClaudeCodeWorkerAdapter(
         binary,
         allowed_versions=frozenset({_FIXTURE_VERSION}),
         exact_model=_EXACT_MODEL,
         max_turns=4,
+        managed_policy_observer=_observer_for(binary, generation=_VALID_GENERATION),
     )
 
 
@@ -189,6 +193,13 @@ def _workspace_and_spec(
         "model": _EXACT_MODEL,
         "timeout_seconds": 0.5,
         "cancel_grace_seconds": 0.1,
+        # Native Claude execution requires an exact worker principal; the
+        # fixture runs as the calling principal so lifecycle tests keep
+        # exercising their original cancellation/timeout/cleanup contract.
+        "worker_user": pwd.getpwuid(os.geteuid()).pw_name,
+        "expected_worker_uid": os.geteuid(),
+        "expected_worker_gid": os.getegid(),
+        "shared_run_gid": os.getegid(),
     }
     values.update(changes)
     return WorkerLaunchSpec(**values)  # type: ignore[arg-type]
@@ -225,7 +236,11 @@ def test_constructor_attests_an_absolute_versioned_non_secret_binary(tmp_path: P
         "allowed_versions",
         "exact_model",
         "max_turns",
+        "managed_policy_observer",
     )
+    observer_parameter = signature.parameters["managed_policy_observer"]
+    assert observer_parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert observer_parameter.default is None
     with pytest.raises(AttributeError):
         adapter.exact_model = "claude-sonnet-4-6"  # type: ignore[misc]
     with pytest.raises(AttributeError):
@@ -236,6 +251,9 @@ def test_constructor_attests_an_absolute_versioned_non_secret_binary(tmp_path: P
             allowed_versions=frozenset({_FIXTURE_VERSION}),
             exact_model=_EXACT_MODEL,
             max_turns=4,
+            # The observer seam is required first, so supply a valid one to
+            # reach the binary attestation edge this discriminator targets.
+            managed_policy_observer=_observer_for(binary),
         )
 
 
@@ -308,6 +326,12 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
             "disableAllHooks": True,
             "enableAllProjectMcpServers": False,
             "enabledMcpjsonServers": [],
+            # The emitted request carries the closed model fences.
+            "model": _EXACT_MODEL,
+            "fallbackModel": [],
+            "availableModels": [_EXACT_MODEL],
+            "enforceAvailableModels": True,
+            "switchModelsOnFlag": False,
             "permissions": {
                 "allow": (
                     ["Glob(./**)", "Grep(./**)", "Read(./**)"]
@@ -335,6 +359,26 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
                         "WebSearch",
                         "Write",
                         "mcp__*",
+                        # ... and every enabled file tool denies the protected
+                        # custody classes in the same serialized request.
+                        "Glob(.claude/**)",
+                        "Glob(.codex/**)",
+                        "Glob(.env)",
+                        "Glob(.env.*)",
+                        "Glob(.git/**)",
+                        "Glob(config.toml)",
+                        "Grep(.claude/**)",
+                        "Grep(.codex/**)",
+                        "Grep(.env)",
+                        "Grep(.env.*)",
+                        "Grep(.git/**)",
+                        "Grep(config.toml)",
+                        "Read(.claude/**)",
+                        "Read(.codex/**)",
+                        "Read(.env)",
+                        "Read(.env.*)",
+                        "Read(.git/**)",
+                        "Read(config.toml)",
                     ]
                     if invocation is read_only
                     else [
@@ -345,11 +389,42 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
                         "WebFetch",
                         "WebSearch",
                         "mcp__*",
+                        "Edit(.claude/**)",
+                        "Edit(.codex/**)",
+                        "Edit(.env)",
+                        "Edit(.env.*)",
+                        "Edit(.git/**)",
+                        "Edit(config.toml)",
+                        "Glob(.claude/**)",
+                        "Glob(.codex/**)",
+                        "Glob(.env)",
+                        "Glob(.env.*)",
+                        "Glob(.git/**)",
+                        "Glob(config.toml)",
+                        "Grep(.claude/**)",
+                        "Grep(.codex/**)",
+                        "Grep(.env)",
+                        "Grep(.env.*)",
+                        "Grep(.git/**)",
+                        "Grep(config.toml)",
+                        "Read(.claude/**)",
+                        "Read(.codex/**)",
+                        "Read(.env)",
+                        "Read(.env.*)",
+                        "Read(.git/**)",
+                        "Read(config.toml)",
+                        "Write(.claude/**)",
+                        "Write(.codex/**)",
+                        "Write(.env)",
+                        "Write(.env.*)",
+                        "Write(.git/**)",
+                        "Write(config.toml)",
                     ]
                 ),
                 "disableBypassPermissionsMode": "disable",
             },
-            "switchModelsOnFlag": False,
+            # The fail-closed subprocess sandbox rides in the same request.
+            "sandbox": _PROTECTED_SANDBOX_REQUEST,
         }
 
     read_tools = read_only.argv[read_only.argv.index("--tools") + 1]
@@ -377,7 +452,18 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
             invocation.argv.index("--disallowedTools") + 1
         ].split(",")
         assert settings["permissions"]["allow"] == allowed
-        assert settings["permissions"]["deny"] == denied
+        # ``--disallowedTools`` carries only the tool-level denials; the
+        # serialized request additionally denies the protected custody classes
+        # for every enabled file tool, after exactly those tool denials.
+        enabled_file_tools = {
+            rule.split("(", 1)[0] for rule in allowed
+        } & set(_FILE_TOOLS)
+        assert settings["permissions"]["deny"][: len(denied)] == list(denied)
+        assert set(settings["permissions"]["deny"]) == set(denied) | {
+            f"{tool}({protected})"
+            for tool in enabled_file_tools
+            for protected in _PROTECTED_PATH_CLASSES
+        }
         assert not {
             "Bash",
             "Edit",
@@ -1955,3 +2041,965 @@ def test_exited_launch_pid_reuse_never_signals_foreign_group(
     assert outcome is claude_worker._LaunchCleanupOutcome.ABSENT
     assert signals == []
     assert process.returncode_reads >= 2
+
+# ---------------------------------------------------------------------------
+# Discriminators for the trusted managed-model-policy observation seam and the
+# fail-closed review-enforced Claude argv/permission contract.  These tests
+# must fail RED against an untouched copy of the supplied preimage and turn
+# GREEN only after the corrections in control_plane/claude_worker.py bind the
+# observer and the closed review-enforced argv/policy into the canonical
+# LaunchAttestation.
+# ---------------------------------------------------------------------------
+
+import hashlib
+
+_PROTECTED_PATH_CLASSES = (
+    ".git/**",
+    ".claude/**",
+    ".codex/**",
+    ".env",
+    ".env.*",
+    "config.toml",
+)
+_PROTECTED_SANDBOX_REQUEST = {
+    "enabled": True,
+    "allowUnsandboxedCommands": False,
+    "failIfUnavailable": True,
+    "blockReadsOutsideWorkingDirectories": True,
+    "network": {
+        "allowedDomains": [],
+        "strictAllowlist": True,
+    },
+}
+_FILE_TOOLS = ("Edit", "Glob", "Grep", "Read", "Write")
+_VALID_GENERATION = 1
+_INVALID_GENERATIONS = (
+    ("bool-true", True),
+    ("bool-false", False),
+    ("zero", 0),
+    ("negative", -1),
+    ("above-2**63-1", 2**63),
+    ("numeric-string", "1"),
+    ("float", 1.0),
+)
+
+
+class _FakeManagedPolicyObserver:
+    """Frozen consumer-side seam; tests may not depend on any producer."""
+
+    def __init__(
+        self,
+        *,
+        exact_model: str,
+        binary_sha256: str,
+        binary_version: str,
+        generation: object,
+        allow_alternate_models: tuple[str, ...] = (),
+        fallback_models: tuple[str, ...] = (),
+    ) -> None:
+        self.exact_model = exact_model
+        self.binary_sha256 = binary_sha256
+        self.binary_version = binary_version
+        self.generation = generation
+        self.allow_alternate_models = tuple(allow_alternate_models)
+        self.fallback_models = tuple(fallback_models)
+        self.calls = 0
+
+    def observe(self) -> "ManagedModelPolicyObservation":
+        from control_plane.claude_worker import ManagedModelPolicyObservation
+
+        self.calls += 1
+        return ManagedModelPolicyObservation(
+            exact_model=self.exact_model,
+            binary_sha256=self.binary_sha256,
+            binary_version=self.binary_version,
+            generation=self.generation,
+            allow_alternate_models=self.allow_alternate_models,
+            fallback_models=self.fallback_models,
+        )
+
+
+def _observation_for(binary: Path, **changes: object) -> object:
+    from control_plane.claude_worker import ManagedModelPolicyObservation
+
+    values: dict[str, object] = {
+        "exact_model": _EXACT_MODEL,
+        "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        "binary_version": _FIXTURE_VERSION,
+        "generation": _VALID_GENERATION,
+    }
+    values.update(changes)
+    return ManagedModelPolicyObservation(**values)  # type: ignore[arg-type]
+
+
+def _observer_for(binary: Path, *, generation: object = _VALID_GENERATION):
+    """Describe the exact already-created fixture binary.
+
+    This deliberately re-reads the caller's binary instead of calling
+    ``_fixture_claude_binary`` again: rewriting the already-attested executable
+    would change its ``mtime_ns`` and reset the requested lifecycle ``mode``.
+    """
+
+    return _FakeManagedPolicyObserver(
+        exact_model=_EXACT_MODEL,
+        binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+        binary_version=_FIXTURE_VERSION,
+        generation=generation,
+    )
+
+
+def _sequence_observer(binary: Path, *later: object):
+    """One valid initial observation, then scripted later results.
+
+    The seam must succeed at construction and only then raise or drift, so a
+    pre-spawn discriminator can actually reach the pre-spawn edge.
+    """
+
+    class _SequenceManagedPolicyObserver:
+        def __init__(self) -> None:
+            self.calls = 0
+            self._pending: list[object] = [
+                _observation_for(binary),
+                *later,
+            ]
+
+        def observe(self) -> object:
+            self.calls += 1
+            if not self._pending:
+                raise claude_worker.ClaudeWorkerContractError(
+                    "managed policy observation is unavailable"
+                )
+            item = self._pending.pop(0)
+            if isinstance(item, BaseException):
+                raise item
+            return item
+
+    return _SequenceManagedPolicyObserver()
+
+
+def _refuse_spawn(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+
+    """Count every attempted subprocess creation and make it impossible."""
+
+    attempted: list[object] = []
+
+    def record(*args: object, **kwargs: object) -> object:
+        attempted.append(args)
+        raise AssertionError("no subprocess may be created for a refused launch")
+
+    monkeypatch.setattr(claude_worker.asyncio, "create_subprocess_exec", record)
+    return attempted
+
+
+def _count_cleanups(monkeypatch: pytest.MonkeyPatch, adapter: object) -> list[object]:
+    """Count the bounded launch-failure cleanups the adapter still performs."""
+
+    performed: list[object] = []
+    original = type(adapter)._safe_launch_failure_cleanup
+
+    async def counting(self: object, process: object) -> object:
+        performed.append(process)
+        return await original(self, process)
+
+    monkeypatch.setattr(type(adapter), "_safe_launch_failure_cleanup", counting)
+    return performed
+
+
+def _claude_settings(invocation: object) -> dict:
+    argv = invocation.argv  # type: ignore[attr-defined]
+    return json.loads(argv[argv.index("--settings") + 1])
+
+
+def test_claude_code_descriptor_remains_inert_and_unknown_aliases_fail_closed() -> None:
+    descriptor = adapter_descriptor("claude-code")
+    assert descriptor.implemented is False
+    assert descriptor.implementation == (
+        "control_plane.claude_worker.ClaudeCodeWorkerAdapter"
+    )
+    for alias in ("claude", "claude-cli", "claude-code-v1", "claude-compatible"):
+        with pytest.raises(ValueError, match="unknown worker adapter"):
+            adapter_descriptor(alias)
+    subscription = adapter_descriptor("claude-compatible-subscription")
+    assert subscription.adapter_id == "claude-compatible-subscription"
+    assert subscription.implemented is False
+    assert subscription.adapter_id != descriptor.adapter_id
+
+
+def test_managed_policy_observer_is_required_at_construction(tmp_path: Path) -> None:
+    with pytest.raises(
+        ClaudeWorkerContractError, match="managed model policy observer"
+    ):
+        ClaudeCodeWorkerAdapter(
+            _fixture_claude_binary(tmp_path),
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+        )
+
+
+def test_observer_that_is_not_the_typed_seam_refuses_construction(
+    tmp_path: Path,
+) -> None:
+    class NotAnObserver:
+        pass
+
+    with pytest.raises(
+        ClaudeWorkerContractError, match="does not satisfy the frozen consumer seam"
+    ):
+        ClaudeCodeWorkerAdapter(
+            _fixture_claude_binary(tmp_path),
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=NotAnObserver(),  # type: ignore[arg-type]
+        )
+
+
+def test_wrong_observation_return_type_refuses_construction(tmp_path: Path) -> None:
+    """A structurally valid seam returning a non-seam value must fail closed.
+
+    The frozen pre-correction behavior read ``observation.generation`` before
+    any type check, so this returned ``AttributeError`` instead of the typed
+    contract refusal. It is retained as a RED control for that boundary.
+    """
+
+    class WrongReturnObserver:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def observe(self) -> ManagedModelPolicyObservation:
+            self.calls += 1
+            return object()  # type: ignore[return-value]
+
+    observer = WrongReturnObserver()
+    with pytest.raises(
+        ClaudeWorkerContractError, match="not a typed seam value"
+    ) as refused:
+        ClaudeCodeWorkerAdapter(
+            _fixture_claude_binary(tmp_path),
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=observer,  # type: ignore[arg-type]
+        )
+    assert type(refused.value) is ClaudeWorkerContractError
+    assert not isinstance(refused.value, AttributeError)
+    assert "has no attribute" not in str(refused.value)
+    assert observer.calls == 1
+
+
+def test_wrong_exact_model_in_observer_refuses_construction(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    observer = _observer_for(binary)
+    observer.exact_model = "claude-sonnet-4-6"
+    with pytest.raises(ClaudeWorkerContractError, match="exact configured model"):
+        ClaudeCodeWorkerAdapter(
+            binary,
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=observer,
+        )
+
+
+def test_wrong_binary_sha256_in_observer_refuses_construction(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    observer = _observer_for(binary)
+    observer.binary_sha256 = "f" * 64
+    with pytest.raises(ClaudeWorkerContractError, match="binary identity"):
+        ClaudeCodeWorkerAdapter(
+            binary,
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=observer,
+        )
+
+
+def test_wrong_binary_version_in_observer_refuses_construction(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    observer = _observer_for(binary)
+    observer.binary_version = "9.9.999"
+    with pytest.raises(ClaudeWorkerContractError, match="binary version"):
+        ClaudeCodeWorkerAdapter(
+            binary,
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=observer,
+        )
+
+
+def test_observer_alternate_model_allowed_refuses_construction(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    observer = _observer_for(binary)
+    observer.allow_alternate_models = (_EXACT_MODEL,)
+    with pytest.raises(ClaudeWorkerContractError, match="alternate"):
+        ClaudeCodeWorkerAdapter(
+            binary,
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=observer,
+        )
+
+
+def test_observer_fallback_present_refuses_construction(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    observer = _observer_for(binary)
+    observer.fallback_models = ("claude-sonnet-4-6",)
+    with pytest.raises(ClaudeWorkerContractError, match="fallback"):
+        ClaudeCodeWorkerAdapter(
+            binary,
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=observer,
+        )
+
+
+@pytest.mark.parametrize(
+    "label, generation",
+    _INVALID_GENERATIONS,
+    ids=[label for label, _value in _INVALID_GENERATIONS],
+)
+def test_non_canonical_generation_refuses_construction(
+    tmp_path: Path, label: str, generation: object
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    observer = _observer_for(binary, generation=generation)
+    with pytest.raises(ClaudeWorkerContractError, match="generation"):
+        ClaudeCodeWorkerAdapter(
+            binary,
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=observer,
+        )
+    assert observer.calls == 1
+
+
+def test_valid_generation_is_canonical_and_bounded(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    for generation in (1, 2**63 - 1):
+        observer = _observer_for(binary, generation=generation)
+        adapter = ClaudeCodeWorkerAdapter(
+            binary,
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=observer,
+        )
+        assert adapter.managed_policy_generation == generation
+        assert type(adapter.managed_policy_generation) is int
+        assert adapter.managed_policy_generation is not True
+
+
+def test_observer_generation_drift_between_construction_and_pre_spawn_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    # Construction observes once; the mandatory pre-spawn re-observation is the
+    # second call and the only place this drift can be caught.
+    sequence = _sequence_observer(
+        binary,
+        _observation_for(binary, generation=2),
+    )
+    adapter = ClaudeCodeWorkerAdapter(
+        binary,
+        allowed_versions=frozenset({_FIXTURE_VERSION}),
+        exact_model=_EXACT_MODEL,
+        max_turns=4,
+        managed_policy_observer=sequence,
+    )
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    spec = _workspace_and_spec(tmp_path)
+    attempted = _refuse_spawn(monkeypatch)
+
+    async def execute() -> None:
+        with pytest.raises(ClaudeWorkerContractError, match="generation"):
+            await adapter.start(spec)
+
+    asyncio.run(execute())
+    assert sequence.calls == 2
+    assert attempted == []
+
+
+def test_wrong_observation_return_type_refuses_pre_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The mandatory pre-spawn re-observation must also fail closed on a wrong return."""
+
+    binary = _fixture_claude_binary(tmp_path)
+    # Construction observes the valid seam value once; the second, pre-spawn
+    # call is the only place this wrong return can reach the spawn edge.
+    sequence = _sequence_observer(binary, object())
+    adapter = ClaudeCodeWorkerAdapter(
+        binary,
+        allowed_versions=frozenset({_FIXTURE_VERSION}),
+        exact_model=_EXACT_MODEL,
+        max_turns=4,
+        managed_policy_observer=sequence,  # type: ignore[arg-type]
+    )
+    assert sequence.calls == 1
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    spec = _workspace_and_spec(tmp_path)
+    attempted = _refuse_spawn(monkeypatch)
+    cleanups = _count_cleanups(monkeypatch, adapter)
+
+    async def execute() -> None:
+        with pytest.raises(
+            ClaudeWorkerContractError, match="not a typed seam value"
+        ) as refused:
+            await adapter.start(spec)
+
+    asyncio.run(execute())
+    assert sequence.calls == 2
+    assert attempted == []
+    assert cleanups == []
+    assert adapter._runs == {}
+
+
+def test_observer_absence_during_pre_spawn_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    # The seam succeeds exactly once at construction and only then disappears.
+    sequence = _sequence_observer(binary)
+    adapter = ClaudeCodeWorkerAdapter(
+        binary,
+        allowed_versions=frozenset({_FIXTURE_VERSION}),
+        exact_model=_EXACT_MODEL,
+        max_turns=4,
+        managed_policy_observer=sequence,
+    )
+    assert sequence.calls == 1
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    spec = _workspace_and_spec(tmp_path)
+    attempted = _refuse_spawn(monkeypatch)
+
+    async def execute() -> None:
+        with pytest.raises(ClaudeWorkerContractError, match="unavailable"):
+            await adapter.start(spec)
+
+    asyncio.run(execute())
+    assert sequence.calls == 2
+    assert attempted == []
+
+
+def test_observer_model_drift_pre_spawn_refuses_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    sequence = _sequence_observer(
+        binary,
+        _observation_for(binary, exact_model="claude-sonnet-4-6"),
+    )
+    adapter = ClaudeCodeWorkerAdapter(
+        binary,
+        allowed_versions=frozenset({_FIXTURE_VERSION}),
+        exact_model=_EXACT_MODEL,
+        max_turns=4,
+        managed_policy_observer=sequence,
+    )
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    attempted = _refuse_spawn(monkeypatch)
+
+    async def execute() -> None:
+        with pytest.raises(ClaudeWorkerContractError, match="pre-spawn"):
+            await adapter.start(_workspace_and_spec(tmp_path))
+
+    asyncio.run(execute())
+    assert sequence.calls == 2
+    assert attempted == []
+
+
+def test_observer_binary_identity_drift_pre_spawn_refuses_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    sequence = _sequence_observer(binary, _observation_for(binary, binary_sha256="e" * 64))
+    adapter = ClaudeCodeWorkerAdapter(
+        binary,
+        allowed_versions=frozenset({_FIXTURE_VERSION}),
+        exact_model=_EXACT_MODEL,
+        max_turns=4,
+        managed_policy_observer=sequence,
+    )
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    attempted = _refuse_spawn(monkeypatch)
+
+    async def execute() -> None:
+        with pytest.raises(ClaudeWorkerContractError, match="identity"):
+            await adapter.start(_workspace_and_spec(tmp_path))
+
+    asyncio.run(execute())
+    assert sequence.calls == 2
+    assert attempted == []
+
+
+def test_observer_alternate_and_fallback_drift_pre_spawn_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    for index, drifted in enumerate(
+        (
+            _observation_for(binary, allow_alternate_models=("claude-sonnet-4-6",)),
+            _observation_for(binary, fallback_models=("claude-sonnet-4-6",)),
+        )
+    ):
+        sequence = _sequence_observer(binary, drifted)
+        adapter = ClaudeCodeWorkerAdapter(
+            binary,
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=_EXACT_MODEL,
+            max_turns=4,
+            managed_policy_observer=sequence,
+        )
+        (tmp_path / "mode").write_text("success", encoding="utf-8")
+        attempted = _refuse_spawn(monkeypatch)
+        # Each iteration needs its own run/workspace pair, or the second one
+        # fails in workspace validation instead of reaching the pre-spawn edge.
+        run_id = f"run-drift-{index}"
+
+        async def execute() -> None:
+            await adapter.start(_workspace_and_spec(tmp_path, run_id=run_id))
+
+        with pytest.raises(ClaudeWorkerContractError):
+            asyncio.run(execute())
+        assert sequence.calls == 2
+        assert attempted == []
+
+
+def test_compile_launch_argv_contains_restricted_and_closed_model_policy(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    invocation = adapter.compile_launch(_spec(tmp_path))
+    argv = invocation.argv
+    assert "--restricted" in argv
+    assert "--safe-mode" in argv
+    assert ("--model", _EXACT_MODEL) == (
+        argv[argv.index("--model") : argv.index("--model") + 2]
+    )
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings["model"] == _EXACT_MODEL
+    assert settings["fallbackModel"] == []
+    assert settings["availableModels"] == [_EXACT_MODEL]
+    assert settings["enforceAvailableModels"] is True
+    assert settings["switchModelsOnFlag"] is False
+    # The serialized request, not an attestation-only object, carries the fences.
+    assert adapter.validate_settings(settings) is None
+    assert settings["sandbox"] == _PROTECTED_SANDBOX_REQUEST
+
+
+def test_settings_request_denies_protected_paths_for_enabled_file_tools(
+    tmp_path: Path,
+) -> None:
+    for authorities in (("READ",), ("READ", "WRITE_BRANCH"), ("READ", "RUN_TESTS")):
+        adapter = _adapter(tmp_path)
+        spec = _spec(
+            tmp_path,
+            authorities=authorities,
+            allowed_artifact_paths=("src/a.py",),
+        )
+        settings = _claude_settings(adapter.compile_launch(spec))
+        deny = settings["permissions"]["deny"]
+        enabled_file_tools = {
+            rule.split("(", 1)[0] for rule in settings["permissions"]["allow"]
+        } & set(_FILE_TOOLS)
+        assert enabled_file_tools
+        for tool in sorted(enabled_file_tools):
+            for protected in _PROTECTED_PATH_CLASSES:
+                assert f"{tool}({protected})" in deny, (
+                    f"{tool} does not deny {protected} in the --settings request"
+                )
+        for protected in _PROTECTED_PATH_CLASSES:
+            for rule in deny:
+                if rule.endswith(f"({protected})"):
+                    assert rule.split("(", 1)[0] in enabled_file_tools
+        adapter.validate_settings(settings)
+
+
+def test_permission_profile_reflects_the_emitted_settings_request(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _spec(tmp_path)
+    settings = _claude_settings(adapter.compile_launch(spec))
+    profile = adapter.permission_profile(spec)
+    assert profile["requested_settings"] == settings
+    assert profile["file_tool_denies"] == [
+        rule for rule in settings["permissions"]["deny"]
+        if rule not in profile["forbidden_tools"]
+    ]
+    assert set(profile["file_tool_denies"]) == {
+        f"{tool}({protected})"
+        for tool in ("Glob", "Grep", "Read")
+        for protected in _PROTECTED_PATH_CLASSES
+    }
+    assert profile["subprocess_sandbox"] == settings["sandbox"]
+    assert profile["subprocess_sandbox"] == _PROTECTED_SANDBOX_REQUEST
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        pytest.param(lambda s: s.pop("model"), id="delete-model"),
+        pytest.param(
+            lambda s: s.__setitem__("model", "claude-sonnet-4-6"), id="widen-model"
+        ),
+        pytest.param(lambda s: s.pop("fallbackModel"), id="delete-fallbackModel"),
+        pytest.param(
+            lambda s: s.__setitem__("fallbackModel", ["claude-sonnet-4-6"]),
+            id="widen-fallbackModel",
+        ),
+        pytest.param(lambda s: s.pop("availableModels"), id="delete-availableModels"),
+        pytest.param(
+            lambda s: s.__setitem__("availableModels", ["claude-sonnet-4-6"]),
+            id="widen-availableModels",
+        ),
+        pytest.param(
+            lambda s: s.__setitem__("enforceAvailableModels", False),
+            id="disable-enforceAvailableModels",
+        ),
+        pytest.param(
+            lambda s: s.__setitem__("switchModelsOnFlag", True),
+            id="enable-switchModelsOnFlag",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["deny"].remove("Read(.git/**)"),
+            id="delete-git-deny",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["deny"].remove("Read(.claude/**)"),
+            id="delete-claude-deny",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["deny"].remove("Read(.codex/**)"),
+            id="delete-codex-deny",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["deny"].remove("Read(.env)"),
+            id="delete-env-deny",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["deny"].remove("Read(.env.*)"),
+            id="delete-env-star-deny",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["deny"].remove("Read(config.toml)"),
+            id="delete-config-toml-deny",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["deny"].remove("Grep(config.toml)"),
+            id="delete-one-file-tool-deny",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["deny"].__setitem__(
+                s["permissions"]["deny"].index("Read(.git/**)"), "Read(.git/HEAD)"
+            ),
+            id="narrow-git-deny",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["deny"].__setitem__(
+                s["permissions"]["deny"].index("Read(.env.*)"), "Read(.env.example)"
+            ),
+            id="narrow-env-star-deny",
+        ),
+        pytest.param(
+            lambda s: s["sandbox"].pop("failIfUnavailable"),
+            id="delete-failIfUnavailable",
+        ),
+        pytest.param(
+            lambda s: s["sandbox"].__setitem__("failIfUnavailable", False),
+            id="widen-failIfUnavailable",
+        ),
+        pytest.param(
+            lambda s: s["sandbox"].__setitem__("allowUnsandboxedCommands", True),
+            id="allow-unsandboxed-commands",
+        ),
+        pytest.param(
+            lambda s: s["sandbox"].__setitem__(
+                "blockReadsOutsideWorkingDirectories", False
+            ),
+            id="allow-reads-outside-workdirs",
+        ),
+        pytest.param(
+            lambda s: s["sandbox"].__setitem__("enabled", False), id="disable-sandbox"
+        ),
+        pytest.param(
+            lambda s: s["sandbox"].pop("network"), id="delete-network-allowlist"
+        ),
+        pytest.param(
+            lambda s: s["sandbox"]["network"]["allowedDomains"].append("example.invalid"),
+            id="allow-network-domain",
+        ),
+        pytest.param(
+            lambda s: s["sandbox"]["network"].__setitem__("strictAllowlist", False),
+            id="drop-strict-network-allowlist",
+        ),
+    ],
+)
+def test_any_single_emitted_fence_mutation_refuses(
+    tmp_path: Path, mutator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _spec(tmp_path)
+    settings = _claude_settings(adapter.compile_launch(spec))
+    baseline_digest = adapter.permission_profile_digest(spec)
+    mutator(settings)
+    attempted = _refuse_spawn(monkeypatch)
+    with pytest.raises(
+        ClaudeWorkerContractError, match="(model fence|deny fence|sandbox fence)"
+    ):
+        adapter.validate_settings(settings)
+    assert attempted == []
+    # The attested contract is bound to the exact emitted settings, so a mutated
+    # request can never hash to the launch attestation the review recorded.
+    mutated_profile = dict(
+        adapter.permission_profile(spec), requested_settings=settings
+    )
+    assert (
+        adapter.permission_profile_digest(spec, profile=mutated_profile)
+        != baseline_digest
+    )
+    assert adapter.permission_profile_digest(spec) == baseline_digest
+
+
+def test_permission_profile_digest_binds_complete_policy_and_managed_observation(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    observer = _observer_for(binary)
+    adapter = ClaudeCodeWorkerAdapter(
+        binary,
+        allowed_versions=frozenset({_FIXTURE_VERSION}),
+        exact_model=_EXACT_MODEL,
+        max_turns=4,
+        managed_policy_observer=observer,
+    )
+    spec = _spec(tmp_path)
+    profile = adapter.permission_profile(spec)
+    digest_a = adapter.permission_profile_digest(spec)
+    digest_b = adapter.permission_profile_digest(spec)
+    assert digest_a == digest_b
+    assert digest_a == claude_worker._canonical_sha256(profile)
+    # A mutable fake cannot retroactively move an already frozen configuration
+    # digest; only a fresh accepted observation at the spawn edge may agree.
+    # Only the generation mutates, so the pre-spawn edge below is reached by
+    # the generation drift and not by an earlier model/identity refusal.
+    observer.generation = 2
+    assert adapter.permission_profile_digest(spec) == digest_a
+    assert adapter.managed_policy_observation.generation == 1
+    # ... and the mandatory pre-spawn re-observation refuses exactly that drift.
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+
+    async def execute() -> None:
+        await adapter.start(_workspace_and_spec(tmp_path))
+
+    with pytest.raises(ClaudeWorkerContractError, match="generation"):
+        asyncio.run(execute())
+    assert observer.calls == 2
+
+
+def test_launch_attestation_includes_review_enforced_permission_profile(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    observer = _observer_for(binary)
+    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    adapter = ClaudeCodeWorkerAdapter(
+        binary,
+        allowed_versions=frozenset({_FIXTURE_VERSION}),
+        exact_model=_EXACT_MODEL,
+        max_turns=4,
+        managed_policy_observer=observer,
+    )
+    spec = _workspace_and_spec(
+        tmp_path,
+        expected_worker_uid=os.geteuid(),
+        expected_worker_gid=os.getegid(),
+        worker_user=__import__("pwd").getpwuid(os.geteuid()).pw_name,
+        secret_canary_verdict=_passing_canary(),
+        require_secret_canary=True,
+    )
+
+    async def execute() -> object:
+        ref = await adapter.start(spec)
+        attestation = adapter.launch_attestation(ref)
+        await adapter.collect_result(ref)
+        return attestation
+
+    attestation = asyncio.run(execute())
+    document = attestation.to_dict()
+    assert document["schema_version"] == "mastermind.executive_launch_attestation/v1"
+    assert len(document["permission_profile_sha256"]) == 64
+    # The attested digest source is the exact emitted settings plus the tool and
+    # isolation fields: the very request the launched process received.
+    settings = _claude_settings(adapter.compile_launch(spec))
+    assert profile_settings_bound(adapter, spec, settings) == (
+        document["permission_profile_sha256"]
+    )
+    assert settings["model"] == _EXACT_MODEL
+    assert document["worker_identity"]["managed_policy_observation"]["exact_model"] == _EXACT_MODEL
+    assert document["worker_identity"]["managed_policy_observation"]["generation"] == 1
+    assert document["worker_identity"]["managed_policy_generation"] == 1
+    assert observer.calls == 2
+
+
+def profile_settings_bound(adapter: object, spec: object, settings: dict) -> str:
+    return claude_worker._canonical_sha256(
+        dict(adapter.permission_profile(spec), requested_settings=settings)  # type: ignore[arg-type]
+    )
+
+
+def test_missing_expected_worker_uid_and_gid_refuses_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _workspace_and_spec(tmp_path)
+    object.__setattr__(spec, "expected_worker_uid", None)
+    object.__setattr__(spec, "expected_worker_gid", None)
+    attempted = _refuse_spawn(monkeypatch)
+
+    async def execute() -> BaseException:
+        try:
+            await adapter.start(spec)
+        except ClaudeWorkerContractError as exc:
+            return exc
+        raise AssertionError("the launch must refuse")
+
+    refusal = asyncio.run(execute())
+    # ``_validate_spec`` exposes only the generic outer refusal and chains the
+    # specific reason as the cause; that redaction is the reviewed contract.
+    assert type(refusal) is claude_worker.ClaudeLaunchError
+    assert str(refusal) == "common launch validation refused"
+    cause = refusal.__cause__
+    assert isinstance(cause, claude_worker.LaunchValidationError)
+    # Both halves missing skips the "together" pairing rule and lands on the
+    # exact-worker-principal requirement itself.
+    assert str(cause) == "native Claude execution requires exact worker UID/GID"
+    assert attempted == []
+    assert adapter._runs == {}
+
+
+def test_missing_expected_gid_only_refuses_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _workspace_and_spec(tmp_path, expected_worker_gid=None)
+    attempted = _refuse_spawn(monkeypatch)
+
+    async def execute() -> BaseException:
+        try:
+            await adapter.start(spec)
+        except ClaudeWorkerContractError as exc:
+            return exc
+        raise AssertionError("the launch must refuse")
+
+    refusal = asyncio.run(execute())
+    assert type(refusal) is claude_worker.ClaudeLaunchError
+    assert str(refusal) == "common launch validation refused"
+    cause = refusal.__cause__
+    assert isinstance(cause, claude_worker.LaunchValidationError)
+    assert str(cause) == "worker UID/GID must be configured together"
+    assert attempted == []
+    assert adapter._runs == {}
+
+
+def test_caller_principal_mismatch_refuses_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = _adapter(tmp_path)
+    cleanups = _count_cleanups(monkeypatch, adapter)
+    attempted = _refuse_spawn(monkeypatch)
+    bogus_uid = (os.geteuid() + 99_999_999) % 4_294_967_295 or 1
+    spec = _workspace_and_spec(
+        tmp_path, expected_worker_uid=bogus_uid, expected_worker_gid=os.getegid()
+    )
+
+    async def execute() -> BaseException:
+        try:
+            await adapter.start(spec)
+        except ClaudeWorkerContractError as exc:
+            return exc
+        raise AssertionError("the launch must refuse")
+
+    refusal = asyncio.run(execute())
+    assert type(refusal) is claude_worker.ClaudeLaunchError
+    assert str(refusal) == "common launch validation refused"
+    cause = refusal.__cause__
+    assert isinstance(cause, claude_worker.LaunchValidationError)
+    assert (
+        str(cause)
+        == "adapter caller principal does not match the configured worker principal"
+    )
+    assert attempted == []
+    assert cleanups == []
+    assert adapter._runs == {}
+
+
+def test_post_spawn_principal_mismatch_refuses_and_retains_cleanup_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("sleep", encoding="utf-8")
+    adapter = ClaudeCodeWorkerAdapter(
+        binary,
+        allowed_versions=frozenset({_FIXTURE_VERSION}),
+        exact_model=_EXACT_MODEL,
+        max_turns=4,
+        managed_policy_observer=_observer_for(binary),
+    )
+    real_inspector = adapter.inspector
+    observed_pids: list[int] = []
+
+    class WrongPrincipalInspector:
+        def boot_session_id(self) -> str:
+            return real_inspector.boot_session_id()
+
+        def inspect(self, pid: int) -> object:
+            observed_pids.append(pid)
+            identity = real_inspector.inspect(pid)
+            return SimpleNamespace(
+                start_identity=identity.start_identity,
+                pgid=identity.pgid,
+                session_id=identity.session_id,
+                effective_uid=(identity.effective_uid or 0) + 1,
+                effective_gid=identity.effective_gid,
+                real_uid=identity.real_uid,
+                real_gid=(identity.real_gid or 0) + 1,
+            )
+
+    adapter.inspector = WrongPrincipalInspector()
+    cleanups = _count_cleanups(monkeypatch, adapter)
+
+    async def execute() -> tuple[BaseException | None, bool, bool]:
+        leaked = False
+        error: BaseException | None = None
+        try:
+            await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        except BaseException as exc:
+            error = exc
+        pid = observed_pids[0] if observed_pids else None
+        if pid is not None:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                leaked = False
+            else:
+                leaked = True
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.sleep(0.05)
+        return error, leaked, adapter._runs == {}
+
+    error, leaked, runs_empty = asyncio.run(execute())
+    assert leaked is False
+    assert runs_empty is True
+    assert isinstance(error, claude_worker.ClaudeProcessIdentityError)
+    assert observed_pids, "the process was created, so cleanup custody applies"
+    assert cleanups, "the refused launch must retain and perform cleanup custody"

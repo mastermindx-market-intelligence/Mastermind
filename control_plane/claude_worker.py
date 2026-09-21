@@ -21,7 +21,7 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
 from control_plane.codex_worker import (
     CodexWorkerAdapter,
@@ -73,6 +73,33 @@ _READ_TOOLS = ("Glob", "Grep", "Read")
 _WRITE_TOOLS = ("Edit", "Write")
 _TEST_TOOL = "Bash"
 _SAFE_PERMISSION_PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9*?][A-Za-z0-9._*?-]*$")
+# Protected repository/custody classes that every enabled file tool must deny
+# inside the serialized ``--settings`` request, not only in the attestation.
+_PROTECTED_PATH_CLASSES = (
+    ".git/**",
+    ".claude/**",
+    ".codex/**",
+    ".env",
+    ".env.*",
+    "config.toml",
+)
+# Tools that can address a file path, and therefore must carry the denies above.
+_FILE_TOOLS = ("Edit", "Glob", "Grep", "Read", "Write")
+# Fail-closed subprocess sandbox request.  The exact object is serialized into
+# ``--settings`` and hashed into the launch attestation, so the two cannot drift.
+def _subprocess_sandbox_request() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "allowUnsandboxedCommands": False,
+        "failIfUnavailable": True,
+        "blockReadsOutsideWorkingDirectories": True,
+        "network": {
+            "allowedDomains": [],
+            "strictAllowlist": True,
+        },
+    }
+# Canonical bounded policy generation: a strict int, never bool, never coerced.
+_MAX_POLICY_GENERATION = 2**63 - 1
 _FORBIDDEN_TOOLS = (
     "Agent",
     "NotebookEdit",
@@ -166,6 +193,29 @@ class ClaudeAuthObservation:
     observed_at: str
 
 
+@dataclasses.dataclass(frozen=True)
+class ManagedModelPolicyObservation:
+    """Closed, exact-match managed-model-policy observation.
+
+    Tests may supply a typed fake; trusted production observation remains a
+    composition prerequisite that the Claude worker itself does not synthesize.
+    """
+
+    exact_model: str
+    binary_sha256: str
+    binary_version: str
+    generation: int
+    allow_alternate_models: tuple[str, ...] = ()
+    fallback_models: tuple[str, ...] = ()
+
+
+@runtime_checkable
+class ManagedPolicyObserver(Protocol):
+    """Frozen consumer-side seam that returns one :class:`ManagedModelPolicyObservation`."""
+
+    def observe(self) -> ManagedModelPolicyObservation: ...
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class ClaudeLaunchEnvironment:
     """An immutable seam, not a caller-supplied subprocess mapping."""
@@ -192,6 +242,8 @@ class _ClaudeConfiguration:
     allowed_versions: frozenset[str]
     exact_model: str
     max_turns: int
+    managed_observation: ManagedModelPolicyObservation
+    managed_policy_generation: int
 
 
 @dataclasses.dataclass
@@ -439,6 +491,92 @@ def _validate_exact_model(exact_model: str) -> str:
     return exact_model
 
 
+def _canonical_policy_generation(value: object) -> int:
+    """Accept only a canonical bounded ``int`` policy generation; never coerce."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ClaudeWorkerContractError(
+            "managed policy generation must be a canonical integer"
+        )
+    if not 1 <= value <= _MAX_POLICY_GENERATION:
+        raise ClaudeWorkerContractError(
+            "managed policy generation is outside the bounded contract"
+        )
+    return value
+
+
+def _protected_file_tool_denies(tools: Sequence[str]) -> tuple[str, ...]:
+    """Deny rules for the protected classes across every enabled file tool."""
+
+    enabled = {tool for tool in tools if tool in _FILE_TOOLS}
+    return tuple(
+        sorted(f"{tool}({pattern})" for tool in sorted(enabled)
+               for pattern in _PROTECTED_PATH_CLASSES)
+    )
+
+
+_OBSERVATION_STAGE_FAILURES: dict[str, tuple[str, str, str]] = {
+    # stage: (model, version, identity) refusal messages.
+    "configured": (
+        "managed policy observation exact model does not match the exact configured model",
+        "managed policy observation does not match the attested binary version",
+        "managed policy observation does not match the attested binary identity",
+    ),
+    "pre-spawn": (
+        "managed policy observation exact model drifted pre-spawn",
+        "managed policy observation binary version drifted pre-spawn",
+        "managed policy observation binary identity drifted pre-spawn",
+    ),
+}
+
+
+def _require_typed_observation(observation: object) -> ManagedModelPolicyObservation:
+    """Fail closed on a wrong seam return before any field of it is read.
+
+    A structurally valid observer may still return a non-seam value. The typed
+    contract, not ``AttributeError``, must close that boundary, so this runs
+    ahead of every ``observation.<field>`` read at construction and pre-spawn.
+    """
+
+    if not isinstance(observation, ManagedModelPolicyObservation):
+        raise ClaudeWorkerContractError(
+            "managed policy observation is not a typed seam value"
+        )
+    return observation
+
+
+def _validate_managed_observation(
+    observation: ManagedModelPolicyObservation,
+    *,
+    exact_model: str,
+    binary: BinaryAttestation,
+    generation: int,
+    stage: str,
+) -> None:
+    """Close one observation against the configured model, binary and generation."""
+
+    _require_typed_observation(observation)
+    model_error, version_error, identity_error = _OBSERVATION_STAGE_FAILURES[stage]
+    if observation.exact_model != exact_model:
+        raise ClaudeWorkerContractError(model_error)
+    if observation.binary_version != binary.version:
+        raise ClaudeWorkerContractError(version_error)
+    if observation.binary_sha256 != binary.sha256:
+        raise ClaudeWorkerContractError(identity_error)
+    if observation.allow_alternate_models:
+        raise ClaudeWorkerContractError(
+            "managed policy observation must not allow alternate models"
+        )
+    if observation.fallback_models:
+        raise ClaudeWorkerContractError(
+            "managed policy observation must not declare an availability fallback"
+        )
+    if _canonical_policy_generation(observation.generation) != generation:
+        raise ClaudeWorkerContractError(
+            "managed policy observation generation drifted pre-spawn"
+        )
+
+
 def _requested_capabilities(spec: WorkerLaunchSpec) -> frozenset[str]:
     if not isinstance(spec.authorities, tuple):
         raise ClaudeWorkerContractError("worker authorities must be an immutable tuple")
@@ -596,18 +734,16 @@ def _redacted_launch_argv(argv: Sequence[str]) -> tuple[str, ...]:
     return tuple(rendered)
 
 
-def _permission_profile(spec: WorkerLaunchSpec) -> dict[str, Any]:
-    tools, preapproved, forbidden = _tool_policy(spec)
+def _jsonable_managed_observation(
+    observation: ManagedModelPolicyObservation,
+) -> dict[str, Any]:
     return {
-        "tools": list(tools),
-        "preapproved_tools": list(preapproved),
-        "forbidden_tools": list(forbidden),
-        "isolation_manifest_sha256": spec.isolation_manifest_sha256,
-        "network_enabled": False,
-        "safe_mode": True,
-        "session_persistence": False,
-        "mcp_servers": [],
-        "shell_environment_policy": "include_only",
+        "exact_model": observation.exact_model,
+        "binary_sha256": observation.binary_sha256,
+        "binary_version": observation.binary_version,
+        "generation": _canonical_policy_generation(observation.generation),
+        "allow_alternate_models": list(observation.allow_alternate_models),
+        "fallback_models": list(observation.fallback_models),
     }
 
 
@@ -916,7 +1052,13 @@ class ClaudeCodeWorkerAdapter:
     """One foreground native Claude process under the common worker contract."""
 
     adapter_id = "claude-code"
-    __slots__ = ("_configuration", "inspector", "_runs", "__weakref__")
+    __slots__ = (
+        "_configuration",
+        "inspector",
+        "_managed_policy_observer",
+        "_runs",
+        "__weakref__",
+    )
 
     def __init__(
         self,
@@ -925,23 +1067,46 @@ class ClaudeCodeWorkerAdapter:
         allowed_versions: frozenset[str],
         exact_model: str,
         max_turns: int,
+        managed_policy_observer: ManagedPolicyObserver | None = None,
     ) -> None:
         if isinstance(max_turns, bool) or not isinstance(max_turns, int) or not (
             1 <= max_turns <= _MAX_TURNS
         ):
             raise ClaudeWorkerContractError("Claude max_turns is outside the bounded contract")
+        if managed_policy_observer is None:
+            raise ClaudeWorkerContractError(
+                "managed model policy observer is required for native Claude execution"
+            )
+        if not isinstance(managed_policy_observer, ManagedPolicyObserver):
+            raise ClaudeWorkerContractError(
+                "managed model policy observer does not satisfy the frozen consumer seam"
+            )
+        validated_model = _validate_exact_model(exact_model)
+        binary = attest_claude_code_binary(
+            claude_binary, allowed_versions=allowed_versions
+        )
+        observation = _require_typed_observation(managed_policy_observer.observe())
+        generation = _canonical_policy_generation(observation.generation)
+        _validate_managed_observation(
+            observation,
+            exact_model=validated_model,
+            binary=binary,
+            generation=generation,
+            stage="configured",
+        )
         object.__setattr__(
             self,
             "_configuration",
             _ClaudeConfiguration(
-                binary=attest_claude_code_binary(
-                    claude_binary, allowed_versions=allowed_versions
-                ),
+                binary=binary,
                 allowed_versions=allowed_versions,
-                exact_model=_validate_exact_model(exact_model),
+                exact_model=validated_model,
                 max_turns=max_turns,
+                managed_observation=observation,
+                managed_policy_generation=generation,
             ),
         )
+        object.__setattr__(self, "_managed_policy_observer", managed_policy_observer)
         self.inspector: ProcessInspector = LocalProcessInspector()
         self._runs: dict[str, _RunState] = {}
 
@@ -961,11 +1126,44 @@ class ClaudeCodeWorkerAdapter:
     def allowed_versions(self) -> frozenset[str]:
         return self._configuration.allowed_versions
 
-    def compile_launch(self, spec: WorkerLaunchSpec) -> ClaudeInvocation:
-        """Compile existing grants into one closed, foreground CLI command."""
+    @property
+    def managed_policy_observer(self) -> ManagedPolicyObserver:
+        return self._managed_policy_observer  # type: ignore[has-type]
+
+    @property
+    def managed_policy_generation(self) -> int:
+        return self._configuration.managed_policy_generation
+
+    @property
+    def managed_policy_observation(self) -> ManagedModelPolicyObservation:
+        return self._configuration.managed_observation
+
+    def _refresh_managed_policy_observation(self) -> ManagedModelPolicyObservation:
+        """Re-observe the managed policy seam immediately before spawn."""
+
+        observation = _require_typed_observation(
+            self._managed_policy_observer.observe()
+        )
+        _validate_managed_observation(
+            observation,
+            exact_model=self._configuration.exact_model,
+            binary=self._configuration.binary,
+            generation=self._configuration.managed_policy_generation,
+            stage="pre-spawn",
+        )
+        return observation
+
+    def requested_settings(self, spec: WorkerLaunchSpec) -> dict[str, Any]:
+        """Return the exact private settings the launch request will carry.
+
+        The returned object is the one serialized into ``--settings``: the model
+        fences, the protected-path file-tool denies and the fail-closed
+        subprocess sandbox are all requested here, never attested alone.
+        """
 
         tools, preapproved, forbidden = _tool_policy(spec)
-        settings = {
+        deny = list(forbidden) + list(_protected_file_tool_denies(tools))
+        return {
             "autoMemoryEnabled": False,
             "disableAllHooks": True,
             "enableAllProjectMcpServers": False,
@@ -974,17 +1172,125 @@ class ClaudeCodeWorkerAdapter:
                 "allow": list(preapproved),
                 "ask": [],
                 "defaultMode": "dontAsk",
-                "deny": list(forbidden),
+                "deny": deny,
                 "disableBypassPermissionsMode": "disable",
             },
+            "model": self.exact_model,
+            "fallbackModel": [],
+            "availableModels": [self.exact_model],
+            "enforceAvailableModels": True,
             "switchModelsOnFlag": False,
+            "sandbox": _subprocess_sandbox_request(),
         }
+
+    def validate_settings(self, settings: Mapping[str, Any]) -> None:
+        """Refuse deletion or widening of any one closed model/path/sandbox fence."""
+
+        observed: dict[str, Any] = dict(settings)
+        for key, expected in (
+            ("model", self.exact_model),
+            ("fallbackModel", []),
+            ("availableModels", [self.exact_model]),
+            ("enforceAvailableModels", True),
+            ("switchModelsOnFlag", False),
+        ):
+            if key not in observed:
+                raise ClaudeWorkerContractError(f"{key} model fence drifted")
+            value = observed[key]
+            if key in ("availableModels", "fallbackModel"):
+                if not isinstance(value, list) or list(value) != list(expected):
+                    raise ClaudeWorkerContractError(f"{key} model fence drifted")
+                continue
+            if value != expected:
+                raise ClaudeWorkerContractError(
+                    f"{key} model fence drifted: mutation refuses"
+                )
+
+        permissions = observed.get("permissions")
+        if not isinstance(permissions, Mapping):
+            raise ClaudeWorkerContractError(
+                "protected path file-tool deny fence drifted: mutation refuses"
+            )
+        allow = permissions.get("allow") or []
+        if not isinstance(allow, list) or any(not isinstance(rule, str) for rule in allow):
+            raise ClaudeWorkerContractError(
+                "protected path file-tool deny fence drifted: mutation refuses"
+            )
+        enabled_file_tools = {
+            rule.split("(", 1)[0] for rule in allow
+        } & set(_FILE_TOOLS)
+        expected_denies = _protected_file_tool_denies(sorted(enabled_file_tools))
+        deny = permissions.get("deny")
+        if not isinstance(deny, list) or any(not isinstance(rule, str) for rule in deny):
+            raise ClaudeWorkerContractError(
+                "protected path file-tool deny fence drifted: mutation refuses"
+            )
+        if len(deny) != len(set(deny)) or not set(expected_denies) <= set(deny):
+            raise ClaudeWorkerContractError(
+                "protected path file-tool deny fence drifted: mutation refuses"
+            )
+
+        if observed.get("sandbox") != _subprocess_sandbox_request():
+            raise ClaudeWorkerContractError(
+                "subprocess sandbox fence drifted: mutation refuses"
+            )
+
+    def permission_profile(self, spec: WorkerLaunchSpec) -> dict[str, Any]:
+        """Render the complete review-enforced permission profile digest.
+
+        The digest source embeds the exact emitted settings alongside the tool
+        argv and isolation fields, so widening or deleting any model, path or
+        sandbox fence changes the launch contract.
+        """
+
+        settings = self.requested_settings(spec)
+        tools, preapproved, forbidden = _tool_policy(spec)
+        permissions = settings["permissions"]
+        return {
+            "tools": list(tools),
+            "preapproved_tools": list(preapproved),
+            "forbidden_tools": list(forbidden),
+            "file_tool_denies": [
+                rule for rule in permissions["deny"]
+                if rule not in forbidden
+            ],
+            "subprocess_sandbox": settings["sandbox"],
+            "requested_settings": settings,
+            "isolation_manifest_sha256": spec.isolation_manifest_sha256,
+            "network_enabled": False,
+            "safe_mode": True,
+            "session_persistence": False,
+            "mcp_servers": [],
+            "shell_environment_policy": "include_only",
+            "managed_policy_observation": _jsonable_managed_observation(
+                self._configuration.managed_observation
+            ),
+            "managed_policy_generation": self._configuration.managed_policy_generation,
+            "managed_policy_required": True,
+        }
+
+    def permission_profile_digest(
+        self, spec: WorkerLaunchSpec, *, profile: Mapping[str, Any] | None = None
+    ) -> str:
+        """Return the canonical digest of the review-enforced permission profile."""
+
+        rendered = (
+            dict(profile) if profile is not None else self.permission_profile(spec)
+        )
+        return _canonical_sha256(rendered)
+
+    def compile_launch(self, spec: WorkerLaunchSpec) -> ClaudeInvocation:
+        """Compile existing grants into one closed, foreground CLI command."""
+
+        tools, preapproved, forbidden = _tool_policy(spec)
+        settings = self.requested_settings(spec)
         argv = (
             self.binary.real_path,
             "-p",
             "--output-format",
             "json",
             "--safe-mode",
+            "--restricted",
             "--no-chrome",
             "--no-session-persistence",
             "--max-turns",
@@ -1126,6 +1432,10 @@ class ClaudeCodeWorkerAdapter:
             )
             if (spec.expected_worker_uid is None) != (spec.expected_worker_gid is None):
                 raise LaunchValidationError("worker UID/GID must be configured together")
+            if spec.expected_worker_uid is None or spec.expected_worker_gid is None:
+                raise LaunchValidationError(
+                    "native Claude execution requires exact worker UID/GID"
+                )
             home = _ensure_private_directory(run_dir / "home")
             tmp = _ensure_private_directory(run_dir / "tmp")
             _ensure_private_directory(run_dir / "logs")
@@ -1141,11 +1451,13 @@ class ClaudeCodeWorkerAdapter:
                 maximum=_MAX_SCHEMA_BYTES,
                 error_type=ClaudeLaunchError,
             )
-            if spec.expected_worker_uid is not None and (
+            if (
                 os.geteuid() != int(spec.expected_worker_uid)
                 or os.getegid() != int(spec.expected_worker_gid)
             ):
-                raise LaunchValidationError("adapter is not running as the configured worker principal")
+                raise LaunchValidationError(
+                    "adapter caller principal does not match the configured worker principal"
+                )
             return workspace, run_dir, home, tmp, baseline, schema
         except (LaunchValidationError, ResultValidationError, OSError, UnicodeError) as exc:
             raise ClaudeLaunchError("common launch validation refused") from exc
@@ -1330,6 +1642,7 @@ class ClaudeCodeWorkerAdapter:
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
         workspace, run_dir, home, tmp, baseline, schema = self._validate_spec(spec)
         _assert_claude_binary_unchanged(self.binary)
+        observation = self._refresh_managed_policy_observation()
         canary_verdict = validate_secret_canary_verdict(
             spec.secret_canary_verdict,
             require_passed=bool(spec.require_secret_canary),
@@ -1454,7 +1767,7 @@ class ClaudeCodeWorkerAdapter:
                 binary=self.binary,
                 rendered_argv=_redacted_launch_argv(argv),
                 environment_keys=tuple(sorted(environment)),
-                permission_profile_sha256=_canonical_sha256(_permission_profile(spec)),
+                permission_profile_sha256=self.permission_profile_digest(spec),
                 prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8", "strict")).hexdigest(),
                 expected_base_sha=spec.expected_base_sha,
                 observed_base_sha=baseline.head,
@@ -1468,6 +1781,12 @@ class ClaudeCodeWorkerAdapter:
                     "effective_gid": ref.effective_gid,
                     "real_uid": ref.real_uid,
                     "real_gid": ref.real_gid,
+                    "managed_policy_observation": _jsonable_managed_observation(
+                        observation
+                    ),
+                    "managed_policy_generation": _canonical_policy_generation(
+                        observation.generation
+                    ),
                 },
                 provider_home_identity=_path_identity(home),
                 secret_canary_verdict=canary_verdict,

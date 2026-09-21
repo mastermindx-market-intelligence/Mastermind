@@ -49,7 +49,6 @@ from control_plane.subscription_canary_admission import seal_subscription_canary
 from control_plane.subscription_harness_bindings import DEFAULT_BINDINGS_PATH
 from control_plane.subscription_provider_profiles import DEFAULT_PROFILES_PATH
 from control_plane.worker_adapter import (
-    ADAPTER_DESCRIPTORS,
     AdapterBindingError,
     bind_reviewed_adapter,
     construct_reviewed_adapter,
@@ -77,7 +76,6 @@ from control_plane.executive_worker_broker import (
     _ps_pids_for_uid,
 )
 from control_plane.executive_steward import CapacityState, SourceOwner
-import control_plane.executive_worker_broker as broker_module
 
 
 class FakeSweeper:
@@ -237,15 +235,7 @@ def _reviewed_codex_kwargs(root: Path) -> dict:
     root.mkdir(parents=True, exist_ok=True)
     binary = root / "fake-codex"
     if not binary.exists():
-        binary.write_text(
-            f"#!{sys.executable}\n"
-            "import os, sys\n"
-            "if 'sandbox' not in sys.argv: raise SystemExit(0)\n"
-            "separator = sys.argv.index('--')\n"
-            "command = sys.argv[separator + 1:]\n"
-            "os.execvpe(command[0], command, os.environ)\n",
-            encoding="utf-8",
-        )
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
         binary.chmod(0o700)
     info = binary.lstat()
     attestation = BinaryAttestation(
@@ -264,13 +254,6 @@ def _reviewed_codex_kwargs(root: Path) -> dict:
     )
     codex_home = root / "codex-home"
     codex_home.mkdir(mode=0o700, exist_ok=True)
-    # Temporary fixture prerequisite while the incumbent Codex owner (#586)
-    # owns the auth-free common-validation correction. This is synthetic test
-    # state only; PF1 does not treat it as native-Claude production readiness.
-    auth = codex_home / "auth.json"
-    if not auth.exists():
-        auth.write_text("{}\n", encoding="utf-8")
-        auth.chmod(0o600)
     return {
         "binary_path": binary,
         "codex_home": codex_home,
@@ -289,6 +272,113 @@ def _reviewed_codex_adapter(root: Path) -> CodexWorkerAdapter:
     )
 
 
+_CLAUDE_FIXTURE_VERSION = "2.1.239"
+_CLAUDE_FIXTURE_MODEL = "claude-opus-4-6"
+
+
+class _TypedClaudePolicyObserver:
+    """Consumer-side typed seam fake for the native Claude adapter.
+
+    No producer is synthesized: this only satisfies the frozen seam the worker
+    consumes, exactly as the ``claude-code`` tests require.
+    """
+
+    def __init__(self, attestation: object, exact_model: str) -> None:
+        self._attestation = attestation
+        self._exact_model = exact_model
+        self.generation: object = 1
+        self.calls = 0
+
+    def observe(self) -> object:
+        from control_plane.claude_worker import ManagedModelPolicyObservation
+
+        self.calls += 1
+        return ManagedModelPolicyObservation(
+            exact_model=self._exact_model,
+            binary_sha256=self._attestation.sha256,
+            binary_version=self._attestation.version,
+            generation=self.generation,
+        )
+
+
+def _reviewed_claude_code_kwargs(root: Path) -> dict:
+    """Reviewed native-Claude construction arguments over one fixture binary."""
+
+    from control_plane.claude_worker import attest_claude_code_binary
+
+    root.mkdir(parents=True, exist_ok=True)
+    binary = root / "fixture-claude"
+    if not binary.exists():
+        binary.write_text(
+            f"#!/bin/sh\nprintf '{_CLAUDE_FIXTURE_VERSION} (Claude Code)\\n'\n",
+            encoding="utf-8",
+        )
+        binary.chmod(0o700)
+    allowed_versions = frozenset({_CLAUDE_FIXTURE_VERSION})
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=allowed_versions
+    )
+    return {
+        "binary_path": binary,
+        "allowed_versions": allowed_versions,
+        "exact_model": _CLAUDE_FIXTURE_MODEL,
+        "max_turns": 4,
+        "managed_policy_observer": _TypedClaudePolicyObserver(
+            attestation, _CLAUDE_FIXTURE_MODEL
+        ),
+    }
+
+
+def _reviewed_claude_code_adapter(root: Path) -> object:
+    """One native Claude adapter built through the reviewed factory only."""
+
+    from control_plane.claude_worker import ClaudeCodeWorkerAdapter
+
+    kwargs = _reviewed_claude_code_kwargs(root)
+    adapter = construct_reviewed_adapter(
+        "claude-code", kwargs.pop("binary_path"), **kwargs
+    )
+    assert type(adapter) is ClaudeCodeWorkerAdapter
+    return adapter
+
+
+def _audit_codex_project_configuration(workspace: Path) -> str:
+    """Give the workspace the existing audited Codex project config and a HEAD.
+
+    Validation fixtures hand the spec to the reviewed common Codex adapter,
+    whose project-configuration preflight demands the audited ``.codex``
+    bytes inside its own clean clone.  The audited checkout content is
+    ``control_plane``'s own ``.codex/config.toml``; nothing is invented here.
+    """
+
+    from control_plane.codex_worker import _PROJECT_ROOT
+
+    def git(*arguments: str) -> str:
+        completed = subprocess.run(
+            ["/usr/bin/git", *arguments],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+        )
+        return completed.stdout.decode("utf-8", errors="strict")
+
+    project_config = workspace / ".codex" / "config.toml"
+    project_config.parent.mkdir(mode=0o700, exist_ok=True)
+    project_config.write_bytes(
+        (_PROJECT_ROOT / ".codex" / "config.toml").read_bytes()
+    )
+    project_config.chmod(0o600)
+    (workspace / "README.md").write_text("fixture\n", encoding="utf-8")
+    git("init", "-q")
+    git("add", "README.md", ".codex/config.toml")
+    git(
+        "-c", "user.name=Broker Fixture",
+        "-c", "user.email=broker-fixture@example.invalid",
+        "commit", "-qm", "fixture",
+    )
+    return git("rev-parse", "HEAD").strip()
+
+
 def _fixture(tmp_path: Path):
     worker_uid = os.geteuid()
     worker_gid = os.getegid()
@@ -302,9 +392,13 @@ def _fixture(tmp_path: Path):
     run_dir = run_root / "run-1"
     schema = run_dir / "input" / "result.schema.json"
     workspace.mkdir(mode=0o700)
+    # Create the run directory itself at the audited worker-private mode:
+    # mkdir(parents=True) would leave the intermediate directory world-readable
+    # and the reviewed run-directory boundary would correctly refuse it.
     run_dir.mkdir(mode=0o700)
-    schema.parent.mkdir(mode=0o700)
+    schema.parent.mkdir(parents=True, mode=0o700)
     schema.write_text("{}\n", encoding="utf-8")
+    expected_base_sha = _audit_codex_project_configuration(workspace)
     policy = BrokerPolicy(
         control_uid=control_uid,
         worker_uid=worker_uid,
@@ -322,6 +416,9 @@ def _fixture(tmp_path: Path):
     adapter = FakeAdapter()
     sweeper = FakeSweeper()
     broker = ExecutiveWorkerBroker(reviewed, policy, sweeper)
+    # The reviewed construction above proves the binding law; the recording
+    # fake then stands in for the adapter on both the primary and validation
+    # seams, which are the same reviewed adapter for the Codex broker.
     broker.adapter = adapter
     broker.validation_adapter = adapter
     peer = PeerCredentials(uid=control_uid, gid=worker_gid, pid=100)
@@ -336,7 +433,7 @@ def _fixture(tmp_path: Path):
         "authorities": ["READ", "RUN_TESTS"],
         "authority": None,
         "worker_user": "fixture-worker",
-        "expected_base_sha": "b" * 40,
+        "expected_base_sha": expected_base_sha,
         "allowed_artifact_paths": [],
         "isolation_roots": [str(workspace_root), str(run_root)],
         "isolation_denied_paths": [],
@@ -2712,436 +2809,212 @@ def test_broker_start_base_exception_retains_original_finalization(tmp_path: Pat
 
     asyncio.run(scenario())
 
-
-def _reviewed_claude_adapter(tmp_path: Path):
-    root = tmp_path.resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    mode_file = root / "mode"
-    mode_file.write_text("success", encoding="utf-8")
-    binary = root / "fixture-claude"
-    binary.write_text(
-        f"#!{sys.executable}\n"
-        "import json, pathlib, signal, sys, time\n"
-        "if sys.argv[1:] == ['--version']:\n"
-        "    print('2.1.239 (Claude Code)'); raise SystemExit(0)\n"
-        f"mode = pathlib.Path({str(mode_file)!r}).read_text()\n"
-        "if mode == 'wait':\n"
-        "    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))\n"
-        "    while True: time.sleep(1)\n"
-        "result = {'outcome': 'ok', 'artifacts': []}\n"
-        "if mode == 'executive':\n"
-        "    schema = json.loads(sys.argv[sys.argv.index('--json-schema') + 1])\n"
-        "    properties = schema['properties']\n"
-        "    result = {name: properties[name]['const'] for name in "
-        "('schema_version', 'job_id', 'run_id', 'worker_id')}\n"
-        "    pathlib.Path('proof.txt').write_text('PF1 fixture proof\\n')\n"
-        "    result.update(status='COMPLETED', summary='Bounded fixture artifact produced', "
-        "completed_steps=['write declared artifact'], current_state='awaiting supervisor validation', "
-        "artifacts=[{'path': 'proof.txt'}], next_actions=[], errors=[], validations=[])\n"
-        "print(json.dumps({'is_error': False, 'model': 'claude-opus-4-6', "
-        "'structured_output': result}), flush=True)\n",
-        encoding="utf-8",
-    )
-    binary.chmod(0o700)
-    return construct_reviewed_adapter(
-        "claude-code",
-        binary,
-        allowed_versions=frozenset({"2.1.239"}),
-        exact_model="claude-opus-4-6",
-        max_turns=4,
-    )
-
-
-def _passing_broker_canary() -> dict[str, object]:
-    return {
-        "schema_version": "mastermind.executive_secret_canary/v1",
-        "passed": True,
-        "checks": {
-            "control_service_environment": "DENIED",
-            "administrative_checkout": "DENIED",
-            "executive_database": "DENIED",
-            "other_worker_home": "DENIED",
-            "forbidden_production_path": "DENIED",
-        },
-        "receipt_sha256": "a" * 64,
-        "control_environment_probe_sha256": "b" * 64,
-        "observed_at": "2026-09-17T00:00:00Z",
-        "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
-    }
-
-
-def _arm_claude_descriptor(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(
-        ADAPTER_DESCRIPTORS,
-        "claude-code",
-        dataclasses.replace(ADAPTER_DESCRIPTORS["claude-code"], implemented=True),
-    )
-
-
-def _real_claude_broker_fixture(
+def test_remote_adapter_reattaches_exact_broker_run_without_starting_again(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    _arm_claude_descriptor(monkeypatch)
-    base_root = tmp_path / "base"
-    base_root.mkdir()
-    base_broker, _fake, sweeper, peer, spec = _fixture(base_root)
-    workspace = Path(spec["workspace_path"])
-    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
-    subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=workspace, check=True)
-    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=workspace, check=True)
-    (workspace / "seed.txt").write_text("seed\n", encoding="utf-8")
-    project_config_dir = workspace / ".codex"
-    project_config_dir.mkdir(mode=0o700)
-    (project_config_dir / "config.toml").write_bytes(
-        (Path(__file__).resolve().parents[1] / ".codex" / "config.toml").read_bytes()
+) -> None:
+    broker, adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
+    from control_plane.executive_worker_broker import (
+        _jsonable,
+        _launch_spec_from_wire,
     )
-    subprocess.run(
-        ["git", "add", "seed.txt", ".codex/config.toml"],
-        cwd=workspace,
-        check=True,
-    )
-    subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=workspace, check=True)
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=workspace, text=True).strip()
+    from control_plane.worker_execution_contract import WorkerRecoveryBinding
 
-    def identity(path: Path) -> dict[str, object]:
-        info = path.lstat()
-        return {
-            "path": str(path.resolve()),
-            "device": info.st_dev,
-            "inode": info.st_ino,
-            "mode": stat.S_IMODE(info.st_mode),
-            "uid": info.st_uid,
-            "gid": info.st_gid,
-            "mtime_ns": info.st_mtime_ns,
-        }
-
-    manifest = dict(spec["isolation_manifest"])
-    manifest["roots"] = sorted(
-        (identity(Path(value)) for value in spec["isolation_roots"]),
-        key=lambda value: str(value["path"]),
+    spec = _launch_spec_from_wire(spec_value, broker.policy)
+    ref = asyncio.run(adapter.start(spec))
+    prompt_path = Path(spec.run_dir) / "input" / "worker-prompt.txt"
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    binding = WorkerRecoveryBinding.bind(
+        adapter_id="codex-cli",
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
     )
-    manifest["entries"] = sorted(
-        (
-            {
-                "root_path": str(Path(entry["root_path"]).resolve()),
-                "disposition": entry["disposition"],
-                "identity": identity(Path(entry["identity"]["path"])),
+
+    class Client:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        def request_sync(self, operation, payload):
+            self.calls.append((operation, payload))
+            assert operation == "status"
+            assert payload == {"run_id": ref.run_id}
+            return {
+                "run": {
+                    "status": "RUNNING",
+                    "process_ref": _jsonable(ref),
+                }
             }
-            for entry in manifest["entries"]
-        ),
-        key=lambda value: str(value["identity"]["path"]),
-    )
-    spec.update(
-        {
-            "expected_base_sha": head,
-            "model": "claude-opus-4-6",
-            "secret_canary_verdict": _passing_broker_canary(),
-            "require_secret_canary": True,
-            "isolation_manifest": manifest,
-            "isolation_manifest_sha256": hashlib.sha256(
-                json.dumps(
-                    manifest,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                    allow_nan=False,
-                ).encode("utf-8")
-            ).hexdigest(),
-        }
-    )
-    claude_root = tmp_path / "claude"
-    claude = _reviewed_claude_adapter(claude_root)
-    # Reuse the sandbox-protocol fixture; an empty binary can falsely pass
-    # validation without executing the exact argv. This is not native OS proof.
-    from test_executive_codex_worker import _FAKE_CODEX
 
-    validation_root = tmp_path / "validator"
-    validation_root.mkdir()
-    validation_binary = validation_root / "fake-codex"
-    validation_binary.write_text(
-        _FAKE_CODEX.replace("#!/usr/bin/python3", f"#!{sys.executable}", 1),
-        encoding="utf-8",
+    client = Client()
+    remote = RemoteCodexWorkerAdapter(client)  # type: ignore[arg-type]
+    recovered = remote.reattach(spec, binding)
+    repeated = remote.reattach(spec, binding)
+    assert recovered == repeated == ref
+    assert remote._refs[ref.run_id] == ref
+    assert remote._specs[ref.run_id] == spec
+    assert client.calls == [("status", {"run_id": ref.run_id})]
+
+
+# ---------------------------------------------------------------------------
+# Discriminators for the broker response identity, the reviewed common Codex
+# validation adapter binding, and the inert descriptor floor.  These tests
+# must fail RED against the supplied preimage and turn GREEN only after the
+# corrections in control_plane/executive_worker_broker.py reconcile the
+# adapter-identity return/check, the RemoteClaudeWorkerAdapter, and the
+# separate common Codex validation adapter.
+# ---------------------------------------------------------------------------
+
+
+def test_claude_code_descriptor_remains_unarmed_after_correction(
+    tmp_path: Path,
+) -> None:
+    from control_plane.worker_adapter import adapter_descriptor, adapter_implementation
+
+    from control_plane.claude_worker import ClaudeCodeWorkerAdapter
+
+    descriptor = adapter_descriptor("claude-code")
+    assert descriptor.implemented is False
+    assert descriptor.implementation == (
+        "control_plane.claude_worker.ClaudeCodeWorkerAdapter"
     )
-    validation_binary.chmod(0o700)
-    validator = _reviewed_codex_adapter(validation_root)
-    broker = ExecutiveWorkerBroker(
-        claude,
-        base_broker.policy,
+    assert adapter_implementation("claude-code") is ClaudeCodeWorkerAdapter
+    assert (
+        adapter_descriptor("claude-compatible-subscription").implementation
+        != descriptor.implementation
+    )
+    # The distinct subscription realm keeps its own inert descriptor; the two
+    # adapter ids are never interchangeable.
+    assert (
+        adapter_descriptor("claude-compatible-subscription").adapter_id
+        == "claude-compatible-subscription"
+        != descriptor.adapter_id
+    )
+
+
+def test_broker_response_identity_mismatch_refuses_start(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+
+        class IdentitySpoof(FakeAdapter):
+            @property
+            def adapter_id(self) -> str:
+                return "claude-code"
+
+        original_adapter = adapter
+
+        async def attempt() -> None:
+            with pytest.raises(WorkerBrokerError, match="does not match descriptor"):
+                ExecutiveWorkerBroker(
+                    IdentitySpoof(),
+                    broker.policy,
+                    broker.sweeper,
+                    adapter_id="codex-cli",
+                )
+
+        await attempt()
+        assert broker.adapter is original_adapter
+
+    asyncio.run(scenario())
+
+
+def test_claude_broker_uses_common_codex_validation_adapter(tmp_path: Path) -> None:
+    from control_plane.claude_worker import ClaudeCodeWorkerAdapter
+    from control_plane.codex_worker import CodexWorkerAdapter as ExactCodexAdapter
+    from control_plane.worker_adapter import adapter_descriptor
+
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    # The primary native Claude adapter is reviewed-constructed, never a stub.
+    claude_adapter = _reviewed_claude_code_adapter(tmp_path / "claude-primary")
+    # The validation adapter is a separately reviewed common Codex adapter.
+    validation_adapter = _reviewed_codex_adapter(tmp_path / "validation-codex")
+    broker_obj = ExecutiveWorkerBroker(
+        claude_adapter,
+        broker.policy,
         sweeper,
         adapter_id="claude-code",
-        validation_adapter=validator,
+        validation_adapter=validation_adapter,
         validation_adapter_id="codex-cli",
     )
-    broker.startup_sweep = sweeper.sweep("broker_startup")
-    broker.last_sweep = broker.startup_sweep
-    return broker, claude, validator, sweeper, peer, spec, claude_root / "mode"
+    # Exact class plus reviewed-construction binding stay active on both sides.
+    assert type(broker_obj.adapter) is ClaudeCodeWorkerAdapter
+    assert broker_obj.adapter is claude_adapter
+    assert bind_reviewed_adapter(broker_obj.adapter, "claude-code") == (
+        adapter_descriptor("claude-code")
+    )
+    assert bind_reviewed_adapter(
+        broker_obj.adapter, "claude-code"
+    ).implemented is False
+    assert broker_obj.adapter_id == "claude-code"
+    assert type(validation_adapter) is ExactCodexAdapter
+    assert bind_reviewed_adapter(validation_adapter, "codex-cli") == (
+        adapter_descriptor("codex-cli")
+    )
+    assert broker_obj.validation_adapter is validation_adapter
+    assert broker_obj.validation_adapter_id == "codex-cli"
 
 
-def test_unarmed_claude_descriptor_refuses_broker_execution(tmp_path: Path) -> None:
-    codex_root = tmp_path / "codex"
-    codex_root.mkdir()
-    codex_broker, _adapter, sweeper, peer, spec = _fixture(codex_root)
-    claude = _reviewed_claude_adapter(tmp_path / "claude")
-    validator = _reviewed_codex_adapter(tmp_path / "validator")
-    broker = ExecutiveWorkerBroker(
-        claude,
-        codex_broker.policy,
-        sweeper,
-        adapter_id="claude-code",
-        validation_adapter=validator,
-        validation_adapter_id="codex-cli",
+def test_claude_broker_refuses_non_codex_validation_adapter(tmp_path: Path) -> None:
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    # Both sides are real reviewed adapters: the refusal must come from the
+    # broker's validation-identity law, not from a stub failing to bind.
+    claude_adapter = _reviewed_claude_code_adapter(tmp_path / "claude-primary")
+    other_claude_adapter = _reviewed_claude_code_adapter(
+        tmp_path / "claude-wrong-validation"
+    )
+    with pytest.raises(WorkerBrokerError, match="common Codex sandbox") as refused:
+        ExecutiveWorkerBroker(
+            claude_adapter,
+            broker.policy,
+            sweeper,
+            adapter_id="claude-code",
+            validation_adapter=other_claude_adapter,
+            validation_adapter_id="claude-code",
+        )
+    # The reviewed Claude adapter is not the reviewed common Codex sandbox, and
+    # it is never conflated with the separate subscription realm descriptor.
+    assert refused.value.__cause__ is None
+    assert "claude-compatible-subscription" not in str(refused.value)
+
+
+def test_remote_claude_worker_adapter_has_immutable_claude_identity() -> None:
+    from control_plane.executive_worker_broker import (
+        RemoteClaudeWorkerAdapter,
+        RemoteCodexWorkerAdapter,
     )
 
-    with pytest.raises(
-        broker_module.WorkerAdapterNotImplementedError, match="not implemented"
-    ):
-        asyncio.run(
-            broker.execute(
+    assert RemoteClaudeWorkerAdapter.adapter_id == "claude-code"
+    assert RemoteCodexWorkerAdapter.adapter_id == "codex-cli"
+    assert issubclass(RemoteClaudeWorkerAdapter, RemoteCodexWorkerAdapter)
+
+
+def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        adapter.finished.set()
+        await broker.execute(
+            _request(
+                "start",
+                {"launch_spec": spec, "validation_commands": [["/usr/bin/true"]]},
+            ),
+            peer=peer,
+        )
+        await broker.execute(
+            _request("collect", {"run_id": "run-1"}),
+            peer=peer,
+        )
+        with pytest.raises(BrokerProtocolError, match="not frozen"):
+            await broker.execute(
                 _request(
-                    "start",
-                    {"launch_spec": spec, "validation_commands": []},
-                    suffix="claude-unarmed",
+                    "validate",
+                    {
+                        "run_id": "run-1",
+                        "argv": ["/usr/bin/false"],
+                        "timeout_seconds": 10,
+                    },
                 ),
                 peer=peer,
             )
-        )
-
-    assert broker._active_run_id is None
-    assert broker._runs == {}
-
-
-def test_claude_broker_binds_exact_execution_and_common_validation_owners(
-    tmp_path: Path,
-) -> None:
-    codex_root = tmp_path / "codex"
-    codex_root.mkdir()
-    codex_broker, _adapter, sweeper, _peer, _spec = _fixture(codex_root)
-    claude = _reviewed_claude_adapter(tmp_path / "claude")
-    validator = _reviewed_codex_adapter(tmp_path / "validator")
-
-    broker = ExecutiveWorkerBroker(
-        claude,
-        codex_broker.policy,
-        sweeper,
-        adapter_id="claude-code",
-        validation_adapter=validator,
-        validation_adapter_id="codex-cli",
-    )
-
-    assert broker.adapter is claude
-    assert broker.adapter_id == "claude-code"
-    assert broker.validation_adapter is validator
-    assert broker.validation_adapter_id == "codex-cli"
-
-
-def test_remote_claude_facade_refuses_broker_provider_identity_drift() -> None:
-    remote_type = getattr(broker_module, "RemoteClaudeWorkerAdapter")
-
-    class Client:
-        async def request(self, operation, payload, **kwargs):
-            del payload, kwargs
-            assert operation == "start"
-            return {"adapter_id": "codex-cli"}
-
-    remote = remote_type(Client())
-    spec = WorkerLaunchSpec(
-        run_id="run-identity",
-        job_id="job-identity",
-        worker_id="worker-identity",
-        workspace_path=Path("/tmp/workspace-identity"),
-        run_dir=Path("/tmp/run-identity"),
-        prompt="bounded",
-        result_schema_path=Path("/tmp/run-identity/schema.json"),
-        authorities=("READ",),
-        model="claude-opus-4-6",
-    )
-    with pytest.raises(BrokerProtocolError, match="adapter identity"):
-        asyncio.run(remote.start(spec))
-
-
-def test_broker_projects_fixed_adapter_identity_in_start_and_status(
-    tmp_path: Path,
-) -> None:
-    async def scenario() -> None:
-        broker, _adapter, _sweeper, peer, spec = _fixture(tmp_path)
-        started = await broker.execute(
-            _request(
-                "start",
-                {"launch_spec": spec, "validation_commands": []},
-                suffix="adapter-start",
-            ),
-            peer=peer,
-        )
-        assert started["result"]["adapter_id"] == "codex-cli"
-        status = await broker.execute(
-            _request("status", {"run_id": spec["run_id"]}, suffix="adapter-status"),
-            peer=peer,
-        )
-        assert status["result"]["adapter_id"] == "codex-cli"
-        await broker.execute(
-            _request(
-                "cancel",
-                {"run_id": spec["run_id"], "reason": "fixture cleanup"},
-                suffix="adapter-cancel",
-            ),
-            peer=peer,
-        )
-
-    asyncio.run(scenario())
-
-
-
-def test_claude_broker_fixture_start_collect_validate_uses_common_lifecycle(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def scenario() -> None:
-        broker, _claude, _validator, sweeper, peer, spec, _mode = (
-            _real_claude_broker_fixture(tmp_path, monkeypatch)
-        )
-        started = await broker.execute(
-            _request(
-                "start",
-                {
-                    "launch_spec": spec,
-                    "validation_commands": [["/usr/bin/true"]],
-                },
-                suffix="claude-start",
-            ),
-            peer=peer,
-        )
-        assert started["result"]["adapter_id"] == "claude-code"
-        run_id = spec["run_id"]
-        status = await broker.execute(
-            _request("status", {"run_id": run_id}, suffix="claude-status"),
-            peer=peer,
-        )
-        assert status["result"]["adapter_id"] == "claude-code"
-        collected = await broker.execute(
-            _request("collect", {"run_id": run_id}, suffix="claude-collect"),
-            peer=peer,
-        )
-        assert collected["result"]["collection"]["result"]["status"] == "SUCCEEDED"
-        validated = await broker.execute(
-            _request(
-                "validate",
-                {
-                    "run_id": run_id,
-                    "argv": ["/usr/bin/true"],
-                    "timeout_seconds": 5.0,
-                },
-                suffix="claude-validate",
-            ),
-            peer=peer,
-        )
-        assert validated["result"]["validation"]["exit_code"] == 0, validated["result"]["validation"]
-        assert broker.validation_adapter_id == "codex-cli"
-        assert [call for call in sweeper.calls] == [
-            "broker_startup",
-            "run_terminal",
-            "validation_terminal",
-        ]
-
-    asyncio.run(scenario())
-
-
-def test_claude_broker_fixture_cancel_uses_common_cancellation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def scenario() -> None:
-        broker, _claude, _validator, sweeper, peer, spec, mode = (
-            _real_claude_broker_fixture(tmp_path, monkeypatch)
-        )
-        mode.write_text("wait", encoding="utf-8")
-        await broker.execute(
-            _request(
-                "start",
-                {"launch_spec": spec, "validation_commands": []},
-                suffix="claude-cancel-start",
-            ),
-            peer=peer,
-        )
-        cancelled = await broker.execute(
-            _request(
-                "cancel",
-                {"run_id": spec["run_id"], "reason": "fixture cancellation"},
-                suffix="claude-cancel",
-            ),
-            peer=peer,
-        )
-        assert cancelled["result"]["cancellation"]["run_id"] == spec["run_id"]
-        assert cancelled["result"]["uid_sweep"]["passed"] is True
-        assert sweeper.calls == ["broker_startup", "run_terminal"]
-
-    asyncio.run(scenario())
-
-
-def test_remote_claude_fixture_round_trip_uses_fixed_common_broker(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def scenario() -> None:
-        broker, _claude, _validator, _sweeper, peer, spec_value, _mode = (
-            _real_claude_broker_fixture(tmp_path, monkeypatch)
-        )
-        broker.peer_resolver = lambda _socket: peer
-        socket_path = Path("/tmp") / f"mm-claude-{os.getpid()}-{uuid.uuid4().hex[:8]}.sock"
-        server = await asyncio.start_unix_server(
-            broker.handle_connection,
-            path=str(socket_path),
-            limit=1024 * 1024,
-        )
-        client = WorkerBrokerClient(socket_path)
-        remote_type = getattr(broker_module, "RemoteClaudeWorkerAdapter")
-        remote = remote_type(
-            client,
-            validation_commands_for_spec=lambda _spec: [["/usr/bin/true"]],
-        )
-        from control_plane.executive_worker_broker import _launch_spec_from_wire
-
-        spec = _launch_spec_from_wire(spec_value, broker.policy)
-        try:
-            ref = await remote.start(spec)
-            assert remote.adapter_id == "claude-code"
-            assert remote.launch_attestation(ref)["launch_nonce"] == ref.launch_nonce
-            collected = await remote.collect_result(ref)
-            assert collected.result.status is WorkerRunStatus.SUCCEEDED
-            validated = await remote.run_validation_argv(
-                spec, ("/usr/bin/true",), timeout_seconds=5.0
-            )
-            assert validated.exit_code == 0
-            assert remote.uid_sweep_receipt(ref)["passed"] is True
-        finally:
-            server.close()
-            await server.wait_closed()
-            socket_path.unlink(missing_ok=True)
-
-    asyncio.run(scenario())
-
-
-def test_claude_broker_validation_executes_exact_command_not_empty_fixture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def scenario() -> None:
-        broker, _claude, _validator, _sweeper, peer, spec, _mode = (
-            _real_claude_broker_fixture(tmp_path, monkeypatch)
-        )
-        await broker.execute(
-            _request("start", {"launch_spec": spec, "validation_commands": [["/usr/bin/false"]]}, suffix="exact-validator-start"),
-            peer=peer,
-        )
-        await broker.execute(
-            _request("collect", {"run_id": spec["run_id"]}, suffix="exact-validator-collect"), peer=peer,
-        )
-        result = await broker.execute(
-            _request("validate", {"run_id": spec["run_id"], "argv": ["/usr/bin/false"], "timeout_seconds": 5.0}, suffix="exact-validator-false"),
-            peer=peer,
-        )
-        receipt = result["result"]["validation"]
-        assert receipt["argv"] == ["/usr/bin/false"]
-        assert receipt["exit_code"] == 1, receipt
-        assert receipt["timed_out"] is False and receipt["error"] is None, receipt
 
     asyncio.run(scenario())

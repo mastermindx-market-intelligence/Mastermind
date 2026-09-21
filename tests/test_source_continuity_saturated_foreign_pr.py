@@ -1235,9 +1235,9 @@ def _roster() -> list[dict[str, object]]:
 
 def test_invocation_ceilings_are_unchanged_by_semantic_revalidation() -> None:
     module = _module()
-    assert module._MAX_HTTP_CALLS == 640
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 32 * 1024 * 1024
-    assert module._HTTP_READ_BUDGET_SECONDS == 180.0
+    assert module._MAX_HTTP_CALLS == 1152
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert module._HTTP_READ_BUDGET_SECONDS == 300.0
 
 
 def test_open_pull_roster_changed_200_with_identical_semantics_does_not_starve() -> None:
@@ -1587,10 +1587,15 @@ def test_main_issues_receipt_when_changed_open_roster_keeps_collision_semantics(
     payload = json.loads(captured.out)
     assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
     assert payload["local_equals_remote"] is True
-    assert len(http.conditional_calls) == len(http.first_calls)
+    # Collision-census reads are intentionally not strict ETag obligations:
+    # they are re-proved by one complete second census under the same budget.
+    conditional_urls = [url for url, _ in http.conditional_calls]
+    assert open_pulls not in conditional_urls
+    assert http.first_calls.count(open_pulls) == 2
+    assert len(http.conditional_calls) == len(http.first_calls) - 2
 
 
-def test_main_refuses_changed_200_on_target_pr_even_when_body_is_identical(
+def test_main_accepts_changed_200_on_target_pr_when_identity_is_identical(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import json
@@ -1614,5 +1619,7 @@ def test_main_refuses_changed_200_on_target_pr_even_when_body_is_identical(
     exit_code = fx._run_cli(module, fx._cli_argv(), http=http)
     captured = capsys.readouterr()
 
-    assert exit_code == 1
-    assert json.loads(captured.out)["code"] == "REMOTE_PROOF_CHANGED"
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
+    assert payload["local_equals_remote"] is True
