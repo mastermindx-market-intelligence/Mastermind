@@ -68,6 +68,7 @@ class FleetOperationError(RuntimeError):
             "CONFIG_PATH_REFUSED",
             "LEASE_EXPIRED",
             "LEASE_RENEWAL_REFUSED",
+            "PROJECT_HEAD_MISMATCH",
             "RUNTIME_AUTH_REF_UNAVAILABLE",
             "RUNTIME_RECONNECT_FAILED",
             "RUNTIME_STOP_FAILED",
@@ -115,6 +116,7 @@ class DoctorReceipt:
 
 Runner = Callable[[Sequence[str]], dict[str, Any]]
 ToolProbe = Callable[[Sequence[str]], None]
+HeadProbe = Callable[[str], str]
 
 
 def _run_json(argv: Sequence[str]) -> dict[str, Any]:
@@ -487,8 +489,36 @@ def _probe_describe_contract(command: Sequence[str]) -> None:
         raise FleetOperationError("TOOL_CONTRACT_MISMATCH")
 
 
+def _git_head(project_root: str) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", project_root, "rev-parse", "--verify", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise FleetOperationError("PROJECT_HEAD_MISMATCH") from None
+    selected = completed.stdout.strip()
+    if completed.returncode != 0 or _HEX40.fullmatch(selected) is None:
+        raise FleetOperationError("PROJECT_HEAD_MISMATCH")
+    return selected
+
+
+def _validate_project_head(config: TunnelConfig, head_probe: HeadProbe) -> None:
+    expected = config.lease.committed_head
+    if expected is None:
+        return
+    if _HEX40.fullmatch(expected) is None or head_probe(config.project_root) != expected:
+        raise FleetOperationError("PROJECT_HEAD_MISMATCH")
+
+
 def _target_release_sha(
-    status: dict[str, Any], config_path: str, tool_probe: ToolProbe
+    status: dict[str, Any],
+    config: TunnelConfig,
+    config_path: str,
+    tool_probe: ToolProbe,
 ) -> str | None:
     process = status.get("process")
     if not isinstance(process, dict):
@@ -521,7 +551,17 @@ def _target_release_sha(
     launcher = argv[2]
     if not python_executable.startswith("/") or not launcher.startswith("/"):
         raise FleetOperationError("TARGET_REFUSED")
-    _same_euid_private_regular(os.path.realpath(python_executable))
+    selected_python = os.path.realpath(python_executable)
+    configured_python = os.path.realpath(config.python_executable)
+    if selected_python != configured_python:
+        raise FleetOperationError("TARGET_REFUSED")
+    _same_euid_private_regular(selected_python)
+    try:
+        observed_python_sha = hashlib.sha256(Path(selected_python).read_bytes()).hexdigest()
+    except OSError:
+        raise FleetOperationError("TARGET_REFUSED") from None
+    if observed_python_sha != config.python_sha256:
+        raise FleetOperationError("TARGET_REFUSED")
     _same_euid_private_regular(launcher)
     if Path(launcher).name != "mastermind_workbench_action_stdio.py":
         raise FleetOperationError("TARGET_REFUSED")
@@ -541,12 +581,14 @@ def doctor(
     now_ms: int | None = None,
     runner: Runner = _run_json,
     tool_probe: ToolProbe = _probe_describe_contract,
+    head_probe: HeadProbe = _git_head,
 ) -> DoctorReceipt:
     _same_euid_private_regular(config_path)
     config = _load_config(config_path)
     if config.schema != TUNNEL_SCHEMA:
         raise FleetOperationError("CONFIGURATION_REFUSED")
     evidence = inspect_artifact_evidence(config.artifact_directory)
+    _validate_project_head(config, head_probe)
     status = _status(alias, runner)
     _validate_binding(config, status)
 
@@ -559,7 +601,7 @@ def doctor(
     if not (healthy and ready and process_running and runtime_state == "ready"):
         raise FleetOperationError("ALIAS_NOT_READY")
 
-    release_sha = _target_release_sha(status, config_path, tool_probe)
+    release_sha = _target_release_sha(status, config, config_path, tool_probe)
     if expected_source_sha is not None:
         if _HEX40.fullmatch(expected_source_sha) is None:
             raise FleetOperationError("SOURCE_RELEASE_MISMATCH")
@@ -928,7 +970,7 @@ def renew(
 
     before = _status(alias, runner)
     _validate_binding(config, before)
-    release_sha = _target_release_sha(before, config_path, tool_probe)
+    release_sha = _target_release_sha(before, config, config_path, tool_probe)
     _require_source(release_sha, expected_source_sha)
     route = _stop_and_probe(
         alias=alias,

@@ -238,8 +238,10 @@ python scripts/mastermind_workbench_fleet.py renew \
 parser and tunnel-client runtime status as the owners of config/channel truth.
 It requires an exact single tunnel/organization/workspace association, a live
 healthy/ready managed runtime, the expected immutable release launcher, the
-closed ten-tool `attended_workbench_f0` describe contract, a live lease, and no
-unresolved per-action artifact evidence. A claim, process record, result,
+config-pinned launcher interpreter and executable hash, the selected worktree's
+Git HEAD when `committed_head` is pinned, the closed ten-tool
+`attended_workbench_f0` describe contract, a live lease, and no unresolved
+per-action artifact evidence. A claim, process record, result,
 stdout, or stderr blob that cannot be qualified as one matching durable
 completed action makes the operator refuse rather than infer that no effect
 occurred. `RENEW_SOON` is advisory only; it grants no renewal authority.
@@ -254,8 +256,11 @@ tools with only `commit_text_patch` and `run_project_command` advertised as
 modifying/destructive. It then reconnects the same alias/profile/tunnel/target
 through the existing `file:` or `env:` runtime-key reference and re-reads the
 exact channel binding. If the native probe refuses, it attempts to restore the
-unchanged original route before returning the refusal. It never calls a
-Workbench project tool.
+unchanged original route before returning the refusal. The config is
+fingerprinted before the stopped window and requalified before and after the
+probe; if it changes, the alias remains stopped for reconciliation rather than
+being reopened through ambiguous authority. It never calls a Workbench project
+tool.
 
 `renew` is an explicit operator ceremony, not a scheduler. It refuses any
 unresolved action evidence before stopping the runtime, performs the same

@@ -83,7 +83,7 @@ def _document(tmp_path: Path, *, expires_at_ms: int | None = None) -> tuple[dict
             "owner_ref": "owner:" + "5" * 64,
             "generation": "generation:" + "6" * 64,
             "allowed_paths": ["sample.py"],
-            "committed_head": SOURCE_SHA,
+            "committed_head": None,
             "lease_expires_at_ms": expires_at_ms,
         },
     }
@@ -101,7 +101,7 @@ def _wrapper(tmp_path: Path, config_path: Path) -> Path:
     wrapper = tmp_path / "mastermind-workbench-c1"
     wrapper.write_text(
         "#!/bin/sh\n"
-        f'exec "{sys.executable}" "{launcher}" --config "{config_path}"\n',
+        f'exec "{os.path.realpath(sys.executable)}" "{launcher}" --config "{config_path}"\n',
         encoding="utf-8",
     )
     os.chmod(wrapper, 0o700)
@@ -192,6 +192,49 @@ def test_doctor_accepts_exact_ready_binding(tmp_path: Path) -> None:
     assert receipt.source_release_sha == SOURCE_SHA
     assert receipt.completed_action_count == 0
     assert receipt.unresolved_action_ids == ()
+
+
+def test_doctor_refuses_pinned_project_head_drift(tmp_path: Path) -> None:
+    document, config_path = _document(tmp_path)
+    document["lease"]["committed_head"] = SOURCE_SHA
+    config_path.write_text(json.dumps(document, sort_keys=True), encoding="ascii")
+    os.chmod(config_path, 0o600)
+    wrapper = _wrapper(tmp_path, config_path)
+
+    with pytest.raises(FleetOperationError) as caught:
+        doctor(
+            alias="mastermind-workbench-c1",
+            config_path=str(config_path),
+            expected_source_sha=SOURCE_SHA,
+            runner=lambda _argv: _status(wrapper),
+            tool_probe=lambda _argv: None,
+            head_probe=lambda _root: "d" * 40,
+        )
+
+    assert caught.value.code == "PROJECT_HEAD_MISMATCH"
+
+
+def test_doctor_refuses_wrapper_interpreter_drift(tmp_path: Path) -> None:
+    _document_value, config_path = _document(tmp_path)
+    wrapper = _wrapper(tmp_path, config_path)
+    launcher = tmp_path / "releases" / SOURCE_SHA / "scripts" / "mastermind_workbench_action_stdio.py"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        f'exec "/bin/sh" "{launcher}" --config "{config_path}"\n',
+        encoding="utf-8",
+    )
+    os.chmod(wrapper, 0o700)
+
+    with pytest.raises(FleetOperationError) as caught:
+        doctor(
+            alias="mastermind-workbench-c1",
+            config_path=str(config_path),
+            expected_source_sha=SOURCE_SHA,
+            runner=lambda _argv: _status(wrapper),
+            tool_probe=lambda _argv: None,
+        )
+
+    assert caught.value.code == "TARGET_REFUSED"
 
 
 def test_doctor_refuses_workspace_cross_binding(tmp_path: Path) -> None:
