@@ -281,6 +281,7 @@ class ActivationBindingTests(unittest.TestCase):
                 binding,
                 catalog=load_catalog(),
                 now_ms=NOW + 1,
+                expected_return_subject_digest=RETURN_SUBJECT_DIGEST,
             ),
             r"^[0-9a-f]{64}$",
         )
@@ -332,6 +333,7 @@ class ActivationBindingTests(unittest.TestCase):
                     value,
                     catalog=load_catalog(),
                     now_ms=NOW + 1,
+                    expected_return_subject_digest=RETURN_SUBJECT_DIGEST,
                 )
 
     def test_expired_or_not_yet_current_economic_envelope_refuses_activation(self):
@@ -343,6 +345,7 @@ class ActivationBindingTests(unittest.TestCase):
                 binding,
                 catalog=load_catalog(),
                 now_ms=NOW - 1,
+                expected_return_subject_digest=RETURN_SUBJECT_DIGEST,
             )
         with self.assertRaisesRegex(
             WorkspaceProfileError, "ECONOMIC_ENVELOPE_NOT_CURRENT"
@@ -351,6 +354,7 @@ class ActivationBindingTests(unittest.TestCase):
                 binding,
                 catalog=load_catalog(),
                 now_ms=binding["economic_envelope"]["expires_at_ms"] + 1,
+                expected_return_subject_digest=RETURN_SUBJECT_DIGEST,
             )
 
     def test_binding_contains_no_token_or_secret_field(self):
