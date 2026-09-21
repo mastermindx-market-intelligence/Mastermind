@@ -1368,6 +1368,10 @@ class ExecutiveWorkerBroker:
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
+        # Most recent operator adapter's observer registry. Deliberately
+        # retained past ``_operator_run`` going terminal so explicit control
+        # status/revoke can still reconcile an exact existing bound grant.
+        self._observer_projection: Any = None
         self._observer_refusals: list[tuple[Any, str]] = []
         self._state_lock = asyncio.Lock()
         self._starting = False
@@ -2013,6 +2017,9 @@ class ExecutiveWorkerBroker:
             )
             async with self._state_lock:
                 self._operator_run = state
+                self._observer_projection = getattr(
+                    state.adapter, "visible_turn_projection", None
+                )
                 self._operator_session_attempts[provider_session_id] = epoch.attempt_id
                 self._operator_session_attempts.move_to_end(provider_session_id)
                 while len(self._operator_session_attempts) > 64:
@@ -2137,10 +2144,34 @@ class ExecutiveWorkerBroker:
         if any(not isinstance(v, str) or not 1 <= len(v) <= 256 for v in payload.values()):
             raise BrokerStateError("OBSERVER_CONFLICT")
         binding = {name: payload[name] for name in binding_fields}
+        identity = (
+            payload["attempt"], payload["epoch"], payload["generation"], payload["turn"],
+        )
         async with self._state_lock:
             active = self._operator_run
             if active is None:
-                raise BrokerStateError("UNKNOWN_GENERATION")
+                if operation == "ohf-observer-enroll":
+                    raise BrokerStateError("UNKNOWN_GENERATION")
+                # No active run can reconstruct the native turn key, so the
+                # exact existing registry binding supplies it. A miss is a
+                # plain ABSENT status; nothing is minted or guessed.
+                projection = getattr(self, "_observer_projection", None)
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None,
+                            "turn_key": None, "grant_generation": None}
+                try:
+                    if operation == "ohf-observer-revoke":
+                        return projection.revoke_observer_by_binding(
+                            identity, **binding
+                        )
+                    return projection.observer_status_by_binding(identity, **binding)
+                except Exception as exc:
+                    code = getattr(exc, "code", None)
+                    raise BrokerStateError(
+                        code
+                        if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
+                        else "GRANT_INVALIDATED"
+                    ) from None
             if (payload["attempt"] != active.epoch.attempt_id
                     or payload["epoch"] != active.epoch.session_epoch_id
                     or payload["generation"] != active.generation.process_generation_id):
@@ -2155,7 +2186,9 @@ class ExecutiveWorkerBroker:
             try:
                 if operation == "ohf-observer-enroll":
                     turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
-                    return active.adapter.mint_observer_grant(turn, binding=binding)
+                    result = active.adapter.mint_observer_grant(turn, binding=binding)
+                    self._observer_projection = active.adapter.visible_turn_projection
+                    return result
                 projection = getattr(active.adapter, "visible_turn_projection", None)
                 if projection is None:
                     return {"status": "ABSENT", "reader_grant": None, "turn_key": None, "grant_generation": None}

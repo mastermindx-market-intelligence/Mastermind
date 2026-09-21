@@ -431,6 +431,56 @@ class VisibleTurnProjection:
                     self._grants[handle] = grant
             return self._observer_wire(handle, grant)
 
+    @staticmethod
+    def _observer_identity(key: TurnKey) -> tuple[str, str, str, str]:
+        return (
+            key.attempt_id,
+            key.session_epoch_id,
+            key.process_generation_id,
+            key.local_turn_id,
+        )
+
+    def _observer_entry_by_binding(
+        self, identity: tuple[str, str, str, str], binding: tuple[str, str, str, str]
+    ) -> tuple[str | None, _Grant | None]:
+        """Exact existing-registry lookup without a caller-supplied key.
+
+        Used only when no active operator run can reconstruct the native turn
+        key: the key comes from the already-bound grant itself. A binding whose
+        operation matches but whose full tuple or turn identity does not is a
+        conflict, never a miss; nothing is minted or guessed on absence."""
+        for handle, grant in self._grants.items():
+            if grant.binding is None or grant.binding[0] != binding[0]:
+                continue
+            if grant.binding != binding or self._observer_identity(grant.key) != identity:
+                raise ProjectionError("OBSERVER_CONFLICT", "OBSERVER_CONFLICT")
+            return handle, grant
+        return None, None
+
+    def observer_status_by_binding(
+        self, identity: tuple[str, str, str, str], **binding
+    ):
+        bound = self._observer_binding(**binding)
+        with self._lock:
+            handle, grant = self._observer_entry_by_binding(identity, bound)
+            if grant and grant.state == "ACTIVE":
+                record = self._turns.get(grant.key.native_turn_id)
+                if record is None or record.key != grant.key:
+                    grant = replace(grant, state="INVALIDATED")
+                    self._grants[handle] = grant
+            return self._observer_wire(handle, grant)
+
+    def revoke_observer_by_binding(
+        self, identity: tuple[str, str, str, str], **binding
+    ):
+        bound = self._observer_binding(**binding)
+        with self._lock:
+            handle, grant = self._observer_entry_by_binding(identity, bound)
+            if grant and grant.state == "ACTIVE":
+                self.revoke_grant(handle)
+                grant = self._grants.get(handle)
+            return self._observer_wire(handle, grant)
+
     def enroll_observer(self, key, **binding):
         bound = self._observer_binding(**binding)
         with self._lock:

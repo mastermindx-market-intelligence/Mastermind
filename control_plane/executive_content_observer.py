@@ -36,35 +36,49 @@ class ExecutiveContentObserver:
         except Exception:
             raise ContentRefused('ACCESS_DENIED') from None
 
-    def _join(self, p):
+    def _join(self, p, *, live=True):
         # Exact bounded joins, never an App-supplied SQL/source selector. Both
         # TX-5 intent and acknowledged APPLIED must match this current writer.
+        # ``live=False`` is the explicit status/revoke reconcile shape: the
+        # durable identity rows must still bind this exact profile, but a lease
+        # that expired or a writer/turn that since ceased does not hide an
+        # existing bound grant from its owner. Enrollment and every read keep
+        # ``live=True``; nothing ever enrolls or reads on a stale Runtime.
         with self.runtime.store.read() as connection:
             row = connection.execute('''
                 SELECT a.worker_id,a.status,a.fence_generation,a.lease_expires_at_ms,
-                       a.execution_mode,j.current_attempt_id,j.status AS job_status,
+                       a.execution_mode,a.quota_class,j.current_attempt_id,j.status AS job_status,
                        e.state,e.worker_id AS epoch_worker,e.provider_session_id,
                        g.generation_number,g.worker_id AS generation_worker,
-                       g.executive_writer_held,g.provider_writer_state,g.ended_at_ms
+                       g.executive_writer_held,g.provider_writer_state,g.ended_at_ms,
+                       q.held_attempt_id,q.fence_counter
                 FROM attempts a JOIN jobs j ON j.job_id=a.job_id
                 JOIN harness_session_epochs e ON e.attempt_id=a.attempt_id
                 JOIN process_generations g ON g.session_epoch_id=e.session_epoch_id
+                LEFT JOIN worker_quota_classes q ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
                 WHERE a.job_id=? AND a.attempt_id=? AND e.session_epoch_id=?
                   AND g.process_generation_id=?
             ''',(p.job_id,p.attempt_id,p.session_epoch_id,p.process_generation_id)).fetchone()
-            if (row is None or row['status'] not in ('RUNNING','CHECKPOINTED')
-                    or row['job_status'] not in ('RUNNING','CHECKPOINTED')
-                    or row['current_attempt_id'] != p.attempt_id
+            if (row is None
                     or row['execution_mode'] != 'OPERATOR_HARNESS'
+                    or row['worker_id'] != row['epoch_worker'] or row['worker_id'] != row['generation_worker']):
+                raise ContentRefused('GRANT_INVALIDATED')
+            if live and (row['current_attempt_id'] != p.attempt_id
+                    or row['status'] not in ('RUNNING','CHECKPOINTED')
+                    or row['job_status'] not in ('RUNNING','CHECKPOINTED')
                     or row['state'] != 'CURRENT' or not row['executive_writer_held']
                     or row['provider_writer_state'] != 'HELD' or row['ended_at_ms'] is not None
-                    or row['worker_id'] != row['epoch_worker'] or row['worker_id'] != row['generation_worker']
                     or not row['provider_session_id']
-                    or row['lease_expires_at_ms'] <= self.runtime.store.now_ms()):
+                    or row['lease_expires_at_ms'] <= self.runtime.store.now_ms()
+                    # Canonical capacity parity: the quota class this attempt
+                    # occupies must still hold exactly this attempt at exactly
+                    # the attempt's current fence.
+                    or row['held_attempt_id'] != p.attempt_id
+                    or row['fence_counter'] != row['fence_generation']):
                 raise ContentRefused('GRANT_INVALIDATED')
             # A worker-wide quarantine is authoritative even when its latest
             # generation still appears current in a stale installation profile.
-            if connection.execute("SELECT 1 FROM events WHERE event_type='OHF_RESTORE_INVALIDATED' AND worker_id=? LIMIT 1",(row['worker_id'],)).fetchone():
+            if live and connection.execute("SELECT 1 FROM events WHERE event_type='OHF_RESTORE_INVALIDATED' AND worker_id=? LIMIT 1",(row['worker_id'],)).fetchone():
                 raise ContentRefused('GRANT_INVALIDATED')
             turns = connection.execute('''
                 SELECT aggregate_id,event_type,payload_json FROM events
@@ -89,23 +103,31 @@ class ExecutiveContentObserver:
                     native = data.get('provider_native_turn_id')
             if not isinstance(native,str) or not 1<=len(native)<=256:
                 raise ContentRefused('GRANT_INVALIDATED')
-            if connection.execute("SELECT 1 FROM events WHERE aggregate_type='operator_operation' AND aggregate_id=? AND event_type='OPERATOR_OPERATION_EFFECT_UNKNOWN' LIMIT 1",(turns[0]['aggregate_id'],)).fetchone():
+            if live and connection.execute("SELECT 1 FROM events WHERE aggregate_type='operator_operation' AND aggregate_id=? AND event_type='OPERATOR_OPERATION_EFFECT_UNKNOWN' LIMIT 1",(turns[0]['aggregate_id'],)).fetchone():
                 raise ContentRefused('GRANT_INVALIDATED')
-        return dict(attempt_id=p.attempt_id,session_epoch_id=p.session_epoch_id,
-                    process_generation_id=p.process_generation_id,generation_number=row['generation_number'],
-                    worker_id=row['worker_id'],local_turn_id=p.local_turn_id,native_turn_id=native)
+        # The turn key keeps the canonical TurnKey field set (never a lease
+        # token); the current fence travels beside it into the access ticket.
+        key = dict(attempt_id=p.attempt_id,session_epoch_id=p.session_epoch_id,
+                   process_generation_id=p.process_generation_id,generation_number=row['generation_number'],
+                   worker_id=row['worker_id'],local_turn_id=p.local_turn_id,native_turn_id=native)
+        return key, row['fence_generation']
 
     async def _access(self, p):
-        key = self._join(p)
+        key, fence = self._join(p)
         status = await self.broker.request('ohf-observer-status',p.broker_payload())
         if (set(status) != {'status','reader_grant','turn_key','grant_generation'}
                 or status['status']!='ACTIVE' or status['turn_key']!=key
                 or not isinstance(status['reader_grant'],str) or not status['reader_grant']
                 or not isinstance(status['grant_generation'],str) or not status['grant_generation']):
             raise ContentRefused('GRANT_INVALIDATED')
-        if self._profile()!=p or self._join(p)!=key:
+        if self._profile()!=p or self._join(p)!=(key,fence):
             raise ContentRefused('ACCESS_CHANGED')
-        ticket = digest(dict(profile=asdict(p),turn_key=key,grant_generation=status['grant_generation']))
+        # The current fence is part of the ticket and of the before/after page
+        # snapshot: a fence moved during a page refuses that page, while a
+        # later fresh read may still observe the same turn once the current
+        # lease and held writer reconcile.
+        ticket = digest(dict(profile=asdict(p),turn_key=key,grant_generation=status['grant_generation'],
+                             fence_generation=fence))
         return dict(ticket_digest=ticket,retained_scope=[key['process_generation_id'],key['native_turn_id']],expires_at=p.expires_at), status
 
     async def handle_frame(self, frame):
@@ -152,7 +174,10 @@ class ExecutiveContentObserver:
 
     async def _lifecycle(self, operation):
         p=self._profile(allow_expired=operation!='enroll')
-        self._join(p)
+        # Only enrollment demands the live writer. Explicit status/revoke
+        # reconcile the exact existing bound grant across a Runtime whose
+        # lease has since expired or whose turn has ceased; they never mint.
+        self._join(p, live=operation=='enroll')
         if operation=='enroll':
             with self.runtime.store.read() as connection:
                 prior=connection.execute("SELECT 1 FROM events WHERE aggregate_type='content_observer' AND aggregate_id=? AND event_type='CONTENT_OBSERVER_ENROLL_INTENT' LIMIT 1",(digest(p.operation_id),)).fetchone()
