@@ -1402,7 +1402,7 @@ def _service_from_config(
         content_factories = {}
         if "content_observer" in raw:
             from control_plane.executive_content_observer import ExecutiveContentObserver
-            from control_plane.executive_steward_reads import InstalledStewardReadProvider
+            from integrations.mastermind_steward_app.installed_reads import InstalledStewardReadProvider
             from datetime import datetime, timezone
             import time
             if content_profile_loader is None:

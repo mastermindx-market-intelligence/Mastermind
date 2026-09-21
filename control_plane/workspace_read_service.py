@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from integrations.mastermind_workspace_app.contract import (
+from common.executive_workspace_contract import (
     FABRIC_VIEW_SCHEMA_V3,
     MAX_RESPONSE_BYTES,
     MAX_RESULT_RESPONSE_BYTES,

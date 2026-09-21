@@ -3055,7 +3055,7 @@ class ExecutiveControlService:
                     # profile_key is optional; None means legacy single-profile
                     profile_key = None
                     if "profile_key" in args:
-                        from integrations.executive_content_contract import ContentProfileKey
+                        from common.executive_content_contract import ContentProfileKey
                         pk = args["profile_key"]
                         if isinstance(pk, str) and pk in (ContentProfileKey.web, ContentProfileKey.mac):
                             profile_key = ContentProfileKey(pk)
@@ -3070,7 +3070,7 @@ class ExecutiveControlService:
                         raise ValueError("CONTENT_UNAVAILABLE")
                     provider = binding.content_provider_factory(self._require_runtime())
                     result = await getattr(provider, lifecycle_commands[command])(profile_key)
-                    from integrations.executive_content_contract import digest
+                    from common.executive_content_contract import digest
                     public = {"status": result["status"], "binding_digest": digest({
                         "turn_key": result.get("turn_key"), "grant_generation": result.get("grant_generation")})}
                     await self._send(writer, {"ok": True, "result": public})
@@ -3947,7 +3947,7 @@ class ExecutiveControlService:
                     writer, "invalid_json", "request is not valid JSON"
                 )
                 return
-            from integrations.mastermind_workspace_app.contract import (
+            from common.executive_workspace_contract import (
                 FRAME_SCHEMA, FRAME_SCHEMA_V2,
                 MAX_RESPONSE_BYTES as WORKSPACE_MAX_RESPONSE_BYTES,
                 MAX_RESULT_RESPONSE_BYTES,
@@ -3979,7 +3979,7 @@ class ExecutiveControlService:
                     result = workspace_error("source_unavailable", 503)
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=ceiling)
                 return
-            from integrations.executive_content_contract import ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA, MAX_PAGE_BYTES
+            from common.executive_content_contract import ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA, MAX_PAGE_BYTES
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA}:
                 factory = (app_binding.steward_provider_factory if parsed["schema"] == STEWARD_SCHEMA
                            else app_binding.content_provider_factory)

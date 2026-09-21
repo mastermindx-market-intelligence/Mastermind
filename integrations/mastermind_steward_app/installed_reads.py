@@ -1,6 +1,6 @@
 """Concrete installed Steward projection over the incumbent sealed read owners."""
 from control_plane import chairman_control_room, surface_bindings
-from integrations.executive_content_contract import STEWARD_SCHEMA, MAX_RESPONSE_BYTES, canonical
+from common.executive_content_contract import STEWARD_SCHEMA, MAX_RESPONSE_BYTES, canonical
 from integrations.mastermind_steward_app.projection import ControlRoomStewardReadPort
 from integrations.mastermind_secretary_mcp.adapter import SecretaryGroundingGateway
 from integrations.mastermind_secretary_mcp.schemas import validate_tool_arguments

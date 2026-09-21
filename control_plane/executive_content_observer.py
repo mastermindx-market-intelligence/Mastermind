@@ -4,7 +4,7 @@ Configuration is reread by the installed sealed-config loader; no read enrolls a
 viewer. This owner does not load provider credentials or render source content.
 """
 from dataclasses import asdict
-from integrations.executive_content_contract import (
+from common.executive_content_contract import (
     ContentObserverProfile, ContentObserverProfiles, ContentProfileKey,
     load_content_profiles, ACCESS_SCHEMA, PAGE_SCHEMA, ERRORS, MAX_PAGE_BYTES,
     canonical, digest, epoch,

@@ -1,7 +1,7 @@
 import asyncio
 import pytest
 from integrations.mastermind_steward_app.installed_grounding import CeoIngressStewardReadPort
-from control_plane.executive_steward_reads import InstalledStewardReadProvider
+from integrations.mastermind_steward_app.installed_reads import InstalledStewardReadProvider
 from integrations.mastermind_steward_app.projection import ControlRoomStewardReadPort
 from integrations.mastermind_secretary_mcp.adapter import SecretaryGroundingGateway, GroundingRefusedError
 from test_mastermind_steward_app_projection import _snapshot, NOW
