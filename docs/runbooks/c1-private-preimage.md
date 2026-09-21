@@ -83,8 +83,11 @@ opened descriptor and post-read named identity, recheck ancestor identities,
 and reject torn observations. Metadata-only observations likewise compare the
 complete admitted ancestor identity before and after the final `lstat`, even
 when the final path is absent. The exact macOS
-`/var -> /private/var` alias is the only accepted alias. ACL checks use the
-macOS stat marker and bind pre/post device and inode.
+`/var -> /private/var` alias is the only accepted alias. Regular-file and
+directory ACL checks use the shared descriptor-bound macOS observer. The three
+frozen Unix socket paths use the bounded `stat -f %Sp` ACL marker because the
+file/directory observer cannot open sockets. Both paths bind the observation to
+matching pre/post device and inode identity.
 
 For the three frozen socket metadata paths only, the exact `/var/run`
 ancestor may be root:daemon (UID 0, GID 1), mode `0775`, matching the installed
@@ -103,7 +106,8 @@ The command adapter permits only:
 /bin/launchctl print-disabled system
 /bin/launchctl print system/<one frozen label>
 /bin/ps -o uid=,gid=,pid=,ppid= -p <exact positive launchd pid>
-/usr/bin/stat -f %Sp <one frozen path>
+/usr/bin/stat -f %Sp <one frozen socket path>
+/usr/bin/true
 ```
 
 The disabled-service parser accepts native `enabled`/`disabled` entries and
@@ -176,9 +180,29 @@ surface, all four principals, and every service. A residual socket, principal,
 partial document set, generic launchctl error, or unrecognized launchd state
 cannot become clean absence. `STALE_STOPPED` also requires all four expected
 principals to be present and matching; stale documents with missing principals
-remain `EFFECT_UNKNOWN`. Validated stale release identities are compared
-internally but emitted only as `release_matches: false`; rejected schema,
-principal, path, and provenance values never enter a receipt.
+remain `EFFECT_UNKNOWN`.
+
+One bounded auxiliary-generation exception is part of `STALE_STOPPED`: the
+already-enrolled C1 SOL_STATE Relay may remain on one older immutable release
+while the stopped Executive core is one coherent generation. This is admitted
+only when the Relay plist is itself a valid closed Relay document, its exact
+config and token metadata are both present and safe, the Relay principal
+matches, and the Relay is explicitly disabled and unloaded. The core release is
+derived independently from `control.json` plus the control/worker/backup
+plists; a mixed core never becomes stale-safe. The credential-free
+prepared-only Agent Relay state may coexist under its own stricter absence
+predicate. Any enabled/loaded SOL_STATE Relay, missing config/token, unsafe
+metadata, foreign/malformed plist, or additional generation disagreement
+remains `EFFECT_UNKNOWN`.
+
+This exception is install-safety evidence only. It does not make the C1 Relay
+current, enrolled for the new release, or activation-ready. After a core release
+replacement, the existing C1 enrollment owner must complete its separately
+reviewed stopped-only release rebind before Relay activation.
+
+Validated stale release identities are compared internally but emitted only as
+`release_matches: false`; rejected schema, principal, path, and provenance
+values never enter a receipt.
 
 Exit codes describe receipt transport only:
 
