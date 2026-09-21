@@ -5,9 +5,10 @@ Wake acknowledgement, result acceptance, or Workspace Agent registration. It is
 an effectful provider transport primitive for a later reviewed Executive owner.
 
 Important boundary: a provider 202 means only that the trigger was accepted by
-the provider. A returned run id is correlation for read-only observation. It
-does not prove that the agent consumed the prompt, produced a useful candidate,
-returned anything to Mastermind, or satisfied a canonical Wake acknowledgement.
+the provider. The supported API contract returns no run id or response body and
+does not expose the agent response. Acceptance therefore does not prove that the
+agent consumed the prompt, produced a useful candidate, returned anything to
+Mastermind, or satisfied a canonical Wake acknowledgement.
 
 The caller must create and durably reconcile one WorkspaceAgentTriggerPlan
 through the existing Executive operation/event owner before production use.
@@ -26,7 +27,6 @@ from typing import Callable
 
 from integrations.workspace_agent_api import (
     HOST,
-    MAX_BODY_BYTES,
     InvalidObservation,
     TriggerObservation,
     decode_trigger,
@@ -196,9 +196,9 @@ def trigger_once(
     """Submit exactly one POST and never retry, redirect, or infer no effect.
 
     Any transport failure after the effect boundary becomes TRIGGER_EFFECT_UNKNOWN.
-    A received provider response remains authoritative for provider trigger
-    disposition even if correlation JSON is unavailable. The response never
-    grants company acceptance or Wake acknowledgement.
+    A received 202 establishes provider queue acceptance only. The supported
+    contract exposes no response body/run id, so this path never reads a success
+    body and never grants company acceptance or Wake acknowledgement.
     """
 
     if type(plan) is not WorkspaceAgentTriggerPlan:
@@ -232,26 +232,9 @@ def trigger_once(
         response = connection.getresponse()
         status = response.status
         if status == 202:
-            encoding = response.getheader("Content-Encoding", "identity").lower()
-            content_type = (
-                response.getheader("Content-Type", "")
-                .split(";", 1)[0]
-                .strip()
-                .lower()
-            )
-            if encoding != "identity" or content_type != "application/json":
-                observation = TriggerObservation(
-                    "accepted", "ACCEPTED_CORRELATION_UNAVAILABLE"
-                )
-            else:
-                try:
-                    body = response.read(MAX_BODY_BYTES + 1)
-                except (OSError, http.client.HTTPException, ValueError, RecursionError):
-                    observation = TriggerObservation(
-                        "accepted", "ACCEPTED_CORRELATION_UNAVAILABLE"
-                    )
-                else:
-                    observation = decode_trigger(202, body)
+            # Current supported contract: 202 has no response body or run id.
+            # Never read or trust correlation bytes from an intermediary/old beta.
+            observation = decode_trigger(202, b"")
         else:
             observation = decode_trigger(status, b"")
     except (OSError, http.client.HTTPException, ValueError, RecursionError):
