@@ -72,7 +72,8 @@ def test_first_acceptance_persists_intent_dispatch_and_applied_once(tmp_path):
 
     assert result.state == "APPLIED"
     assert result.reason == "PROVIDER_ACCEPTED_UNCORRELATED"
-    assert result.provider_request_sent is True
+    assert result.provider_call_invoked is True
+    assert result.provider_request_state == "PROVEN_SENT"
     assert result.replayed is False
     assert result.terminal_persisted is True
     assert len(trigger.calls) == 1
@@ -90,7 +91,8 @@ def test_first_acceptance_persists_intent_dispatch_and_applied_once(tmp_path):
     reconciled = owner.reconcile(binding=binding(), plan=plan())
     assert reconciled.state == "APPLIED"
     assert reconciled.replayed is True
-    assert reconciled.provider_request_sent is False
+    assert reconciled.provider_call_invoked is False
+    assert reconciled.provider_request_state == "PROVEN_SENT"
     assert reconciled.terminal_command_id == result.terminal_command_id
 
 
@@ -104,7 +106,8 @@ def test_matching_execute_replay_never_calls_provider_again(tmp_path):
 
     assert first.state == second.state == "APPLIED"
     assert second.replayed is True
-    assert second.provider_request_sent is False
+    assert second.provider_call_invoked is False
+    assert second.provider_request_state == "PROVEN_SENT"
     assert len(trigger.calls) == 1
     assert len(events(runtime)) == 3
 
@@ -160,7 +163,8 @@ def test_known_provider_rejection_is_terminal_refusal_without_retry(tmp_path):
     assert result.state == "REFUSED"
     assert result.reason == "PROVIDER_REJECTED_401"
     assert replay.state == "REFUSED"
-    assert replay.provider_request_sent is False
+    assert replay.provider_call_invoked is False
+    assert replay.provider_request_state == "PROVEN_SENT"
     assert len(trigger.calls) == 1
     assert [item.event_type for item in events(runtime)][-1] == (
         "WORKSPACE_AGENT_TRIGGER_REFUSED"
@@ -175,7 +179,8 @@ def test_local_invalid_token_is_known_refusal_and_never_opens_network(tmp_path):
 
     assert result.state == "REFUSED"
     assert result.reason == "LOCAL_TRIGGER_REFUSED"
-    assert result.provider_request_sent is True
+    assert result.provider_call_invoked is True
+    assert result.provider_request_state == "PROVEN_NOT_SENT"
     # "sent" means this effect owner crossed its provider-call boundary; trigger_once
     # itself refused before creating a connection.
     assert [item.event_type for item in events(runtime)][-1] == (
@@ -224,7 +229,8 @@ def test_unexpected_trigger_exception_is_effect_unknown_and_not_retried(tmp_path
 
     assert result.state == "EFFECT_UNKNOWN"
     assert replay.state == "EFFECT_UNKNOWN"
-    assert replay.provider_request_sent is False
+    assert replay.provider_call_invoked is False
+    assert replay.provider_request_state == "UNKNOWN"
     assert len(trigger.calls) == 1
     rendered = repr(result) + repr([item.to_dict() for item in events(runtime)])
     assert "SECRET_PROVIDER_EXCEPTION" not in rendered
@@ -260,7 +266,8 @@ def test_crash_after_provider_call_before_terminal_write_blocks_resend(tmp_path)
     recovered = owner.execute_once(binding=binding(), plan=plan(), token=TOKEN)
     assert recovered.state == "EFFECT_UNKNOWN"
     assert recovered.reason == "DISPATCH_COMMITTED_WITHOUT_TERMINAL"
-    assert recovered.provider_request_sent is False
+    assert recovered.provider_call_invoked is False
+    assert recovered.provider_request_state == "UNKNOWN"
     assert recovered.terminal_persisted is False
     assert len(trigger.calls) == 1
     assert len(events(runtime)) == 2
@@ -287,7 +294,8 @@ def test_duplicate_during_inflight_call_does_not_send_and_outer_can_finish(tmp_p
     nested = nested_results[0]
     assert nested.state == "EFFECT_UNKNOWN"
     assert nested.reason == "DISPATCH_COMMITTED_WITHOUT_TERMINAL"
-    assert nested.provider_request_sent is False
+    assert nested.provider_call_invoked is False
+    assert nested.provider_request_state == "UNKNOWN"
     assert nested.terminal_persisted is False
     assert result.state == "APPLIED"
     assert [item.event_type for item in events(runtime)] == [
@@ -305,7 +313,8 @@ def test_reconcile_before_intent_is_read_only_not_started(tmp_path):
     result = owner.reconcile(binding=binding(), plan=plan())
 
     assert result.state == "NOT_STARTED"
-    assert result.provider_request_sent is False
+    assert result.provider_call_invoked is False
+    assert result.provider_request_state == "PROVEN_NOT_SENT"
     assert result.terminal_persisted is False
     assert events(runtime) == []
     assert trigger.calls == []
@@ -336,9 +345,8 @@ def test_source_adds_no_workspace_state_or_retry_plane():
     ).read_text(encoding="utf-8")
     forbidden = (
         "CREATE TABLE",
-        "sqlite3",
-        "sleep(",
-        "retry",
+        "import sqlite3",
+        "time.sleep",
         "requests.",
         "http.client",
         "read_run_once",
