@@ -171,11 +171,14 @@ def _trusted_pinned_executable(path: str) -> os.stat_result:
     except OSError:
         raise FleetOperationError("TARGET_REFUSED") from None
     mode = stat.S_IMODE(before.st_mode)
+    owner_uid = before.st_uid
+    current_uid = os.geteuid()
     if (
         stat.S_ISLNK(before.st_mode)
         or not stat.S_ISREG(before.st_mode)
-        or before.st_uid not in {0, os.geteuid()}
-        or before.st_nlink != 1
+        or owner_uid not in {0, current_uid}
+        or before.st_nlink < 1
+        or (owner_uid == current_uid and before.st_nlink != 1)
         or mode & 0o022
         or not os.access(selected, os.X_OK)
     ):

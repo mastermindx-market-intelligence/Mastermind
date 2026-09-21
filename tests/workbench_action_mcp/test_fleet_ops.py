@@ -175,21 +175,32 @@ def _result(
     )
 
 
-def test_pinned_executable_accepts_root_owner_and_refuses_foreign_owner(
+def test_pinned_executable_owner_and_link_rules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = Path("/private/fake-python")
     monkeypatch.setattr(fleet_ops_module.os, "access", lambda _path, _mode: True)
     monkeypatch.setattr(fleet_ops_module.os, "geteuid", lambda: 501)
+
     monkeypatch.setattr(
         Path,
         "lstat",
         lambda _self: SimpleNamespace(
-            st_mode=stat.S_IFREG | 0o755, st_uid=0, st_nlink=1
+            st_mode=stat.S_IFREG | 0o755, st_uid=0, st_nlink=78
         ),
     )
-
     fleet_ops_module._trusted_pinned_executable(str(selected))
+
+    monkeypatch.setattr(
+        Path,
+        "lstat",
+        lambda _self: SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o755, st_uid=501, st_nlink=2
+        ),
+    )
+    with pytest.raises(FleetOperationError) as current_owner:
+        fleet_ops_module._trusted_pinned_executable(str(selected))
+    assert current_owner.value.code == "TARGET_REFUSED"
 
     monkeypatch.setattr(
         Path,
@@ -198,10 +209,9 @@ def test_pinned_executable_accepts_root_owner_and_refuses_foreign_owner(
             st_mode=stat.S_IFREG | 0o755, st_uid=12345, st_nlink=1
         ),
     )
-    with pytest.raises(FleetOperationError) as caught:
+    with pytest.raises(FleetOperationError) as foreign_owner:
         fleet_ops_module._trusted_pinned_executable(str(selected))
-
-    assert caught.value.code == "TARGET_REFUSED"
+    assert foreign_owner.value.code == "TARGET_REFUSED"
 
 
 def test_doctor_accepts_exact_ready_binding(tmp_path: Path) -> None:
