@@ -2172,6 +2172,14 @@ class ExecutiveControlService:
             supervisor.reconcile_restart,
             requeue_lost=False,
         )
+        await self._schedule_recovered_runs()
+        if self._reconciliation_requires_quarantine(
+            self._startup_reconciliation
+        ):
+            self._service_state = "QUARANTINED"
+            raise StateConflict(
+                "Executive restart reconciliation was quarantined"
+            )
         # Activation is the first moment this bootstrap-quarantined instance
         # may resume durable terminal obligations.  Replay while admission is
         # still closed; exposing READY first would create a race and omitting
@@ -2625,6 +2633,11 @@ class ExecutiveControlService:
                             requeue_lost=False,
                         )
                     )
+                await self._schedule_recovered_runs()
+                if self._reconciliation_requires_quarantine(
+                    self._startup_reconciliation
+                ):
+                    self._service_state = "QUARANTINED"
                 await self._replay_terminal_returns_on_startup()
             if (
                 self._ceo_ingress_socket_path is not None
@@ -2659,7 +2672,10 @@ class ExecutiveControlService:
             # (Operator starts second, so this line already runs after both),
             # unchanged single-listener timing otherwise.
             self._started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            if self.config.coo_autonomy_armed:
+            if (
+                self.config.coo_autonomy_armed
+                and self._service_state == "READY"
+            ):
                 self._coo_shutdown_event = asyncio.Event()
                 self._coo_tick_task = asyncio.create_task(
                     self._coo_tick_loop(),
@@ -2733,6 +2749,13 @@ class ExecutiveControlService:
         if runtime is not None:
             for job_id, task in list(self._dispatch_tasks.items()):
                 if task.done():
+                    continue
+                if task.get_name().startswith(
+                    "executive-recovered-finish-"
+                ):
+                    # A service restart relinquishes only the in-memory
+                    # collector. The exact worker remains owned by its durable
+                    # Attempt and will be reattached by the replacement.
                     continue
                 try:
                     job = runtime.jobs.get_job(job_id)
@@ -4740,6 +4763,18 @@ class ExecutiveControlService:
         self._require_shared_git_handoff(workspace)
         return observation
 
+    def _require_initial_coo_workspace(self, root: Job) -> dict[str, Any]:
+        """Reuse one read-only initial-workspace rule at selection and execution."""
+        observation = self._require_coo_workspace(root)
+        if (
+            observation["head"] != self.config.proof_base_sha
+            or observation["launch_clean"] is not True
+        ):
+            raise ServiceError(
+                "new COO root requires the clean exact reviewed-base workspace"
+            )
+        return observation
+
     def _require_coo_worker_composed(self) -> None:
         runtime = self._require_runtime()
         binding = self._require_current_coo_binding()
@@ -4949,14 +4984,7 @@ class ExecutiveControlService:
                 if job.parent_job_id == root_id
             ]
             if not children:
-                observation = self._require_coo_workspace(root)
-                if (
-                    observation["head"] != self.config.proof_base_sha
-                    or observation["launch_clean"] is not True
-                ):
-                    raise ServiceError(
-                        "new COO root requires the clean exact reviewed-base workspace"
-                    )
+                self._require_initial_coo_workspace(root)
             live = {
                 value
                 for value, task in self._dispatch_tasks.items()
@@ -4998,7 +5026,15 @@ class ExecutiveControlService:
         finally:
             self._coo_action_tasks.discard(task)
 
-    def _next_bound_coo_root(self) -> str | None:
+    def _next_bound_coo_root(
+        self, *, prestart_refusals: dict[str, Exception] | None = None
+    ) -> str | None:
+        """Select one root, optionally collecting ephemeral pre-start diagnostics.
+
+        Only a QUEUED root with no child or Attempt history may be deferred.
+        Existing work and ambiguous effects retain their reconciliation path.
+        No persistent exclusion, new queue or retry state is introduced.
+        """
         runtime = self._require_runtime()
         with runtime.store.read() as connection:
             rows = connection.execute(
@@ -5022,8 +5058,30 @@ class ExecutiveControlService:
                 event.event_type == "COO_CYCLE_BLOCKED"
                 for event in runtime.events.list_events(job_id=root.job_id)
             )
-            if not blocked:
-                return root.job_id
+            if blocked:
+                continue
+            if (
+                root.status is JobStatus.QUEUED
+                and root.attempt_count == 0
+                and root.current_attempt_id is None
+            ):
+                with runtime.store.read() as connection:
+                    child = connection.execute(
+                        "SELECT 1 FROM jobs WHERE parent_job_id=? LIMIT 1",
+                        (root.job_id,),
+                    ).fetchone()
+                    attempt = connection.execute(
+                        "SELECT 1 FROM attempts WHERE job_id=? LIMIT 1",
+                        (root.job_id,),
+                    ).fetchone()
+                if child is None and attempt is None:
+                    try:
+                        self._require_initial_coo_workspace(root)
+                    except (OSError, ServiceError, StateConflict) as exc:
+                        if prestart_refusals is not None:
+                            prestart_refusals[root.job_id] = exc
+                        continue
+            return root.job_id
         return None
 
     def _record_coo_tick_refusal(self, root_job_id: str, exc: Exception) -> None:
@@ -5079,9 +5137,27 @@ class ExecutiveControlService:
             try:
                 if not self.config.coo_autonomy_armed:
                     continue
-                root_id = self._next_bound_coo_root()
+                # Validate before writing even a diagnostic refusal. The existing
+                # per-action guard revalidates immediately before useful work.
+                self._require_current_autonomy()
+                prestart_refusals: dict[str, Exception] = {}
+                selected_root_id = self._next_bound_coo_root(
+                    prestart_refusals=prestart_refusals
+                )
+                for refused_root_id, refusal in prestart_refusals.items():
+                    self._record_coo_tick_refusal(refused_root_id, refusal)
+                # A diagnostic-write failure must not be attributed to a healthy
+                # root that has not yet been selected for any action.
+                root_id = selected_root_id
                 if root_id is not None:
                     await self._run_coo_cycle(root_id)
+                elif prestart_refusals:
+                    self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
+                        timespec="seconds"
+                    )
+                    self._coo_last_error = (
+                        "ServiceError: no usable never-started COO workspace"
+                    )
             except Exception as exc:
                 self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
                     timespec="seconds"
@@ -5119,6 +5195,50 @@ class ExecutiveControlService:
             current = asyncio.current_task()
             if self._dispatch_tasks.get(job_id) is current:
                 self._dispatch_tasks.pop(job_id, None)
+
+    @staticmethod
+    def _reconciliation_requires_quarantine(values: list[Any]) -> bool:
+        blocked = {
+            "IDENTITY_AMBIGUOUS",
+            "LIVE_QUARANTINED",
+            "LEASE_EXPIRED_QUARANTINED",
+            "STALE_FENCE_QUARANTINED",
+        }
+        for value in values:
+            status = getattr(value, "status", None)
+            rendered = getattr(status, "value", status)
+            if rendered in blocked:
+                return True
+        return False
+
+    async def _schedule_recovered_runs(self) -> None:
+        supervisor = self._require_supervisor()
+        take = getattr(supervisor, "take_recovered_runs", None)
+        if not callable(take):
+            return
+        for active in take():
+            lease = getattr(active, "lease", None)
+            attempt = getattr(lease, "attempt", None)
+            job_id = getattr(attempt, "job_id", None)
+            attempt_id = getattr(attempt, "attempt_id", None)
+            if not isinstance(job_id, str) or not isinstance(
+                attempt_id, str
+            ):
+                self._service_state = "QUARANTINED"
+                raise ServiceError(
+                    "recovered worker has no exact Job/Attempt identity"
+                )
+            existing = self._dispatch_tasks.get(job_id)
+            if existing is not None and not existing.done():
+                self._service_state = "QUARANTINED"
+                raise ServiceError(
+                    "recovered worker conflicts with an existing finisher"
+                )
+            task = asyncio.create_task(
+                self._finish_dispatched(job_id, active),
+                name=f"executive-recovered-finish-{job_id}",
+            )
+            self._dispatch_tasks[job_id] = task
 
     async def _replay_terminal_returns_on_startup(self) -> None:
         """Re-offer durable terminal facts in canonical JobRegistry order."""

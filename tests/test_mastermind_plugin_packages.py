@@ -180,6 +180,55 @@ def test_symlinked_repository_root_is_refused_before_package_content_is_opened(
     assert "SYMLINK_FORBIDDEN" in {error["code"] for error in result["errors"]}  # type: ignore[index]
 
 
+def test_symlinked_repository_root_ignores_lexical_parent_inventory_churn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rejecting the supplied root must not make its parent package inventory."""
+    target = tmp_path / "target"
+    target.mkdir()
+    redirected_root = tmp_path / "redirected-root"
+    redirected_root.symlink_to(target, target_is_directory=True)
+    parent_info = tmp_path.stat()
+    parent_identity = (parent_info.st_dev, parent_info.st_ino)
+    original_stat = plugin_validator.os.stat
+    injected = False
+
+    def add_parent_entry_after_root_link_stat(
+        name: object, *args: object, **kwargs: object
+    ) -> os.stat_result:
+        nonlocal injected
+        captured = original_stat(name, *args, **kwargs)
+        parent_fd = kwargs.get("dir_fd")
+        if (
+            not injected
+            and name == redirected_root.name
+            and kwargs.get("follow_symlinks") is False
+            and isinstance(parent_fd, int)
+        ):
+            parent = os.fstat(parent_fd)
+            if (parent.st_dev, parent.st_ino) == parent_identity:
+                (tmp_path / "late-parent-entry").write_text("late\n", encoding="utf-8")
+                injected = True
+        return captured
+
+    _preserve_capability_membership(monkeypatch, "stat", add_parent_entry_after_root_link_stat)
+    result = validate_repository(redirected_root)
+    codes = {error["code"] for error in result["errors"]}
+    errors = {
+        (error["path"], error["code"], error["message"])
+        for error in result["errors"]
+    }
+
+    assert injected is True
+    assert result["ok"] is False
+    assert "SYMLINK_FORBIDDEN" in codes
+    assert (
+        ".",
+        "PACKAGE_FILESYSTEM_INVALID",
+        "package directory changed during validation",
+    ) not in errors
+
+
 def test_agents_ancestor_symlink_is_refused_before_its_marketplace_is_read(
     tmp_path: Path,
 ) -> None:

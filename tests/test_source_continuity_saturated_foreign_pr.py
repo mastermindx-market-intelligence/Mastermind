@@ -1125,3 +1125,501 @@ def test_saturated_compare_representation_binds_exact_requested_url(bad_url) -> 
     with pytest.raises(module._RemoteProbeError):
         module._collision_census(hostile, TOKEN, REPOSITORY, TARGET_PR, OWNED)
     assert not any("/git/commits/" in url for url in hostile.calls)
+
+
+TARGET_PULL_URL = f"https://api.github.com/repos/{REPOSITORY}/pulls/{TARGET_PR}"
+OPEN_PULLS_URL = (
+    f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1"
+)
+FOREIGN_FILES_URL = (
+    f"https://api.github.com/repos/{REPOSITORY}/pulls/{FOREIGN_PR}"
+    f"/files?per_page=100&page=1"
+)
+TARGET_BRANCH_URL = f"https://api.github.com/repos/{REPOSITORY}/branches/{TARGET_BRANCH}"
+HEAD_COMMIT_URL = f"https://api.github.com/repos/{REPOSITORY}/git/commits/{HEAD}"
+ENGINE_TREE_URL = f"https://api.github.com/repos/{REPOSITORY}/git/trees/{ENGINE_TREE}"
+COMPARE_URL = f"https://api.github.com/repos/{REPOSITORY}/compare/{BASE}...{HEAD}"
+UNSUPPORTED_URL = "https://api.github.com/repos/example/repo"
+
+
+class SemanticRevalidationTransport:
+    """Conditional transport whose second read may return a changed 200 body."""
+
+    _source_continuity_conditional = True
+
+    def __init__(
+        self,
+        module,
+        first: dict[str, object],
+        changed: dict[str, object] | None = None,
+    ) -> None:
+        self.module = module
+        self.first = first
+        self.changed = changed or {}
+        self.conditional_calls: list[tuple[str, str]] = []
+
+    @staticmethod
+    def etag(url: str) -> str:
+        import hashlib
+
+        return 'W/"' + hashlib.sha256(url.encode("utf-8")).hexdigest() + '"'
+
+    def __call__(
+        self,
+        url: str,
+        *,
+        token: str,
+        timeout: float,
+        if_none_match: str | None = None,
+    ) -> object:
+        assert token == TOKEN and timeout > 0
+        if if_none_match is None:
+            assert url in self.first, url
+            return self.module._HTTPRepresentation(
+                payload=self.first[url],
+                etag=self.etag(url),
+                not_modified=False,
+            )
+        self.conditional_calls.append((url, if_none_match))
+        if url in self.changed:
+            return self.module._HTTPRepresentation(
+                payload=self.changed[url],
+                etag='"' + "e" * 40 + '"',
+                not_modified=False,
+            )
+        return self.module._HTTPRepresentation(
+            payload=None,
+            etag=self.etag(url).removeprefix("W/"),
+            not_modified=True,
+        )
+
+
+def _observe_all(module, transport: SemanticRevalidationTransport):
+    bounded = module._BoundedHTTPGet(transport)
+    for url in transport.first:
+        bounded(url, token=TOKEN, timeout=20.0)
+    return bounded
+
+
+def _file_row(path: str, **extra: object) -> dict[str, object]:
+    row: dict[str, object] = {"filename": path, "status": "modified"}
+    row.update(extra)
+    return row
+
+
+def _roster_row(
+    number: int,
+    *,
+    head_sha: str,
+    base_sha: str,
+    head_repository: str = REPOSITORY,
+    base_repository: str = REPOSITORY,
+    **extra: object,
+) -> dict[str, object]:
+    row: dict[str, object] = {
+        "number": number,
+        "state": "open",
+        "head": {"sha": head_sha, "repo": {"full_name": head_repository}},
+        "base": {"sha": base_sha, "repo": {"full_name": base_repository}},
+    }
+    row.update(extra)
+    return row
+
+
+def _roster() -> list[dict[str, object]]:
+    return [
+        _roster_row(TARGET_PR, head_sha=TARGET_HEAD, base_sha=TARGET_BASE_HEAD),
+        _roster_row(FOREIGN_PR, head_sha=HEAD, base_sha=BASE),
+    ]
+
+
+def test_invocation_ceilings_are_unchanged_by_semantic_revalidation() -> None:
+    module = _module()
+    assert module._MAX_HTTP_CALLS == 1152
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert module._HTTP_READ_BUDGET_SECONDS == 300.0
+
+
+def test_open_pull_roster_changed_200_with_identical_semantics_does_not_starve() -> None:
+    module = _module()
+    first = _roster()
+    noisy_foreign = _roster_row(
+        FOREIGN_PR,
+        head_sha=HEAD,
+        base_sha=BASE,
+        title="representation churn",
+        updated_at="2026-09-16T00:00:00Z",
+        draft=True,
+    )
+    noisy_foreign["head"]["ref"] = "renamed-ref"  # type: ignore[index]
+    noisy_foreign["base"]["ref"] = "renamed-base-ref"  # type: ignore[index]
+    noisy_target = _roster_row(
+        TARGET_PR,
+        head_sha=TARGET_HEAD,
+        base_sha=TARGET_BASE_HEAD,
+        comments=7,
+    )
+    transport = SemanticRevalidationTransport(
+        module,
+        {OPEN_PULLS_URL: first},
+        changed={OPEN_PULLS_URL: [noisy_foreign, noisy_target]},
+    )
+    bounded = _observe_all(module, transport)
+    first_bytes = bounded._bytes
+
+    assert bounded.validate_unchanged(token=TOKEN) is True
+    assert bounded._semantic_revalidations == [OPEN_PULLS_URL]
+    assert bounded._bytes > first_bytes
+    assert bounded._calls == 2
+
+
+def test_changed_endpoint_only_revalidation_is_not_a_second_census() -> None:
+    module = _module()
+    first = {
+        TARGET_PULL_URL: _target_pr_payload(),
+        TARGET_BRANCH_URL: {"commit": {"sha": TARGET_HEAD}},
+        HEAD_COMMIT_URL: {"sha": HEAD, "tree": {"sha": HEAD_ROOT}},
+        COMPARE_URL: {
+            "url": COMPARE_URL,
+            "base_commit": {"sha": BASE},
+            "merge_base_commit": {"sha": MERGE_BASE},
+        },
+        OPEN_PULLS_URL: _roster(),
+        FOREIGN_FILES_URL: [_file_row("docs/one.md", sha="a" * 40)],
+    }
+    changed_roster = list(reversed(_roster()))
+    changed_roster[0] = {**changed_roster[0], "updated_at": "2026-09-16T00:00:00Z"}
+    transport = SemanticRevalidationTransport(
+        module,
+        first,
+        changed={OPEN_PULLS_URL: changed_roster},
+    )
+    bounded = _observe_all(module, transport)
+    first_bytes = bounded._bytes
+
+    assert bounded.validate_unchanged(token=TOKEN) is True
+    assert bounded._semantic_revalidations == [OPEN_PULLS_URL]
+    replayed = bounded._bytes - first_bytes
+    only_changed = len(
+        module.canonical_json(transport.changed[OPEN_PULLS_URL]).encode("utf-8")
+    )
+    assert replayed == only_changed
+    assert replayed < first_bytes
+    assert sorted(url for url, _ in transport.conditional_calls) == sorted(first)
+
+
+@pytest.mark.parametrize(
+    ("url", "payload"),
+    [
+        (TARGET_PULL_URL, _target_pr_payload()),
+        (TARGET_BRANCH_URL, {"commit": {"sha": TARGET_HEAD}}),
+        (HEAD_COMMIT_URL, {"sha": HEAD, "tree": {"sha": HEAD_ROOT}}),
+        (
+            COMPARE_URL,
+            {
+                "url": COMPARE_URL,
+                "base_commit": {"sha": BASE},
+                "merge_base_commit": {"sha": MERGE_BASE},
+            },
+        ),
+        (FOREIGN_FILES_URL, [_file_row("docs/one.md", sha="a" * 40)]),
+        (ENGINE_TREE_URL, _tree(ENGINE_TREE, [_entry()])),
+        (UNSUPPORTED_URL, {"ok": True}),
+    ],
+)
+def test_non_roster_changed_200_refuses_even_when_body_is_identical(
+    url: str, payload: object
+) -> None:
+    module = _module()
+    transport = SemanticRevalidationTransport(
+        module,
+        {url: payload},
+        changed={url: payload},
+    )
+    bounded = _observe_all(module, transport)
+    first_bytes = bounded._bytes
+
+    assert bounded.validate_unchanged(token=TOKEN) is False
+    assert bounded._bytes > first_bytes
+
+
+@pytest.mark.parametrize(
+    "changed_open_pulls",
+    [
+        [
+            _roster_row(TARGET_PR, head_sha=TARGET_HEAD, base_sha=TARGET_BASE_HEAD),
+            _roster_row(FOREIGN_PR, head_sha="8" * 40, base_sha=BASE),
+        ],
+        [
+            _roster_row(TARGET_PR, head_sha=TARGET_HEAD, base_sha=TARGET_BASE_HEAD),
+            _roster_row(FOREIGN_PR, head_sha=HEAD, base_sha="8" * 40),
+        ],
+        [
+            _roster_row(TARGET_PR, head_sha=TARGET_HEAD, base_sha=TARGET_BASE_HEAD),
+            _roster_row(
+                FOREIGN_PR,
+                head_sha=HEAD,
+                base_sha=BASE,
+                head_repository="fork/macro",
+            ),
+        ],
+        [
+            _roster_row(TARGET_PR, head_sha=TARGET_HEAD, base_sha=TARGET_BASE_HEAD),
+            _roster_row(
+                FOREIGN_PR,
+                head_sha=HEAD,
+                base_sha=BASE,
+                base_repository="fork/macro",
+            ),
+        ],
+        [_roster_row(TARGET_PR, head_sha=TARGET_HEAD, base_sha=TARGET_BASE_HEAD)],
+        [*_roster(), _roster_row(7777, head_sha="9" * 40, base_sha=BASE)],
+        [*_roster(), _roster_row(FOREIGN_PR, head_sha=HEAD, base_sha=BASE)],
+        [
+            _roster_row(TARGET_PR, head_sha=TARGET_HEAD, base_sha=TARGET_BASE_HEAD),
+            {"number": FOREIGN_PR},
+        ],
+        [
+            _roster_row(TARGET_PR, head_sha=TARGET_HEAD, base_sha=TARGET_BASE_HEAD),
+            {**_roster_row(FOREIGN_PR, head_sha=HEAD, base_sha=BASE), "state": "closed"},
+        ],
+    ],
+)
+def test_changed_open_roster_identity_membership_or_malformed_rows_refuse(
+    changed_open_pulls: list[dict[str, object]],
+) -> None:
+    module = _module()
+    transport = SemanticRevalidationTransport(
+        module,
+        {OPEN_PULLS_URL: _roster()},
+        changed={OPEN_PULLS_URL: changed_open_pulls},
+    )
+    bounded = _observe_all(module, transport)
+
+    assert bounded.validate_unchanged(token=TOKEN) is False
+
+
+def test_open_roster_pagination_boundary_movement_refuses() -> None:
+    module = _module()
+    page2 = OPEN_PULLS_URL.replace("page=1", "page=2")
+    first_page_1 = [_roster_row(TARGET_PR, head_sha=TARGET_HEAD, base_sha=TARGET_BASE_HEAD)]
+    first_page_2 = [_roster_row(FOREIGN_PR, head_sha=HEAD, base_sha=BASE)]
+    transport = SemanticRevalidationTransport(
+        module,
+        {OPEN_PULLS_URL: first_page_1, page2: first_page_2},
+        changed={OPEN_PULLS_URL: first_page_2, page2: first_page_1},
+    )
+    bounded = _observe_all(module, transport)
+
+    assert bounded.validate_unchanged(token=TOKEN) is False
+
+
+@pytest.mark.parametrize(
+    ("url", "first_payload", "changed_payload"),
+    [
+        (OPEN_PULLS_URL, _roster(), {"message": "Not Found"}),
+        (OPEN_PULLS_URL, _roster(), ["not-an-object"]),
+        (UNSUPPORTED_URL, {"ok": True}, {"ok": True}),
+    ],
+)
+def test_malformed_or_unsupported_changed_representation_fails_closed(
+    url: str, first_payload: object, changed_payload: object
+) -> None:
+    module = _module()
+    transport = SemanticRevalidationTransport(
+        module, {url: first_payload}, changed={url: changed_payload}
+    )
+    bounded = _observe_all(module, transport)
+
+    assert bounded.validate_unchanged(token=TOKEN) is False
+
+
+def test_changed_representation_that_overflows_body_budget_fails_closed(
+    monkeypatch,
+) -> None:
+    module = _module()
+    first = _roster()
+    changed = [dict(row) for row in first]
+    changed[0] = {**changed[0], "title": "x" * 256}
+    transport = SemanticRevalidationTransport(
+        module,
+        {OPEN_PULLS_URL: first},
+        changed={OPEN_PULLS_URL: changed},
+    )
+    bounded = _observe_all(module, transport)
+    monkeypatch.setattr(module, "_MAX_HTTP_NORMALIZED_BYTES", bounded._bytes)
+
+    with pytest.raises(module._ReadBudgetExceeded):
+        bounded.validate_unchanged(token=TOKEN)
+
+
+def test_changed_representation_that_overflows_call_budget_fails_closed(
+    monkeypatch,
+) -> None:
+    module = _module()
+    first = {
+        TARGET_PULL_URL: _target_pr_payload(),
+        OPEN_PULLS_URL: _roster(),
+        FOREIGN_FILES_URL: [_file_row("docs/one.md")],
+    }
+    transport = SemanticRevalidationTransport(module, first)
+    bounded = _observe_all(module, transport)
+    monkeypatch.setattr(module, "_MAX_HTTP_CALLS", len(first) + 1)
+
+    with pytest.raises(module._ReadBudgetExceeded):
+        bounded.validate_unchanged(token=TOKEN)
+
+
+@pytest.mark.parametrize("error", ["_AuthProbeError", "_RemoteProbeError"])
+def test_changed_representation_transport_ambiguity_propagates(error: str) -> None:
+    module = _module()
+
+    class AmbiguousTransport(SemanticRevalidationTransport):
+        def __call__(self, url, *, token, timeout, if_none_match=None):
+            if if_none_match is not None:
+                raise getattr(module, error)()
+            return super().__call__(url, token=token, timeout=timeout)
+
+    transport = AmbiguousTransport(module, {OPEN_PULLS_URL: _roster()})
+    bounded = _observe_all(module, transport)
+
+    with pytest.raises(getattr(module, error)):
+        bounded.validate_unchanged(token=TOKEN)
+
+
+class MainSemanticConditionalHTTP:
+    _source_continuity_conditional = True
+
+    def __init__(
+        self,
+        module,
+        changed: dict[str, object],
+        *,
+        first_overrides: dict[str, object] | None = None,
+    ) -> None:
+        import test_source_continuity as fx
+
+        self.module = module
+        self.base = fx._ProbeHTTP()
+        self.changed = changed
+        self.first_overrides = first_overrides or {}
+        self.conditional_calls: list[tuple[str, str]] = []
+        self.first_calls: list[str] = []
+
+    @staticmethod
+    def etag(url: str) -> str:
+        import hashlib
+
+        return 'W/"' + hashlib.sha256(url.encode("utf-8")).hexdigest() + '"'
+
+    def __call__(self, url, *, token, timeout, if_none_match=None):
+        if if_none_match is None:
+            self.first_calls.append(url)
+            if url in self.first_overrides:
+                payload = self.first_overrides[url]
+            else:
+                payload = self.base(url, token=token, timeout=timeout)
+            return self.module._HTTPRepresentation(
+                payload=payload,
+                etag=self.etag(url),
+                not_modified=False,
+            )
+        self.conditional_calls.append((url, if_none_match))
+        if url in self.changed:
+            return self.module._HTTPRepresentation(
+                payload=self.changed[url],
+                etag='"' + "e" * 40 + '"',
+                not_modified=False,
+            )
+        return self.module._HTTPRepresentation(
+            payload=None,
+            etag=if_none_match.removeprefix("W/"),
+            not_modified=True,
+        )
+
+
+def test_main_issues_receipt_when_changed_open_roster_keeps_collision_semantics(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import json
+    import test_source_continuity as fx
+
+    module = _module()
+    open_pulls = (
+        f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls?state=open&per_page=100&page=1"
+    )
+    first_roster = [
+        {
+            "number": fx.PR_NUMBER,
+            "state": "open",
+            "head": {
+                "sha": fx.HEAD_SHA,
+                "ref": fx.BRANCH,
+                "repo": {"full_name": fx.REPOSITORY},
+            },
+            "base": {
+                "sha": fx.CURRENT_BASE_SHA,
+                "ref": "master",
+                "repo": {"full_name": fx.REPOSITORY},
+            },
+        }
+    ]
+    changed_roster = [
+        {
+            **first_roster[0],
+            "title": "unrelated churn",
+            "updated_at": "2026-09-16T00:00:00Z",
+            "draft": True,
+            "head": {**first_roster[0]["head"], "ref": "representation-only-ref"},
+            "base": {**first_roster[0]["base"], "ref": "representation-only-base"},
+        }
+    ]
+    http = MainSemanticConditionalHTTP(
+        module,
+        {open_pulls: changed_roster},
+        first_overrides={open_pulls: first_roster},
+    )
+
+    exit_code = fx._run_cli(module, fx._cli_argv(), http=http)
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
+    assert payload["local_equals_remote"] is True
+    # Collision-census reads are intentionally not strict ETag obligations:
+    # they are re-proved by one complete second census under the same budget.
+    conditional_urls = [url for url, _ in http.conditional_calls]
+    assert open_pulls not in conditional_urls
+    assert http.first_calls.count(open_pulls) == 2
+    assert len(http.conditional_calls) == len(http.first_calls) - 2
+
+
+def test_main_accepts_changed_200_on_target_pr_when_identity_is_identical(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import json
+    import test_source_continuity as fx
+
+    module = _module()
+    target = f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls/{fx.PR_NUMBER}"
+    unchanged_target = {
+        "state": "open",
+        "draft": True,
+        "labels": [],
+        "head": {
+            "ref": fx.BRANCH,
+            "sha": fx.HEAD_SHA,
+            "repo": {"full_name": fx.REPOSITORY},
+        },
+        "base": {"ref": "master"},
+    }
+    http = MainSemanticConditionalHTTP(module, {target: unchanged_target})
+
+    exit_code = fx._run_cli(module, fx._cli_argv(), http=http)
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["schema"] == "mastermind.source_continuity_receipt/v1"
+    assert payload["local_equals_remote"] is True

@@ -347,6 +347,7 @@ class _PackageSnapshot:
         self._fds: list[int] = []
         self._directories: list[tuple[int, int | None, str, str, os.stat_result, tuple[str, ...], bool]] = []
         self._lexical: list[tuple[int, int | None, str, str, os.stat_result, tuple[str, ...], bool]] = []
+        self._supplied_root_opened = False
 
     @staticmethod
     def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
@@ -476,12 +477,14 @@ class _PackageSnapshot:
         fd = self._open_directory(parts[0], None, "", strict=False)
         if fd is None:
             return
-        for index, part in enumerate(parts[1:], start=1):
+        self._lexical.append(self._directories[-1])
+        for part in parts[1:]:
             next_fd = self._open_directory(part, fd, "", strict=False)
             if next_fd is None:
                 return
             fd = next_fd
-        self._lexical = list(self._directories)
+            self._lexical.append(self._directories[-1])
+        self._supplied_root_opened = True
         for top in (".agents", "plugins"):
             top_fd = self._open_directory(top, fd, top)
             if top_fd is not None:
@@ -517,7 +520,7 @@ class _PackageSnapshot:
         for entry in self._lexical[:-1]:
             settle_link(entry, strict=False)
         if self._lexical:
-            settle_link(self._lexical[-1], strict=True)
+            settle_link(self._lexical[-1], strict=self._supplied_root_opened)
 
     def close(self) -> None:
         for fd in reversed(self._fds):

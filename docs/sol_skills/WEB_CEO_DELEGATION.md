@@ -7,7 +7,7 @@ skill: web_ceo_delegation
 
 # WEB CEO DELEGATION — Role-Adaptive Principal Work
 
-Candidate procedure: not enrolled in INDEX or fleet instructions. Apply as governing procedure only after accepted same-source enrollment. Current authority, worker-routing, source-custody, admission, effect and dialogue laws remain controlling. This procedure selects a working approach; it never selects a provider account, changes a model setting, or grants execution authority. Because `scripts/ohf/fresh_sol_eval.py` materializes every `docs/sol_skills/*.md`, merging this candidate path also places its bytes in each fresh-Sol evaluation bundle pinned at or after that merge. That is evaluation exposure, not production enrollment, INDEX enrollment, runtime authority or live behavior.
+Enrolled companion procedure. This skill is enrolled in the same pinned INDEX as `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires detailed role selection or delegation. ACTIVE_EXECUTION remains the sole active-turn, no-delta and finalization owner. Current authority, worker-routing, source-custody, admission, effect and dialogue laws remain controlling. This procedure selects a working approach; it never selects a provider account, changes a model setting, or grants execution authority. Because `scripts/ohf/fresh_sol_eval.py` materializes every `docs/sol_skills/*.md`, this file also appears in each fresh-Sol evaluation bundle pinned at or after its source merge. That automatic placement is evaluation exposure, not production enrollment; procedural enrollment comes only from the same pinned INDEX and still grants no runtime authority or live behavior.
 
 ## 1. Choose the work profile, not a prestige hierarchy
 
@@ -47,7 +47,7 @@ Keep a substantive principal-owned task while workers execute: resolve the harde
 
 Sustained Sol orchestration may include normal ACK/CONTINUE/repair/acceptance steps within a substantive mission. That does not promote a standalone acknowledgment, status check or polling turn into frontier reasoning. Astra may continue orchestration when it is productive, and Sol may directly resolve high-level architecture within its authority. Neither should stop solely because it has written a plan or delivered a packet while useful authorized work remains.
 
-After `WEB_CEO_DELEGATION.md` has accepted enrollment in the same pinned INDEX as `ACTIVE_EXECUTION.md`, consume ACTIVE_EXECUTION as the sole active-turn, no-delta and finalization owner and this companion only for detailed delegation. Before that enrollment, this candidate has no procedural authority; use the current accepted COO cycle/control-service owners. This skill adds no second stop-state machine. A failed or blocked lane freezes only its affected work; independently safe and authorized work can continue. Keep `EFFECT_UNKNOWN` on the exact operation/carrier until reconciled; never start a duplicate or silently move a started modifier to another session.
+Because `WEB_CEO_DELEGATION.md` is enrolled in the same pinned INDEX as `ACTIVE_EXECUTION.md`, consume ACTIVE_EXECUTION as the sole active-turn, no-delta and finalization owner and this companion only for detailed delegation. Enrollment changes procedure availability only; current Executive/COO cycle and control-service owners retain their authority. This skill adds no second stop-state machine. A failed or blocked lane freezes only its affected work; independently safe and authorized work can continue. Keep `EFFECT_UNKNOWN` on the exact operation/carrier until reconciled; never start a duplicate or silently move a started modifier to another session.
 
 ## 6. Consume evidence, not worker transcripts
 
@@ -60,3 +60,24 @@ Adjust verification to consequence. The principal must not redo every worker ste
 Use existing Executive/COO/Dialogue/Wake and Agent OS continuation. Maintain enough recoverable state after material decisions and before dependency waits that a lawful successor can recover the objective, decisions, exact artifacts, incumbent effects and next action. Do not rely on predicting a hidden model ceiling or saving everything for the last minute. A Web turn is not a daemon; source merge, delivery and native execution are not parent consumption or production acceptance.
 
 Prefer exact existing event-driven return handling; do not keep Pro generating unchanged status checks. A change of principal requires current assignment, source/effect reconciliation and existing fencing. Role preference is not assignment, and a native harness result is not a served-model or Web Pro attestation. Empirical role evaluation must preserve actual surface/mode identity and distinguish observed completion from waiting, truncation and platform failure.
+
+## 8. Resource-aware work profiles and decision depth
+
+Use the requested work profile separately from observed model/mode and available tools. These are
+working approaches, not a minimum run length, tool entitlement, provider selection or new admission
+receipt. Unobserved limits remain UNKNOWN. Current cognition/routing and economic gates stay controlling;
+a Chairman preference requires reconciliation by that existing owner rather than an inferred mode switch.
+
+Sustained delivery advances successive useful units while safe, checkpointing material progress without
+forcing a user request after every milestone. Bounded execution chooses a narrow result with targeted
+verification and persists before slow/effectful/high-output work; it does not pretend to know a hidden
+Web timeout. Concentrated judgment must be decision-ready: relevant primary evidence, credible alternatives,
+the strongest counterargument, uncertainties/falsifiers and discriminating acceptance criteria. Do not
+stop at a first plausible outline, but do not invent research or expand a research-only commission into
+unauthorized delivery. Completed bounded research is not a shipped product.
+
+ACTIVE_EXECUTION alone defines CHECKPOINTED_CONTINUATION and its verification conditions. A checkpoint
+is not an excuse to stop productive work; elapsed time is not quality, and a long turn is not proof of
+more reasoning. Use the existing fresh-session evaluation owner to test actual behavior, preserving exact
+observed surface identity and distinguishing context symptoms, transport errors, quota, safety refusal
+and voluntary premature stopping. Neither source-contract tests nor model labels prove native adoption.

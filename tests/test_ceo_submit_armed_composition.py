@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import tokenize
+import unicodedata
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -201,7 +202,114 @@ def _scan_evidence_identity_literals(document: str) -> list[str]:
     return flagged
 
 
+_NON_PRODUCTION_IDENTITY_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
+_PERMISSION_MODE_MARKERS = ("chmod", "umask", "st_mode", "dir_mode", "file_mode", "permission")
+_HTTP_STATUS_MARKERS = (
+    "sendjsonerror(", "err?.status", "http_fallback", "http_code",
+    ".status(", "response.status", "statuscode",
+)
+_COMMENT_PREFIXES = ("#", "//", "/*", "*/", "* ")
+_SOURCE_IDENTITY_WORDS = {
+    "uid", "uids", "gid", "gids", "euid", "egid", "suid", "sgid",
+    "peer", "peers", "account", "accounts", "principal", "principals",
+    "user", "users", "group", "groups", "identity", "identities",
+    "owner", "owners", "port", "ports", "socket", "sockets",
+    "endpoint", "endpoints", "topology",
+}
+_SOURCE_SYNTAX_NAMES = {
+    "as", "class", "const", "def", "else", "false", "from", "function",
+    "if", "import", "in", "let", "none", "null", "return", "true", "var",
+}
+
+
+def _is_production_identity_scan_path(path: str) -> bool:
+    if not _identity_guard_source_path(path):
+        return False
+    name = Path(path).name
+    if name.startswith("test_") or name.endswith("_test.py") or ".test." in name:
+        return False
+    if name in _NON_PRODUCTION_IDENTITY_FILES or name.endswith((".lock", ".md", ".rst")):
+        return False
+    if name.startswith(("README", "CHANGELOG", "LICENSE")):
+        return False
+    return True
+
+
+def _semantic_words(text: str) -> set[str]:
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", normalized)
+    normalized = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", normalized)
+    return {word for word in re.split(r"[^a-z0-9]+", normalized.lower()) if word}
+
+
+def _source_identifiers(line: str) -> set[str]:
+    normalized = unicodedata.normalize("NFKC", line)
+    return {
+        name for name in re.findall(r"[^\W\d]\w*", normalized, flags=re.UNICODE)
+        if name.lower() not in _SOURCE_SYNTAX_NAMES
+    }
+
+
+def _line_mentions_identity_name(line: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", line)
+    return "_mastermind_" in normalized.lower() or bool(
+        _semantic_words(normalized) & _SOURCE_IDENTITY_WORDS
+    )
+
+
+def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
+    stripped = line.lstrip()
+    if stripped.startswith(_COMMENT_PREFIXES):
+        return True
+    if _line_mentions_identity_name(line):
+        return False
+    lowered = line.lower()
+    if (
+        token_text.lower().startswith("0o")
+        and any(marker in lowered for marker in _PERMISSION_MODE_MARKERS)
+    ):
+        return True
+    if 400 <= value <= 600 and any(marker in lowered for marker in _HTTP_STATUS_MARKERS):
+        return True
+    return False
+
+
+def _scan_identity_source_lines(
+    lines: list[str], *, path_identity: bool = False, identity_aliases: set[str] | None = None,
+) -> list[str]:
+    flagged: list[str] = []
+    identity_aliases = identity_aliases or set()
+    for line in lines:
+        normalized = unicodedata.normalize("NFKC", line)
+        line_identity = _line_mentions_identity_name(normalized)
+        alias_identity = bool(_source_identifiers(normalized) & identity_aliases)
+        identity_context = path_identity or line_identity or alias_identity
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(normalized + "\n").readline)
+            for token in tokens:
+                if token.type == tokenize.NUMBER:
+                    try:
+                        value = int(token.string, 0)
+                    except ValueError:
+                        continue
+                    if (identity_context and 400 <= value <= 999
+                            and not _is_known_non_identity_numeric(
+                        normalized, token.string, value
+                    )):
+                        flagged.append(token.string)
+                elif token.type in {tokenize.NAME, tokenize.STRING} and "_mastermind_" in token.string:
+                    start = token.string.find("_mastermind_")
+                    end = start + len("_mastermind_")
+                    while end < len(token.string) and (token.string[end].isalnum() or token.string[end] == "_"):
+                        end += 1
+                    flagged.append(token.string[start:end])
+        except (IndentationError, tokenize.TokenError):
+            continue
+    return flagged
+
+
 def _scan_added_identity_literals(added_lines: str) -> list[str]:
+    """Legacy positive-control helper retained for the evidence classifier tests."""
     flagged: list[str] = []
     for line in added_lines.splitlines():
         try:
@@ -218,6 +326,77 @@ def _scan_added_identity_literals(added_lines: str) -> list[str]:
                     flagged.append(token.string)
         except (IndentationError, tokenize.TokenError):
             continue
+    return flagged
+
+
+def _scan_added_identity_diff(diff: str) -> list[str]:
+    """Reject added identity/topology literals without classifying unrelated numbers.
+
+    Numeric literals are security-relevant only when their path, line, or an alias chain
+    gives them identity/topology meaning. Alias propagation spans all added production
+    files, so moving a generic constant away from its UID/GID/peer/port consumer does not
+    bypass the guard. Explicit HTTP-status and permission-mode lines remain semantic
+    non-identity contexts unless the line itself names an identity.
+    """
+    additions_by_path: dict[str, list[str]] = {}
+    current_path: str | None = None
+    for raw in diff.splitlines():
+        if raw.startswith("+++ "):
+            target = raw[4:]
+            if target == "/dev/null":
+                current_path = None
+            elif target.startswith("b/"):
+                current_path = target[2:]
+                additions_by_path.setdefault(current_path, [])
+            else:
+                current_path = target
+                additions_by_path.setdefault(current_path, [])
+            continue
+        if current_path is None or not raw.startswith("+") or raw.startswith("+++"):
+            continue
+        additions_by_path[current_path].append(raw[1:])
+
+    identity_aliases: set[str] = set()
+    production: dict[str, list[str]] = {
+        path: lines for path, lines in additions_by_path.items()
+        if _is_production_identity_scan_path(path)
+    }
+
+    # Seed aliases from the non-identity side of an identity-bearing assignment or
+    # call, then propagate through generic aliases across files to a fixed point.
+    for path, lines in production.items():
+        path_identity = bool(_semantic_words(path) & _SOURCE_IDENTITY_WORDS)
+        for line in lines:
+            normalized = unicodedata.normalize("NFKC", line)
+            if path_identity:
+                identity_aliases.update(_source_identifiers(normalized))
+                continue
+            if not _line_mentions_identity_name(normalized):
+                continue
+            left, separator, right = normalized.partition("=")
+            if separator and (_semantic_words(left) & _SOURCE_IDENTITY_WORDS):
+                identity_aliases.update(_source_identifiers(right))
+            else:
+                identity_aliases.update(_source_identifiers(normalized))
+
+    changed = True
+    while changed:
+        changed = False
+        for lines in production.values():
+            for line in lines:
+                names = _source_identifiers(line)
+                if not (names & identity_aliases):
+                    continue
+                before = len(identity_aliases)
+                identity_aliases.update(names)
+                changed = changed or len(identity_aliases) != before
+
+    flagged: list[str] = []
+    for path, lines in production.items():
+        path_identity = bool(_semantic_words(path) & _SOURCE_IDENTITY_WORDS)
+        flagged.extend(_scan_identity_source_lines(
+            lines, path_identity=path_identity, identity_aliases=identity_aliases,
+        ))
     return flagged
 
 
@@ -455,7 +634,7 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 321)]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 353)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
@@ -535,6 +714,160 @@ def test_d8_genuinely_distinct_app_peer_uid_is_admitted(tmp_path):
     assert loaded["ceo_ingress_app_peer_uid"] == app_peer
 
 
+def test_d8_scanner_rejects_hidden_numeric_aliases_across_production_files():
+    diff = "\n".join(
+        [
+            "diff --git a/control_plane/new_identity.py b/control_plane/new_identity.py",
+            "--- /dev/null",
+            "+++ b/control_plane/new_identity.py",
+            "@@ -0,0 +1,5 @@",
+            '+worker_uid = config["worker_uid"]',
+            "+DIR_MODE = 0o700",
+            '+worker_user = "_mastermind_shadow"',
+            "+HTTP_WORKER_UID_CODE = 501",
+            "+UID_DIR_MODE = 0o765",
+            "diff --git a/common/identity_constants.py b/common/identity_constants.py",
+            "--- /dev/null",
+            "+++ b/common/identity_constants.py",
+            "@@ -0,0 +1,4 @@",
+            "+FALLBACK = 501",
+            "+ALLOWED = (450, 459)",
+            "+OCTAL_ALIAS = 0o765",
+            "+peer_uid = 777",
+        ]
+    )
+    assert _scan_added_identity_diff(diff) == [
+        "_mastermind_shadow", "501", "0o765", "501", "450", "459", "0o765", "777",
+    ]
+
+
+def test_d8_http_exemption_cannot_hide_identity_shaped_aliases():
+    diff = "\n".join(
+        [
+            "diff --git a/common/identity_status.py b/common/identity_status.py",
+            "--- /dev/null",
+            "+++ b/common/identity_status.py",
+            "@@ -0,0 +1,4 @@",
+            "+status_uid = 501",
+            "+http_peer_uid = 459",
+            "+status_peer = 501",
+            "+response_peer = 459",
+        ]
+    )
+    assert _scan_added_identity_diff(diff) == ["501", "459", "501", "459"]
+
+
+def test_d8_scanner_rejects_mastermind_identity_name_in_unrelated_source():
+    diff = "\n".join(
+        [
+            "diff --git a/integrations/service/runtime.mjs b/integrations/service/runtime.mjs",
+            "--- /dev/null",
+            "+++ b/integrations/service/runtime.mjs",
+            "@@ -0,0 +1 @@",
+            '+const serviceUser = "_mastermind_shadow";',
+        ]
+    )
+    assert _scan_added_identity_diff(diff) == ["_mastermind_shadow"]
+
+def test_d8_scanner_ignores_unrelated_protocol_modes_and_nonproduction_paths():
+    diff = "\n".join(
+        [
+            "diff --git a/integrations/service/gateway.mjs b/integrations/service/gateway.mjs",
+            "--- /dev/null",
+            "+++ b/integrations/service/gateway.mjs",
+            "@@ -0,0 +1,4 @@",
+            "+sendJsonError(res, 404, 'not found');",
+            "+const status = Number(err?.statusCode || 500);",
+            "+return sendJsonError(res, status >= 400 && status < 600 ? status : 500);",
+            "+res.set('Allow', 'POST, DELETE').status(405).json({});",
+            "diff --git a/integrations/service/gateway.py b/integrations/service/gateway.py",
+            "--- /dev/null",
+            "+++ b/integrations/service/gateway.py",
+            "@@ -0,0 +1,2 @@",
+            "+# control_uid is unrelated to this HTTP adapter",
+            "+HTTP_FALLBACK = 503",
+            "diff --git a/integrations/service/private_service.py b/integrations/service/private_service.py",
+            "--- /dev/null",
+            "+++ b/integrations/service/private_service.py",
+            "@@ -0,0 +1 @@",
+            "+DIR_MODE = 0o700",
+            "diff --git a/integrations/service/gateway.test.mjs b/integrations/service/gateway.test.mjs",
+            "--- /dev/null",
+            "+++ b/integrations/service/gateway.test.mjs",
+            "@@ -0,0 +1 @@",
+            "+assert.equal(response.status, 503);",
+            "diff --git a/integrations/service/README.md b/integrations/service/README.md",
+            "--- /dev/null",
+            "+++ b/integrations/service/README.md",
+            "@@ -0,0 +1 @@",
+            "+Private port 443 remains unchanged.",
+        ]
+    )
+    assert _scan_added_identity_diff(diff) == []
+
+
+def _d8_frozen_added_diff(entries: list[tuple[str, str]]) -> str:
+    """Build a zero-context diff from lines frozen from immutable consumer heads."""
+    sections = []
+    for index, (path, line) in enumerate(entries, 1):
+        sections.extend((
+            f"diff --git a/{path} b/{path}",
+            f"--- a/{path}",
+            f"+++ b/{path}",
+            f"@@ -0,0 +{index} @@",
+            "+" + line,
+        ))
+    return "\n".join(sections)
+
+
+def test_d8_actual_pr882_and_pr887_semantic_numbers_are_not_identity():
+    # Frozen from the actual diffs at PR #882 head bf9540a3 and PR #887 head
+    # 7f51f780. They are consumer regressions, not exemptions in the classifier.
+    entries = [
+        ("control_plane/mission_workspace.py",
+         "    if text in (None, _REDACTED_TEXT) or len(text) > 512:"),
+        ("control_plane/mission_workspace.py",
+         "    month_lengths = (31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,"),
+        ("app/mastermind_os/src-tauri/tauri.conf.json",
+         '{"app":{"windows":[{"width":1200,"height":820,"minWidth":390,"minHeight":600}]}}'),
+        ("app/mastermind_os/src/mission.ts",
+         "  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);"),
+        ("app/mastermind_os/src/mission.ts", "  len = 512;"),
+        ("app/mastermind_os/src/mission.ts", "        v.url.length <= 512 &&"),
+        ("app/mastermind_os/src/mission.ts", "    v.items.length > 500 ||"),
+        ("app/mastermind_os/src/mission.ts", "  if (!raw || raw.length > 640) return null;"),
+        ("app/mastermind_os/src/styles.css", "  font-weight: 750;"),
+        ("app/mastermind_os/src/styles.css", "  font-weight: 700;"),
+        ("app/mastermind_os/src/styles.css", "  border-radius: 999px;"),
+        ("app/mastermind_os/src/styles.css", "  max-width: 760px;"),
+        ("app/mastermind_os/src/styles.css", "@media (max-width: 800px) {"),
+        ("app/mastermind_os/src/styles.css", "@media (max-width: 420px) {"),
+    ]
+    assert _scan_added_identity_diff(_d8_frozen_added_diff(entries)) == []
+
+
+def test_d8_true_identity_topology_and_cross_file_aliases_still_fail_closed():
+    diff = _d8_frozen_added_diff([
+        ("common/runtime_constants.py", "FALLBACK = 501"),
+        ("common/runtime_constants.py", "SECONDARY = FALLBACK"),
+        ("control_plane/admission.py", "peer_uid = SECONDARY"),
+        ("config/service.json", '{"endpointPort": 684}'),
+        ("integrations/service/runtime.ts", "const principalId = 777;"),
+        ("integrations/service/runtime.ts", 'const accountUser = "_mastermind_shadow";'),
+    ])
+    assert _scan_added_identity_diff(diff) == [
+        "501", "684", "777", "_mastermind_shadow",
+    ]
+
+
+def test_d8_identity_context_normalizes_camelcase_and_unicode_names():
+    diff = _d8_frozen_added_diff([
+        ("config/service.json", '{"allowedPeerUIDs": [459]}'),
+        ("config/service.json", '{"peer\uff3fuid": 501}'),
+        ("integrations/service/runtime.ts", "const endpointPort = 684;"),
+    ])
+    assert _scan_added_identity_diff(diff) == ["459", "501", "684"]
+
 def test_d8_template_topology_and_protected_defaults():
     value = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     assert value["allowed_peer_uids"] == [450, 501]
@@ -550,7 +883,7 @@ def test_d8_template_topology_and_protected_defaults():
         ["git", "diff", "--diff-filter=ACMRT", "--name-only", "-z", base, "HEAD", "--", ":!tests/"],
         cwd=ROOT, check=True, capture_output=True, text=True,
     ).stdout
-    additions_by_path: dict[str, str] = {}
+    source_diffs: list[str] = []
     for path in changed.split("\0"):
         if not path:
             continue
@@ -567,23 +900,8 @@ def test_d8_template_topology_and_protected_defaults():
             ["git", "diff", "--unified=0", base, "HEAD", "--", path], cwd=ROOT,
             check=True, capture_output=True, text=True,
         ).stdout
-        additions_by_path[path] = "\n".join(
-            line[1:] for line in diff.splitlines()
-            if line.startswith("+") and not line.startswith("+++")
-        )
-    additions = "\n".join(additions_by_path.values())
-    positive = "\n".join(
-        [
-            "ceo_ingress_app_peer_uid = 459",
-            "_EXTRA_PEER = 459",
-            "FALLBACK = 501",
-            "ALLOWED = (450, 459)",
-            "peer_uid = 777",
-        ]
-    )
-    positive_hits = _scan_added_identity_literals(positive)
-    assert positive_hits == ["459", "459", "501", "450", "459", "777"]
-    assert _scan_added_identity_literals(additions) == []
+        source_diffs.append(diff)
+    assert _scan_added_identity_diff("\n".join(source_diffs)) == []
 
 
 @pytest.mark.parametrize("path,guarded", [
