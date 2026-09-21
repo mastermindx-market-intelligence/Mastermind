@@ -1377,8 +1377,7 @@ def _compose_mission_workspace(
     elif cache.get("state") == "historical_refresh_error":
         read_state = "HISTORICAL"
     elif (
-        control_current
-        and cross_owner_generation_current
+        observation_current
         and control_valid
         and fabric_valid
         and resolved_root is not None

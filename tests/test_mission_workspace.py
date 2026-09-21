@@ -1693,3 +1693,14 @@ def test_v2_real_fabric_without_finalized_owner_generation_cannot_be_promoted(tm
     assert doc["mission"]["root_job_id"] == job.job_id
     assert doc["read_state"]["state"] == "PARTIAL"
     assert doc["source"]["owner_observation"]["state"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("historical", [True, None, 0, "false"])
+def test_v2_same_owner_receipt_requires_exact_nonhistorical_dispatch(historical):
+    args = _owner_observation_inputs()
+    args["control_room"]["autonomy"]["responsibilities"][0]["dispatch"]["historical"] = historical
+    _refresh_observation_digests(args)
+    doc = compose_mission_workspace_v2(**args)
+    assert doc["source"]["owner_observation"]["state"] == "SAME"
+    assert doc["read_state"]["state"] == "PARTIAL"
+    assert doc["posture"]["value"] == "CONSUMPTION_UNKNOWN"
