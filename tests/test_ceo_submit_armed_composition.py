@@ -828,7 +828,42 @@ def _scan_added_identity_literals(added_lines: str) -> list[str]:
     return flagged
 
 
-def _scan_added_identity_diff(diff: str) -> list[str]:
+def _python_multiline_string_view(source: str) -> tuple[list[str], dict[int, list[str]]]:
+    """Mask proven multiline STRING spans, preserving account-literal findings.
+
+    Tokenize the complete postimage, never concatenated diff hunks. If its lexical
+    structure is incomplete, retain the old conservative line analysis in full.
+    Single-line strings and executable f-string expressions keep existing rules.
+    """
+    lines = source.splitlines()
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (IndentationError, tokenize.TokenError, SyntaxError):
+        return lines, {}
+    if any(token.type == tokenize.ERRORTOKEN for token in tokens):
+        return lines, {}
+    masked = [list(line) for line in lines]
+    accounts: dict[int, list[str]] = {}
+    for token in tokens:
+        if token.type != tokenize.STRING or token.start[0] == token.end[0]:
+            continue
+        # Python 3.11 emits the entire f-string as STRING, including executable
+        # interpolations. Keep its conservative line analysis, unlike plain text.
+        prefix = re.match(r"(?i)[rubf]*", token.string).group(0)
+        if "f" in prefix.lower():
+            continue
+        for number in range(token.start[0], token.end[0] + 1):
+            start = token.start[1] if number == token.start[0] else 0
+            end = token.end[1] if number == token.end[0] else len(lines[number - 1])
+            fragment = unicodedata.normalize("NFKC", lines[number - 1][start:end])
+            accounts.setdefault(number, []).extend(re.findall(r"_mastermind_\w*", fragment))
+            masked[number - 1][start:end] = " " * (end - start)
+    return ["".join(line) for line in masked], accounts
+
+
+def _scan_added_identity_diff(
+    diff: str, *, source_postimages: dict[str, str] | None = None,
+) -> list[str]:
     """Reject added identity/topology literals without classifying unrelated numbers.
 
     Numeric literals are security-relevant only when their path, line, or an alias chain
@@ -839,8 +874,11 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
     """
     additions_by_path: dict[str, list[str]] = {}
     current_path: str | None = None
+    added_numbers: dict[str, list[int | None]] = {}
+    next_number: int | None = None
     for raw in diff.splitlines():
         if raw.startswith("+++ "):
+            next_number = None
             target = raw[4:]
             if target == "/dev/null":
                 current_path = None
@@ -851,14 +889,37 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
                 current_path = target
                 additions_by_path.setdefault(current_path, [])
             continue
-        if current_path is None or not raw.startswith("+") or raw.startswith("+++"):
+        if current_path is None:
             continue
-        additions_by_path[current_path].append(raw[1:])
+        hunk = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw)
+        if hunk:
+            next_number = int(hunk.group(1))
+            continue
+        if raw.startswith("+"):
+            additions_by_path[current_path].append(raw[1:])
+            added_numbers.setdefault(current_path, []).append(next_number)
+        if raw.startswith(("+", " ")) and next_number is not None:
+            next_number += 1
 
     production: dict[str, list[str]] = {
         path: lines for path, lines in additions_by_path.items()
         if _is_production_identity_scan_path(path)
     }
+
+    string_accounts: dict[str, list[list[str]]] = {}
+    for path, lines in production.items():
+        if _scope_language(path) != "py" or source_postimages is None or path not in source_postimages:
+            continue
+        source_lines = source_postimages[path].splitlines()
+        masked, accounts = _python_multiline_string_view(source_postimages[path])
+        rendered, literal_flags = [], []
+        for line, number in zip(lines, added_numbers.get(path, [])):
+            assert number is not None and 1 <= number <= len(source_lines), "missing postimage line"
+            assert source_lines[number - 1] == line, "diff/postimage line mismatch"
+            rendered.append(masked[number - 1])
+            literal_flags.append(accounts.get(number, []))
+        production[path] = rendered
+        string_accounts[path] = literal_flags
 
     import_edges: dict[str, dict[str, set[tuple[str, str]]]] = {
         path: {} for path in production
@@ -1001,6 +1062,8 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
                 path_identity=path_identity,
                 identity_aliases=_visible_aliased_names(scopes, line_scope[index]),
             ))
+            if path in string_accounts:
+                flagged.extend(string_accounts[path][index])
     return flagged
 
 
@@ -1883,6 +1946,7 @@ def test_d8_template_topology_and_protected_defaults():
         cwd=ROOT, check=True, capture_output=True, text=True,
     ).stdout
     source_diffs: list[str] = []
+    source_postimages: dict[str, str] = {}
     for path in changed.split("\0"):
         if not path:
             continue
@@ -1900,7 +1964,14 @@ def test_d8_template_topology_and_protected_defaults():
             check=True, capture_output=True, text=True,
         ).stdout
         source_diffs.append(diff)
-    assert _scan_added_identity_diff("\n".join(source_diffs)) == []
+        if _scope_language(path) == "py":
+            source_postimages[path] = subprocess.run(
+                ["git", "show", f"HEAD:{path}"], cwd=ROOT,
+                check=True, capture_output=True, text=True,
+            ).stdout
+    assert _scan_added_identity_diff(
+        "\n".join(source_diffs), source_postimages=source_postimages,
+    ) == []
 
 
 @pytest.mark.parametrize("path,guarded", [
@@ -2090,3 +2161,99 @@ def test_d8_decimal_context_cannot_round_fraction_into_an_identity():
         assert _scan_evidence_identity_literals('{"peer_uid":"4.59e2"}')
         assert _scan_evidence_identity_literals(
             '{"peer_uid":"459.0000000000000000000000000001"}') == []
+
+
+@pytest.mark.parametrize("quote", ['"""', "'''"])
+@pytest.mark.parametrize("prose", [
+    "a 400 because the mission endpoint requires both keys.",
+    "peer_uid = fallback",
+])
+def test_d8_multiline_python_prose_is_not_numeric_or_alias_code(tmp_path, monkeypatch, quote, prose):
+    source = f'fallback = 501\ndef parse():\n    {quote}Explanation.\n    {prose}\n    {quote}\n    return None\n'
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, 'control_plane/adapter.py', source, False,
+    )
+
+
+@pytest.mark.parametrize("suffix", [
+    'peer_uid = 459\n',
+    'config.peer_uid = fallback\n',
+    'account = "_mastermind_fixture"\n',
+])
+def test_d8_multiline_prose_does_not_hide_real_identity(tmp_path, monkeypatch, suffix):
+    source = 'fallback = 501\n"""Explanation.\na 400 because the endpoint requires keys.\n"""\n' + suffix
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, 'control_plane/adapter.py', source, True,
+    )
+
+
+def test_d8_multiline_reserved_account_string_is_still_guarded(tmp_path, monkeypatch):
+    source = 'message = """_mastermind_fixture\ncontinued\n"""\n'
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, 'control_plane/adapter.py', source, True,
+    )
+
+
+def test_d8_postimage_disjoint_hunks_keep_actual_identity():
+    import difflib
+    path = 'control_plane/adapter.py'
+    before = '"""Explanation.\nordinary prose\n"""\n' + '\n' * 8 + 'peer_uid = current_uid\n'
+    after = before.replace('ordinary prose', 'endpoint failure is 400').replace('peer_uid = current_uid', 'peer_uid = 459')
+    diff = '\n'.join(difflib.unified_diff(before.splitlines(), after.splitlines(), fromfile='a/' + path, tofile='b/' + path, n=0, lineterm=''))
+    assert _scan_added_identity_diff(diff) == ['400', '459']
+    assert _scan_added_identity_diff(diff, source_postimages={path: after}) == ['459']
+
+
+def test_d8_postimage_import_property_identity_survives_prose_mask():
+    sources = {
+        'common/defaults.py': 'REAL = 459\nUNRELATED = 501\n',
+        'control_plane/adapter.py': 'from common.defaults import REAL, UNRELATED\n"""Explanation.\npeer_uid = UNRELATED\n"""\nconfig.peer_uid = REAL\n',
+    }
+    diff = '\n'.join(_d8_frozen_source_diff(path, source) for path, source in sources.items())
+    assert _scan_added_identity_diff(diff, source_postimages=sources) == ['459']
+
+
+def test_d8_postimage_real_identity_after_string_closer():
+    path = 'control_plane/adapter.py'
+    source = 'message = """ordinary\nprose\n"""; peer_uid = 459\n'
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source), source_postimages={path: source},
+    ) == ['459']
+
+
+def test_d8_incomplete_python_postimage_retains_conservative_guard():
+    path = 'control_plane/adapter.py'
+    source = 'message = """unfinished\npeer_uid = 459\n'
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source), source_postimages={path: source},
+    ) == ['459']
+
+
+def test_d8_postimage_line_mismatch_is_refused():
+    path = 'control_plane/adapter.py'
+    diff = _d8_frozen_source_diff(path, 'peer_uid = 459\n')
+    with pytest.raises(AssertionError, match='diff/postimage line mismatch'):
+        _scan_added_identity_diff(diff, source_postimages={path: '"""peer_uid = 459"""\n'})
+
+
+def test_d8_postimage_deletion_only_hunk_has_no_added_findings():
+    path = 'control_plane/adapter.py'
+    diff = f'--- a/{path}\n+++ b/{path}\n@@ -1 +0,0 @@\n-peer_uid = 459\n'
+    assert _scan_added_identity_diff(diff, source_postimages={path: ''}) == []
+
+
+@pytest.mark.parametrize("prefix", ['f', 'F', 'fr', 'rf', 'Fr', 'rF'])
+@pytest.mark.parametrize("quote", ['"""', "'''"])
+def test_d8_multiline_fstring_expression_keeps_executable_identity(prefix, quote):
+    path = 'control_plane/adapter.py'
+    source = f'message = {prefix}{quote}Ordinary text\n{{(peer_uid := 459)}}\n{quote}\n'
+    diff = _d8_frozen_source_diff(path, source)
+    assert _scan_added_identity_diff(diff, source_postimages={path: source}) == ['459']
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_d8_error_token_postimage_preserves_conservative_numeric_guard(quote):
+    path = 'control_plane/adapter.py'
+    source = '"""ordinary\npeer_uid = 459\n"""\nbad = ' + quote + 'unfinished\n'
+    diff = _d8_frozen_source_diff(path, source)
+    assert _scan_added_identity_diff(diff, source_postimages={path: source}) == ['459']
