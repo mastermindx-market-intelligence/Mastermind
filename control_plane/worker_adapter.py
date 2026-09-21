@@ -23,6 +23,7 @@ from control_plane.worker_execution_contract import (
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
+    WorkerRecoveryBinding,
     WorkerProcessRef,
     WorkerRunStatus,
 )
@@ -246,12 +247,22 @@ class WorkerExecutionAdapter(Protocol):
     ) -> ValidationReceipt: ...
 
 
+@runtime_checkable
+class RecoverableWorkerExecutionAdapter(WorkerExecutionAdapter, Protocol):
+    """Optional same-execution recovery on top of the stable adapter/v1 floor."""
+
+    def reattach(
+        self, spec: WorkerLaunchSpec, binding: WorkerRecoveryBinding
+    ) -> WorkerProcessRef: ...
+
+
 __all__ = [
     "ADAPTER_DESCRIPTORS",
     "ADAPTER_INTERFACE_VERSION",
     "AdapterBindingError",
     "AdapterDescriptor",
     "WorkerExecutionAdapter",
+    "RecoverableWorkerExecutionAdapter",
     "adapter_descriptor",
     "adapter_implementation",
     "bind_reviewed_adapter",

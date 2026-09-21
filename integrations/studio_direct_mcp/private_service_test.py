@@ -403,7 +403,7 @@ class TestBuildConfig(unittest.TestCase):
             self.assertEqual(config["cwd"], str(home))
             self.assertEqual(config["childEnv"]["NODE_OPTIONS"], "")
             self.assertEqual(config["stateDir"], str(state_dir))
-            self.assertEqual(config["maxSessions"], 64)
+            self.assertEqual(config["maxSessions"], 256)
             self.assertEqual(config["requestTimeoutMs"], 300_000)
             self.assertEqual(config["idleTimeoutMs"], 1_800_000)
             self.assertEqual(
@@ -501,7 +501,7 @@ class TestStage(unittest.TestCase):
                 self.assertEqual(config["idleTimeoutMs"], 1_800_000)
                 self.assertEqual(config["requestTimeoutMs"], 300_000)
                 self.assertEqual(config["reclaimIdleGraceMs"], 30_000)
-                self.assertEqual(config["maxSessions"], 64)
+                self.assertEqual(config["maxSessions"], 256)
                 self.assertEqual(config["gitPublish"]["enabled"], True)
                 self.assertEqual(
                     config["gitPublish"]["workspaceCli"],
