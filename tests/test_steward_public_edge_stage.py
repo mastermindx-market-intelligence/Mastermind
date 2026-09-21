@@ -112,6 +112,7 @@ def test_stage_binds_exact_source_host_paths_and_effect_falsehoods(tmp_path):
     assert "@PUBLIC_HOST@" not in caddy
     assert caddy.count("mcp.mastermind-x.com") == 3
     assert caddy.count("reverse_proxy 127.0.0.1:8766") == 2
+    assert "tls internal" not in caddy
     assert "control.mastermind-x.com" not in caddy
     assert "forward_auth" not in caddy
     assert "path /mcp/*" not in caddy
@@ -198,6 +199,19 @@ def test_stage_refuses_symlink_output_parent(tmp_path):
     assert not (real / "staged").exists()
 
 
+def test_archive_member_allowance_is_root_and_ancestor_scoped():
+    assert subject._archive_member_allowed("common", is_directory=True)
+    assert subject._archive_member_allowed("common/module.py", is_directory=False)
+    assert subject._archive_member_allowed("scripts", is_directory=True)
+    assert subject._archive_member_allowed(
+        "scripts/mastermind_steward_app.py", is_directory=False,
+    )
+    assert not subject._archive_member_allowed("scripts", is_directory=False)
+    assert not subject._archive_member_allowed("scripts/unrelated.py", is_directory=False)
+    assert not subject._archive_member_allowed("script", is_directory=True)
+    assert not subject._archive_member_allowed("../scripts", is_directory=True)
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -232,6 +246,86 @@ def test_caddy_renderer_refuses_route_or_host_widening(mutation):
         subject._render_caddy(mutation(template))
 
 
+@pytest.mark.parametrize("directive", [
+    "tls internal",
+    "tls /tmp/cert.pem /tmp/key.pem",
+    "tls {\n\t\ton_demand\n\t}",
+])
+def test_caddy_renderer_requires_automatic_public_tls(directive):
+    template = CADDY.read_text(encoding="utf-8").replace("\n\ttls internal", "")
+    subject._render_caddy(template)
+    mutated = template.replace("\n}", f"\n\t{directive}\n}}")
+    with pytest.raises(subject.StageError, match="CADDY_TEMPLATE_INVALID"):
+        subject._render_caddy(mutated)
+
+
+def test_replace_that_publishes_then_errors_is_effect_unknown(tmp_path, monkeypatch):
+    repo, commit, tree = _fixture_repo(tmp_path)
+    output = tmp_path / "staged"
+    replace = os.replace
+
+    def publish_then_raise(source, destination):
+        replace(source, destination)
+        raise OSError("ambiguous rename acknowledgement")
+
+    monkeypatch.setattr(subject.os, "replace", publish_then_raise)
+    with pytest.raises(subject.StageError, match="PUBLISH_EFFECT_UNKNOWN"):
+        subject.stage(
+            source_repo=repo,
+            accepted_commit=commit,
+            accepted_tree=tree,
+            output_dir=output,
+        )
+    assert output.is_dir()
+    assert (output / subject.MANIFEST_NAME).is_file()
+
+
+@pytest.mark.parametrize("failure", ["parent_fsync", "readback", "readback_mismatch"])
+def test_postrename_failure_is_effect_unknown_and_preserves_output(
+    tmp_path, monkeypatch, failure,
+):
+    repo, commit, tree = _fixture_repo(tmp_path)
+    output = tmp_path / "staged"
+    if failure == "parent_fsync":
+        fsync = os.fsync
+
+        def fail_parent_fsync(fd):
+            if output.exists() and os.fstat(fd).st_ino == output.parent.stat().st_ino:
+                raise OSError("parent durability unknown")
+            return fsync(fd)
+
+        monkeypatch.setattr(subject.os, "fsync", fail_parent_fsync)
+    elif failure == "readback":
+        sha256_file = subject._sha256_file
+
+        def fail_published_readback(path):
+            if output in path.parents:
+                raise subject.StageError("READBACK_FAILED")
+            return sha256_file(path)
+
+        monkeypatch.setattr(subject, "_sha256_file", fail_published_readback)
+    else:
+        replace = os.replace
+
+        def publish_then_corrupt(source, destination):
+            replace(source, destination)
+            (Path(destination) / subject.CADDY_NAME).write_text(
+                "corrupt after publish\n", encoding="utf-8",
+            )
+
+        monkeypatch.setattr(subject.os, "replace", publish_then_corrupt)
+
+    with pytest.raises(subject.StageError, match="PUBLISH_EFFECT_UNKNOWN"):
+        subject.stage(
+            source_repo=repo,
+            accepted_commit=commit,
+            accepted_tree=tree,
+            output_dir=output,
+        )
+    assert output.is_dir()
+    assert (output / subject.MANIFEST_NAME).is_file()
+
+
 def test_stager_is_inert_and_templates_do_not_touch_existing_control_room():
     source = STAGER.read_text(encoding="utf-8")
     unit = UNIT.read_text(encoding="utf-8")
@@ -252,8 +346,9 @@ def test_stager_is_inert_and_templates_do_not_touch_existing_control_room():
     assert "control.mastermind-x.com" not in caddy
     assert "mastermind-control-room" not in unit
     assert "mastermind-control-room" not in caddy
-    assert "mcp.mastermind-x.com" in caddy
-    assert "tls internal" in caddy
+    assert caddy.count("@PUBLIC_HOST@") == 3
+    assert "mcp.mastermind-x.com" not in caddy
+    assert "tls internal" not in caddy
 
 
 def test_cli_refusal_is_fixed_and_does_not_echo_paths(tmp_path, capsys):

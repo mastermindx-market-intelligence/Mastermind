@@ -175,6 +175,11 @@ def _render_caddy(template: str) -> str:
     )
     if any(item in rendered for item in forbidden):
         _refuse("CADDY_TEMPLATE_INVALID")
+    if any(
+        re.match(r"\s*(?:tls|on_demand_tls)\b", line, flags=re.IGNORECASE)
+        for line in rendered.splitlines()
+    ):
+        _refuse("CADDY_TEMPLATE_INVALID")
     return rendered
 
 
@@ -213,6 +218,18 @@ def _safe_output(source: Path, output: Path) -> Path:
     ):
         _refuse("OUTPUT_PATH_REFUSED")
     return parent
+
+
+def _archive_member_allowed(name: str, *, is_directory: bool) -> bool:
+    """Admit release roots plus only the directory ancestors needed to reach them."""
+    if any(name == root or name.startswith(root + "/") for root in RELEASE_ROOTS):
+        return True
+    ancestors = {
+        "/".join(Path(root).parts[:index])
+        for root in RELEASE_ROOTS
+        for index in range(1, len(Path(root).parts))
+    }
+    return is_directory and name in ancestors
 
 
 def _archive(source: Path, commit: str, target: Path) -> tuple[str, int, int]:
@@ -254,9 +271,8 @@ def _archive(source: Path, commit: str, target: Path) -> tuple[str, int, int]:
                     or not (member.isfile() or member.isdir())
                 ):
                     _refuse("ARCHIVE_FAILED")
-                if not any(
-                    member.name == root or member.name.startswith(root + "/")
-                    for root in RELEASE_ROOTS
+                if not _archive_member_allowed(
+                    member.name, is_directory=member.isdir(),
                 ):
                     _refuse("ARCHIVE_FAILED")
                 if member.isfile():
@@ -292,6 +308,39 @@ def _write(path: Path, content: bytes) -> str:
     except OSError:
         _refuse("WRITE_FAILED")
     return _sha256_file(path)
+
+
+def _published_bundle_matches(output: Path, expected: dict[str, str]) -> bool:
+    """Bounded, read-only verification of a possibly published release directory."""
+    try:
+        output_info = output.lstat()
+        if (
+            not stat.S_ISDIR(output_info.st_mode)
+            or stat.S_ISLNK(output_info.st_mode)
+            or output_info.st_uid != os.getuid()
+            or stat.S_IMODE(output_info.st_mode) != OUTPUT_DIR_MODE
+        ):
+            return False
+        children: list[Path] = []
+        for child in output.iterdir():
+            if len(children) == len(expected):
+                return False
+            children.append(child)
+        if {child.name for child in children} != set(expected):
+            return False
+        for child in children:
+            info = child.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != OUTPUT_FILE_MODE
+                or _sha256_file(child) != expected[child.name]
+            ):
+                return False
+    except (OSError, StageError):
+        return False
+    return True
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -367,26 +416,42 @@ def stage(
         manifest_digest = _write(temporary / MANIFEST_NAME, manifest_bytes)
         manifest["manifest_sha256"] = manifest_digest
 
-        directory_fd = os.open(temporary, os.O_RDONLY)
         try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-        os.replace(temporary, output)
-        published = True
-        parent_fd = os.open(parent, os.O_RDONLY)
-        try:
-            os.fsync(parent_fd)
-        finally:
-            os.close(parent_fd)
+            directory_fd = os.open(temporary, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            _refuse("WRITE_FAILED")
 
-        if (
-            _sha256_file(output / ARCHIVE_NAME) != archive_digest
-            or _sha256_file(output / UNIT_NAME) != unit_digest
-            or _sha256_file(output / CADDY_NAME) != caddy_digest
-            or _sha256_file(output / MANIFEST_NAME) != manifest_digest
-        ):
-            _refuse("READBACK_FAILED")
+        expected = {
+            ARCHIVE_NAME: archive_digest,
+            UNIT_NAME: unit_digest,
+            CADDY_NAME: caddy_digest,
+            MANIFEST_NAME: manifest_digest,
+        }
+        try:
+            os.replace(temporary, output)
+        except OSError:
+            # Rename acknowledgement can fail after the directory moved. Inspect only
+            # to bound the observation; never delete or claim a determinate outcome.
+            _published_bundle_matches(output, expected)
+            _refuse("PUBLISH_EFFECT_UNKNOWN")
+        published = True
+        try:
+            parent_fd = os.open(parent, os.O_RDONLY)
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+            if not _published_bundle_matches(output, expected):
+                _refuse("PUBLISH_EFFECT_UNKNOWN")
+        except (OSError, StageError):
+            # The output may already be visible. Preserve it for same-carrier
+            # reconciliation and return only the fixed uncertainty classification.
+            _published_bundle_matches(output, expected)
+            _refuse("PUBLISH_EFFECT_UNKNOWN")
         return manifest
     finally:
         if not published and temporary.exists() and not temporary.is_symlink():
