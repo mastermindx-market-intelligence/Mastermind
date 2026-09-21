@@ -38,6 +38,6 @@ Existing #147 owns replay-prevention/linter semantics and overlaps procedure fil
 
 ## Acceptance and proof ceiling
 
-Source proof: original active-execution baseline; missing-rule RED tests before edits; selected transitive tests; existing ScenarioPacket compatibility; whitespace and exact changed-path review. Seventeen pressure packets are inputs to the existing fresh-Sol evaluator, not observations that any model passed.
+Source proof: original active-execution baseline; missing-rule RED tests before edits; selected transitive tests; existing ScenarioPacket compatibility; whitespace and exact changed-path review. Nineteen pressure packets are inputs to the existing fresh-Sol evaluator, not observations that any model passed.
 
 Release remains held for independent exact-head review, #147 compatibility and required hosted checks. Production acceptance additionally requires actual canonical checkpoint input, fresh-session consumption without transcript replay, correct pending-effect handling, actual Studio connector output proof and approved Project readback. No failure-rate reduction, automatic resume, worker START or Project-memory change is asserted by this source slice.
