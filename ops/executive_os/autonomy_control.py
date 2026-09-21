@@ -75,11 +75,21 @@ AUTONOMY_TRANSACTION = CONFIG_ROOT / "autonomy-transaction.lock"
 CEO_SUBMIT_RECEIPT = CONFIG_ROOT / "ceo-submit-state-v1.json"
 CEO_SUBMIT_RECEIPT_SCHEMA = "mastermind.executive_ceo_submit_receipt/v1"
 CEO_SUBMIT_OPERATIONS = frozenset({"CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"})
+_CONTROL_LAUNCHD_PREIMAGE_FIELD = "control_launchd_disabled_before_reconcile"
+_CONTROL_LAUNCHD_DISABLED_ROW_RE = re.compile(
+    r'^"(?P<label>[^"]+)"\s*=>\s*(?P<state>enabled|disabled)$'
+)
+_MAX_LAUNCHCTL_DISABLED_BYTES = 64 * 1024
 # R17 B1: the CEO-submit operation domain as it is reachable from THIS CLI.  A
 # closed set, so `main` can route the three verbs with one membership test and no
 # string prefix matching.
 CEO_SUBMIT_COMMANDS = frozenset(
-    {"ceo-submit-status", "ceo-submit-arm", "ceo-submit-disarm"}
+    {
+        "ceo-submit-status",
+        "ceo-submit-arm",
+        "ceo-submit-disarm",
+        "ceo-submit-reconcile",
+    }
 )
 EXECUTIVE_APP_USER = "_mastermind_executive_mcp"
 CEO_INGRESS_LAUNCHD_SOCKET_NAME = "CeoIngress"
@@ -583,6 +593,10 @@ class CeoSubmitTransactionHost(Protocol):
         self, transaction: TransactionContext, receipt: Mapping[str, Any]
     ) -> None: ...
 
+    def recover_ceo_submit_effect_unknown(
+        self, request: CeoSubmitRequest, *, now: datetime
+    ) -> TransactionResult: ...
+
 
 class _StoreOnce(argparse.Action):
     """Reject repeated authority-bearing flags instead of silently taking last."""
@@ -661,6 +675,14 @@ def _parser() -> argparse.ArgumentParser:
         "ceo-submit-disarm", help="Disarm only the CEO-submit sink."
     )
     ceo_disarm.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
+
+    ceo_reconcile = sub.add_parser(
+        "ceo-submit-reconcile",
+        help="Reconcile one existing effect-unknown CEO-submit transaction to its archived preimage.",
+    )
+    ceo_reconcile.add_argument(
         "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
     )
     return parser
@@ -1579,6 +1601,10 @@ def execute_ceo_submit_arm(
             request.expected_sha, transaction.candidates.control_sha256
         )
         host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        # An effect boundary explicitly classified UNKNOWN keeps this transaction
+        # marker sticky. Do not convert it into an automatic rollback/retry.
+        raise
     except Exception as exc:
         try:
             rollback = dataclasses.replace(
@@ -1736,6 +1762,10 @@ def execute_ceo_submit_disarm(
             request.expected_sha, transaction.candidates.control_sha256
         )
         host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        # An effect boundary explicitly classified UNKNOWN keeps this transaction
+        # marker sticky. Do not convert it into an automatic rollback/retry.
+        raise
     except Exception as exc:
         try:
             rollback = dataclasses.replace(
@@ -2510,8 +2540,14 @@ class ProductionTransactionHost(ProductionArmHost):
             "target_control_sha256",
             "target_worker_sha256",
         }
+        keys = set(value)
+        allowed_with_control_preimage = required | {_CONTROL_LAUNCHD_PREIMAGE_FIELD}
         if (
-            set(value) != required
+            frozenset(keys)
+            not in {
+                frozenset(required),
+                frozenset(allowed_with_control_preimage),
+            }
             or value.get("schema_version") != _TRANSACTION_SCHEMA
             or value.get("operation") not in _TRANSACTION_OPERATIONS
             or not isinstance(value.get("phase"), str)
@@ -2529,11 +2565,19 @@ class ProductionTransactionHost(ProductionArmHost):
                     "target_worker_sha256",
                 )
             )
+            or (
+                _CONTROL_LAUNCHD_PREIMAGE_FIELD in value
+                and (
+                    value.get("operation") not in CEO_SUBMIT_OPERATIONS
+                    or type(value.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)) is not bool
+                )
+            )
         ):
             raise TransactionEffectUnknown()
         return value
 
     def _persist_phase(self, transaction: TransactionContext, phase: str, *, operation: str | None = None) -> None:
+        current: Mapping[str, Any] | None = None
         if operation is None:
             current = self._manifest()
             operation = str(current["operation"])
@@ -2548,6 +2592,10 @@ class ProductionTransactionHost(ProductionArmHost):
             "target_control_sha256": transaction.candidates.control_sha256,
             "target_worker_sha256": transaction.candidates.worker_sha256,
         }
+        if current is not None and _CONTROL_LAUNCHD_PREIMAGE_FIELD in current:
+            value[_CONTROL_LAUNCHD_PREIMAGE_FIELD] = current[
+                _CONTROL_LAUNCHD_PREIMAGE_FIELD
+            ]
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -3357,20 +3405,156 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         )
         self._persist_phase(transaction, "RECEIPT_REPLACED")
 
+    @staticmethod
+    def _read_control_launchd_disabled_override() -> bool:
+        """Read one exact persistent launchd override with a closed parser.
+
+        ``print-disabled`` is a global table. Before a CEO-submit transaction may
+        mutate the fixed control label, every non-empty row must parse, labels must
+        be unique, output must be bounded, and the control label itself must be
+        explicitly present. Missing/ambiguous output is not interpreted as the
+        launchd default because rollback must restore an observed preimage, not an
+        inferred one.
+        """
+
+        try:
+            completed = subprocess.run(
+                ["/bin/launchctl", "print-disabled", "system"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise TransactionEffectUnknown() from exc
+        raw = completed.stdout or b""
+        if completed.returncode != 0 or len(raw) > _MAX_LAUNCHCTL_DISABLED_BYTES:
+            raise TransactionEffectUnknown()
+        try:
+            text = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise TransactionEffectUnknown() from exc
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if len(lines) < 3 or lines[0] != "disabled services = {" or lines[-1] != "}":
+            raise TransactionEffectUnknown()
+        observed: dict[str, bool] = {}
+        for line in lines[1:-1]:
+            match = _CONTROL_LAUNCHD_DISABLED_ROW_RE.fullmatch(line)
+            if match is None:
+                raise TransactionEffectUnknown()
+            label = match.group("label")
+            if label in observed:
+                raise TransactionEffectUnknown()
+            observed[label] = match.group("state") == "disabled"
+        if CONTROL_LABEL not in observed:
+            raise TransactionEffectUnknown()
+        return observed[CONTROL_LABEL]
+
+    def _persist_control_launchd_preimage(
+        self, transaction: TransactionContext, disabled: bool
+    ) -> None:
+        """Persist the fixed-label launchd preimage before the first enable."""
+
+        if type(disabled) is not bool:
+            raise TransactionEffectUnknown()
+        current = self._manifest()
+        if (
+            current.get("operation") not in CEO_SUBMIT_OPERATIONS
+            or current.get("transaction_id") != transaction.transaction_id
+            or current.get("expected_sha") != transaction.expected_sha
+        ):
+            raise TransactionEffectUnknown()
+        existing = current.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)
+        if existing is not None:
+            if type(existing) is not bool or existing is not disabled:
+                raise TransactionEffectUnknown()
+            return
+        value = dict(current)
+        value[_CONTROL_LAUNCHD_PREIMAGE_FIELD] = disabled
+        value["phase"] = "CONTROL_OVERRIDE_SNAPSHOTTED"
+        _atomic_file(
+            self._manifest_path(),
+            _encoded_json(value),
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=True,
+        )
+        reread = self._manifest()
+        if reread.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD) is not disabled:
+            raise TransactionEffectUnknown()
+
+    def _ensure_control_launchd_preimage(self) -> bool:
+        transaction = self._active_transaction
+        if transaction is None:
+            raise TransactionEffectUnknown()
+        current = self._manifest()
+        existing = current.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)
+        if existing is not None:
+            if type(existing) is not bool:
+                raise TransactionEffectUnknown()
+            return existing
+        disabled = self._read_control_launchd_disabled_override()
+        self._persist_control_launchd_preimage(transaction, disabled)
+        return disabled
+
+    def _restore_control_launchd_preimage_if_recorded(
+        self, transaction: TransactionContext
+    ) -> None:
+        """Restore and prove a recorded launchd override before marker release."""
+
+        current = self._manifest()
+        if (
+            current.get("transaction_id") != transaction.transaction_id
+            or current.get("expected_sha") != transaction.expected_sha
+        ):
+            raise TransactionEffectUnknown()
+        if _CONTROL_LAUNCHD_PREIMAGE_FIELD not in current:
+            # Legacy transactions created before this repair made no launchd
+            # override effect through this source path. Their separate same-carrier
+            # reconciliation remains evidence-driven; never invent a preimage here.
+            return
+        disabled = current.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)
+        if type(disabled) is not bool:
+            raise TransactionEffectUnknown()
+        release = SYSTEM_ROOT / "releases" / transaction.expected_sha
+        if disabled:
+            try:
+                self._run_fixed(
+                    ["/bin/launchctl", "disable", f"system/{CONTROL_LABEL}"],
+                    cwd=release,
+                    timeout=45.0,
+                )
+            except Exception as exc:
+                raise TransactionEffectUnknown() from exc
+        if self._read_control_launchd_disabled_override() is not disabled:
+            raise TransactionEffectUnknown()
+        self._persist_phase(transaction, "CONTROL_OVERRIDE_RESTORED")
+
     def _reconcile_control_boundary(self, expected_sha: str) -> None:
         """Converge ONLY the control launchd boundary. Never the worker.
 
         R17 B2: the reviewed lifecycle script exposes no control-only verb and its
         ``start`` bootstraps the worker daemon first, so it is not used from the
-        CEO-submit domain at all.  The two argv forms below are fixed and name the
+        CEO-submit domain at all. The two argv forms below are fixed and name the
         hard-coded control label and control plist; nothing is caller-selected.
+        The persistent disabled-state preimage is sealed in the existing
+        transaction marker before the fixed ``enable`` effect.
         """
         release = SYSTEM_ROOT / "releases" / expected_sha
-        self._run_fixed(
-            ["/bin/launchctl", "enable", f"system/{CONTROL_LABEL}"],
-            cwd=release,
-            timeout=45.0,
-        )
+        self._ensure_control_launchd_preimage()
+        try:
+            self._run_fixed(
+                ["/bin/launchctl", "enable", f"system/{CONTROL_LABEL}"],
+                cwd=release,
+                timeout=45.0,
+            )
+        except Exception as exc:
+            # The command may have crossed the launchd effect boundary even when
+            # its response is unavailable. Preserve the marker; do not convert a
+            # possibly-applied enable into a false-clean rollback.
+            raise TransactionEffectUnknown() from exc
         if self._loaded(CONTROL_LABEL):
             self._run_fixed(
                 ["/bin/launchctl", "kickstart", "-k", f"system/{CONTROL_LABEL}"],
@@ -3687,7 +3871,74 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         ):
             raise TransactionEffectUnknown()
         self._prove_rolled_back_control_live(transaction)
+        self._restore_control_launchd_preimage_if_recorded(transaction)
         self.complete_transaction(transaction)
+
+    def recover_ceo_submit_effect_unknown(
+        self, request: CeoSubmitRequest, *, now: datetime
+    ) -> TransactionResult:
+        """Rollback one existing CEO-submit marker without minting a new operation.
+
+        Recovery is available only to repaired-generation markers that sealed the
+        persistent launchd preimage before the first enable. Legacy markers that
+        lack that evidence remain EFFECT_UNKNOWN and require a separate,
+        evidence-driven same-carrier reconciliation.
+        """
+
+        require_root_privilege(self.effective_uid())
+        installed_sha = self.require_exact_install(request.expected_sha)
+        if installed_sha != request.expected_sha:
+            raise CeoSubmitAdmissionError("release_identity_mismatch")
+        manifest = self._manifest()
+        if (
+            manifest.get("operation") not in CEO_SUBMIT_OPERATIONS
+            or manifest.get("expected_sha") != request.expected_sha
+            or _CONTROL_LAUNCHD_PREIMAGE_FIELD not in manifest
+            or type(manifest.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)) is not bool
+        ):
+            raise TransactionEffectUnknown()
+        prior = self._archived_configs(request.expected_sha)
+        prior_armed = dict(prior.control).get("ceo_submit_armed")
+        if type(prior_armed) is not bool:
+            raise TransactionEffectUnknown()
+        control_bytes = prior.control_bytes or encode_config(prior.control)
+        worker_bytes = prior.worker_bytes or encode_config(prior.worker)
+        candidates = CandidateConfigs(
+            control=copy.deepcopy(dict(prior.control)),
+            worker=copy.deepcopy(dict(prior.worker)),
+            control_bytes=control_bytes,
+            worker_bytes=worker_bytes,
+            control_sha256=prior.control_sha256,
+            worker_sha256=prior.worker_sha256,
+        )
+        transaction = TransactionContext(
+            transaction_id=str(manifest["transaction_id"]),
+            expected_sha=request.expected_sha,
+            prior_configs=prior,
+            candidates=candidates,
+            admission=None,
+        )
+        self._active_transaction = transaction
+        binding = self.executive_app_binding()
+        separation = self.ceo_submit_separation(prior)
+        admission = CeoSubmitAdmission(
+            expected_sha=request.expected_sha,
+            installed_sha=installed_sha,
+            binding=binding,
+            separation=separation,
+            configs=prior,
+        )
+        receipt = build_ceo_submit_receipt(
+            transaction, admission, armed=prior_armed, now=now
+        )
+        self.rollback_ceo_submit(transaction, receipt)
+        state = "CEO_SUBMIT_ARMED" if prior_armed else "CEO_SUBMIT_DISARMED"
+        return TransactionResult(
+            state=state,
+            status=state,
+            transaction_id=transaction.transaction_id,
+            replayed=True,
+        )
 
     def proves_safe_coexistence(self, configs: ConfigEvidence) -> bool:
         """Default is REFUSE: no source today proves coexistence with full autonomy."""
@@ -3765,13 +4016,17 @@ def _run_ceo_submit_command(
             result = execute_ceo_submit_arm(host, request, now=now)
             code = "ceo_submit_armed"
             exit_code = 0
-        else:
+        elif args.command == "ceo-submit-disarm":
             result = execute_ceo_submit_disarm(host, request, now=now)
             code = (
                 "ceo_submit_already_disarmed"
                 if result.replayed
                 else "ceo_submit_disarmed"
             )
+            exit_code = 0
+        else:
+            result = host.recover_ceo_submit_effect_unknown(request, now=now)
+            code = "ceo_submit_reconciled"
             exit_code = 0
         document = operation_document(
             code=code,

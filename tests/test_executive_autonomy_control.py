@@ -107,8 +107,8 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
     disarm = parser.parse_args(["disarm", "--expected-sha", SHA])
     assert vars(disarm) == {"command": "disarm", "expected_sha": SHA}
 
-    # R17 B1: the CEO-submit operation domain is the SAME parser, three verbs,
-    # each bounded to --expected-sha alone.
+    # The CEO-submit operation domain is the SAME parser: three state verbs plus
+    # one same-transaction reconciliation verb, each bounded to --expected-sha alone.
     assert vars(parser.parse_args(["ceo-submit-status", "--expected-sha", SHA])) == {
         "command": "ceo-submit-status",
         "expected_sha": SHA,
@@ -121,9 +121,13 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "command": "ceo-submit-disarm",
         "expected_sha": SHA,
     }
+    assert vars(parser.parse_args(["ceo-submit-reconcile", "--expected-sha", SHA])) == {
+        "command": "ceo-submit-reconcile",
+        "expected_sha": SHA,
+    }
 
-    # The command set is EXACTLY the closed six: no seventh verb exists, and the
-    # three legacy verbs are still present.
+    # The command set is EXACTLY the closed seven: no generic recovery/debug verb
+    # exists, and the three legacy autonomy verbs remain present.
     subparser_actions = [
         action
         for action in parser._actions
@@ -137,6 +141,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "ceo-submit-status",
         "ceo-submit-arm",
         "ceo-submit-disarm",
+        "ceo-submit-reconcile",
     }
 
     # A CEO verb carries no COO authority flag: the arm admission surface of the
@@ -3577,6 +3582,7 @@ def test_ceo_submit_control_boundary_enables_only_control_before_bootstrap(monke
         staticmethod(lambda: None),
         raising=False,
     )
+    monkeypatch.setattr(host, "_ensure_control_launchd_preimage", lambda: True)
 
     host.reconcile_control_service(SHA)
 
@@ -3637,6 +3643,7 @@ def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundar
 
     host = control.ProductionCeoSubmitHost()
     assert host._active_transaction is None
+    monkeypatch.setattr(host, "_ensure_control_launchd_preimage", lambda: True)
     monkeypatch.setattr(
         control.ProductionCeoSubmitHost,
         "_require_control_plist_safe",
@@ -3730,6 +3737,7 @@ def test_ceo_submit_control_boundary_refuses_when_the_launchd_call_does_not_regi
         staticmethod(lambda: None),
         raising=False,
     )
+    monkeypatch.setattr(host, "_ensure_control_launchd_preimage", lambda: True)
 
     with pytest.raises(control.TransactionEffectUnknown):
         host.reconcile_control_service(SHA)
@@ -3745,6 +3753,269 @@ def test_ceo_submit_control_boundary_refuses_when_the_launchd_call_does_not_regi
     assert ledger.index(expected_argv) < len(ledger) - 1
     assert ledger[-1][:2] == ["/bin/launchctl", "print"]
     assert probes["count"] >= 2
+
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [("disabled", True), ("enabled", False)],
+)
+def test_ceo_submit_launchd_override_reader_accepts_only_explicit_target_rows(
+    monkeypatch, state, expected
+):
+    payload = (
+        "disabled services = {\n"
+        '\t"com.apple.example" => enabled\n'
+        f'\t"{control.CONTROL_LABEL}" => {state}\n'
+        "}\n"
+    ).encode()
+
+    monkeypatch.setattr(
+        control.subprocess,
+        "run",
+        lambda *args, **kwargs: mock.Mock(returncode=0, stdout=payload),
+    )
+
+    assert control.ProductionCeoSubmitHost._read_control_launchd_disabled_override() is expected
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'disabled services = {\n"com.apple.example" => enabled\n}\n',
+        (
+            'disabled services = {\n'
+            f'"{control.CONTROL_LABEL}" => disabled\n'
+            f'"{control.CONTROL_LABEL}" => disabled\n'
+            '}\n'
+        ).encode(),
+        (
+            'disabled services = {\n'
+            f'"{control.CONTROL_LABEL}" => banana\n'
+            '}\n'
+        ).encode(),
+        b"not the launchd table\n",
+    ],
+)
+def test_ceo_submit_launchd_override_reader_refuses_missing_duplicate_or_malformed(
+    monkeypatch, payload
+):
+    monkeypatch.setattr(
+        control.subprocess,
+        "run",
+        lambda *args, **kwargs: mock.Mock(returncode=0, stdout=payload),
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        control.ProductionCeoSubmitHost._read_control_launchd_disabled_override()
+
+
+def test_ceo_submit_control_boundary_seals_preimage_before_enable(monkeypatch):
+    host = control.ProductionCeoSubmitHost()
+    ledger = []
+
+    monkeypatch.setattr(
+        host,
+        "_ensure_control_launchd_preimage",
+        lambda: ledger.append(("preimage", True)) or True,
+    )
+    monkeypatch.setattr(host, "_loaded", lambda _label: True)
+    monkeypatch.setattr(
+        host,
+        "_run_fixed",
+        lambda argv, **kwargs: ledger.append(("run", list(argv))),
+    )
+
+    host._reconcile_control_boundary(SHA)
+
+    assert ledger[0] == ("preimage", True)
+    assert ledger[1] == (
+        "run",
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+    )
+    assert ledger[2] == (
+        "run",
+        ["/bin/launchctl", "kickstart", "-k", f"system/{control.CONTROL_LABEL}"],
+    )
+
+
+@pytest.mark.parametrize(("prior_disabled", "expect_disable"), [(True, True), (False, False)])
+def test_ceo_submit_rollback_restores_and_proves_launchd_override(
+    monkeypatch, prior_disabled, expect_disable
+):
+    prior = _ceo_submit_evidence(armed=False)
+    transaction = _rollback_transaction(
+        prior, control.derive_ceo_submit_candidate(prior, armed=False)
+    )
+    host = control.ProductionCeoSubmitHost()
+    ledger = []
+    manifest = {
+        "transaction_id": transaction.transaction_id,
+        "expected_sha": transaction.expected_sha,
+        control._CONTROL_LAUNCHD_PREIMAGE_FIELD: prior_disabled,
+    }
+    monkeypatch.setattr(host, "_manifest", lambda: dict(manifest))
+    monkeypatch.setattr(
+        host,
+        "_run_fixed",
+        lambda argv, **kwargs: ledger.append(("run", list(argv))),
+    )
+    monkeypatch.setattr(
+        host,
+        "_read_control_launchd_disabled_override",
+        lambda: ledger.append(("readback", prior_disabled)) or prior_disabled,
+    )
+    monkeypatch.setattr(
+        host,
+        "_persist_phase",
+        lambda _tx, phase, **kwargs: ledger.append(("phase", phase)),
+    )
+
+    host._restore_control_launchd_preimage_if_recorded(transaction)
+
+    disable = ["/bin/launchctl", "disable", f"system/{control.CONTROL_LABEL}"]
+    assert (("run", disable) in ledger) is expect_disable
+    assert ("readback", prior_disabled) in ledger
+    assert ledger[-1] == ("phase", "CONTROL_OVERRIDE_RESTORED")
+
+
+def test_ceo_submit_rollback_keeps_marker_when_launchd_restore_readback_disagrees(
+    monkeypatch,
+):
+    prior = _ceo_submit_evidence(armed=False)
+    transaction = _rollback_transaction(
+        prior, control.derive_ceo_submit_candidate(prior, armed=False)
+    )
+    host = control.ProductionCeoSubmitHost()
+    manifest = {
+        "transaction_id": transaction.transaction_id,
+        "expected_sha": transaction.expected_sha,
+        control._CONTROL_LAUNCHD_PREIMAGE_FIELD: True,
+    }
+    monkeypatch.setattr(host, "_manifest", lambda: dict(manifest))
+    monkeypatch.setattr(host, "_run_fixed", lambda *args, **kwargs: None)
+    monkeypatch.setattr(host, "_read_control_launchd_disabled_override", lambda: False)
+    phases = []
+    monkeypatch.setattr(
+        host, "_persist_phase", lambda _tx, phase, **kwargs: phases.append(phase)
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host._restore_control_launchd_preimage_if_recorded(transaction)
+
+    assert phases == []
+
+
+def test_ceo_submit_enable_response_loss_is_effect_unknown_and_not_auto_rolled_back(
+    monkeypatch,
+):
+    host = FakeCeoSubmitHost()
+    rollback_calls = []
+    monkeypatch.setattr(
+        host,
+        "reconcile_control_service",
+        lambda _sha: (_ for _ in ()).throw(control.TransactionEffectUnknown()),
+    )
+    monkeypatch.setattr(
+        host,
+        "rollback_ceo_submit",
+        lambda *args, **kwargs: rollback_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+
+    assert host.marker is True
+    assert rollback_calls == []
+
+
+
+def test_ceo_submit_process_recovery_reuses_marker_and_rolls_back_to_archived_preimage(
+    monkeypatch,
+):
+    prior = _ceo_submit_evidence(armed=False)
+    transaction_id = "autonomy-7a7a7a7a7a7a"
+    host = control.ProductionCeoSubmitHost()
+    manifest = {
+        "operation": "CEO_SUBMIT_ARM",
+        "phase": "CONTROL_OVERRIDE_SNAPSHOTTED",
+        "transaction_id": transaction_id,
+        "expected_sha": SHA,
+        control._CONTROL_LAUNCHD_PREIMAGE_FIELD: True,
+    }
+    rollback = []
+
+    monkeypatch.setattr(host, "effective_uid", lambda: 0)
+    monkeypatch.setattr(host, "require_exact_install", lambda _sha: SHA)
+    monkeypatch.setattr(host, "_manifest", lambda: dict(manifest))
+    monkeypatch.setattr(host, "_archived_configs", lambda _sha: prior)
+    monkeypatch.setattr(
+        host,
+        "executive_app_binding",
+        lambda: FakeCeoSubmitHost().executive_app_binding(),
+    )
+    monkeypatch.setattr(
+        host,
+        "ceo_submit_separation",
+        lambda _configs: control.CeoSubmitSeparation(
+            ceo_ingress_app_armed=True,
+            ceo_ingress_app_peer_uid=458,
+            ceo_ingress_peer_uid=452,
+            coo_autonomy_armed=False,
+            coo_operator_harness_armed=False,
+            worker_operator_harness_armed=False,
+        ),
+    )
+    monkeypatch.setattr(
+        host,
+        "rollback_ceo_submit",
+        lambda tx, receipt: rollback.append((tx, receipt)),
+    )
+
+    result = host.recover_ceo_submit_effect_unknown(
+        control.CeoSubmitRequest(expected_sha=SHA), now=NOW
+    )
+
+    assert result.transaction_id == transaction_id
+    assert result.state == "CEO_SUBMIT_DISARMED"
+    assert result.replayed is True
+    assert len(rollback) == 1
+    recovered, receipt = rollback[0]
+    assert recovered.transaction_id == transaction_id
+    assert recovered.prior_configs.control_sha256 == prior.control_sha256
+    assert recovered.candidates.control_sha256 == prior.control_sha256
+    assert recovered.candidates.worker_sha256 == prior.worker_sha256
+    assert receipt["state"] == "CEO_SUBMIT_DISARMED"
+    assert receipt["transaction_id"] == transaction_id
+
+
+def test_ceo_submit_process_recovery_refuses_legacy_marker_without_launchd_preimage(
+    monkeypatch,
+):
+    host = control.ProductionCeoSubmitHost()
+    monkeypatch.setattr(host, "effective_uid", lambda: 0)
+    monkeypatch.setattr(host, "require_exact_install", lambda _sha: SHA)
+    monkeypatch.setattr(
+        host,
+        "_manifest",
+        lambda: {
+            "operation": "CEO_SUBMIT_ARM",
+            "phase": "RECEIPT_REPLACED",
+            "transaction_id": "autonomy-8b8b8b8b8b8b",
+            "expected_sha": SHA,
+        },
+    )
+    called = []
+    monkeypatch.setattr(
+        host, "rollback_ceo_submit", lambda *args, **kwargs: called.append(True)
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host.recover_ceo_submit_effect_unknown(
+            control.CeoSubmitRequest(expected_sha=SHA), now=NOW
+        )
+
+    assert called == []
 
 
 def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecycle_script():
@@ -3819,6 +4090,9 @@ class _RollbackProbeHost(control.ProductionCeoSubmitHost):
 
     def _persist_phase(self, transaction, phase, *, operation=None):
         self.ledger.append(("phase", phase))
+
+    def _restore_control_launchd_preimage_if_recorded(self, transaction):
+        self.ledger.append(("restore_launchd", None))
 
     def write_ceo_submit_receipt(self, transaction, receipt):
         self.ledger.append(("receipt", None))
@@ -3947,6 +4221,7 @@ def test_ceo_submit_rollback_proves_the_live_control_service_before_removing_the
         probe_entries[0],
         ("phase", "ADMISSION_BOUND"),
         ("phase", "ROLLBACK_CONTROL_PROVEN"),
+        ("restore_launchd", None),
         ("complete", None),
     ]
     assert host.ledger[-1] == ("complete", None)
