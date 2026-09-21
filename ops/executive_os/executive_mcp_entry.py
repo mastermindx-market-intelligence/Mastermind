@@ -26,8 +26,10 @@ CONFIG_KEYS = frozenset({
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'executive_mcp_profile'}):
         raise ValueError('installed MCP configuration fields differ')
+    from integrations.executive_mcp.web_ceo import validate_installed_mcp_profile
+    validate_installed_mcp_profile(raw.get('executive_mcp_profile', 'legacy'))
     if raw['schema'] != CONFIG_SCHEMA:
         raise ValueError('installed MCP schema differs')
     if not isinstance(raw['release_sha'], str) or re.fullmatch('[0-9a-f]{40}', raw['release_sha']) is None:
@@ -274,7 +276,12 @@ def main(argv=None):
         raise ValueError('MCP source or process identity differs from its installation')
     from integrations.mastermind_executive_app.app import AppSettings
     from integrations.mastermind_executive_app.gateway import load_app_policies
-    from integrations.executive_mcp.server import build_executive_mcp_app
+    from integrations.executive_mcp.server import (
+        build_executive_mcp_app, build_web_ceo_v2_mcp_app,
+    )
+    from integrations.executive_mcp.web_ceo import (
+        WEB_CEO_V2_PROFILE, validate_installed_mcp_profile,
+    )
     import uvicorn
 
     policies = load_app_policies(raw['policies'])
@@ -286,7 +293,10 @@ def main(argv=None):
     sink = PolicyAuditSink(policies, Path(raw['audit_root']), optional=optional_policies(raw))
     try:
         mounts = build_optional_apps(raw, source, args.config, sink)
-        app = build_executive_mcp_app(settings, audit_sink=sink, **mounts)
+        profile = validate_installed_mcp_profile(raw.get('executive_mcp_profile', 'legacy'))
+        builder = (build_web_ceo_v2_mcp_app if profile == WEB_CEO_V2_PROFILE
+                   else build_executive_mcp_app)
+        app = builder(settings, audit_sink=sink, **mounts)
         uvicorn.run(app, host='127.0.0.1', port=raw['port'], access_log=False,
                     proxy_headers=True, forwarded_allow_ips='127.0.0.1')
     finally:

@@ -741,10 +741,11 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
 
     value = json.loads((OPS / "control.json.template").read_text(encoding="utf-8"))
     assert value["schema_version"] == CONTROL_CONFIG_SCHEMA_VERSION
-    # These optional groups require actual installed viewer/resource bindings.
-    # Omit them in the unconfigured template: null placeholders would activate
-    # all-or-none validation without supplying a valid installation.
+    # Installed product groups and the optional read-profile selector stay
+    # omitted in the unconfigured template. Null groups fail validation;
+    # an omitted executive_mcp_profile preserves the legacy generation.
     installed_product_keys = {
+        "executive_mcp_profile",
         "content_observer",
         "workspace_acquisition",
         "workspace_resource_policy",

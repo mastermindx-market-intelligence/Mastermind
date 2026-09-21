@@ -302,3 +302,137 @@ def test_terminal_return_factory_selects_v2_only_when_explicitly_armed(
     assert payload["root_job_id"] == candidate.root_job_id
     assert message["message_key"] == candidate.message_key
     assert provider_calls == [True]
+
+
+INVALID_INSTALLED_PROFILES = (
+    None, False, True, 0, 1, 3.14, [], {}, "", " ", "\t", "legacy ", " legacy",
+    "Legacy", "LEGACY", "web_ceo_v1", "web_ceo_v2 ", "WEB_CEO_V2",
+    "mastermind.executive_ceo_ingress_app_read.v1",
+    "mastermind.executive_ceo_ingress_app_read.v3",
+    "unknown",
+)
+
+
+def _app_raw(tmp_path: Path) -> dict[str, object]:
+    raw = _raw(tmp_path)
+    raw.update(
+        ceo_ingress_app_peer_uid=os.geteuid() + 10,
+        ceo_ingress_app_armed=True,
+        ceo_ingress_app_macro_root=tmp_path / "macro",
+        ceo_ingress_app_boot_python=APP_BOOT_PYTHON,
+    )
+    return raw
+
+
+def _capture_service(module, monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        importlib.import_module("control_plane.executive_worker_broker"),
+        "WorkerBrokerClient", lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(module, "activate_launchd_socket", lambda _name: object())
+
+    class FakeService:
+        def __init__(self, _config, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(module, "ExecutiveControlService", FakeService)
+    return captured
+
+
+def test_omitted_and_explicit_legacy_profile_keep_installed_reader(monkeypatch, tmp_path):
+    from control_plane.executive_service import CEO_APP_READ_SCHEMA
+    from integrations.executive_mcp.adapter import ExecutiveMcpGateway
+    from integrations.executive_mcp.installed import InstalledExecutiveReaders
+
+    module = _module()
+    binds: list[object] = []
+    original = ExecutiveMcpGateway.bind_fabric_source
+
+    def tracking(self, **kwargs):
+        binds.append(self)
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(ExecutiveMcpGateway, "bind_fabric_source", tracking)
+    for profile in (None, "legacy"):
+        raw = _app_raw(tmp_path)
+        if profile is not None:
+            raw["executive_mcp_profile"] = profile
+        captured = _capture_service(module, monkeypatch)
+        binds.clear()
+        module._service_from_config(raw)
+        binding = captured["ceo_ingress_app_binding"]
+        assert type(binding.read_provider) is InstalledExecutiveReaders
+        assert binding.read_schema == CEO_APP_READ_SCHEMA
+        assert binding.read_provider is binding.grounding_provider
+        assert binds == []
+        assert captured["ceo_ingress_armed"] is False
+
+
+def test_exact_v2_profile_selects_accepted_reader_and_inert_bind(monkeypatch, tmp_path):
+    from control_plane.executive_service import CEO_WEB_CEO_V2_READ_SCHEMA
+    from control_plane.fabric_job_view import ARM_KEYS
+    from integrations.executive_mcp.web_ceo import WebCeoV2InstalledExecutiveReaders
+
+    module = _module()
+    raw = _app_raw(tmp_path)
+    raw["executive_mcp_profile"] = "web_ceo_v2"
+    captured = _capture_service(module, monkeypatch)
+    module._service_from_config(raw)
+    binding = captured["ceo_ingress_app_binding"]
+    readers = binding.read_provider
+    assert type(readers) is WebCeoV2InstalledExecutiveReaders
+    assert binding.read_schema == CEO_WEB_CEO_V2_READ_SCHEMA
+    assert readers._fabric_source_binding is not None
+    getter, armed, identity = readers._fabric_source_binding
+    assert callable(getter)
+    assert identity == {"root": None, "db_present": True, "identity": None}
+    assert armed["source"] == "control.json"
+    assert armed["ceo_ingress_app_armed"] is True
+    for key in ARM_KEYS:
+        if key != "ceo_ingress_app_armed":
+            assert armed[key] is None
+    with pytest.raises((AttributeError, TypeError)):
+        getter()
+    assert captured["ceo_ingress_armed"] is False
+
+
+def test_v2_profile_does_not_require_workspace(monkeypatch, tmp_path):
+    from integrations.executive_mcp.web_ceo import WebCeoV2InstalledExecutiveReaders
+
+    module = _module()
+    raw = _app_raw(tmp_path)
+    raw["executive_mcp_profile"] = "web_ceo_v2"
+    assert "workspace_acquisition" not in raw
+    captured = _capture_service(module, monkeypatch)
+    module._service_from_config(raw)
+    assert type(captured["ceo_ingress_app_binding"].read_provider) is WebCeoV2InstalledExecutiveReaders
+    assert captured.get("workspace_control_room") is None
+
+
+@pytest.mark.parametrize("value", INVALID_INSTALLED_PROFILES)
+def test_control_config_refuses_invalid_installed_profile(tmp_path, value):
+    module = _module()
+    raw = _app_raw(tmp_path)
+    raw["executive_mcp_profile"] = value
+    with pytest.raises(module.ServiceError, match="installed Executive MCP profile is invalid"):
+        module.load_control_config(_write_config(tmp_path, raw))
+
+
+def test_present_profile_without_app_group_is_refused_before_source(tmp_path, monkeypatch):
+    module = _module()
+    raw = _raw(tmp_path)
+    raw["executive_mcp_profile"] = "legacy"
+    with pytest.raises(module.ServiceError, match="App binding requires all App"):
+        module.load_control_config(_write_config(tmp_path, raw))
+    captured = _capture_service(module, monkeypatch)
+    with pytest.raises(module.ServiceError, match="App binding requires all App"):
+        module._service_from_config(raw)
+    assert captured == {}
+
+
+def test_omitted_profile_does_not_manufacture_app_binding(tmp_path):
+    module = _module()
+    loaded = module.load_control_config(_write_config(tmp_path, _raw(tmp_path)))
+    assert "executive_mcp_profile" not in loaded
+    assert "ceo_ingress_app_peer_uid" not in loaded

@@ -330,6 +330,162 @@ def test_shutdown_deadline_retains_owner_until_cleanup_terminal(monkeypatch):
     asyncio.run(check())
 
 
+INVALID_INSTALLED_PROFILES = (
+    None, False, True, 0, 1, 3.14, [], {}, "", " ", "\t", "legacy ", " legacy",
+    "Legacy", "LEGACY", "web_ceo_v1", "web_ceo_v2 ", "WEB_CEO_V2",
+    "mastermind.executive_ceo_ingress_app_read.v1",
+    "mastermind.executive_ceo_ingress_app_read.v3",
+    "unknown",
+)
+
+
+@pytest.mark.parametrize("value", (None, "legacy", "web_ceo_v2"))
+def test_install_document_admits_omitted_and_exact_profiles(value):
+    raw = document()
+    if value is not None:
+        raw["executive_mcp_profile"] = value
+    assert entry.validate_document(raw) == raw
+
+
+@pytest.mark.parametrize("value", INVALID_INSTALLED_PROFILES)
+def test_install_document_refuses_invalid_profiles(value):
+    raw = document()
+    raw["executive_mcp_profile"] = value
+    with pytest.raises(ValueError, match="installed Executive MCP profile is invalid"):
+        entry.validate_document(raw)
+
+
+def test_install_document_unknown_top_level_still_refused():
+    raw = document()
+    raw["other"] = True
+    with pytest.raises(ValueError, match="installed MCP configuration fields differ"):
+        entry.validate_document(raw)
+
+
+def test_optional_workspace_mount_survives_both_profile_selections():
+    for profile in ("legacy", "web_ceo_v2"):
+        raw = document()
+        raw["executive_mcp_profile"] = profile
+        raw["workspace"] = workspace_block()
+        assert entry.validate_document(raw) == raw
+
+
+@pytest.mark.parametrize("profile", ["legacy", "web_ceo_v2"])
+def test_selected_profile_keeps_optional_mount_absence(settings, profile):
+    from integrations.executive_mcp.web_ceo import (
+        WEB_CEO_V2_PROFILE, validate_installed_mcp_profile,
+    )
+    builder = (server.build_web_ceo_v2_mcp_app
+               if validate_installed_mcp_profile(profile) == WEB_CEO_V2_PROFILE
+               else server.build_executive_mcp_app)
+    app = builder(settings, audit_sink=existing.Sink())
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                    base_url=entry.PUBLIC_ORIGIN) as client:
+            for path in ("/workspace/programs/current", "/workspace/mission/current",
+                         "/workspace/window/current", "/os/"):
+                assert (await client.get(path)).status_code == 404
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("profile", ["legacy", "web_ceo_v2"])
+def test_selected_profile_keeps_workspace_dispatch(settings, profile):
+    from integrations.executive_mcp.web_ceo import (
+        WEB_CEO_V2_PROFILE, validate_installed_mcp_profile,
+    )
+    builder = (server.build_web_ceo_v2_mcp_app
+               if validate_installed_mcp_profile(profile) == WEB_CEO_V2_PROFILE
+               else server.build_executive_mcp_app)
+    workspace = Mount()
+    app = builder(settings, audit_sink=existing.Sink(), workspace_app=workspace)
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                    base_url=entry.PUBLIC_ORIGIN) as client:
+            assert (await client.get("/workspace/programs/current")).status_code == 200
+            assert workspace.calls
+    asyncio.run(check())
+
+
+def test_installed_launcher_selects_builders(monkeypatch, tmp_path, rsa_key):
+    from types import SimpleNamespace
+    captured: dict[str, object] = {}
+
+    class Flags:
+        isolated = True
+
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *a, **k: None)
+    monkeypatch.setattr(entry.os, "geteuid", lambda: 458)
+    monkeypatch.setattr(entry.sys, "flags", Flags())
+    monkeypatch.setattr(entry.sys, "dont_write_bytecode", True)
+
+    class FakeSink:
+        def emit(self, event):
+            return None
+        def close(self):
+            return None
+
+    monkeypatch.setattr(entry, "PolicyAuditSink", lambda *a, **k: FakeSink())
+    monkeypatch.setattr(entry, "build_optional_apps", lambda *a, **k: {})
+    monkeypatch.setattr(entry, "optional_policies", lambda raw: {})
+
+    real_path = entry.Path
+    release = "1" * 40
+
+    class Source:
+        name = release
+        def __str__(self):
+            return str(tmp_path / release)
+        def __fspath__(self):
+            return str(self)
+        def __truediv__(self, other):
+            return real_path("/nonexistent-os") / other
+
+    class FilePath:
+        def absolute(self):
+            return self
+        @property
+        def parents(self):
+            return {2: Source()}
+
+    def path_factory(*args, **kwargs):
+        if args == (entry.__file__,):
+            return FilePath()
+        return real_path(*args, **kwargs)
+
+    monkeypatch.setattr(entry, "Path", path_factory)
+
+    import integrations.mastermind_executive_app.app as appmod
+    import integrations.mastermind_executive_app.gateway as gw
+    import integrations.executive_mcp.server as transport
+    import uvicorn
+
+    monkeypatch.setattr(appmod, "AppSettings", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(gw, "load_app_policies", lambda policies: SimpleNamespace(read=object(), submit=object()))
+
+    def legacy_builder(settings, *, audit_sink, **mounts):
+        captured.setdefault("builders", []).append(("legacy", mounts))
+        return object()
+
+    def v2_builder(settings, *, audit_sink, **mounts):
+        captured.setdefault("builders", []).append(("v2", mounts))
+        return object()
+
+    monkeypatch.setattr(transport, "build_executive_mcp_app", legacy_builder)
+    monkeypatch.setattr(transport, "build_web_ceo_v2_mcp_app", v2_builder)
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: captured.setdefault("runs", []).append(kwargs) or None)
+
+    for profile, expected in ((None, "legacy"), ("legacy", "legacy"), ("web_ceo_v2", "v2")):
+        captured.clear()
+        raw = document()
+        if profile is not None:
+            raw["executive_mcp_profile"] = profile
+        path = tmp_path / f"mcp-{expected}-{profile}.json"
+        path.write_text(json.dumps(raw))
+        assert entry.main(["--config", str(path)]) == 0
+        assert captured["builders"] == [(expected, {})]
+        assert captured["runs"]
+
+
 def test_public_mount_trusts_only_loopback_forwarded_scheme(settings):
     from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
     mount = Mount()

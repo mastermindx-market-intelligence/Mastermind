@@ -39,6 +39,8 @@ from control_plane.executive_service import (
     ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
     CeoIngressAppBinding,
+    CEO_APP_READ_SCHEMA,
+    CEO_WEB_CEO_V2_READ_SCHEMA,
     ServiceConfig,
     ServiceError,
     activate_launchd_socket,
@@ -167,6 +169,7 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_app_armed",
         "ceo_ingress_app_macro_root",
         "ceo_ingress_app_boot_python",
+        "executive_mcp_profile",
         "terminal_return_armed",
         "terminal_return_socket_path",
         "dialogue_observation_socket_path",
@@ -546,6 +549,16 @@ def load_control_config(
         raise ServiceError("App binding requires all App and CeoIngress configuration fields")
     if "ceo_ingress_app_boot_python" in keys and app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
         raise ServiceError("App boot interpreter requires the complete App binding")
+    from integrations.executive_mcp.web_ceo import validate_installed_mcp_profile
+    try:
+        validate_installed_mcp_profile(config.get("executive_mcp_profile", "legacy"))
+    except ValueError:
+        raise ServiceError("installed Executive MCP profile is invalid") from None
+    if "executive_mcp_profile" in keys and (
+        app_present != _CEO_INGRESS_APP_CONFIG_KEYS
+        or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
     terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
     if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
         raise ServiceError("terminal-return control config fields must be supplied together")
@@ -1317,6 +1330,23 @@ def _service_from_config(
             terminal_return_projector_factory
         )
 
+    from integrations.executive_mcp.web_ceo import (
+        WEB_CEO_V2_PROFILE,
+        validate_installed_mcp_profile,
+    )
+
+    try:
+        installed_profile = validate_installed_mcp_profile(
+            raw.get("executive_mcp_profile", "legacy")
+        )
+    except ValueError:
+        raise ServiceError("installed Executive MCP profile is invalid") from None
+    if "executive_mcp_profile" in raw and not (
+        _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw)
+        and _CEO_INGRESS_CONFIG_KEYS <= set(raw)
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
+
     listener = activate_launchd_socket(str(raw["launchd_socket_name"]))
     activated_listeners = [listener]
     ceo_ingress_kwargs: dict[str, Any] = {}
@@ -1336,8 +1366,7 @@ def _service_from_config(
     if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
         # SDK-free canonical projection runs under the existing control uid.
         # The network App has no Runtime database or source-checkout access.
-        from integrations.executive_mcp.installed import InstalledExecutiveReaders
-        readers = InstalledExecutiveReaders(
+        reader_kwargs = dict(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
             runtime_root=Path(raw["runtime_root"]),
@@ -1346,6 +1375,30 @@ def _service_from_config(
             code_root=Path(__file__).resolve().parents[1],
             expected_source_sha=str(raw["proof_base_sha"]),
         )
+        if installed_profile == WEB_CEO_V2_PROFILE:
+            from integrations.executive_mcp.web_ceo import (
+                WebCeoV2InstalledExecutiveReaders,
+            )
+            readers = WebCeoV2InstalledExecutiveReaders(**reader_kwargs)
+            from control_plane.fabric_job_view import ARM_KEYS
+            readers.bind_fabric_source(
+                bounded_runtime=lambda: service._namespace_custody.bound_runtime(
+                    service._require_runtime()
+                ),
+                armed={
+                    **{
+                        key: raw.get(key) if type(raw.get(key)) is bool else None
+                        for key in ARM_KEYS
+                    },
+                    "source": "control.json",
+                },
+                runtime_identity={"root": None, "db_present": True, "identity": None},
+            )
+            app_read_schema = CEO_WEB_CEO_V2_READ_SCHEMA
+        else:
+            from integrations.executive_mcp.installed import InstalledExecutiveReaders
+            readers = InstalledExecutiveReaders(**reader_kwargs)
+            app_read_schema = CEO_APP_READ_SCHEMA
         content_factories = {}
         if "content_observer" in raw:
             from control_plane.executive_content_observer import ExecutiveContentObserver
@@ -1422,7 +1475,9 @@ def _service_from_config(
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
-            grounding_provider=readers, read_provider=readers, **content_factories, **workspace_factories,
+            grounding_provider=readers, read_provider=readers,
+            read_schema=app_read_schema,
+            **content_factories, **workspace_factories,
         )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (

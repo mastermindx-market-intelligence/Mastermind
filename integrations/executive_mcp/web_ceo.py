@@ -254,8 +254,27 @@ def build_web_ceo_read_gateway(
 # ---------------------------------------------------------------------------
 
 WEB_CEO_V2_PROFILE = "web_ceo_v2"
+INSTALLED_MCP_PROFILE_LEGACY = "legacy"
 WEB_CEO_V2_SERVER_NAME = legacy.SERVER_NAME
 WEB_CEO_V2_SERVER_VERSION = "1.2.0"
+
+
+def validate_installed_mcp_profile(value: Any = "legacy") -> str:
+    """Pure closed enum for the installed Executive MCP generation selector.
+
+    Only the exact strings ``legacy`` and :data:`WEB_CEO_V2_PROFILE` are
+    admitted.  Omitted callers pass the default; explicit null, false,
+    numbers, containers, whitespace, case variants and historical names
+    refuse.  This helper has no trimming, aliases, environment, filesystem,
+    gateway, Runtime or provider side effects.
+    """
+
+    if type(value) is str and value in {
+        INSTALLED_MCP_PROFILE_LEGACY,
+        WEB_CEO_V2_PROFILE,
+    }:
+        return value
+    raise ValueError("installed Executive MCP profile is invalid")
 
 #: The existing public operator_continuation/wake_events Attempt grammar.
 _ATT_ID_RE = re.compile(r"^ATT-[0-9a-f]{32}$")
