@@ -462,17 +462,20 @@ class SelectedPhysicalReservationPackage:
             _refuse("SELECTION_MOVED")
 
         sealed = wire["reservation_input"]
-        if _freeze(policy) != sealed["policy"]:
+        frozen_policy = _freeze(policy)
+        frozen_charges = _freeze(list(current_charges))
+        frozen_observations = _freeze(observations)
+        if frozen_policy != sealed["policy"]:
             _refuse("POLICY_MOVED")
-        if _freeze(list(current_charges)) != sealed["current_charges"]:
+        if frozen_charges != sealed["current_charges"]:
             _refuse("CURRENT_CHARGES_MOVED")
-        if _freeze(observations) != sealed["observations"]:
+        if frozen_observations != sealed["observations"]:
             _refuse("OBSERVATIONS_MOVED")
         reservation = evaluate_reservation(
             sealed["request"],
-            policy=policy,
-            current_charges=current_charges,
-            observations=observations,
+            policy=frozen_policy,
+            current_charges=frozen_charges,
+            observations=frozen_observations,
             decision_time_ms=decision_time_ms,
         )
         qualification = wire["selected_qualification"]

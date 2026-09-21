@@ -531,6 +531,22 @@ def _artifact_selection_inputs():
     return artifact, selection, inputs, qualified
 
 
+class _TraversalCountingCharges(Sequence[dict]):
+    def __init__(self, values: Sequence[dict]) -> None:
+        self._values = tuple(values)
+        self.traversals = 0
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def __getitem__(self, index):
+        return self._values[index]
+
+    def __iter__(self) -> Iterator[dict]:
+        self.traversals += 1
+        return iter(self._values)
+
+
 class _TraversalCountingCandidates(Sequence[ehpp.QualifiedHostCandidate]):
     def __init__(self, values: Sequence[ehpp.QualifiedHostCandidate]) -> None:
         self._values = tuple(values)
@@ -592,6 +608,25 @@ def test_commit_evaluation_freezes_qualified_candidates_once() -> None:
 
     assert result["selected_worker_id"] == "worker-z-headroom"
     assert candidates.traversals == 1
+
+
+def test_commit_evaluation_freezes_current_charges_once() -> None:
+    package, artifact, selection, inputs, qualified = _package()
+    winner_inputs = inputs[package.selected_worker_id]
+    charges = _TraversalCountingCharges(winner_inputs["current_charges"])
+
+    result = package.evaluate_for_commit(
+        selection=selection,
+        artifact=artifact,
+        qualified_candidates=qualified,
+        policy=winner_inputs["policy"],
+        current_charges=charges,
+        observations=winner_inputs["observations"],
+        decision_time_ms=DECISION_TIME_MS,
+    )
+
+    assert result["reservation"]["code"] == "RESERVED"
+    assert charges.traversals == 1
 
 
 def test_package_binds_resolved_selection_to_exact_selected_physical_inputs() -> None:
