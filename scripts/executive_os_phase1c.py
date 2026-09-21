@@ -135,6 +135,10 @@ _CONFIG_REQUIRED = frozenset(
 )
 _CONFIG_OPTIONAL = frozenset(
     {
+        "content_observer",
+        "workspace_acquisition",
+        "workspace_resource_policy",
+        "workspace_control_room",
         "proof_branch",
         "exact_worker_claim_target",
         "worker_id",
@@ -222,6 +226,9 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--config", type=_absolute_path, required=True)
 
     for name, help_text in (
+        ("content-observer-enroll", "Explicitly enroll the installed content profile as control uid."),
+        ("content-observer-status", "Reconcile the installed content profile without enrollment."),
+        ("content-observer-revoke", "Revoke the installed content profile as control uid."),
         ("status", "Show service and startup-reconciliation status."),
         ("health", "Check SQLite migration and integrity health."),
         ("activate-canary", "Validate and activate the current PID-bound canary."),
@@ -232,7 +239,13 @@ def _parser() -> argparse.ArgumentParser:
         ("reconcile", "Reconcile durable attempts without automatic requeue."),
         ("backup", "Create an online DB backup in the configured backup root."),
     ):
-        sub.add_parser(name, help=help_text)
+        cmd_parser = sub.add_parser(name, help=help_text)
+        if name.startswith("content-observer-"):
+            cmd_parser.add_argument(
+                "--profile-key",
+                choices=["web", "mac"],
+                help="Content profile key (web or mac). Omit for legacy single-profile.",
+            )
 
     job = sub.add_parser("job", help="Inspect one Job.")
     job.add_argument("job_id")
@@ -608,6 +621,32 @@ def load_control_config(
             config["ceo_ingress_app_boot_python"] = _attest_app_boot_runtime(
                 sealed_boot_python
             )
+    workspace_keys = {"workspace_acquisition", "workspace_resource_policy", "workspace_control_room"}
+    if keys & workspace_keys:
+        if keys & workspace_keys != workspace_keys or app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
+            raise ServiceError("workspace acquisition requires its policy and installed App peer")
+        topology = config["workspace_control_room"]
+        if (type(topology) is not dict or set(topology) != {"port"}
+                or type(topology["port"]) is not int or not 1 <= topology["port"] <= 65535):
+            raise ServiceError("workspace Control Room topology refused")
+        from integrations.business_mcp_auth.contracts import load_resource_policy
+        from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
+        try:
+            workspace_policy = load_resource_policy(config["workspace_resource_policy"])
+            config["workspace_acquisition"] = validate_workspace_bindings(config["workspace_acquisition"], workspace_policy)
+        except Exception:
+            raise ServiceError("workspace acquisition policy or binding refused") from None
+    if "content_observer" in config:
+        from integrations.executive_content_contract import ContentObserverProfile, load_content_profiles
+        if not app_present:
+            raise ServiceError("content observer requires installed App peer")
+        configured = load_content_profiles(config["content_observer"])
+        profiles = (configured,) if type(configured) is ContentObserverProfile else tuple(
+            slot.profile for slot in (configured.web, configured.mac)
+            if slot.profile is not None
+        )
+        if any(profile.release_sha != config["proof_base_sha"] for profile in profiles):
+            raise ServiceError("content observer release differs from control source")
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
             config["dialogue_observation_peer_uid"],
@@ -1110,6 +1149,8 @@ def _service_from_config(
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     autonomy_guard: Callable[[], None] | None = None,
     initial_canary: Mapping[str, Any] | None = None,
+    content_profile_loader: Callable[[], Any] | None = None,
+    workspace_acquisition_loader: Callable[[], Any] | None = None,
     exact_target_source: _ExactWorkerTargetSource | None = None,
 ) -> ExecutiveControlService:
     from control_plane.executive_supervisor import ExecutiveSupervisor
@@ -1289,6 +1330,7 @@ def _service_from_config(
             "ceo_ingress_armed": False,
             "ceo_ingress_activated_socket": ceo_listener,
         }
+    workspace_control_room = None
     if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
         # SDK-free canonical projection runs under the existing control uid.
         # The network App has no Runtime database or source-checkout access.
@@ -1302,10 +1344,50 @@ def _service_from_config(
             code_root=Path(__file__).resolve().parents[1],
             expected_source_sha=str(raw["proof_base_sha"]),
         )
+        content_factories = {}
+        if "content_observer" in raw:
+            from control_plane.executive_content_observer import ExecutiveContentObserver
+            from control_plane.executive_steward_reads import InstalledStewardReadProvider
+            from datetime import datetime, timezone
+            import time
+            if content_profile_loader is None:
+                raise ServiceError("sealed current content profile loader is required")
+            content_factories = {
+                "content_provider_factory": lambda runtime: ExecutiveContentObserver(
+                    runtime=runtime, broker_client=client, profile_loader=content_profile_loader,
+                    now=lambda: int(time.time())),
+                "steward_provider_factory": lambda runtime: InstalledStewardReadProvider(
+                    readers=readers, runtime=runtime, bindings_path=None,
+                    now=lambda: datetime.now(timezone.utc)),
+            }
+        workspace_factories = {}
+        if "workspace_acquisition" in raw:
+            from integrations.business_mcp_auth.contracts import load_resource_policy
+            from integrations.mastermind_workspace_app.contract import workspace_authorizers
+            from control_plane.workspace_control_room_lifecycle import HostedControlRoom
+            from control_plane.workspace_read_service import workspace_provider_factory
+            from scripts.chairman_control_room import ServerConfig
+            from control_plane.fabric_job_view import ARM_KEYS
+            import secrets
+            if workspace_acquisition_loader is None:
+                raise ServiceError("sealed current workspace acquisition loader is required")
+            policy = load_resource_policy(raw["workspace_resource_policy"])
+            _, authorize = workspace_authorizers(policy=policy, load_bindings=workspace_acquisition_loader)
+            # Existing source paths and existing controller permissions only.
+            # Bind the installation-selected incumbent topology before publishing.
+            port = raw["workspace_control_room"]["port"]
+            workspace_control_room = HostedControlRoom(ServerConfig(
+                repo_root=Path(raw["proof_source_repository"]),
+                macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=None,
+                token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port))
+            workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
+                control_room=workspace_control_room, authorize=authorize,
+                armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
+                runtime_identity={"root": None, "db_present": True, "identity": None})
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
-            grounding_provider=readers, read_provider=readers,
+            grounding_provider=readers, read_provider=readers, **content_factories, **workspace_factories,
         )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
@@ -1370,6 +1452,7 @@ def _service_from_config(
         activated_socket=listener,
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
+        workspace_control_room=workspace_control_room,
         **ceo_ingress_kwargs,
         **dialogue_observation_kwargs,
         **terminal_return_kwargs,
@@ -1468,6 +1551,8 @@ async def _serve_from_config(config_path: Path) -> None:
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         initial_canary=initial_canary,
+        content_profile_loader=lambda: load_control_config(config_path)["content_observer"],
+        workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
@@ -1475,6 +1560,7 @@ async def _serve_from_config(config_path: Path) -> None:
 
 def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     if args.command in {
+        "content-observer-enroll", "content-observer-status", "content-observer-revoke",
         "status",
         "health",
         "activate-canary",
@@ -1485,6 +1571,8 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         "reconcile",
         "backup",
     }:
+        if args.command.startswith("content-observer-") and hasattr(args, 'profile_key') and args.profile_key:
+            return args.command, {"profile_key": args.profile_key}
         return args.command, {}
     if args.command in {"job", "dispatch", "cancel", "requeue"}:
         return args.command, {"job_id": args.job_id}

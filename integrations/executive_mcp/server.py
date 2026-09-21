@@ -15,12 +15,14 @@ rewrites a tool at runtime.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
-from contextlib import asynccontextmanager
+import re
+from contextlib import asynccontextmanager, AsyncExitStack
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qsl
 
 import httpx
 import mcp.types as mcp_types
@@ -33,9 +35,10 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.middleware.authentication import AuthenticationMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from control_plane.workspace_owned_task import await_owned
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from integrations.business_mcp_auth.metadata import (
     mcp_auth_error_result, oauth_security_schemes, protected_resource_metadata,
@@ -322,27 +325,195 @@ class _ExecutivePolicyVerifiers:
 class _ExecutivePathFence:
     """Literal, query-free routes for the private stateless HTTP transport."""
 
-    def __init__(self, app: Any, metadata_path: str):
+    def __init__(self, app: Any, metadata_path: str, *, workspace_app=None, content_app=None, os_app=None):
         self._app = app
-        self._routes = {
-            metadata_path: "GET", "/mcp": "POST",
-            "/v1/tools/submit_ceo_intent/reconcile": "POST",
-        }
+        self._routes = {metadata_path: "GET", "/mcp": "POST",
+                        "/v1/tools/submit_ceo_intent/reconcile": "POST"}
+        self._query_routes = set()
+        self._workspace_routes = set()
+        self._public_routes = set()
+        if workspace_app is not None:
+            self._workspace_routes.update(("/workspace/programs/current", "/workspace/mission/current"))
+            self._query_routes.add("/workspace/mission/current")
+        if content_app is not None:
+            self._workspace_routes.add("/workspace/window/current")
+        self._routes.update({path: "GET" for path in self._workspace_routes})
+        self._public_routes.update(self._workspace_routes)
+        if os_app is not None:
+            if type(os_app) is not OsStaticApp:
+                raise ValueError("fixed OS static owner required")
+            self._routes.update({path: "GET" for path in os_app.paths})
+            self._public_routes.update(os_app.paths)
+            self._query_routes.update(("/os/", "/os/auth/callback"))
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
             path = scope.get("path", "")
-            if (
-                self._routes.get(path) != scope.get("method")
-                or not path.isascii()
-                or scope.get("raw_path") != path.encode("ascii")
-                or scope.get("query_string")
-            ):
+            if (self._routes.get(path) != scope.get("method") or not path.isascii()
+                    or scope.get("raw_path") != path.encode("ascii")
+                    or (scope.get("query_string") and path not in self._query_routes)):
                 await JSONResponse({"ok": False, "error": {
                     "code": "not_found", "message": "unknown Executive transport route",
-                }}, status_code=404)(scope, receive, send)
+                }}, status_code=404, headers=_OS_RESPONSE_HEADERS if path.startswith("/os/") else None)(scope, receive, send)
+                return
+            if path in self._public_routes:
+                headers = scope.get("headers", ())
+                hosts = [v for k, v in headers if k.lower() == b"host"]
+                origins = [v for k, v in headers if k.lower() == b"origin"]
+                if (scope.get("scheme") != "https" or hosts != [b"mcp.mastermind-x.com"]
+                        or len(origins) > 1 or (origins and origins != [b"https://mcp.mastermind-x.com"])):
+                    await JSONResponse({"error": "transport_refused"}, status_code=403,
+                        headers=_OS_RESPONSE_HEADERS if path.startswith("/os/")
+                        else {"Cache-Control": "no-store"})(scope, receive, send)
+                    return
+            if path in self._workspace_routes and sum(
+                    key.lower() == b"authorization" for key, _ in scope.get("headers", ())) > 1:
+                await JSONResponse({"error": "authentication_required"}, status_code=401,
+                                   headers={"Cache-Control": "no-store"})(scope, receive, send)
                 return
         await self._app(scope, receive, send)
+
+
+class AuditedWorkspaceApp:
+    """Incumbent A1 audit gate; the sibling independently verifies the bearer.
+
+    No principal is injected into ASGI state. A sink failure in the existing
+    verifier refuses admission before the sibling can acquire its source.
+    """
+    def __init__(self, app, verifier):
+        if not isinstance(verifier, MastermindTokenVerifier):
+            raise TypeError("incumbent A1 verifier required")
+        self._app, self._verifier = app, verifier
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+            return
+        headers = [value for key, value in scope.get("headers", ()) if key.lower() == b"authorization"]
+        token = None
+        if len(headers) == 1:
+            try:
+                scheme, value = headers[0].decode("ascii").split(" ", 1)
+                if scheme.lower() == "bearer" and value and not any(c.isspace() for c in value):
+                    token = value
+            except (UnicodeError, ValueError):
+                pass
+        if token is not None and await self._verifier.verify_token(token) is not None:
+            await self._app(scope, receive, send)
+            return
+        await JSONResponse({"error": "authentication_required"}, status_code=401,
+            headers={"Cache-Control": "no-store", "WWW-Authenticate": "Bearer"})(scope, receive, send)
+
+
+@asynccontextmanager
+async def _mounted_lifespan(app):
+    """Join an optional owner's ASGI lifecycle under the existing listener."""
+    incoming, outgoing = asyncio.Queue(), asyncio.Queue()
+    task = asyncio.create_task(app({"type": "lifespan", "asgi": {"version": "3.0"}, "state": {}},
+                                   incoming.get, outgoing.put))
+    started = False
+    try:
+        await incoming.put({"type": "lifespan.startup"})
+        response = await asyncio.wait_for(outgoing.get(), 10)
+        if response.get("type") != "lifespan.startup.complete":
+            raise RuntimeError("optional App startup failed")
+        started = True
+        yield
+    finally:
+        async def finish_owner():
+            try:
+                if started and not task.done():
+                    await incoming.put({"type": "lifespan.shutdown"})
+                    response = await asyncio.wait_for(outgoing.get(), 10)
+                    if response.get("type") != "lifespan.shutdown.complete":
+                        raise RuntimeError("optional App shutdown failed")
+            finally:
+                # A shutdown deadline is a failure, never permission to abandon
+                # or cancel cleanup. Retain custody until the owner terminates.
+                if not started and not task.done():
+                    task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    if started:
+                        raise
+        await await_owned(asyncio.create_task(finish_owner()))
+
+
+_OS_RESPONSE_HEADERS = {
+    "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; "
+        "connect-src 'self' https://dev-eo0jf8us5mup7wd5.us.auth0.com; "
+        "img-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'",
+}
+
+
+class OsStaticApp:
+    """Three verified release assets, never a pathname supplied by a request."""
+    def __init__(self, assets):
+        # The sealed launcher supplies already-hashed immutable bytes. The
+        # static owner itself also closes the route set before outer routing.
+        if type(assets) is not dict or len(assets) != 3 or "/os/" not in assets:
+            raise ValueError("fixed OS asset set required")
+        expected = {"/os/": "text/html; charset=utf-8"}
+        for suffix, mime in (("css", "text/css; charset=utf-8"), ("js", "text/javascript; charset=utf-8")):
+            paths = [path for path in assets if isinstance(path, str)
+                     and re.fullmatch(r"/os/assets/index-[A-Za-z0-9_-]+\." + suffix, path)]
+            if len(paths) != 1:
+                raise ValueError("fixed OS asset set required")
+            expected[paths[0]] = mime
+        for path, value in assets.items():
+            if (type(value) is not tuple or len(value) != 2 or type(value[0]) is not bytes
+                    or not 0 < len(value[0]) <= 4 * 1024 * 1024 or value[1] != expected.get(path)):
+                raise ValueError("fixed OS asset bytes and MIME required")
+        self._assets = dict(assets)
+        self.paths = frozenset((*self._assets, "/os/", "/os/auth/callback"))
+
+    @staticmethod
+    def _query_allowed(path, raw):
+        if not raw:
+            return True
+        if len(raw) > 8192 or b"#" in raw or re.search(rb"%(?![0-9A-Fa-f]{2})", raw) or path not in ("/os/", "/os/auth/callback"):
+            return False
+        try:
+            pairs = parse_qsl(raw.decode("ascii"), keep_blank_values=True,
+                              strict_parsing=True, encoding="utf-8", errors="strict", max_num_fields=5)
+            fields = dict(pairs)
+            if any(any(ord(c) < 32 or ord(c) == 127 for c in key + value) for key, value in pairs):
+                return False
+            if len(fields) != len(pairs):
+                return False
+            if path == "/os/":
+                from integrations.mastermind_workspace_app.contract import selection
+                selection(fields)
+            elif not fields or not set(fields) <= {"code", "state", "error", "error_description", "iss"}:
+                return False
+            return True
+        except (ValueError, UnicodeError):
+            return False
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "")
+        if (scope.get("method") != "GET" or path not in self.paths
+                or scope.get("raw_path") != path.encode("ascii")
+                or not self._query_allowed(path, scope.get("query_string", b""))):
+            await Response(status_code=404, headers=_OS_RESPONSE_HEADERS)(scope, receive, send)
+            return
+        # Bound empty chunks as well; GET never accepts a request body.
+        for _ in range(32):
+            message = await receive()
+            if message.get("type") != "http.request" or message.get("body"):
+                await Response(status_code=400, headers=_OS_RESPONSE_HEADERS)(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+        else:
+            await Response(status_code=400, headers=_OS_RESPONSE_HEADERS)(scope, receive, send)
+            return
+        key = "/os/" if path == "/os/auth/callback" else path
+        body, mime = self._assets[key]
+        headers = {**_OS_RESPONSE_HEADERS, "Content-Type": mime}
+        await Response(body, headers=headers)(scope, receive, send)
 
 
 def _executive_outcome(payload: Any, request_ref: str, status_code: int) -> bool:
@@ -372,7 +543,8 @@ def _executive_outcome(payload: Any, request_ref: str, status_code: int) -> bool
     )
 
 
-def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+def build_executive_mcp_app(settings: Any, *, audit_sink: Any,
+                            workspace_app=None, content_app=None, os_app=None) -> Any:
     """Expose the frozen five tools through the existing authenticated App.
 
     This is a stateless transport composition, not a new admission service.
@@ -516,22 +688,38 @@ def build_executive_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     @asynccontextmanager
     async def lifespan(_app: Any):
         try:
-            async with manager.run():
-                yield
+            async with AsyncExitStack() as owners:
+                if workspace_app is not None:
+                    await owners.enter_async_context(_mounted_lifespan(workspace_app))
+                if content_app is not None:
+                    await owners.enter_async_context(_mounted_lifespan(content_app))
+                async with manager.run():
+                    yield
         finally:
             await inner_app.aclose()
 
     async def metadata(_request: Request) -> JSONResponse:
         return JSONResponse(protected_resource_metadata(configured.policies.submit))
 
-    outer_app = Starlette(routes=[
+    outer_routes = [
         Route(metadata_path, metadata, methods=["GET"]),
         Route("/mcp", authenticated, methods=["POST"]),
         Route("/v1/tools/submit_ceo_intent/reconcile", inner_app, methods=["POST"]),
-    ], lifespan=lifespan)
+    ]
+    if workspace_app is not None:
+        outer_routes.extend(Route(path, workspace_app, methods=["GET"]) for path in
+                            ("/workspace/programs/current", "/workspace/mission/current"))
+    if content_app is not None:
+        outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))
+    if os_app is not None:
+        if type(os_app) is not OsStaticApp:
+            raise ValueError("fixed OS static owner required")
+        outer_routes.extend(Route(path, os_app, methods=["GET"]) for path in sorted(os_app.paths))
+    outer_app = Starlette(routes=outer_routes, lifespan=lifespan)
     outer_app.router.redirect_slashes = False
     return _DuplicateAuthorizationGuard(outer_app,
-        fenced_app=_ExecutivePathFence(outer_app, metadata_path))
+        fenced_app=_ExecutivePathFence(outer_app, metadata_path, workspace_app=workspace_app,
+                                      content_app=content_app, os_app=os_app))
 
 def build_tools() -> list[mcp_types.Tool]:
     """The static five-tool advertisement, built from the reviewed table.

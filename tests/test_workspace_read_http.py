@@ -65,55 +65,68 @@ def test_real_http_runtime_owner_receipt_and_deny_before_read(
         try:
             workspace = create_workspace_app(WorkspaceAppConfig(authenticator=authenticator, now=lambda: NOW,
                 authorize_principal=app_authorize, client=CeoIngressWorkspaceClient(svc.ceo_ingress_socket_path)))
-            # Exercise the actual existing AppSettings sibling mount as well.
-            from integrations.mastermind_executive_app.app import AppSettings, create_app
+            # Exercise the installed UID458 outer dispatcher and incumbent audit gate.
+            from integrations.mastermind_executive_app.app import AppSettings
             from integrations.mastermind_executive_app.gateway import AppPolicies
+            from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
+            from integrations.executive_mcp.server import (
+                AuditedWorkspaceApp, build_executive_mcp_app, _mounted_lifespan,
+            )
             from tests.test_mastermind_executive_app_asgi import _read_policy, _submit_policy, _FakeJwksCache
-            mounted = create_app(AppSettings(policies=AppPolicies(read=_read_policy(), submit=_submit_policy()),
+            class Sink:
+                def __init__(self): self.events = []
+                def emit(self, event): self.events.append(event)
+            sink = Sink()
+            verifier = MastermindTokenVerifier(authenticator=authenticator, policy=authenticator.policy,
+                now=lambda: NOW, audit_sink=sink)
+            mounted = build_executive_mcp_app(AppSettings(
+                policies=AppPolicies(read=_read_policy(), submit=_submit_policy()),
                 mastermind_root=tmp_path, macro_root_flag=None, environ={}, ceo_ingress_socket_path=svc.ceo_ingress_socket_path,
-                read_from_ceo_ingress=True, jwks_cache=_FakeJwksCache(rsa_key), clock=lambda: NOW, workspace_app=workspace))
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=mounted), base_url="http://fixture") as client:
-                for bad in (None, _workspace_token(rsa_key, client_id="foreign"),
-                            _workspace_token(rsa_key, scope="mastermind.executive.read"),
-                            _workspace_token(rsa_key, sub="foreign"), _workspace_token(rsa_key, resource="https://wrong.example.test")):
-                    response = await client.get("/workspace/programs/current", headers={} if bad is None else {"Authorization": "Bearer " + bad})
-                    assert response.status_code in (401, 403)
-                    assert counters == {"cache": 0, "factory": 0}
-                headers = {"Authorization": "Bearer " + token}
-                programs = await client.get("/workspace/programs/current", headers=headers)
-                assert programs.status_code == 200, programs.text
-                assert programs.json()["control_room"] == document
-                entries = namespace.entries
-                from control_plane import executive_runtime as er
-                traces = []
-                original_connect = er.sqlite3.connect
-                def connect(*args, **kwargs):
-                    connection = original_connect(*args, **kwargs)
-                    connection.set_trace_callback(traces.append)
-                    return connection
-                monkeypatch.setattr(er.sqlite3, "connect", connect)
-                monkeypatch.setattr(runtime.jobs, "list_jobs", lambda *a, **k: pytest.fail("unbounded Jobs"))
-                monkeypatch.setattr(runtime.events, "list_events", lambda *a, **k: pytest.fail("legacy Event history"))
-                monkeypatch.setattr(runtime.attempts, "list_attempts", lambda *a, **k: pytest.fail("unbounded Attempts"))
-                response = await client.get("/workspace/mission/current", params={"work_ref": "WS:ONE", "root_job_id": job_id}, headers=headers)
-                assert response.status_code == 200, response.text
-                result = response.json()
-                assert result["schema"] == "mastermind.mission_workspace.v2"
-                assert result["read_state"]["state"] == "CURRENT", result["source"]
-                assert result["acceptance"]["state"] == "NOT_PROJECTED"
-                assert result["source"]["owner_observation"]["runtime"]["state"] == "SAME"
-                assert namespace.entries == entries + 1 and namespace.entries == namespace.exits and not namespace.active
-                statements = [s.strip().upper() for s in traces]
-                assert statements.count("PRAGMA DATA_VERSION") == 2
-                assert len(statements) <= 30, statements
-                assert not any(s.startswith(("INSERT", "UPDATE", "DELETE")) for s in statements)
-                source_reads = counters.copy()
-                malformed = await client.get("/workspace/mission/current?work_ref=WS:ONE&work_ref=WS:TWO&root_job_id=" + job_id, headers=headers)
-                assert malformed.status_code == 400 and counters == source_reads
-                slots["profiles"]["web"]["enabled"] = False
-                refused = await client.get("/workspace/programs/current", headers=headers)
-                assert refused.status_code == 403 and counters == source_reads
-            await mounted.aclose()
+                read_from_ceo_ingress=True, jwks_cache=_FakeJwksCache(rsa_key), clock=lambda: NOW),
+                audit_sink=sink, workspace_app=AuditedWorkspaceApp(workspace, verifier))
+            async with _mounted_lifespan(mounted):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=mounted), base_url="https://mcp.mastermind-x.com") as client:
+                    for bad in (None, _workspace_token(rsa_key, client_id="foreign"),
+                                _workspace_token(rsa_key, scope="mastermind.executive.read"),
+                                _workspace_token(rsa_key, sub="foreign"), _workspace_token(rsa_key, resource="https://wrong.example.test")):
+                        response = await client.get("/workspace/programs/current", headers={} if bad is None else {"Authorization": "Bearer " + bad})
+                        assert response.status_code in (401, 403)
+                        assert counters == {"cache": 0, "factory": 0}
+                    headers = {"Authorization": "Bearer " + token}
+                    programs = await client.get("/workspace/programs/current", headers=headers)
+                    assert programs.status_code == 200, programs.text
+                    assert programs.json()["control_room"] == document
+                    entries = namespace.entries
+                    from control_plane import executive_runtime as er
+                    traces = []
+                    original_connect = er.sqlite3.connect
+                    def connect(*args, **kwargs):
+                        connection = original_connect(*args, **kwargs)
+                        connection.set_trace_callback(traces.append)
+                        return connection
+                    monkeypatch.setattr(er.sqlite3, "connect", connect)
+                    monkeypatch.setattr(runtime.jobs, "list_jobs", lambda *a, **k: pytest.fail("unbounded Jobs"))
+                    monkeypatch.setattr(runtime.events, "list_events", lambda *a, **k: pytest.fail("legacy Event history"))
+                    monkeypatch.setattr(runtime.attempts, "list_attempts", lambda *a, **k: pytest.fail("unbounded Attempts"))
+                    response = await client.get("/workspace/mission/current", params={"work_ref": "WS:ONE", "root_job_id": job_id}, headers=headers)
+                    assert response.status_code == 200, response.text
+                    result = response.json()
+                    assert result["schema"] == "mastermind.mission_workspace.v2"
+                    assert result["read_state"]["state"] == "CURRENT", result["source"]
+                    assert result["acceptance"]["state"] == "NOT_PROJECTED"
+                    assert result["source"]["owner_observation"]["runtime"]["state"] == "SAME"
+                    assert namespace.entries == entries + 1 and namespace.entries == namespace.exits and not namespace.active
+                    statements = [s.strip().upper() for s in traces]
+                    assert statements.count("PRAGMA DATA_VERSION") == 2
+                    assert len(statements) <= 30, statements
+                    assert not any(s.startswith(("INSERT", "UPDATE", "DELETE")) for s in statements)
+                    source_reads = counters.copy()
+                    malformed = await client.get("/workspace/mission/current?work_ref=WS:ONE&work_ref=WS:TWO&root_job_id=" + job_id, headers=headers)
+                    assert malformed.status_code == 400 and counters == source_reads
+                    slots["profiles"]["web"]["enabled"] = False
+                    refused = await client.get("/workspace/programs/current", headers=headers)
+                    assert refused.status_code == 403 and counters == source_reads
+            assert any(event.policy_id == authenticator.policy.policy_id and event.accepted for event in sink.events)
         finally:
             await svc.close()
     asyncio.run(run())

@@ -1618,6 +1618,9 @@ class CeoIngressAppBinding:
     armed: bool
     grounding_provider: ceo_ingress.GroundingProvider
     read_provider: Any | None = None
+    content_provider_factory: Callable[[Runtime], Any] | None = None
+    steward_provider_factory: Callable[[Runtime], Any] | None = None
+    workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -1655,6 +1658,7 @@ class ExecutiveControlService:
         ) = None,
         ceo_ingress_armed: bool = False,
         ceo_ingress_app_binding: CeoIngressAppBinding | None = None,
+        workspace_control_room: Any | None = None,
         ceo_ingress_activated_socket: socket.socket | None = None,
         terminal_return_projector: TerminalReturnProjector | None = None,
         terminal_return_projector_factory: (
@@ -1672,6 +1676,7 @@ class ExecutiveControlService:
     ) -> None:
         self.config = config
         self._runtime_factory = runtime_factory
+        self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
         self._operator_supervisor_factory = operator_supervisor_factory
         self._operator_identity_verifier = operator_identity_verifier
@@ -2639,6 +2644,8 @@ class ExecutiveControlService:
                 ):
                     self._service_state = "QUARANTINED"
                 await self._replay_terminal_returns_on_startup()
+            if self._workspace_control_room is not None:
+                await self._workspace_control_room.start()
             if (
                 self._ceo_ingress_socket_path is not None
                 or self._dialogue_observation_socket_path is not None
@@ -2822,6 +2829,8 @@ class ExecutiveControlService:
         if ceo_ingress_tasks:
             await asyncio.gather(*ceo_ingress_tasks, return_exceptions=True)
         self._ceo_ingress_tasks.clear()
+        if self._workspace_control_room is not None:
+            await self._workspace_control_room.close()
         if self._ceo_ingress_app_binding is not None:
             read_provider = self._ceo_ingress_app_binding.read_provider
             if read_provider is not None:
@@ -2927,7 +2936,8 @@ class ExecutiveControlService:
                     "platform exposes no trusted local peer uid",
                 )
                 return
-            if peer not in self._allowed_peer_uids():
+            control_peer = peer == os.geteuid()
+            if peer not in self._allowed_peer_uids() and not control_peer:
                 await self._send_error(writer, "peer_denied", "peer uid is not authorized")
                 return
             try:
@@ -2944,6 +2954,41 @@ class ExecutiveControlService:
                 request = json.loads(raw.decode("utf-8", errors="strict"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 await self._send_error(writer, "invalid_json", "request is not valid UTF-8 JSON")
+                return
+            lifecycle_commands = {"content-observer-enroll": "enroll", "content-observer-status": "status", "content-observer-revoke": "revoke"}
+            if isinstance(request, dict) and isinstance(request.get("command"), str) and request["command"] in lifecycle_commands:
+                if not control_peer:
+                    await self._send_error(writer, "peer_denied", "content enrollment requires control uid")
+                    return
+                try:
+                    command, args = self._request(request)
+                    # profile_key is optional; None means legacy single-profile
+                    profile_key = None
+                    if "profile_key" in args:
+                        from integrations.executive_content_contract import ContentProfileKey
+                        pk = args["profile_key"]
+                        if isinstance(pk, str) and pk in (ContentProfileKey.web, ContentProfileKey.mac):
+                            profile_key = ContentProfileKey(pk)
+                        else:
+                            raise ValueError("INVALID_REQUEST")
+                        self._exact_args(args, {"profile_key"})
+                    else:
+                        self._exact_args(args, set())
+                    binding = self._ceo_ingress_app_binding
+                    if (binding is None or binding.content_provider_factory is None
+                            or self._service_state not in {"READY", "AWAITING_CANARY"}):
+                        raise ValueError("CONTENT_UNAVAILABLE")
+                    provider = binding.content_provider_factory(self._require_runtime())
+                    result = await getattr(provider, lifecycle_commands[command])(profile_key)
+                    from integrations.executive_content_contract import digest
+                    public = {"status": result["status"], "binding_digest": digest({
+                        "turn_key": result.get("turn_key"), "grant_generation": result.get("grant_generation")})}
+                    await self._send(writer, {"ok": True, "result": public})
+                except Exception:
+                    await self._send_error(writer, "content_observer_refused", "content observer action refused")
+                return
+            if peer not in self._allowed_peer_uids():
+                await self._send_error(writer, "peer_denied", "peer uid is not authorized")
                 return
             try:
                 result = await self._dispatch_request(request)
@@ -3671,15 +3716,18 @@ class ExecutiveControlService:
         )
 
     async def _send_ceo_ingress_response(
-        self, writer: asyncio.StreamWriter, payload: Mapping[str, Any]
+        self, writer: asyncio.StreamWriter, payload: Mapping[str, Any],
+        *, response_ceiling: int = ceo_ingress.MAX_RESPONSE_BYTES,
     ) -> None:
         """Dedicated bounded sender (§7.4) — the 32 KiB ingress ceiling, never
         the generic ``_send()``'s ``ServiceConfig.max_response_bytes``.  A
         successful canonical receipt above the ingress bound is a protocol/
-        backend defect and refuses; it is never truncated."""
+        backend defect and refuses; it is never truncated.  ``response_ceiling``
+        widens that bound only for the installed App's framed content pages,
+        whose own contract ceiling is ``MAX_PAGE_BYTES``."""
 
         raw = _canonical_json(payload)
-        if len(raw) > ceo_ingress.MAX_RESPONSE_BYTES:
+        if len(raw) > response_ceiling:
             raw = _canonical_json(
                 {
                     "ok": False,
@@ -3806,6 +3854,40 @@ class ExecutiveControlService:
                 await self._send_ceo_ingress_error(
                     writer, "invalid_json", "request is not valid JSON"
                 )
+                return
+            from integrations.mastermind_workspace_app.contract import FRAME_SCHEMA, MAX_RESPONSE_BYTES as WORKSPACE_MAX_RESPONSE_BYTES, error as workspace_error, bounded_canonical as workspace_encode
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") == FRAME_SCHEMA:
+                factory = app_binding.workspace_read_provider_factory
+                if factory is None or self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                    result = workspace_error("source_unavailable", 503)
+                else:
+                    try:
+                        result = await factory(self._require_runtime()).handle_frame(parsed)
+                    except Exception:
+                        result = workspace_error("source_unavailable", 503)
+                    if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                        result = workspace_error("source_unavailable", 503)
+                try:
+                    workspace_encode(result, limit=WORKSPACE_MAX_RESPONSE_BYTES - 1)
+                except (TypeError, ValueError):
+                    result = workspace_error("source_unavailable", 503)
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=WORKSPACE_MAX_RESPONSE_BYTES)
+                return
+            from integrations.executive_content_contract import ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA, MAX_PAGE_BYTES
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA}:
+                factory = (app_binding.steward_provider_factory if parsed["schema"] == STEWARD_SCHEMA
+                           else app_binding.content_provider_factory)
+                if factory is None or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                    result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
+                else:
+                    try:
+                        result = await factory(self._require_runtime()).handle_frame(parsed)
+                    except Exception:
+                        result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
+                    if self._service_state not in {"READY", "AWAITING_CANARY"}:
+                        result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=(
+                    MAX_PAGE_BYTES if parsed["schema"] == PAGE_SCHEMA else ceo_ingress.MAX_RESPONSE_BYTES))
                 return
             if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
                 ceo_ingress.APP_READ_SCHEMA, ceo_ingress.APP_GROUNDING_SCHEMA,

@@ -574,6 +574,10 @@ class ServerConfig:
     #: gate early. The envelope's ``refresh_in_flight`` key stays a bool,
     #: derived as ``count > 0`` in :func:`_cached_state_snapshot`.
     state_refreshes_in_flight: int = 0
+    # Hosted lifecycle drains actual refresh handles before retiring owners.
+    state_refresh_threads: set = field(default_factory=set)
+    state_stopping: bool = False
+    workspace_refresh_on_read: bool = True
     #: Cache max-age (seconds, monotonic clock) before a GET kicks a
     #: background recompose. CLI flag ``--state-ttl``.
     state_ttl: float = 120.0
@@ -661,6 +665,8 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
     error) below.
     """
     with config.state_lock:
+        if config.state_stopping:
+            raise RuntimeError("control room owner is stopping")
         config.state_compose_seq += 1
         gen = config.state_compose_seq
         if explicit:
@@ -670,6 +676,24 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
 
 
 def _refresh_state_cache(
+    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
+) -> None:
+    thread = threading.current_thread()
+    with config.state_lock:
+        config.state_refresh_threads.add(thread)
+        stopping = config.state_stopping
+        if stopping:
+            config.state_refreshes_in_flight -= 1
+    try:
+        if not stopping:
+            _refresh_state_cache_impl(config, timeout=timeout, generation=generation,
+                                      include_capabilities=include_capabilities)
+    finally:
+        with config.state_lock:
+            config.state_refresh_threads.discard(thread)
+
+
+def _refresh_state_cache_impl(
     config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
 ) -> None:
     """Compose a fresh doc (+ capability census, when requested) for
@@ -786,7 +810,7 @@ def _maybe_start_background_refresh(config: ServerConfig) -> None:
         composed_monotonic = config.state_cache.get("composed_monotonic")
         age = None if composed_monotonic is None else time.monotonic() - composed_monotonic
         is_stale = age is None or age > config.state_ttl
-        if not is_stale or config.state_refreshes_in_flight:
+        if config.state_stopping or not is_stale or config.state_refreshes_in_flight:
             return
         config.state_compose_seq += 1
         gen = config.state_compose_seq
@@ -799,7 +823,18 @@ def _maybe_start_background_refresh(config: ServerConfig) -> None:
         },
         daemon=True,
     )
-    thread.start()
+    with config.state_lock:
+        if config.state_stopping:
+            config.state_refreshes_in_flight -= 1
+            return
+        config.state_refresh_threads.add(thread)
+        # Start under the same lock so shutdown never misses a reserved handle.
+        try:
+            thread.start()
+        except BaseException:
+            config.state_refresh_threads.discard(thread)
+            config.state_refreshes_in_flight -= 1
+            raise
 
 
 def _ensure_capabilities_cached(config: ServerConfig) -> None:
@@ -1155,8 +1190,9 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         cheap dict lookup, not part of the composition cache).
         """
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        _ensure_capabilities_cached(config)
-        _maybe_start_background_refresh(config)
+        if config.workspace_refresh_on_read:
+            _ensure_capabilities_cached(config)
+            _maybe_start_background_refresh(config)
         snapshot = _cached_state_snapshot(config)
         body = {
             "control_room": snapshot["doc"],
