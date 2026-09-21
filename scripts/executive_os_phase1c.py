@@ -1310,6 +1310,7 @@ def _service_from_config(
             return ExecutiveTerminalReturnProjector(
                 RuntimeTerminalReturnBindingResolver(runtime_provider),
                 socket_path=socket_path,
+                result_synopsis_version="v2",
             )
 
         terminal_return_kwargs["terminal_return_projector_factory"] = (

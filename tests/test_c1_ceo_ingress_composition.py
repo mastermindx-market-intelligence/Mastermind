@@ -235,3 +235,70 @@ def test_app_boot_python_without_app_binding_is_refused(tmp_path):
     raw['ceo_ingress_app_boot_python'] = '/Library/Application Support/MastermindExecutive/capacity-runtimes/example/bin/python3.12'
     with pytest.raises(module.ServiceError, match='complete App binding'):
         module.load_control_config(_write_config(tmp_path, raw))
+
+
+@pytest.mark.parametrize("armed", [None, False, True])
+def test_terminal_return_factory_selects_v2_only_when_explicitly_armed(
+    monkeypatch, tmp_path, armed,
+):
+    """Exercise the production composition without starting a service or sending."""
+    from integrations.slack_agent_dialogue import executive_terminal_return_projector as projection
+    from tests.test_slack_agent_dialogue_executive_terminal_return_projector import (
+        _binding, _candidate,
+    )
+
+    module = _module()
+    raw = _raw(tmp_path)
+    if armed is not None:
+        raw["terminal_return_armed"] = armed
+        raw["terminal_return_socket_path"] = module._CANONICAL_AGENT_RELAY_SOCKET
+    captured = {}
+    monkeypatch.setattr(
+        importlib.import_module("control_plane.executive_worker_broker"),
+        "WorkerBrokerClient", lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(module, "activate_launchd_socket", lambda _name: object())
+
+    class CapturedService:
+        def __init__(self, config, **kwargs):
+            captured["config"] = config
+            captured.update(kwargs)
+
+    monkeypatch.setattr(module, "ExecutiveControlService", CapturedService)
+    module._service_from_config(raw)
+    assert captured["config"].terminal_return_armed is (armed is True)
+    assert captured["config"].ceo_submit_armed is False
+    assert captured["config"].coo_autonomy_armed is False
+    assert captured["ceo_ingress_armed"] is False
+    if armed is not True:
+        assert "terminal_return_projector_factory" not in captured
+        return
+
+    candidate = _candidate()
+    provider_calls = []
+    runtime_marker = object()
+
+    def runtime_provider():
+        provider_calls.append(True)
+        return runtime_marker
+
+    projector = captured["terminal_return_projector_factory"](
+        runtime_provider, raw["terminal_return_socket_path"],
+    )
+    assert type(projector) is projection.ExecutiveTerminalReturnProjector
+    assert type(projector._binding_resolver) is projection.RuntimeTerminalReturnBindingResolver
+    assert projector._socket_path == module._CANONICAL_AGENT_RELAY_SOCKET
+    assert provider_calls == []  # Construction is inert.
+
+    def resolve_fixture(resolver, observed):
+        assert observed is candidate
+        assert resolver._runtime_provider() is runtime_marker
+        return _binding(candidate)
+
+    monkeypatch.setattr(projection.RuntimeTerminalReturnBindingResolver, "resolve", resolve_fixture)
+    _context, _thread, message = projector._resolve(candidate)
+    payload = json.loads(message["body"]["result"])
+    assert payload["schema"] == "mastermind.executive_terminal_result_synopsis/v2"
+    assert payload["root_job_id"] == candidate.root_job_id
+    assert message["message_key"] == candidate.message_key
+    assert provider_calls == [True]
