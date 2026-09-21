@@ -1424,3 +1424,466 @@ def test_installed_collector_refuses_after_cleanup_exhausts_budget(tmp_path, mon
 
     assert cleaned_roots
     assert all(not root.exists() for root in cleaned_roots)
+
+
+# ---------------------------------------------------------------------------
+# Bounded same-invocation overlap of one snapshot's two full-proof branches
+# ---------------------------------------------------------------------------
+
+
+def _overlappable_repo(tmp_path: Path) -> tuple[Path, str]:
+    """A clean real checkout exercising every tracked leaf kind and ancestry."""
+    repo = tmp_path / "overlappable"
+    repo.mkdir()
+    (repo / "deep/nested").mkdir(parents=True)
+    (repo / "plain.txt").write_text("first\n", encoding="utf-8")
+    (repo / "deep/nested/leaf.txt").write_text("leaf\n", encoding="utf-8")
+    executable = repo / "run.sh"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    (repo / "deep/link").symlink_to("nested/leaf.txt")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    _git(repo, "config", "user.email", "test@example.invalid")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "first")
+    (repo / "plain.txt").write_text("second\n", encoding="utf-8")
+    _git(repo, "add", "plain.txt")
+    _git(repo, "commit", "-q", "-m", "second")
+    return repo, _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _proof_observations(
+    monkeypatch, *, timeout: float = 10.0,
+    object_failure: BaseException | None = None,
+    inventory_failure: BaseException | None = None,
+    on_enter=None,
+) -> dict[str, object]:
+    """Instrument the two real full-proof branches with an entry rendezvous.
+
+    Each branch records that it was entered and then waits, under a finite
+    timeout, for the other branch to have been entered as well, before
+    delegating to the real implementation.  Every object and every raw entry is
+    therefore still checked exactly once, and a serial implementation cannot
+    satisfy the rendezvous: the discriminator is a synchronization fact, not a
+    sleep-based speed measurement.
+    """
+    import threading
+    from integrations.executive_mcp import installed
+
+    real_objects = installed._require_git_object_types
+    real_inventory = installed._worktree_path_sets
+    entered = {"objects": threading.Event(), "inventory": threading.Event()}
+    announced = {"objects": False, "inventory": False}
+    state: dict[str, object] = {
+        "overlaps": [],
+        "threads": set(),
+        "object_maps": [],
+        "inventories": [],
+        "entered": set(),
+        "settled": set(),
+    }
+
+    def _rendezvous(mine: str, theirs: str) -> None:
+        state["threads"].add(threading.get_ident())
+        # The object proof enters twice (commits, then blobs); only its first
+        # entry takes part in the rendezvous.
+        if announced[mine]:
+            return
+        announced[mine] = True
+        state["entered"].add(mine)
+        if on_enter is not None:
+            on_enter(mine)
+        entered[mine].set()
+        if entered[theirs].wait(timeout=timeout):
+            state["overlaps"].append(f"{mine}+{theirs}")
+
+    def object_probe(*args, **kwargs):
+        try:
+            _rendezvous("objects", "inventory")
+            if object_failure is not None:
+                raise object_failure
+            mapping = args[1] if len(args) > 1 else kwargs["expected_types"]
+            state["object_maps"].append(dict(mapping))
+            return real_objects(*args, **kwargs)
+        finally:
+            state["settled"].add("objects")
+
+    def inventory_probe(*args, **kwargs):
+        try:
+            _rendezvous("inventory", "objects")
+            if inventory_failure is not None:
+                raise inventory_failure
+            observed = real_inventory(*args, **kwargs)
+            state["inventories"].append(observed)
+            return observed
+        finally:
+            state["settled"].add("inventory")
+
+    monkeypatch.setattr(installed, "_require_git_object_types", object_probe)
+    monkeypatch.setattr(installed, "_worktree_path_sets", inventory_probe)
+    return state
+
+
+def _tracked_leaf_paths(repo: Path, head: str) -> set[str]:
+    return {
+        record.partition("\t")[2]
+        for record in _git(
+            repo, "ls-tree", "-r", "-z", "--full-tree", head,
+        ).stdout.split("\0")
+        if record
+    }
+
+
+def test_clean_snapshot_overlaps_full_object_closure_with_full_inventory(
+    tmp_path: Path, monkeypatch,
+):
+    """Real object proof and complete raw inventory overlap inside one call."""
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+
+    repo, head = _overlappable_repo(tmp_path)
+    state = _proof_observations(monkeypatch)
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    captures: list = []
+    observed = _clean_git_snapshot(
+        repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+        include_seal=True, snapshot_capture=captures,
+    )
+
+    assert observed[0] == head
+    assert sorted(state["overlaps"]) == ["inventory+objects", "objects+inventory"]
+    assert len(state["threads"]) == 2
+
+    # Both branches stay complete: every expected object exactly once ...
+    expected_commits = set(_git(repo, "rev-list", "--parents", head).stdout.split())
+    expected_blobs = {
+        record.partition("\t")[0].split()[2]
+        for record in _git(
+            repo, "ls-tree", "-r", "-z", "--full-tree", head,
+        ).stdout.split("\0")
+        if record
+    }
+    object_maps = state["object_maps"]
+    assert len(object_maps) == 2
+    checked = [object_id for mapping in object_maps for object_id in mapping]
+    assert len(checked) == len(set(checked))
+    assert set(checked) == expected_commits | expected_blobs
+    assert object_maps[1] == {object_id: "blob" for object_id in expected_blobs}
+    assert set(object_maps[0]) == expected_commits
+
+    # ... and one full raw inventory, with no leaf or directory dropped.
+    inventories = state["inventories"]
+    assert len(inventories) == 1
+    leaves, directories, _worktree_seal = inventories[0]
+    tracked = _tracked_leaf_paths(repo, head)
+    assert set(leaves) == tracked
+    assert leaves["deep/link"] == "symlink"
+    assert leaves["run.sh"] == "regular"
+    assert leaves["plain.txt"] == "regular"
+    assert directories == {"deep", "deep/nested"}
+    assert len(captures) == 1
+
+
+def test_clean_snapshot_overlap_preserves_exact_head_and_generation_seal(
+    tmp_path: Path, monkeypatch,
+):
+    """The overlapped proof binds the exact HEAD and seal a direct read binds."""
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _direct_git_directory,
+        _git_generation_seal,
+        _installed_child_env,
+    )
+
+    repo, head = _overlappable_repo(tmp_path)
+    state = _proof_observations(monkeypatch)
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    captures: list = []
+    observed = _clean_git_snapshot(
+        repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+        include_seal=True, snapshot_capture=captures,
+    )
+
+    _leaves, _directories, worktree_seal = state["inventories"][0]
+    assert observed == (head, _git_generation_seal(
+        _direct_git_directory(repo, label="Mastermind source"),
+        worktree_seal=worktree_seal, deadline=None, label="Mastermind source",
+    ))
+    assert len(captures) == 1
+    assert captures[0].root == repo.resolve()
+    assert captures[0].head == head
+    assert captures[0].worktree_seal == worktree_seal
+    assert captures[0].generation_seal == observed[1]
+
+
+def test_clean_snapshot_overlap_still_refuses_untracked_ignored_and_empty(
+    tmp_path: Path, monkeypatch,
+):
+    """Raw inventory completeness survives the overlap; drift is still refused."""
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _head = _overlappable_repo(tmp_path)
+    (repo / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+    (repo / "empty").mkdir()
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-q", "-m", "ignore")
+    ignored = repo / "ignored"
+    ignored.mkdir()
+    (ignored / "payload.txt").write_text("ignored\n", encoding="utf-8")
+    (repo / "untracked.txt").write_text("untracked\n", encoding="utf-8")
+
+    state = _proof_observations(monkeypatch)
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    captures: list = []
+    with pytest.raises(GatewayError, match="worktree path set differs"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+            include_seal=True, snapshot_capture=captures,
+        )
+
+    assert len(state["inventories"]) == 1
+    leaves, directories, _worktree_seal = state["inventories"][0]
+    assert leaves["untracked.txt"] == "regular"
+    assert leaves["ignored/payload.txt"] == "regular"
+    assert "empty" in directories
+    assert captures == []
+
+
+def test_clean_snapshot_object_closure_failure_blocks_inventory_use(
+    tmp_path: Path, monkeypatch,
+):
+    """An object-proof failure is typed and leaves no captured snapshot."""
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _head = _overlappable_repo(tmp_path)
+    refusal = GatewayError(
+        "backend_unavailable",
+        "installed Mastermind source repository objects are incomplete",
+    )
+    state = _proof_observations(monkeypatch, object_failure=refusal)
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    captures: list = []
+    with pytest.raises(GatewayError, match="repository objects are incomplete"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+            include_seal=True, snapshot_capture=captures,
+        )
+
+    # The concurrent inventory still reached a terminal state before the refusal.
+    assert "inventory" in state["settled"]
+    assert len(state["inventories"]) == 1
+    assert state["object_maps"] == []
+    assert captures == []
+
+
+def test_clean_snapshot_inventory_failure_blocks_object_use(
+    tmp_path: Path, monkeypatch,
+):
+    """An inventory failure keeps its canonical wrapping and blocks the proof."""
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    repo, _head = _overlappable_repo(tmp_path)
+    state = _proof_observations(
+        monkeypatch, inventory_failure=NotADirectoryError(21, "root replaced"),
+    )
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    captures: list = []
+    with pytest.raises(GatewayError, match="worktree observation failed"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+            include_seal=True, snapshot_capture=captures,
+        )
+
+    # The concurrent object proof still settled before the refusal surfaced.
+    assert len(state["object_maps"]) == 2
+    assert state["inventories"] == []
+    assert captures == []
+
+
+def test_clean_snapshot_overlap_cannot_resurrect_expired_deadline(
+    tmp_path: Path, monkeypatch,
+):
+    """Exhaustion reached inside the proof pair stays typed and never succeeds.
+
+    The canonical outcome is the object-proof refusal: the deadline check feeds
+    the bounded runner timeout, so the object proof converts it exactly as it
+    does for any other bounded-runner failure.
+    """
+    from integrations.executive_mcp import installed
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+
+    repo, _head = _overlappable_repo(tmp_path)
+    real_monotonic = installed.time.monotonic
+    clock = {"value": real_monotonic()}
+
+    def exhaust_budget(branch: str) -> None:
+        # The cumulative deadline runs out exactly when the proof pair runs, so
+        # the branch-level check is what refuses.
+        if branch == "objects":
+            clock["value"] += 3600.0
+
+    def fake_monotonic() -> float:
+        return clock["value"]
+
+    monkeypatch.setattr(installed.time, "monotonic", fake_monotonic)
+    state = _proof_observations(monkeypatch, on_enter=exhaust_budget)
+    env = _installed_child_env(code_root=repo, macro_root=repo)
+    captures: list = []
+    deadline = fake_monotonic() + 60.0
+    from integrations.executive_mcp.schemas import GatewayError
+
+    with pytest.raises(GatewayError, match="repository objects are incomplete"):
+        _clean_git_snapshot(
+            repo, runner=_default_packet_runner, env=env, label="Mastermind source",
+            include_seal=True, snapshot_capture=captures, deadline=deadline,
+        )
+
+    # The deadline that ran out is still the deadline that ran out, the blob
+    # proof never completed, and no snapshot survived the exhausted budget.
+    assert deadline < installed.time.monotonic()
+    assert not any(
+        set(mapping.values()) == {"blob"} for mapping in state["object_maps"]
+    )
+    assert captures == []
+    assert state["inventories"] == []
+
+
+def test_installed_collector_refuses_without_child_when_proof_branch_fails(
+    tmp_path: Path, monkeypatch,
+):
+    """A failed proof branch stops the collector before any child launch."""
+    import json
+    from integrations.executive_mcp import installed
+    from integrations.executive_mcp.installed import InstalledBootPacketCollector
+    from integrations.executive_mcp.schemas import GatewayError
+
+    collector, source, macro, source_sha, macro_sha = _direct_pair_collector(tmp_path)
+    child_seen = False
+
+    def runner(argv, **kwargs):
+        nonlocal child_seen
+        if str(argv[0]) != "git":
+            child_seen = True
+            return {
+                "code": 0,
+                "stdout": json.dumps({
+                    "schema": "mastermind.ceo_boot_packet.v1",
+                    "mastermind": {"root": str(source), "sha": source_sha,
+                                   "branch": "HEAD"},
+                    "macro": {"root": str(macro), "sha": macro_sha,
+                              "resolved_via": "flag", "candidates_tried": []},
+                }),
+                "stderr": "", "timed_out": False,
+                "limit_exceeded": False, "invalid_utf8": False,
+            }
+        return installed._default_packet_runner(argv, **kwargs)
+
+    refusal = GatewayError(
+        "backend_unavailable", "installed forced proof-branch refusal",
+    )
+
+    def object_probe(*_args, **_kwargs):
+        raise refusal
+
+    monkeypatch.setattr(installed, "_require_git_object_types", object_probe)
+    collector = InstalledBootPacketCollector(
+        source_root=source, macro_root=macro,
+        code_root=tmp_path / "immutable-release",
+        python_executable=tmp_path / "python", runner=runner,
+        expected_source_sha=source_sha,
+    )
+    with pytest.raises(GatewayError, match="forced proof-branch refusal"):
+        collector(
+            repo_root=source, macro_root_flag=str(macro), now=None, timeout=20.0,
+        )
+    assert child_seen is False
+
+
+def test_installed_collector_refuses_live_macro_mutation_made_during_child(
+    tmp_path: Path,
+):
+    """A real byte mutation during the child fails the final generation check."""
+    import json
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    source_parent = tmp_path / "source-parent"
+    source_parent.mkdir()
+    repo, _tracked = _clean_repo(source_parent)
+    macro, macro_sha = _macro_sparse_fixture(tmp_path)
+    code = tmp_path / "immutable-release"
+    (code / "scripts").mkdir(parents=True)
+    python = tmp_path / "python"
+    python.write_text("fixture", encoding="utf-8")
+    source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    consumed = macro / "agentos/workstreams/WS-SPARSE.md"
+    materialized_roots: list[Path] = []
+    child_seen = False
+
+    def runner(argv, **kwargs):
+        nonlocal child_seen
+        argv_s = tuple(str(item) for item in argv)
+        if argv_s[0] != "git":
+            child_seen = True
+            materialized_roots.append(Path(argv_s[argv_s.index("--macro-root") + 1]))
+            # Real filesystem mutation of live Macro consumed bytes while the
+            # child is the only thing still running.
+            consumed.write_text(
+                consumed.read_text(encoding="utf-8") + "mutated\n",
+                encoding="utf-8",
+            )
+            return {
+                "code": 0,
+                "stdout": json.dumps({
+                    "schema": "mastermind.ceo_boot_packet.v1",
+                    "mastermind": {"root": str(repo), "sha": source_sha,
+                                   "branch": "HEAD"},
+                    "macro": {"root": str(materialized_roots[0]), "sha": macro_sha,
+                              "resolved_via": "flag", "candidates_tried": []},
+                }),
+                "stderr": "", "timed_out": False,
+                "limit_exceeded": False, "invalid_utf8": False,
+            }
+        return _default_packet_runner(argv, **kwargs)
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo, macro_root=macro, code_root=code,
+        python_executable=python, runner=runner, expected_source_sha=source_sha,
+    )
+    with pytest.raises(GatewayError, match="source changed during boot-packet read"):
+        collector(
+            repo_root=repo, macro_root_flag=str(macro), now=None, timeout=20.0,
+        )
+
+    assert child_seen is True
+    assert len(materialized_roots) == 1
+    assert materialized_roots[0] != macro
+    assert not materialized_roots[0].exists()
+    assert consumed.read_text(encoding="utf-8").endswith("mutated\n")

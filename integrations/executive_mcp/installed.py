@@ -780,6 +780,49 @@ def _content_paths_for_scope(paths: set[str], scope: str) -> set[str]:
     raise ValueError(f"unknown installed snapshot content scope: {scope}")
 
 
+def _overlap_full_proofs(
+    *, object_closure: Callable[[], Any] | None,
+    worktree_inventory: Callable[[], Any] | None,
+) -> tuple[Any, Any]:
+    """Run one snapshot's two independent full proofs, overlapping when both exist.
+
+    The complete repository object-closure check and the complete raw worktree
+    inventory read disjoint inputs, so within a single ``_clean_git_snapshot``
+    invocation they may share the wall clock on at most two local tasks.  Both
+    must reach a terminal state before either result is used, and a branch
+    failure is raised in the same branch order the serial proof used, so no
+    observation work is abandoned silently and nothing downstream starts early.
+    """
+    if object_closure is None or worktree_inventory is None:
+        return (
+            object_closure() if object_closure is not None else None,
+            worktree_inventory() if worktree_inventory is not None else None,
+        )
+
+    results: list[Any] = [None, None]
+    failure: BaseException | None = None
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=2, thread_name_prefix="mmx-installed-proof-pair",
+    )
+    try:
+        futures = [
+            executor.submit(branch) for branch in (object_closure, worktree_inventory)
+        ]
+        for index, future in enumerate(futures):
+            try:
+                results[index] = future.result()
+            except BaseException as exc:  # noqa: BLE001 - re-raised unchanged below
+                if failure is None:
+                    failure = exc
+    finally:
+        # Joins both workers: a surviving branch settles before the refusal is
+        # raised, and a late success can never be mistaken for a completed proof.
+        executor.shutdown(wait=True, cancel_futures=True)
+    if failure is not None:
+        raise failure
+    return results[0], results[1]
+
+
 def _clean_git_snapshot(
     path: Path, *, runner: PacketRunner, env: Mapping[str, str], label: str,
     content_scope: str = "all", include_seal: bool = False,
@@ -928,7 +971,7 @@ def _clean_git_snapshot(
     # Historical trees/blobs are not consumed by installed reads and can number in
     # the millions; current HEAD bytes are instead bound by the complete ls-tree
     # inventory and a second bounded batch over every current blob.
-    if verify_repository_closure:
+    def _object_closure() -> None:
         _require_git_object_types(
             path, {object_id: "commit" for object_id in ancestry_commits},
             runner=runner, env=env, deadline=deadline, label=label,
@@ -937,6 +980,25 @@ def _clean_git_snapshot(
             path, {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()},
             runner=runner, env=env, deadline=deadline, label=label,
         )
+
+    def _worktree_inventory() -> tuple[dict[str, str], set[str], str]:
+        try:
+            return _worktree_path_sets(path, deadline=deadline, label=label)
+        except (OSError, TimeoutError) as exc:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} worktree observation failed"
+            ) from exc
+
+    # The exact HEAD/tree and both complete inventories are decoded above, so the
+    # object closure and the raw path/metadata enumeration are independent and
+    # overlap for the rest of this one invocation.  Path-set comparison, content
+    # verification, seal capture and materialization all wait for both.
+    _object_proof, (actual_types, actual_directories, metadata_seal) = (
+        _overlap_full_proofs(
+            object_closure=_object_closure if verify_repository_closure else None,
+            worktree_inventory=_worktree_inventory,
+        )
+    )
 
     all_tree_directories = _tree_directory_paths(set(expected))
     if admitted_worktree_files is None and admitted_worktree_directories is None:
@@ -962,14 +1024,6 @@ def _clean_git_snapshot(
         rel: ("symlink" if expected[rel][0] == "120000" else "regular")
         for rel in expected_leaves
     }
-    try:
-        actual_types, actual_directories, metadata_seal = _worktree_path_sets(
-            path, deadline=deadline, label=label,
-        )
-    except (OSError, TimeoutError) as exc:
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} worktree observation failed"
-        ) from exc
     if actual_types != expected_types or actual_directories != expected_directories:
         raise GatewayError("backend_unavailable", f"installed {label} worktree path set differs")
     try:
