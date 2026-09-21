@@ -55,6 +55,7 @@ def settings(rsa_key, tmp_path, short_socket_root):
     (macro / "scripts").mkdir(parents=True)
     (macro / "scripts" / "agentos.py").write_text("")
     (macro / "agentos").mkdir()
+    (macro / "agentos" / ".keep").write_text("")
     fixture._git_repo(macro)
     return fixture._real_app_settings(
         rsa_key,
