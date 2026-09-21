@@ -15,8 +15,10 @@ included in events or public ``to_dict`` output.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import hashlib
+import fnmatch
 import hmac
 import importlib
 import json
@@ -24,7 +26,10 @@ import os
 import re
 import secrets
 import sqlite3
-from contextlib import contextmanager
+import threading
+from abc import ABC, abstractmethod
+from collections.abc import Iterator as IteratorABC, Sequence as SequenceABC
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -36,6 +41,7 @@ from common.commission_ref import (
     CommissionRefError,
     normalize_commission_ref,
 )
+
 from control_plane.executive_authority import (
     AuthorityDenied,
     AuthorityPolicyError,
@@ -64,6 +70,7 @@ from control_plane.executive_retry_safety import (
 from control_plane.operator_harness_contract import (
     AttemptExecutionMode,
     CandidateResult,
+    CheckpointObservation,
     EventCursor,
     LaunchDecision,
     NormalizedEvent,
@@ -88,8 +95,39 @@ from control_plane.operator_harness_contract import (
 from scripts.ohf.redaction import redact_evidence, redact_evidence_text
 
 SCHEMA_VERSION = 4
+
+
+def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
+    value_parts = value.split("/")
+
+    def _matches(pattern: str) -> bool:
+        pattern_parts = pattern.split("/")
+
+        def _walk(pattern_index: int, value_index: int) -> bool:
+            if pattern_index == len(pattern_parts):
+                return value_index == len(value_parts)
+            part = pattern_parts[pattern_index]
+            if part == "**":
+                return any(
+                    _walk(pattern_index + 1, candidate)
+                    for candidate in range(value_index, len(value_parts) + 1)
+                )
+            return (
+                value_index < len(value_parts)
+                and fnmatch.fnmatchcase(value_parts[value_index], part)
+                and _walk(pattern_index + 1, value_index + 1)
+            )
+
+        return _walk(0, 0)
+
+    return any(_matches(pattern) for pattern in patterns)
+
+
 OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION = (
     "mastermind.operator_harness_internal_generation_operation/v1"
+)
+OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION = (
+    "mastermind.operator_harness_checkpoint_operation/v1"
 )
 OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION = (
     "mastermind.operator_harness_reconcile_observation/v1"
@@ -99,6 +137,19 @@ OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION = (
 )
 DEFAULT_LEASE_SECONDS = 60
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
+MAX_RUNTIME_ACQUISITION_LIMIT = 2**9
+_MAX_RUNTIME_ACQUISITION_FILTER_IDS = 128
+_MAX_RUNTIME_ACQUISITION_IDENTIFIER_LENGTH = 128
+_MAX_RUNTIME_ACQUISITION_CURSOR_LENGTH = 4_096
+_RUNTIME_ACQUISITION_CURSOR_SCHEMA = "mastermind.executive_runtime_cursor/v1"
+_RUNTIME_ACQUISITION_CAPABILITY = object()
+BOUNDED_RUNTIME_DISCOVERY_SCHEMA = "mastermind.executive_runtime_root_discovery/v1"
+BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA = "mastermind.executive_runtime_root_snapshot/v1"
+RUNTIME_READ_OBSERVATION_SCHEMA = "mastermind.runtime_read_observation.v1"
+BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS = 64
+BOUNDED_RUNTIME_ROOT_MAX_CHILDREN = 16
+BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS = 20
+BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL = ((1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN) * BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS)
 _ROOT = Path(__file__).resolve().parent.parent
 _DB_RELATIVE_PATH = Path("data") / "control_plane" / "executive.sqlite3"
 _WORKER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -141,6 +192,13 @@ V2_HOST_EXECUTION_BINDING_KEYS = frozenset(
     }
     | OPERATOR_HARNESS_BINDING_KEYS
 )
+HOST_EXECUTION_BINDING_VERSION_KEY = "host_execution_binding_version"
+HOST_EXECUTION_BINDING_V2 = "mastermind.host_execution_binding/v2"
+HOST_EXECUTION_BINDING_V3 = "mastermind.host_execution_binding/v3"
+V3_HOST_EXECUTION_BINDING_KEYS = frozenset(
+    V2_HOST_EXECUTION_BINDING_KEYS | {"work_placement_union"}
+)
+WORK_PLACEMENT_UNION_MAX_MEMBERS = 8
 EXECUTIVE_DIALOGUE_SOURCE_SCHEMA = "mastermind.executive_dialogue_source/v1"
 _EXECUTIVE_DIALOGUE_SOURCE_KEYS = frozenset(
     {
@@ -507,7 +565,11 @@ def _normalise_capabilities(
     )
 
 
-def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
+def _normalise_constraints(
+    value: dict[str, Any] | None,
+    *,
+    host_admitted_placement_union: bool = False,
+) -> dict[str, Any]:
     if value is not None and not isinstance(value, dict):
         raise StateConflict("job constraints must be a mapping")
     raw = value or {}
@@ -719,7 +781,60 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
         result["operator_harness_binary_digest"] = harness_digest
         result["operator_harness_version"] = harness_version
         result["operator_harness_armed"] = raw["operator_harness_armed"]
+    if host_admitted_placement_union and "work_placement_union" in raw:
+        result["work_placement_union"] = _normalise_work_placement_union(
+            raw["work_placement_union"]
+        )
     return result
+
+
+def _normalise_work_placement_union(
+    value: Any,
+) -> list[dict[str, str]]:
+    if not isinstance(value, (list, tuple)) or len(value) > (
+        WORK_PLACEMENT_UNION_MAX_MEMBERS
+    ):
+        raise StateConflict("host work-placement union must be a bounded list")
+    if not value:
+        raise StateConflict(
+            "host work-placement union must admit at least one placement"
+        )
+    members: list[dict[str, str]] = []
+    identities: set[tuple[str, str]] = set()
+    for member in value:
+        if not isinstance(member, Mapping) or set(member) != {
+            "provider_realm",
+            "quota_class",
+        }:
+            raise StateConflict(
+                "host work-placement union member must name exactly "
+                "a provider realm and quota class"
+            )
+        normalized_member = {
+            key: str(member[key]).strip()
+            for key in ("provider_realm", "quota_class")
+        }
+        if any(
+            _ROUTING_VALUE_RE.fullmatch(item) is None
+            for item in normalized_member.values()
+        ):
+            raise StateConflict(
+                "host work-placement union member values are invalid"
+            )
+        identity = (
+            normalized_member["provider_realm"],
+            normalized_member["quota_class"],
+        )
+        if identity in identities:
+            raise StateConflict(
+                "host work-placement union members must be distinct"
+            )
+        identities.add(identity)
+        members.append(normalized_member)
+    return sorted(
+        members,
+        key=lambda item: (item["provider_realm"], item["quota_class"]),
+    )
 
 
 def _normalise_seat(value: str, *, field: str) -> str:
@@ -783,6 +898,45 @@ def _assert_child_does_not_widen_parent(
             raise StateConflict(
                 "child cost_class may only shrink relative to the parent"
             )
+
+
+def _project_work_placement(
+    constraints: dict[str, Any],
+    root_constraints: Mapping[str, Any],
+    placement: Mapping[str, Any],
+    *,
+    raw_root_constraints: Mapping[str, Any],
+) -> dict[str, Any]:
+    provider_realm = str(placement.get("provider_realm") or "").strip().lower()
+    quota_class = str(placement.get("quota_class") or "").strip().lower()
+    if (
+        _ROUTING_VALUE_RE.fullmatch(provider_realm) is None
+        or _ROUTING_VALUE_RE.fullmatch(quota_class) is None
+    ):
+        raise StateConflict("plan step placement values are invalid")
+    admitted_union = raw_root_constraints.get("work_placement_union")
+    if not isinstance(admitted_union, list):
+        raise StateConflict(
+            "plan step placement is outside the reviewed host work-placement union"
+        )
+    member = next(
+        (
+            item
+            for item in admitted_union
+            if isinstance(item, Mapping)
+            and str(item.get("provider_realm") or "").strip().lower() == provider_realm
+            and str(item.get("quota_class") or "").strip().lower() == quota_class
+        ),
+        None,
+    )
+    if member is None:
+        raise StateConflict(
+            "plan step placement is outside the reviewed host work-placement union"
+        )
+    projected = dict(constraints)
+    projected["provider"] = provider_realm
+    projected["eligible_quota_classes"] = [quota_class]
+    return projected
 
 
 def _has_executive_provenance(
@@ -1044,6 +1198,51 @@ class Attempt:
 
 
 @dataclasses.dataclass(frozen=True)
+class BoundedRuntimeRootDiscovery:
+    schema_version: str
+    roots: tuple[Job, ...]
+    truncated: bool
+    snapshot_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"schema_version": self.schema_version, "roots": [job.to_dict() for job in self.roots], "truncated": self.truncated, "snapshot_digest": self.snapshot_digest}
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundedRuntimeRootSnapshot:
+    schema_version: str
+    root_job_id: str
+    jobs: tuple[Job, ...]
+    attempts: tuple[Attempt, ...]
+    jobs_truncated: bool
+    attempts_truncated_job_ids: tuple[str, ...]
+    snapshot_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"schema_version": self.schema_version, "root_job_id": self.root_job_id, "jobs": [job.to_dict() for job in self.jobs], "attempts": [attempt.to_dict() for attempt in self.attempts], "jobs_truncated": self.jobs_truncated, "attempts_truncated_job_ids": list(self.attempts_truncated_job_ids), "snapshot_digest": self.snapshot_digest}
+
+
+def _bounded_runtime_snapshot_digest(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_json_dumps(dict(payload)).encode("utf-8")).hexdigest()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BoundedJobPage:
+    """One fully materialized, SQL-bounded Job page from a stable snapshot."""
+
+    items: tuple[Job, ...]
+    next_cursor: str | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BoundedAttemptPage:
+    """One fully materialized, SQL-bounded Attempt page from a stable snapshot."""
+
+    items: tuple[Attempt, ...]
+    next_cursor: str | None
+
+
+@dataclasses.dataclass(frozen=True)
 class AttemptLease:
     attempt: Attempt
     lease_token: str = dataclasses.field(repr=False)
@@ -1247,6 +1446,178 @@ class ValidatedRoleCompletion:
     dialogue_source: ExecutiveDialogueSource | None
 
 
+# The capability stays inside the trusted control-service composition. It is
+# not a wire token, registry, or a substitute for Job/Worker authorization.
+_EXACT_WORKER_TARGET_PRODUCER = object()
+_NO_EXACT_WORKER_TARGET = object()
+_EXACT_WORKER_TARGET_SCHEMA = "mastermind.exact_worker_claim_target/v1"
+_EXACT_WORKER_TARGET_OBSERVATION_SCHEMA = "mastermind.exact_worker_target_observation/v1"
+_EXACT_WORKER_TARGET_EVIDENCE_SCHEMA = "mastermind.exact_worker_claim_evidence/v1"
+
+
+def _normalise_exact_worker_target_documents(
+    definition: Any, observation: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from scripts.ohf.redaction import evidence_contains_secret
+
+    keys = {"schema_version", "operation_key", "root_job_id", "job_id", "worker_id",
+            "quota_class", "expected_provider", "expected_account_label", "expected_model",
+            "expected_effort", "expected_cost_class", "expected_capabilities", "excluded_worker_ids",
+            "source_owner", "source_generation", "authority_policy_hash", "expires_at_ms"}
+    observation_keys = {"schema_version", "source_sha256", "control_attestation_sha256",
+                        "observed_at_ms", "max_age_ms"}
+    if not isinstance(definition, Mapping) or set(definition) != keys:
+        raise StateConflict("exact worker target definition fields drifted")
+    if not isinstance(observation, Mapping) or set(observation) != observation_keys:
+        raise StateConflict("exact worker target observation fields drifted")
+    d, o = dict(definition), dict(observation)
+    if d["schema_version"] != _EXACT_WORKER_TARGET_SCHEMA or o["schema_version"] != _EXACT_WORKER_TARGET_OBSERVATION_SCHEMA:
+        raise StateConflict("exact worker target schema is unsupported")
+    if d["source_owner"] != "executive-control":
+        raise StateConflict("exact worker target source owner is not control")
+    def identifier(value: Any) -> str:
+        if (not isinstance(value, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value) is None
+            or evidence_contains_secret({"value": value})):
+            raise StateConflict("exact worker target identifier is invalid")
+        return value
+    for key in keys - {"schema_version", "expected_capabilities", "excluded_worker_ids", "authority_policy_hash", "expires_at_ms"}:
+        d[key] = identifier(d[key])
+    if d["quota_class"] != d["quota_class"].lower():
+        raise StateConflict("exact worker target quota must be canonical")
+    for key in ("expected_capabilities", "excluded_worker_ids"):
+        values = d[key]
+        if not isinstance(values, (list, tuple)) or len(values) > 64:
+            raise StateConflict("exact worker target vector is invalid")
+        items = [identifier(item) for item in values]
+        if len(set(items)) != len(items):
+            raise StateConflict("exact worker target vector contains duplicates")
+        d[key] = sorted(items)
+    for value in (d["authority_policy_hash"], o["source_sha256"], o["control_attestation_sha256"]):
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise StateConflict("exact worker target digest is invalid")
+    for value in (d["expires_at_ms"], o["observed_at_ms"], o["max_age_ms"]):
+        if type(value) is not int or value <= 0 or value > 2**63 - 1:
+            raise StateConflict("exact worker target time is invalid")
+    if o["max_age_ms"] > 60 * 1000:
+        raise StateConflict("exact worker target observation exceeds one minute")
+    return d, o
+
+
+@dataclasses.dataclass(frozen=True)
+class ExactWorkerClaimTarget:
+    """Immutable trusted composition input, never accepted as caller JSON.
+
+    The definition's operation_key is the root's immutable CEO intent source_id,
+    not the implementation workstream or the current provider invocation.
+    """
+
+    _definition_json: str
+    _observation_json: str
+    _producer: object = dataclasses.field(repr=False, compare=False)
+    _revalidate: Callable[[], None] = dataclasses.field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._producer is not _EXACT_WORKER_TARGET_PRODUCER or not callable(self._revalidate):
+            raise StateConflict("exact worker target lacks its trusted producer")
+        d, o = _normalise_exact_worker_target_documents(
+            _strict_canonical_json_loads(self._definition_json, name="exact target definition"),
+            _strict_canonical_json_loads(self._observation_json, name="exact target observation"),
+        )
+        if _json_dumps(d) != self._definition_json or _json_dumps(o) != self._observation_json:
+            raise StateConflict("exact worker target is not canonical")
+
+    @property
+    def definition(self) -> dict[str, Any]:
+        return json.loads(self._definition_json)
+
+    @property
+    def observation(self) -> dict[str, Any]:
+        return json.loads(self._observation_json)
+
+    def evidence(self) -> dict[str, Any]:
+        d, o = self.definition, self.observation
+        return {"schema_version": _EXACT_WORKER_TARGET_EVIDENCE_SCHEMA,
+                "definition": d, "definition_sha256": orchestration_digest(d),
+                "observation": o, "observation_sha256": orchestration_digest(o)}
+
+    def require_fresh(self, now_ms: int) -> None:
+        d, o = self.definition, self.observation
+        age = now_ms - o["observed_at_ms"]
+        if age < 0 or age > o["max_age_ms"] or now_ms >= d["expires_at_ms"]:
+            raise StateConflict("exact worker target observation or grant expired")
+
+    def revalidate_source(self) -> None:
+        # Called outside the database transaction by the trusted supervisor.
+        self._revalidate()
+
+
+def _issue_exact_worker_claim_target(
+    definition: Mapping[str, Any], observation: Mapping[str, Any], *,
+    _producer_capability: object, revalidate: Callable[[], None],
+) -> ExactWorkerClaimTarget:
+    if _producer_capability is not _EXACT_WORKER_TARGET_PRODUCER:
+        raise StateConflict("exact worker target producer is not admitted")
+    d, o = _normalise_exact_worker_target_documents(definition, observation)
+    return ExactWorkerClaimTarget(_json_dumps(d), _json_dumps(o), _producer_capability, revalidate)
+
+
+def _require_exact_worker_target(value: Any) -> ExactWorkerClaimTarget:
+    if type(value) is not ExactWorkerClaimTarget or value._producer is not _EXACT_WORKER_TARGET_PRODUCER:
+        raise StateConflict("exact worker target must be owner-issued, not caller data")
+    value.__post_init__()
+    return value
+
+
+def _validate_exact_worker_target_replay(payload: Mapping[str, Any], target: ExactWorkerClaimTarget | None) -> None:
+    has_target = "exact_worker_target" in payload
+    if not has_target and target is None:
+        return
+    if not has_target or target is None:
+        raise StateConflict("dispatch command targeted/untargeted history conflict")
+    stored = payload["exact_worker_target"]
+    if (not isinstance(stored, dict)
+        or set(stored) != {"schema_version", "definition", "definition_sha256", "observation", "observation_sha256"}
+        or stored["schema_version"] != _EXACT_WORKER_TARGET_EVIDENCE_SCHEMA):
+        raise StateConflict("exact worker target history is malformed")
+    d, o = _normalise_exact_worker_target_documents(stored["definition"], stored["observation"])
+    if (d != stored["definition"] or o != stored["observation"]
+        or orchestration_digest(d) != stored["definition_sha256"]
+        or orchestration_digest(o) != stored["observation_sha256"]
+        or d != target.definition):
+        raise StateConflict("dispatch command complete target drifted")
+    # History is read under its current caller authorization. It never re-ages
+    # the original observation or supplies a new first-issuance right.
+
+
+def _validate_exact_worker_target_selection(
+    connection: sqlite3.Connection, target: ExactWorkerClaimTarget,
+    job_row: sqlite3.Row, capacity: sqlite3.Row, authority_policy_hash: str,
+) -> None:
+    d = target.definition
+    if (job_row["orchestration_role"] != "work"
+        or job_row["job_id"] != d["job_id"] or job_row["root_job_id"] != d["root_job_id"]
+        or authority_policy_hash != d["authority_policy_hash"]):
+        raise StateConflict("exact worker target Job/root/authority binding differs")
+    root_row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (d["root_job_id"],)).fetchone()
+    if root_row is None:
+        raise StateConflict("exact worker target root is unavailable")
+    root = _job_from_row(root_row)
+    if (root.orchestration_role != "aggregation" or root.parent_job_id is not None
+        or root.orchestration_provenance.get("creator") != "ceo_intent"
+        or root.orchestration_provenance.get("source_id") != d["operation_key"]):
+        raise StateConflict("exact worker target operation is not its admitted root")
+    for field, expected in (("worker_id", "worker_id"), ("quota_class", "quota_class"),
+                            ("provider", "expected_provider"), ("worker_provider", "expected_provider"),
+                            ("account_label", "expected_account_label"), ("model", "expected_model"),
+                            ("effort", "expected_effort"), ("cost_class", "expected_cost_class")):
+        if capacity[field] != d[expected]:
+            raise StateConflict("exact worker target selected metadata differs")
+    capabilities = sorted(_normalise_capabilities(_json_loads(capacity["capabilities_json"], fallback=[])))
+    if capabilities != d["expected_capabilities"] or capacity["worker_id"] in d["excluded_worker_ids"]:
+        raise StateConflict("exact worker target capability or exclusion differs")
+
+
 @dataclasses.dataclass(frozen=True)
 class OrchestrationDispatchOutcome:
     """Command-bound active lease or immutable terminal dispatch outcome."""
@@ -1256,8 +1627,11 @@ class OrchestrationDispatchOutcome:
     attempt: Attempt
     outcome: str
     lease_token: str | None = dataclasses.field(default=None, repr=False)
+    claimed_now: bool = dataclasses.field(default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        if type(self.claimed_now) is not bool or (self.claimed_now and (self.outcome != "ACTIVE" or self.attempt.status is not AttemptStatus.CLAIMED)):
+            raise StateConflict("fresh dispatch must originate in a new CLAIMED Attempt")
         if self.outcome == "ACTIVE":
             if (
                 self.attempt.status not in _LEASE_ACTIVE_ATTEMPT_STATUSES
@@ -2294,6 +2668,330 @@ _PHYSICAL_RESOURCE_SCHEMA_CANDIDATE: tuple[str, ...] = (
 )
 
 
+class RuntimeReadUnavailable(PersistenceError):
+    """A bound read cannot establish or retain its trusted namespace custody."""
+
+
+class RuntimeNamespaceCapability(ABC):
+    """Server-owned contract; there is deliberately no installed implementation.
+
+    ``namespace`` must exclude replacement of every resolving path component,
+    database and sidecar through physical close. ``validate`` raises on relevant
+    observed invalidation, including after the physical scope exits. A lock that
+    other namespace writers do not honor is NOT such a capability. Python object
+    identity is an interface check, not a security boundary against hostile code.
+    """
+
+    @abstractmethod
+    def namespace(self, database_path: Path) -> Any:
+        """Return a context manager owning the actual namespace exclusion."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def validate(self, database_path: Path) -> None:
+        """Raise if this request's namespace binding is no longer valid."""
+        raise NotImplementedError
+
+
+class RuntimeReadBinding:
+    """One request, one lexical database path, and a monotonic invalidation latch.
+
+    This object does not obtain OS namespace authority itself. Only a trusted
+    server capability can supply it; callers cannot substitute a boolean grant.
+    The validation point bounds correctness, not later transport delivery or
+    unobservable external revocation. Retain it for a later adapter release check.
+    """
+
+    def __init__(self, capability: RuntimeNamespaceCapability | None) -> None:
+        if not isinstance(capability, RuntimeNamespaceCapability):
+            raise RuntimeReadUnavailable("bound read namespace capability unavailable")
+        self._capability = capability
+        self._path: Path | None = None
+        self._invalid = False
+        self._state_lock = threading.RLock()
+        self._physical_lock = threading.Lock()
+        self._owner_thread: int | None = None
+        self._namespace_stack: ExitStack | None = None
+        self._retained_namespace: ExitStack | None = None
+        self._unclosed_connection: sqlite3.Connection | None = None
+        self._unclosed_resources: Any = None
+
+    def _retain_unclosed(self, connection: sqlite3.Connection) -> None:
+        # An uncertain close cannot release the namespace. The trusted caller
+        # must retain this failed request binding for explicit reconciliation;
+        # no retry/recovery or installed custodian is manufactured here.
+        self.invalidate()
+        self._unclosed_connection = connection
+        assert self._namespace_stack is not None
+        if self._retained_namespace is None:
+            self._retained_namespace = self._namespace_stack.pop_all()
+
+    def invalidate(self) -> None:
+        """Latch an observed relevant invalidation, even if identity recovers."""
+        with self._state_lock:
+            self._invalid = True
+
+    def _validate(self) -> None:
+        with self._state_lock:
+            if self._invalid or self._path is None:
+                raise RuntimeReadUnavailable("bound read invalidated or not acquired")
+            try:
+                # No truthy return can grant custody: the interface returns None.
+                if self._capability.validate(self._path) is not None:
+                    raise RuntimeReadUnavailable("bound read validation contract violated")
+            except BaseException as exc:
+                self._invalid = True
+                if isinstance(exc, Exception) and not isinstance(exc, RuntimeReadUnavailable):
+                    raise RuntimeReadUnavailable("bound read validation unavailable") from exc
+                raise
+            if self._invalid:
+                raise RuntimeReadUnavailable("bound read invalidated")
+
+    def validate_before_core_return(self) -> None:
+        """Validate after physical close, immediately before releasing results."""
+        try:
+            with self._state_lock:
+                if self._owner_thread is not None:
+                    raise RuntimeReadUnavailable("bound read physical work not closed")
+                self._validate()
+        except Exception as exc:
+            self.invalidate()
+            if isinstance(exc, RuntimeReadUnavailable):
+                raise
+            raise RuntimeReadUnavailable("bound read validation unavailable") from exc
+
+    @contextmanager
+    def physical_read(self, database_path: Path) -> Iterator[None]:
+        # absolute() is lexical: no pathname is resolved or inspected before
+        # the provider's exclusion scope has entered.
+        path = database_path.absolute()
+        if not self._physical_lock.acquire(blocking=False):
+            self.invalidate()
+            raise RuntimeReadUnavailable("bound read already owns physical work")
+        body_error: BaseException | None = None
+        try:
+            with self._state_lock:
+                if self._invalid or (self._path is not None and self._path != path):
+                    raise RuntimeReadUnavailable("bound read path changed or invalidated")
+                self._path = path
+                self._owner_thread = threading.get_ident()
+            with ExitStack() as stack:
+                self._namespace_stack = stack
+                stack.enter_context(self._capability.namespace(path))
+                self._validate()
+                try:
+                    yield
+                except BaseException as exc:
+                    body_error = exc
+                    raise
+                self._validate()
+            if body_error is not None:
+                # A provider's __exit__ cannot erase an application failure.
+                raise body_error
+        except BaseException as exc:
+            self.invalidate()
+            if exc is not body_error and isinstance(exc, Exception) and not isinstance(exc, RuntimeProofError):
+                raise RuntimeReadUnavailable("bound read custody unavailable") from exc
+            raise
+        finally:
+            self._namespace_stack = None
+            if self._unclosed_connection is None:
+                with self._state_lock:
+                    self._owner_thread = None
+                self._physical_lock.release()
+        self.validate_before_core_return()
+
+    def _require_physical_read(self, path: Path) -> None:
+        with self._state_lock:
+            if self._owner_thread != threading.get_ident() or self._path != path.absolute():
+                raise RuntimeReadUnavailable("bound SQLite open requires namespace custody")
+            self._validate()
+
+
+class _BoundReadCursor:
+    """Owned statement view, never a native Cursor compatibility surface."""
+
+    __slots__ = ("_view", "_cursor", "_closed")
+
+    def __init__(self, view: "_BoundReadConnection", cursor: sqlite3.Cursor) -> None:
+        self._view, self._cursor, self._closed = view, cursor, False
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise RuntimeReadUnavailable("bound cursor is closed")
+        self._view._require_open()
+
+    def execute(self, sql: str, parameters: Any = ()) -> "_BoundReadCursor":
+        self._require_open()
+        self._cursor.execute(sql, parameters)
+        return self
+
+    def fetchone(self) -> Any:
+        self._require_open()
+        return self._cursor.fetchone()
+
+    def fetchmany(self, size: int | None = None) -> list[Any]:
+        self._require_open()
+        return self._cursor.fetchmany() if size is None else self._cursor.fetchmany(size)
+
+    def fetchall(self) -> list[Any]:
+        self._require_open()
+        return self._cursor.fetchall()
+
+    def __iter__(self) -> "_BoundReadCursor":
+        self._require_open()
+        return self
+
+    def __next__(self) -> Any:
+        self._require_open()
+        return next(self._cursor)
+
+    def _finalize(self) -> None:
+        if not self._closed:
+            self._cursor.close()
+            self._closed = True
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._view._require_open()
+        try:
+            self._finalize()
+        except BaseException:
+            self._view._retain_uncertain()
+            raise
+
+    @property
+    def connection(self) -> "_BoundReadConnection":
+        self._require_open()
+        return self._view
+
+    @property
+    def description(self) -> Any:
+        self._require_open()
+        return self._cursor.description
+
+    @property
+    def rowcount(self) -> int:
+        self._require_open()
+        return self._cursor.rowcount
+
+    @property
+    def lastrowid(self) -> Any:
+        self._require_open()
+        return self._cursor.lastrowid
+
+    @property
+    def arraysize(self) -> int:
+        self._require_open()
+        return self._cursor.arraysize
+
+    @property
+    def row_factory(self) -> Any:
+        self._require_open()
+        return sqlite3.Row
+
+
+class _BoundReadConnection:
+    """A finite bound query interface over the store's SAME native connection.
+
+    Private members are trusted implementation detail, not a hostile-Python
+    security boundary. No passthrough, raw-handle property or native subclass.
+    """
+
+    __slots__ = ("_native", "_store", "_binding", "_cursors", "_pending_cursor",
+                 "_closed", "_owner_control", "_drain_uncertain")
+
+    def __init__(self, connection: sqlite3.Connection, store: "RuntimeStore") -> None:
+        self._native, self._store, self._binding = connection, store, store.read_binding
+        self._cursors: list[_BoundReadCursor] = []
+        self._pending_cursor: sqlite3.Cursor | None = None
+        self._closed = self._owner_control = self._drain_uncertain = False
+        connection.set_authorizer(self._authorize)
+
+    def _authorize(self, action: int, first: Any, second: Any, database: Any, source: Any) -> int:
+        if not self._owner_control and action in (
+            sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT,
+            sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_PRAGMA,
+            # mode=ro does not prohibit writes to a connection's TEMP schema.
+            sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
+        ):
+            # Authorizer action codes, not a SQL parser. Bound statement caching
+            # is disabled so internal-control authorization cannot be reused.
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    def _require_open(self) -> None:
+        if self._closed or self._drain_uncertain:
+            raise RuntimeReadUnavailable("bound connection is closed or uncertain")
+        assert self._binding is not None
+        self._binding._require_physical_read(self._store.path)
+
+    def cursor(self) -> _BoundReadCursor:
+        self._require_open()
+        try:
+            self._pending_cursor = self._native.cursor()
+            cursor = _BoundReadCursor(self, self._pending_cursor)
+            self._cursors.append(cursor)  # strong ownership BEFORE execution
+            self._pending_cursor = None
+            return cursor
+        except BaseException:
+            # If registration fails, the acquired pending cursor is still owned.
+            self._retain_uncertain()
+            raise
+
+    def execute(self, sql: str, parameters: Any = ()) -> _BoundReadCursor:
+        return self.cursor().execute(sql, parameters)
+
+    def _owner_execute(self, sql: str) -> _BoundReadCursor:
+        self._owner_control = True
+        try:
+            return self.execute(sql)
+        finally:
+            self._owner_control = False
+
+    def _owner_finish(self, *, commit: bool) -> None:
+        self._owner_control = True
+        try:
+            if commit:
+                self._native.commit()
+            else:
+                self._native.rollback()
+        finally:
+            self._owner_control = False
+
+    @property
+    def in_transaction(self) -> bool:
+        return False if self._closed else self._native.in_transaction
+
+    @property
+    def row_factory(self) -> Any:
+        self._require_open()
+        return sqlite3.Row
+
+    def _retain_uncertain(self) -> None:
+        self._drain_uncertain = True
+        assert self._binding is not None
+        self._binding._unclosed_resources = self
+        self._binding._retain_unclosed(self._native)
+
+    def _drain_and_close(self) -> None:
+        if self._drain_uncertain:
+            # A failed finalization is not retried at context exit.
+            raise RuntimeReadUnavailable("bound cursor drain remains uncertain")
+        try:
+            if self._pending_cursor is not None:
+                self._pending_cursor.close()
+                self._pending_cursor = None
+            for cursor in self._cursors:
+                cursor._finalize()
+            self._native.close()
+            self._closed = True
+        except BaseException:
+            self._retain_uncertain()
+            raise
+
+
 class RuntimeStore:
     """SQLite connection, migration, transaction, and event boundary."""
 
@@ -2307,7 +3005,27 @@ class RuntimeStore:
         create: bool = True,
         existing_writable: bool = False,
         database_path: str | Path | None = None,
+        read_binding: RuntimeReadBinding | None = None,
     ) -> None:
+        self.read_binding = read_binding
+        self._bound_connections: set[_BoundReadConnection] = set()
+        if read_binding is not None:
+            if not isinstance(read_binding, RuntimeReadBinding) or create or existing_writable:
+                raise RuntimeReadUnavailable("bound reads require a read-only RuntimeStore")
+            self.root = Path(root).absolute() if root is not None else _ROOT
+            self.path = Path(database_path).absolute() if database_path is not None else self.root / _DB_RELATIVE_PATH
+            self.clock = clock
+            self.lease_seconds = int(lease_seconds)
+            self.busy_timeout_ms = int(busy_timeout_ms)
+            if self.lease_seconds <= 0 or self.busy_timeout_ms < 0:
+                raise StateConflict("invalid runtime read timing")
+            self.create = self.existing_writable = False
+            self._schema_ready = False
+            self._database_file_identity = self._fresh_file_identity = None
+            self._database_was_absent = False
+            self.upgrade_barrier_path = self.path.parent / _SCHEMA_UPGRADE_BARRIER
+            # No probe connection or filesystem access: the actual read owns both.
+            return
         self.root = Path(root).resolve() if root is not None else _ROOT
         self.path = (
             Path(database_path).resolve()
@@ -2548,6 +3266,16 @@ class RuntimeStore:
     def _assert_owned_snapshot_connection(self, connection: sqlite3.Connection) -> None:
         """Prove a supplied snapshot's ``main`` is this store's stable file."""
 
+        if self.read_binding is not None:
+            self.read_binding._require_physical_read(self.path)
+            if (not isinstance(connection, _BoundReadConnection)
+                    or connection not in self._bound_connections
+                    or connection._store is not self
+                    or connection._binding is not self.read_binding
+                    or connection._closed or connection._drain_uncertain
+                    or not connection.in_transaction):
+                raise StateConflict("supplied connection is not this bound read snapshot")
+            return
         if connection.in_transaction is not True:
             raise StateConflict(
                 "supplied connection must already own an active SQLite transaction"
@@ -2584,7 +3312,7 @@ class RuntimeStore:
                 "supplied connection is not the stable database owned by this RuntimeStore"
             )
 
-    def _open_readonly(self) -> sqlite3.Connection:
+    def _open_readonly(self) -> sqlite3.Connection | _BoundReadConnection:
         """Open an EXISTING database read-only: no create, no chmod, no migration.
 
         SQLite's ``mode=ro`` makes the guarantee structural rather than
@@ -2597,30 +3325,42 @@ class RuntimeStore:
         empty, truncated, or foreign file reads as a valid database with no rows,
         which a caller would report as "nothing is running".
         """
-        connection: sqlite3.Connection | None = None
+        if self.read_binding is not None:
+            self.read_binding._require_physical_read(self.path)
+        connection: sqlite3.Connection | _BoundReadConnection | None = None
         try:
             connection = sqlite3.connect(
                 f"{self.path.as_uri()}?mode=ro",
                 uri=True,
                 timeout=self.busy_timeout_ms / 1000,
                 isolation_level=None,
+                **({"cached_statements": 0} if self.read_binding is not None else {}),
             )
             connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA foreign_keys=ON")
-            connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
-        except (OSError, sqlite3.Error) as exc:
+            if self.read_binding is not None:
+                connection = _BoundReadConnection(connection, self)
+                connection._owner_execute("PRAGMA foreign_keys=ON")
+                connection._owner_execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+            else:
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+        except BaseException as exc:
             if connection is not None:
-                connection.close()
-            raise PersistenceError(
-                f"executive runtime database at {self.path} is unavailable: {exc}"
-            ) from exc
+                self._close_read_connection(connection)
+            if isinstance(exc, (OSError, sqlite3.Error)):
+                raise PersistenceError(
+                    f"executive runtime database at {self.path} is unavailable: {exc}"
+                ) from exc
+            raise
+        if self.read_binding is not None:
+            return connection
         if not self._schema_ready:
             try:
                 connection.execute(
                     "SELECT version FROM schema_migrations LIMIT 1"
                 ).fetchone()
             except sqlite3.Error as exc:
-                connection.close()
+                self._close_read_connection(connection)
                 message = str(exc)
                 if "no such table" in message:
                     detail = "carries no Executive OS schema"
@@ -2713,6 +3453,8 @@ class RuntimeStore:
             ) from exc
 
     def _open(self) -> sqlite3.Connection:
+        if self.read_binding is not None:
+            raise RuntimeReadUnavailable("bound store opens only inside read()")
         if self.existing_writable:
             return self._open_existing_writable()
         if not self.create:
@@ -2910,8 +3652,83 @@ class RuntimeStore:
         finally:
             connection.close()
 
+    def _close_read_connection(self, connection: sqlite3.Connection | _BoundReadConnection) -> None:
+        if isinstance(connection, _BoundReadConnection):
+            connection._drain_and_close()
+            return
+        try:
+            connection.close()
+        except BaseException:
+            if self.read_binding is not None:
+                self.read_binding._retain_unclosed(connection)
+            raise
+
+    @contextmanager
+    def _read_bound(self, *, _observation: "BoundedRuntimeReadObservation | None" = None) -> Iterator[_BoundReadConnection]:
+        binding = self.read_binding
+        assert binding is not None
+        with binding.physical_read(self.path):
+            connection: _BoundReadConnection | None = None
+            try:
+                connection = self._open_readonly()
+                assert isinstance(connection, _BoundReadConnection)
+                if _observation is not None:
+                    _observation._before = _observation._sample(connection)
+                connection._owner_execute("BEGIN")
+                # Under real namespace exclusion this detects a wrong handle;
+                # it is explicitly not a pathname-ABA detector without custody.
+                mains = [row for row in connection._owner_execute("PRAGMA database_list") if row[1] == "main"]
+                if len(mains) != 1 or Path(mains[0][2]).resolve(strict=True) != self.path.resolve(strict=True):
+                    raise RuntimeReadUnavailable("bound read opened another database")
+                self._verify_current_schema(connection)
+                binding._validate()
+                self._bound_connections.add(connection)
+                yield connection
+                binding._validate()
+                connection._owner_finish(commit=True)
+                if _observation is not None:
+                    _observation._after = _observation._sample(connection)
+            except sqlite3.Error as exc:
+                if connection is not None and connection.in_transaction:
+                    connection._owner_finish(commit=False)
+                raise PersistenceError("bound database read failed") from exc
+            except BaseException:
+                if connection is not None and connection.in_transaction:
+                    connection._owner_finish(commit=False)
+                raise
+            finally:
+                if connection is not None:
+                    self._bound_connections.discard(connection)
+                    self._close_read_connection(connection)
+
+    @contextmanager
+    def _read_observation(self, observation: "BoundedRuntimeReadObservation") -> Iterator[sqlite3.Connection | _BoundReadConnection]:
+        if self.read_binding is not None:
+            with self._read_bound(_observation=observation) as connection:
+                yield connection
+            return
+        # Even a writable Runtime owner observes through a mode=ro connection.
+        connection = self._open_readonly()
+        try:
+            observation._before = observation._sample(connection)
+            connection.execute("BEGIN")
+            self._verify_current_schema(connection)
+            yield connection
+            connection.commit()
+            observation._after = observation._sample(connection)
+        except BaseException:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            self._close_read_connection(connection)
+
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
+        if self.read_binding is not None:
+            with self._read_bound() as connection:
+                yield connection
+            return
         connection = self._open()
         try:
             connection.execute("BEGIN")
@@ -3268,7 +4085,8 @@ def _job_from_row(row: sqlite3.Row) -> Job:
         created_at=_iso(int(row["created_at_ms"])),
         updated_at=_iso(int(row["updated_at_ms"])),
         constraints=_normalise_constraints(
-            _json_loads(row["constraints_json"], fallback={})
+            _json_loads(row["constraints_json"], fallback={}),
+            host_admitted_placement_union=row["orchestration_role"] == "aggregation",
         ),
         current_attempt_id=row["current_attempt_id"],
         attempt_count=int(row["attempt_count"]),
@@ -3300,6 +4118,692 @@ def _job_from_row(row: sqlite3.Row) -> Job:
         repair_round=row["repair_round"],
         supersedes_job_id=row["supersedes_job_id"],
     )
+
+
+
+def _bounded_acquisition_limit(value: Any) -> int:
+    if type(value) is not int or not 1 <= value <= MAX_RUNTIME_ACQUISITION_LIMIT:
+        raise StateConflict(
+            "bounded acquisition limit must be an integer between 1 and "
+            f"{MAX_RUNTIME_ACQUISITION_LIMIT}"
+        )
+    return value
+
+
+def _bounded_acquisition_identifier(value: Any, *, name: str) -> str:
+    if (
+        type(value) is not str
+        or value != value.strip()
+        or not value
+        or len(value) > _MAX_RUNTIME_ACQUISITION_IDENTIFIER_LENGTH
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise StateConflict(f"bounded acquisition {name} identifier is invalid")
+    return value
+
+
+def _bounded_acquisition_identifiers(
+    value: Sequence[str] | None, *, name: str
+) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, SequenceABC)
+        or isinstance(value, (str, bytes, bytearray))
+        or not value
+        or len(value) > _MAX_RUNTIME_ACQUISITION_FILTER_IDS
+    ):
+        raise StateConflict(
+            f"bounded acquisition {name} identifiers must be a non-empty bounded sequence"
+        )
+    identifiers = tuple(
+        _bounded_acquisition_identifier(item, name=name) for item in value
+    )
+    if len(set(identifiers)) != len(identifiers):
+        raise StateConflict(f"bounded acquisition {name} identifiers contain a duplicate")
+    return tuple(sorted(identifiers))
+
+
+def _bounded_acquisition_statuses(
+    value: Sequence[Enum | str] | None,
+    *,
+    enum_type: type[Enum],
+    name: str,
+) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, SequenceABC)
+        or isinstance(value, (str, bytes, bytearray))
+        or not value
+        or len(value) > len(enum_type)
+    ):
+        raise StateConflict(
+            f"bounded acquisition {name} status filter must be a non-empty bounded sequence"
+        )
+    normalized: list[str] = []
+    for item in value:
+        if isinstance(item, enum_type):
+            token = str(item.value)
+        elif type(item) is str:
+            token = item
+        else:
+            raise StateConflict(f"bounded acquisition {name} status is invalid")
+        try:
+            normalized.append(str(enum_type(token).value))
+        except ValueError as exc:
+            raise StateConflict(
+                f"bounded acquisition {name} status is invalid"
+            ) from exc
+    if len(set(normalized)) != len(normalized):
+        raise StateConflict(f"bounded acquisition {name} status filter has a duplicate")
+    return tuple(sorted(normalized))
+
+
+def _bounded_acquisition_placeholders(values: Sequence[Any]) -> str:
+    return ",".join("?" for _ in values)
+
+
+class BoundedRuntimeAcquisition:
+    """Canonical finite Job/Attempt reads over one Runtime-owned snapshot.
+
+    The object never exposes its connection.  Every page is bounded in SQL by
+    ``LIMIT n+1`` before any Job or Attempt payload decoder runs.  Cursors are
+    authenticated with a snapshot-local secret, bind the exact normalized query,
+    and cease to be valid when the owning ``Runtime.bounded_acquisition`` context
+    closes.
+    """
+
+    __slots__ = (
+        "_store",
+        "_connection",
+        "_snapshot_id",
+        "_cursor_secret",
+        "_active",
+    )
+
+    def __init__(
+        self,
+        store: RuntimeStore,
+        connection: sqlite3.Connection | _BoundReadConnection,
+        *,
+        _capability: object,
+    ) -> None:
+        if _capability is not _RUNTIME_ACQUISITION_CAPABILITY:
+            raise StateConflict("bounded acquisition is Runtime-owned")
+        store._assert_owned_snapshot_connection(connection)
+        self._store = store
+        self._connection = connection
+        self._snapshot_id = secrets.token_hex(16)
+        self._cursor_secret: bytes | None = secrets.token_bytes(32)
+        self._active = True
+
+    def _require_open(self) -> None:
+        if not self._active or self._cursor_secret is None:
+            raise StateConflict("bounded Runtime acquisition is closed")
+        self._store._assert_owned_snapshot_connection(self._connection)
+
+    def _close(self) -> None:
+        self._active = False
+        self._cursor_secret = None
+
+    @staticmethod
+    def _query_digest(kind: str, query: Mapping[str, Any]) -> str:
+        return hashlib.sha256(
+            (kind + "\0" + _json_dumps(dict(query))).encode("utf-8")
+        ).hexdigest()
+
+    def _encode_cursor(
+        self,
+        *,
+        kind: str,
+        query: Mapping[str, Any],
+        position: Sequence[Any],
+    ) -> str:
+        self._require_open()
+        assert self._cursor_secret is not None
+        payload = {
+            "schema": _RUNTIME_ACQUISITION_CURSOR_SCHEMA,
+            "snapshot": self._snapshot_id,
+            "kind": kind,
+            "query": self._query_digest(kind, query),
+            "position": list(position),
+        }
+        raw = _json_dumps(payload).encode("utf-8")
+        body = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+        signature = hmac.new(
+            self._cursor_secret, body.encode("ascii"), hashlib.sha256
+        ).hexdigest()
+        return f"{body}.{signature}"
+
+    def _decode_cursor(
+        self,
+        cursor: str | None,
+        *,
+        kind: str,
+        query: Mapping[str, Any],
+    ) -> list[Any] | None:
+        self._require_open()
+        if cursor is None:
+            return None
+        try:
+            if (
+                type(cursor) is not str
+                or not cursor
+                or len(cursor) > _MAX_RUNTIME_ACQUISITION_CURSOR_LENGTH
+            ):
+                raise ValueError("invalid cursor token")
+            body, signature = cursor.split(".", 1)
+            if (
+                re.fullmatch(r"[A-Za-z0-9_-]+", body) is None
+                or re.fullmatch(r"[0-9a-f]{64}", signature) is None
+            ):
+                raise ValueError("invalid cursor encoding")
+            assert self._cursor_secret is not None
+            expected = hmac.new(
+                self._cursor_secret, body.encode("ascii"), hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(signature, expected):
+                raise ValueError("cursor authentication failed")
+            padding = "=" * (-len(body) % 4)
+            raw = base64.b64decode(
+                (body + padding).encode("ascii"),
+                altchars=b"-_",
+                validate=True,
+            ).decode("utf-8")
+            payload = _strict_canonical_json_loads(
+                raw, name="bounded acquisition cursor"
+            )
+            if (
+                not isinstance(payload, dict)
+                or set(payload)
+                != {"schema", "snapshot", "kind", "query", "position"}
+                or payload["schema"] != _RUNTIME_ACQUISITION_CURSOR_SCHEMA
+                or payload["snapshot"] != self._snapshot_id
+                or payload["kind"] != kind
+                or payload["query"] != self._query_digest(kind, query)
+                or not isinstance(payload["position"], list)
+            ):
+                raise ValueError("cursor binding mismatch")
+            return payload["position"]
+        except Exception as exc:
+            if isinstance(exc, StateConflict) and str(exc) == "bounded Runtime acquisition is closed":
+                raise
+            raise StateConflict(
+                "bounded acquisition cursor is invalid or stale"
+            ) from exc
+
+    @staticmethod
+    def _require_position(
+        position: list[Any] | None,
+        expected: tuple[type, ...],
+    ) -> tuple[Any, ...] | None:
+        if position is None:
+            return None
+        if len(position) != len(expected):
+            raise StateConflict("bounded acquisition cursor position is invalid")
+        for value, expected_type in zip(position, expected, strict=True):
+            if expected_type is int:
+                if type(value) is not int:
+                    raise StateConflict(
+                        "bounded acquisition cursor position is invalid"
+                    )
+            elif type(value) is not expected_type:
+                raise StateConflict("bounded acquisition cursor position is invalid")
+        return tuple(position)
+
+    def _validate_root(self, root_job_id: str) -> None:
+        row = self._connection.execute(
+            "SELECT job_id,parent_job_id,root_job_id,depth FROM jobs WHERE job_id=?",
+            (root_job_id,),
+        ).fetchone()
+        if (
+            row is None
+            or row["job_id"] != root_job_id
+            or row["parent_job_id"] is not None
+            or row["root_job_id"] != root_job_id
+            or int(row["depth"]) != 0
+        ):
+            raise StateConflict(
+                "bounded acquisition root_job_id is not an existing root Job"
+            )
+
+    @staticmethod
+    def _append_status_filter(
+        clauses: list[str],
+        parameters: list[Any],
+        statuses: tuple[str, ...] | None,
+    ) -> None:
+        if statuses is not None:
+            clauses.append(
+                f"status IN ({_bounded_acquisition_placeholders(statuses)})"
+            )
+            parameters.extend(statuses)
+
+    def list_jobs(
+        self,
+        *,
+        limit: int,
+        cursor: str | None = None,
+        root_job_id: str | None = None,
+        job_ids: Sequence[str] | None = None,
+        roots_only: bool = False,
+        statuses: Sequence[JobStatus | str] | None = None,
+    ) -> BoundedJobPage:
+        """Acquire one deterministic Job page without decoding unrelated history."""
+
+        self._require_open()
+        page_limit = _bounded_acquisition_limit(limit)
+        if type(roots_only) is not bool:
+            raise StateConflict("bounded acquisition roots_only must be boolean")
+        normalized_root = (
+            _bounded_acquisition_identifier(root_job_id, name="root_job_id")
+            if root_job_id is not None
+            else None
+        )
+        normalized_ids = _bounded_acquisition_identifiers(job_ids, name="Job")
+        normalized_statuses = _bounded_acquisition_statuses(
+            statuses, enum_type=JobStatus, name="Job"
+        )
+        if sum(
+            (
+                normalized_root is not None,
+                normalized_ids is not None,
+                roots_only,
+            )
+        ) > 1:
+            raise StateConflict(
+                "bounded acquisition Job query modes are mutually exclusive"
+            )
+        if roots_only and normalized_statuses is not None:
+            raise StateConflict(
+                "bounded acquisition roots_only does not accept a status filter"
+            )
+
+        if normalized_root is not None and normalized_statuses is not None:
+            raise StateConflict(
+                "bounded acquisition Job query cannot combine "
+                "root_job_id and statuses"
+            )
+
+        if normalized_root is not None:
+            mode = "root"
+        elif normalized_ids is not None:
+            mode = "ids"
+        elif roots_only:
+            mode = "roots"
+        else:
+            mode = "global"
+        query = {
+            "mode": mode,
+            "root_job_id": normalized_root,
+            "job_ids": list(normalized_ids or ()),
+            "statuses": list(normalized_statuses or ()),
+        }
+        raw_position = self._decode_cursor(cursor, kind="jobs", query=query)
+
+        if mode == "roots":
+            position = self._require_position(raw_position, (str,))
+            after = "" if position is None else str(position[0])
+            # One MIN-after index seek per root avoids DISTINCT scanning every
+            # child row when a single root owns a very large historical tree.
+            id_rows = self._connection.execute(
+                """
+                WITH RECURSIVE bounded_root_ids(root_job_id) AS (
+                    SELECT MIN(root_job_id) FROM jobs WHERE root_job_id>?
+                    UNION ALL
+                    SELECT (
+                        SELECT MIN(root_job_id) FROM jobs
+                        WHERE root_job_id>bounded_root_ids.root_job_id
+                    )
+                    FROM bounded_root_ids
+                    WHERE root_job_id IS NOT NULL
+                    LIMIT ?
+                )
+                SELECT root_job_id FROM bounded_root_ids
+                WHERE root_job_id IS NOT NULL
+                """,
+                (after, page_limit + 1),
+            ).fetchall()
+            candidate_ids = [
+                _bounded_acquisition_identifier(
+                    row["root_job_id"], name="persisted root_job_id"
+                )
+                for row in id_rows
+            ]
+            selected_ids = candidate_ids[:page_limit]
+            if not selected_ids:
+                return BoundedJobPage(items=(), next_cursor=None)
+            rows = self._connection.execute(
+                "SELECT * FROM jobs WHERE job_id IN ("
+                + _bounded_acquisition_placeholders(selected_ids)
+                + ") ORDER BY job_id",
+                selected_ids,
+            ).fetchall()
+            row_by_id = {str(row["job_id"]): row for row in rows}
+            if set(row_by_id) != set(selected_ids):
+                raise PersistenceError(
+                    "bounded root acquisition lost a canonical root Job"
+                )
+            ordered_rows: list[sqlite3.Row] = []
+            for job_id in selected_ids:
+                row = row_by_id[job_id]
+                if (
+                    row["parent_job_id"] is not None
+                    or row["root_job_id"] != job_id
+                    or int(row["depth"]) != 0
+                ):
+                    raise PersistenceError(
+                        "bounded root acquisition found a non-root identity"
+                    )
+                ordered_rows.append(row)
+            items = tuple(_job_from_row(row) for row in ordered_rows)
+            next_cursor = (
+                self._encode_cursor(
+                    kind="jobs", query=query, position=(selected_ids[-1],)
+                )
+                if len(candidate_ids) > page_limit
+                else None
+            )
+            return BoundedJobPage(items=items, next_cursor=next_cursor)
+
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        preselected_rows: list[sqlite3.Row] | None = None
+        self._append_status_filter(clauses, parameters, normalized_statuses)
+
+        if mode == "root":
+            assert normalized_root is not None
+            self._validate_root(normalized_root)
+            clauses.insert(0, "root_job_id=?")
+            parameters.insert(0, normalized_root)
+            position = self._require_position(raw_position, (int, int, str))
+            if position is not None:
+                depth, created_at_ms, job_id = position
+                clauses.append("(depth,created_at_ms,job_id)>(?,?,?)")
+                parameters.extend((depth, created_at_ms, job_id))
+            order_by = "depth,created_at_ms,job_id"
+        elif mode == "ids":
+            assert normalized_ids is not None
+            clauses.insert(
+                0,
+                "job_id IN ("
+                + _bounded_acquisition_placeholders(normalized_ids)
+                + ")",
+            )
+            parameters[0:0] = list(normalized_ids)
+            position = self._require_position(raw_position, (str,))
+            if position is not None:
+                clauses.append("job_id>?")
+                parameters.append(position[0])
+            order_by = "job_id"
+        else:
+            position = self._require_position(
+                raw_position, (str, int, int, int, str)
+            )
+            order_by = (
+                "status,available_at_ms,priority DESC,created_at_ms,job_id"
+            )
+            if position is not None:
+                status, available_at_ms, priority, created_at_ms, job_id = position
+                base_clauses = tuple(clauses)
+                base_parameters = tuple(parameters)
+
+                def fetch_branch(
+                    clause: str, values: Sequence[Any]
+                ) -> list[sqlite3.Row]:
+                    branch_clauses = [*base_clauses, clause]
+                    branch_parameters = [*base_parameters, *values, page_limit + 1]
+                    branch_sql = (
+                        "SELECT * FROM jobs WHERE "
+                        + " AND ".join(
+                            f"({item})" for item in branch_clauses
+                        )
+                        + f" ORDER BY {order_by} LIMIT ?"
+                    )
+                    return list(
+                        self._connection.execute(
+                            branch_sql, branch_parameters
+                        ).fetchall()
+                    )
+
+                candidates: list[sqlite3.Row] = []
+                for branch_clause, branch_values in (
+                    ("status>?", (status,)),
+                    (
+                        "status=? AND available_at_ms>?",
+                        (status, available_at_ms),
+                    ),
+                    (
+                        "status=? AND available_at_ms=? AND priority<?",
+                        (status, available_at_ms, priority),
+                    ),
+                    (
+                        "status=? AND available_at_ms=? AND priority=? "
+                        "AND created_at_ms>?",
+                        (status, available_at_ms, priority, created_at_ms),
+                    ),
+                    (
+                        "status=? AND available_at_ms=? AND priority=? "
+                        "AND created_at_ms=? AND job_id>?",
+                        (
+                            status,
+                            available_at_ms,
+                            priority,
+                            created_at_ms,
+                            job_id,
+                        ),
+                    ),
+                ):
+                    candidates.extend(fetch_branch(branch_clause, branch_values))
+                preselected_rows = sorted(
+                    candidates,
+                    key=lambda row: (
+                        str(row["status"]),
+                        int(row["available_at_ms"]),
+                        -int(row["priority"]),
+                        int(row["created_at_ms"]),
+                        str(row["job_id"]),
+                    ),
+                )[: page_limit + 1]
+
+        if preselected_rows is None:
+            sql = "SELECT * FROM jobs"
+            if clauses:
+                sql += " WHERE " + " AND ".join(
+                    f"({clause})" for clause in clauses
+                )
+            sql += f" ORDER BY {order_by} LIMIT ?"
+            parameters.append(page_limit + 1)
+            rows = self._connection.execute(sql, parameters).fetchall()
+        else:
+            rows = preselected_rows
+        page_rows = rows[:page_limit]
+        items = tuple(_job_from_row(row) for row in page_rows)
+        next_cursor: str | None = None
+        if len(rows) > page_limit and page_rows:
+            row = page_rows[-1]
+            if mode == "root":
+                next_position = (
+                    int(row["depth"]),
+                    int(row["created_at_ms"]),
+                    str(row["job_id"]),
+                )
+            elif mode == "ids":
+                next_position = (str(row["job_id"]),)
+            else:
+                next_position = (
+                    str(row["status"]),
+                    int(row["available_at_ms"]),
+                    int(row["priority"]),
+                    int(row["created_at_ms"]),
+                    str(row["job_id"]),
+                )
+            next_cursor = self._encode_cursor(
+                kind="jobs", query=query, position=next_position
+            )
+        return BoundedJobPage(items=items, next_cursor=next_cursor)
+
+    def list_attempts(
+        self,
+        *,
+        limit: int,
+        cursor: str | None = None,
+        job_ids: Sequence[str] | None = None,
+        statuses: Sequence[AttemptStatus | str] | None = None,
+    ) -> BoundedAttemptPage:
+        """Acquire one deterministic Attempt page without decoding unrelated history."""
+
+        self._require_open()
+        page_limit = _bounded_acquisition_limit(limit)
+        normalized_ids = _bounded_acquisition_identifiers(job_ids, name="Job")
+        normalized_statuses = _bounded_acquisition_statuses(
+            statuses, enum_type=AttemptStatus, name="Attempt"
+        )
+        if normalized_ids is not None and normalized_statuses is not None:
+            raise StateConflict(
+                "bounded acquisition Attempt query cannot combine job_ids and statuses"
+            )
+        mode = "job_ids" if normalized_ids is not None else "global"
+        query = {
+            "mode": mode,
+            "job_ids": list(normalized_ids or ()),
+            "statuses": list(normalized_statuses or ()),
+        }
+        raw_position = self._decode_cursor(cursor, kind="attempts", query=query)
+        preselected_rows: list[sqlite3.Row] | None = None
+
+        if normalized_ids is not None:
+            position = self._require_position(raw_position, (str, int))
+            select = "SELECT * FROM attempts"
+            order_by = "job_id,attempt_number"
+            if position is None:
+                clauses = [
+                    "job_id IN ("
+                    + _bounded_acquisition_placeholders(normalized_ids)
+                    + ")"
+                ]
+                parameters: list[Any] = list(normalized_ids)
+            else:
+                cursor_job_id, attempt_number = position
+                candidates: list[sqlite3.Row] = []
+                for candidate_job_id in normalized_ids:
+                    if candidate_job_id < cursor_job_id:
+                        continue
+                    if candidate_job_id == cursor_job_id:
+                        clause = "job_id=? AND attempt_number>?"
+                        values: tuple[Any, ...] = (
+                            candidate_job_id,
+                            attempt_number,
+                        )
+                    else:
+                        clause = "job_id=?"
+                        values = (candidate_job_id,)
+                    branch_rows = self._connection.execute(
+                        select
+                        + " WHERE "
+                        + clause
+                        + f" ORDER BY {order_by} LIMIT ?",
+                        (*values, page_limit + 1),
+                    ).fetchall()
+                    candidates.extend(branch_rows)
+                preselected_rows = sorted(
+                    candidates,
+                    key=lambda row: (
+                        str(row["job_id"]),
+                        int(row["attempt_number"]),
+                    ),
+                )[: page_limit + 1]
+                clauses = []
+                parameters = []
+        else:
+            position = self._require_position(raw_position, (str, int, int))
+            select = "SELECT rowid AS _runtime_acquisition_rowid,* FROM attempts"
+            order_by = "status,lease_expires_at_ms,rowid"
+            clauses = []
+            parameters = []
+            self._append_status_filter(clauses, parameters, normalized_statuses)
+            if position is not None:
+                status, lease_expires_at_ms, row_id = position
+                base_clauses = tuple(clauses)
+                base_parameters = tuple(parameters)
+
+                def fetch_branch(
+                    clause: str, values: Sequence[Any]
+                ) -> list[sqlite3.Row]:
+                    branch_clauses = [*base_clauses, clause]
+                    branch_parameters = [
+                        *base_parameters,
+                        *values,
+                        page_limit + 1,
+                    ]
+                    branch_sql = (
+                        select
+                        + " WHERE "
+                        + " AND ".join(
+                            f"({item})" for item in branch_clauses
+                        )
+                        + f" ORDER BY {order_by} LIMIT ?"
+                    )
+                    return list(
+                        self._connection.execute(
+                            branch_sql, branch_parameters
+                        ).fetchall()
+                    )
+
+                candidates = []
+                for branch_clause, branch_values in (
+                    ("status>?", (status,)),
+                    (
+                        "status=? AND lease_expires_at_ms>?",
+                        (status, lease_expires_at_ms),
+                    ),
+                    (
+                        "status=? AND lease_expires_at_ms=? AND rowid>?",
+                        (status, lease_expires_at_ms, row_id),
+                    ),
+                ):
+                    candidates.extend(fetch_branch(branch_clause, branch_values))
+                preselected_rows = sorted(
+                    candidates,
+                    key=lambda row: (
+                        str(row["status"]),
+                        int(row["lease_expires_at_ms"]),
+                        int(row["_runtime_acquisition_rowid"]),
+                    ),
+                )[: page_limit + 1]
+
+        if preselected_rows is None:
+            sql = select
+            if clauses:
+                sql += " WHERE " + " AND ".join(
+                    f"({clause})" for clause in clauses
+                )
+            sql += f" ORDER BY {order_by} LIMIT ?"
+            parameters.append(page_limit + 1)
+            rows = self._connection.execute(sql, parameters).fetchall()
+        else:
+            rows = preselected_rows
+        page_rows = rows[:page_limit]
+        items = tuple(_attempt_from_row(row) for row in page_rows)
+        next_cursor: str | None = None
+        if len(rows) > page_limit and page_rows:
+            row = page_rows[-1]
+            if normalized_ids is not None:
+                next_position = (
+                    str(row["job_id"]),
+                    int(row["attempt_number"]),
+                )
+            else:
+                next_position = (
+                    str(row["status"]),
+                    int(row["lease_expires_at_ms"]),
+                    int(row["_runtime_acquisition_rowid"]),
+                )
+            next_cursor = self._encode_cursor(
+                kind="attempts", query=query, position=next_position
+            )
+        return BoundedAttemptPage(items=items, next_cursor=next_cursor)
 
 
 def _authorize_job_row(row: sqlite3.Row):
@@ -5379,7 +6883,26 @@ def _sealed_worker_result_payload(
         != evidence["assignment_seal_receipt_digest"]
     ):
         raise StateConflict("sealed-worker receipt digests are invalid")
-    from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+
+
+    def uid_sweep_receipt_is_passing(value: Any) -> bool:
+        before = value.get("residual_pids_before") if isinstance(value, Mapping) else None
+        after = value.get("residual_pids_after") if isinstance(value, Mapping) else None
+        return (
+            isinstance(value, Mapping)
+            and value.get("schema_version") == "mastermind.executive_uid_sweep/v2"
+            and value.get("passed") is True
+            and isinstance(before, list)
+            and isinstance(after, list)
+            and after == []
+            and all(
+                type(item) is int
+                and item > 0
+                and str(item) == str(item).strip()
+                for item in before
+            )
+            and value.get("found_residuals") is bool(before)
+        )
 
     if (
         not uid_sweep_receipt_is_passing(collection_receipt["uid_sweep"])
@@ -5603,8 +7126,6 @@ def _sealed_worker_result_payload(
         artifacts_match = artifact_manifest == []
     else:
         try:
-            from control_plane.codex_worker import _path_matches_patterns
-
             artifacts_match = (
                 isinstance(declared_artifacts, list)
                 and [
@@ -5619,7 +7140,7 @@ def _sealed_worker_result_payload(
                     for item in artifact_manifest
                 )
             )
-        except (ImportError, KeyError, TypeError):
+        except (KeyError, TypeError):
             artifacts_match = False
     if (
         not isinstance(role_result, dict)
@@ -6465,6 +7986,7 @@ def _validated_plan_admission(
             plan_digest=str(admission["plan_digest"]),
             plan_step_id=str(step["step_id"]),
             repair_round=0,
+            placement=step.get("placement"),
         )
     try:
         expected_total = policy.reserved_children_total(tuple(requirements))
@@ -7560,6 +9082,7 @@ def _insert_cycle_child(
     provenance_source_id: str | None = None,
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
+    placement: dict[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
 
@@ -7575,6 +9098,15 @@ def _insert_cycle_child(
     )
     constraints = dict(root_constraints)
     constraints["cost_class"] = cost_class
+    if role == "work" and placement is not None:
+        constraints = _project_work_placement(
+            constraints,
+            root_constraints,
+            placement,
+            raw_root_constraints=_strict_canonical_json_loads(
+                str(root_row["constraints_json"]), name="root constraints"
+            ),
+        )
     constraints = _normalise_constraints(constraints)
     try:
         authority = ExecutiveAuthorityPolicy.load().authorize(
@@ -7777,6 +9309,7 @@ def _reconcile_cycle_child_creation(
     provenance_source_id: str | None = None,
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
+    placement: dict[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Reconcile one immutable child creation without consulting mutable phase state."""
 
@@ -7802,6 +9335,15 @@ def _reconcile_cycle_child_creation(
     )
     expected_constraints = dict(root_constraints)
     expected_constraints["cost_class"] = cost_class
+    if role == "work" and placement is not None:
+        expected_constraints = _project_work_placement(
+            expected_constraints,
+            root_constraints,
+            placement,
+            raw_root_constraints=_strict_canonical_json_loads(
+                str(root_row["constraints_json"]), name="root constraints"
+            ),
+        )
     expected_constraints = _normalise_constraints(expected_constraints)
     stored_authorities = _strict_canonical_json_loads(
         str(row["requested_authorities_json"]), name="cycle child authorities"
@@ -8131,13 +9673,37 @@ class JobRegistry:
         contract = normalized["execution_contract"]
         constraints = dict(contract.get("constraints") or {})
         if execution_binding is not None:
-            if not isinstance(execution_binding, dict) or set(execution_binding) != set(
+            version = execution_binding.get(
+                HOST_EXECUTION_BINDING_VERSION_KEY,
+                HOST_EXECUTION_BINDING_V2,
+            )
+            if version not in {HOST_EXECUTION_BINDING_V2, HOST_EXECUTION_BINDING_V3}:
+                raise StateConflict("host execution binding version is unknown")
+            carried = dict(execution_binding)
+            carried.pop(HOST_EXECUTION_BINDING_VERSION_KEY, None)
+            admitted_union = None
+            if version == HOST_EXECUTION_BINDING_V3:
+                if not isinstance(execution_binding, dict) or set(carried) != set(
+                    V3_HOST_EXECUTION_BINDING_KEYS
+                ):
+                    raise StateConflict(
+                        "v2 host execution binding fields are incomplete or drifted"
+                    )
+                if "work_placement_union" in constraints:
+                    raise StateConflict(
+                        "caller constraint work_placement_union conflicts "
+                        "with reviewed host composition"
+                    )
+                admitted_union = _normalise_work_placement_union(
+                    carried.pop("work_placement_union")
+                )
+            if not isinstance(execution_binding, dict) or set(carried) != set(
                 V2_HOST_EXECUTION_BINDING_KEYS
             ):
                 raise StateConflict(
                     "v2 host execution binding fields are incomplete or drifted"
                 )
-            bound = _normalise_constraints(execution_binding)
+            bound = _normalise_constraints(carried)
             if set(bound) != set(V2_HOST_EXECUTION_BINDING_KEYS):
                 raise StateConflict(
                     "v2 host execution binding did not normalize exactly"
@@ -8149,7 +9715,14 @@ class JobRegistry:
                         f"caller constraint {key} conflicts with reviewed host composition"
                     )
             normalized_caller.update(bound)
-            constraints = _normalise_constraints(normalized_caller)
+            if admitted_union is not None:
+                normalized_caller["work_placement_union"] = admitted_union
+                constraints = _normalise_constraints(
+                    normalized_caller,
+                    host_admitted_placement_union=True,
+                )
+            else:
+                constraints = _normalise_constraints(normalized_caller)
         worktree = contract.get("worktree")
         if worktree is not None:
             if workspace_root is None:
@@ -8465,6 +10038,21 @@ class JobRegistry:
                 )
                 for step in plan_body["steps"]
             )
+            if plan_body["schema_version"] == "mastermind.execution_plan/v2":
+                if any("placement" not in step for step in plan_body["steps"]):
+                    raise StateConflict(
+                        "v2 plan work steps require an exact placement"
+                    )
+                for step in plan_body["steps"]:
+                    placement = step.get("placement")
+                    if (
+                        not isinstance(placement, dict)
+                        or set(placement)
+                        != {"provider_realm", "quota_class"}
+                    ):
+                        raise StateConflict(
+                            "v2 plan step placement is invalid"
+                        )
             try:
                 reserved_total = policy.reserved_children_total(requirements)
             except CooCyclePolicyError as exc:
@@ -8500,6 +10088,7 @@ class JobRegistry:
                     plan_digest=plan_digest,
                     plan_step_id=str(step["step_id"]),
                     repair_round=0,
+                    placement=step.get("placement"),
                 )
                 created_ids.append(str(member["job_id"]))
                 reservation_steps.append(
@@ -9653,7 +11242,13 @@ class JobRegistry:
             raise StateConflict(
                 f"escalation_target={escalation_target!r} requires its typed executive provenance"
             )
-        normalized_constraints = _normalise_constraints(constraints)
+        normalized_constraints = _normalise_constraints(
+            constraints,
+            host_admitted_placement_union=(
+                orchestration_role == "aggregation"
+                and _v2_root_capability is _V2_ROOT_CREATION_CAPABILITY
+            ),
+        )
         try:
             authority = ExecutiveAuthorityPolicy.load().authorize(
                 ["READ"] if requested_authorities is None else requested_authorities,
@@ -10384,6 +11979,7 @@ class AttemptRegistry:
         placement_snapshot_digest: str | None,
         carrier_claim: _CarrierClaimSpec | None = None,
         _c2_capability: object | None = None,
+        exact_target: ExactWorkerClaimTarget | None = None,
     ) -> AttemptLease | None:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
 
@@ -10434,6 +12030,8 @@ class AttemptRegistry:
         elif _c2_capability is not None:
             raise StateConflict("private C2 capability requires carrier claim evidence")
 
+        if exact_target is not None:
+            _validate_exact_worker_target_selection(connection, exact_target, job_row, capacity, authority_policy_hash)
         job_id = str(job_row["job_id"])
         attempt_id = f"ATT-{uuid4().hex}"
         lease_token = secrets.token_urlsafe(32)
@@ -10580,6 +12178,8 @@ class AttemptRegistry:
                     carrier_claim.carrier_authority_fingerprint
                 ),
             }
+        if exact_target is not None:
+            claim_payload["exact_worker_target"] = exact_target.evidence()
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -10615,6 +12215,7 @@ class AttemptRegistry:
         lease_owner: str = "local-supervisor",
         command_id: str | None = None,
         _coo_cycle_dispatch_capability: object | None = None,
+        exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -10634,6 +12235,17 @@ class AttemptRegistry:
             raise StateConflict(
                 "command-bound claim requires the COO dispatch boundary"
             )
+        if exact_target is _NO_EXACT_WORKER_TARGET:
+            exact_target = None
+        else:
+            exact_target = _require_exact_worker_target(exact_target)
+        if exact_target is not None:
+            d = exact_target.definition
+            if worker_id not in (None, d["worker_id"]) or selected_quota not in (None, d["quota_class"]):
+                raise StateConflict("exact worker target selectors conflict")
+            worker_id, selected_quota = d["worker_id"], d["quota_class"]
+            if command_id is None:
+                raise StateConflict("exact worker target requires command-bound child dispatch")
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
             if command_id is not None:
@@ -10662,6 +12274,7 @@ class AttemptRegistry:
                         raise StateConflict(
                             "dispatch command replay semantic target drifted"
                         )
+                    _validate_exact_worker_target_replay(payload, exact_target)
                     attempt_row = connection.execute(
                         "SELECT * FROM attempts WHERE attempt_id=?",
                         (existing_dispatch["attempt_id"],),
@@ -10714,6 +12327,9 @@ class AttemptRegistry:
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
                 raise StateConflict(f"job {job_id} exhausted its attempt limit")
             authority = _authorize_job_row(job_row)
+            if exact_target is not None:
+                timestamp = self.store.now_ms()
+                exact_target.require_fresh(timestamp)
             orchestration_role = job_row["orchestration_role"]
             quarantined_workers: set[str] = set()
             if orchestration_role is not None:
@@ -10924,8 +12540,48 @@ class AttemptRegistry:
                 effective_grant_digest=effective_grant_digest,
                 placement_snapshot=placement_snapshot,
                 placement_snapshot_digest=placement_snapshot_digest,
+                exact_target=exact_target,
             )
         return claimed
+
+    def _validate_exact_target_launch(
+        self, target: ExactWorkerClaimTarget, lease: AttemptLease,
+    ) -> None:
+        """Recheck the existing lease and target before the original issuance.
+
+        This read grants no lease or replay permission. Only the supervisor's
+        fresh-claim branch may call through to its adapter after this fence.
+        """
+        target = _require_exact_worker_target(target)
+        with self.store.read() as connection:
+            timestamp = self.store.now_ms()
+            target.require_fresh(timestamp)
+            row = self._leased_row(
+                connection, attempt_id=lease.attempt.attempt_id,
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token, timestamp=timestamp,
+                statuses={AttemptStatus.CLAIMED},
+            )
+            job_row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+            capacity = connection.execute(
+                "SELECT q.*, w.provider AS worker_provider, w.account_label, w.identity_status "
+                "FROM worker_quota_classes q JOIN workers w ON w.worker_id=q.worker_id "
+                "WHERE q.worker_id=? AND q.quota_class=?", (row["worker_id"], row["quota_class"]),
+            ).fetchone()
+            if job_row is None or capacity is None or capacity["identity_status"] != "ONLINE":
+                raise StateConflict("exact worker target disappeared before launch")
+            authority = _authorize_job_row(job_row)
+            _validate_exact_worker_target_selection(connection, target, job_row, capacity, authority.policy_sha256)
+            event = connection.execute(
+                "SELECT payload_json FROM events WHERE event_type='JOB_CLAIMED' AND attempt_id=?",
+                (row["attempt_id"],),
+            ).fetchall()
+            if len(event) != 1:
+                raise StateConflict("exact worker target lost its original claim evidence")
+            payload = _strict_canonical_json_loads(str(event[0]["payload_json"]), name="exact target claim")
+            _validate_exact_worker_target_replay(payload, target)
+            if payload["exact_worker_target"] != target.evidence():
+                raise StateConflict("exact worker target first-issuance observation differs")
 
     def dispatch_cycle_job(
         self,
@@ -10936,6 +12592,7 @@ class AttemptRegistry:
         quota_class: str | None = None,
         lease_seconds: int | None = None,
         lease_owner: str = "executive-coo-cycle",
+        exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
     ) -> OrchestrationDispatchOutcome | None:
         """Claim exactly one persisted orchestration Job under one command."""
 
@@ -10962,6 +12619,7 @@ class AttemptRegistry:
             lease_owner=lease_owner,
             command_id=command_id,
             _coo_cycle_dispatch_capability=_COO_CYCLE_DISPATCH_CAPABILITY,
+            **({"exact_target": exact_target} if exact_target is not _NO_EXACT_WORKER_TARGET else {}),
         )
         if claimed is None:
             return None
@@ -10973,6 +12631,7 @@ class AttemptRegistry:
             attempt=claimed.attempt,
             outcome="ACTIVE",
             lease_token=claimed.lease_token,
+            claimed_now=True,
         )
 
     def _leased_row(
@@ -14309,6 +15968,219 @@ class OperatorHarnessRegistry:
                 },
             )
 
+    def reserve_checkpoint_operation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        """Commit a checkpoint INTENT before any provider compaction call."""
+
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            if (
+                self._event(connection, operation_id.command_id) is not None
+                or found["state"] != SessionEpochState.CURRENT.value
+                or not found["executive_writer_held"]
+                or found["ended_at_ms"] is not None
+            ):
+                raise StateConflict("checkpoint operation INTENT preconditions failed")
+            payload = {
+                "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                "attempt_id": str(found["attempt_id"]),
+                "session_epoch_id": generation.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": generation.worker_id,
+                "provider_session_id": found["epoch_session"],
+                "expected_checkpoint_sequence": int(row["checkpoint_sequence"]) + 1,
+            }
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.INTENT,
+                row=row,
+                payload=payload,
+            )
+
+    def apply_checkpoint_operation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        observation: CheckpointObservation,
+        fence_generation: int,
+        lease_token: str,
+    ) -> Job:
+        """Apply one checkpoint only from its exact committed INTENT."""
+
+        checkpoint = JobPayload.from_value(observation.checkpoint_candidate).to_dict()
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            expected = {
+                "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                "attempt_id": str(found["attempt_id"]),
+                "session_epoch_id": generation.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": generation.worker_id,
+                "provider_session_id": found["epoch_session"],
+                "expected_checkpoint_sequence": int(row["checkpoint_sequence"]) + 1,
+            }
+            intent = self._event(connection, operation_id.command_id)
+            intent_payload = (
+                _json_loads(intent["payload_json"], fallback={}) if intent else {}
+            )
+            applied_id = operation_receipt_command_id(
+                operation_id, OperationReceiptKind.APPLIED
+            )
+            if self._event(connection, applied_id) is not None:
+                return JobRegistry(self.store).get_job(str(row["job_id"]))
+            if (
+                intent is None
+                or intent["event_type"] != OperationReceiptKind.INTENT.value
+                or intent_payload != expected
+            ):
+                raise StateConflict("checkpoint operation result does not match INTENT")
+            sequence = int(row["checkpoint_sequence"]) + 1
+            expiry = max(
+                int(row["lease_expires_at_ms"]),
+                timestamp + self.store.lease_seconds * 1000,
+            )
+            connection.execute(
+                """
+                UPDATE attempts
+                SET status='CHECKPOINTED',checkpoint_sequence=?,checkpoint_json=?,heartbeat_at_ms=?,
+                    lease_expires_at_ms=?,updated_at_ms=?,version=version+1
+                WHERE attempt_id=?
+                """,
+                (
+                    sequence,
+                    _json_dumps(checkpoint),
+                    timestamp,
+                    expiry,
+                    timestamp,
+                    str(row["attempt_id"]),
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE jobs SET status='CHECKPOINTED',checkpoint_json=?,updated_at_ms=?,version=version+1
+                WHERE job_id=? AND current_attempt_id=?
+                """,
+                (
+                    _json_dumps(checkpoint),
+                    timestamp,
+                    str(row["job_id"]),
+                    str(row["attempt_id"]),
+                ),
+            )
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=str(row["job_id"]),
+                event_type="JOB_CHECKPOINTED",
+                job_id=str(row["job_id"]),
+                attempt_id=str(row["attempt_id"]),
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={"checkpoint_sequence": sequence},
+                timestamp_ms=timestamp,
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.APPLIED,
+                row=row,
+                payload={
+                    "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                    "process_generation_id": generation.process_generation_id,
+                    "checkpoint_sequence": sequence,
+                    "provider_mutated_state": observation.provider_mutated_state,
+                },
+            )
+        job = JobRegistry(self.store).get_job(str(row["job_id"]))
+        assert job is not None
+        return job
+
     def record_reconcile_observation(
         self,
         *,
@@ -17002,6 +18874,207 @@ class ActiveOperatorBindingFacts:
     owner_seat: str
 
 
+def _discover_job_roots_bounded(acquisition: BoundedRuntimeAcquisition) -> BoundedRuntimeRootDiscovery:
+    """Return the fixed owner root view through the canonical bounded seam."""
+    page = acquisition.list_jobs(limit=BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS, roots_only=True)
+    roots = page.items
+    truncated = page.next_cursor is not None
+    payload = {"schema_version": BOUNDED_RUNTIME_DISCOVERY_SCHEMA, "roots": [job.to_dict() for job in roots], "truncated": truncated}
+    return BoundedRuntimeRootDiscovery(
+        schema_version=BOUNDED_RUNTIME_DISCOVERY_SCHEMA,
+        roots=roots,
+        truncated=truncated,
+        snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+    )
+
+
+def _read_job_root_bounded(acquisition: BoundedRuntimeAcquisition, root_job_id: str) -> BoundedRuntimeRootSnapshot:
+    """Return one fixed owner root view through the canonical bounded seam."""
+    root_token = str(root_job_id or "").strip()
+    if not root_token:
+        raise StateConflict("bounded Runtime read requires an exact root Job")
+    try:
+        jobs_page = acquisition.list_jobs(limit=1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN, root_job_id=root_token)
+    except StateConflict as exc:
+        raise StateConflict("bounded Runtime read requires an exact root Job") from exc
+    jobs = jobs_page.items
+    if not jobs or jobs[0].job_id != root_token:
+        raise PersistenceError("bounded Runtime root membership is invalid")
+    attempts: list[Attempt] = []
+    truncated_attempt_jobs: list[str] = []
+    for job in jobs:
+        page = acquisition.list_attempts(limit=BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS, job_ids=(job.job_id,))
+        attempts.extend(page.items)
+        if page.next_cursor is not None:
+            truncated_attempt_jobs.append(job.job_id)
+    if len(attempts) > BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL:
+        raise PersistenceError("bounded Runtime attempt budget exceeded")
+    attempts_tuple = tuple(attempts)
+    truncated_tuple = tuple(truncated_attempt_jobs)
+    jobs_truncated = jobs_page.next_cursor is not None
+    payload = {
+        "schema_version": BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        "root_job_id": root_token,
+        "jobs": [job.to_dict() for job in jobs],
+        "attempts": [attempt.to_dict() for attempt in attempts_tuple],
+        "jobs_truncated": jobs_truncated,
+        "attempts_truncated_job_ids": list(truncated_tuple),
+    }
+    return BoundedRuntimeRootSnapshot(
+        schema_version=BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        root_job_id=root_token,
+        jobs=jobs,
+        attempts=attempts_tuple,
+        jobs_truncated=jobs_truncated,
+        attempts_truncated_job_ids=truncated_tuple,
+        snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class RuntimeReadObservationReceipt:
+    """Same-connection samples; usable only after owner close and validation.
+
+    SAME is as of the sampled observation, not continuous write exclusion.
+    Identity is request-scoped, never a filesystem or cross-request identity.
+    """
+    schema: str
+    state: str
+    source_identity: str | None
+    before: int | None
+    after: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
+class BoundedRuntimeReadObservation:
+    """Runtime-created fixed facade; no connection, SQL or pagination surface."""
+    def __init__(self, store: RuntimeStore, *, _capability: object) -> None:
+        if _capability is not _RUNTIME_ACQUISITION_CAPABILITY:
+            raise StateConflict("bounded observation is Runtime-owned")
+        self._store = store
+        self._active = self._selected = self._failed = False
+        self._before: int | None = None
+        self._after: int | None = None
+        self._identity: str | None = None
+        self._receipt: RuntimeReadObservationReceipt | None = None
+        self._commands: dict[str, tuple[str, str, str]] = {}
+        self._events: dict[str, Event | None] = {}
+
+    @staticmethod
+    def _sample(connection: sqlite3.Connection | _BoundReadConnection) -> int:
+        execute = connection._owner_execute if isinstance(connection, _BoundReadConnection) else connection.execute
+        row = execute("PRAGMA data_version").fetchone()
+        if row is None or len(row) != 1 or type(row[0]) is not int or row[0] < 0:
+            raise RuntimeReadUnavailable("Runtime observation token unavailable")
+        return row[0]
+
+    def _start(self, acquisition: BoundedRuntimeAcquisition, connection: Any) -> None:
+        self._acquisition, self._connection = acquisition, connection
+        self._active = True
+        if self._store.read_binding is not None:
+            self._identity = secrets.token_hex(16)
+
+    def _require_active(self) -> None:
+        if not self._active or self._failed:
+            raise StateConflict("bounded observation is closed or failed")
+
+    def _select(self) -> None:
+        self._require_active()
+        if self._selected:
+            self._failed = True
+            raise StateConflict("bounded observation already acquired a root or discovery")
+        self._selected = True
+
+    def _remember(self, jobs: Sequence[Job]) -> None:
+        keys = {"schema_version", "creator", "source_id", "source_digest", "command_id",
+                "job_id", "parent_job_id", "root_job_id", "role"}
+        for job in jobs:
+            cycle, digest = job.orchestration_provenance, job.orchestration_provenance_digest
+            if not (isinstance(cycle, Mapping) and set(cycle) == keys
+                    and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+                    and digest == orchestration_digest(cycle)
+                    and cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
+                    and cycle.get("creator") == "ceo_intent"
+                    and isinstance(cycle.get("source_id"), str)
+                    and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", cycle["source_id"])
+                    and isinstance(cycle.get("source_digest"), str)
+                    and re.fullmatch(r"[0-9a-f]{64}", cycle["source_digest"])
+                    and cycle.get("command_id") == "ceo-intent:" + cycle["source_id"]
+                    and cycle.get("job_id") == job.job_id
+                    and cycle.get("parent_job_id") is None and job.parent_job_id is None
+                    and cycle.get("root_job_id") == job.job_id == job.root_job_id
+                    and cycle.get("role") == job.orchestration_role == "aggregation"):
+                continue
+            self._commands[cycle["command_id"]] = (job.job_id, digest, cycle["source_digest"])
+
+    def read_job_root_bounded(self, root_job_id: str) -> BoundedRuntimeRootSnapshot:
+        self._select()
+        try:
+            result = _read_job_root_bounded(self._acquisition, root_job_id)
+            self._remember(result.jobs)
+            return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    def discover_job_roots_bounded(self) -> BoundedRuntimeRootDiscovery:
+        self._select()
+        try:
+            result = _discover_job_roots_bounded(self._acquisition)
+            self._remember(result.roots)
+            return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    def get_creation_event_by_command_id(self, command_id: str) -> Event | None:
+        self._require_active()
+        try:
+            if not self._selected:
+                raise StateConflict("bounded observation requires acquisition first")
+            if type(command_id) is not str or command_id not in self._commands:
+                raise StateConflict("command is not authorized by included Job provenance")
+            if command_id in self._events:
+                return self._events[command_id]
+            if len(self._events) >= 17:
+                raise StateConflict("bounded observation point budget exceeded")
+            job_id, digest, source_digest = self._commands[command_id]
+            event = self._store.get_event_by_command_id(command_id, connection=self._connection)
+            if event is not None:
+                payload = event.payload
+                provenance = payload.get("provenance") if isinstance(payload, Mapping) else None
+                if not (event.event_type == "JOB_CREATED" and event.command_id == command_id
+                        and event.job_id == event.aggregate_id == job_id and event.aggregate_type == "job"
+                        and isinstance(provenance, Mapping)
+                        and provenance.get("schema") == "mastermind.ceo_intent.v2"
+                        and "ceo-intent:" + str(provenance.get("intent_id")) == command_id
+                        and provenance.get("fingerprint") == source_digest
+                        and payload.get("orchestration_role") == "aggregation"
+                        and payload.get("orchestration_provenance_digest") == digest):
+                    raise RuntimeReadUnavailable("creation Event identity disagrees with included Job")
+            self._events[command_id] = event
+            return event
+        except BaseException:
+            self._failed = True
+            raise
+
+    def _finalize(self) -> None:
+        if self._failed or not self._selected:
+            return
+        state = ("UNKNOWN" if self._identity is None else
+                 "SAME" if self._before == self._after else "CONFLICT")
+        self._receipt = RuntimeReadObservationReceipt(RUNTIME_READ_OBSERVATION_SCHEMA, state,
+                                                    self._identity, self._before, self._after)
+
+    @property
+    def receipt(self) -> RuntimeReadObservationReceipt:
+        if self._receipt is None or self._failed:
+            raise StateConflict("bounded observation receipt is not finalized")
+        return self._receipt
+
+
 @dataclasses.dataclass(frozen=True)
 class Runtime:
     store: RuntimeStore
@@ -17034,6 +19107,7 @@ class Runtime:
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
         create: bool = True,
         existing_writable: bool = False,
+        read_binding: RuntimeReadBinding | None = None,
     ) -> "Runtime":
         return cls.from_store(
             RuntimeStore(
@@ -17043,8 +19117,100 @@ class Runtime:
                 busy_timeout_ms=busy_timeout_ms,
                 create=create,
                 existing_writable=existing_writable,
+                read_binding=read_binding,
             )
         )
+
+
+    @contextmanager
+    def bounded_acquisition(self) -> Iterator[BoundedRuntimeAcquisition]:
+        """Own one stable, finite Runtime read snapshot for bounded consumers."""
+
+        with self.store.read() as connection:
+            acquisition = BoundedRuntimeAcquisition(
+                self.store,
+                connection,
+                _capability=_RUNTIME_ACQUISITION_CAPABILITY,
+            )
+            try:
+                yield acquisition
+            finally:
+                acquisition._close()
+
+    def discover_job_roots_bounded(self) -> BoundedRuntimeRootDiscovery:
+        with self.bounded_acquisition() as acquisition:
+            return _discover_job_roots_bounded(acquisition)
+
+    def read_job_root_bounded(self, root_job_id: str) -> BoundedRuntimeRootSnapshot:
+        with self.bounded_acquisition() as acquisition:
+            return _read_job_root_bounded(acquisition, root_job_id)
+
+    @contextmanager
+    def observe_bounded_read(self) -> Iterator["BoundedRuntimeReadObservation"]:
+        """Materialize one sample-bounded observation; finalize only after close.
+
+        SAME compares two data_version samples on one retained connection. It
+        does not exclude commits after the final sample or promise later freshness.
+        A missing namespace capability always yields UNKNOWN.
+        """
+        observation = BoundedRuntimeReadObservation(self.store, _capability=_RUNTIME_ACQUISITION_CAPABILITY)
+        try:
+            with self.store._read_observation(observation) as connection:
+                acquisition = BoundedRuntimeAcquisition(self.store, connection, _capability=_RUNTIME_ACQUISITION_CAPABILITY)
+                observation._start(acquisition, connection)
+                try:
+                    yield observation
+                finally:
+                    acquisition._close()
+                    observation._active = False
+            observation._finalize()
+        except BaseException:
+            observation._failed = True
+            raise
+
+    @classmethod
+    def read_bound(
+        cls, root: str | Path, *, binding: RuntimeReadBinding | None,
+        reader: Callable[["Runtime"], Any],
+    ) -> Any:
+        """Complete a trusted materializing callback on existing typed registries.
+
+        No runtime provider is created here. The callback must not return live
+        cursors/iterators; all physical reads must close before final validation.
+        Independent registries are not claimed to share one atomic snapshot.
+        """
+        if not isinstance(binding, RuntimeReadBinding):
+            raise RuntimeReadUnavailable("bound read namespace capability unavailable")
+        try:
+            runtime = cls.at(root, create=False, read_binding=binding)
+            result = reader(runtime)
+            def materialized(value: Any, seen: set[int]) -> None:
+                if isinstance(value, (sqlite3.Connection, sqlite3.Cursor, _BoundReadConnection, _BoundReadCursor, IteratorABC, Runtime, RuntimeStore)):
+                    raise RuntimeReadUnavailable("bound read result is not materialized")
+                if value is None or isinstance(value, (str, bytes, bool, int, float, datetime)):
+                    return
+                if isinstance(value, Enum):
+                    materialized(value.value, seen)
+                    return
+                if isinstance(value, (dict, list, tuple)) or (dataclasses.is_dataclass(value) and not isinstance(value, type)):
+                    if id(value) in seen:
+                        raise RuntimeReadUnavailable("bound read result contains a cycle")
+                    seen.add(id(value))
+                    values = tuple(value.keys()) + tuple(value.values()) if isinstance(value, dict) else (
+                        (getattr(value, field.name) for field in dataclasses.fields(value))
+                        if dataclasses.is_dataclass(value) else value
+                    )
+                    for item in values:
+                        materialized(item, seen)
+                    seen.remove(id(value))
+                    return
+                raise RuntimeReadUnavailable("bound read result is not materialized")
+            materialized(result, set())
+            binding.validate_before_core_return()
+            return result
+        except BaseException:
+            binding.invalidate()
+            raise
 
     def commit_initial_capacity_placement(
         self,
@@ -17405,7 +19571,7 @@ class Runtime:
                 )
             role = str(job_row["orchestration_role"] or "")
             if (
-                role not in {"plan", "work", "review", "repair"}
+                role not in {"plan", "work", "review", "repair", "aggregation"}
                 or job_row["current_attempt_id"] != attempt_token
             ):
                 raise StateConflict("terminal completion binding is not current")
@@ -17973,6 +20139,11 @@ __all__ = [
     "AttemptLease",
     "AttemptRegistry",
     "AttemptStatus",
+    "BoundedAttemptPage",
+    "BoundedJobPage",
+    "BoundedRuntimeAcquisition",
+    "BoundedRuntimeReadObservation",
+    "RuntimeReadObservationReceipt",
     "CooRetryMutationOutcome",
     "EXECUTIVE_DIALOGUE_SOURCE_SCHEMA",
     "Event",
@@ -17983,6 +20154,7 @@ __all__ = [
     "JobPayload",
     "JobRegistry",
     "JobStatus",
+    "MAX_RUNTIME_ACQUISITION_LIMIT",
     "OperatorHarnessRegistry",
     "PersistenceError",
     "ResourceBroker",
@@ -17992,7 +20164,12 @@ __all__ = [
     "RuntimeStore",
     "SCHEMA_VERSION",
     "StateConflict",
+    "HOST_EXECUTION_BINDING_V2",
+    "HOST_EXECUTION_BINDING_V3",
+    "HOST_EXECUTION_BINDING_VERSION_KEY",
     "V2_HOST_EXECUTION_BINDING_KEYS",
+    "V3_HOST_EXECUTION_BINDING_KEYS",
+    "WORK_PLACEMENT_UNION_MAX_MEMBERS",
     "ValidatedRoleCompletion",
     "Worker",
     "WorkerQuotaClass",

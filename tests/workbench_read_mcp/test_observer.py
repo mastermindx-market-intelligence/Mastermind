@@ -183,6 +183,43 @@ class FileObservationTests(unittest.TestCase):
             self.read();self.refusal({'relative_path':'CLAUDE.md','expected_sha256':'0'*64})
         self.assertEqual(sorted(opened),sorted(closed))
         os.fstat(self.fd)
+    def _assert_cleanup_uncertainty(self, failed_kind):
+        opened=[];attempted=[];callback=[];orig_open=os.open;orig_close=os.close;orig_dup=os.dup
+        root_dup=[];opened_by_path=[]
+        def op(*a,**kw):
+            fd=orig_open(*a,**kw);opened.append(fd);opened_by_path.append(fd);return fd
+        def dup(*a,**kw):
+            fd=orig_dup(*a,**kw);opened.append(fd);root_dup.append(fd);return fd
+        def cl(fd):
+            attempted.append(fd);orig_close(fd)
+            target=opened_by_path[-1] if failed_kind=='leaf' else root_dup[0]
+            if fd==target:raise OSError('PRIVATE_CLOSE_DETAIL')
+        with patch('integrations.workbench_read_mcp.observer.os.open',side_effect=op),patch('integrations.workbench_read_mcp.observer.os.close',side_effect=cl),patch('integrations.workbench_read_mcp.observer.os.dup',side_effect=dup):
+            with self.assertRaises(ReadRefusal) as caught:
+                observe_file({'relative_path':'nested/source.py'},self.resolve,clock_ms=lambda:NOW,on_cleanup_uncertain=lambda:callback.append(tuple(attempted)))
+        expected=[*reversed(opened_by_path),root_dup[0]]
+        self.assertEqual(caught.exception.code,'CLEANUP_UNCERTAIN')
+        self.assertEqual(str(caught.exception),'CLEANUP_UNCERTAIN')
+        self.assertEqual(callback,[tuple(expected)])
+        self.assertEqual(attempted,expected)
+        self.assertEqual(sorted(opened),sorted(attempted))
+        for fd in opened:
+            with self.assertRaises(OSError):os.fstat(fd)
+        os.fstat(self.fd)
+    def test_leaf_close_failure_refuses_after_attempting_all_descriptors_once(self):
+        self._assert_cleanup_uncertainty('leaf')
+    def test_root_duplicate_close_failure_refuses_after_leaf_close(self):
+        self._assert_cleanup_uncertainty('root')
+    def test_cleanup_failure_refuses_when_callback_is_omitted(self):
+        attempts=[];orig_close=os.close
+        def cl(fd):
+            attempts.append(fd);orig_close(fd)
+            if len(attempts)==1:raise OSError('PRIVATE_CLOSE_DETAIL')
+        with patch('integrations.workbench_read_mcp.observer.os.close',side_effect=cl):
+            with self.assertRaises(ReadRefusal) as caught:self.read()
+        self.assertEqual(caught.exception.code,'CLEANUP_UNCERTAIN')
+        self.assertEqual(str(caught.exception),'CLEANUP_UNCERTAIN')
+        self.assertEqual(len(attempts),2)
     def test_platform_without_required_flags_refuses(self):
         with patch('integrations.workbench_read_mcp.observer.os.O_NOFOLLOW',0):self.refusal({'relative_path':'CLAUDE.md'},'PLATFORM_UNQUALIFIED')
 

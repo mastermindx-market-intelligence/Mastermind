@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import json
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from control_plane.visible_turn_projection import VisibleTurnProjection
 import scripts.ohf.laboratory as laboratory
 from scripts.ohf.laboratory import AppServerClient, JsonRpcError
 
@@ -90,3 +93,98 @@ def test_raw_method_is_hard_wired_to_closed_page_contract(tmp_path):
             )
     finally:
         client.close()
+
+
+def test_lc1_extraction_publishes_after_demux_and_never_retains_raw_pages(tmp_path):
+    projection = VisibleTurnProjection()
+    client = _client(tmp_path)
+    client.visible_projection = projection
+    try:
+        ordinary = client.request("thread/turns/list", {"threadId": "THREAD"})
+        assert isinstance(ordinary, dict)
+        assert projection.parser_gaps() == ()
+        assert projection.active_prebind_request_id() is None
+        assert isinstance(client.notifications, list)
+    finally:
+        client.close()
+
+
+def test_observer_extraction_fault_does_not_escape_receiver_demux(monkeypatch):
+    projection = VisibleTurnProjection()
+    client = AppServerClient([], env={}, cwd=Path("."))
+    client.proc = None
+    client.visible_projection = projection
+    first = json.loads(
+        '{"method":"item/updated","params":{"item":{"id":"observer-fault",'
+        '"sequence":1,"type":"agentMessage","text":"valid frame"}}}'
+    )
+    second = json.loads(
+        '{"method":"item/updated","params":{"item":{"id":"observer-fault",'
+        '"sequence":2,"type":"agentMessage","text":"following frame"}}}'
+    )
+    terminal = json.loads(
+        '{"method":"turn/completed","params":{"turn":{"id":"terminal"}}}'
+    )
+
+    def fail_once(operation):
+        original = getattr(projection, operation)
+
+        def failing(*args, **kwargs):
+            if failing.calls == 0:
+                failing.calls += 1
+                raise RuntimeError("observer fixture failure")
+            return original(*args, **kwargs)
+
+        failing.calls = 0
+        monkeypatch.setattr(projection, operation, failing)
+
+    fail_once("publish_demultiplexed")
+    stdout_data = (
+        json.dumps(first)
+        + "\n"
+        + json.dumps(second)
+        + "\n"
+        + json.dumps(terminal)
+        + "\n"
+    ).encode("utf-8")
+    client.proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(Path(__file__).resolve().parent),
+    )
+    assert client.proc.stdin is not None and client.proc.stdout is not None
+    client.proc.stdin.write(stdout_data)
+    client.proc.stdin.close()
+    client._read_stdout()
+
+    assert client.notifications == [first, second, terminal]
+    assert client.observer_faults == (
+        laboratory.ObserverFault("publish_demultiplexed", "RuntimeError"),
+    )
+    assert projection._viewers_by_turn == {}
+
+
+def test_request_preserves_typed_send_failure_before_payload_exists(monkeypatch):
+    client = AppServerClient([], env={}, cwd=Path("."))
+
+    def fail_send(_message):
+        raise JsonRpcError("sentinel send failure")
+
+    monkeypatch.setattr(client, "_send", fail_send)
+
+    with pytest.raises(JsonRpcError, match="sentinel send failure"):
+        client.request("account/read", timeout=0.01)
+
+    assert client._responses == {}
+
+
+def test_request_preserves_typed_timeout_before_payload_exists(monkeypatch):
+    client = AppServerClient([], env={}, cwd=Path("."))
+    monkeypatch.setattr(client, "_send", lambda _message: None)
+
+    with pytest.raises(JsonRpcError, match="timeout waiting for account/read"):
+        client.request("account/read", timeout=0.001)
+
+    assert client._responses == {}

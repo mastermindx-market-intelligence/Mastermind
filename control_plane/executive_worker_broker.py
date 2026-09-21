@@ -46,18 +46,24 @@ from control_plane.executive_ambient_process import (
     NullAmbientClassifier,
 )
 from control_plane.codex_worker import (
-    CodexWorkerAdapter,
     GitPreflightFailed,
     GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
     LaunchValidationStageError,
     ProcessIdentityError,
 )
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    WorkerExecutionAdapter,
+    adapter_descriptor,
+    bind_reviewed_adapter,
+)
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
@@ -114,6 +120,8 @@ from control_plane.worker_execution_contract import (
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
+    WorkerRecoveryBinding,
+    WorkerRecoveryContractError,
     WorkerResult,
     WorkerRunStatus,
 )
@@ -122,8 +130,6 @@ from control_plane.worker_browser_b1 import (
     BrowserReviewError,
     browser_review_receipt,
 )
-
-
 BROKER_REQUEST_SCHEMA_VERSION = "mastermind.executive_worker_broker_request/v1"
 BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1"
 UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v2"
@@ -166,6 +172,7 @@ _OHF_OPERATIONS = frozenset(
         "ohf-begin-turn",
         "ohf-deliver-attention",
         "ohf-collect-turn",
+        "ohf-observe-turn",
         "ohf-interrupt",
         "ohf-stop",
         "ohf-cancel",
@@ -182,6 +189,7 @@ _MAX_VALIDATION_COMMANDS = 32
 _MAX_VALIDATION_ARGS = 128
 _MAX_VALIDATION_BYTES = 64 * 1024
 _MAX_HISTORY = 32
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 _SHELL_EXECUTABLES = frozenset(
     {
         "/bin/bash",
@@ -211,6 +219,10 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class WorkerAdapterNotImplementedError(WorkerBrokerError):
+    """A reviewed adapter is not implemented for broker execution."""
 
 
 class BrokerPreSubmitError(WorkerBrokerError):
@@ -898,8 +910,17 @@ class _BrokerRun:
     collected_receipt: Any = None
     cancel_receipt: Any = None
     validation_receipts: dict[tuple[str, ...], Any] = dataclasses.field(default_factory=dict)
+    collection_task: asyncio.Task[
+        tuple[CollectionReceipt, UIDSweepReceipt]
+    ] | None = None
+    validation_tasks: dict[
+        tuple[str, ...],
+        tuple[
+            float,
+            asyncio.Task[tuple[ValidationReceipt, UIDSweepReceipt]],
+        ],
+    ] = dataclasses.field(default_factory=dict)
     terminal_error: str | None = None
-    collecting: bool = False
     cancelling: bool = False
     terminal_sweep_task: asyncio.Task[UIDSweepReceipt] | None = None
 
@@ -1285,10 +1306,11 @@ class ExecutiveWorkerBroker:
 
     def __init__(
         self,
-        adapter: CodexWorkerAdapter,
+        adapter: WorkerExecutionAdapter,
         policy: BrokerPolicy,
         sweeper: ResidualSweeper,
         *,
+        adapter_id: str = "codex-cli",
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
@@ -1299,7 +1321,16 @@ class ExecutiveWorkerBroker:
         ]
         | None = None,
     ) -> None:
+        try:
+            descriptor = bind_reviewed_adapter(adapter, adapter_id)
+        except AdapterBindingError as exc:
+            raise WorkerBrokerError(str(exc)) from exc
+        except Exception as exc:
+            raise WorkerBrokerError(
+                f"worker adapter {adapter_id!r} failed to bind"
+            ) from exc
         self.adapter = adapter
+        self.adapter_id = descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -1334,6 +1365,7 @@ class ExecutiveWorkerBroker:
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
+        self._observer_refusals: list[tuple[Any, str]] = []
         self._state_lock = asyncio.Lock()
         self._starting = False
         self._validation_busy = False
@@ -1448,6 +1480,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
+        if operation == "ohf-observe-turn":
+            return await self._ohf_observe_turn(payload)
         if operation == "ohf-interrupt":
             return await self._ohf_interrupt(payload)
         if operation == "ohf-stop":
@@ -2091,6 +2125,129 @@ class ExecutiveWorkerBroker:
         finally:
             await self._operator_release_busy(state)
 
+    async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        expected = {
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+            "cursor",
+            "max_items",
+        }
+        if set(payload) != expected:
+            raise BrokerStateError("ohf-observe-turn payload fields are invalid")
+        identity_fields = (
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+        )
+        if any(
+            not isinstance(payload[field], str) or not payload[field]
+            for field in identity_fields
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        async with self._state_lock:
+            active = self._operator_run
+            if active is None:
+                self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+                raise BrokerStateError("UNKNOWN_GENERATION")
+            generation_number = active.generation.generation_number
+            worker_id = active.generation.worker_id
+        if (
+            payload["attempt"] != active.epoch.attempt_id
+            or payload["epoch"] != active.epoch.session_epoch_id
+            or payload["generation"] != active.generation.process_generation_id
+            or generation_number != active.generation.generation_number
+            or worker_id != active.generation.worker_id
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        native_turn = None
+        projection = getattr(active.adapter, "visible_turn_projection", None)
+        if projection is None:
+            self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+            raise BrokerStateError("UNKNOWN_GENERATION")
+        grant_key = projection.check_grant(payload["reader_grant"])
+        if grant_key is None:
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
+        exact_local = None
+        generation_state = active.adapter._generations.get(
+            active.generation.process_generation_id
+        )
+        if generation_state is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        for local_turn, candidate_native in generation_state.turns.items():
+            if (
+                local_turn == payload["turn"]
+                and candidate_native
+                and candidate_native == grant_key.native_turn_id
+            ):
+                exact_local = local_turn
+                native_turn = candidate_native
+                break
+        if exact_local is None or native_turn is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        expected_key = TurnKey(
+            active.epoch.attempt_id,
+            active.epoch.session_epoch_id,
+            active.generation.process_generation_id,
+            active.generation.generation_number,
+            active.generation.worker_id,
+            exact_local,
+            native_turn,
+        )
+        if grant_key != expected_key:
+            self._observer_refusals.append((grant_key, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        try:
+            result = projection.read(
+                expected_key,
+                reader_grant=payload["reader_grant"],
+                cursor=payload["cursor"],
+                max_items=payload["max_items"],
+            )
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if not isinstance(code, str):
+                raise
+            self._observer_refusals.append((expected_key, code))
+            raise BrokerStateError(code) from None
+        return {
+            "items": [
+                {
+                    "source_item_id": item.source_item_id,
+                    "source_sequence": item.source_sequence,
+                    "publication_sequence": item.publication_sequence,
+                    "state": item.state,
+                    "text": item.text,
+                    "byte_length": item.byte_length,
+                    "truncated": False,
+                    "gap": None,
+                }
+                for item in result.items
+            ],
+            "next_cursor": result.next_cursor,
+            "gaps": [
+                {
+                    "from_publication_sequence": gap.from_publication_sequence,
+                    "to_publication_sequence": gap.to_publication_sequence,
+                    "reason": gap.reason,
+                }
+                for gap in result.gaps
+            ],
+            "terminal": result.terminal,
+            "publication_epoch": result.publication_epoch,
+            "retained_scope": list(result.retained_scope),
+            "resync_required": result.resync_required,
+        }
+
     async def _ohf_deliver_attention(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send one bounded nudge through the already-owned current writer."""
 
@@ -2631,6 +2788,24 @@ class ExecutiveWorkerBroker:
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        descriptor = adapter_descriptor(self.adapter_id)
+        if not descriptor.implemented:
+            raise WorkerAdapterNotImplementedError(
+                f"worker adapter {descriptor.adapter_id!r} is not implemented "
+                "for broker execution"
+            )
+        binding = getattr(self.adapter, "binding", None)
+        if binding is not None:
+            if getattr(binding, "implementation_state", None) == "SPEC_ONLY":
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "is SPEC_ONLY for broker execution"
+                )
+            if getattr(binding, "autonomous_allowed", None) is False:
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "does not allow autonomous broker execution"
+                )
         self._require_current_autonomy()
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
@@ -2650,10 +2825,12 @@ class ExecutiveWorkerBroker:
             if spec.run_id in self._runs:
                 raise BrokerStateError("run_id cannot be reused")
             self._starting = True
+        started = False
         try:
             process_ref = await self.adapter.start(spec)
             attestation_reader = getattr(self.adapter, "launch_attestation", None)
             attestation = attestation_reader(process_ref) if callable(attestation_reader) else None
+            started = True
         except Exception:
             try:
                 self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "start_failed")
@@ -2663,16 +2840,17 @@ class ExecutiveWorkerBroker:
             raise
         finally:
             async with self._state_lock:
+                if started:
+                    # Publish before releasing admission, in the original finalizer.
+                    state = _BrokerRun(
+                        spec=spec,
+                        process_ref=process_ref,
+                        validation_commands=commands,
+                        launch_attestation=attestation,
+                    )
+                    self._remember(spec.run_id, state)
+                    self._active_run_id = spec.run_id
                 self._starting = False
-        async with self._state_lock:
-            state = _BrokerRun(
-                spec=spec,
-                process_ref=process_ref,
-                validation_commands=commands,
-                launch_attestation=attestation,
-            )
-            self._remember(spec.run_id, state)
-            self._active_run_id = spec.run_id
         return {
             "process_ref": process_ref,
             "launch_attestation": attestation,
@@ -2759,7 +2937,17 @@ class ExecutiveWorkerBroker:
                 "status": status,
                 "process_ref": state.process_ref,
                 "terminal_error": state.terminal_error,
-                "validated_commands": [list(command) for command in state.validation_receipts],
+                "collection_busy": (
+                    state.collection_task is not None
+                    and not state.collection_task.done()
+                ),
+                "validation_busy": any(
+                    not task.done()
+                    for _timeout, task in state.validation_tasks.values()
+                ),
+                "validated_commands": [
+                    list(command) for command in state.validation_receipts
+                ],
             }
         return result
 
@@ -2788,34 +2976,50 @@ class ExecutiveWorkerBroker:
             self.last_sweep = receipt
         return receipt
 
+    async def _collect_transaction(
+        self, state: _BrokerRun
+    ) -> tuple[CollectionReceipt, UIDSweepReceipt]:
+        """Own one collection effect independently of any one socket caller."""
+
+        receipt = await self.adapter.collect_result(state.process_ref)
+        async with self._state_lock:
+            if (
+                state.collected_receipt is not None
+                and state.collected_receipt != receipt
+            ):
+                state.terminal_error = (
+                    "replayed collection differs from the accepted receipt"
+                )
+                raise BrokerStateError(state.terminal_error)
+            state.collected_receipt = receipt
+        sweep = await self._terminal_sweep(state, reason="run_terminal")
+        async with self._state_lock:
+            if self._active_run_id == state.spec.run_id:
+                self._active_run_id = None
+        if sweep.found_residuals:
+            async with self._state_lock:
+                state.terminal_error = (
+                    "worker left a detached same-UID process after collection"
+                )
+            raise BrokerStateError(state.terminal_error)
+        return receipt, sweep
+
     async def _collect(self, payload: dict[str, Any]) -> dict[str, Any]:
         if set(payload) != {"run_id"}:
             raise BrokerProtocolError("collect payload fields are invalid")
         async with self._state_lock:
             state = self._run(payload["run_id"])
-            if self._active_run_id != state.spec.run_id:
-                raise BrokerStateError("only the active run can be collected")
-            if state.collecting:
-                raise BrokerStateError("collection is already in progress")
-            state.collecting = True
-        try:
-            receipt = await self.adapter.collect_result(state.process_ref)
-            async with self._state_lock:
-                state.collected_receipt = receipt
-            sweep = await self._terminal_sweep(state, reason="run_terminal")
-            async with self._state_lock:
-                if self._active_run_id == state.spec.run_id:
-                    self._active_run_id = None
-            if sweep.found_residuals:
-                async with self._state_lock:
-                    state.terminal_error = (
-                        "worker left a detached same-UID process after collection"
-                    )
-                raise BrokerStateError(state.terminal_error)
-            return {"collection": receipt, "uid_sweep": sweep}
-        finally:
-            async with self._state_lock:
-                state.collecting = False
+            task = state.collection_task
+            if task is None:
+                if self._active_run_id != state.spec.run_id:
+                    raise BrokerStateError("only the active run can be collected")
+                task = asyncio.create_task(
+                    self._collect_transaction(state),
+                    name=f"executive-worker-collect-{state.spec.run_id}",
+                )
+                state.collection_task = task
+        receipt, sweep = await asyncio.shield(task)
+        return {"collection": receipt, "uid_sweep": sweep}
 
     async def _cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
         if set(payload) != {"run_id", "reason"}:
@@ -2853,44 +3057,29 @@ class ExecutiveWorkerBroker:
             raise BrokerStateError(state.terminal_error) from adapter_error
         return {"cancellation": receipt, "uid_sweep": sweep}
 
-    async def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if set(payload) != {"run_id", "argv", "timeout_seconds"}:
-            raise BrokerProtocolError("validate payload fields are invalid")
-        commands = _validation_commands([payload["argv"]])
-        command = commands[0]
-        timeout = payload.get("timeout_seconds")
-        if not isinstance(timeout, (int, float)) or not 0.1 <= float(timeout) <= 3600:
-            raise BrokerProtocolError("validation timeout is outside the safe range")
-        async with self._state_lock:
-            if (
-                self._active_run_id is not None
-                or self._operator_run is not None
-                or self._starting
-                or self._validation_busy
-                or self._status_sweep_busy
-            ):
-                raise BrokerStateError("validation is serialized after worker collection")
-            state = self._run(payload["run_id"])
-            if state.collected_receipt is None:
-                raise BrokerStateError("validation requires a collected worker result")
-            if command not in state.validation_commands:
-                raise BrokerProtocolError("validation argv was not frozen in the start request")
-            if command in state.validation_receipts:
-                raise BrokerStateError("validation argv has already been executed")
-            self._validation_busy = True
+    async def _validation_transaction(
+        self,
+        state: _BrokerRun,
+        command: tuple[str, ...],
+        timeout: float,
+    ) -> tuple[ValidationReceipt, UIDSweepReceipt]:
+        """Own one frozen validation effect independently of socket callers."""
+
         try:
             adapter_error: Exception | None = None
-            receipt: Any = None
+            receipt: ValidationReceipt | None = None
             try:
                 receipt = await self.adapter.run_validation_argv(
                     state.spec,
                     command,
-                    timeout_seconds=float(timeout),
+                    timeout_seconds=timeout,
                 )
             except Exception as exc:
                 adapter_error = exc
             try:
-                sweep = await asyncio.to_thread(self.sweeper.sweep, "validation_terminal")
+                sweep = await asyncio.to_thread(
+                    self.sweeper.sweep, "validation_terminal"
+                )
             except Exception as exc:
                 async with self._state_lock:
                     self._quarantined_reason = (
@@ -2908,14 +3097,82 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(state.terminal_error) from adapter_error
             if sweep.found_residuals:
                 async with self._state_lock:
-                    state.terminal_error = "validation left a detached same-UID process"
+                    state.terminal_error = (
+                        "validation left a detached same-UID process"
+                    )
                 raise BrokerStateError(state.terminal_error)
+            if not isinstance(receipt, ValidationReceipt):
+                raise BrokerStateError(
+                    "worker adapter returned an invalid validation receipt"
+                )
             async with self._state_lock:
+                existing = state.validation_receipts.get(command)
+                if existing is not None and existing != receipt:
+                    state.terminal_error = (
+                        "replayed validation differs from the accepted receipt"
+                    )
+                    raise BrokerStateError(state.terminal_error)
                 state.validation_receipts[command] = receipt
-            return {"validation": receipt, "uid_sweep": sweep}
+            return receipt, sweep
         finally:
             async with self._state_lock:
                 self._validation_busy = False
+
+    async def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if set(payload) != {"run_id", "argv", "timeout_seconds"}:
+            raise BrokerProtocolError("validate payload fields are invalid")
+        commands = _validation_commands([payload["argv"]])
+        command = commands[0]
+        raw_timeout = payload.get("timeout_seconds")
+        if (
+            not isinstance(raw_timeout, (int, float))
+            or not 0.1 <= float(raw_timeout) <= 3600
+        ):
+            raise BrokerProtocolError("validation timeout is outside the safe range")
+        timeout = float(raw_timeout)
+        async with self._state_lock:
+            state = self._run(payload["run_id"])
+            existing = state.validation_tasks.get(command)
+            if existing is not None:
+                accepted_timeout, task = existing
+                if timeout != accepted_timeout:
+                    raise BrokerProtocolError(
+                        "validation replay timeout differs from the accepted operation"
+                    )
+            else:
+                if (
+                    self._active_run_id is not None
+                    or self._operator_run is not None
+                    or self._starting
+                    or self._validation_busy
+                    or self._status_sweep_busy
+                ):
+                    raise BrokerStateError(
+                        "validation is serialized after worker collection"
+                    )
+                if state.collected_receipt is None:
+                    raise BrokerStateError(
+                        "validation requires a collected worker result"
+                    )
+                if command not in state.validation_commands:
+                    raise BrokerProtocolError(
+                        "validation argv was not frozen in the start request"
+                    )
+                if command in state.validation_receipts:
+                    raise BrokerStateError(
+                        "validation receipt exists without its replay operation"
+                    )
+                self._validation_busy = True
+                task = asyncio.create_task(
+                    self._validation_transaction(state, command, timeout),
+                    name=(
+                        "executive-worker-validate-"
+                        f"{state.spec.run_id}-{len(state.validation_tasks) + 1}"
+                    ),
+                )
+                state.validation_tasks[command] = (timeout, task)
+        receipt, sweep = await asyncio.shield(task)
+        return {"validation": receipt, "uid_sweep": sweep}
 
     async def shutdown(self) -> None:
         """Cancel an active run, then prove the dedicated UID is quiescent."""
@@ -3135,10 +3392,18 @@ class ExecutiveWorkerBroker:
                 await self._write_interrupted_envelope(
                     writer, request_id, operation, exc
                 )
+            if isinstance(exc, _CLIENT_GONE):
+                return
             raise
         finally:
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except _CLIENT_GONE:
+                # A vanished control process is normal after an operation has
+                # become broker-owned. Never let socket teardown mask the
+                # operation result or a caller cancellation.
+                pass
 
     async def serve(self, activated_socket: socket.socket) -> None:
         """Run forever on one launchd-owned Unix listener."""
@@ -3428,6 +3693,8 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
 class RemoteCodexWorkerAdapter:
     """Control-side Codex adapter facade backed by the distinct-UID broker."""
 
+    adapter_id = "codex-cli"
+
     def __init__(
         self,
         client: WorkerBrokerClient,
@@ -3464,6 +3731,55 @@ class RemoteCodexWorkerAdapter:
         self._specs[spec.run_id] = spec
         self.startup_uid_sweep = startup_sweep
         return process_ref
+
+    def reattach(
+        self,
+        spec: WorkerLaunchSpec,
+        binding: WorkerRecoveryBinding,
+    ) -> WorkerProcessRef:
+        """Rebind one exact broker-owned run without invoking provider start."""
+
+        if binding.adapter_id != self.adapter_id:
+            raise BrokerStateError(
+                "remote recovery adapter identity changed"
+            )
+        try:
+            recovered_spec = binding.recover_launch_spec(type(spec))
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+        if recovered_spec != spec:
+            raise BrokerStateError(
+                "remote recovery launch specification changed"
+            )
+        ref = binding.process_ref
+        existing = self._refs.get(ref.run_id)
+        if existing is not None:
+            if existing == ref and self._specs.get(ref.run_id) == spec:
+                return ref
+            raise BrokerStateError(
+                "remote run is already bound to another execution"
+            )
+        result = self.client.request_sync(
+            "status",
+            {"run_id": ref.run_id},
+        )
+        run = _mapping(result.get("run"), field="run status")
+        observed = _process_ref_from_json(run.get("process_ref"))
+        if observed != ref:
+            raise BrokerProtocolError(
+                "remote recovery status changed immutable process identity"
+            )
+        status = run.get("status")
+        allowed = {
+            item.value for item in WorkerRunStatus
+        } | {"COLLECTED", "ERROR"}
+        if status not in allowed:
+            raise BrokerProtocolError(
+                "remote recovery status is invalid"
+            )
+        self._refs[ref.run_id] = ref
+        self._specs[ref.run_id] = spec
+        return ref
 
     def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
         if self._refs.get(ref.run_id) != ref:
@@ -3705,8 +4021,18 @@ class RemoteWorkerProcessController:
             return ProcessPresence.UNKNOWN
         if not self._matches_attempt(process, attempt):
             return ProcessPresence.UNKNOWN
-        if run.get("status") in {"STARTING", "RUNNING", "CANCELLING"}:
+        run_status = run.get("status")
+        if run_status in {"STARTING", "RUNNING", "CANCELLING"}:
             return ProcessPresence.LIVE
+        if (
+            run.get("collection_busy") is True
+            or run.get("validation_busy") is True
+        ):
+            # The original provider process is terminal, but the persistent
+            # worker broker still owns this run's exact collection/validation
+            # operation and replay task. This is neither a live Attempt process
+            # nor ambiguous identity, and it may not pass a global UID sweep yet.
+            return ProcessPresence.TERMINAL_OWNED
         if self._fresh_overall_absence(attempt.attempt_id):
             return ProcessPresence.ABSENT
         return ProcessPresence.UNKNOWN

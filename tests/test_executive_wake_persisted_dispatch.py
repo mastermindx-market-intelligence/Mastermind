@@ -23,6 +23,7 @@ from control_plane.wake_dispatcher import (
     WakeDispatchError,
     WakeNudge,
     WakeTransportCompletion,
+    reconcile_persisted_delivered_ack,
 )
 from control_plane.wake_ledger import (
     LedgerPhase,
@@ -664,3 +665,64 @@ def test_concrete_codex_dispatcher_composes_through_generic_fabric():
     assert transport is not None and transport.outcome is TransportOutcome.DELIVERED
     assert receipts[0].outcome.value == "DELIVERED"
     assert client.calls == 1
+
+
+def test_delivered_ack_reconciliation_never_resends_and_canonical_ingress_writes_ack(
+    tmp_path,
+):
+    runtime, sealed, generation = _admitted_runtime(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    registry = _codex_registry("PROPHET-COO-A")
+    binding = project_runtime_binding(
+        runtime, sealed.attempt_id, registry.targets["PROPHET-COO-A"]
+    )
+    obligation = mint_obligation(
+        wake_kind="job_failed",
+        source_kind="executive_inbox_attention",
+        source_ref="eia-0000000000ab",
+        declared_target_seat="coo",
+        root_job_id="JOB-001",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    _seed_requested(repo, (obligation, route))
+    delivered = _Dispatcher()
+    first = _dispatch_persisted(
+        repo, [(obligation, route)], dispatcher=delivered, binding=binding,
+        retry_policy=_POLICY,
+    )
+    assert first.state is wake_dispatcher.PersistedNudgeState.DELIVERED
+
+    client = _LateCodexClient(
+        target_attempt_id=sealed.attempt_id,
+        process_generation_id=generation.process_generation_id,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+    )
+    dispatcher = CodexAppServerWakeDispatcher(client)
+    result = asyncio.run(reconcile_persisted_delivered_ack(
+        repo, [(obligation, route)], dispatcher=dispatcher, binding=binding,
+        target_registry=registry,
+    ))
+    replay = asyncio.run(reconcile_persisted_delivered_ack(
+        repo, [(obligation, route)], dispatcher=dispatcher,
+        binding=dataclasses.replace(
+            binding, binding_generation=binding.binding_generation + 1
+        ),
+        target_registry=registry,
+    ))
+    mismatched_replay = asyncio.run(reconcile_persisted_delivered_ack(
+        repo,
+        [(obligation, dataclasses.replace(route, route_digest="f" * 16))],
+        dispatcher=dispatcher,
+        binding=binding,
+        target_registry=registry,
+    ))
+    phases = [item.record.phase for item in repo.list_records(obligation.obligation_id)]
+    assert result.state.value == replay.state.value == "RECORDED"
+    assert mismatched_replay.state.value == "HOLD"
+    assert phases.count(LedgerPhase.DELIVERY_ATTEMPT) == 1
+    assert phases.count(LedgerPhase.DELIVERED) == 1
+    assert phases.count(LedgerPhase.TARGET_ACKNOWLEDGED) == 1
+    assert delivered.nudge_calls == 1
+    assert client.deliver_calls == 0
+    assert client.reconcile_calls == 1

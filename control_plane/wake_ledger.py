@@ -33,6 +33,7 @@ from control_plane.wake_events import (
     parse_obligation,
     utc_now_iso,
 )
+from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
 
 
 WAKE_AGGREGATE_TYPE = "wake"
@@ -78,6 +79,7 @@ class SourceResolutionCode(str, Enum):
     RUNTIME_REVIEW_ABSENT = "runtime_review_absent"
     INBOX_ATTENTION_ABSENT = "inbox_attention_absent"
     AGENTOS_ITEM_ABSENT = "agentos_item_absent"
+    DIALOGUE_ATTENTION_ABSENT = "dialogue_attention_absent"
 
 
 SNAPSHOT_DIGEST_RE = re.compile(r"^[0-9a-f]{16,64}$")
@@ -87,6 +89,7 @@ ATTEMPT_COMMAND_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}:A[1-9][0-9]*$")
 _RESOLUTION_CODE_BY_SOURCE = {
     SourceKind.EXECUTIVE_RUNTIME_EVENT: SourceResolutionCode.RUNTIME_REVIEW_ABSENT,
     SourceKind.EXECUTIVE_INBOX_ATTENTION: SourceResolutionCode.INBOX_ATTENTION_ABSENT,
+    SourceKind.AGENT_DIALOGUE_ATTENTION: SourceResolutionCode.DIALOGUE_ATTENTION_ABSENT,
 }
 
 
@@ -241,6 +244,7 @@ class WakeLedgerRecord:
     ack: WakeAcknowledgement | None = None
     source_resolution: SourceResolution | None = None
     obligation: WakeObligation | None = None
+    physical_source: PhysicalDialogueSourceIdentity | None = None
 
     def matches_attempt(self, attempt: DeliveryAttempt) -> bool:
         return (
@@ -306,7 +310,11 @@ def make_delivery_attempt(obligation: WakeObligation, route: WakeRoute, *, attem
     )
 
 
-def requested_record(obligation: WakeObligation) -> WakeLedgerRecord:
+def requested_record(
+    obligation: WakeObligation,
+    *,
+    physical_source: PhysicalDialogueSourceIdentity | None = None,
+) -> WakeLedgerRecord:
     parsed = parse_obligation(obligation.to_dict())
     return parse_ledger_record(
         WakeLedgerRecord(
@@ -315,6 +323,7 @@ def requested_record(obligation: WakeObligation) -> WakeLedgerRecord:
             ),
             phase=LedgerPhase.WAKE_REQUESTED,
             obligation=parsed,
+            physical_source=physical_source,
         )
     )
 
@@ -380,7 +389,25 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
                 raise WakeLedgerError(str(exc)) from exc
             if parsed_obligation.obligation_id != oid:
                 raise WakeLedgerError("WAKE_REQUESTED obligation_id does not match command_id")
-            return dataclasses.replace(record, obligation=parsed_obligation)
+            physical = record.physical_source
+            if physical is not None:
+                if (
+                    type(physical) is not PhysicalDialogueSourceIdentity
+                    or parsed_obligation.source_kind is not SourceKind.AGENT_DIALOGUE_ATTENTION
+                    or parsed_obligation.wake_kind is not WakeKind.DIALOGUE_TURN_PENDING
+                    or physical.logical_source_ref != parsed_obligation.source_ref
+                    or physical.obligation_id != parsed_obligation.obligation_id
+                    or physical.target_seat != parsed_obligation.declared_target_seat
+                    or physical.candidate.root_job_id != parsed_obligation.root_job_id
+                    or physical.candidate.job_id != parsed_obligation.job_id
+                    or physical.candidate.attempt_id != parsed_obligation.attempt_id
+                ):
+                    raise WakeLedgerError("physical source identity disagrees with Wake")
+            return dataclasses.replace(
+                record, obligation=parsed_obligation, physical_source=physical
+            )
+        if record.physical_source is not None:
+            raise WakeLedgerError("physical source is WAKE_REQUESTED-only")
         if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED:
             parse_acknowledgement(record.ack, obligation_id=oid)
         if record.phase is LedgerPhase.SOURCE_RESOLVED:
@@ -403,6 +430,8 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
         raise WakeLedgerError("attempt phase cannot carry ack or resolution evidence")
     if record.obligation is not None:
         raise WakeLedgerError("attempt phase cannot carry the obligation envelope")
+    if record.physical_source is not None:
+        raise WakeLedgerError("physical source is WAKE_REQUESTED-only")
     if bool(record.nudge_id) != bool(record.nudge_attempt_command_ids):
         raise WakeLedgerError(
             "attempt phase must carry complete nudge group identity or none"
@@ -968,10 +997,15 @@ def identity_payload(obligation: WakeObligation) -> dict[str, object]:
     return {key: full[key] for key in IDENTITY_PAYLOAD_KEYS}
 
 
-def requested_event_payload(obligation: WakeObligation) -> dict[str, object]:
+def requested_event_payload(
+    obligation: WakeObligation,
+    physical_source: PhysicalDialogueSourceIdentity | None = None,
+) -> dict[str, object]:
     payload = identity_payload(obligation)
     payload["source_created_at"] = obligation.source_created_at
     payload["emitted_at"] = obligation.emitted_at
+    if physical_source is not None:
+        payload["physical_source"] = physical_source.to_dict()
     return payload
 
 
@@ -1039,7 +1073,7 @@ def event_payload_for(
             raise WakeLedgerError("WAKE_REQUESTED payload requires the obligation envelope")
         if envelope.obligation_id != _obligation_id_from_command(record.command_id):
             raise WakeLedgerError("obligation_id does not match WAKE_REQUESTED command")
-        return requested_event_payload(envelope)
+        return requested_event_payload(envelope, record.physical_source)
     if record.phase is LedgerPhase.SOURCE_RESOLVED:
         if record.source_resolution is None:
             raise WakeLedgerError("SOURCE_RESOLVED payload requires resolution evidence")
@@ -1077,7 +1111,10 @@ def event_payload_for(
 def payloads_equivalent(left: Mapping[str, object], right: Mapping[str, object], *, phase: LedgerPhase) -> bool:
     if phase is LedgerPhase.WAKE_REQUESTED:
         def _ident(payload: Mapping[str, object]) -> dict[str, object]:
-            return {key: payload.get(key) for key in IDENTITY_PAYLOAD_KEYS}
+            return {
+                **{key: payload.get(key) for key in IDENTITY_PAYLOAD_KEYS},
+                "physical_source": payload.get("physical_source"),
+            }
 
         return _ident(left) == _ident(right)
     return dict(left) == dict(right)
@@ -1111,17 +1148,33 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
         phase = LedgerPhase(event_type)
     except ValueError as exc:
         raise WakeLedgerError(f"wake event_type {event_type!r} is not a ledger phase") from exc
+    if phase is not LedgerPhase.WAKE_REQUESTED and "physical_source" in payload:
+        raise WakeLedgerError("physical source is WAKE_REQUESTED-only")
     oid = _obligation_id(aggregate_id)
     if command_id.split(":", 1)[0] != oid:
         raise WakeLedgerError("wake command_id does not belong to aggregate_id")
     if ledger_command_id(oid, phase, attempt_n=_payload_attempt_n(payload, phase)) != command_id:
         raise WakeLedgerError("wake command_id does not match phase")
     if phase is LedgerPhase.WAKE_REQUESTED:
-        obligation = parse_obligation(payload)
+        physical_present = "physical_source" in payload
+        physical_value = payload.get("physical_source")
+        if physical_present and type(physical_value) is not dict:
+            raise WakeLedgerError("WAKE_REQUESTED physical source is malformed")
+        obligation = parse_obligation(
+            {key: value for key, value in payload.items() if key != "physical_source"}
+        )
         if obligation.obligation_id != oid:
             raise WakeLedgerError("WAKE_REQUESTED payload obligation_id disagrees with aggregate")
         _assert_outer_correlation(event, obligation)
-        return requested_record(obligation)
+        try:
+            physical = (
+                None
+                if not physical_present
+                else PhysicalDialogueSourceIdentity.from_dict(physical_value)
+            )
+        except Exception as exc:
+            raise WakeLedgerError("WAKE_REQUESTED physical source is malformed") from exc
+        return requested_record(obligation, physical_source=physical)
     if phase is LedgerPhase.SOURCE_RESOLVED:
         try:
             code = SourceResolutionCode(str(payload.get("code") or ""))

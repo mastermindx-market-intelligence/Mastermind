@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
 BACKUP_LABEL="com.mastermind.executive.backup"
+RELAY_LABEL="com.mastermind.executive.sol-state-relay"
+PRIVILEGED_LABEL="com.mastermind.executive.privileged"
 CONTROL_USER="_mastermind_exec"
 CONTROL_GROUP="_mastermind_exec"
 WORKER_USER="_mastermind_worker"
@@ -21,6 +23,8 @@ SOURCE_REPO=""
 EXPECTED_SHA=""
 PROTECTED_MASTER_SHA=""
 ALLOW_FROZEN_ACCEPTED_ANCESTOR="0"
+ARM_PRIVILEGED_BROKER="0"
+PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
 OPERATOR_USER=""
 PYTHON_BINARY=""
@@ -48,6 +52,7 @@ while [ "$#" -gt 0 ]; do
     --expected-sha) EXPECTED_SHA="${2:-}"; shift 2 ;;
     --protected-master-sha) PROTECTED_MASTER_SHA="${2:-}"; shift 2 ;;
     --allow-frozen-accepted-ancestor) ALLOW_FROZEN_ACCEPTED_ANCESTOR="1"; shift ;;
+    --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
@@ -557,6 +562,9 @@ RUNTIME_ROOT="/var/db/mastermind-executive"
 RELEASE_ROOT="$SYSTEM_ROOT/releases/$EXPECTED_SHA"
 CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"
 WORKER_CONFIG="$SYSTEM_ROOT/config/worker-codex.json"
+PRIVILEGED_CONFIG="$SYSTEM_ROOT/config/privileged-broker.json"
+PRIVILEGED_RECEIPT_ROOT="$RUNTIME_ROOT/privileged-actions/receipts"
+PRIVILEGED_SOCKET="/var/run/mastermind-executive/privileged.sock"
 # Version-addressed, like $INSTALLED_CODEX below: a future Codex version bump
 # gets its own fresh receipt instead of colliding with (and fail-closed
 # refusing to overwrite or silently reuse) an older version's receipt.
@@ -648,13 +656,28 @@ case "$(/usr/bin/stat -f '%Sp' "$AUTH_PATH")" in
 esac
 
 # Cross the mutation boundary only after the identity, runtime, source, auth,
-# and exact-SHA preflight above. From here to process exit the trap keeps both
-# old and new daemon definitions disabled and booted out, including on error.
+# and exact-SHA preflight above. From here to process exit the trap keeps all
+# install-owned daemons, including a separately prepared C1 Relay, disabled
+# and booted out across generation mutation and rollback.
 STAGING=""
 leave_installed_services_stopped() {
+  /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+  if [ "$PRIVILEGED_BROKER_LIVE" != "1" ]; then
+    /bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
+      /bin/sleep 2
+      /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    fi
+    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
+      /bin/echo "privileged LaunchDaemon remained loaded after cleanup" >&2
+      exit 65
+    fi
+  fi
+  /bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
@@ -663,12 +686,20 @@ leave_installed_services_stopped() {
   fi
 }
 trap leave_installed_services_stopped EXIT
+/bin/launchctl disable "system/$RELAY_LABEL"
 /bin/launchctl disable "system/$CONTROL_LABEL"
 /bin/launchctl disable "system/$WORKER_LABEL"
 /bin/launchctl disable "system/$BACKUP_LABEL"
+/bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+if /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1; then
+  /bin/echo "relay LaunchDaemon remained loaded after bootout" >&2
+  exit 65
+fi
 if /bin/launchctl print "system/$CONTROL_LABEL" >/dev/null 2>&1; then
   /bin/echo "control LaunchDaemon remained loaded after bootout" >&2
   exit 65
@@ -679,6 +710,10 @@ if /bin/launchctl print "system/$WORKER_LABEL" >/dev/null 2>&1; then
 fi
 if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then
   /bin/echo "backup LaunchDaemon remained loaded after bootout" >&2
+  exit 65
+fi
+if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
+  /bin/echo "privileged LaunchDaemon remained loaded after bootout" >&2
   exit 65
 fi
 
@@ -967,6 +1002,48 @@ PY
 /usr/sbin/chown "root:$CONTROL_GROUP" "$CONTROL_CONFIG"
 /bin/chmod 0440 "$CONTROL_CONFIG"
 
+# Root-only privileged-action broker policy. The config contains no secrets;
+# it binds the daemon to this exact installed release and to the existing
+# Executive control/operator principals. The broker is inert unless the
+# explicit --arm-privileged-broker install flag is present.
+/usr/bin/install -d -o root -g wheel -m 0700 "$RUNTIME_ROOT/privileged-actions"
+/usr/bin/install -d -o root -g wheel -m 0700 "$PRIVILEGED_RECEIPT_ROOT"
+/usr/bin/install -d -o root -g wheel -m 0700 /var/log/mastermind-executive/privileged
+"$PYTHON_BINARY" -I -S -B - "$PRIVILEGED_CONFIG" "$RELEASE_ROOT"   "$PRIVILEGED_RECEIPT_ROOT" "$CONTROL_UID" "$OPERATOR_UID" <<'PY'
+import json, os, pathlib, sys
+path, release_root, receipt_root, control_uid, operator_uid = sys.argv[1:]
+value = {
+    "schema": "mastermind.executive_privileged_broker_config.v1",
+    "release_root": release_root,
+    "receipt_root": receipt_root,
+    "allowed_peer_uids": sorted({int(control_uid), int(operator_uid)}),
+    "timeout_seconds": 600,
+    "broker_version": "1",
+}
+out = pathlib.Path(path)
+temporary = out.with_name(f".{out.name}.{os.getpid()}.tmp")
+temporary.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+os.chmod(temporary, 0o400)
+os.replace(temporary, out)
+PY
+/usr/sbin/chown root:wheel "$PRIVILEGED_CONFIG"
+/bin/chmod 0400 "$PRIVILEGED_CONFIG"
+[ -f "$PRIVILEGED_CONFIG" ] && [ ! -L "$PRIVILEGED_CONFIG" ]   && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PRIVILEGED_CONFIG")" = "0:0:400:1" ] || {
+  /bin/echo "privileged broker config is missing or has unsafe metadata" >&2
+  exit 65
+}
+
+# Stable, non-root client launcher. It never elevates; all root authority stays
+# behind the typed broker socket.
+MMX_ADMIN="$SYSTEM_ROOT/bin/mmx-admin"
+MMX_ADMIN_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.mmx-admin.XXXXXX")"
+/usr/bin/printf '%s\n' '#!/bin/bash' \
+  "exec \"$PYTHON_BINARY\" -I -S -B \"$RELEASE_ROOT/scripts/mmx_admin.py\" \"\$@\"" \
+  >"$MMX_ADMIN_TEMP"
+/usr/sbin/chown root:wheel "$MMX_ADMIN_TEMP"
+/bin/chmod 0555 "$MMX_ADMIN_TEMP"
+/bin/mv -f "$MMX_ADMIN_TEMP" "$MMX_ADMIN"
+
 if [ -e "$CONTROL_SENTINEL_FILE" ] || [ -L "$CONTROL_SENTINEL_FILE" ]; then
   [ -f "$CONTROL_SENTINEL_FILE" ] && [ ! -L "$CONTROL_SENTINEL_FILE" ] \
     && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$CONTROL_SENTINEL_FILE")" = "0:$CONTROL_GID:440" ] || {
@@ -1179,9 +1256,11 @@ PY
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 BACKUP_PLIST="/Library/LaunchDaemons/$BACKUP_LABEL.plist"
+PRIVILEGED_PLIST="/Library/LaunchDaemons/$PRIVILEGED_LABEL.plist"
 /usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$CONTROL_LABEL.plist.template" "$CONTROL_PLIST"
 /usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$WORKER_LABEL.plist.template" "$WORKER_PLIST"
 /usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$BACKUP_LABEL.plist.template" "$BACKUP_PLIST"
+/usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$PRIVILEGED_LABEL.plist.template" "$PRIVILEGED_PLIST"
 
 "$PYTHON_BINARY" -I -S -B \
   "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
@@ -1199,6 +1278,10 @@ BACKUP_PLIST="/Library/LaunchDaemons/$BACKUP_LABEL.plist"
 /usr/bin/plutil -replace Sockets.Operator.SockPathName -string /var/run/mastermind-executive/control.sock "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.Operator.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.Operator.SockPathGroup -integer "$OPS_GID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.CeoIngress.SockPathName -string /var/run/mastermind-executive/ceo-ingress.sock "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.CeoIngress.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.CeoIngress.SockPathGroup -integer 452 "$CONTROL_PLIST"
+/usr/bin/plutil -replace Sockets.CeoIngress.SockPathMode -integer 432 "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.DialogueObservation.SockPathName -string /var/run/mastermind-dialogue-observation/dialogue-observation.sock "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.DialogueObservation.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.DialogueObservation.SockPathGroup -integer 457 "$CONTROL_PLIST"
@@ -1226,6 +1309,17 @@ BACKUP_PLIST="/Library/LaunchDaemons/$BACKUP_LABEL.plist"
 /usr/bin/plutil -replace Sockets.WorkerBroker.SockPathMode -integer 384 "$WORKER_PLIST"
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/worker/stdout.log "$WORKER_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/worker/stderr.log "$WORKER_PLIST"
+
+"$PYTHON_BINARY" -I -S -B   "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py"   "$PRIVILEGED_PLIST" --   "$PYTHON_BINARY" -I -S -B   "$RELEASE_ROOT/scripts/executive_os_privileged_broker.py"   serve --config "$PRIVILEGED_CONFIG"
+/usr/bin/plutil -replace WorkingDirectory -string "$RELEASE_ROOT" "$PRIVILEGED_PLIST"
+/usr/bin/plutil -replace Sockets.PrivilegedActions.SockPathName -string "$PRIVILEGED_SOCKET" "$PRIVILEGED_PLIST"
+/usr/bin/plutil -replace Sockets.PrivilegedActions.SockPathOwner -integer "$CONTROL_UID" "$PRIVILEGED_PLIST"
+/usr/bin/plutil -replace Sockets.PrivilegedActions.SockPathGroup -integer "$OPS_GID" "$PRIVILEGED_PLIST"
+/usr/bin/plutil -replace Sockets.PrivilegedActions.SockPathMode -integer 432 "$PRIVILEGED_PLIST"
+/usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/privileged/stdout.log "$PRIVILEGED_PLIST"
+/usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/privileged/stderr.log "$PRIVILEGED_PLIST"
+/usr/sbin/chown root:wheel "$PRIVILEGED_PLIST"
+/bin/chmod 0644 "$PRIVILEGED_PLIST"
 
 # Off-host DR nightly backup daemon. It ships DISABLED (see
 # leave_installed_services_stopped above and DR_RUNBOOK.md) exactly like
@@ -1261,13 +1355,13 @@ BACKUP_PLIST="/Library/LaunchDaemons/$BACKUP_LABEL.plist"
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/backup/stdout.log "$BACKUP_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/backup/stderr.log "$BACKUP_PLIST"
 
-for installed_policy_file in "$CONTROL_CONFIG" "$WORKER_CONFIG" "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST"; do
+for installed_policy_file in "$CONTROL_CONFIG" "$WORKER_CONFIG" "$PRIVILEGED_CONFIG" "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST" "$PRIVILEGED_PLIST"; do
   case "$(/usr/bin/stat -f '%Sp' "$installed_policy_file")" in
     *+) /bin/echo "installed policy file has a filesystem ACL: $installed_policy_file" >&2; exit 65 ;;
   esac
 done
 
-/usr/bin/plutil -lint "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST"
+/usr/bin/plutil -lint "$CONTROL_PLIST" "$WORKER_PLIST" "$BACKUP_PLIST" "$PRIVILEGED_PLIST"
 (
   cd "$RELEASE_ROOT"
   /usr/bin/sudo -u "$WORKER_USER" /usr/bin/env -i \
@@ -1284,6 +1378,26 @@ done
 
 "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" verify \
   --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
+
+if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then
+  /bin/launchctl enable "system/$PRIVILEGED_LABEL"
+  /bin/launchctl bootstrap system "$PRIVILEGED_PLIST"
+  /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || {
+    /bin/echo "privileged broker did not load" >&2
+    exit 65
+  }
+  for attempt in 1 2 3 4 5; do
+    if [ -S "$PRIVILEGED_SOCKET" ]; then break; fi
+    /bin/sleep 1
+  done
+  [ -S "$PRIVILEGED_SOCKET" ] \
+    && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$PRIVILEGED_SOCKET")" = "$CONTROL_UID:$OPS_GID:660" ] || {
+      /bin/echo "privileged broker socket is absent or has unsafe metadata" >&2
+      exit 65
+    }
+  PRIVILEGED_BROKER_LIVE="1"
+  /bin/echo "privileged action broker armed at $PRIVILEGED_SOCKET"
+fi
 
 /bin/echo "installed exact Executive OS release $EXPECTED_SHA"
 /bin/echo "services remain stopped until provider readiness and the secret canary have passing receipts"

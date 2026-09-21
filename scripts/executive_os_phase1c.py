@@ -6,14 +6,16 @@ crosses the distinct-UID worker broker; this entrypoint has no local adapter or
 TCP fallback.  G1 adds one exact-root deterministic COO-cycle operation and one
 bounded service tick; both remain disabled by checked-in host configuration.
 C1 may additionally expose the already-implemented dedicated CeoIngress state
-listener through the SAME service process while CEO write admission remains
-hard-disabled. Restore operations are deliberately offline CLI commands and are
+listener through the SAME service process while C1 write admission remains
+hard-disabled. An explicitly configured App peer has a separate admission
+setting and canonical read binding on that same socket. Restore operations are deliberately offline CLI commands and are
 never exposed through the live control socket.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import hashlib
 import json
 import os
@@ -24,6 +26,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+_ROOT = Path(__file__).resolve().parents[1]
+if os.fspath(_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_ROOT))
+
 from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
@@ -32,6 +38,7 @@ from control_plane.executive_autonomy import (
 from control_plane.executive_service import (
     ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
+    CeoIngressAppBinding,
     ServiceConfig,
     ServiceError,
     activate_launchd_socket,
@@ -129,6 +136,7 @@ _CONFIG_REQUIRED = frozenset(
 _CONFIG_OPTIONAL = frozenset(
     {
         "proof_branch",
+        "exact_worker_claim_target",
         "worker_id",
         "worker_account_label",
         "quota_class",
@@ -136,6 +144,7 @@ _CONFIG_OPTIONAL = frozenset(
         "effort",
         "cost_class",
         "coo_autonomy_armed",
+        "ceo_submit_armed",
         "coo_operator_harness_armed",
         "coo_tick_interval_seconds",
         "coo_model_alias",
@@ -150,6 +159,10 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_socket_path",
         "ceo_ingress_launchd_socket_name",
         "ceo_ingress_peer_uid",
+        "ceo_ingress_app_peer_uid",
+        "ceo_ingress_app_armed",
+        "ceo_ingress_app_macro_root",
+        "ceo_ingress_app_boot_python",
         "terminal_return_armed",
         "terminal_return_socket_path",
         "dialogue_observation_socket_path",
@@ -166,6 +179,9 @@ _CEO_INGRESS_CONFIG_KEYS = frozenset(
         "ceo_ingress_peer_uid",
     }
 )
+_CEO_INGRESS_APP_CONFIG_KEYS = frozenset({
+    "ceo_ingress_app_peer_uid", "ceo_ingress_app_armed", "ceo_ingress_app_macro_root",
+})
 _TERMINAL_RETURN_CONFIG_KEYS = frozenset(
     {
         "terminal_return_armed",
@@ -280,16 +296,218 @@ def _path(value: Any, name: str) -> Path:
     return Path(value).resolve(strict=False)
 
 
+def _sealed_root_executable(value: Any, name: str) -> Path:
+    """Require one root-owned executable behind no symlink/writable ancestor."""
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        raise ServiceError(f"control config {name} must be an absolute path")
+    path = Path(value)
+    try:
+        if path.resolve(strict=True) != path:
+            raise ServiceError(f"control config {name} must not traverse symlinks")
+        for node in (path, *path.parents):
+            info = node.lstat()
+            if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise ServiceError(
+                    f"control config {name} must be root-owned and sealed through its path"
+                )
+            if node == path:
+                if (not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111
+                        or info.st_nlink != 1):
+                    raise ServiceError(
+                        f"control config {name} must name one sealed executable file"
+                    )
+            elif not stat.S_ISDIR(info.st_mode):
+                raise ServiceError(
+                    f"control config {name} has a non-directory ancestor"
+                )
+    except ServiceError:
+        raise
+    except OSError as exc:
+        raise ServiceError(f"control config {name} is unavailable") from exc
+    return path
+
+
+def _attest_app_boot_runtime(path: Path) -> Path:
+    """Bind the optional App boot interpreter to the accepted CF2 capacity runtime."""
+    from control_plane.ceo_boot_packet import attest_capacity_boot_runtime
+
+    try:
+        attest_capacity_boot_runtime(path)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise ServiceError("App boot runtime attestation failed") from exc
+    return path
+
+
 def _integer(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ServiceError(f"control config {name} must be a non-negative integer")
     return value
 
 
-def load_control_config(path: str | Path) -> dict[str, Any]:
-    """Load the exact secret-free, root-owned production composition contract."""
+_CONTROL_TARGET_COMPOSITION = object()
 
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class _TargetConfigSnapshot:
+    path: Path
+    raw: bytes
+    identity: tuple[int, ...]
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.raw).hexdigest()
+
+
+class _LoadedTargetConfig(dict):
+    """A startup-only snapshot; never accepted as serialized authority."""
+    def __init__(self, value, snapshot: _TargetConfigSnapshot):
+        super().__init__(value)
+        self._target_snapshot = snapshot
+        self._normalized_sha256 = ""
+
+
+def _target_file_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _read_target_config_snapshot(path: Path) -> tuple[dict[str, Any], _TargetConfigSnapshot]:
+    """Read one bounded owner-controlled file and hash the very bytes parsed."""
+    if not path.is_absolute():
+        raise ServiceError("exact worker target config path must be absolute")
+    fd = -1
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+            or before.st_uid not in {0, os.geteuid()} or stat.S_IMODE(before.st_mode) & 0o022
+            or before.st_size <= 0 or before.st_size > 256 * 1024):
+            raise ServiceError("exact worker target source identity is invalid")
+        parts, size = [], 0
+        while True:
+            part = os.read(fd, min(65536, 256 * 1024 + 1 - size))
+            if not part:
+                break
+            size += len(part)
+            if size > 256 * 1024:
+                raise ServiceError("exact worker target config exceeds byte bound")
+            parts.append(part)
+        raw = b"".join(parts)
+        after = os.fstat(fd)
+        if (_target_file_identity(before) != _target_file_identity(after)
+            or _target_file_identity(after) != _target_file_identity(path.lstat())
+            or len(raw) != after.st_size):
+            raise ServiceError("exact worker target source changed during read")
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ServiceError("exact worker target config contains duplicate keys")
+                result[key] = value
+            return result
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
+        if not isinstance(value, dict):
+            raise ServiceError("exact worker target config is not an object")
+        return value, _TargetConfigSnapshot(path, raw, _target_file_identity(after))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ServiceError("exact worker target source is unavailable or malformed") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _target_config_mode(config: Mapping[str, Any]) -> str:
+    value = config.get("exact_worker_claim_target", {"mode": "disabled"})
+    if value == {"mode": "disabled"}:
+        return "disabled"
+    if (not isinstance(value, dict) or set(value) != {"mode", "definition", "max_age_ms"}
+        or value.get("mode") != "fixed"):
+        raise ServiceError("exact worker target configuration is not closed")
+    from control_plane.executive_runtime import _normalise_exact_worker_target_documents
+    try:
+        definition, _ = _normalise_exact_worker_target_documents(value["definition"], {
+            "schema_version": "mastermind.exact_worker_target_observation/v1",
+            "source_sha256": "0" * 64, "control_attestation_sha256": "0" * 64,
+            "observed_at_ms": 1, "max_age_ms": value["max_age_ms"],
+        })
+    except (ValueError, RuntimeProofError) as exc:
+        raise ServiceError("exact worker target definition is invalid") from exc
+    if (definition["worker_id"] != config.get("worker_id", "codex-01")
+        or definition["expected_account_label"] != config.get("worker_account_label", "dedicated-codex-home")):
+        raise ServiceError("exact worker target does not match the fixed broker identity")
+    return "fixed"
+
+
+class _ExactWorkerTargetSource:
+    """Private adapter of the existing attested config into the claim owner."""
+    def __init__(self, raw, attestation, attestation_loader, *, capability):
+        if capability is not _CONTROL_TARGET_COMPOSITION or type(raw) is not _LoadedTargetConfig:
+            raise ServiceError("exact worker target lacks attested source composition")
+        self._raw = raw
+        self._snapshot = raw._target_snapshot
+        self._attestation = dict(attestation)
+        self._attestation_loader = attestation_loader
+        self._target = json.loads(self._snapshot.raw)["exact_worker_claim_target"]
+        self.require_current()
+
+    def require_current(self) -> None:
+        if _canonical_sha256(_jsonable(self._raw)) != self._raw._normalized_sha256:
+            raise ServiceError("exact worker target loaded composition was modified")
+        _, current = _read_target_config_snapshot(self._snapshot.path)
+        if current != self._snapshot:
+            raise ServiceError("exact worker target consumed source snapshot changed")
+        attestation = self._attestation_loader()
+        if (not isinstance(attestation, Mapping)
+            or attestation.get("config_sha256") != self._snapshot.sha256
+            or self._attestation.get("config_sha256") != self._snapshot.sha256
+            or _canonical_sha256(attestation) != _canonical_sha256(self._attestation)):
+            raise ServiceError("exact worker target source/attestation binding differs")
+
+    def for_job(self, job_id: str, *, now_ms: int):
+        from control_plane.executive_runtime import (
+            _issue_exact_worker_claim_target, _EXACT_WORKER_TARGET_PRODUCER,
+        )
+        if job_id != self._target["definition"]["job_id"]:
+            raise ServiceError("exact worker target does not select this Job")
+        self.require_current()
+        return _issue_exact_worker_claim_target(
+            self._target["definition"], {
+                "schema_version": "mastermind.exact_worker_target_observation/v1",
+                "source_sha256": self._snapshot.sha256,
+                "control_attestation_sha256": _canonical_sha256(self._attestation),
+                "observed_at_ms": now_ms, "max_age_ms": self._target["max_age_ms"],
+            }, _producer_capability=_EXACT_WORKER_TARGET_PRODUCER,
+            revalidate=self.require_current,
+        )
+
+
+def _bind_exact_worker_target_source(raw, attestation, *, _producer_capability, attestation_loader):
+    if _target_config_mode(raw) == "disabled":
+        return None
+    return _ExactWorkerTargetSource(raw, attestation, attestation_loader,
+                                   capability=_producer_capability)
+
+
+def load_control_config(
+    path: str | Path, *, enforce_current_uid: bool = True
+) -> dict[str, Any]:
+    """Load the exact secret-free, root-owned production composition contract.
+
+    The service path keeps the default live-UID check.  A root-only credential
+    interlock may request static validation so it can prove the configured
+    control UID without impersonating that UID or weakening service startup.
+    """
+
+    if type(enforce_current_uid) is not bool:
+        raise ServiceError("control config UID enforcement selector must be boolean")
+    if not enforce_current_uid and os.geteuid() != 0:
+        raise ServiceError("static control config validation requires root")
     config = _private_json(Path(path), label="Executive control config", root_owned=True)
+    if _target_config_mode(config) == "fixed":
+        parsed, snapshot = _read_target_config_snapshot(Path(path))
+        if parsed != config:
+            raise ServiceError("exact worker target config moved between observations")
+        config = _LoadedTargetConfig(parsed, snapshot)
     if config.get("schema_version") != CONTROL_CONFIG_SCHEMA_VERSION:
         raise ServiceError("unsupported Executive control config schema")
     keys = set(config)
@@ -307,6 +525,14 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
+    app_present = keys & _CEO_INGRESS_APP_CONFIG_KEYS
+    if app_present and (
+        app_present != _CEO_INGRESS_APP_CONFIG_KEYS
+        or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
+    if "ceo_ingress_app_boot_python" in keys and app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
+        raise ServiceError("App boot interpreter requires the complete App binding")
     terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
     if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
         raise ServiceError("terminal-return control config fields must be supplied together")
@@ -361,6 +587,27 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["ceo_ingress_peer_uid"] = _integer(
             config["ceo_ingress_peer_uid"], "ceo_ingress_peer_uid"
         )
+    if app_present:
+        config["ceo_ingress_app_peer_uid"] = _integer(
+            config["ceo_ingress_app_peer_uid"], "ceo_ingress_app_peer_uid"
+        )
+        if config["ceo_ingress_app_peer_uid"] in {
+            config["control_uid"], config["ceo_ingress_peer_uid"], config["worker_uid"],
+            *config["allowed_peer_uids"],
+        }:
+            raise ServiceError("App peer must be distinct from control, Operator, C1 and worker identities")
+        if type(config["ceo_ingress_app_armed"]) is not bool:
+            raise ServiceError("App admission arming must be boolean")
+        config["ceo_ingress_app_macro_root"] = _path(
+            config["ceo_ingress_app_macro_root"], "ceo_ingress_app_macro_root"
+        )
+        if "ceo_ingress_app_boot_python" in config:
+            sealed_boot_python = _sealed_root_executable(
+                config["ceo_ingress_app_boot_python"], "ceo_ingress_app_boot_python"
+            )
+            config["ceo_ingress_app_boot_python"] = _attest_app_boot_runtime(
+                sealed_boot_python
+            )
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
             config["dialogue_observation_peer_uid"],
@@ -417,7 +664,7 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError(
                 "control config dialogue_wake_retry_policy is invalid"
             ) from exc
-    if config["control_uid"] != os.geteuid():
+    if enforce_current_uid and config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
         raise ServiceError("worker_uid must differ from control_uid")
@@ -486,6 +733,10 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["coo_autonomy_armed"], bool
     ):
         raise ServiceError("control config coo_autonomy_armed must be boolean")
+    if "ceo_submit_armed" in config and not isinstance(
+        config["ceo_submit_armed"], bool
+    ):
+        raise ServiceError("control config ceo_submit_armed must be boolean")
     if "coo_operator_harness_armed" in config and not isinstance(
         config["coo_operator_harness_armed"], bool
     ):
@@ -517,6 +768,8 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         raise ServiceError(
             "control config coo_tick_interval_seconds must be numeric"
         )
+    if type(config) is _LoadedTargetConfig:
+        config._normalized_sha256 = _canonical_sha256(_jsonable(config))
     return config
 
 
@@ -857,6 +1110,7 @@ def _service_from_config(
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     autonomy_guard: Callable[[], None] | None = None,
     initial_canary: Mapping[str, Any] | None = None,
+    exact_target_source: _ExactWorkerTargetSource | None = None,
 ) -> ExecutiveControlService:
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
@@ -870,6 +1124,13 @@ def _service_from_config(
         RemoteWorkerProcessController,
         WorkerBrokerClient,
     )
+
+    if _target_config_mode(raw) == "fixed":
+        if type(exact_target_source) is not _ExactWorkerTargetSource or exact_target_source._raw is not raw:
+            raise ServiceError("exact worker target has no attested composition")
+        exact_target_source.require_current()
+    elif exact_target_source is not None:
+        raise ServiceError("exact worker target source conflicts with disabled config")
 
     client = WorkerBrokerClient(
         raw["worker_broker_socket_path"],
@@ -907,6 +1168,7 @@ def _service_from_config(
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
+        ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
             "coo_operator_harness_armed", False
         ),
@@ -964,6 +1226,10 @@ def _service_from_config(
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
             process_controller=RemoteWorkerProcessController(client),
+            exact_target_provider=(
+                (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
+                if exact_target_source is not None else None
+            ),
         )
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
@@ -1023,6 +1289,24 @@ def _service_from_config(
             "ceo_ingress_armed": False,
             "ceo_ingress_activated_socket": ceo_listener,
         }
+    if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
+        # SDK-free canonical projection runs under the existing control uid.
+        # The network App has no Runtime database or source-checkout access.
+        from integrations.executive_mcp.installed import InstalledExecutiveReaders
+        readers = InstalledExecutiveReaders(
+            repo_root=Path(raw["proof_source_repository"]),
+            macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+            runtime_root=Path(raw["runtime_root"]),
+            boot_python=(Path(raw["ceo_ingress_app_boot_python"])
+                         if "ceo_ingress_app_boot_python" in raw else None),
+            code_root=Path(__file__).resolve().parents[1],
+            expected_source_sha=str(raw["proof_base_sha"]),
+        )
+        ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
+            peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
+            armed=raw["ceo_ingress_app_armed"],
+            grounding_provider=readers, read_provider=readers,
+        )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
         _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)
@@ -1133,6 +1417,13 @@ async def _serve_from_config(config_path: Path) -> None:
         config_path=config_path,
         expected_release_sha=str(raw["proof_base_sha"]),
     )
+    exact_target_source = _bind_exact_worker_target_source(
+        raw, control_attestation, _producer_capability=_CONTROL_TARGET_COMPOSITION,
+        attestation_loader=lambda: _load_control_environment_attestation(
+            Path(raw["control_environment_attestation_path"]), config_path=config_path,
+            expected_release_sha=str(raw["proof_base_sha"]),
+        ),
+    )
     canary_path = Path(raw["secret_canary_receipt_path"])
 
     def load_canary() -> Mapping[str, Any]:
@@ -1177,6 +1468,7 @@ async def _serve_from_config(config_path: Path) -> None:
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         initial_canary=initial_canary,
+        **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
 

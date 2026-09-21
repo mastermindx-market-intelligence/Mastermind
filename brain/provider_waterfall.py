@@ -95,14 +95,22 @@ def available() -> bool:
 
 
 def _failure_kind(error: object) -> str | None:
-    """Classify only failures that authorize provider failover."""
+    """Classify only failures that authorize provider failover.
+
+    Macro's shared classifier primarily covers HTTP-shaped provider failures.
+    Codex can instead return a local refresh failure before an HTTP status exists;
+    that credential is just as unusable and must release the Claude OAuth fallback.
+    Keep this vocabulary deliberately narrow so tool/runtime failures are never replayed.
+    """
+    msg = str(error or "").lower()
+    if "access token could not be refreshed" in msg:
+        return "auth"
     try:
         llm_auth, _ = _shared_modules()
         exc = RuntimeError(str(error or ""))
         if llm_auth._is_auth_error(exc):
             return "auth"
         if llm_auth._is_rate_limit_error(exc):
-            msg = str(error or "").lower()
             return "weekly" if "weekly" in msg or "week limit" in msg else "window"
     except Exception:
         pass
