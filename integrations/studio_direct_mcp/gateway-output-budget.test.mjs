@@ -114,6 +114,19 @@ test('frozen app snapshot can page through existing read_file without backend re
   const next=body(await call(a.client,'start_process',{cmd:'next'}));assert.equal(next.pid,10002);
 });
 
+test('frozen compat receipt survives creator frontend deletion for same owner',async t=>{
+  const {gateway,connect}=await setup(t),a=await connect(),b=await connect();
+  const cmd='compat-reconnect-'+('r'.repeat(50000));
+  const receipt=body(await call(a.client,'start_process',{cmd}));
+  assert.equal(receipt.status,'OUTPUT_PAGED');
+  const before=gateway.stats().requests.backendOps;
+  await a.transport.terminateSession();
+  const exact=body(await reconstructCompat(b.client,receipt,gateway));
+  assert.equal(exact.cmd,cmd);
+  assert.equal(gateway.stats().requests.backendOps,before);
+  assert.equal(gateway.stats().backend.spawns,1);
+});
+
 test('frozen compat read remains owner-bound and never reaches foreign backend',async t=>{
   const {gateway,connect}=await setup(t),a=await connect('alice'),b=await connect('bob');
   const receipt=body(await call(a.client,'start_process',{cmd:'private-'+('x'.repeat(50000))}));
