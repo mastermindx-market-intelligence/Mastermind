@@ -356,46 +356,66 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
             continue
         additions_by_path[current_path].append(raw[1:])
 
-    identity_aliases: set[str] = set()
     production: dict[str, list[str]] = {
         path: lines for path, lines in additions_by_path.items()
         if _is_production_identity_scan_path(path)
     }
 
-    # Seed aliases from the non-identity side of an identity-bearing assignment or
-    # call, then propagate through generic aliases across files to a fixed point.
+    definitions: dict[str, set[str]] = {path: set() for path in production}
+    imported: dict[str, set[str]] = {path: set() for path in production}
     for path, lines in production.items():
-        path_identity = bool(_semantic_words(path) & _SOURCE_IDENTITY_WORDS)
         for line in lines:
             normalized = unicodedata.normalize("NFKC", line)
-            if path_identity:
-                identity_aliases.update(_source_identifiers(normalized))
-                continue
+            left, separator, right = normalized.partition("=")
+            if separator:
+                definitions[path].update(_source_identifiers(left))
+            python_import = re.match(r"\s*from\s+[.\w]+\s+import\s+(.+)", normalized)
+            js_import = re.match(r"\s*import\s*\{([^}]+)\}\s*from\s*['\"]", normalized)
+            if python_import:
+                imported[path].update(_source_identifiers(python_import.group(1)))
+            elif js_import:
+                imported[path].update(_source_identifiers(js_import.group(1)))
+
+    aliases: dict[str, set[str]] = {path: set() for path in production}
+    for path, lines in production.items():
+        for line in lines:
+            normalized = unicodedata.normalize("NFKC", line)
             if not _line_mentions_identity_name(normalized):
                 continue
             left, separator, right = normalized.partition("=")
-            if separator and (_semantic_words(left) & _SOURCE_IDENTITY_WORDS):
-                identity_aliases.update(_source_identifiers(right))
-            else:
-                identity_aliases.update(_source_identifiers(normalized))
+            candidates = _source_identifiers(right if separator else normalized)
+            aliases[path].update(candidates & (definitions[path] | imported[path]))
 
     changed = True
     while changed:
         changed = False
-        for lines in production.values():
+        for path, lines in production.items():
             for line in lines:
-                names = _source_identifiers(line)
-                if not (names & identity_aliases):
+                normalized = unicodedata.normalize("NFKC", line)
+                left, separator, right = normalized.partition("=")
+                if not separator or not (_source_identifiers(left) & aliases[path]):
                     continue
-                before = len(identity_aliases)
-                identity_aliases.update(names)
-                changed = changed or len(identity_aliases) != before
+                before = len(aliases[path])
+                aliases[path].update(
+                    _source_identifiers(right) & (definitions[path] | imported[path])
+                )
+                changed = changed or len(aliases[path]) != before
+
+            # An explicit import is the only cross-file name edge. Trace an imported
+            # alias back to matching added definitions, then continue within that file.
+            for name in aliases[path] & imported[path]:
+                for source_path, source_definitions in definitions.items():
+                    if source_path == path or name not in source_definitions:
+                        continue
+                    before = len(aliases[source_path])
+                    aliases[source_path].add(name)
+                    changed = changed or len(aliases[source_path]) != before
 
     flagged: list[str] = []
     for path, lines in production.items():
         path_identity = bool(_semantic_words(path) & _SOURCE_IDENTITY_WORDS)
         flagged.extend(_scan_identity_source_lines(
-            lines, path_identity=path_identity, identity_aliases=identity_aliases,
+            lines, path_identity=path_identity, identity_aliases=aliases[path],
         ))
     return flagged
 
@@ -850,6 +870,7 @@ def test_d8_true_identity_topology_and_cross_file_aliases_still_fail_closed():
     diff = _d8_frozen_added_diff([
         ("common/runtime_constants.py", "FALLBACK = 501"),
         ("common/runtime_constants.py", "SECONDARY = FALLBACK"),
+        ("control_plane/admission.py", "from common.runtime_constants import SECONDARY"),
         ("control_plane/admission.py", "peer_uid = SECONDARY"),
         ("config/service.json", '{"endpointPort": 684}'),
         ("integrations/service/runtime.ts", "const principalId = 777;"),
@@ -858,6 +879,14 @@ def test_d8_true_identity_topology_and_cross_file_aliases_still_fail_closed():
     assert _scan_added_identity_diff(diff) == [
         "501", "684", "777", "_mastermind_shadow",
     ]
+
+
+def test_d8_same_spelling_without_an_import_or_dataflow_edge_does_not_taint():
+    diff = _d8_frozen_added_diff([
+        ("control_plane/admission.py", 'peer_uid = config["peer_uid"]'),
+        ("app/mastermind_os/src/mission.ts", "const config = 512;"),
+    ])
+    assert _scan_added_identity_diff(diff) == []
 
 
 def test_d8_identity_context_normalizes_camelcase_and_unicode_names():
