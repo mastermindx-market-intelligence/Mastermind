@@ -44,6 +44,7 @@ from control_plane.mission_workspace import (
     READ_STATE_KEYS,
     REVIEW_KEYS,
     SCHEMA,
+    SCHEMA_V2,
     SECTION_KEYS,
     SECTION_STATES,
     SOURCE_KEYS,
@@ -53,9 +54,11 @@ from control_plane.mission_workspace import (
     W3C_KEYS,
     W3C_RECEIPT_KEYS,
     _posture,
+    _posture_v2,
     _qualified_current,
     _safe_timestamp,
     compose_mission_workspace,
+    compose_mission_workspace_v2,
 )
 from tests import test_chairman_control_room_server as control_room_server_tests
 
@@ -210,6 +213,37 @@ def _compose(**changes):
     inputs = _inputs()
     inputs.update(changes)
     return compose_mission_workspace(**inputs)
+
+
+def _inputs_v2(*, execution_state="COMPLETED", dispatch_state="RETURNED") -> dict:
+    """Frozen Fabric-v2 shape from immutable #819 semantic head 1ba7d2d2."""
+
+    args = _inputs(execution_state=execution_state, dispatch_state=dispatch_state)
+    fabric = args["fabric_view"]
+    fabric["schema"] = "mastermind.fabric_job_view.v2"
+    fabric["root"].update(
+        {
+            "status": "COMPLETED",
+            "attempt_count": 1,
+            "attempt_limit": 2,
+            "current_attempt_id": None,
+            "attempts": [],
+            "latest_attempt": None,
+            "repair": {"repair_round": None, "supersedes_job_id": None},
+            "acceptance": {
+                "state": "NOT_PROJECTED",
+                "producer_owner": None,
+                "reason": "product acceptance has no producer in this projection",
+            },
+        }
+    )
+    return args
+
+
+def _compose_v2(**changes):
+    args = _inputs_v2()
+    args.update(changes)
+    return compose_mission_workspace_v2(**args)
 
 
 def test_closed_nested_shape_and_real_owner_vocabulary_are_exact():
@@ -1227,6 +1261,207 @@ def test_permanent_full_3696_posture_oracle_sweep_is_total_and_currentness_safe(
         "F0", "F1", "F2", "F3", "F4", "F5", "G1", "G1h", "G2", "G2h", "H1", "I1",
     }
     assert len(observed_postures) == 20
+
+
+def test_mission_v2_uses_completed_execution_and_keeps_acceptance_unproduced():
+    document = _compose_v2()
+
+    assert document["schema"] == SCHEMA_V2
+    assert document["source"]["fabric_view_schema"] == "mastermind.fabric_job_view.v2"
+    assert document["execution"]["state"] == "COMPLETED"
+    assert document["acceptance"] == {
+        "state": "NOT_PROJECTED",
+        "reason_codes": ["ACCEPTANCE_OWNER_NOT_PROJECTED"],
+        "owner": None,
+        "artifact_revision": None,
+        "ruling": None,
+        "evidence": [],
+    }
+    assert document["read_state"]["state"] == "PARTIAL"
+    assert document["posture"] == {
+        "value": "CONSUMPTION_UNKNOWN", "rule": "E3", "evidence": [],
+    }
+
+
+def test_mission_v2_retains_program_when_frozen_fabric_v2_emits_null_root():
+    args = _inputs_v2()
+    args["fabric_view"]["root"] = None
+    args["fabric_view"]["capability"] = {
+        "state": "PARTIAL",
+        "installed": True,
+        "version": None,
+        "detail": "the executive runtime database was read; the requested root job is not in it",
+    }
+
+    document = compose_mission_workspace_v2(**args)
+
+    assert document["schema"] == SCHEMA_V2
+    assert document["program"]["work_ref"] == "WS:ONE"
+    assert document["source"]["fabric_view_schema"] == "mastermind.fabric_job_view.v2"
+    assert document["mission"]["root_job_id"] is None
+    assert document["mission"]["runtime_root_state"] == "UNKNOWN"
+    assert document["children"]["state"] == "UNAVAILABLE"
+    assert document["read_state"]["state"] == "PARTIAL"
+
+
+def test_mission_v2_refuses_malformed_non_null_root_instead_of_treating_it_as_absent():
+    args = _inputs_v2()
+    args["fabric_view"]["root"] = {}
+
+    with pytest.raises(ValueError, match="root"):
+        compose_mission_workspace_v2(**args)
+
+
+@pytest.mark.parametrize(
+    "mutate, expected",
+    [
+        (lambda args: args["fabric_view"].update(schema="mastermind.fabric_job_view.v1"), "schema"),
+        (lambda args: args["fabric_view"]["root"]["result"].update(state="ACCEPTED"), "result.state"),
+        (lambda args: args["fabric_view"]["root"].pop("acceptance"), "acceptance"),
+        (lambda args: args["fabric_view"]["root"]["acceptance"].update(producer_owner="fabric"), "acceptance"),
+        (lambda args: args["fabric_view"]["root"]["acceptance"].update(state="ACCEPTED"), "acceptance"),
+    ],
+)
+def test_mission_v2_refuses_wrong_fabric_version_execution_alias_and_invalid_acceptance(
+    mutate, expected,
+):
+    args = _inputs_v2()
+    mutate(args)
+
+    with pytest.raises(ValueError, match=expected):
+        compose_mission_workspace_v2(**args)
+
+
+def test_mission_v2_refuses_missing_and_foreign_child_acceptance_facets():
+    args = _inputs_v2()
+    child = copy.deepcopy(args["fabric_view"]["root"])
+    child.update({"job_id": "JOB-CHILD", "root_job_id": "JOB-1", "parent_job_id": "JOB-1", "depth": 1})
+    args["fabric_view"]["children"] = [child]
+    args["fabric_view"]["children"][0].pop("acceptance")
+
+    with pytest.raises(ValueError, match="child.*acceptance"):
+        compose_mission_workspace_v2(**args)
+
+    args["fabric_view"]["children"][0]["acceptance"] = {
+        "state": "NOT_PROJECTED", "producer_owner": "other-owner",
+        "reason": "product acceptance has no producer in this projection",
+    }
+    with pytest.raises(ValueError, match="child.*acceptance"):
+        compose_mission_workspace_v2(**args)
+
+
+def test_mission_v2_refuses_unclosed_or_unknown_root_and_child_review_facets():
+    args = _inputs_v2()
+    args["fabric_view"]["root"]["review"]["evidence"] = []
+
+    with pytest.raises(ValueError, match="root.*review"):
+        compose_mission_workspace_v2(**args)
+
+    args = _inputs_v2()
+    child = copy.deepcopy(args["fabric_view"]["root"])
+    child.update({"job_id": "JOB-CHILD", "root_job_id": "JOB-1", "parent_job_id": "JOB-1", "depth": 1})
+    child["review"]["verdict"] = "foreign"
+    args["fabric_view"]["children"] = [child]
+
+    with pytest.raises(ValueError, match="child.*review"):
+        compose_mission_workspace_v2(**args)
+
+
+def test_mission_v2_refuses_non_string_root_and_child_result_states_with_value_error():
+    args = _inputs_v2()
+    args["fabric_view"]["root"]["result"]["state"] = ["COMPLETED"]
+
+    with pytest.raises(ValueError, match="root result.state"):
+        compose_mission_workspace_v2(**args)
+
+    args = _inputs_v2()
+    child = copy.deepcopy(args["fabric_view"]["root"])
+    child.update({"job_id": "JOB-CHILD", "root_job_id": "JOB-1", "parent_job_id": "JOB-1", "depth": 1})
+    child["result"]["state"] = {"state": "COMPLETED"}
+    args["fabric_view"]["children"] = [child]
+
+    with pytest.raises(ValueError, match="child result.state"):
+        compose_mission_workspace_v2(**args)
+
+def test_mission_v2_result_and_approved_review_cannot_manufacture_acceptance():
+    args = _inputs_v2()
+    args["fabric_view"]["root"]["result"].update(
+        summary="accepted product", artifacts=["accepted=true", "ruling=approve"]
+    )
+    args["fabric_view"]["root"]["review"].update(
+        required=True, reviews_job_id="REVIEW-1", verdict="approve"
+    )
+
+    document = compose_mission_workspace_v2(**args)
+
+    assert document["execution"]["state"] == "COMPLETED"
+    assert document["review"]["verdict"] == "approve"
+    assert document["acceptance"]["state"] == "NOT_PROJECTED"
+    assert document["acceptance"]["owner"] is None
+    assert document["posture"]["value"] != "ACCEPTED_PRODUCT"
+
+
+def test_mission_v2_current_generation_diagnostic_stays_unproduced_without_owner_receipt():
+    document = _compose_v2(
+        source_generation={"state": "CURRENT", "version": 1, "generation": 1},
+    )
+
+    assert document["source"]["source_generation"] == {
+        "state": "CURRENT", "version": 1, "generation": 1,
+    }
+    assert document["read_state"]["state"] == "PARTIAL"
+    assert document["posture"]["value"] == "CONSUMPTION_UNKNOWN"
+
+
+def test_mission_v2_full_3696_posture_oracle_replaces_execution_accepted_with_completed():
+    execution_states = (
+        "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "FAILED", "LOST", "RATE_LIMITED",
+    )
+    dispatch_states = (
+        "WAITING_CAPACITY", "RECEIVER_SELECTED", "DELIVERY_SENT", "PICKUP_ACKNOWLEDGED",
+        "STARTED", "RETURNED", "DELIVERY_UNCONSUMED", "WATCH_UNPROVEN",
+        "RUNTIME_BINDING_RECONCILIATION_REQUIRED", "EFFECT_UNKNOWN", "UNKNOWN",
+    )
+    acceptances = (
+        {"state": "NOT_PROJECTED", "artifact_revision": None, "ruling": None},
+        {"state": "ACCEPTED", "artifact_revision": "revision-1", "ruling": "accept"},
+    )
+    observed_rules = set()
+    count = 0
+    for execution, dispatch, review, acceptance, current, blocker, conflict in itertools.product(
+        execution_states, dispatch_states, ("approve", "reject", "NOT_YET"),
+        acceptances,
+        (False, True), (False, True), (False, True),
+    ):
+        posture, rule = _posture_v2(
+            execution=execution,
+            dispatch=dispatch,
+            current=current,
+            conflict=conflict,
+            blocker=blocker,
+            acceptance=acceptance,
+            review=review,
+        )
+        count += 1
+        observed_rules.add(rule)
+        assert isinstance(posture, str) and posture
+        assert isinstance(rule, str) and rule
+        if not current:
+            assert posture not in {"RUNNING", "WAITING"}
+        if (
+            dispatch == "RETURNED"
+            and current
+            and execution in {"NOT_STARTED", "IN_PROGRESS"}
+            and not blocker
+            and not conflict
+        ):
+            assert (posture, rule) == ("RETURN_EXECUTION_MISMATCH", "F0")
+
+    assert count == 3696
+    assert observed_rules == {
+        "A1", "B1", "B2", "C1", "C2", "C3", "C4", "D1", "E1", "E2", "E3",
+        "F0", "F1", "F2", "F3", "F4", "F5", "G1", "G1h", "G2", "G2h", "H1", "I1",
+    }
 
 
 def test_same_inputs_are_byte_identical_and_not_mutated():

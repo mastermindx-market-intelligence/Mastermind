@@ -15,8 +15,10 @@ from control_plane.chairman_control_room_remote import _project_agent_os_freefor
 
 
 SCHEMA = "mastermind.mission_workspace.v1"
+SCHEMA_V2 = "mastermind.mission_workspace.v2"
 CONTROL_ROOM_SCHEMA = "mastermind.chairman_control_room.v1"
 FABRIC_VIEW_SCHEMA = "mastermind.fabric_job_view.v1"
+FABRIC_VIEW_SCHEMA_V2 = "mastermind.fabric_job_view.v2"
 SOURCE_VALIDITY_SCHEMA = "mastermind.control_room_source_validity.v1"
 SOURCE_VALIDITY_PROFILE = "b5.darwin-chrome-paired-v1"
 AUTONOMY_VALIDITY_SCHEMA = "mastermind.autonomy_validity.v1"
@@ -47,6 +49,9 @@ ARM_KEYS = (
 )
 EXECUTION_STATES = frozenset(
     {"NOT_STARTED", "IN_PROGRESS", "ACCEPTED", "CANCELLED", "FAILED", "LOST", "RATE_LIMITED"}
+)
+EXECUTION_STATES_V2 = frozenset(
+    {"NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "FAILED", "LOST", "RATE_LIMITED"}
 )
 DISPATCH_STATES = frozenset(
     {
@@ -194,6 +199,22 @@ MISSINGNESS_KEYS = frozenset(
 SOURCE_GENERATION_KEYS = frozenset({"state", "version", "generation"})
 FEATURE_GATE_KEYS = frozenset({"conversation", "actions", "advanced"})
 RESULT_INPUT_KEYS = frozenset({"state", "summary", "artifacts", "errors", "next_actions"})
+FABRIC_V2_OUTPUT_KEYS = frozenset(
+    {
+        "schema", "generated_at", "runtime", "armed", "root", "children",
+        "unjoined_job_count", "unjoined_job_ids", "degraded", "missingness", "capability",
+    }
+)
+FABRIC_V2_JOB_CARD_KEYS = frozenset(
+    {
+        "job_id", "status", "parent_job_id", "root_job_id", "depth", "orchestration_role",
+        "plan_step_id", "attempt_count", "attempt_limit", "current_attempt_id", "attempts",
+        "latest_attempt", "review", "repair", "result", "acceptance",
+    }
+)
+FABRIC_V2_ACCEPTANCE_KEYS = frozenset({"state", "producer_owner", "reason"})
+FABRIC_V2_REVIEW_KEYS = frozenset({"required", "reviews_job_id", "verdict"})
+FABRIC_V2_NOT_PROJECTED_REASON = "product acceptance has no producer in this projection"
 SOURCE_GENERATION_STATES = frozenset({"CURRENT", "STALE", "CONFLICT", "UNKNOWN"})
 
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
@@ -551,6 +572,86 @@ def _valid_result(value: object) -> tuple[Mapping[str, Any], bool]:
     return (row if valid else {}), valid
 
 
+def _valid_result_v2(value: object) -> tuple[Mapping[str, Any], bool]:
+    row = _mapping(value)
+    state = row.get("state")
+    valid = (
+        set(row) == RESULT_INPUT_KEYS
+        and isinstance(state, str)
+        and state in EXECUTION_STATES_V2
+        and (row.get("summary") is None or isinstance(row.get("summary"), str))
+        and isinstance(row.get("artifacts"), list)
+        and isinstance(row.get("errors"), list)
+        and isinstance(row.get("next_actions"), list)
+    )
+    return (row if valid else {}), valid
+
+
+def _valid_fabric_v2_acceptance(value: object) -> bool:
+    acceptance = _mapping(value)
+    return (
+        set(acceptance) == FABRIC_V2_ACCEPTANCE_KEYS
+        and acceptance.get("state") == "NOT_PROJECTED"
+        and acceptance.get("producer_owner") is None
+        and acceptance.get("reason") == FABRIC_V2_NOT_PROJECTED_REASON
+    )
+
+
+def _valid_fabric_v2_review(value: object) -> bool:
+    review = _mapping(value)
+    verdict = review.get("verdict")
+    reviews_job_id = review.get("reviews_job_id")
+    return (
+        set(review) == FABRIC_V2_REVIEW_KEYS
+        and type(review.get("required")) is bool
+        and (reviews_job_id is None or _safe_identifier(reviews_job_id) is not None)
+        and isinstance(verdict, str)
+        and verdict in REVIEW_VERDICTS
+    )
+
+
+def validate_mission_workspace_v2_input(*, fabric_view: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Return only the frozen Fabric-v2 input or raise a typed closed-contract refusal."""
+
+    fabric = _mapping(fabric_view)
+    if fabric.get("schema") != FABRIC_VIEW_SCHEMA_V2:
+        raise ValueError("mission v2 requires the exact Fabric v2 schema")
+    if set(fabric) != FABRIC_V2_OUTPUT_KEYS:
+        raise ValueError("mission v2 requires the closed Fabric v2 document shape")
+    raw_root = fabric.get("root")
+    if raw_root is not None:
+        root = _mapping(raw_root)
+        if "acceptance" not in root:
+            raise ValueError("mission v2 refuses a Fabric v2 root without acceptance")
+        if set(root) != FABRIC_V2_JOB_CARD_KEYS:
+            raise ValueError("mission v2 requires the closed Fabric v2 root card")
+        _root_result, root_result_valid = _valid_result_v2(root.get("result"))
+        if not root_result_valid:
+            raise ValueError("mission v2 refuses an invalid Fabric v2 root result.state")
+        if not _valid_fabric_v2_acceptance(root.get("acceptance")):
+            raise ValueError("mission v2 refuses an invalid Fabric v2 root acceptance")
+        if not _valid_fabric_v2_review(root.get("review")):
+            raise ValueError("mission v2 refuses an invalid Fabric v2 root review")
+
+    children = fabric.get("children")
+    if not isinstance(children, list):
+        raise ValueError("mission v2 requires Fabric v2 children as a list")
+    for child in children:
+        card = _mapping(child)
+        if "acceptance" not in card:
+            raise ValueError("mission v2 refuses a Fabric v2 child without acceptance")
+        if set(card) != FABRIC_V2_JOB_CARD_KEYS:
+            raise ValueError("mission v2 requires each closed Fabric v2 child card")
+        _child_result, child_result_valid = _valid_result_v2(card.get("result"))
+        if not child_result_valid:
+            raise ValueError("mission v2 refuses an invalid Fabric v2 child result.state")
+        if not _valid_fabric_v2_acceptance(card.get("acceptance")):
+            raise ValueError("mission v2 refuses an invalid Fabric v2 child acceptance")
+        if not _valid_fabric_v2_review(card.get("review")):
+            raise ValueError("mission v2 refuses an invalid Fabric v2 child review")
+    return fabric
+
+
 def _project_prs(value: object) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for row in _mapping_rows(value)[:16]:
@@ -680,6 +781,56 @@ def _posture(
         return "CONSUMPTION_UNKNOWN", "E3"
     if dispatch == "RETURNED" and current:
         if execution != "ACCEPTED":
+            return "RETURN_EXECUTION_MISMATCH", "F0"
+        if acceptance.get("state") == "ACCEPTED" and review == "reject":
+            return "ACCEPTANCE_REVIEW_CONFLICT", "F1"
+        if acceptance.get("state") == "ACCEPTED" and acceptance.get("artifact_revision") and acceptance.get("ruling"):
+            return "ACCEPTED_PRODUCT", "F2"
+        if review == "reject":
+            return "REVIEW_REJECTED", "F3"
+        if review == "NOT_YET":
+            return "RETURNED_UNREVIEWED", "F4"
+        if review == "approve":
+            return "REVIEWED_NOT_ACCEPTED", "F5"
+    if dispatch == "STARTED":
+        return ("RUNNING", "G1") if current else ("HISTORICAL_OBSERVATION", "G1h")
+    if dispatch in {"WAITING_CAPACITY", "RECEIVER_SELECTED", "DELIVERY_SENT", "PICKUP_ACKNOWLEDGED"}:
+        return ("WAITING", "G2") if current else ("HISTORICAL_OBSERVATION", "G2h")
+    if execution == "NOT_STARTED" and dispatch == "UNKNOWN":
+        return "NOT_STARTED", "H1"
+    return "UNKNOWN", "I1"
+
+
+def _posture_v2(
+    *, execution: str, dispatch: str, current: bool, conflict: bool, blocker: bool,
+    acceptance: Mapping[str, Any], review: str,
+) -> tuple[str, str]:
+    """Mission-v2 preserves F0–F5 while completion remains separate from acceptance."""
+
+    if dispatch == "EFFECT_UNKNOWN":
+        return "EFFECT_UNKNOWN", "A1"
+    if dispatch == "RUNTIME_BINDING_RECONCILIATION_REQUIRED":
+        return "RECONCILIATION_REQUIRED", "B1"
+    if conflict:
+        return "RECONCILIATION_REQUIRED", "B2"
+    terminal = {
+        "FAILED": ("EXECUTION_FAILED", "C1"),
+        "CANCELLED": ("EXECUTION_CANCELLED", "C2"),
+        "LOST": ("EXECUTION_LOST", "C3"),
+        "RATE_LIMITED": ("EXECUTION_RATE_LIMITED", "C4"),
+    }
+    if execution in terminal:
+        return terminal[execution]
+    if blocker:
+        return "BLOCKED", "D1"
+    if dispatch == "DELIVERY_UNCONSUMED":
+        return "DELIVERED_UNCONSUMED", "E1"
+    if dispatch == "WATCH_UNPROVEN":
+        return "CONSUMPTION_UNKNOWN", "E2"
+    if dispatch == "RETURNED" and not current:
+        return "CONSUMPTION_UNKNOWN", "E3"
+    if dispatch == "RETURNED" and current:
+        if execution != "COMPLETED":
             return "RETURN_EXECUTION_MISMATCH", "F0"
         if acceptance.get("state") == "ACCEPTED" and review == "reject":
             return "ACCEPTANCE_REVIEW_CONFLICT", "F1"
@@ -903,7 +1054,7 @@ def _children_section(
     return section, invalid
 
 
-def compose_mission_workspace(
+def _compose_mission_workspace(
     *,
     control_room: Mapping[str, Any] | None,
     fabric_view: Mapping[str, Any] | None,
@@ -912,6 +1063,11 @@ def compose_mission_workspace(
     source_validity: Mapping[str, Any] | None,
     cache_currentness: Mapping[str, Any] | None,
     source_generation: Mapping[str, Any] | None,
+    schema: str,
+    fabric_view_schema: str,
+    execution_states: frozenset[str],
+    result_validator: Any,
+    posture_composer: Any,
 ) -> dict[str, Any]:
     """Pure deterministic read-only mission workspace projection."""
 
@@ -920,7 +1076,7 @@ def compose_mission_workspace(
     validity = _mapping(source_validity)
     cache = _mapping(cache_currentness)
     control_valid = control.get("schema") == CONTROL_ROOM_SCHEMA
-    fabric_valid = fabric.get("schema") == FABRIC_VIEW_SCHEMA
+    fabric_valid = fabric.get("schema") == fabric_view_schema
     control_generation = _safe_timestamp(control.get("generated_at"))
     fabric_generation = _safe_timestamp(fabric.get("generated_at"))
     generation_projection = _source_generation(source_generation)
@@ -995,8 +1151,8 @@ def compose_mission_workspace(
         and dispatch.get("historical") is False
     )
 
-    result, result_valid = _valid_result(root.get("result")) if root else ({}, False)
-    execution_state = _closed_string(result.get("state"), EXECUTION_STATES)
+    result, result_valid = result_validator(root.get("result")) if root else ({}, False)
+    execution_state = _closed_string(result.get("state"), execution_states)
     review_source = _mapping(root.get("review"))
     review_verdict = _closed_string(review_source.get("verdict"), REVIEW_VERDICTS) or "NOT_YET"
     artifacts, artifacts_excluded = _safe_items(result.get("artifacts"))
@@ -1011,7 +1167,7 @@ def compose_mission_workspace(
     }
     generation_conflict = generation_projection["state"] == "CONFLICT"
     blocker = bool(responsibility.get("blocker") or responsibility.get("declared_blocker"))
-    posture_value, posture_rule = _posture(
+    posture_value, posture_rule = posture_composer(
         execution=execution_state or "UNKNOWN",
         dispatch=dispatch_state,
         current=observation_current,
@@ -1261,7 +1417,7 @@ def compose_mission_workspace(
     source = {
         "control_room_schema": CONTROL_ROOM_SCHEMA if control_valid else None,
         "control_room_generated_at": control_generation,
-        "fabric_view_schema": FABRIC_VIEW_SCHEMA if fabric_valid else None,
+        "fabric_view_schema": fabric_view_schema if fabric_valid else None,
         "fabric_view_generated_at": fabric_generation,
         "source_generation": generation_projection,
         "source_coverage": [
@@ -1272,7 +1428,7 @@ def compose_mission_workspace(
     }
 
     output = {
-        "schema": SCHEMA,
+        "schema": schema,
         "generated_at": control_generation or fabric_generation,
         "source": source,
         "read_state": {
@@ -1357,3 +1513,60 @@ def compose_mission_workspace(
         assert all(set(item) == EVIDENCE_KEYS for item in evidence_owner["evidence"])
     assert set(output["feature_gates"]) == FEATURE_GATE_KEYS
     return output
+
+
+def compose_mission_workspace(
+    *,
+    control_room: Mapping[str, Any] | None,
+    fabric_view: Mapping[str, Any] | None,
+    work_ref: str,
+    root_job_id: str | None,
+    source_validity: Mapping[str, Any] | None,
+    cache_currentness: Mapping[str, Any] | None,
+    source_generation: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Historical Mission-v1 projection; retained for existing bounded consumers."""
+
+    return _compose_mission_workspace(
+        control_room=control_room,
+        fabric_view=fabric_view,
+        work_ref=work_ref,
+        root_job_id=root_job_id,
+        source_validity=source_validity,
+        cache_currentness=cache_currentness,
+        source_generation=source_generation,
+        schema=SCHEMA,
+        fabric_view_schema=FABRIC_VIEW_SCHEMA,
+        execution_states=EXECUTION_STATES,
+        result_validator=_valid_result,
+        posture_composer=_posture,
+    )
+
+
+def compose_mission_workspace_v2(
+    *,
+    control_room: Mapping[str, Any] | None,
+    fabric_view: Mapping[str, Any] | None,
+    work_ref: str,
+    root_job_id: str | None,
+    source_validity: Mapping[str, Any] | None,
+    cache_currentness: Mapping[str, Any] | None,
+    source_generation: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Compose Mission-v2 from only the exact frozen Fabric-v2 public contract."""
+
+    fabric = validate_mission_workspace_v2_input(fabric_view=fabric_view)
+    return _compose_mission_workspace(
+        control_room=control_room,
+        fabric_view=fabric,
+        work_ref=work_ref,
+        root_job_id=root_job_id,
+        source_validity=source_validity,
+        cache_currentness=cache_currentness,
+        source_generation=source_generation,
+        schema=SCHEMA_V2,
+        fabric_view_schema=FABRIC_VIEW_SCHEMA_V2,
+        execution_states=EXECUTION_STATES_V2,
+        result_validator=_valid_result_v2,
+        posture_composer=_posture_v2,
+    )
