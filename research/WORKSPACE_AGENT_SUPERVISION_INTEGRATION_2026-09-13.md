@@ -2,6 +2,8 @@
 
 **Status: SOURCE RECORD — not an implementation contract.** Adopted with change by the Fable seat (W6-A intake, 2026-09-14). Workspace Agents are supervisory attention/read/candidate-return clients only. No publish or trigger step may be taken until the bounded candidate-return ingress (W6-C) and the run-observation qualification (W6-D) are accepted; `control_plane/wake_transport.py:transport_implemented` remains false for Workspace. Executive OS stays the sole Job/Attempt/Worker/Event authority; Capacity/Router owns placement; Agent OS owns continuity; Relay/Wake/Slack are transport and attention only.
 
+**Provider-contract correction — 2026-09-21.** Current OpenAI Workspace Agents product documentation now states that an API trigger returns `202 Accepted` with no response body/run id and that the agent response cannot be retrieved through the API. The earlier beta run-id/status research in this record is superseded for production planning. W6-D therefore means truthful trigger-disposition qualification, not run polling. Mastermind must not depend on a Workspace run-status GET until a current supported provider contract is independently re-established. Candidate return through the authenticated Mastermind tool remains the decisive result edge.
+
 Date: 2026-09-13. Owner: Sol, for Chairman Chris.
 
 **Status: PROPOSAL / SOURCE RECORD ONLY. Workspace Agent integration is NOT_BUILT and NOT_PROVEN.** This document does not admit a runtime operation, assign a receiver, publish an agent, change credentials or spending, amend production-deployment authority, or certify an autonomous organization.
@@ -74,18 +76,19 @@ Use the two existing seats; purchase nothing. Before a metered run, complete the
 
 ## 5. Workspace Agent protocol delta
 
-Official developer reference observed 2026-09-13:
+Current supported product contract rechecked 2026-09-21:
 
 ```text
-POST https://api.chatgpt.com/v1/workspace_agents/{id}/trigger
-GET  https://api.chatgpt.com/v1/workspace_agents/{id}/runs/{run_id}
+POST <published Workspace Agent API channel trigger endpoint>
+-> 202 Accepted
+-> no response body
+-> no run id
+-> no API response retrieval
 ```
 
-`id` is a published API-channel identifier. Trigger input accepts `input` and optional `conversation_key`; `Idempotency-Key` deduplicates the same event. The beta header `OpenAI-Beta: workspace_agent_runs=v1` returns an `agent_trigger_run_id` for status observation. The API does not retrieve the agent's answer. Provider `completed` is not company acceptance.
+The exact endpoint, headers and token remain channel/product instructions that must be qualified against the actual published agent. Mastermind keeps the existing deterministic event/idempotency binding, but a successful trigger has no provider correlation identity that may be promoted into lifecycle truth. The older beta run-id/status description observed on 2026-09-13 is historical evidence only and is not a current production dependency.
 
-The Help Center still describes an older response without a body/run ID. Prefer the developer contract for implementation research, but qualify the actual published channel before depending on the beta. Neither page proves entitlement in these seats.
-
-References: [trigger contract](https://developers.openai.com/workspace-agents/trigger-runs), [authentication](https://developers.openai.com/workspace-agents/authentication), [builder and controls](https://help.openai.com/en/articles/20001143).
+Current product reference: [Workspace Agents for Enterprise and Business](https://help.openai.com/en/articles/20001143).
 
 ### 5.1 Start as a supervisory client, not a fictional full worker adapter
 
@@ -99,7 +102,7 @@ At admitted dispatch, the existing owner must bind the logical responsibility, e
 
 Use responsibility-scoped conversation continuity, not a shared conversation for the entire organization. Deduplication identity is per event, not per whole project. A corrected or new event must not accidentally reuse an old event key. A changed payload under an existing key is a conflict. Keys must be opaque and must not disclose paths, credentials, people or confidential task content.
 
-A provider `202` proves provider queue acceptance only. It does not prove execution, consumption of the current obligation, delegated authority, receipt of useful output, or a completed Job.
+A provider `202` proves provider queue acceptance only. Under the current supported contract it carries no run id or response body. It does not prove execution, consumption of the current obligation, delegated authority, receipt of useful output, or a completed Job.
 
 ### 5.3 The missing return edge is the decisive integration
 
@@ -117,7 +120,7 @@ Unknown launch outcome holds the same event and carrier for canonical reconcilia
 
 A suspended run is a wait, not free capacity or completion. A missing callback does not authorize redoing the work. Reject stale-target, duplicate, out-of-scope and corrected-input callbacks. Preserve the earlier evidence with supersession; do not erase history.
 
-Use exact tool/role scopes and existing secret custody. Revalidate grants at every material write so a stopped responsibility cannot continue changing the company through a late tool call. Revoking tool authority does not prove the vendor stopped computing or billing. Do not promise cancellation or bounded provider lifetime without direct evidence.
+Use exact tool/role scopes and existing secret custody. Revalidate grants at every material write so a stopped responsibility cannot continue changing the company through a late tool call. Revoking tool authority does not prove the vendor stopped computing or billing. Do not promise cancellation, provider run polling, or bounded provider lifetime without direct evidence.
 
 Treat repository text, Slack, issues, web research and returned artifacts as data. Only current authorized intent and existing policy owners can confer authority. A research note that says 'launch workers' is not an instruction to do so.
 
