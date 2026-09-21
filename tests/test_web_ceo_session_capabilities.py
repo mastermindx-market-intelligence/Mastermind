@@ -37,6 +37,15 @@ def _selection(
     *,
     worker_id: str = "web-ceo-c3-astra",
     quota_class: str = "chatgpt-pro",
+    required_capabilities: frozenset[str] = frozenset(
+        {"executive_submit", "studio_direct_write", "desktop_commander_write"}
+    ),
+    allowed_modes: frozenset[c1.PlacementMode] = frozenset(
+        {
+            c1.PlacementMode.EXISTING_SESSION_REUSE,
+            c1.PlacementMode.NEW_SESSION_MATERIALIZATION,
+        }
+    ),
 ) -> c1.PlacementSelectionDecision:
     responsibility = ResponsibilityFact(
         responsibility_ref="WS:WEB-CEO-CAPABILITY",
@@ -47,17 +56,17 @@ def _selection(
         source=_source(SourceOwner.AGENT_OS, "agentos-web-ceo-capability"),
     )
     demand = c1.PlacementDemand(
-        required_capabilities=frozenset({"strategic_reasoning"}),
+        required_capabilities=required_capabilities,
         quota_class=quota_class,
         provider="chatgpt-web",
-        allowed_modes=frozenset({c1.PlacementMode.EXISTING_SESSION_REUSE}),
+        allowed_modes=allowed_modes,
     )
     candidate = c1.PlacementCandidateFact(
         worker_id=worker_id,
         provider="chatgpt-web",
         account_label="chatgpt3",
         quota_class=quota_class,
-        capabilities=frozenset({"strategic_reasoning"}),
+        capabilities=required_capabilities,
         observed_at_ms=OBSERVED_AT_MS,
         occupancy=c1.OccupancyState.FREE,
         occupancy_source=_source(SourceOwner.RUNTIME_BINDING, "binding-current"),
@@ -295,12 +304,6 @@ def _guard(
     receipt: wcap.WebCeoSessionCapabilityReceipt,
     *,
     selection: c1.PlacementSelectionDecision | None = None,
-    required: frozenset[str] = frozenset(
-        {"executive_submit", "studio_direct_write", "desktop_commander_write"}
-    ),
-    binding_mode: wcap.ReceiverBindingMode = (
-        wcap.ReceiverBindingMode.CAPACITY_SELECTABLE
-    ),
     binding: wcap.CurrentSessionBindingFacts | None = None,
     expected_contract_digest: str | None = None,
     expected_observer_digest: str | None = None,
@@ -315,8 +318,6 @@ def _guard(
         placement_selection=selection or _selection(),
         validated_target_facts=_target_facts(),
         capability_receipt=receipt,
-        required_capabilities=required,
-        receiver_binding_mode=binding_mode,
         current_binding=binding or _binding(),
         expected_capability_contract_digest=(
             expected_contract_digest or receipt.capability_contract_digest
@@ -349,9 +350,34 @@ def test_v2_schema_and_guard_signature_are_pinned() -> None:
     assert "capability_receipt" in inspect.signature(
         wcap.build_guarded_commitment_plan_from_selection_decision
     ).parameters
-    assert "current_binding" in inspect.signature(
+    guard_parameters = inspect.signature(
         wcap.build_guarded_commitment_plan_from_selection_decision
     ).parameters
+    assert "current_binding" in guard_parameters
+    assert "required_capabilities" not in guard_parameters
+    assert "receiver_binding_mode" not in guard_parameters
+
+
+def test_effect_guard_refuses_selection_without_web_action_demand() -> None:
+    receipt = _receipt()
+    selection = _selection(
+        required_capabilities=frozenset({"strategic_reasoning"})
+    )
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="WEB_ACTION_DEMAND_MISSING",
+    ):
+        _guard(receipt, selection=selection)
+
+
+def test_effect_guard_derives_exact_session_mode_from_c1_demand() -> None:
+    selection = _selection(
+        required_capabilities=frozenset({"executive_submit"}),
+        allowed_modes=frozenset({c1.PlacementMode.EXISTING_SESSION_REUSE}),
+    )
+    required, mode = wcap._placement_action_requirements(selection)
+    assert required == frozenset({"executive_submit"})
+    assert mode is wcap.ReceiverBindingMode.EXACT_SESSION_REQUIRED
 
 
 def test_exact_fresh_action_capabilities_allow_guarded_commitment() -> None:
@@ -450,7 +476,9 @@ def test_visible_but_unprobed_action_remains_unknown() -> None:
     ):
         _guard(
             receipt,
-            required=frozenset({"executive_submit"}),
+            selection=_selection(
+                required_capabilities=frozenset({"executive_submit"})
+            ),
         )
 
 
@@ -582,7 +610,9 @@ def test_guard_rereads_binding_and_catches_rollover(
     ):
         _guard(
             receipt,
-            required=frozenset({"executive_submit"}),
+            selection=_selection(
+                required_capabilities=frozenset({"executive_submit"})
+            ),
             binding=binding,
         )
 
@@ -613,7 +643,9 @@ def test_contract_digest_drift_requires_reconciliation() -> None:
     ):
         _guard(
             receipt,
-            required=frozenset({"executive_submit"}),
+            selection=_selection(
+                required_capabilities=frozenset({"executive_submit"})
+            ),
             expected_contract_digest="f" * 64,
         )
 
@@ -632,7 +664,9 @@ def test_observer_evidence_rollover_requires_reconciliation() -> None:
     ):
         _guard(
             receipt,
-            required=frozenset({"executive_submit"}),
+            selection=_selection(
+                required_capabilities=frozenset({"executive_submit"})
+            ),
             expected_observer_digest="f" * 64,
         )
 
@@ -960,7 +994,9 @@ def test_serviceability_owner_digest_rollover_requires_reconciliation() -> None:
     ):
         _guard(
             receipt,
-            required=frozenset({"executive_submit"}),
+            selection=_selection(
+                required_capabilities=frozenset({"executive_submit"})
+            ),
             expected_serviceability_digest="0" * 64,
         )
 

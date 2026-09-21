@@ -1034,6 +1034,34 @@ def assess_web_ceo_session_capabilities(
     return _decision(state=PreflightState.READY, **common)
 
 
+def _placement_action_requirements(
+    decision: c1.PlacementSelectionDecision,
+) -> tuple[frozenset[str], ReceiverBindingMode]:
+    """Project action requirements from the already-frozen C1 demand.
+
+    The effect guard must not accept a second, caller-supplied requirement or
+    binding-mode claim that can understate the work after selection. C1 already
+    carries both facts on its immutable decision: required capabilities and
+    allowed placement modes.
+    """
+
+    demand = decision.demand
+    action_capabilities = frozenset(
+        capability
+        for capability in demand.required_capabilities
+        if capability in _KNOWN_EFFECTIVE_CAPABILITY_SET
+    )
+    if not action_capabilities:
+        raise WebCeoSessionCapabilityError("WEB_ACTION_DEMAND_MISSING")
+    binding_mode = (
+        ReceiverBindingMode.EXACT_SESSION_REQUIRED
+        if demand.allowed_modes
+        == frozenset({c1.PlacementMode.EXISTING_SESSION_REUSE})
+        else ReceiverBindingMode.CAPACITY_SELECTABLE
+    )
+    return action_capabilities, binding_mode
+
+
 def build_guarded_commitment_plan_from_selection_decision(
     *,
     source_root_job_id: str,
@@ -1041,8 +1069,6 @@ def build_guarded_commitment_plan_from_selection_decision(
     placement_selection: c1.PlacementSelectionDecision,
     validated_target_facts: Any,
     capability_receipt: WebCeoSessionCapabilityReceipt,
-    required_capabilities: frozenset[str],
-    receiver_binding_mode: ReceiverBindingMode,
     current_binding: CurrentSessionBindingFacts,
     expected_capability_contract_digest: str,
     expected_observer_evidence_digest: str,
@@ -1057,6 +1083,9 @@ def build_guarded_commitment_plan_from_selection_decision(
         raise WebCeoSessionCapabilityError("PLACEMENT_SELECTION_INVALID")
     if not isinstance(current_binding, CurrentSessionBindingFacts):
         raise WebCeoSessionCapabilityError("CURRENT_BINDING_INVALID")
+    required_capabilities, receiver_binding_mode = _placement_action_requirements(
+        placement_selection
+    )
     wire = placement_selection.to_dict()
     selected = wire.get("selected")
     if not isinstance(selected, Mapping):
