@@ -162,6 +162,27 @@ def _same_euid_private_regular(path: str, *, exact_mode: int | None = None) -> o
     return before
 
 
+def _trusted_pinned_executable(path: str) -> os.stat_result:
+    selected = Path(path)
+    if not selected.is_absolute():
+        raise FleetOperationError("TARGET_REFUSED")
+    try:
+        before = selected.lstat()
+    except OSError:
+        raise FleetOperationError("TARGET_REFUSED") from None
+    mode = stat.S_IMODE(before.st_mode)
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_uid not in {0, os.geteuid()}
+        or before.st_nlink != 1
+        or mode & 0o022
+        or not os.access(selected, os.X_OK)
+    ):
+        raise FleetOperationError("TARGET_REFUSED")
+    return before
+
+
 def _load_config(path: str) -> TunnelConfig:
     try:
         return load_tunnel_config(path)
@@ -555,7 +576,7 @@ def _target_release_sha(
     configured_python = os.path.realpath(config.python_executable)
     if selected_python != configured_python:
         raise FleetOperationError("TARGET_REFUSED")
-    _same_euid_private_regular(selected_python)
+    _trusted_pinned_executable(selected_python)
     try:
         observed_python_sha = hashlib.sha256(Path(selected_python).read_bytes()).hexdigest()
     except OSError:
