@@ -264,6 +264,9 @@ def test_companion_disagreement_preserves_incumbent_effects_and_source_pin():
 def test_prestart_action_capability_gate_blocks_blind_session_start():
     text = _section("Step 6 — Discover exact action capability, then react to evidence")
     assert "Gate action-bearing START on current capability proof" in text
+    assert "THIS concrete receiver must itself perform or invoke" in text
+    assert "downstream worker-local actions" in text
+    assert "dispatch/inspection/review actions the principal itself must execute" in text
     assert "Schema exposure alone is not positive readiness" in text
     assert "do not emit action-bearing `START`" in text
     assert "`UNKNOWN` / `UNPROBED`" in text

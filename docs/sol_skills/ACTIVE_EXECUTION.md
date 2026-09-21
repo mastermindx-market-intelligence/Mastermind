@@ -246,10 +246,12 @@ organizational permission; unknown organizational permission never proves techni
 
 ### Step 6A — Gate action-bearing START on current capability proof
 
-Before a concrete ChatGPT/Web CEO/provider session emits `START` for work whose accepted outcome
-requires a tool/action family, derive those required action families from the accepted scope and
-validation contract rather than from the provider, model, account or session label. Inspect the
-current effective action schema for that exact session/generation and use the existing safe
+Before a concrete ChatGPT/Web CEO/provider session emits `START`, derive the action families that
+THIS concrete receiver must itself perform or invoke from the accepted scope and validation contract,
+rather than from the provider, model, account or session label. Do not charge the principal session
+for downstream worker-local actions when an already-admitted worker route owns them; do include the
+dispatch/inspection/review actions the principal itself must execute to complete that route. Inspect
+the current effective action schema for that exact session/generation and use the existing safe
 non-effect permission/capability/binding or serviceability preflight for each required family when one
 exists.
 
