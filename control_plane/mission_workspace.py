@@ -18,9 +18,12 @@ from control_plane.chairman_control_room_remote import _project_agent_os_freefor
 
 SCHEMA = "mastermind.mission_workspace.v1"
 SCHEMA_V2 = "mastermind.mission_workspace.v2"
+SCHEMA_V3 = "mastermind.mission_workspace.v3"
 CONTROL_ROOM_SCHEMA = "mastermind.chairman_control_room.v1"
 FABRIC_VIEW_SCHEMA = "mastermind.fabric_job_view.v1"
 FABRIC_VIEW_SCHEMA_V2 = "mastermind.fabric_job_view.v2"
+FABRIC_VIEW_SCHEMA_V3 = "mastermind.fabric_job_view.v3"
+RESULT_REFERENCE_INDEX_SCHEMA = "mastermind.fabric_result_reference_index.v1"
 SOURCE_VALIDITY_SCHEMA = "mastermind.control_room_source_validity.v1"
 SOURCE_VALIDITY_PROFILE = "b5.darwin-chrome-paired-v1"
 AUTONOMY_VALIDITY_SCHEMA = "mastermind.autonomy_validity.v1"
@@ -110,6 +113,29 @@ OUTPUT_KEYS = frozenset(
         "posture", "conversation", "missingness", "degraded", "budget", "feature_gates",
     }
 )
+OUTPUT_KEYS_V3 = OUTPUT_KEYS | {"result_refs"}
+FABRIC_V3_KEYS = frozenset({"schema", "fabric_view", "result_refs"})
+FABRIC_V3_RESULT_REFS_KEYS = frozenset(
+    {
+        "schema", "root_job_id", "snapshot_digest", "generation",
+        "availability", "refs", "absent_job_ids", "omitted_job_ids", "truncated",
+    }
+)
+FABRIC_V3_REF_KEYS = frozenset(
+    {
+        "root_job_id", "job_id", "attempt_id", "result_envelope_digest",
+        "orchestration_role", "validation",
+    }
+)
+FABRIC_V3_GENERATION_KEYS = frozenset(
+    {"schema", "state", "source_identity", "before", "after"}
+)
+FABRIC_V3_AVAILABILITY_STATES = frozenset({"AVAILABLE", "PARTIAL", "UNAVAILABLE"})
+FABRIC_V3_VALIDATION_STATES = frozenset({"UNVALIDATED"})
+FABRIC_V3_ORCHESTRATION_ROLES = frozenset(
+    {"aggregation", "plan", "work", "review", "repair"}
+)
+FABRIC_V3_MAX_INCLUDED_SLOTS = 17
 SOURCE_KEYS = frozenset(
     {
         "control_room_schema", "control_room_generated_at", "fabric_view_schema",
@@ -1756,3 +1782,302 @@ def compose_mission_workspace_v2(
         owner_observation=owner_observation,
         emit_owner_observation=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Unit M — Mission v3 reducer (frozen result-reference companion).
+#
+# The reducer composes the existing v2 output unchanged and layers the closed
+# Fabric-v3 navigation index on top. It never acquires I/O, never reads the
+# clock, never invokes random, never imports Runtime, and never fans out into
+# the shared selected-detail projector. The companion is pure data: same-call
+# assembly binds snapshot digest and generation to the nested v2 acquisition,
+# and Mission currentness remains the only gate on selectable refs.
+# ---------------------------------------------------------------------------
+
+
+def _validate_fabric_v3_companion(fabric_view: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Validate the closed three-key Fabric-v3 companion wrapper."""
+
+    if not isinstance(fabric_view, Mapping):
+        raise ValueError("mission v3 requires the closed Fabric v3 companion")
+    if set(fabric_view) != FABRIC_V3_KEYS:
+        raise ValueError("mission v3 requires the closed Fabric v3 companion shape")
+    if fabric_view.get("schema") != FABRIC_VIEW_SCHEMA_V3:
+        raise ValueError("mission v3 requires the exact Fabric v3 schema")
+    return fabric_view
+
+
+def _valid_index_identifier(value: object) -> bool:
+    """Locator and partition identifiers are exact valid strings, never coerced."""
+
+    return isinstance(value, str) and _safe_identifier(value) is not None
+
+
+def _validate_result_reference_index(index: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Validate the closed nine-key result-reference index.
+
+    Keys, enums, identifier types and the generation receipt's owner-law
+    relationships are refused here with the established ValueError
+    input-refusal convention before anything is sorted or hashed, so an
+    invalid, unhashable or mixed partition can never leak a TypeError.  A
+    malformed (non-hex) snapshot_digest string is a value-level defect: the
+    remaining structure is still fully validated, and the reducer degrades
+    availability afterwards — never into success-shaped data.
+    """
+
+    if not isinstance(index, Mapping) or set(index) != FABRIC_V3_RESULT_REFS_KEYS:
+        raise ValueError("mission v3 requires the closed result_refs index")
+    if index.get("schema") != RESULT_REFERENCE_INDEX_SCHEMA:
+        raise ValueError("mission v3 result_refs index must carry the exact index schema")
+    root_job_id = index.get("root_job_id")
+    if not _valid_index_identifier(root_job_id):
+        raise ValueError("mission v3 result_refs root_job_id is invalid")
+    snapshot_digest = index.get("snapshot_digest")
+    if snapshot_digest is not None and not isinstance(snapshot_digest, str):
+        raise ValueError("mission v3 result_refs snapshot_digest must be a 64 lowercase hex string or null")
+    generation = index.get("generation")
+    if not isinstance(generation, Mapping) or set(generation) != FABRIC_V3_GENERATION_KEYS:
+        raise ValueError("mission v3 result_refs generation must be the five-key receipt")
+    if generation.get("schema") != RUNTIME_OBSERVATION_SCHEMA:
+        raise ValueError("mission v3 result_refs generation schema is invalid")
+    state = generation.get("state")
+    if type(state) is not str or state not in OWNER_OBSERVATION_STATES:
+        raise ValueError("mission v3 result_refs generation state is invalid")
+    identity = generation.get("source_identity")
+    if identity is not None and not (
+        isinstance(identity, str)
+        and _OPAQUE_REF.fullmatch(identity) is not None
+        and _safe_identifier(identity) == identity
+    ):
+        raise ValueError("mission v3 result_refs generation source_identity is invalid")
+    before = generation.get("before")
+    after = generation.get("after")
+    for name, sample in (("before", before), ("after", after)):
+        if sample is not None and (type(sample) is not int or sample < 0):
+            raise ValueError(f"mission v3 result_refs generation {name} sample is invalid")
+    if state in {"SAME", "CONFLICT"}:
+        if type(before) is not int or type(after) is not int:
+            raise ValueError("mission v3 result_refs generation requires genuine integer samples")
+        if not isinstance(identity, str) or not identity:
+            raise ValueError("mission v3 result_refs generation requires a nonempty source identity")
+    if state == "SAME" and before != after:
+        raise ValueError("mission v3 result_refs generation SAME requires equal samples")
+    if state == "CONFLICT" and before == after:
+        raise ValueError("mission v3 result_refs generation CONFLICT requires differing samples")
+    availability = index.get("availability")
+    if type(availability) is not str or availability not in FABRIC_V3_AVAILABILITY_STATES:
+        raise ValueError("mission v3 result_refs index availability enum is invalid")
+    refs = index.get("refs")
+    absent = index.get("absent_job_ids")
+    omitted = index.get("omitted_job_ids")
+    if not isinstance(refs, list) or not isinstance(absent, list) or not isinstance(omitted, list):
+        raise ValueError("mission v3 result_refs partition arrays must be lists")
+    if not all(isinstance(item, Mapping) for item in refs):
+        raise ValueError("mission v3 result_refs refs must be closed six-key mappings")
+    for row in refs:
+        if not isinstance(row, Mapping) or set(row) != FABRIC_V3_REF_KEYS:
+            raise ValueError("mission v3 result_refs ref must be the closed six-key shape")
+        if type(row.get("validation")) is not str or row.get("validation") not in FABRIC_V3_VALIDATION_STATES:
+            raise ValueError("mission v3 result_refs ref validation must be UNVALIDATED")
+        if type(row.get("orchestration_role")) is not str or row.get("orchestration_role") not in FABRIC_V3_ORCHESTRATION_ROLES:
+            raise ValueError("mission v3 result_refs ref orchestration_role enum is invalid")
+        if row.get("root_job_id") != root_job_id:
+            raise ValueError("mission v3 result_refs ref root_job_id must match the index")
+        if not _valid_index_identifier(row.get("job_id")):
+            raise ValueError("mission v3 result_refs ref job_id must be an exact valid string")
+        if not _valid_index_identifier(row.get("attempt_id")):
+            raise ValueError("mission v3 result_refs ref attempt_id must be an exact valid string")
+        digest = row.get("result_envelope_digest")
+        if (
+            not isinstance(digest, str)
+            or _HEX_64.fullmatch(digest) is None
+        ):
+            raise ValueError("mission v3 result_refs ref result_envelope_digest must be 64 lowercase hex")
+    for name, group in (("absent_job_ids", absent), ("omitted_job_ids", omitted)):
+        for item in group:
+            if not _valid_index_identifier(item):
+                raise ValueError(
+                    f"mission v3 result_refs {name} entries must be exact valid strings"
+                )
+    refs_sorted = sorted(refs, key=lambda row: row["job_id"])
+    if refs_sorted != refs:
+        raise ValueError("mission v3 result_refs refs must be sorted by job_id")
+    absent_sorted = sorted(absent)
+    if absent_sorted != absent:
+        raise ValueError("mission v3 result_refs absent_job_ids must be sorted")
+    omitted_sorted = sorted(omitted)
+    if omitted_sorted != omitted:
+        raise ValueError("mission v3 result_refs omitted_job_ids must be sorted")
+    ids: list[str] = [row["job_id"] for row in refs] + list(absent) + list(omitted)
+    if len(ids) > FABRIC_V3_MAX_INCLUDED_SLOTS:
+        raise ValueError(
+            "mission v3 result_refs includes at most 17 included Job slots"
+        )
+    if len(ids) != len(set(ids)):
+        raise ValueError("mission v3 result_refs partition must be pairwise disjoint")
+    truncated = index.get("truncated")
+    if not isinstance(truncated, bool):
+        raise ValueError("mission v3 result_refs truncated must be a bool")
+    return index
+
+
+def _is_well_formed_digest(value: object) -> bool:
+    """A v3 index digest is well-formed only when it is a 64 lowercase hex string."""
+
+    return (
+        isinstance(value, str)
+        and _HEX_64.fullmatch(value) is not None
+    )
+
+
+def _validate_companion_against_v2(
+    index: Mapping[str, Any],
+    *,
+    nested_v2: Mapping[str, Any],
+    selected_root_job_id: str | None,
+) -> None:
+    """Bind index snapshot_digest and generation to the nested Fabric-v2 acquisition."""
+
+    acquisition = _mapping(_mapping(nested_v2.get("runtime")).get("acquisition"))
+    acq_digest = acquisition.get("snapshot_digest")
+    acq_generation = _mapping(acquisition.get("generation"))
+    acq_root = _safe_identifier(
+        _mapping(acquisition.get("query")).get("root_job_id")
+    )
+
+    nested_root = _safe_identifier(_mapping(nested_v2.get("root")).get("job_id"))
+    if selected_root_job_id is not None and nested_root is not None:
+        if selected_root_job_id != nested_root:
+            raise ValueError("mission v3 root_job_id does not join the nested Fabric v2 root")
+
+    if index.get("root_job_id") != acq_root:
+        raise ValueError("mission v3 result_refs root_job_id must match nested v2 acquisition")
+    if nested_root is not None and index.get("root_job_id") != nested_root:
+        raise ValueError("mission v3 result_refs root_job_id must join the nested Fabric v2 root")
+    index_digest = index.get("snapshot_digest")
+    if acq_digest is None:
+        if index_digest is not None:
+            raise ValueError("mission v3 result_refs snapshot_digest joins a null v2 acquisition")
+    elif index_digest != acq_digest:
+        raise ValueError("mission v3 result_refs snapshot_digest must equal nested v2 acquisition")
+    if index.get("generation") != acq_generation:
+        raise ValueError("mission v3 result_refs generation must equal nested v2 acquisition")
+
+
+def _downgrade_index_for_noncurrent(index: Mapping[str, Any]) -> dict[str, Any]:
+    """Clear selectable refs and known absence when Mission is nonCURRENT."""
+
+    generation = _mapping(index.get("generation"))
+    snapshot_digest = index.get("snapshot_digest")
+    root_job_id = index.get("root_job_id")
+    return {
+        "schema": RESULT_REFERENCE_INDEX_SCHEMA,
+        "root_job_id": root_job_id,
+        "snapshot_digest": snapshot_digest,
+        "generation": dict(generation),
+        "availability": "UNAVAILABLE",
+        "refs": [],
+        "absent_job_ids": [],
+        "omitted_job_ids": [],
+        "truncated": False,
+    }
+
+
+def compose_mission_workspace_v3(
+    *,
+    control_room: Mapping[str, Any] | None,
+    fabric_view: Mapping[str, Any] | None,
+    work_ref: str,
+    root_job_id: str | None,
+    source_validity: Mapping[str, Any] | None,
+    cache_currentness: Mapping[str, Any] | None,
+    source_generation: Mapping[str, Any] | None,
+    owner_observation: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Compose Mission-v3 from only the exact frozen Fabric-v3 companion."""
+
+    companion = _validate_fabric_v3_companion(fabric_view)
+    nested_v2 = validate_mission_workspace_v2_input(
+        fabric_view=companion.get("fabric_view"),
+    )
+    index = _validate_result_reference_index(companion.get("result_refs"))
+    _validate_companion_against_v2(
+        index,
+        nested_v2=nested_v2,
+        selected_root_job_id=(
+            root_job_id if isinstance(root_job_id, str) else None
+        ),
+    )
+
+    v2_document = _compose_mission_workspace(
+        control_room=control_room,
+        fabric_view=nested_v2,
+        work_ref=work_ref,
+        root_job_id=root_job_id,
+        source_validity=source_validity,
+        cache_currentness=cache_currentness,
+        source_generation=source_generation,
+        schema=SCHEMA_V3,
+        fabric_view_schema=FABRIC_VIEW_SCHEMA_V2,
+        execution_states=EXECUTION_STATES_V2,
+        result_validator=_valid_result_v2,
+        posture_composer=_posture_v2,
+        owner_observation=owner_observation,
+        emit_owner_observation=True,
+    )
+
+    if v2_document["read_state"]["state"] != "CURRENT":
+        effective_index = _downgrade_index_for_noncurrent(index)
+    else:
+        index_digest = index["snapshot_digest"]
+        digest_valid = _is_well_formed_digest(index_digest)
+        generation = _mapping(index["generation"])
+        if (
+            not digest_valid
+            or generation.get("state") != "SAME"
+            or index["availability"] == "UNAVAILABLE"
+        ):
+            # A missing/null/malformed digest, a generation that is not a
+            # qualified SAME, and an explicit producer UNAVAILABLE can never
+            # retain selectable refs or known absence.  Valid receipt
+            # diagnostics stay; the malformed digest itself is cleared.
+            effective_index = {
+                "schema": RESULT_REFERENCE_INDEX_SCHEMA,
+                "root_job_id": index["root_job_id"],
+                "snapshot_digest": index_digest if digest_valid else None,
+                "generation": dict(generation),
+                "availability": "UNAVAILABLE",
+                "refs": [],
+                "absent_job_ids": [],
+                "omitted_job_ids": [],
+                "truncated": False,
+            }
+        else:
+            # AVAILABLE is downgraded truthfully to PARTIAL when the retained
+            # partitions or truncation prove incompleteness; no claim is ever
+            # upgraded and no eligible ref or omitted ID is dropped.
+            incomplete = bool(index["omitted_job_ids"]) or index["truncated"] is True
+            effective_index = {
+                "schema": RESULT_REFERENCE_INDEX_SCHEMA,
+                "root_job_id": index["root_job_id"],
+                "snapshot_digest": index_digest,
+                "generation": dict(index["generation"]),
+                "availability": (
+                    "PARTIAL" if incomplete and index["availability"] == "AVAILABLE"
+                    else index["availability"]
+                ),
+                "refs": [dict(row) for row in index["refs"]],
+                "absent_job_ids": list(index["absent_job_ids"]),
+                "omitted_job_ids": list(index["omitted_job_ids"]),
+                "truncated": bool(index["truncated"]),
+            }
+
+    output = dict(v2_document)
+    output["schema"] = SCHEMA_V3
+    output["result_refs"] = effective_index
+    assert set(output) == OUTPUT_KEYS_V3
+    assert set(output["result_refs"]) == FABRIC_V3_RESULT_REFS_KEYS
+    for row in output["result_refs"]["refs"]:
+        assert set(row) == FABRIC_V3_REF_KEYS
+    return output
