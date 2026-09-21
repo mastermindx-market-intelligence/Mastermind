@@ -4,17 +4,38 @@ The App holds no Runtime, grant handle or broker connection. Every window call
 uses one fixed installed viewer/source profile, never ambient mutable identity.
 """
 import asyncio
+from dataclasses import dataclass
+from collections.abc import Callable
+from typing import Any
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
 from integrations.executive_content_contract import (
-    ContentObserverProfile, ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA,
+    ContentObserverProfile, ContentObserverProfiles, ContentProfileKey,
+    load_content_profiles, ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA,
     MAX_PAGE_BYTES, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, canonical, epoch,
 )
 from integrations.business_mcp_auth.contracts import VerifiedPrincipal, validate_resource_policy
 from integrations.mastermind_window_reader.production_binding import read_installed_window
 from integrations.mastermind_steward_app.live_window import LiveWindowConfig
+
+
+@dataclass(frozen=True)
+class LiveWindowProfilesConfig:
+    """Immutable configuration for installed multi-profile LiveWindow composition.
+
+    Contains the incumbent authenticator, policy, profile_loader, ceo_ingress_socket_path,
+    now callable, allowed_origin, and audit_sink. Used to construct a request-owned
+    profile selector for the installed composition.
+    """
+    authenticator: Any
+    content_policy: Any
+    profile_loader: Callable[[], Any]
+    ceo_ingress_socket_path: Path
+    now: Callable[[], int]
+    allowed_origin: str
+    audit_sink: Any
 
 
 class CeoIngressContentClient:
@@ -100,6 +121,25 @@ class InstalledWindowSource:
         return raw
 
 
+def _select_profile_for_principal(profiles_config, principal):
+    """Select only from the validated configuration and incumbent A1 principal."""
+    if type(principal) is not VerifiedPrincipal:
+        return None
+    value = load_content_profiles(profiles_config.profile_loader())
+    profiles = (value,) if type(value) is ContentObserverProfile else tuple(
+        slot.profile for slot in (value.web, value.mac)
+        if slot.enabled and slot.profile is not None
+    )
+    matches = [
+        profile for profile in profiles
+        if principal.resource == profile.content_resource
+        and principal.scopes == (profile.content_scope,)
+        and all(getattr(principal, field) == getattr(profile, field)
+                for field in ('policy_id', 'issuer_digest', 'subject_digest', 'client_ref'))
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def construct_installed_live_window(*, profile, authenticator, content_policy, audit_sink,
                                     ceo_ingress_socket_path, now, allowed_origin):
     p=profile.validated() if type(profile) is ContentObserverProfile else ContentObserverProfile.from_mapping(profile)
@@ -128,3 +168,31 @@ def build_installed_steward_app(*, profile, steward_policy, steward_token_verifi
     port=CeoIngressStewardReadPort(CeoIngressContentClient(ceo_ingress_socket_path))
     return build_authenticated_app(build_contract_server(port),policy=steward_policy,
         token_verifier=steward_token_verifier,allowed_origins=(allowed_origin,),live_window=window)
+
+
+def build_installed_steward_app_with_profiles(
+    *, profiles_config, steward_policy, steward_token_verifier, audit_sink=None,
+):
+    """Compose both qualified clients on the existing fixed content mount."""
+    from urllib.parse import urlsplit
+    from integrations.mastermind_steward_app.installed_grounding import CeoIngressStewardReadPort
+    from integrations.mastermind_steward_app.server import build_contract_server
+    from integrations.mastermind_steward_app.app import build_authenticated_app, _canonical_raw_path
+    from integrations.mastermind_steward_app.live_window import LiveWindowDispatch
+    from integrations.mastermind_steward_app.installed_profiles import live_window_reader_with_profiles
+
+    resource = urlsplit(steward_policy.resource)
+    metadata_path = urlsplit(steward_policy.resource_metadata_url).path
+    reader, path = live_window_reader_with_profiles(
+        profiles_config, steward_resource=steward_policy.resource,
+        reserved_paths=(resource.path, metadata_path, '/healthz', '/readyz'),
+    )
+    port = CeoIngressStewardReadPort(CeoIngressContentClient(profiles_config.ceo_ingress_socket_path))
+    app = build_authenticated_app(
+        build_contract_server(port), policy=steward_policy,
+        token_verifier=steward_token_verifier,
+        allowed_origins=(profiles_config.allowed_origin,),
+    )
+    return LiveWindowDispatch(
+        app, reader=reader, path=path, canonical_raw_path=_canonical_raw_path,
+    )

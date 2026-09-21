@@ -1,4 +1,5 @@
 """Source integration only: actual Runtime/adapter/broker and Unix App reader."""
+from collections import OrderedDict
 import asyncio
 import json
 import hashlib
@@ -37,6 +38,7 @@ def fixture(tmp_path):
     adapter._generations={generation.process_generation_id:SimpleNamespace(epoch=epoch,generation=generation,turns={turn['turn_id']:'NATIVE-G1'})}
     broker=ExecutiveWorkerBroker.__new__(ExecutiveWorkerBroker)
     broker._state_lock=asyncio.Lock()
+    broker._operator_terminal=OrderedDict()
     broker._observer_refusals=[]
     broker._operator_run=SimpleNamespace(epoch=epoch,generation=generation,adapter=adapter)
     return clock,runtime,p,adapter,broker

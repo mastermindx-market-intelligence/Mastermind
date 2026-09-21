@@ -1365,13 +1365,10 @@ class ExecutiveWorkerBroker:
                 ProcessGenerationRef,
                 ReconcileObservation,
                 BrowserReviewReceipt | None,
+                Any,  # Original bounded observer registry; no adapter/process.
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
-        # Most recent operator adapter's observer registry. Deliberately
-        # retained past ``_operator_run`` going terminal so explicit control
-        # status/revoke can still reconcile an exact existing bound grant.
-        self._observer_projection: Any = None
         self._observer_refusals: list[tuple[Any, str]] = []
         self._state_lock = asyncio.Lock()
         self._starting = False
@@ -2017,9 +2014,6 @@ class ExecutiveWorkerBroker:
             )
             async with self._state_lock:
                 self._operator_run = state
-                self._observer_projection = getattr(
-                    state.adapter, "visible_turn_projection", None
-                )
                 self._operator_session_attempts[provider_session_id] = epoch.attempt_id
                 self._operator_session_attempts.move_to_end(provider_session_id)
                 while len(self._operator_session_attempts) > 64:
@@ -2149,33 +2143,32 @@ class ExecutiveWorkerBroker:
         )
         async with self._state_lock:
             active = self._operator_run
-            if active is None:
+            same_active = active is not None and (
+                payload["attempt"] == active.epoch.attempt_id
+                and payload["epoch"] == active.epoch.session_epoch_id
+                and payload["generation"] == active.generation.process_generation_id
+            )
+            if not same_active:
                 if operation == "ohf-observer-enroll":
                     raise BrokerStateError("UNKNOWN_GENERATION")
-                # No active run can reconstruct the native turn key, so the
-                # exact existing registry binding supplies it. A miss is a
-                # plain ABSENT status; nothing is minted or guessed.
-                projection = getattr(self, "_observer_projection", None)
+                # Historical reconciliation uses the original registry already
+                # retained by the bounded terminal receipt owner. A different
+                # active run cannot replace or authorize this exact old binding.
+                terminal = self._operator_terminal.get(payload["generation"])
+                projection = terminal[3] if terminal is not None else None
                 if projection is None:
                     return {"status": "ABSENT", "reader_grant": None,
                             "turn_key": None, "grant_generation": None}
                 try:
                     if operation == "ohf-observer-revoke":
-                        return projection.revoke_observer_by_binding(
-                            identity, **binding
-                        )
+                        return projection.revoke_observer_by_binding(identity, **binding)
                     return projection.observer_status_by_binding(identity, **binding)
                 except Exception as exc:
                     code = getattr(exc, "code", None)
                     raise BrokerStateError(
-                        code
-                        if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
+                        code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
                         else "GRANT_INVALIDATED"
                     ) from None
-            if (payload["attempt"] != active.epoch.attempt_id
-                    or payload["epoch"] != active.epoch.session_epoch_id
-                    or payload["generation"] != active.generation.process_generation_id):
-                raise BrokerStateError("GENERATION_INVALID")
             state = active.adapter._generations.get(payload["generation"])
             native = state.turns.get(payload["turn"]) if state else None
             if not native:
@@ -2187,7 +2180,6 @@ class ExecutiveWorkerBroker:
                 if operation == "ohf-observer-enroll":
                     turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
                     result = active.adapter.mint_observer_grant(turn, binding=binding)
-                    self._observer_projection = active.adapter.visible_turn_projection
                     return result
                 projection = getattr(active.adapter, "visible_turn_projection", None)
                 if projection is None:
@@ -2561,10 +2553,14 @@ class ExecutiveWorkerBroker:
         artifact_receipt: BrowserReviewReceipt | None = None,
     ) -> None:
         async with self._state_lock:
+            projection = getattr(state.adapter, "visible_turn_projection", None)
+            if projection is not None:
+                projection.retire_generation(state.generation.process_generation_id)
             self._operator_terminal[state.generation.process_generation_id] = (
                 state.generation,
                 observation,
                 artifact_receipt,
+                projection,
             )
             self._operator_terminal.move_to_end(
                 state.generation.process_generation_id
@@ -2745,7 +2741,7 @@ class ExecutiveWorkerBroker:
                 generation.process_generation_id
             )
         if terminal_receipt is not None:
-            terminal_generation, terminal, artifact_receipt = terminal_receipt
+            terminal_generation, terminal, artifact_receipt, _projection = terminal_receipt
             if terminal_generation != generation:
                 raise BrokerProtocolError(
                     "operator terminal generation identity drifted"

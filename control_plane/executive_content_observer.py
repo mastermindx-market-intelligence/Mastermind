@@ -5,7 +5,8 @@ viewer. This owner does not load provider credentials or render source content.
 """
 from dataclasses import asdict
 from integrations.executive_content_contract import (
-    ContentObserverProfile, ACCESS_SCHEMA, PAGE_SCHEMA, ERRORS, MAX_PAGE_BYTES,
+    ContentObserverProfile, ContentObserverProfiles, ContentProfileKey,
+    load_content_profiles, ACCESS_SCHEMA, PAGE_SCHEMA, ERRORS, MAX_PAGE_BYTES,
     canonical, digest, epoch,
 )
 
@@ -23,14 +24,37 @@ class ExecutiveContentObserver:
         self.profile_loader = profile_loader
         self.now = now
 
-    def _profile(self, *, allow_expired=False):
+    def _profile(self, *, profile_key=None, profile_digest=None, allow_expired=False):
         try:
-            value = self.profile_loader()
-            p = value.validated() if type(value) is ContentObserverProfile else ContentObserverProfile.from_mapping(value)
-            current = self.now()
-            if type(current) is not int or (not allow_expired and current >= epoch(p.expires_at)):
+            value = load_content_profiles(self.profile_loader())
+            if type(value) is ContentObserverProfile:
+                if profile_key is not None:
+                    raise ContentRefused('INVALID_REQUEST')
+                profile = value
+            else:
+                if profile_digest is not None:
+                    matches = [
+                        slot.profile for slot in (value.web, value.mac)
+                        if slot.enabled and slot.profile is not None
+                        and slot.profile.profile_digest == profile_digest
+                    ]
+                    if len(matches) != 1:
+                        raise ContentRefused('ACCESS_DENIED')
+                    profile = matches[0]
+                else:
+                    if type(profile_key) is not ContentProfileKey:
+                        raise ContentRefused('INVALID_REQUEST')
+                    slot = getattr(value, profile_key.value)
+                    if slot.profile is None or not slot.enabled and not allow_expired:
+                        raise ContentRefused('ACCESS_DENIED')
+                    profile = slot.profile
+            if profile_digest is not None and profile.profile_digest != profile_digest:
                 raise ContentRefused('ACCESS_DENIED')
-            return p
+            if not allow_expired:
+                current = self.now()
+                if type(current) is not int or current >= epoch(profile.expires_at):
+                    raise ContentRefused('ACCESS_DENIED')
+            return profile
         except ContentRefused:
             raise
         except Exception:
@@ -120,7 +144,7 @@ class ExecutiveContentObserver:
                 or not isinstance(status['reader_grant'],str) or not status['reader_grant']
                 or not isinstance(status['grant_generation'],str) or not status['grant_generation']):
             raise ContentRefused('GRANT_INVALIDATED')
-        if self._profile()!=p or self._join(p)!=(key,fence):
+        if self._profile(profile_digest=p.profile_digest)!=p or self._join(p)!=(key,fence):
             raise ContentRefused('ACCESS_CHANGED')
         # The current fence is part of the ticket and of the before/after page
         # snapshot: a fence moved during a page refuses that page, while a
@@ -139,7 +163,7 @@ class ExecutiveContentObserver:
                 expected |= {'access_ticket_digest','cursor','max_items'}
             if set(frame)!=expected:
                 raise ContentRefused('INVALID_REQUEST')
-            p = self._profile()
+            p = self._profile(profile_digest=frame['profile_digest'])
             if any(frame[k]!=p.frame(frame['schema'])[k] for k in ('profile_digest','source_ref','viewer_binding_digest')):
                 raise ContentRefused('ACCESS_DENIED')
             before, status = await self._access(p)
@@ -172,34 +196,39 @@ class ExecutiveContentObserver:
                     'viewer_binding_digest':p.viewer_binding_digest,
                     'result_digest':digest(result) if result is not None else None})
 
-    async def _lifecycle(self, operation):
-        p=self._profile(allow_expired=operation!='enroll')
+    async def _lifecycle(self, operation, profile_key: ContentProfileKey | None = None):
+        # Enrollment requires enabled profile; status/revoke allow disabled with retained binding.
+        allow_disabled = operation != 'enroll'
+        p = self._profile(profile_key=profile_key, allow_expired=allow_disabled)
         # Only enrollment demands the live writer. Explicit status/revoke
         # reconcile the exact existing bound grant across a Runtime whose
         # lease has since expired or whose turn has ceased; they never mint.
-        self._join(p, live=operation=='enroll')
-        if operation=='enroll':
+        self._join(p, live=operation == 'enroll')
+        if operation == 'enroll':
             with self.runtime.store.read() as connection:
-                prior=connection.execute("SELECT 1 FROM events WHERE aggregate_type='content_observer' AND aggregate_id=? AND event_type='CONTENT_OBSERVER_ENROLL_INTENT' LIMIT 1",(digest(p.operation_id),)).fetchone()
+                prior = connection.execute(
+                    "SELECT 1 FROM events WHERE aggregate_type='content_observer' AND aggregate_id=? AND event_type='CONTENT_OBSERVER_ENROLL_INTENT' LIMIT 1",
+                    (digest(p.operation_id),)
+                ).fetchone()
             if prior:
-                existing=await self.broker.request('ohf-observer-status',p.broker_payload())
-                if existing.get('status')=='ABSENT':
+                existing = await self.broker.request('ohf-observer-status', p.broker_payload())
+                if existing.get('status') == 'ABSENT':
                     raise ContentRefused('GRANT_INVALIDATED')
                 return existing
         # Explicit calls only. Status has no mutation, while intent survives a
         # lost broker response and the same operation's status reconciles it.
-        if operation!='status':
-            self._audit(p,operation.upper()+'_INTENT')
-        result=await self.broker.request('ohf-observer-'+operation,p.broker_payload())
-        if operation!='status':
-            self._audit(p,operation.upper()+'_RESULT',result)
+        if operation != 'status':
+            self._audit(p, operation.upper() + '_INTENT')
+        result = await self.broker.request('ohf-observer-' + operation, p.broker_payload())
+        if operation != 'status':
+            self._audit(p, operation.upper() + '_RESULT', result)
         return result
 
-    async def enroll(self):
-        return await self._lifecycle('enroll')
+    async def enroll(self, profile_key: ContentProfileKey | None = None):
+        return await self._lifecycle('enroll', profile_key)
 
-    async def status(self):
-        return await self._lifecycle('status')
+    async def status(self, profile_key: ContentProfileKey | None = None):
+        return await self._lifecycle('status', profile_key)
 
-    async def revoke(self):
-        return await self._lifecycle('revoke')
+    async def revoke(self, profile_key: ContentProfileKey | None = None):
+        return await self._lifecycle('revoke', profile_key)

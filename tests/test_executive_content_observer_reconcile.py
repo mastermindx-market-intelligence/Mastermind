@@ -52,10 +52,18 @@ def _observer(runtime, broker, p, clock):
     )
 
 
-def _terminal_run_absent(broker, adapter):
-    """Model the broker state after the operator run went terminal."""
-    broker._operator_run = None
-    assert broker._observer_projection is adapter.visible_turn_projection
+async def _terminal_run_absent(broker, adapter):
+    """Drive the existing terminal owner, retaining only retired grant metadata."""
+    from control_plane.operator_harness_contract import (
+        ReconcileObservation, ProcessLiveness, ProviderWriterState,
+    )
+    observation = ReconcileObservation(
+        ProcessLiveness.PROVEN_DEAD, None, False,
+        ProviderWriterState.RELEASED, None, 'd' * 64,
+    )
+    await broker._remember_operator_terminal(broker._operator_run, observation)
+    assert broker._operator_run is None
+    assert broker._operator_terminal[next(iter(broker._operator_terminal))][3] is adapter.visible_turn_projection
 
 
 def test_status_and_revoke_reconcile_expired_lease_and_absent_run(tmp_path):
@@ -66,12 +74,12 @@ def test_status_and_revoke_reconcile_expired_lease_and_absent_run(tmp_path):
         enrolled = await observer.enroll()
         assert enrolled["status"] == "ACTIVE"
         assert enrolled["turn_key"]["native_turn_id"] == "NATIVE-G1"
-        _terminal_run_absent(broker, adapter)
+        await _terminal_run_absent(broker, adapter)
         clock.advance(3)  # the Runtime lease was 2s
         # Status reconciles the exact existing bound grant on the stale
         # Runtime with no active operator run.
         status = await observer.status()
-        assert status["status"] == "ACTIVE"
+        assert status["status"] == "INVALIDATED"
         assert status["turn_key"] == enrolled["turn_key"]
         # Neither reads nor enrollment reconcile a stale Runtime.
         refused = await observer.handle_frame(p.frame(ACCESS_SCHEMA))
@@ -79,7 +87,7 @@ def test_status_and_revoke_reconcile_expired_lease_and_absent_run(tmp_path):
         with pytest.raises(ContentRefused, match="GRANT_INVALIDATED"):
             await observer.enroll()
         revoked = await observer.revoke()
-        assert revoked["status"] == "REVOKED"
+        assert revoked["status"] == "INVALIDATED"
         assert revoked["reader_grant"] is None
         # Subsequent reads refuse on the revoked grant.
         again = await observer.handle_frame(p.frame(ACCESS_SCHEMA))
@@ -94,13 +102,12 @@ def test_run_absent_without_grant_returns_absent_and_never_mints(tmp_path):
     async def run():
         broker._operator_run = None
         adapter.visible_turn_projection = VisibleTurnProjection()
-        broker._observer_projection = adapter.visible_turn_projection
         observer = _observer(runtime, broker, p, clock)
         assert (await observer.status())["status"] == "ABSENT"
         assert (await observer.revoke())["status"] == "ABSENT"
         # With no retained registry at all the answer is still a plain
         # ABSENT status, never a minted or guessed grant.
-        broker._observer_projection = None
+        broker._operator_terminal.clear()
         absent = await observer.status()
         assert absent == {"status": "ABSENT", "reader_grant": None,
                           "turn_key": None, "grant_generation": None}
@@ -117,8 +124,8 @@ def test_partial_binding_tuple_is_conflict_not_miss(tmp_path):
     async def run():
         observer = _observer(runtime, broker, p, clock)
         assert (await observer.enroll())["status"] == "ACTIVE"
-        _terminal_run_absent(broker, adapter)
-        assert (await observer.status())["status"] == "ACTIVE"
+        await _terminal_run_absent(broker, adapter)
+        assert (await observer.status())["status"] == "INVALIDATED"
         wrong_permission = dict(p.broker_payload(), permission_digest="f" * 64)
         with pytest.raises(BrokerStateError, match="OBSERVER_CONFLICT"):
             await broker._dispatch("ohf-observer-status", wrong_permission)
@@ -126,7 +133,7 @@ def test_partial_binding_tuple_is_conflict_not_miss(tmp_path):
         with pytest.raises(BrokerStateError, match="OBSERVER_CONFLICT"):
             await broker._dispatch("ohf-observer-revoke", wrong_turn)
         # The exact full tuple still reconciles after the conflicts.
-        assert (await observer.status())["status"] == "ACTIVE"
+        assert (await observer.status())["status"] == "INVALIDATED"
 
     asyncio.run(run())
 

@@ -637,6 +637,25 @@ class VisibleTurnProjection:
                     if grant.binding is not None:
                         self._grants[handle] = replace(grant, state="INVALIDATED")
 
+    def retire_generation(self, process_generation_id: str) -> None:
+        """Retire content under the broker's proven-terminal generation owner.
+
+        Bound grant metadata remains in this existing registry for explicit
+        reconciliation. No visible bytes, prebind buffer or active viewer is
+        retained by terminal history; unbound legacy handles are discarded.
+        """
+        with self._lock:
+            keys = {grant.key for grant in self._grants.values()
+                    if grant.key.process_generation_id == process_generation_id}
+            keys.update(record.key for record in self._turns.values()
+                        if record.key.process_generation_id == process_generation_id)
+            for key in keys:
+                self.invalidate_generation(key)
+            for handle, grant in list(self._grants.items()):
+                if grant.key.process_generation_id == process_generation_id and grant.binding is None:
+                    self._grants.pop(handle, None)
+            self._prebind = None
+
     def refusal_receipts(self) -> tuple[tuple[str, str, int], ...]:
         with self._lock:
             return tuple(
