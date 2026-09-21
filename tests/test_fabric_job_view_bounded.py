@@ -38,8 +38,13 @@ def _use_runtime(monkeypatch, runtime):
 def test_real_bounded_root_and_unique_creation_event(monkeypatch, tmp_path):
     runtime, job = _root(tmp_path)
     calls = []
-    point = runtime.events.get_event_by_command_id
-    monkeypatch.setattr(runtime.events, "get_event_by_command_id", lambda command: (calls.append(command), point(command))[1])
+    point = runtime.store.get_event_by_command_id
+    def observed_point(command, *, connection):
+        assert connection is not None
+        calls.append(command)
+        return point(command, connection=connection)
+    monkeypatch.setattr(runtime.store, "get_event_by_command_id", observed_point)
+    monkeypatch.setattr(runtime.events, "get_event_by_command_id", _trap)
     _use_runtime(monkeypatch, runtime)
     doc = view.read_fabric_view_v2(tmp_path, job.job_id)
     assert doc["root"]["job_id"] == job.job_id
@@ -102,8 +107,11 @@ def test_missing_owner_api_is_no_unbounded_fallback(monkeypatch, tmp_path):
 
 def test_detail_truncation_has_missingness_and_partial(monkeypatch, tmp_path):
     runtime, job = _root(tmp_path)
-    snap = runtime.read_job_root_bounded(job.job_id)
-    monkeypatch.setattr(Runtime, "read_job_root_bounded", lambda _self, _root: dataclasses.replace(snap, jobs_truncated=True, attempts_truncated_job_ids=(job.job_id,)))
+    from control_plane.executive_runtime import BoundedRuntimeReadObservation
+    original = BoundedRuntimeReadObservation.read_job_root_bounded
+    def truncated(read, root_id):
+        return dataclasses.replace(original(read, root_id), jobs_truncated=True, attempts_truncated_job_ids=(job.job_id,))
+    monkeypatch.setattr(BoundedRuntimeReadObservation, "read_job_root_bounded", truncated)
     _use_runtime(monkeypatch, runtime)
     doc = view.read_fabric_view_v2(tmp_path, job.job_id)
     assert doc["capability"]["state"] == "PARTIAL"
@@ -130,3 +138,97 @@ def test_projection_limit_does_not_change_owner_budget(monkeypatch, tmp_path):
     assert doc["count"] == 1 and doc["total"] == 3 and doc["truncated"] is True
     assert doc["runtime"]["acquisition"]["truncation"]["roots"] is False
     assert doc["runtime"]["acquisition"]["truncation"]["projection"] is True
+
+
+
+@pytest.fixture
+def observation_fixture(tmp_path):
+    """Reuse the Runtime owner's closed test namespace; never a service adapter."""
+    import importlib.util
+    from pathlib import Path
+    from control_plane import executive_runtime as er
+    path = Path(er.__file__).resolve().parents[1] / "tests/test_executive_runtime_bounded_read.py"
+    spec = importlib.util.spec_from_file_location("fabric_runtime_owner_test_fixture", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    yield from module.observation_fixture.__wrapped__(tmp_path)
+
+
+def test_trusted_owner_observation_closes_before_receipt_and_uses_one_connection(observation_fixture, monkeypatch):
+    from control_plane import executive_runtime as er
+    _, _, runtime, namespace, _, job_id, _ = observation_fixture
+    monkeypatch.setattr(runtime.events, "get_event_by_command_id", _trap)
+    monkeypatch.setattr(runtime.jobs, "list_jobs", _trap)
+    monkeypatch.setattr(runtime.attempts, "list_attempts", _trap)
+    monkeypatch.setattr(runtime.events, "list_events", _trap)
+    opened, events = [], []
+    connect = er.sqlite3.connect
+    def counted_connect(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+    monkeypatch.setattr(er.sqlite3, "connect", counted_connect)
+    point = runtime.store.get_event_by_command_id
+    def bounded_point(command_id, *, connection):
+        assert namespace.active and connection is not None
+        events.append(command_id)
+        return point(command_id, connection=connection)
+    monkeypatch.setattr(runtime.store, "get_event_by_command_id", bounded_point)
+    encode = er.RuntimeReadObservationReceipt.to_dict
+    def finalized(receipt):
+        assert not namespace.active and namespace.exits == 1
+        return encode(receipt)
+    monkeypatch.setattr(er.RuntimeReadObservationReceipt, "to_dict", finalized)
+    doc = view.read_fabric_view_v2_from_runtime(runtime, job_id, armed={}, runtime_identity={"db_present": True})
+    assert doc["root"]["job_id"] == job_id
+    assert len(opened) == namespace.entries == namespace.exits == 1
+    assert events == ["ceo-intent:OBS-ROOT-001"]
+    generation = doc["runtime"]["acquisition"]["generation"]
+    assert generation["schema"] == "mastermind.runtime_read_observation.v1"
+    assert generation["state"] == "SAME"
+    assert generation["before"] == generation["after"]
+    assert doc["runtime"]["root"] is None
+
+
+def test_trusted_owner_observation_concurrent_commit_is_conflict(observation_fixture, monkeypatch):
+    _, writer, runtime, namespace, _, job_id, _ = observation_fixture
+    from control_plane import executive_runtime as er
+    original = er.BoundedRuntimeReadObservation.get_creation_event_by_command_id
+    def commit_after_event(read, command):
+        event = original(read, command)
+        writer.jobs.create_job("concurrent unrelated commit")
+        return event
+    monkeypatch.setattr(er.BoundedRuntimeReadObservation, "get_creation_event_by_command_id", commit_after_event)
+    doc = view.read_fabric_view_v2_from_runtime(runtime, job_id, armed={}, runtime_identity={"db_present": True})
+    generation = doc["runtime"]["acquisition"]["generation"]
+    assert generation["state"] == "CONFLICT"
+    assert generation["before"] != generation["after"]
+    assert doc["root"]["job_id"] == job_id and not namespace.active
+
+
+@pytest.mark.parametrize("fault", ["namespace", "event"])
+def test_trusted_owner_failed_observation_discards_rows_and_receipt(observation_fixture, monkeypatch, fault):
+    _, _, runtime, namespace, _, job_id, _ = observation_fixture
+    from control_plane import executive_runtime as er
+    original = er.BoundedRuntimeReadObservation.get_creation_event_by_command_id
+    def fail(read, command):
+        if fault == "event":
+            raise er.RuntimeReadUnavailable("private path must not be emitted")
+        event = original(read, command)
+        namespace.invalid = True
+        return event
+    monkeypatch.setattr(er.BoundedRuntimeReadObservation, "get_creation_event_by_command_id", fail)
+    doc = view.read_fabric_view_v2_from_runtime(runtime, job_id, armed={}, runtime_identity={"db_present": True})
+    assert doc["root"] is None
+    assert doc["runtime"]["acquisition"]["snapshot_digest"] is None
+    assert doc["runtime"]["acquisition"]["generation"]["state"] == "UNKNOWN"
+    assert "private path" not in str(doc)
+    assert not namespace.active
+
+
+def test_trusted_runtime_without_namespace_never_attests_same(tmp_path):
+    runtime, job = _root(tmp_path)
+    doc = view.read_fabric_view_v2_from_runtime(runtime, job.job_id, armed={}, runtime_identity={"db_present": True})
+    assert doc["root"]["job_id"] == job.job_id
+    assert doc["runtime"]["acquisition"]["generation"]["state"] == "UNKNOWN"
+    assert doc["runtime"]["acquisition"]["generation"]["source_identity"] is None

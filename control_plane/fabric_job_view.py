@@ -984,7 +984,7 @@ def read_fabric_view(
     )
 
 
-def _bounded_provenance(runtime, job):
+def _bounded_provenance(runtime, job, *, creation_event_reader=None):
     """Validate durable routing before one Event point read and owner validation.
 
     The adapter supplies only the immutable Job already in the bounded snapshot
@@ -1016,7 +1016,8 @@ def _bounded_provenance(runtime, job):
         and cycle.get("role") == job.orchestration_role == "aggregation"
     ):
         return None, "durable CEO-intent provenance invalid or unsupported"
-    event = runtime.events.get_event_by_command_id(cycle["command_id"])
+    point_read = creation_event_reader or runtime.events.get_event_by_command_id
+    event = point_read(cycle["command_id"])
     if event is None or event.event_type != "JOB_CREATED":
         return None, "durable CEO-intent creation Event unavailable"
     # Only v2 carries the durable cycle needed to prove this bounded join.
@@ -1046,9 +1047,9 @@ def _acquisition_receipt(*, kind, root_job_id=None, snapshot=None, unjoined=(), 
         },
         "provenance": {"state": "PARTIAL" if unjoined or snapshot is None else "COMPLETE",
                        "unjoined_job_ids": sorted(unjoined)},
-        "generation": {"state": "UNKNOWN", "source_identity": None,
-                       "before": None, "after": None,
-                       "reason": "Runtime owner generation seam not yet supplied"},
+        "generation": {"schema": "mastermind.runtime_read_observation.v1",
+                       "state": "UNKNOWN", "source_identity": None,
+                       "before": None, "after": None},
     }
 
 
@@ -1058,59 +1059,91 @@ def read_fabric_view_v2(
     *,
     control_config_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Finite v2 acquisition; no fallback to historical population reads."""
+    """Path-based CLI adapter; a missing namespace owner cannot attest SAME."""
+    runtime_root = Path(runtime_root)
+    armed, notes = _read_armed(None if control_config_path is None else Path(control_config_path))
+    runtime, present, open_notes = _open_runtime(runtime_root, runtime_root / DB_RELATIVE_PATH)
+    return _read_observed_fabric_view_v2(
+        runtime, str(root_job_id), armed=armed,
+        runtime_identity={"root": str(runtime_root), "db_present": present, "identity": None},
+        notes=notes + open_notes,
+    )
+
+
+def read_fabric_view_v2_from_runtime(
+    runtime: Any,
+    root_job_id: str,
+    *,
+    armed: Mapping[str, Any],
+    runtime_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Trusted Runtime-owner acquisition without opening paths or config files.
+
+    Jobs, Attempts and eligible creation Events share one owner observation.
+    Its finalized receipt describes the bounded sample interval, not freshness
+    after return or write exclusion after the final data_version sample.
+    The service supplies its existing Runtime, flags and public identity.
+    """
+    return _read_observed_fabric_view_v2(
+        runtime, str(root_job_id), armed=armed, runtime_identity=runtime_identity, notes=[],
+    )
+
+
+def _read_observed_fabric_view_v2(runtime, root_job_id, *, armed, runtime_identity, notes):
     from control_plane import executive_runtime
 
-    runtime_root = Path(runtime_root)
-    root_job_id = str(root_job_id)
-    armed, notes = _read_armed(None if control_config_path is None else Path(control_config_path))
-    db_path = runtime_root / DB_RELATIVE_PATH
-    runtime, present, open_notes = _open_runtime(runtime_root, db_path)
-    notes += open_notes
+    present = runtime_identity.get("db_present") is True
+    generation = None
     snapshot = None
     jobs, joined, unjoined = [], set(), []
     attempts_by_job = {}
     failed = runtime is None and present
     try:
         if runtime is not None:
-            snapshot = runtime.read_job_root_bounded(root_job_id)
-            jobs = list(snapshot.jobs)
-            if (snapshot.root_job_id != root_job_id or not jobs
-                    or jobs[0].job_id != root_job_id or len(jobs) > 17
-                    or len(snapshot.attempts) > 340):
-                raise ValueError("bounded Runtime snapshot identity or budget invalid")
-            ids = {job.job_id for job in jobs}
-            if len(ids) != len(jobs) or any(job.root_job_id != root_job_id for job in jobs):
-                raise ValueError("bounded Runtime snapshot membership invalid")
-            for attempt in snapshot.attempts:
-                if attempt.job_id not in ids:
-                    raise ValueError("bounded Runtime Attempt membership invalid")
-                attempts_by_job[attempt.job_id] = attempts_by_job.get(attempt.job_id, []) + [attempt]
-            if any(len(attempts) > 20 for attempts in attempts_by_job.values()):
-                raise ValueError("bounded Runtime Attempt budget invalid")
-            for job in jobs:
-                provenance, warning = _bounded_provenance(runtime, job)
-                if isinstance(provenance, Mapping) and provenance.get("workstream"):
-                    joined.add(job.job_id)
-                else:
-                    unjoined = unjoined + [job.job_id]
-                    notes = notes + [f"provenance not projected: {job.job_id}: {warning or 'workstream unavailable'}"]
-            if snapshot.jobs_truncated:
-                notes = notes + ["bounded Runtime Job snapshot truncated"]
-            if snapshot.attempts_truncated_job_ids:
-                notes = notes + ["bounded Runtime Attempt snapshot truncated"]
+            with runtime.observe_bounded_read() as read:
+                snapshot = read.read_job_root_bounded(root_job_id)
+                jobs = list(snapshot.jobs)
+                if (snapshot.root_job_id != root_job_id or not jobs
+                        or jobs[0].job_id != root_job_id or len(jobs) > 17
+                        or len(snapshot.attempts) > 340):
+                    raise ValueError("bounded Runtime snapshot identity or budget invalid")
+                ids = {job.job_id for job in jobs}
+                if len(ids) != len(jobs) or any(job.root_job_id != root_job_id for job in jobs):
+                    raise ValueError("bounded Runtime snapshot membership invalid")
+                for attempt in snapshot.attempts:
+                    if attempt.job_id not in ids:
+                        raise ValueError("bounded Runtime Attempt membership invalid")
+                    attempts_by_job[attempt.job_id] = attempts_by_job.get(attempt.job_id, []) + [attempt]
+                if any(len(attempts) > 20 for attempts in attempts_by_job.values()):
+                    raise ValueError("bounded Runtime Attempt budget invalid")
+                for job in jobs:
+                    provenance, warning = _bounded_provenance(
+                            runtime, job, creation_event_reader=read.get_creation_event_by_command_id)
+                    if isinstance(provenance, Mapping) and provenance.get("workstream"):
+                        joined.add(job.job_id)
+                    else:
+                        unjoined = unjoined + [job.job_id]
+                        notes = notes + [f"provenance not projected: {job.job_id}: {warning or 'workstream unavailable'}"]
+                if snapshot.jobs_truncated:
+                    notes = notes + ["bounded Runtime Job snapshot truncated"]
+                if snapshot.attempts_truncated_job_ids:
+                    notes = notes + ["bounded Runtime Attempt snapshot truncated"]
+            generation = read.receipt.to_dict()
     except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError) as exc:
-        notes = notes + [f"bounded acquisition unavailable: {_failure_first_line(exc)}"]
+        notes = notes + ["bounded acquisition unavailable: owner observation could not be finalized"]
         failed = True
         snapshot, jobs, attempts_by_job, joined, unjoined = None, [], {}, set(), []
+        generation = None
     doc = compose_fabric_view_v2(
         root_job_id=root_job_id, root_job=jobs[0] if jobs else None,
         jobs=jobs, attempts_by_job=attempts_by_job, joined_job_ids=joined,
-        runtime_identity={"root": str(runtime_root), "db_present": present, "identity": None},
+        runtime_identity=runtime_identity,
         armed=armed, degraded=notes, read_failed=failed,
     )
     receipt = _acquisition_receipt(kind="root_detail", root_job_id=root_job_id,
                                    snapshot=snapshot, unjoined=unjoined)
+    if generation is not None:
+        receipt["generation"] = generation
     doc["runtime"]["acquisition"] = receipt
     if snapshot is not None and (unjoined or snapshot.jobs_truncated or snapshot.attempts_truncated_job_ids):
         doc["capability"]["state"] = PARTIAL
