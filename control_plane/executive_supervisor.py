@@ -2486,14 +2486,19 @@ class ExecutiveSupervisor:
                 / "reconciliation-receipt.json"
             ),
         )
-        _write_private_json(
-            path,
-            {
-                "schema_version": "mastermind.executive_reconciliation_evidence/v1",
-                "outcome": outcome.to_dict(),
-                "uid_sweep": _jsonable(uid_sweep),
-            },
-        )
+        payload = {
+            "schema_version": "mastermind.executive_reconciliation_evidence/v1",
+            "outcome": outcome.to_dict(),
+            "uid_sweep": _jsonable(uid_sweep),
+        }
+        try:
+            _write_private_json(path, payload)
+        except FileExistsError:
+            # A no-PID claim may first await expiry and reconcile again later.
+            # Keep each fresh sweep/outcome immutable and return its exact path;
+            # neither overwrite the earlier receipt nor reuse its stale sweep.
+            path = path.with_name(f"{path.stem}-{uuid4().hex}{path.suffix}")
+            _write_private_json(path, payload)
         return dataclasses.replace(outcome, uid_sweep_receipt_path=str(path))
 
     def _restart_uid_sweep(self, attempt: Attempt) -> Mapping[str, Any] | None:
@@ -2518,6 +2523,48 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "restart reconciliation received a non-passing dedicated-UID sweep"
             )
+        return sweep
+
+    @staticmethod
+    def _is_unbound_claim(attempt: Attempt) -> bool:
+        """Empty control identity is a cleanup candidate, never absence proof."""
+
+        return (
+            attempt.status is AttemptStatus.CLAIMED
+            and all(value is None for value in (
+                attempt.pid, attempt.pgid, attempt.process_start_identity,
+                attempt.boot_id, attempt.provider_session_id,
+                attempt.stdout_path, attempt.stderr_path, attempt.result_path,
+            ))
+            and "worker_recovery_binding" not in attempt.launch_metadata
+            and "launch_attestation" not in attempt.launch_metadata
+        )
+
+    def _cleanup_unbound_claim(self, attempt: Attempt) -> Mapping[str, Any]:
+        """Ask the existing exact-run owner for fresh, worker-bound absence."""
+
+        cleanup = getattr(self.process_controller, "cleanup_unbound_run", None)
+        if not callable(cleanup):
+            raise SupervisorError("unbound claim has no exact-run cleanup owner")
+        requested_at = time.time()
+        sweep = self._validate_terminal_uid_sweep(cleanup(attempt.attempt_id))
+        completed_at = time.time()
+        observed_at = sweep.get("observed_at")
+        if not isinstance(observed_at, str):
+            raise SupervisorError("unbound cleanup has no observation time")
+        observed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        expected_uid = (
+            self.worker_uid if self.worker_uid is not None
+            else pwd.getpwnam(self.worker_user).pw_uid
+        )
+        if (
+            observed.tzinfo is None
+            or not requested_at <= observed.timestamp() <= completed_at
+            or sweep.get("reason") != "status_absence"
+            or sweep.get("worker_uid") != expected_uid
+            or self._restart_uid_sweep(attempt) != sweep
+        ):
+            raise SupervisorError("unbound cleanup absence receipt is stale or foreign")
         return sweep
 
     def reconcile_restart(self, *, requeue_lost: bool = True) -> list[ReconcileReceipt]:
@@ -2612,7 +2659,25 @@ class ExecutiveSupervisor:
                         f"attempt {attempt.attempt_id} remained live or ambiguous after termination"
                     )
                 presence = ProcessPresence.ABSENT
-            if presence is ProcessPresence.ABSENT:
+            if presence is ProcessPresence.UNKNOWN and self._is_unbound_claim(attempt):
+                try:
+                    uid_sweep = self._cleanup_unbound_claim(attempt)
+                except Exception as exc:
+                    outcomes.append(
+                        ReconcileReceipt(
+                            attempt_id=attempt.attempt_id,
+                            job_id=attempt.job_id,
+                            status=ReconcileStatus.IDENTITY_AMBIGUOUS,
+                            process_was_live=False,
+                            error=_render_recovery_error(exc),
+                        )
+                    )
+                    continue
+                # The exact broker owner proved fresh overall absence. Its
+                # retained terminal run still cannot match missing control
+                # metadata, so repeating presence() would recreate the wedge.
+                presence = ProcessPresence.ABSENT
+            elif presence is ProcessPresence.ABSENT:
                 if not self.process_controller.absence_verified(attempt):
                     presence = ProcessPresence.UNKNOWN
                 else:

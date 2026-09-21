@@ -1364,7 +1364,7 @@ class RestartCapableFakeAdapter(FakeAdapter):
 
 
 def test_restart_adopts_and_reattaches_live_worker_without_terminating_or_restarting(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ) -> None:
     runtime, job_id, _workspace = _runtime_and_job(tmp_path)
     inspector = FakeInspector()
@@ -1374,6 +1374,10 @@ def test_restart_adopts_and_reattaches_live_worker_without_terminating_or_restar
     reopened = Runtime.at(tmp_path, lease_seconds=30)
     second_adapter = RestartCapableFakeAdapter(inspector)
     restarted = _supervisor(reopened, tmp_path, second_adapter)
+    def forbidden_unbound_cleanup(_attempt_id):
+        raise AssertionError("valid recovery binding cannot enter unbound cleanup")
+    monkeypatch.setattr(restarted.process_controller, "cleanup_unbound_run",
+                        forbidden_unbound_cleanup, raising=False)
     outcomes = restarted.reconcile_restart(requeue_lost=False)
     assert [outcome.status for outcome in outcomes] == [ReconcileStatus.LIVE_RECOVERED]
     assert restarted.process_controller.terminated_attempt_ids == []
@@ -1868,3 +1872,175 @@ def test_recovery_feature_gate_precedes_fence_rotation(tmp_path: Path) -> None:
     assert restarted.process_controller.terminated_attempt_ids == []
     assert legacy_adapter.spec is None
     assert legacy_adapter.ref is None
+
+
+class _ControlDied(BaseException):
+    """A crash must bypass the live launch Exception cleanup."""
+
+
+class _UnboundBrokerClient:
+    """Exercise the real synchronous controller with a retained unbound run."""
+
+    def __init__(self, adapter, attempt_id, *, fault=None):
+        self.adapter = adapter
+        self.attempt_id = attempt_id
+        self.fault = fault
+        self.active = adapter.ref is not None
+        self.cancelled = []
+        self.requests = []
+
+    def _sweep(self, reason):
+        from datetime import datetime, timezone
+
+        sweep = FakeProcessController(self.adapter.inspector).uid_sweep_receipt(
+            type("AttemptId", (), {"attempt_id": self.attempt_id, "pid": None})()
+        )
+        sweep.update(reason=reason, observed_at=datetime.now(timezone.utc).isoformat())
+        if self.fault == "stale":
+            sweep["observed_at"] = "2026-08-11T00:00:01+00:00"
+        elif self.fault == "foreign":
+            sweep["worker_uid"] = os.geteuid() + 1
+        elif self.fault == "nonpassing":
+            sweep["passed"] = False
+        elif self.fault == "malformed":
+            sweep["observed_at"] = "not-a-timestamp"
+        return sweep
+
+    def request_sync(self, operation, payload):
+        from control_plane.executive_worker_broker import RemoteBrokerError
+
+        self.requests.append((operation, dict(payload)))
+        if operation == "cancel":
+            assert payload["run_id"] == self.attempt_id
+            self.cancelled.append(payload["run_id"])
+            if self.fault == "response_lost":
+                raise OSError("cancel response unavailable")
+            if self.fault == "denied":
+                raise RemoteBrokerError("PeerAuthorizationError", "not admitted")
+            self.active = False
+            self.adapter.inspector.live = False
+            return {"uid_sweep": self._sweep("run_terminal")}
+        assert operation == "status"
+        if "run_id" in payload:
+            assert payload["run_id"] == self.attempt_id
+            if self.adapter.ref is None:
+                raise RemoteBrokerError("BrokerStateError", "no such run")
+            # Terminal records remain available; their ProcessRef cannot match
+            # the deliberately absent control metadata even after cleanup.
+            return {"run": {"process_ref": dataclasses.asdict(self.adapter.ref),
+                            "status": "RUNNING" if self.active else "CANCELLED"}}
+        assert payload == {"fresh_uid_sweep": True}
+        return {"active_run_id": self.attempt_id if self.active else None,
+                "starting": False, "validation_busy": False,
+                "status_sweep_busy": False, "quarantined_reason": None,
+                "status_sweep": self._sweep("status_absence")}
+
+
+def _unbound_crash_fixture(tmp_path, monkeypatch, *, fault=None, before_start=False):
+    from control_plane.executive_worker_broker import RemoteWorkerProcessController
+
+    runtime, root, work, command, target, adapter, first = _hf1b_supervisor_fixture(tmp_path)
+    record_process = runtime.attempts.record_process
+
+    def die(*args, **kwargs):
+        raise _ControlDied()
+
+    if before_start:
+        monkeypatch.setattr(adapter, "start", die)
+    else:
+        monkeypatch.setattr(runtime.attempts, "record_process", die)
+    with pytest.raises(_ControlDied):
+        asyncio.run(first.start_cycle_job(work.job_id, command_id=command))
+    monkeypatch.setattr(runtime.attempts, "record_process", record_process)
+    attempt = runtime.attempts.list_attempts(work.job_id)[0]
+    assert attempt.status is AttemptStatus.CLAIMED
+    assert attempt.pid is None and attempt.launch_metadata == {}
+    assert (first._run_dir(attempt.attempt_id) / "input" / "worker-prompt.txt").is_file()
+    client = _UnboundBrokerClient(adapter, attempt.attempt_id, fault=fault)
+    restarted = _supervisor(runtime, tmp_path, adapter,
+        worker_uid=os.geteuid(),
+        exact_target_provider=lambda job_id: target if job_id == work.job_id else None)
+    restarted.process_controller = RemoteWorkerProcessController(client)
+    return runtime, work, command, adapter, restarted, attempt, client
+
+
+def _assert_unbound_claim_fenced(runtime, attempt, command, work, adapter, supervisor):
+    current = runtime.attempts.get_attempt(attempt.attempt_id)
+    assert current.status is AttemptStatus.CLAIMED
+    assert current.fence_generation == attempt.fence_generation
+    with runtime.store.read() as connection:
+        held = connection.execute(
+            "SELECT held_attempt_id FROM worker_quota_classes WHERE worker_id=? AND quota_class=?",
+            (attempt.worker_id, attempt.quota_class),
+        ).fetchone()[0]
+    assert held == attempt.attempt_id
+    replay = asyncio.run(supervisor.start_cycle_job(work.job_id, command_id=command))
+    assert replay.attempt.attempt_id == attempt.attempt_id and not replay.claimed_now
+    assert adapter.start_count == 1
+
+
+def test_restart_unbound_claim_cleans_exact_run_and_reaches_finite_expiry(tmp_path, monkeypatch):
+    runtime, work, command, adapter, supervisor, attempt, client = _unbound_crash_fixture(
+        tmp_path, monkeypatch)
+    first = supervisor.reconcile_restart()
+    assert first[0].status is ReconcileStatus.AWAITING_LEASE_EXPIRY
+    assert client.cancelled == [attempt.attempt_id]
+    assert adapter.start_count == 1
+    original_receipt = Path(first[0].uid_sweep_receipt_path)
+    original_bytes = original_receipt.read_bytes()
+    receipt = json.loads(original_bytes)
+    assert receipt["uid_sweep"]["reason"] == "status_absence"
+    assert receipt["uid_sweep"]["preceding_terminal_sweep"]["reason"] == "run_terminal"
+    _assert_unbound_claim_fenced(runtime, attempt, command, work, adapter, supervisor)
+    from datetime import datetime
+    expired = int(datetime.fromisoformat(attempt.lease_expires_at).timestamp() * 1000) + 2_000
+    runtime.store.clock = lambda: expired
+    outcomes = supervisor.reconcile_restart()
+    assert outcomes[0].status in {ReconcileStatus.EXPIRED_LOST, ReconcileStatus.REQUEUED}
+    assert runtime.attempts.get_attempt(attempt.attempt_id).status is AttemptStatus.LOST
+    assert Path(outcomes[0].uid_sweep_receipt_path) != original_receipt
+    assert original_receipt.read_bytes() == original_bytes
+    assert json.loads(Path(outcomes[0].uid_sweep_receipt_path).read_text())["outcome"]["status"] == outcomes[0].status.value
+    assert adapter.start_count == 1
+    assert len(runtime.attempts.list_attempts(work.job_id)) == 1
+
+
+@pytest.mark.parametrize("fault", ["response_lost", "denied", "stale", "foreign", "nonpassing", "malformed"])
+def test_restart_unbound_claim_uncertain_cleanup_keeps_claim_and_quota(tmp_path, monkeypatch, fault):
+    runtime, work, command, adapter, supervisor, attempt, client = _unbound_crash_fixture(
+        tmp_path, monkeypatch, fault=fault)
+    outcomes = supervisor.reconcile_restart()
+    assert outcomes[0].status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert client.cancelled == [attempt.attempt_id]
+    assert outcomes[0].uid_sweep_receipt_path is None
+    _assert_unbound_claim_fenced(runtime, attempt, command, work, adapter, supervisor)
+
+
+def test_restart_unbound_claim_prestart_crash_uses_absence_without_cancel(tmp_path, monkeypatch):
+    runtime, work, command, adapter, supervisor, attempt, client = _unbound_crash_fixture(
+        tmp_path, monkeypatch, before_start=True)
+    outcomes = supervisor.reconcile_restart()
+    assert outcomes[0].status is ReconcileStatus.AWAITING_LEASE_EXPIRY
+    assert client.cancelled == [] and adapter.start_count == 0
+    assert supervisor.take_recovered_runs() == ()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("pid", 42420), ("pgid", 42420), ("process_start_identity", "partial"),
+    ("boot_id", "partial"), ("provider_session_id", "partial"),
+    ("stdout_path", "/partial"), ("stderr_path", "/partial"), ("result_path", "/partial"),
+    ("launch_metadata", {"worker_recovery_binding": None}),
+    ("launch_metadata", {"launch_attestation": {}}),
+    ("status", AttemptStatus.RUNNING),
+])
+def test_restart_unbound_claim_partial_identity_never_grants_cleanup(tmp_path, monkeypatch, field, value):
+    runtime, work, command, adapter, supervisor, attempt, client = _unbound_crash_fixture(
+        tmp_path, monkeypatch)
+    altered = dataclasses.replace(attempt, **{field: value})
+    original_list = runtime.attempts.list_attempts
+    monkeypatch.setattr(runtime.attempts, "list_attempts", lambda *a, **k: [altered])
+    outcomes = supervisor.reconcile_restart()
+    assert outcomes[0].status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert client.cancelled == []
+    monkeypatch.setattr(runtime.attempts, "list_attempts", original_list)
+    _assert_unbound_claim_fenced(runtime, attempt, command, work, adapter, supervisor)
