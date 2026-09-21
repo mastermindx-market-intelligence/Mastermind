@@ -272,6 +272,23 @@ def _import_bindings(names: str) -> list[tuple[str, str]]:
     return bindings
 
 
+def _python_import_edge(line: str) -> tuple[str, list[tuple[str, str]]] | None:
+    """Parse one Python ``from`` import with Python's own comment/alias rules."""
+    try:
+        tree = ast.parse(unicodedata.normalize("NFKC", line).lstrip(), mode="exec")
+    except (SyntaxError, ValueError, TypeError):
+        return None
+    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.ImportFrom):
+        return None
+    node = tree.body[0]
+    module = "." * node.level + (node.module or "")
+    bindings = [
+        (item.name, item.asname or item.name)
+        for item in node.names if item.name != "*"
+    ]
+    return (module, bindings) if module and bindings else None
+
+
 def _python_import_source_paths(importer: str, module: str) -> tuple[str, ...]:
     """Resolve a Python ``from`` module to its repository source spellings."""
     level = len(module) - len(module.lstrip("."))
@@ -423,19 +440,18 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
             left, separator, right = normalized.partition("=")
             if separator:
                 definitions[path].update(_source_identifiers(left))
-            python_import = re.match(
-                r"\s*from\s+([.\w]+)\s+import\s+(.+)", normalized,
-            )
+            python_import = _python_import_edge(normalized)
             js_import = re.match(
                 r"\s*import\s*\{([^}]+)\}\s*from\s*['\"]([^'\"]+)['\"]",
                 normalized,
             )
             if python_import:
-                candidates = _python_import_source_paths(path, python_import.group(1))
+                module, bindings = python_import
+                candidates = _python_import_source_paths(path, module)
                 # The first present candidate follows Python package/module precedence.
                 source_path = next((item for item in candidates if item in production), None)
                 if source_path:
-                    for exported, local in _import_bindings(python_import.group(2)):
+                    for exported, local in bindings:
                         import_edges[path].setdefault(local, set()).add(
                             (source_path, exported)
                         )
@@ -974,6 +990,21 @@ def test_d8_import_edges_are_qualified_by_their_python_module_source():
         ("common/defaults.py", "FALLBACK = 501"),
         ("control_plane/credentials.py", "from common.defaults import FALLBACK"),
         ("control_plane/credentials.py", "worker_uid = FALLBACK"),
+        ("app/constants.py", "FALLBACK = 512"),
+    ])
+    assert _scan_added_identity_diff(diff) == ["501"]
+
+
+@pytest.mark.parametrize("import_line", [
+    "from common.defaults import FALLBACK  # documented fallback",
+    "from common.defaults import FALLBACK as WORKER  # documented fallback",
+])
+def test_d8_python_import_edges_preserve_valid_inline_comments(import_line):
+    local_name = "WORKER" if " as WORKER" in import_line else "FALLBACK"
+    diff = _d8_frozen_added_diff([
+        ("common/defaults.py", "FALLBACK = 501"),
+        ("control_plane/credentials.py", import_line),
+        ("control_plane/credentials.py", f"worker_uid = {local_name}"),
         ("app/constants.py", "FALLBACK = 512"),
     ])
     assert _scan_added_identity_diff(diff) == ["501"]
