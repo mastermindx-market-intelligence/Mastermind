@@ -2058,6 +2058,18 @@ def _branch_head_sha(payload: object) -> str | None:
     return commit["sha"]
 
 
+def _compare_terminal_head_sha(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    commits = payload.get("commits")
+    if not isinstance(commits, list) or not commits:
+        return None
+    terminal = commits[-1]
+    if not isinstance(terminal, dict) or not _is_sha(terminal.get("sha")):
+        return None
+    return terminal["sha"]
+
+
 def _revalidate_moved_base(
     http_get: HTTPGet,
     token: str,
@@ -2087,11 +2099,17 @@ def _revalidate_moved_base(
         raise _RemoteProbeError()
     forward_base = forward.get("base_commit")
     forward_merge_base = forward.get("merge_base_commit")
-    if not isinstance(forward_base, dict) or not isinstance(forward_merge_base, dict):
+    forward_head = _compare_terminal_head_sha(forward)
+    if (
+        not isinstance(forward_base, dict)
+        or not isinstance(forward_merge_base, dict)
+        or forward_head is None
+    ):
         raise _RemoteProbeError()
     if (
         forward_base.get("sha") != old_base_head
         or forward_merge_base.get("sha") != old_base_head
+        or forward_head != new_base_head
     ):
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
@@ -2106,10 +2124,17 @@ def _revalidate_moved_base(
         raise _RemoteProbeError()
     refreshed_base = refreshed.get("base_commit")
     refreshed_merge_base = refreshed.get("merge_base_commit")
-    if not isinstance(refreshed_base, dict) or not isinstance(refreshed_merge_base, dict):
+    refreshed_head = _compare_terminal_head_sha(refreshed)
+    if (
+        not isinstance(refreshed_base, dict)
+        or not isinstance(refreshed_merge_base, dict)
+        or refreshed_head is None
+    ):
         raise _RemoteProbeError()
     if refreshed_base.get("sha") != new_base_head:
         raise _RemoteProbeError()
+    if refreshed_head != remote_head:
+        return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
     refreshed_merge_base_sha = refreshed_merge_base.get("sha")
     if not _is_sha(refreshed_merge_base_sha):
         raise _RemoteProbeError()

@@ -52,6 +52,8 @@ class MovingBaseHTTP(fx._ProbeHTTP):
         malformed_second_base: bool = False,
         omit_forward_url: bool = False,
         omit_refreshed_base: bool = False,
+        forward_head_sha: str | None = NEW_BASE_SHA,
+        refreshed_head_sha: str | None = fx.HEAD_SHA,
     ) -> None:
         super().__init__()
         self.base_reads = 0
@@ -61,6 +63,8 @@ class MovingBaseHTTP(fx._ProbeHTTP):
         self.malformed_second_base = malformed_second_base
         self.omit_forward_url = omit_forward_url
         self.omit_refreshed_base = omit_refreshed_base
+        self.forward_head_sha = forward_head_sha
+        self.refreshed_head_sha = refreshed_head_sha
 
     def __call__(self, url: str, *, token: str, timeout: float):
         self.calls.append((url, token, timeout))
@@ -87,7 +91,7 @@ class MovingBaseHTTP(fx._ProbeHTTP):
                 url,
                 base_sha=fx.CURRENT_BASE_SHA,
                 merge_base_sha=self.ff_merge_base,
-                head_sha=NEW_BASE_SHA,
+                head_sha=self.forward_head_sha,
             )
             if self.omit_forward_url:
                 payload.pop("url")
@@ -101,6 +105,7 @@ class MovingBaseHTTP(fx._ProbeHTTP):
                 url,
                 base_sha=NEW_BASE_SHA,
                 merge_base_sha=self.refreshed_merge_base,
+                head_sha=self.refreshed_head_sha,
             )
             if self.omit_refreshed_base:
                 payload.pop("base_commit")
@@ -162,6 +167,7 @@ class ConditionalMovingBaseHTTP:
                 url,
                 base_sha=NEW_BASE_SHA,
                 merge_base_sha=fx.BASE_SHA,
+                head_sha=fx.HEAD_SHA,
             )
         return self.base(url, token=fx.TOKEN, timeout=20.0)
 
@@ -269,6 +275,36 @@ def test_moved_base_compare_must_bind_exact_requested_url(
     exit_code, payload = _run(
         module,
         MovingBaseHTTP(omit_forward_url=True),
+        capsys,
+    )
+    assert exit_code != 0
+    assert payload["schema"] == "mastermind.source_continuity_refusal/v1"
+
+
+@pytest.mark.parametrize("bad_head", [None, "b" * 40])
+def test_moved_base_compare_must_bind_new_base_head(
+    capsys: pytest.CaptureFixture[str],
+    bad_head: str | None,
+) -> None:
+    module = fx._cli_module()
+    exit_code, payload = _run(
+        module,
+        MovingBaseHTTP(forward_head_sha=bad_head),
+        capsys,
+    )
+    assert exit_code != 0
+    assert payload["schema"] == "mastermind.source_continuity_refusal/v1"
+
+
+@pytest.mark.parametrize("bad_head", [None, "c" * 40])
+def test_refreshed_target_compare_must_bind_remote_head(
+    capsys: pytest.CaptureFixture[str],
+    bad_head: str | None,
+) -> None:
+    module = fx._cli_module()
+    exit_code, payload = _run(
+        module,
+        MovingBaseHTTP(refreshed_head_sha=bad_head),
         capsys,
     )
     assert exit_code != 0
