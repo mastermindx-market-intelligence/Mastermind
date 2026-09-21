@@ -47,6 +47,11 @@ except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
         evaluate_identity_policy,
     )
 
+try:
+    from ops.executive_os import provider_worker_slots
+except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
+    import provider_worker_slots  # type: ignore[no-redef]
+
 
 SCHEMA_VERSION = "mastermind.executive_provider_readiness/v2"
 IDENTITY_SCHEMA = "mastermind.executive_provider_identity/v1"
@@ -496,13 +501,19 @@ def receipt_storage_contract(
     )
     if binding == COMPANY_WORKSPACE_BINDING_CLASS:
         return 0, 0, 0o400
-    if (
-        binding == PERSONAL_PRO_WORKER_BINDING_CLASS
-        and not isinstance(worker_gid, bool)
-        and isinstance(worker_gid, int)
-        and 400 <= worker_gid < 500
-    ):
-        return 0, worker_gid, 0o440
+    if binding == PERSONAL_PRO_WORKER_BINDING_CLASS:
+        if isinstance(worker_gid, bool) or not isinstance(worker_gid, int):
+            raise ReadinessError("readiness_receipt_reader_invalid")
+        try:
+            personal_slot_gids = {
+                slot.worker_gid
+                for slot in provider_worker_slots.all_slots()
+                if slot.workspace_binding_class == PERSONAL_PRO_WORKER_BINDING_CLASS
+            }
+        except (AttributeError, provider_worker_slots.SlotCatalogError) as exc:
+            raise ReadinessError("readiness_receipt_reader_invalid") from exc
+        if worker_gid in personal_slot_gids:
+            return 0, worker_gid, 0o440
     raise ReadinessError("readiness_receipt_reader_invalid")
 
 def _read_json(path: Path) -> dict[str, Any]:

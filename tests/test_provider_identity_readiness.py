@@ -45,6 +45,14 @@ def test_personal_pro_readiness_receipt_storage_is_exact_slot_readable_nonwritab
     ) == (0, 0, 0o400)
 
 
+def test_personal_pro_readiness_receipt_rejects_gid_outside_reviewed_slot_catalog() -> None:
+    with pytest.raises(readiness.ReadinessError, match="readiness_receipt_reader_invalid"):
+        readiness.receipt_storage_contract(
+            workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            worker_gid=499,
+        )
+
+
 def test_personal_pro_receipt_persistence_uses_exact_slot_group_read_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
