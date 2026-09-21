@@ -510,8 +510,11 @@ test('a session id from one account listener is unknown on another account liste
 });
 
 test('timeout answers EFFECT_UNKNOWN once, refuses the retry, and never replays', async () => {
+  // Leave enough time for a cold stdio backend initialize; FIXTURE_NEVER keeps
+  // the tools/call itself pending, so this still deterministically exercises
+  // the post-dispatch timeout/effect-unknown path rather than startup timing.
   const { gw, markerPath, effectLog } = await bootTunnel(
-    'acct-a', { requestTimeoutMs: 300 }, { FIXTURE_NEVER: '1' });
+    'acct-a', { requestTimeoutMs: 700 }, { FIXTURE_NEVER: '1' });
   const client = newClient();
   const transport = await connect(client, gw.url);
   const sid = transport.sessionId;

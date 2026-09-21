@@ -2691,3 +2691,50 @@ def test_broker_start_base_exception_retains_original_finalization(tmp_path: Pat
         assert sweeper.calls == []
 
     asyncio.run(scenario())
+
+def test_remote_adapter_reattaches_exact_broker_run_without_starting_again(
+    tmp_path: Path,
+) -> None:
+    broker, adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
+    from control_plane.executive_worker_broker import (
+        _jsonable,
+        _launch_spec_from_wire,
+    )
+    from control_plane.worker_execution_contract import WorkerRecoveryBinding
+
+    spec = _launch_spec_from_wire(spec_value, broker.policy)
+    ref = asyncio.run(adapter.start(spec))
+    prompt_path = Path(spec.run_dir) / "input" / "worker-prompt.txt"
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    binding = WorkerRecoveryBinding.bind(
+        adapter_id="codex-cli",
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
+    )
+
+    class Client:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        def request_sync(self, operation, payload):
+            self.calls.append((operation, payload))
+            assert operation == "status"
+            assert payload == {"run_id": ref.run_id}
+            return {
+                "run": {
+                    "status": "RUNNING",
+                    "process_ref": _jsonable(ref),
+                }
+            }
+
+    client = Client()
+    remote = RemoteCodexWorkerAdapter(client)  # type: ignore[arg-type]
+    recovered = remote.reattach(spec, binding)
+    repeated = remote.reattach(spec, binding)
+    assert recovered == repeated == ref
+    assert remote._refs[ref.run_id] == ref
+    assert remote._specs[ref.run_id] == spec
+    assert client.calls == [("status", {"run_id": ref.run_id})]
