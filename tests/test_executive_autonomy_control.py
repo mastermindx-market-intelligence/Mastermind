@@ -955,6 +955,75 @@ def test_concurrent_marker_race_never_rolls_back_a_foreign_transaction():
     assert host.worker_config["operator_harness_armed"] is False
 
 
+def test_arm_begin_ownership_failure_refuses_without_rollback_or_service_effects():
+    host = FakeTransactionHost()
+    before_control = copy.deepcopy(host.control_config)
+    before_worker = copy.deepcopy(host.worker_config)
+    effects = []
+
+    def ownership_failure(_transaction):
+        # The failed creator's marker is durable evidence, but this process did
+        # not acquire its execution owner and may not operate on that marker.
+        host.marker = True
+        raise control.TransactionOwnershipError()
+
+    host.begin_transaction = ownership_failure
+    host.stop_services = lambda _sha: effects.append("stop")
+    host.rollback_disarmed = lambda *_args, **_kwargs: effects.append("rollback")
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        control.execute_arm(host, _arm_request(), now=NOW)
+
+    assert effects == []
+    assert host.marker is True
+    assert host.control_config == before_control
+    assert host.worker_config == before_worker
+    assert host.receipt is None
+
+
+def test_arm_owned_post_begin_failure_still_runs_the_normal_rollback():
+    host = FakeTransactionHost(fail_after="candidates")
+    rollback = []
+    real_rollback = host.rollback_disarmed
+
+    def recorded_rollback(transaction, receipt):
+        rollback.append(transaction.transaction_id)
+        real_rollback(transaction, receipt)
+
+    host.rollback_disarmed = recorded_rollback
+
+    with pytest.raises(control.ArmTransactionError) as raised:
+        control.execute_arm(host, _arm_request(), now=NOW)
+
+    assert raised.value.code == "arm_rolled_back"
+    assert rollback == ["autonomy-deadbeefcafe"]
+    assert host.marker is False
+    assert host.services == "STOPPED"
+    assert host.receipt["state"] == "DISARMED"
+
+
+def test_arm_owned_partial_begin_failure_still_runs_the_normal_rollback():
+    host = FakeTransactionHost(fail_after="lock")
+    rollback = []
+    real_rollback = host.rollback_disarmed
+
+    def recorded_rollback(transaction, receipt):
+        rollback.append(transaction.transaction_id)
+        real_rollback(transaction, receipt)
+
+    host.rollback_disarmed = recorded_rollback
+
+    with pytest.raises(control.ArmTransactionError) as raised:
+        control.execute_arm(host, _arm_request(), now=NOW)
+
+    assert raised.value.code == "arm_rolled_back"
+    assert host.transaction_calls == ["lock"]
+    assert rollback == ["autonomy-deadbeefcafe"]
+    assert host.marker is False
+    assert host.services == "STOPPED"
+    assert host.receipt["state"] == "DISARMED"
+
+
 def test_unproven_rollback_retains_marker_and_returns_effect_unknown():
     host = FakeTransactionHost(fail_after="control", rollback_fails=True)
     with pytest.raises(control.TransactionEffectUnknown) as raised:
@@ -2223,12 +2292,11 @@ def test_nonobject_receipt_is_refused_at_every_level(value, capsys):
 
 def _strict_receipt_payload(raw):
     host = control.ProductionCeoSubmitHost()
-    read = control._read_root_file
 
     def bounded_read(*args, **kwargs):
         if len(raw) > control._MAX_JSON_BYTES:
             raise control.HostControlError("config_identity_unavailable")
-        return read(*args, **kwargs)
+        return raw, mock.Mock()
 
     with mock.patch.object(control.Path, "exists", return_value=True), mock.patch.object(
         control.Path, "is_symlink", return_value=False
@@ -2277,6 +2345,13 @@ def test_production_receipt_read_boundary_refuses_duplicate_valid_keys():
     assert duplicated != raw
     assert _strict_receipt_payload(duplicated) is None
     json.loads(duplicated, object_pairs_hook=dict)
+
+
+def test_production_receipt_read_boundary_accepts_exact_valid_fixture_bytes():
+    host = _armed_ceo_submit_host()
+    raw = control._encoded_json(host.receipt)
+
+    assert _strict_receipt_payload(raw) == host.receipt
 
 
 @pytest.mark.parametrize(
@@ -3996,10 +4071,21 @@ def test_ceo_submit_process_recovery_reuses_marker_and_rolls_back_to_archived_pr
         control._CONTROL_LAUNCHD_PREIMAGE_FIELD: True,
     }
     rollback = []
+    ownership = []
 
     monkeypatch.setattr(host, "effective_uid", lambda: 0)
     monkeypatch.setattr(host, "require_exact_install", lambda _sha: SHA)
-    monkeypatch.setattr(host, "_manifest", lambda: dict(manifest))
+    monkeypatch.setattr(
+        host,
+        "_claim_transaction_owner",
+        lambda: ownership.append("claimed"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        host,
+        "_manifest",
+        lambda: ownership.append("manifest") or dict(manifest),
+    )
     monkeypatch.setattr(host, "_archived_configs", lambda _sha: prior)
     monkeypatch.setattr(
         host,
@@ -4021,7 +4107,10 @@ def test_ceo_submit_process_recovery_reuses_marker_and_rolls_back_to_archived_pr
     monkeypatch.setattr(
         host,
         "rollback_ceo_submit",
-        lambda tx, receipt: rollback.append((tx, receipt)),
+        lambda tx, receipt: (
+            ownership.append("rollback"),
+            rollback.append((tx, receipt)),
+        ),
     )
 
     result = host.recover_ceo_submit_effect_unknown(
@@ -4031,6 +4120,7 @@ def test_ceo_submit_process_recovery_reuses_marker_and_rolls_back_to_archived_pr
     assert result.transaction_id == transaction_id
     assert result.state == "CEO_SUBMIT_DISARMED"
     assert result.replayed is True
+    assert ownership == ["claimed", "manifest", "rollback"]
     assert len(rollback) == 1
     recovered, receipt = rollback[0]
     assert recovered.transaction_id == transaction_id
@@ -4041,12 +4131,239 @@ def test_ceo_submit_process_recovery_reuses_marker_and_rolls_back_to_archived_pr
     assert receipt["transaction_id"] == transaction_id
 
 
+def test_ceo_submit_process_recovery_refuses_before_reading_an_unowned_marker(
+    monkeypatch,
+):
+    host = control.ProductionCeoSubmitHost()
+    ledger = []
+    monkeypatch.setattr(host, "effective_uid", lambda: 0)
+    monkeypatch.setattr(host, "require_exact_install", lambda _sha: SHA)
+    monkeypatch.setattr(
+        host,
+        "_claim_transaction_owner",
+        lambda: (
+            ledger.append("claim"),
+            (_ for _ in ()).throw(control.TransactionEffectUnknown()),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        host,
+        "_manifest",
+        lambda: ledger.append("manifest") or {},
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host.recover_ceo_submit_effect_unknown(
+            control.CeoSubmitRequest(expected_sha=SHA), now=NOW
+        )
+
+    assert ledger == ["claim"]
+
+
+def test_transaction_owner_claim_refuses_a_competing_writer_and_closes_its_fd(
+    monkeypatch,
+):
+    host = control.ProductionCeoSubmitHost()
+    info = types.SimpleNamespace(
+        st_mode=stat.S_IFDIR | 0o700,
+        st_uid=0,
+        st_gid=0,
+        st_dev=41,
+        st_ino=73,
+    )
+    ledger = []
+    monkeypatch.setattr(host, "_config_root_safe", lambda: ledger.append("root"))
+    monkeypatch.setattr(
+        host, "_transaction_present", lambda: ledger.append("marker") or True
+    )
+    monkeypatch.setattr(
+        control.os,
+        "open",
+        lambda path, flags: ledger.append(("open", path, flags)) or 91,
+    )
+    monkeypatch.setattr(control.os, "fstat", lambda fd: info)
+    monkeypatch.setattr(control.Path, "lstat", lambda _path: info)
+    monkeypatch.setattr(
+        control.fcntl,
+        "flock",
+        lambda fd, operation: (
+            ledger.append(("flock", fd, operation)),
+            (_ for _ in ()).throw(BlockingIOError()),
+        ),
+    )
+    monkeypatch.setattr(
+        control.os, "close", lambda fd: ledger.append(("close", fd))
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host._claim_transaction_owner()
+
+    assert ("flock", 91, control.fcntl.LOCK_EX | control.fcntl.LOCK_NB) in ledger
+    assert ledger[-1] == ("close", 91)
+    assert host._transaction_owner_fd is None
+
+
+def test_production_arm_begin_types_a_failure_before_ownership(monkeypatch, tmp_path):
+    host = control.ProductionTransactionHost()
+    transaction = mock.Mock()
+    monkeypatch.setattr(
+        control, "AUTONOMY_TRANSACTION", tmp_path / "absent-transaction.lock"
+    )
+    monkeypatch.setattr(
+        host,
+        "_create_marker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            control.TransactionEffectUnknown()
+        ),
+    )
+
+    with pytest.raises(control.TransactionOwnershipError):
+        host.begin_transaction(transaction)
+
+    assert host._transaction_owner_fd is None
+    assert host._active_transaction is None
+
+
+def test_production_arm_begin_preserves_an_owned_partial_failure(
+    monkeypatch, tmp_path
+):
+    host = control.ProductionTransactionHost()
+    host._transaction_owner_fd = 91
+    transaction = mock.Mock()
+    failure = RuntimeError("archive write failed after ownership")
+    monkeypatch.setattr(
+        control, "AUTONOMY_TRANSACTION", tmp_path / "absent-transaction.lock"
+    )
+    monkeypatch.setattr(
+        host,
+        "_create_marker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        host.begin_transaction(transaction)
+
+    assert raised.value is failure
+    assert host._transaction_owner_fd == 91
+    assert host._active_transaction is transaction
+
+
+def test_transaction_owner_directory_lock_excludes_competing_process_carriers(
+    monkeypatch, tmp_path
+):
+    marker = tmp_path / "autonomy-transaction.lock"
+    marker.mkdir(mode=0o700)
+    real_fstat = os.fstat
+    probe_fd = os.open(marker, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        actual = real_fstat(probe_fd)
+    finally:
+        os.close(probe_fd)
+    safe = types.SimpleNamespace(
+        st_mode=stat.S_IFDIR | 0o700,
+        st_uid=0,
+        st_gid=0,
+        st_dev=actual.st_dev,
+        st_ino=actual.st_ino,
+    )
+    first = control.ProductionCeoSubmitHost()
+    second = control.ProductionCeoSubmitHost()
+    for host in (first, second):
+        monkeypatch.setattr(host, "_config_root_safe", lambda: None)
+        monkeypatch.setattr(host, "_transaction_present", lambda: True)
+    monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
+    monkeypatch.setattr(control.os, "fstat", lambda _fd: safe)
+    monkeypatch.setattr(control.Path, "lstat", lambda _path: safe)
+
+    first._claim_transaction_owner()
+    try:
+        with pytest.raises(control.TransactionEffectUnknown):
+            second._claim_transaction_owner()
+        assert first._transaction_owner_fd is not None
+        assert second._transaction_owner_fd is None
+    finally:
+        first._release_transaction_owner()
+
+    second._claim_transaction_owner()
+    second._release_transaction_owner()
+
+
+def test_existing_disarm_claims_transaction_owner_before_reading_identity(
+    monkeypatch, tmp_path
+):
+    marker = tmp_path / "autonomy-transaction.lock"
+    marker.mkdir()
+    host = control.ProductionTransactionHost()
+    ledger = []
+    monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
+    monkeypatch.setattr(
+        host, "_claim_transaction_owner", lambda: ledger.append("claim")
+    )
+    monkeypatch.setattr(
+        host,
+        "_manifest",
+        lambda: ledger.append("manifest")
+        or {"transaction_id": "autonomy-121212121212"},
+    )
+
+    transaction_id = host.new_transaction_id()
+
+    assert transaction_id == "autonomy-121212121212"
+    assert ledger == ["claim", "manifest"]
+
+
+@pytest.mark.parametrize(
+    ("mode", "uid", "gid", "has_acl"),
+    [
+        (stat.S_IFLNK | 0o777, 0, 0, False),
+        (stat.S_IFDIR | 0o755, 0, 0, False),
+        (stat.S_IFDIR | 0o700, 501, 0, False),
+        (stat.S_IFDIR | 0o700, 0, 20, False),
+        (stat.S_IFDIR | 0o700, 0, 0, True),
+    ],
+)
+def test_transaction_owner_claim_refuses_unsafe_marker_before_open(
+    monkeypatch, mode, uid, gid, has_acl
+):
+    host = control.ProductionCeoSubmitHost()
+    opened = []
+    info = types.SimpleNamespace(st_mode=mode, st_uid=uid, st_gid=gid)
+    monkeypatch.setattr(host, "_config_root_safe", lambda: None)
+    monkeypatch.setattr(control.Path, "lstat", lambda _path: info)
+    monkeypatch.setattr(control, "_has_acl", lambda _path: has_acl)
+    monkeypatch.setattr(
+        control.os, "open", lambda *args, **kwargs: opened.append((args, kwargs))
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host._claim_transaction_owner()
+
+    assert opened == []
+    assert host._transaction_owner_fd is None
+
+
+def test_transaction_owner_is_claimed_by_creation_and_held_through_completion():
+    source = Path(control.__file__).read_text(encoding="utf-8")
+    production = source.split("class ProductionTransactionHost", 1)[1]
+    create = production.split("def _create_marker", 1)[1].split("\n    def ", 1)[0]
+    complete = production.split("def complete_transaction", 1)[1].split(
+        "\n    def ", 1
+    )[0]
+
+    assert create.index("_claim_transaction_owner") < create.index("prior_control")
+    assert complete.index("AUTONOMY_TRANSACTION.rmdir()") < complete.index(
+        "_release_transaction_owner"
+    )
+
+
 def test_ceo_submit_process_recovery_refuses_legacy_marker_without_launchd_preimage(
     monkeypatch,
 ):
     host = control.ProductionCeoSubmitHost()
     monkeypatch.setattr(host, "effective_uid", lambda: 0)
     monkeypatch.setattr(host, "require_exact_install", lambda _sha: SHA)
+    monkeypatch.setattr(host, "_claim_transaction_owner", lambda: None)
     monkeypatch.setattr(
         host,
         "_manifest",

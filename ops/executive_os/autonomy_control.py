@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import copy
 import dataclasses
+import fcntl
 import grp
 import hashlib
 import json
@@ -350,6 +351,10 @@ class TransactionEffectUnknown(RuntimeError):
             raise ValueError("unknown autonomy effect-unknown code")
         self.code = code
         super().__init__(code)
+
+
+class TransactionOwnershipError(TransactionEffectUnknown):
+    """The transaction began but this process never acquired its owner."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1400,6 +1405,10 @@ def execute_arm(
         # A marker that appeared between the read-only admission check and the
         # atomic mkdir belongs to another root transaction. Never "recover"
         # it through this operation's rollback carrier.
+        raise
+    except TransactionOwnershipError:
+        # A failed begin may have left durable marker evidence, but without the
+        # execution owner this process may neither stop services nor roll back.
         raise
     except Exception as exc:
         try:
@@ -2488,6 +2497,7 @@ class ProductionTransactionHost(ProductionArmHost):
     def __init__(self) -> None:
         super().__init__()
         self._active_transaction: TransactionContext | None = None
+        self._transaction_owner_fd: int | None = None
 
     @staticmethod
     def _candidate_paths(transaction_id: str) -> tuple[Path, Path]:
@@ -2525,6 +2535,57 @@ class ProductionTransactionHost(ProductionArmHost):
             or _has_acl(CONFIG_ROOT)
         ):
             raise TransactionEffectUnknown()
+
+    def _claim_transaction_owner(self) -> None:
+        """Exclusively own the existing marker directory for this process.
+
+        The persistent directory remains the single transaction owner.  Its
+        advisory lock only distinguishes a crashed owner from a still-running
+        ARM/DISARM or recovery process; it does not create another lifecycle.
+        """
+
+        if self._transaction_owner_fd is not None:
+            raise TransactionEffectUnknown()
+        self._config_root_safe()
+        descriptor: int | None = None
+        try:
+            if not self._transaction_present():
+                raise TransactionEffectUnknown()
+            descriptor = os.open(
+                AUTONOMY_TRANSACTION,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            )
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o700
+            ):
+                raise TransactionEffectUnknown()
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if not self._transaction_present():
+                raise TransactionEffectUnknown()
+            path_info = AUTONOMY_TRANSACTION.lstat()
+            if (
+                path_info.st_dev != info.st_dev
+                or path_info.st_ino != info.st_ino
+            ):
+                raise TransactionEffectUnknown()
+        except Exception as exc:
+            if descriptor is not None:
+                os.close(descriptor)
+            if isinstance(exc, TransactionEffectUnknown):
+                raise
+            raise TransactionEffectUnknown() from exc
+        self._transaction_owner_fd = descriptor
+
+    def _release_transaction_owner(self) -> None:
+        descriptor = self._transaction_owner_fd
+        if descriptor is None:
+            raise TransactionEffectUnknown()
+        self._transaction_owner_fd = None
+        os.close(descriptor)
 
     def _manifest(self) -> dict[str, Any]:
         try:
@@ -2619,6 +2680,7 @@ class ProductionTransactionHost(ProductionArmHost):
             os.chown(AUTONOMY_TRANSACTION, 0, 0)
             os.chmod(AUTONOMY_TRANSACTION, 0o700)
             _fsync_directory(CONFIG_ROOT)
+            self._claim_transaction_owner()
             prior_control, prior_worker = self._archive_paths()
             control_bytes = transaction.prior_configs.control_bytes or encode_config(
                 transaction.prior_configs.control
@@ -2727,6 +2789,7 @@ class ProductionTransactionHost(ProductionArmHost):
 
     def new_transaction_id(self) -> str:
         if AUTONOMY_TRANSACTION.exists() and not AUTONOMY_TRANSACTION.is_symlink():
+            self._claim_transaction_owner()
             return str(self._manifest()["transaction_id"])
         return f"autonomy-{secrets.token_hex(6)}"
 
@@ -2737,8 +2800,15 @@ class ProductionTransactionHost(ProductionArmHost):
         try:
             self._create_marker(transaction, operation="ARM")
         except FileExistsError as exc:
+            if self._transaction_owner_fd is not None:
+                raise
             self._active_transaction = None
             raise ArmAdmissionError("transaction_incomplete") from exc
+        except Exception as exc:
+            if self._transaction_owner_fd is None:
+                self._active_transaction = None
+                raise TransactionOwnershipError() from exc
+            raise
 
     def write_candidates(self, transaction: TransactionContext) -> None:
         self._active_transaction = transaction
@@ -2984,6 +3054,8 @@ class ProductionTransactionHost(ProductionArmHost):
         _fsync_directory(CONFIG_ROOT)
 
     def complete_transaction(self, transaction: TransactionContext) -> None:
+        if self._transaction_owner_fd is None:
+            raise TransactionEffectUnknown()
         manifest = self._manifest()
         if (
             manifest.get("transaction_id") != transaction.transaction_id
@@ -3014,6 +3086,7 @@ class ProductionTransactionHost(ProductionArmHost):
         AUTONOMY_TRANSACTION.rmdir()
         _fsync_directory(CONFIG_ROOT)
         self._active_transaction = None
+        self._release_transaction_owner()
 
     def _archived_configs(self, expected_sha: str) -> ConfigEvidence:
         control_path, worker_path = self._archive_paths()
@@ -3041,6 +3114,8 @@ class ProductionTransactionHost(ProductionArmHost):
 
     def begin_disarm(self, expected_sha: str, transaction_id: str) -> ConfigEvidence:
         if AUTONOMY_TRANSACTION.exists() and not AUTONOMY_TRANSACTION.is_symlink():
+            if self._transaction_owner_fd is None:
+                self._claim_transaction_owner()
             manifest = self._manifest()
             if (
                 manifest.get("transaction_id") != transaction_id
@@ -3280,6 +3355,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
 
     def new_transaction_id(self) -> str:
         if AUTONOMY_TRANSACTION.exists() and not AUTONOMY_TRANSACTION.is_symlink():
+            self._claim_transaction_owner()
             return str(self._manifest()["transaction_id"])
         return f"autonomy-{secrets.token_hex(6)}"
 
@@ -4006,6 +4082,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         installed_sha = self.require_exact_install(request.expected_sha)
         if installed_sha != request.expected_sha:
             raise CeoSubmitAdmissionError("release_identity_mismatch")
+        self._claim_transaction_owner()
         manifest = self._manifest()
         if (
             manifest.get("operation") not in CEO_SUBMIT_OPERATIONS
