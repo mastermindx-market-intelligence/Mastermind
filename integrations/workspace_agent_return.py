@@ -17,6 +17,7 @@ import copy
 import dataclasses
 import hashlib
 import hmac
+import inspect
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
@@ -101,7 +102,9 @@ class WorkspaceReturnTicket:
 class WorkspaceReturnBindingResolver(Protocol):
     """Resolve the current canonical dialogue binding for one operation key."""
 
-    def resolve(self, operation_key: str) -> DialogueBinding: ...
+    def resolve(
+        self, operation_key: str
+    ) -> DialogueBinding | Awaitable[DialogueBinding]: ...
 
 
 ServiceCall = Callable[[Path, Mapping[str, Any]], Awaitable[dict[str, Any]]]
@@ -486,7 +489,8 @@ class WorkspaceCandidateReturnGateway:
 
         message_key = ticket.message_key
         try:
-            current = self._binding_resolver.resolve(ticket.operation_key)
+            resolved = self._binding_resolver.resolve(ticket.operation_key)
+            current = await resolved if inspect.isawaitable(resolved) else resolved
             current_document = _binding_document(current)
             if binding_digest(current) != ticket.binding_digest:
                 return _error("CURRENT_TARGET_CHANGED", message_key=message_key)
