@@ -31,6 +31,19 @@ async function reconstruct(client,receipt){let offset=0;const chunks=[];
     assert.ok(page.next_offset>offset);offset=page.next_offset;
   }assert.fail('result did not finish paging');
 }
+async function reconstructCompat(client,receipt,gateway){let offset=0;const chunks=[];
+  const backendOpsBefore=gateway.stats().requests.backendOps;
+  for(let n=0;n<200;n++){
+    const out=await call(client,'read_file',{path:receipt.compat_read_path,offset,length:1,origin:'llm'});
+    assert.ok(size(out)<=16384);const page=body(out);assert.equal(page.status,'OUTPUT_PAGE');
+    assert.equal(page.offset,offset);chunks.push(page.text);
+    if(page.done){const raw=chunks.join('');assert.equal(Buffer.byteLength(raw),receipt.source_bytes);
+      assert.equal(createHash('sha256').update(raw).digest('hex'),receipt.sha256);
+      assert.equal(gateway.stats().requests.backendOps,backendOpsBefore);return JSON.parse(raw);}
+    assert.ok(page.next_offset>offset);offset=page.next_offset;
+  }assert.fail('compat result did not finish paging');
+}
+
 test('catalog exposes exactly one narrow read-only paging tool',async t=>{
   const {connect}=await setup(t),a=await connect();const tools=(await a.client.listTools()).tools;
   const pages=tools.filter(x=>x.name==='studio_output_page');assert.equal(pages.length,1);
@@ -85,4 +98,37 @@ test('projection failure never becomes a backend failure or repeats an effect',a
   assert.doesNotMatch(JSON.stringify(failed),/private projection internals|EFFECT_UNKNOWN|NOT_APPLIED/);
   assert.equal(body(await call(a.client,'start_process',{cmd:'next-effect'})).pid,10002);
   assert.equal(gateway.stats().backend.spawns,1);
+});
+
+
+test('frozen app snapshot can page through existing read_file without backend replay',async t=>{
+  const {gateway,connect}=await setup(t),a=await connect();
+  const cmd='compat-'+('z'.repeat(50000));
+  const first=await call(a.client,'start_process',{cmd});const receipt=body(first);
+  assert.equal(receipt.status,'OUTPUT_PAGED');
+  assert.equal(receipt.compat_read_tool,'read_file');
+  assert.equal(receipt.compat_offset_argument,'offset');
+  assert.equal(receipt.compat_read_path,`studio-output://receipt/${receipt.receipt_id}`);
+  const exact=body(await reconstructCompat(a.client,receipt,gateway));
+  assert.equal(exact.cmd,cmd);assert.equal(exact.pid,10001);
+  const next=body(await call(a.client,'start_process',{cmd:'next'}));assert.equal(next.pid,10002);
+});
+
+test('frozen compat read remains owner-bound and never reaches foreign backend',async t=>{
+  const {gateway,connect}=await setup(t),a=await connect('alice'),b=await connect('bob');
+  const receipt=body(await call(a.client,'start_process',{cmd:'private-'+('x'.repeat(50000))}));
+  const before=gateway.stats().requests.backendOps;
+  const out=await call(b.client,'read_file',{path:receipt.compat_read_path,offset:0,length:1,origin:'llm'});
+  assert.equal(out.isError,true);assert.equal(body(out).status,'OUTPUT_NOT_AVAILABLE');
+  assert.equal(gateway.stats().requests.backendOps,before);
+  assert.doesNotMatch(JSON.stringify(out),/private-/);
+});
+
+test('reserved frozen compat path refuses malformed receipt locally',async t=>{
+  const {gateway,connect}=await setup(t),a=await connect();
+  const before=gateway.stats().requests.backendOps;
+  const out=await call(a.client,'read_file',{
+    path:'studio-output://receipt/not-a-receipt',offset:0,length:1,origin:'llm'});
+  assert.equal(out.isError,true);assert.equal(body(out).status,'OUTPUT_PAGE_ARGUMENT_INVALID');
+  assert.equal(gateway.stats().requests.backendOps,before);
 });
