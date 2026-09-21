@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -564,6 +571,88 @@ describe("installed authentication and permitted content", () => {
         .disabled,
     ).toBe(true);
   });
+  it("renders the global current window only as unbound from the selected Mission", async () => {
+    const h = "b".repeat(64);
+    window.MastermindMissionHost = {
+      readPrograms,
+      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+      readCurrentWindow: async () => ({
+        schema: "mastermind.workspace.window_read_candidate.v1" as const,
+        selection_ref: "managed-window:unbound-fixture",
+        mode: "observed-turn-window" as const,
+        view: {
+          schema: "mastermind.workspace.visible_window_candidate.v1" as const,
+          source_ref: "managed-window:unbound-fixture",
+          scope: "one-managed-turn-window" as const,
+          observed_at: "2026-09-21T08:00:00Z",
+          epoch: h,
+          terminal: false,
+          coverage: "OBSERVED_WINDOW" as const,
+          history: "NOT_PROVEN" as const,
+          acceptance: "NOT_PROJECTED" as const,
+          capabilities: {
+            send: false as const,
+            provider_control: false as const,
+            history: false as const,
+          },
+          items: [
+            {
+              id: `visible:${h}`,
+              source_sequence: 0,
+              publication_sequence: 1,
+              state: "completed" as const,
+              kind: "visible-response" as const,
+              text: "Unbound permitted response",
+              representation: "VISIBLE_TEXT" as const,
+              display_sha256: h,
+            },
+          ],
+          gaps: [],
+        },
+      }),
+      auth: {
+        getState: () => ({
+          status: "signed_in",
+          reason: null,
+          acquisition: true,
+          content: true,
+        }),
+        subscribe: () => () => {},
+        signIn: async () => {},
+        signOut: async () => {},
+      },
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Mission Workspace" }));
+    await screen.findByText("JOB-A");
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Unbound current window",
+        level: 2,
+      }),
+    ).toBeTruthy();
+    expect(screen.getByText("NOT_LINKED_TO_SELECTED_MISSION")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "No relationship is proven between this current window and WS:ALPHA / JOB-A.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Unbound permitted response")).toBeTruthy();
+    const banner = within(screen.getByRole("banner"));
+    expect(banner.queryByText("CURRENT")).toBeNull();
+    expect(banner.queryByText("PARTIAL")).toBeNull();
+    expect(banner.queryByText(/This mission projection is/)).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain(
+      "not linked to the selected Mission",
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Missingness and source state" }),
+    ).toBeNull();
+  });
+
   it("consumes the fixed content callback and clears visible text on sign-out", async () => {
     let listener!: (state: import("./host").AuthState) => void;
     const h = "a".repeat(64),
@@ -636,5 +725,70 @@ describe("installed authentication and permitted content", () => {
     });
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(screen.queryByText("Permitted fixture response")).toBeNull();
+  });
+});
+
+describe("route focus handoff", () => {
+  it("moves keyboard focus from a removed Open Programs action to the route heading", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    expect(document.activeElement).toBe(document.body);
+    screen.getByRole("button", { name: "Open Programs" }).focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Programs", level: 1 }),
+    );
+  });
+
+  it("retains persistent navigation focus and exposes the current route", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const programs = screen.getByRole("button", { name: "Programs" });
+    programs.focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(programs);
+    expect(programs.getAttribute("aria-current")).toBe("page");
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(programs);
+  });
+
+  it("hands program selection to the Mission heading without stealing focus when data resolves", async () => {
+    const pending = deferred<unknown>();
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      readPrograms,
+      readMission: ({ workRef }) =>
+        workRef === "WS:BETA"
+          ? pending.promise
+          : Promise.resolve(missionFixture("WS:ALPHA", "JOB-A")),
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    screen.getByRole("button", { name: "Open Programs" }).focus();
+    await user.keyboard("{Enter}");
+    (await screen.findByRole("button", { name: /Beta program/ })).focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Mission Workspace", level: 1 }),
+    );
+    const connections = screen.getByRole("button", { name: "Connections" });
+    connections.focus();
+    await act(async () => pending.resolve(missionFixture("WS:BETA", "JOB-B")));
+    expect(document.activeElement).toBe(connections);
+  });
+
+  it("does not focus a heading on initial render or a late Programs read", async () => {
+    const pending = deferred<unknown>();
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      readPrograms: () => pending.promise,
+      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+    };
+    render(<App />);
+    expect(document.activeElement).toBe(document.body);
+    const action = screen.getByRole("button", { name: "Open Programs" });
+    action.focus();
+    await act(async () => pending.resolve(controlRoomFixture()));
+    expect(document.activeElement).toBe(action);
   });
 });
