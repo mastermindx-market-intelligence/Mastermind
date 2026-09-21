@@ -487,11 +487,17 @@ def test_effective_tool_schema_producer_maps_real_tool_families() -> None:
         binding_generation=7,
         observed_at_ms=1_789_870_000_000,
         expires_at_ms=1_789_870_120_000,
-        family_serviceability={
-            "github": True,
-            "executive": True,
-            "studio_direct": True,
-            "desktop_commander": True,
+        capability_serviceability={
+            "desktop_commander_command": True,
+            "desktop_commander_read": True,
+            "desktop_commander_write": True,
+            "executive_read": True,
+            "executive_submit": True,
+            "github_read": True,
+            "github_write": True,
+            "studio_direct_command": True,
+            "studio_direct_read": True,
+            "studio_direct_write": True,
         },
     )
     states = {item.name: item.state for item in receipt.observations}
@@ -525,7 +531,7 @@ def test_effective_tool_schema_producer_turns_github_read_only_astra_into_rebind
         binding_generation=7,
         observed_at_ms=1_789_870_000_000,
         expires_at_ms=1_789_870_120_000,
-        family_serviceability={"github": True},
+        capability_serviceability={"github_read": True},
     )
     states = {item.name: item.state for item in receipt.observations}
     assert states["github_read"] is wcap.CapabilityObservationState.PRESENT
@@ -627,10 +633,10 @@ def test_failed_executive_serviceability_does_not_false_green_visible_submit() -
         binding_generation=7,
         observed_at_ms=1_789_870_000_000,
         expires_at_ms=1_789_870_120_000,
-        family_serviceability={
-            "executive": False,
-            "studio_direct": True,
-            "desktop_commander": True,
+        capability_serviceability={
+            "executive_submit": False,
+            "studio_direct_write": True,
+            "desktop_commander_write": True,
         },
     )
     observations = {item.name: item for item in receipt.observations}
@@ -671,20 +677,20 @@ def test_successful_serviceability_without_exposed_surface_is_refused() -> None:
             binding_generation=7,
             observed_at_ms=1_789_870_000_000,
             expires_at_ms=1_789_870_120_000,
-            family_serviceability={"executive": True},
+            capability_serviceability={"executive_submit": True},
         )
 
 
 @pytest.mark.parametrize(
-    "family_serviceability",
+    "capability_serviceability",
     (
-        {"unknown_family": True},
-        {"github": 1},
-        {"github": "yes"},
+        {"invented_super_write": True},
+        {"github_read": 1},
+        {"github_read": "yes"},
     ),
 )
 def test_invalid_serviceability_probe_shapes_are_refused(
-    family_serviceability: object,
+    capability_serviceability: object,
 ) -> None:
     with pytest.raises(
         wcap.WebCeoSessionCapabilityError,
@@ -699,7 +705,7 @@ def test_invalid_serviceability_probe_shapes_are_refused(
             binding_generation=7,
             observed_at_ms=1_789_870_000_000,
             expires_at_ms=1_789_870_120_000,
-            family_serviceability=family_serviceability,
+            capability_serviceability=capability_serviceability,
         )
 
 
@@ -848,3 +854,70 @@ def test_negative_schema_projection_round_trips_through_closed_receipt_wire() ->
         expires_at_ms=1_789_870_120_000,
     )
     assert wcap.validate_session_capability_receipt(receipt.to_dict()) == receipt
+
+
+def test_successful_read_preflight_never_promotes_sibling_write() -> None:
+    receipt = wcap.build_receipt_from_effective_tool_schema(
+        tool_names=(
+            "mcp__GitHub__fetch_file",
+            "mcp__GitHub__update_file",
+        ),
+        worker_id="web-ceo-c3-astra",
+        quota_class="chatgpt-pro",
+        session_ref="websol-c3-session-17",
+        binding_ref="runtimebinding-websol-c3-17",
+        binding_generation=7,
+        observed_at_ms=1_789_870_000_000,
+        expires_at_ms=1_789_870_120_000,
+        capability_serviceability={"github_read": True},
+    )
+    observations = {item.name: item for item in receipt.observations}
+    assert (
+        observations["github_read"].state
+        is wcap.CapabilityObservationState.PRESENT
+    )
+    assert (
+        observations["github_read"].proof_class
+        is wcap.CapabilityProofClass.NO_EFFECT_PROBE
+    )
+    assert (
+        observations["github_write"].state
+        is wcap.CapabilityObservationState.UNKNOWN
+    )
+    assert (
+        observations["github_write"].proof_class
+        is wcap.CapabilityProofClass.EFFECTIVE_SCHEMA
+    )
+
+
+def test_write_preflight_is_independent_from_read_preflight() -> None:
+    receipt = wcap.build_receipt_from_effective_tool_schema(
+        tool_names=(
+            "mcp__GitHub__fetch_file",
+            "mcp__GitHub__update_file",
+        ),
+        worker_id="web-ceo-c3-astra",
+        quota_class="chatgpt-pro",
+        session_ref="websol-c3-session-17",
+        binding_ref="runtimebinding-websol-c3-17",
+        binding_generation=7,
+        observed_at_ms=1_789_870_000_000,
+        expires_at_ms=1_789_870_120_000,
+        capability_serviceability={
+            "github_read": True,
+            "github_write": False,
+        },
+    )
+    observations = {item.name: item for item in receipt.observations}
+    assert (
+        observations["github_read"].state
+        is wcap.CapabilityObservationState.PRESENT
+    )
+    assert (
+        observations["github_write"].state
+        is wcap.CapabilityObservationState.UNKNOWN
+    )
+    assert (
+        observations["github_write"].proof_class
+        is wcap.CapabilityProofClass.NO_EFFECT_PROBE
+    )

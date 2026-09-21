@@ -75,19 +75,7 @@ KNOWN_EFFECTIVE_CAPABILITIES = (
     "studio_direct_write",
 )
 
-CAPABILITY_FAMILIES = {
-    "desktop_commander_command": "desktop_commander",
-    "desktop_commander_read": "desktop_commander",
-    "desktop_commander_write": "desktop_commander",
-    "executive_read": "executive",
-    "executive_submit": "executive",
-    "github_read": "github",
-    "github_write": "github",
-    "studio_direct_command": "studio_direct",
-    "studio_direct_read": "studio_direct",
-    "studio_direct_write": "studio_direct",
-}
-SERVICEABILITY_FAMILIES = frozenset(CAPABILITY_FAMILIES.values())
+SERVICEABILITY_CAPABILITIES = frozenset(KNOWN_EFFECTIVE_CAPABILITIES)
 
 
 class WebCeoSessionCapabilityError(ValueError):
@@ -395,19 +383,19 @@ def build_receipt_from_effective_tool_schema(
     binding_generation: int,
     observed_at_ms: int,
     expires_at_ms: int,
-    family_serviceability: Mapping[str, bool] | None = None,
+    capability_serviceability: Mapping[str, bool] | None = None,
 ) -> WebCeoSessionCapabilityReceipt:
-    """Derive capability evidence from schema plus no-effect serviceability.
+    """Derive capability evidence from schema plus exact-action preflight.
 
     A complete effective schema may prove that a capability is absent. It may
-    not prove that a visible connector is actually usable. Positive capability
-    therefore requires a successful current-generation no-effect serviceability
-    probe for that connector family. Failed or unprobed serviceability remains
-    UNKNOWN and cannot cross the placement commitment fence.
+    not prove that a visible action is actually usable. Positive capability
+    therefore requires a successful current-generation no-effect permission /
+    capability / binding / serviceability preflight for that EXACT capability.
+    A successful READ probe never promotes sibling WRITE/ADMIN/COMMAND actions.
+    Failed or unprobed action serviceability remains UNKNOWN.
 
-    family_serviceability is deliberately coarse to connector families, never
-    organizational permission. It says only whether a safe read or health probe
-    for that exact current family generation succeeded.
+    capability_serviceability is technical/resource evidence only. It never
+    grants organizational or source-writer authority.
     """
 
     if isinstance(tool_names, (str, bytes)) or not isinstance(tool_names, Sequence):
@@ -419,23 +407,19 @@ def build_receipt_from_effective_tool_schema(
     if tuple(sorted(effective)) != KNOWN_EFFECTIVE_CAPABILITIES:
         raise WebCeoSessionCapabilityError("EFFECTIVE_CAPABILITY_MAP_INVALID")
 
-    if family_serviceability is None:
+    if capability_serviceability is None:
         probes: dict[str, bool] = {}
-    elif isinstance(family_serviceability, Mapping):
-        probes = dict(family_serviceability)
+    elif isinstance(capability_serviceability, Mapping):
+        probes = dict(capability_serviceability)
     else:
         raise WebCeoSessionCapabilityError("SERVICEABILITY_PROBES_INVALID")
     if any(
-        family not in SERVICEABILITY_FAMILIES or type(result) is not bool
-        for family, result in probes.items()
+        capability not in SERVICEABILITY_CAPABILITIES or type(result) is not bool
+        for capability, result in probes.items()
     ):
         raise WebCeoSessionCapabilityError("SERVICEABILITY_PROBES_INVALID")
-    for family, result in probes.items():
-        if result and not any(
-            effective[name]
-            for name in KNOWN_EFFECTIVE_CAPABILITIES
-            if CAPABILITY_FAMILIES[name] == family
-        ):
+    for capability, result in probes.items():
+        if result and not effective[capability]:
             raise WebCeoSessionCapabilityError(
                 "SERVICEABILITY_PROBE_WITHOUT_SURFACE"
             )
@@ -446,7 +430,7 @@ def build_receipt_from_effective_tool_schema(
             state = CapabilityObservationState.ABSENT
             proof = CapabilityProofClass.EFFECTIVE_SCHEMA
         else:
-            probe = probes.get(CAPABILITY_FAMILIES[name])
+            probe = probes.get(name)
             if probe is True:
                 state = CapabilityObservationState.PRESENT
                 proof = CapabilityProofClass.NO_EFFECT_PROBE
