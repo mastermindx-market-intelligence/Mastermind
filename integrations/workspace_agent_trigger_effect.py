@@ -111,7 +111,8 @@ class WorkspaceTriggerEffectOutcome:
     event_ref: str
     effect_fingerprint: str
     terminal_command_id: str | None
-    provider_request_sent: bool
+    provider_call_invoked: bool
+    provider_request_state: str
     replayed: bool
     terminal_persisted: bool
 
@@ -287,7 +288,8 @@ def _outcome(
     event_ref: str,
     effect_fingerprint: str,
     terminal_command_id: str | None,
-    provider_request_sent: bool,
+    provider_call_invoked: bool,
+    provider_request_state: str,
     replayed: bool,
     terminal_persisted: bool,
 ) -> WorkspaceTriggerEffectOutcome:
@@ -298,7 +300,8 @@ def _outcome(
         event_ref=event_ref,
         effect_fingerprint=effect_fingerprint,
         terminal_command_id=terminal_command_id,
-        provider_request_sent=provider_request_sent,
+        provider_call_invoked=provider_call_invoked,
+        provider_request_state=provider_request_state,
         replayed=replayed,
         terminal_persisted=terminal_persisted,
     )
@@ -376,7 +379,8 @@ class WorkspaceTriggerEffectOwner:
                 event_ref=bound["event_ref"],
                 effect_fingerprint=fingerprint,
                 terminal_command_id=None,
-                provider_request_sent=False,
+                provider_call_invoked=False,
+                provider_request_state="PROVEN_NOT_SENT",
                 replayed=False,
                 terminal_persisted=False,
             )
@@ -399,7 +403,8 @@ class WorkspaceTriggerEffectOwner:
                 event_ref=bound["event_ref"],
                 effect_fingerprint=fingerprint,
                 terminal_command_id=None,
-                provider_request_sent=False,
+                provider_call_invoked=False,
+                provider_request_state="PROVEN_NOT_SENT",
                 replayed=True,
                 terminal_persisted=False,
             )
@@ -410,7 +415,14 @@ class WorkspaceTriggerEffectOwner:
             event_ref=bound["event_ref"],
             effect_fingerprint=fingerprint,
             terminal_command_id=event.command_id,
-            provider_request_sent=False,
+            provider_call_invoked=False,
+            provider_request_state=(
+                "PROVEN_SENT"
+                if state == "APPLIED" or reason.startswith("PROVIDER_REJECTED_")
+                else "PROVEN_NOT_SENT"
+                if state == "REFUSED"
+                else "UNKNOWN"
+            ),
             replayed=True,
             terminal_persisted=True,
         )
@@ -476,7 +488,14 @@ class WorkspaceTriggerEffectOwner:
                         event_ref=event_ref,
                         effect_fingerprint=fingerprint,
                         terminal_command_id=event.command_id,
-                        provider_request_sent=False,
+                        provider_call_invoked=False,
+                        provider_request_state=(
+                            "PROVEN_SENT"
+                            if state == "APPLIED" or reason.startswith("PROVIDER_REJECTED_")
+                            else "PROVEN_NOT_SENT"
+                            if state == "REFUSED"
+                            else "UNKNOWN"
+                        ),
                         replayed=True,
                         terminal_persisted=True,
                     )
@@ -488,7 +507,8 @@ class WorkspaceTriggerEffectOwner:
                 event_ref=event_ref,
                 effect_fingerprint=fingerprint,
                 terminal_command_id=None,
-                provider_request_sent=False,
+                provider_call_invoked=False,
+                provider_request_state="PROVEN_NOT_SENT",
                 replayed=True,
                 terminal_persisted=False,
             )
@@ -564,7 +584,15 @@ class WorkspaceTriggerEffectOwner:
                     event_ref=event_ref,
                     effect_fingerprint=fingerprint,
                     terminal_command_id=prior_event.command_id,
-                    provider_request_sent=True,
+                    provider_call_invoked=True,
+                    provider_request_state=(
+                        "PROVEN_SENT"
+                        if prior_state == "APPLIED"
+                        or prior_reason.startswith("PROVIDER_REJECTED_")
+                        else "PROVEN_NOT_SENT"
+                        if prior_state == "REFUSED"
+                        else "UNKNOWN"
+                    ),
                     replayed=True,
                     terminal_persisted=True,
                 )
@@ -584,7 +612,14 @@ class WorkspaceTriggerEffectOwner:
             event_ref=event_ref,
             effect_fingerprint=fingerprint,
             terminal_command_id=commands[command_key],
-            provider_request_sent=True,
+            provider_call_invoked=True,
+            provider_request_state=(
+                "PROVEN_SENT"
+                if state == "APPLIED" or reason.startswith("PROVIDER_REJECTED_")
+                else "PROVEN_NOT_SENT"
+                if state == "REFUSED"
+                else "UNKNOWN"
+            ),
             replayed=False,
             terminal_persisted=True,
         )
