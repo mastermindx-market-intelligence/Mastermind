@@ -18,6 +18,7 @@ from typing import Any, Protocol
 from control_plane.executive_terminal_return import (
     TerminalReturnCandidate,
     TerminalReturnProjectionError,
+    TerminalReviewFinding,
     reduce_terminal_return,
 )
 from control_plane.executive_delegation_identity import derive_delegation_identity
@@ -274,7 +275,11 @@ def _bound_thread(
 def _build_message(
     candidate: TerminalReturnCandidate,
     context: Mapping[str, Any],
+    *,
+    synopsis_version: str = "v1",
 ) -> dict[str, Any]:
+    if synopsis_version not in {"v1", "v2"}:
+        _refuse("DIALOGUE_REFUSED")
     if (
         not isinstance(candidate, TerminalReturnCandidate)
         or candidate.runtime_status != "COMPLETED"
@@ -295,8 +300,28 @@ def _build_message(
             )
         )
         or not isinstance(candidate.summary, str)
+        or not isinstance(candidate.next_actions, tuple)
+        or any(not isinstance(item, str) or not item for item in candidate.next_actions)
+        or len(set(candidate.next_actions)) != len(candidate.next_actions)
+        or not isinstance(candidate.review_findings, tuple)
     ):
         _refuse("DIALOGUE_REFUSED")
+    for finding in candidate.review_findings:
+        if (
+            not isinstance(finding, TerminalReviewFinding)
+            or not isinstance(finding.code, str)
+            or not finding.code
+            or finding.severity not in {"info", "warning", "blocking"}
+            or not isinstance(finding.message, str)
+            or not finding.message
+            or not isinstance(finding.evidence_digests, tuple)
+            or any(
+                not isinstance(digest, str) or _DIGEST_RE.fullmatch(digest) is None
+                for digest in finding.evidence_digests
+            )
+            or len(set(finding.evidence_digests)) != len(finding.evidence_digests)
+        ):
+            _refuse("DIALOGUE_REFUSED")
     if candidate.role == "review":
         if (
             not isinstance(candidate.review_verdict, str)
@@ -305,7 +330,7 @@ def _build_message(
             _refuse("DIALOGUE_REFUSED")
         body_status = "PASS" if candidate.review_verdict == "approve" else "FAIL"
     else:
-        if candidate.review_verdict is not None:
+        if candidate.review_verdict is not None or candidate.review_findings:
             _refuse("DIALOGUE_REFUSED")
         body_status = "PASS"
 
@@ -327,16 +352,82 @@ def _build_message(
             "created_at": candidate.terminal_at,
         }
 
-    def synopsis(*, include_summary: bool) -> str:
-        result: dict[str, str] = {
-            "schema": "mastermind.executive_terminal_result_synopsis/v1",
+    # Preserve the established v1 wire for returns that carry no richer
+    # review rationale or reserved next action. This keeps legacy consumers
+    # byte-compatible while allowing enriched canonical results to opt into v2.
+    if synopsis_version == "v1":
+        def legacy_synopsis(*, include_summary: bool) -> str:
+            result: dict[str, str] = {
+                "schema": "mastermind.executive_terminal_result_synopsis/v1",
+                "role": candidate.role,
+                "outcome": body_status,
+                "result_envelope_digest": candidate.result_envelope_digest,
+                "terminal_evidence_digest": candidate.terminal_evidence_digest,
+                "artifact_receipt_digest": candidate.artifact_receipt_digest,
+                "validation_receipt_digest": candidate.validation_receipt_digest,
+                "effective_grant_digest": candidate.effective_grant_digest,
+            }
+            if include_summary:
+                result["summary"] = candidate.summary
+            else:
+                result["summary_sha256"] = hashlib.sha256(
+                    candidate.summary.encode("utf-8")
+                ).hexdigest()
+            return json.dumps(
+                result,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+
+        try:
+            return build_message_v2(envelope(legacy_synopsis(include_summary=True)))
+        except DialogueContractError:
+            try:
+                return build_message_v2(envelope(legacy_synopsis(include_summary=False)))
+            except DialogueContractError:
+                _refuse("DIALOGUE_REFUSED")
+
+    def canonical_digest(value: Any) -> str:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    findings = [
+        {
+            "code": item.code,
+            "severity": item.severity,
+            "message": item.message,
+            "evidence_digests": list(item.evidence_digests),
+        }
+        for item in candidate.review_findings
+    ]
+    finding_counts = {
+        severity: sum(1 for item in candidate.review_findings if item.severity == severity)
+        for severity in ("blocking", "warning", "info")
+    }
+
+    def synopsis(
+        *,
+        include_summary: bool,
+        finding_mode: str,
+        include_next_actions: bool,
+    ) -> str:
+        result: dict[str, Any] = {
+            "schema": "mastermind.executive_terminal_result_synopsis/v2",
             "role": candidate.role,
             "outcome": body_status,
-            "result_envelope_digest": candidate.result_envelope_digest,
-            "terminal_evidence_digest": candidate.terminal_evidence_digest,
-            "artifact_receipt_digest": candidate.artifact_receipt_digest,
-            "validation_receipt_digest": candidate.validation_receipt_digest,
-            "effective_grant_digest": candidate.effective_grant_digest,
+            "digests": {
+                "result": candidate.result_envelope_digest,
+                "terminal": candidate.terminal_evidence_digest,
+                "artifact": candidate.artifact_receipt_digest,
+                "validation": candidate.validation_receipt_digest,
+                "grant": candidate.effective_grant_digest,
+            },
         }
         if include_summary:
             result["summary"] = candidate.summary
@@ -344,6 +435,45 @@ def _build_message(
             result["summary_sha256"] = hashlib.sha256(
                 candidate.summary.encode("utf-8")
             ).hexdigest()
+
+        if include_next_actions:
+            result["next"] = list(candidate.next_actions)
+        else:
+            result["next_count"] = len(candidate.next_actions)
+            result["next_sha256"] = canonical_digest(list(candidate.next_actions))
+
+        if candidate.role == "review":
+            review: dict[str, Any] = {
+                "verdict": candidate.review_verdict,
+                "counts": finding_counts,
+            }
+            inline_findings = [
+                {
+                    "code": item["code"],
+                    "severity": item["severity"],
+                    "message": item["message"],
+                }
+                for item in findings
+            ]
+            if finding_mode == "all":
+                # The result-envelope digest above commits the complete review
+                # payload, including each finding's evidence digests.
+                review["findings"] = inline_findings
+            elif finding_mode == "blocking":
+                review["findings"] = [
+                    item for item in inline_findings if item["severity"] == "blocking"
+                ]
+                review["findings_scope"] = "blocking_only"
+                review["findings_sha256"] = canonical_digest(findings)
+            elif finding_mode == "digest":
+                review["findings_sha256"] = canonical_digest(findings)
+            else:
+                _refuse("DIALOGUE_REFUSED")
+            result["review"] = review
+        elif finding_mode != "digest":
+            # Non-review roles have no review details; use one canonical mode.
+            _refuse("DIALOGUE_REFUSED")
+
         return json.dumps(
             result,
             ensure_ascii=True,
@@ -351,15 +481,30 @@ def _build_message(
             sort_keys=True,
         )
 
-    # RESULT always carries the stable evidence synopsis.  Contract-only
-    # refusal of the raw summary (too large or unsafe) selects its digest form.
-    try:
-        return build_message_v2(envelope(synopsis(include_summary=True)))
-    except DialogueContractError:
+    # Preserve the richest bounded explanation that the frozen RESULT contract
+    # can safely carry. Never slice model text: fall back by semantic fields and
+    # finally to counts/digests when a complete field set is too large/unsafe.
+    attempts = (
+        (True, "all" if candidate.role == "review" else "digest", True),
+        (False, "all" if candidate.role == "review" else "digest", True),
+        (False, "blocking" if candidate.role == "review" else "digest", True),
+        (False, "blocking" if candidate.role == "review" else "digest", False),
+        (False, "digest", False),
+    )
+    for include_summary, finding_mode, include_next_actions in attempts:
         try:
-            return build_message_v2(envelope(synopsis(include_summary=False)))
+            return build_message_v2(
+                envelope(
+                    synopsis(
+                        include_summary=include_summary,
+                        finding_mode=finding_mode,
+                        include_next_actions=include_next_actions,
+                    )
+                )
+            )
         except DialogueContractError:
-            _refuse("DIALOGUE_REFUSED")
+            continue
+    _refuse("DIALOGUE_REFUSED")
 
 
 def _receipt(
@@ -436,6 +581,7 @@ class ExecutiveTerminalReturnProjector:
         *,
         socket_path: Path,
         service_call: ServiceCall = call_service,
+        result_synopsis_version: str = "v1",
     ) -> None:
         path = Path(socket_path)
         if not path.is_absolute():
@@ -446,9 +592,12 @@ class ExecutiveTerminalReturnProjector:
             raise TypeError("binding_resolver must expose resolve()")
         if not callable(service_call):
             raise TypeError("service_call must be callable")
+        if result_synopsis_version not in {"v1", "v2"}:
+            raise ValueError("result_synopsis_version must be v1 or v2")
         self._binding_resolver = binding_resolver
         self._socket_path = path
         self._service_call = service_call
+        self._result_synopsis_version = result_synopsis_version
 
     def _resolve(
         self,
@@ -464,7 +613,11 @@ class ExecutiveTerminalReturnProjector:
             candidate,
             binding,
         )
-        return context, thread_ts, _build_message(candidate, context)
+        return context, thread_ts, _build_message(
+            candidate,
+            context,
+            synopsis_version=self._result_synopsis_version,
+        )
 
     async def _bind(
         self,
