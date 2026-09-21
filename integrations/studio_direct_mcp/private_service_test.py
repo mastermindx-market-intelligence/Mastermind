@@ -223,6 +223,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     """Recreate one exact historical layout; never include newly staged modules."""
     config = json.loads(roots["config"].read_text(encoding="utf-8"))
     config.pop("paperDesign", None)
+    config.pop("mosyle", None)
     if not typed_git:
         config.pop("gitPublish", None)
     roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
@@ -230,8 +231,8 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     manifest["version"] = 1
     for key in ("nodeHash", "backendHash", "dependencyTreeHash"):
         manifest.pop(key, None)
-    removed = ("paper-design.mjs", "output-budget.mjs") if typed_git else (
-        "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
+    removed = ("mosyle.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
+        "mosyle.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
     for name in removed:
         (roots["base"] / name).unlink()
@@ -262,6 +263,7 @@ class TestIdentity(unittest.TestCase):
                 "output-budget.mjs",
                 "git-publish.mjs",
                 "paper-design.mjs",
+                "mosyle.mjs",
                 "private-tunnel-auth.mjs",
                 "private-tunnel-gateway.mjs",
                 "package.json",

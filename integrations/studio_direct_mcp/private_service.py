@@ -57,6 +57,8 @@ PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v2")
 PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
 PAPER_BRIDGE_SHA256 = "83e36b0bcd0acabbf5dd6ace5b708e5797a52e7db732e8dbbf848ded781c231d"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
+MOSYLE_CREDENTIAL_REL = Path(".local/share/studio-direct-mcp/secrets/mosyle.json")
+MOSYLE_TIMEOUT_MS = 15_000
 
 # CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
@@ -73,22 +75,24 @@ STAGE_FILES = (
     "output-budget.mjs",
     "git-publish.mjs",
     "paper-design.mjs",
+    "mosyle.mjs",
     "private-tunnel-auth.mjs",
     "private-tunnel-gateway.mjs",
     "package.json",
     "package-lock.json",
 )
 
-# Historical installs are admitted only through exact known file sets. The
-# immediately preceding v0.1.5 install has every current file except the new
-# Paper capability module; earlier generations also predate output paging and
-# typed Git.
-LEGACY_STAGE_FILES_V3 = tuple(name for name in STAGE_FILES if name != "paper-design.mjs")
+# Historical staged file sets are admitted only for bounded upgrades. The
+# immediate parent generation has every current file except the Mosyle module;
+# older generations also predate Paper, output paging, and typed Git.
+LEGACY_STAGE_FILES_V4 = tuple(name for name in STAGE_FILES if name != "mosyle.mjs")
+LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
 LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V4),
         frozenset(LEGACY_STAGE_FILES_V3),
         frozenset(LEGACY_STAGE_FILES_V2),
         frozenset(LEGACY_STAGE_FILES_V1),
@@ -496,6 +500,16 @@ def _paper_design_config(user_root: Path) -> dict:
     }
 
 
+def _mosyle_config(user_root: Path) -> dict | None:
+    credential = user_root / MOSYLE_CREDENTIAL_REL
+    if not credential.is_file() or credential.is_symlink():
+        return None
+    st = credential.stat()
+    if st.st_uid != os.getuid() or (stat.S_IMODE(st.st_mode) & 0o077) != 0:
+        return None
+    return {"enabled": True, "credentialPath": str(credential), "timeoutMs": MOSYLE_TIMEOUT_MS}
+
+
 def _build_config(
     account: str,
     host: str,
@@ -522,6 +536,7 @@ def _build_config(
         "reclaimIdleGraceMs": 30_000,
         "gitPublish": _typed_git_config(user_root),
         "paperDesign": _paper_design_config(user_root),
+        "mosyle": _mosyle_config(user_root),
     }
 
 

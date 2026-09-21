@@ -100,6 +100,13 @@ import {
   toolResult as gitToolResult,
 } from './git-publish.mjs';
 import {
+  MOSYLE_TOOLS,
+  MOSYLE_TOOL_NAMES,
+  createMosyleClient,
+  mosyleToolResult,
+  resolveMosyleConfig,
+} from './mosyle.mjs';
+import {
   PAPER_DESIGN_TOOLS,
   PAPER_DESIGN_TOOL_NAMES,
   createPaperDesigner,
@@ -108,7 +115,7 @@ import {
 } from './paper-design.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.6';
+export const GATEWAY_VERSION = '0.1.7';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -195,6 +202,8 @@ const KNOWN_READONLY_TOOL_NAMES = new Set([
   'paper_inspect',
   'paper_catalog',
   'paper_read',
+  'mosyle_fleet_status',
+  'mosyle_device_status',
 ]);
 
 /**
@@ -361,6 +370,7 @@ export function resolveConfig(partial = {}) {
 
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
+  cfg.mosyle = resolveMosyleConfig(cfg.mosyle);
 
   return cfg;
 }
@@ -832,6 +842,7 @@ class GatewaySession {
     this.server = null;
     this.gitPublisher = cfg.gitPublish ? createGitPublisher(cfg.gitPublish) : null;
     this.paperDesigner = cfg.paperDesign ? createPaperDesigner(cfg.paperDesign) : null;
+    this.mosyleClient = cfg.mosyle ? createMosyleClient(cfg.mosyle) : null;
     this.owner?.sessions.add(this);
   }
 
@@ -933,7 +944,7 @@ class GatewaySession {
         capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
-          'studio_ping, studio_output_page, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
+          'studio_ping, studio_output_page, configured studio_git_* tools, configured paper_* design tools, and configured mosyle_* read tools are gateway-owned. ' +
           'studio_output_page reads retained output without repeating the original action. ' +
           'Paper design tools use the host-pinned guarded Paper adapter and never route through Desktop Commander. ' +
           'All remaining tools are proxied to the backend.',
@@ -954,6 +965,9 @@ class GatewaySession {
         }
         if (session.paperDesigner) {
           localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
+        }
+        if (session.mosyleClient) {
+          localTools.push(...MOSYLE_TOOLS.map((tool) => ({ ...tool })));
         }
         const backendNames = new Set(tools.map((tool) => tool.name));
         for (const localTool of localTools) {
@@ -1025,6 +1039,18 @@ class GatewaySession {
         classification: CLASSIFICATION.OK,
       });
       return result;
+    }
+
+    if (this.mosyleClient && MOSYLE_TOOL_NAMES.has(name)) {
+      return this.withBackendSlot(async () => {
+        this.bumpTool(name);
+        const result = await this.mosyleClient.call(name, request?.params?.arguments ?? {});
+        log(result.isError ? 'warn' : 'info', 'tool_call', {
+          sid: this.tag, tool: name, durationMs: Date.now() - started,
+          classification: result.isError ? CLASSIFICATION.TOOL_ERROR : CLASSIFICATION.OK,
+        });
+        return mosyleToolResult(result.value, result.isError);
+      }, { kind: 'tools/call', tool: name, started });
     }
 
     if (this.paperDesigner && PAPER_DESIGN_TOOL_NAMES.has(name)) {
