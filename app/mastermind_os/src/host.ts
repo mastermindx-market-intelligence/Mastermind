@@ -1,7 +1,11 @@
 import {
   decodeMission,
+  decodeMissionv3,
   normalizeSelection,
-  type MissionRead,
+  normalizeWorkspaceSelection,
+  type MissionDocument,
+  type MissionSelection,
+  type Missionv3Document,
   type ProgramRead,
 } from "./mission";
 import {
@@ -9,6 +13,12 @@ import {
   decodeWindow,
   type WindowDocument,
 } from "./workspace-contract";
+import {
+  decodeResultEnvelope,
+  normalizeResultSelection,
+  type ResultEnvelopeDigestShape,
+  type ResultSelection,
+} from "./result";
 
 export interface AuthState {
   status: "unconfigured" | "signed_out" | "signing_in" | "signed_in" | "error";
@@ -27,11 +37,42 @@ export interface RawClient {
     root_job_id: string;
     signal: AbortSignal;
   }): Promise<unknown>;
+  readMissionV3?(request: {
+    workRef: string;
+    rootJobId: string;
+    signal: AbortSignal;
+  }): Promise<unknown>;
+  readResult?(request: {
+    workRef: string;
+    rootJobId: string;
+    jobId: string;
+    attemptId: string;
+    resultEnvelopeDigest: string;
+    signal: AbortSignal;
+  }): Promise<unknown>;
   readCurrentWindow(request: { signal: AbortSignal }): Promise<unknown>;
 }
+/**
+ * One internally consistent typed read API: every fixed read returns its
+ * fully decoded frozen DTO, or throws. The typed allowed 503 body is not a
+ * separate wrapper kind — it is the validated
+ * `mastermind.workspace_role_result.v1` envelope with availability
+ * "UNAVAILABLE", preserved whole (reason_codes included) for the consumer
+ * render path. The exact five selector fields stay separate from the
+ * AbortSignal, which is an option, never part of the selector.
+ */
+export interface MissionResultRead {
+  (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
+}
 export interface MissionHost {
-  readMission?: MissionRead;
+  readMission?: (
+    request: MissionSelection & { signal: AbortSignal },
+  ) => Promise<unknown>;
+  readMissionV3?: (
+    request: MissionSelection & { signal: AbortSignal },
+  ) => Promise<unknown>;
   readPrograms?: ProgramRead;
+  readResult?: MissionResultRead;
   readCurrentWindow?: (request: {
     signal: AbortSignal;
   }) => Promise<WindowDocument>;
@@ -88,6 +129,61 @@ export function bindMissionHost(client: RawClient): MissionHost {
         throw new Error("MISSION_RESPONSE_INVALID");
       return result;
     },
+    async readMissionV3({ workRef, rootJobId, signal }) {
+      const selection = normalizeWorkspaceSelection({ workRef, rootJobId });
+      if (!selection) throw new Error("SELECTION_INVALID");
+      const started = epoch;
+      check(signal, started);
+      if (!client.readMissionV3) throw new Error("MISSION_V3_UNAVAILABLE");
+      const raw = await client.readMissionV3({
+        workRef,
+        rootJobId,
+        signal,
+      });
+      check(signal, started);
+      const result = decodeMissionv3(raw, selection);
+      if (!result) throw new Error("MISSION_V3_RESPONSE_INVALID");
+      return result;
+    },
+    async readResult({
+      workRef,
+      rootJobId,
+      jobId,
+      attemptId,
+      resultEnvelopeDigest,
+      signal,
+    }) {
+      // The exact five-key selector is normalized alone; the AbortSignal is
+      // an option and never part of the selector.
+      const normalized = normalizeResultSelection({
+        workRef,
+        rootJobId,
+        jobId,
+        attemptId,
+        resultEnvelopeDigest,
+      });
+      if (!normalized) throw new Error("SELECTION_INVALID");
+      const started = epoch;
+      check(signal, started);
+      if (!client.readResult) throw new Error("RESULT_READ_UNAVAILABLE");
+      const raw = await client.readResult({
+        workRef: normalized.workRef,
+        rootJobId: normalized.rootJobId,
+        jobId: normalized.jobId,
+        attemptId: normalized.attemptId,
+        resultEnvelopeDigest: normalized.resultEnvelopeDigest,
+        signal,
+      });
+      check(signal, started);
+      // The typed allowed 503 body is the same frozen envelope with
+      // availability "UNAVAILABLE": it survives only through the full
+      // decoder below, which validates the complete closed body, its
+      // reason vocabulary and its null result/observation joins. There is
+      // deliberately no shortcut around that validation.
+      const decoded = decodeResultEnvelope(raw, normalized);
+      if (!decoded) throw new Error("RESULT_RESPONSE_INVALID");
+      return decoded;
+    },
     async readCurrentWindow({ signal }) {
       const started = epoch;
       check(signal, started);
@@ -132,6 +228,7 @@ function authState(raw: unknown): AuthState {
     throw new Error("AUTH_STATE_INVALID");
   return { ...r } as unknown as AuthState;
 }
+
 /** Injectable fixed command functions permit ordinary fixture tests without a native app launch. */
 export async function createNativeClient(
   invoke: Invoke,
@@ -162,7 +259,12 @@ export async function createNativeClient(
   const status = await invoke("auth_status");
   if (initial === epoch) update(status);
   async function read(
-    command: "read_programs" | "read_mission" | "read_current_window",
+    command:
+      | "read_programs"
+      | "read_mission"
+      | "read_mission_v3"
+      | "read_result"
+      | "read_current_window",
     signal: AbortSignal,
     args?: Record<string, unknown>,
   ) {
@@ -203,6 +305,39 @@ export async function createNativeClient(
         return Promise.reject(new Error("SELECTION_INVALID"));
       return read("read_mission", signal, {
         selection: { work_ref, root_job_id },
+      });
+    },
+    readMissionV3: ({ workRef, rootJobId, signal }) => {
+      if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
+        return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("read_mission_v3", signal, {
+        selection: { work_ref: workRef, root_job_id: rootJobId },
+      });
+    },
+    readResult: ({
+      workRef,
+      rootJobId,
+      jobId,
+      attemptId,
+      resultEnvelopeDigest,
+      signal,
+    }) => {
+      const normalized = normalizeResultSelection({
+        workRef,
+        rootJobId,
+        jobId,
+        attemptId,
+        resultEnvelopeDigest,
+      });
+      if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("read_result", signal, {
+        selection: {
+          work_ref: workRef,
+          root_job_id: rootJobId,
+          job_id: jobId,
+          attempt_id: attemptId,
+          result_envelope_digest: resultEnvelopeDigest,
+        },
       });
     },
     readCurrentWindow: ({ signal }) => read("read_current_window", signal),

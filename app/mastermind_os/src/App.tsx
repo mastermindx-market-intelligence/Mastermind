@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   allEvidence,
   decodeMission,
+  decodeMissionv3,
   locationSelectionInput,
   normalizeSelection,
   programsFromControlRoom,
@@ -12,8 +13,15 @@ import {
   unavailableMission,
   type MissionDocument,
   type MissionSelection,
+  type Missionv3Document,
   type UnavailableMission,
 } from "./mission";
+import {
+  decodeResultEnvelope,
+  normalizeResultSelection,
+  type ResultEnvelopeDigestShape,
+  type ResultSelection,
+} from "./result";
 export const navigation = [
   "Today",
   "Programs",
@@ -43,6 +51,9 @@ const display = (v: unknown, f = "Not established") =>
 const label = (v: unknown) => display(v, "UNKNOWN").replaceAll("_", " ");
 const isDoc = (v: MissionDocument | UnavailableMission): v is MissionDocument =>
   !("kind" in v);
+const isDocv3 = (
+  v: Missionv3Document | UnavailableMission | null,
+): v is Missionv3Document => !!v && !("kind" in v);
 function State({ value }: { value: unknown }) {
   return (
     <span className={`state state-${String(value ?? "UNKNOWN").toLowerCase()}`}>
@@ -52,6 +63,278 @@ function State({ value }: { value: unknown }) {
 }
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="empty">{children}</p>;
+}
+
+function ResultRefs({
+  d,
+  onPick,
+  selectedKey,
+  disabled,
+}: {
+  d: Missionv3Document;
+  onPick: (selection: ResultSelection) => void;
+  selectedKey: string | null;
+  disabled: boolean;
+}) {
+  const index = d.result_refs;
+  return (
+    <section className="card">
+      <div className="section-title">
+        <div>
+          <h2>Result navigation</h2>
+          <p className="muted">
+            Unvalidated navigation from the bounded Mission v3 reference index.
+            Each row identifies exactly one tuple; this view never constructs a
+            URL or command outside the fixed selection.
+          </p>
+        </div>
+        <State value={index.availability} />
+      </div>
+      <p className="muted index-summary">
+        <span>{index.refs.length} result refs</span>
+        <span>{index.absent_job_ids.length} absent</span>
+        <span>{index.omitted_job_ids.length} omitted</span>
+      </p>
+      {index.availability === "UNAVAILABLE" ? (
+        <Empty>
+          No result index was published for this Mission v3 selection.
+        </Empty>
+      ) : index.refs.length === 0 && index.absent_job_ids.length === 0 ? (
+        <Empty>
+          No qualifying result references were returned by the bounded
+          same-snapshot index. No result history is implied.
+        </Empty>
+      ) : (
+        <ul className="items">
+          {index.refs.map((ref) => {
+            const key = `${ref.job_id}|${ref.attempt_id}|${ref.result_envelope_digest}`;
+            const sel: ResultSelection = {
+              workRef: d.program.work_ref,
+              rootJobId: ref.root_job_id,
+              jobId: ref.job_id,
+              attemptId: ref.attempt_id,
+              resultEnvelopeDigest: ref.result_envelope_digest,
+            };
+            return (
+              <li key={key}>
+                <button
+                  className={key === selectedKey ? "selected" : ""}
+                  onClick={() => onPick(sel)}
+                  disabled={disabled}
+                >
+                  <code>{ref.job_id}</code>
+                  <span>{label(ref.orchestration_role)}</span>
+                  <small>attempt {ref.attempt_id}</small>
+                  <small>
+                    digest {ref.result_envelope_digest.slice(0, 12)}…
+                  </small>
+                </button>
+              </li>
+            );
+          })}
+          {index.absent_job_ids.map((jobId) => (
+            <li key={`absent-${jobId}`}>
+              <code>{jobId}</code>
+              <span>absent</span>
+              <small>No result was emitted for this job in the snapshot.</small>
+            </li>
+          ))}
+        </ul>
+      )}
+      {(index.omitted_job_ids.length > 0 || index.truncated) && (
+        <p className="muted">
+          Omitted IDs:{" "}
+          {index.omitted_job_ids.length > 0
+            ? index.omitted_job_ids.map(label).join(", ")
+            : "none reported"}
+          {index.truncated ? " · owner snapshot was truncated" : ""}
+        </p>
+      )}
+    </section>
+  );
+}
+
+type ResultState =
+  | { kind: "IDLE" }
+  | { kind: "PENDING"; selection: ResultSelection }
+  | {
+      kind: "READY";
+      selection: ResultSelection;
+      document: ResultEnvelopeDigestShape;
+    }
+  | { kind: "UNAVAILABLE"; selection: ResultSelection; reason: string };
+
+function ResultCard({ state }: { state: ResultState }) {
+  if (state.kind === "IDLE") return null;
+  const title =
+    state.selection.jobId + " / " + state.selection.attemptId.slice(0, 8) + "…";
+  if (state.kind === "PENDING") {
+    return (
+      <section className="card">
+        <div className="section-title">
+          <h2>Result detail</h2>
+          <State value="SOURCE_READ_PENDING" />
+        </div>
+        <p className="muted">Reading the exact selected tuple…</p>
+        <code>{title}</code>
+      </section>
+    );
+  }
+  if (state.kind === "UNAVAILABLE") {
+    return (
+      <section className="card">
+        <div className="section-title">
+          <h2>Result detail</h2>
+          <State value="UNAVAILABLE" />
+        </div>
+        <p className="muted">{state.reason}</p>
+        <code>{title}</code>
+      </section>
+    );
+  }
+  const doc = state.document;
+  const result = doc.result;
+  if (doc.availability === "UNAVAILABLE" || !result) {
+    return (
+      <section className="card">
+        <div className="section-title">
+          <h2>Result detail</h2>
+          <State value={doc.availability} />
+        </div>
+        <p className="muted">
+          The bounded result read returned a typed unavailability response:{" "}
+          <code>{doc.reason_codes[0] ?? "SOURCE_UNAVAILABLE"}</code>. This is
+          not a producer acceptance and adds no result history.
+        </p>
+        <code>{title}</code>
+        <details className="reason-details">
+          <summary>Technical details</summary>
+          <code>
+            {(doc.reason_codes[0] ?? "SOURCE_UNAVAILABLE") +
+              " · selection " +
+              doc.selection.work_ref +
+              " / " +
+              doc.selection.root_job_id +
+              " / " +
+              doc.selection.job_id +
+              " / " +
+              doc.selection.attempt_id +
+              " / " +
+              doc.selection.result_envelope_digest}
+          </code>
+        </details>
+      </section>
+    );
+  }
+  const counts = result.counts.findings;
+  const review = result.review;
+  const verdictLabel =
+    review === null
+      ? "Not a review role"
+      : "Review verdict: " +
+        label(review.verdict) +
+        " · latest revision UNPROVEN";
+  return (
+    <section className="card">
+      <div className="section-title">
+        <h2>Result detail</h2>
+        <State value={doc.availability} />
+      </div>
+      {doc.availability !== "AVAILABLE" ? (
+        <p className="muted">
+          <code>{doc.reason_codes.join(" · ")}</code>
+        </p>
+      ) : null}
+      <dl>
+        <dt>Role</dt>
+        <dd>{label(result.role)}</dd>
+        <dt>Execution</dt>
+        <dd>{label(result.execution_status)}</dd>
+        <dt>Acceptance</dt>
+        <dd>
+          <State value={result.acceptance} />
+        </dd>
+        <dt>Review</dt>
+        <dd>{review === null ? "Not a review role" : verdictLabel}</dd>
+        <dt>Findings</dt>
+        <dd>
+          {counts === null
+            ? "No findings tracked for this role"
+            : `Total ${counts.total} · blocking ${counts.blocking} · warning ${counts.warning} · info ${counts.info}`}
+        </dd>
+        <dt>Next actions</dt>
+        <dd>
+          {result.counts.next_actions === 0
+            ? "None reported"
+            : `${result.counts.next_actions} item(s)`}
+        </dd>
+        <dt>Envelope digest</dt>
+        <dd>
+          <code>{result.selection.result_envelope_digest}</code>
+        </dd>
+        {review ? (
+          <>
+            <dt>Reviewed job and attempt</dt>
+            <dd>
+              <code>
+                {review.reviewed_job_id} · {review.reviewed_attempt_id}
+              </code>
+            </dd>
+            <dt>Reviewed role-result digest</dt>
+            <dd>
+              <code>{review.reviewed_result_digest}</code>
+            </dd>
+          </>
+        ) : null}
+        <dt>Role-result digest</dt>
+        <dd>
+          <code>{result.role_result_digest}</code>
+        </dd>
+        <dt>Selection</dt>
+        <dd>
+          <code>
+            {result.selection.root_job_id +
+              " · " +
+              result.selection.job_id +
+              " · " +
+              result.selection.attempt_id}
+          </code>
+        </dd>
+        <dt>Omitted</dt>
+        <dd>
+          {result.omitted.length === 0
+            ? "Whole content shown for this role."
+            : result.omitted.map((x) => label(x)).join(" · ")}
+        </dd>
+      </dl>
+      {result.content === null ? (
+        <Empty>
+          Content omitted by owner. Counts and digests remain, but the full role
+          result body was not delivered within the bounded response. A full
+          result link is not provided.
+        </Empty>
+      ) : (
+        <article className="result-content">
+          <h3>Structured role result</h3>
+          <pre className="visible-text">
+            {JSON.stringify(result.content.role_result, null, 2)}
+          </pre>
+          <h3>Summary</h3>
+          <pre className="visible-text">{result.content.summary}</pre>
+          {result.content.next_actions.length > 0 ? (
+            <>
+              <h3>Next actions</h3>
+              <ul className="artifact-list">
+                {result.content.next_actions.map((x, i) => (
+                  <li key={`na-${i}`}>{x}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </article>
+      )}
+    </section>
+  );
 }
 function Mission({ d }: { d: MissionDocument }) {
   return (
@@ -494,6 +777,11 @@ export function App() {
     [windowDocument, setWindowDocument] = useState<WindowDocument | null>(null),
     [windowPending, setWindowPending] = useState(false),
     [windowRevision, setWindowRevision] = useState(0),
+    [missionV3, setMissionV3] = useState<
+      Missionv3Document | UnavailableMission | null
+    >(null),
+    [resultState, setResultState] = useState<ResultState>({ kind: "IDLE" }),
+    resultRequest = useRef(0),
     missionRequest = useRef(0),
     programRequest = useRef(0),
     missionSelectionState =
@@ -509,6 +797,22 @@ export function App() {
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
+  const resultContext = useMemo(
+    () => ({ selection, authRevision, missionV3 }),
+    [selection, authRevision, missionV3],
+  );
+  const currentResultContext = useRef(resultContext);
+  currentResultContext.current = resultContext;
+  const resultController = useRef<AbortController | null>(null);
+  useEffect(() => {
+    resultRequest.current++;
+    resultController.current?.abort();
+    setResultState({ kind: "IDLE" });
+    return () => {
+      resultRequest.current++;
+      resultController.current?.abort();
+    };
+  }, [resultContext]);
   const routeHeading = useRef<HTMLHeadingElement>(null),
     previousView = useRef(active);
   useLayoutEffect(() => {
@@ -525,11 +829,29 @@ export function App() {
         setAuthState(state);
         setAuthRevision((n) => n + 1);
         setWindowDocument(null);
+        setMissionV3(null);
+        setResultState({ kind: "IDLE" });
         if (!state.acquisition)
           setMission(unavailableMission(null, "AUTHENTICATION_REQUIRED"));
       }),
     [],
   );
+  useEffect(() => {
+    // Selection change clears result detail. The bounded read for the new
+    // tuple must be reissued; we never carry stale detail across a click.
+    setResultState({ kind: "IDLE" });
+  }, [selection]);
+  useEffect(() => {
+    // New result_refs revision (root/work_ref pair changed under the hood)
+    // also clears any in-flight detail even if the user kept their click.
+    setResultState({ kind: "IDLE" });
+  }, [missionV3]);
+  useEffect(() => {
+    if (resultState.kind !== "READY") return;
+    if (authState && !authState.acquisition) {
+      setResultState({ kind: "IDLE" });
+    }
+  }, [authState?.acquisition, resultState]);
   useEffect(() => {
     const controller = new AbortController();
     let attached = true;
@@ -607,6 +929,19 @@ export function App() {
         controller.abort();
       };
     }
+    // A refused owner read emits auth state. Re-reading on that notification
+    // without acquisition authority creates a feedback loop while signed out.
+    if (authState && !authState.acquisition) {
+      setIndex({
+        programs: [],
+        state: "UNAVAILABLE",
+        reason: "AUTHENTICATION_REQUIRED",
+      });
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
     const read = window.MastermindMissionHost?.readPrograms;
     if (typeof read !== "function") {
       setIndex({
@@ -646,12 +981,14 @@ export function App() {
       attached = false;
       controller.abort();
     };
-  }, [native, authRevision]);
+  }, [native, authRevision, authState?.acquisition]);
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
       setWindowDocument(null);
       setWindowPending(false);
+      setMissionV3(null);
+      setResultState({ kind: "IDLE" });
       setMission(
         unavailableMission(
           next,
@@ -668,7 +1005,11 @@ export function App() {
     let attached = true;
     const current = ++missionRequest.current,
       controller = new AbortController();
-    if (native && !window.MastermindMissionHost?.readMission) {
+    if (
+      native &&
+      !window.MastermindMissionHost?.readMissionV3 &&
+      !window.MastermindMissionHost?.readMission
+    ) {
       setMission(
         unavailableMission(selection, "NATIVE_TRANSPORT_UNCONFIGURED"),
       );
@@ -714,7 +1055,18 @@ export function App() {
         controller.abort();
       };
     }
-    const read = window.MastermindMissionHost?.readMission;
+    if (authState && !authState.acquisition) {
+      setMissionV3(null);
+      setMission(unavailableMission(selection, "AUTHENTICATION_REQUIRED"));
+      setNotice("Workspace connection unavailable. Current work was not read.");
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
+    const readV3 = window.MastermindMissionHost?.readMissionV3;
+    const read = readV3 ?? window.MastermindMissionHost?.readMission;
+    setMissionV3(null);
     if (typeof read !== "function") {
       setMission(
         unavailableMission(selection, "QUALIFIED_HOST_READ_UNAVAILABLE"),
@@ -731,9 +1083,18 @@ export function App() {
       .then(() => read({ ...selection, signal: controller.signal }))
       .then((raw) => {
         if (!attached || missionRequest.current !== current) return;
-        const decoded = decodeMission(raw, selection);
+        const v3 = readV3 ? decodeMissionv3(raw, selection) : null;
+        const decoded = readV3 ? v3 : decodeMission(raw, selection);
         if (decoded) {
-          setMission(decoded);
+          if (v3) {
+            // Existing presentation components consume the same observation's
+            // v2 fields; there is no second acquisition or fallback read.
+            const { result_refs: _refs, ...body } = v3;
+            setMission({ ...body, schema: "mastermind.mission_workspace.v2" });
+            setMissionV3(v3);
+          } else {
+            setMission(decoded as MissionDocument);
+          }
           setNotice(
             "Source and observation clocks are displayed as projected; this render did not refresh them.",
           );
@@ -768,6 +1129,7 @@ export function App() {
     missionSelectionState,
     selectionRefused,
     authRevision,
+    authState?.acquisition,
   ]);
   const candidate = isDoc(mission) ? mission : null,
     d =
@@ -921,7 +1283,100 @@ export function App() {
         </details>
       </section>
     );
-  else if (active === "Mission Workspace") content = <Mission d={d} />;
+  else if (active === "Mission Workspace")
+    content = (
+      <>
+        <Mission d={d} />
+        {missionV3 && isDocv3(missionV3) ? (
+          <ResultRefs
+            d={missionV3}
+            onPick={(sel) => {
+              const valid = normalizeResultSelection(sel);
+              if (!valid) return;
+              if (!window.MastermindMissionHost?.readResult) {
+                setResultState({
+                  kind: "UNAVAILABLE",
+                  selection: valid,
+                  reason: "QUALIFIED_RESULT_READ_UNAVAILABLE",
+                });
+                return;
+              }
+              resultController.current?.abort();
+              const context = resultContext;
+              setResultState({ kind: "PENDING", selection: valid });
+              const current = ++resultRequest.current;
+              const controller = new AbortController();
+              resultController.current = controller;
+              let raceAborted = false;
+              Promise.resolve()
+                .then(() =>
+                  window.MastermindMissionHost!.readResult!({
+                    workRef: valid.workRef,
+                    rootJobId: valid.rootJobId,
+                    jobId: valid.jobId,
+                    attemptId: valid.attemptId,
+                    resultEnvelopeDigest: valid.resultEnvelopeDigest,
+                    signal: controller.signal,
+                  }),
+                )
+                .then((raw) => {
+                  if (
+                    resultRequest.current !== current ||
+                    raceAborted ||
+                    currentResultContext.current !== context ||
+                    controller.signal.aborted
+                  )
+                    return;
+                  // The host returns the decoded frozen envelope — including
+                  // the typed allowed 503 body as a validated UNAVAILABLE
+                  // envelope. No kind sniffing, no blind cast: the value is
+                  // re-validated against the exact selected tuple before it
+                  // is admitted for rendering.
+                  const decoded = decodeResultEnvelope(raw, valid);
+                  if (!decoded) {
+                    setResultState({
+                      kind: "UNAVAILABLE",
+                      selection: valid,
+                      reason: "RESULT_RESPONSE_INVALID",
+                    });
+                    return;
+                  }
+                  setResultState({
+                    kind: "READY",
+                    selection: valid,
+                    document: decoded,
+                  });
+                })
+                .catch((err: Error) => {
+                  if (
+                    resultRequest.current !== current ||
+                    raceAborted ||
+                    currentResultContext.current !== context ||
+                    controller.signal.aborted
+                  )
+                    return;
+                  if (err?.message === "READ_CANCELLED") {
+                    raceAborted = true;
+                    return;
+                  }
+                  setResultState({
+                    kind: "UNAVAILABLE",
+                    selection: valid,
+                    reason: "RESULT_SOURCE_UNAVAILABLE",
+                  });
+                });
+            }}
+            selectedKey={
+              resultState.kind === "READY" || resultState.kind === "PENDING"
+                ? `${resultState.selection.jobId}|${resultState.selection.attemptId}|${resultState.selection.resultEnvelopeDigest}`
+                : null
+            }
+            disabled={!authState?.acquisition}
+          />
+        ) : null}
+        <ResultCard state={resultState} />
+      </>
+    );
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <Evidence d={d} />;
   else content = <Conversation />;
