@@ -212,6 +212,69 @@ defines the workspace. This integration does not claim that it created a new
 workspace through `mmx-workspace`, and it preserves the current assigned
 checkout unless the custody owner explicitly supplies another receipt.
 
+## Installed-fleet host hardening
+
+After a Workbench Action channel is installed, use the repository-owned host
+operator rather than hand-editing leases or recreating tunnel bindings:
+
+```sh
+python scripts/mastermind_workbench_fleet.py doctor \
+  --expected-source-sha <exact-workbench-release-sha> \
+  --entry <alias>=/absolute/action-config.json
+
+python scripts/mastermind_workbench_fleet.py qualify \
+  --expected-source-sha <exact-workbench-release-sha> \
+  --alias <alias> \
+  --config /absolute/action-config.json
+
+python scripts/mastermind_workbench_fleet.py renew \
+  --expected-source-sha <exact-workbench-release-sha> \
+  --alias <alias> \
+  --config /absolute/action-config.json \
+  --extend-days 30
+```
+
+`doctor` is read-only. It reuses the existing Workbench Action configuration
+parser and tunnel-client runtime status as the owners of config/channel truth.
+It requires an exact single tunnel/organization/workspace association, a live
+healthy/ready managed runtime, the expected immutable release launcher, the
+closed ten-tool `attended_workbench_f0` describe contract, a live lease, and no
+unresolved per-action artifact evidence. A claim, process record, result,
+stdout, or stderr blob that cannot be qualified as one matching durable
+completed action makes the operator refuse rather than infer that no effect
+occurred. `RENEW_SOON` is advisory only; it grants no renewal authority.
+
+`qualify` is an attended zero-project-effect transport/tool-surface ceremony.
+The running Action child owns an exclusive durable audit lock, so a second
+Action runtime must not be started in parallel merely to inspect tools. The
+operator first proves the current exact route, stops only that Workbench alias,
+launches the same target while the audit lock is free, performs MCP
+`initialize -> tools/list`, and requires exactly the final ten closed-schema
+tools with only `commit_text_patch` and `run_project_command` advertised as
+modifying/destructive. It then reconnects the same alias/profile/tunnel/target
+through the existing `file:` or `env:` runtime-key reference and re-reads the
+exact channel binding. If the native probe refuses, it attempts to restore the
+unchanged original route before returning the refusal. It never calls a
+Workbench project tool.
+
+`renew` is an explicit operator ceremony, not a scheduler. It refuses any
+unresolved action evidence before stopping the runtime, performs the same
+stopped-runtime native qualification, then requires the entire parsed config to
+remain identical across the stop boundary. The only permitted config delta is
+`lease.lease_expires_at_ms`; the replacement is private, atomic and fsynced.
+The operator reconnects the exact original alias/profile/tunnel/target using
+only the existing runtime-key reference and requires a final green doctor
+readback. Never run renewal from cron, a background watcher, or a second lease
+owner. A lease expiry remains a deliberate safety boundary.
+
+The fleet operator is not a registry and accepts no account inventory file.
+Live tunnel, workspace, project and credential identities stay in their
+existing owner configs and tunnel-client state. Run the command once per exact
+installed channel or supply a finite set of `--entry` values to `doctor`.
+Do not use it to retarget Executive or Studio Direct tunnels, share writable
+project roots, rotate action keys, recover an `EFFECT_UNKNOWN` action, or create
+new tunnel/workspace associations.
+
 ## ChatGPT app admission
 
 After the tunnel is healthy, create or update one developer-mode Workbench app
