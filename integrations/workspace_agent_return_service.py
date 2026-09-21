@@ -31,10 +31,8 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
-from integrations.business_mcp_auth.contracts import (
-    AuthAuditEvent,
-    load_resource_policy,
-)
+from integrations.business_mcp_auth.audit import DurableAuthAuditSink
+from integrations.business_mcp_auth.contracts import load_resource_policy
 from integrations.business_mcp_auth.jwks import (
     BoundedJwksCache,
     HttpxJwksFetcher,
@@ -67,6 +65,7 @@ _CONFIG_KEYS = frozenset(
         "schema",
         "policy_file",
         "ticket_key_file",
+        "audit_directory",
         "executive_runtime_root",
         "dialogue_socket_path",
         "bind_host",
@@ -100,6 +99,7 @@ class ServiceConfig:
     schema: str
     policy_file: str
     ticket_key_file: str
+    audit_directory: str
     executive_runtime_root: str
     dialogue_socket_path: str
     bind_host: str
@@ -119,6 +119,8 @@ class ServiceState:
     socket_owned: bool = False
     stopping: bool = False
     server_failed: bool = False
+    audit_close_attempted: bool = False
+    audit_close_uncertain: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -127,27 +129,7 @@ class WorkspaceReturnServiceRuntime:
     gateway: WorkspaceCandidateReturnGateway
     server: object
     dialogue_socket_path: Path
-
-
-class _StderrAuditSink:
-    """Bounded auth facts only; no token, prompt, path, or candidate text."""
-
-    def emit(self, event: AuthAuditEvent) -> None:
-        try:
-            print(
-                "MMX_WORKSPACE_RETURN_AUTH "
-                + json.dumps(
-                    dataclasses.asdict(event),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=True,
-                    allow_nan=False,
-                ),
-                file=sys.stderr,
-                flush=True,
-            )
-        except Exception:
-            return
+    audit_sink: DurableAuthAuditSink
 
 
 def _refuse(code: str = "SERVICE_CONFIGURATION_REFUSED") -> None:
@@ -228,6 +210,7 @@ def parse_service_config(value: object) -> ServiceConfig:
         schema=SERVICE_SCHEMA,
         policy_file=_absolute_path(value.get("policy_file")),
         ticket_key_file=_absolute_path(value.get("ticket_key_file")),
+        audit_directory=_absolute_path(value.get("audit_directory")),
         executive_runtime_root=_absolute_path(value.get("executive_runtime_root")),
         dialogue_socket_path=_absolute_path(value.get("dialogue_socket_path")),
         bind_host="127.0.0.1",
@@ -365,6 +348,88 @@ def _secure_ticket_key(path: str) -> bytes:
     raise AssertionError("unreachable")
 
 
+def _open_safe_directory(path: str) -> int:
+    """Open one owner-controlled directory without granting audit authority."""
+
+    selected = Path(_absolute_path(path))
+    try:
+        before = selected.lstat()
+    except OSError:
+        _refuse()
+    directory = getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    if (
+        not directory
+        or not nofollow
+        or not cloexec
+        or stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISDIR(before.st_mode)
+        or before.st_uid != os.geteuid()
+        or stat.S_IMODE(before.st_mode) & 0o022
+    ):
+        _refuse()
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            selected,
+            os.O_RDONLY | directory | nofollow | cloexec,
+        )
+        opened = os.fstat(descriptor)
+        if (
+            opened.st_dev != before.st_dev
+            or opened.st_ino != before.st_ino
+            or not stat.S_ISDIR(opened.st_mode)
+            or opened.st_uid != before.st_uid
+            or stat.S_IMODE(opened.st_mode) & 0o022
+            or os.get_inheritable(descriptor)
+        ):
+            _refuse()
+        return descriptor
+    except BaseException as error:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except BaseException as cleanup_error:
+                raise ServiceConfigurationError(
+                    "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+                ) from cleanup_error
+        if isinstance(error, ServiceConfigurationError):
+            raise
+        _refuse()
+    raise AssertionError("unreachable")
+
+
+def _open_audit_sink(path: str, *, policy_id: str) -> DurableAuthAuditSink:
+    """Acquire the existing durable Business-auth audit owner."""
+
+    directory_fd = _open_safe_directory(path)
+    sink: DurableAuthAuditSink | None = None
+    primary_error: BaseException | None = None
+    try:
+        sink = DurableAuthAuditSink.open(
+            directory_fd,
+            policy_id=policy_id,
+        )
+    except BaseException as error:
+        primary_error = error
+    try:
+        os.close(directory_fd)
+    except BaseException as close_error:
+        if sink is not None:
+            try:
+                sink.close()
+            except BaseException:
+                pass
+        raise ServiceConfigurationError(
+            "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+        ) from close_error
+    if primary_error is not None:
+        _refuse()
+    assert sink is not None
+    return sink
+
+
 def load_service_config(path: str) -> ServiceConfig:
     return parse_service_config(_secure_json(path, maximum=MAX_CONFIG_BYTES))
 
@@ -421,6 +486,10 @@ def create_runtime(config: ServiceConfig) -> WorkspaceReturnServiceRuntime:
         _refuse()
 
     ticket_key = _secure_ticket_key(config.ticket_key_file)
+    audit_sink = _open_audit_sink(
+        config.audit_directory,
+        policy_id=policy.policy_id,
+    )
     try:
         executive_runtime = Runtime.at(
             config.executive_runtime_root,
@@ -450,7 +519,7 @@ def create_runtime(config: ServiceConfig) -> WorkspaceReturnServiceRuntime:
             authenticator=authenticator,
             policy=policy,
             now=lambda: int(time.time()),
-            audit_sink=_StderrAuditSink(),
+            audit_sink=audit_sink,
         )
         server = create_authenticated_return_server(
             gateway=gateway,
@@ -459,9 +528,15 @@ def create_runtime(config: ServiceConfig) -> WorkspaceReturnServiceRuntime:
             allowed_hosts=config.allowed_hosts,
             allowed_origins=(),
         )
-    except ServiceConfigurationError:
-        raise
-    except Exception:
+    except BaseException as error:
+        try:
+            audit_sink.close()
+        except BaseException as cleanup_error:
+            raise ServiceConfigurationError(
+                "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+            ) from cleanup_error
+        if isinstance(error, ServiceConfigurationError):
+            raise
         _refuse()
 
     return WorkspaceReturnServiceRuntime(
@@ -469,8 +544,8 @@ def create_runtime(config: ServiceConfig) -> WorkspaceReturnServiceRuntime:
         gateway=gateway,
         server=server,
         dialogue_socket_path=Path(config.dialogue_socket_path),
+        audit_sink=audit_sink,
     )
-
 
 def reserve_loopback_socket(
     config: ServiceConfig,
@@ -519,6 +594,27 @@ def is_ready(
     return _dialogue_socket_is_trusted(runtime.dialogue_socket_path)
 
 
+def _close_audit(
+    runtime: WorkspaceReturnServiceRuntime,
+    state: ServiceState,
+) -> None:
+    if state.audit_close_attempted:
+        if state.audit_close_uncertain:
+            raise ServiceConfigurationError(
+                "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+            )
+        return
+    state.audit_close_attempted = True
+    try:
+        runtime.audit_sink.close()
+    except BaseException as error:
+        state.audit_close_uncertain = True
+        state.server_failed = True
+        raise ServiceConfigurationError(
+            "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+        ) from error
+
+
 def build_service_app(
     runtime: WorkspaceReturnServiceRuntime,
     state: ServiceState,
@@ -557,6 +653,10 @@ def build_service_app(
             raise
         finally:
             state.stopping = True
+            try:
+                _close_audit(runtime, state)
+            except ServiceConfigurationError:
+                state.server_failed = True
 
     return Starlette(
         routes=[
@@ -630,6 +730,11 @@ async def run_service(config: ServiceConfig) -> int:
                 close_failed = True
         if close_failed:
             state.server_failed = True
+        if not state.audit_close_attempted:
+            try:
+                _close_audit(runtime, state)
+            except ServiceConfigurationError:
+                state.server_failed = True
 
     return 0 if state.lifespan_completed and not state.server_failed else 5
 
