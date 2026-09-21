@@ -38,6 +38,10 @@ class Refusal(RuntimeError):
     pass
 
 
+class RetryableRefusal(Refusal):
+    """Definite pre-commit refusal that may be retried after state reconciliation."""
+
+
 class EffectUnknown(RuntimeError):
     pass
 
@@ -148,15 +152,22 @@ def _probe_bridge(target: Path) -> None:
     bridge = target / "source" / "bridge.py"
     if not python.exists() or not bridge.is_file():
         raise Refusal("RUNTIME_INCOMPLETE")
-    result = subprocess.run(
-        [str(python), str(bridge), "--help"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=15,
-        check=False,
-        env={"PATH": os.environ.get("PATH", ""), "HOME": str(Path.home())},
-    )
+    try:
+        result = subprocess.run(
+            [str(python), str(bridge), "--help"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+            env={"PATH": os.environ.get("PATH", ""), "HOME": str(Path.home())},
+        )
+    except subprocess.TimeoutExpired as exc:
+        # This probe runs before the generation rename commit point. Python's
+        # run(timeout=...) kills and waits for the probe child before raising,
+        # so the target generation is definitely absent and a later caller may
+        # retry only after reconciling that same target state.
+        raise RetryableRefusal("BRIDGE_PROBE_TIMEOUT") from exc
     if result.returncode != 0:
         raise Refusal("BRIDGE_PROBE_FAILED")
 
@@ -291,6 +302,14 @@ def main() -> int:
             "reconcile_action": "verify",
         }))
         return 3
+    except RetryableRefusal as exc:
+        print(json.dumps({
+            "state": str(exc),
+            "retry_allowed": True,
+            "generation": args.generation,
+            "reconcile_action": "verify",
+        }))
+        return 2
     except (Refusal, OSError, subprocess.SubprocessError) as exc:
         code = str(exc) if isinstance(exc, Refusal) else "LOCAL_FAILURE"
         print(json.dumps({"state": code, "retry_allowed": False}))
