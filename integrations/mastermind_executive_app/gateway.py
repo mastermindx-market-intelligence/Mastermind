@@ -546,6 +546,19 @@ class WebCeoCeoIngressReadGateway(CeoIngressReadGateway):
         return validate_web_ceo_tool_arguments(name, arguments)
 
 
+class WebCeoV2CeoIngressReadGateway(WebCeoCeoIngressReadGateway):
+    """Static Web-CEO v2 installed reader (App-read v3); earlier readers frozen."""
+
+    _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V3
+
+    def _validate_arguments(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        from integrations.executive_mcp.web_ceo import (
+            validate_web_ceo_v2_tool_arguments,
+        )
+
+        return validate_web_ceo_v2_tool_arguments(name, arguments)
+
+
 async def observe_ingress_grounding(
     client: CeoIngressClient, socket_path: Path | str,
 ) -> dict[str, str]:

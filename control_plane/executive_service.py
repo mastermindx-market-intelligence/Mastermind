@@ -1605,6 +1605,7 @@ class _ModuleBackupBackend:
 
 CEO_APP_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
 CEO_WEB_CEO_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V2
+CEO_WEB_CEO_V2_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V3
 CEO_APP_READ_TOOLS_BY_SCHEMA = {
     CEO_APP_READ_SCHEMA: frozenset(
         {
@@ -1615,6 +1616,15 @@ CEO_APP_READ_TOOLS_BY_SCHEMA = {
         }
     ),
     CEO_WEB_CEO_READ_SCHEMA: frozenset(
+        {
+            "executive_state",
+            "executive_inbox",
+            "executive_job",
+            "executive_fabric",
+            "ceo_intent_status",
+        }
+    ),
+    CEO_WEB_CEO_V2_READ_SCHEMA: frozenset(
         {
             "executive_state",
             "executive_inbox",

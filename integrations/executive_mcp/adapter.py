@@ -35,6 +35,7 @@ import os
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable
 
 from common.bounded_sync_executor import (
@@ -340,6 +341,13 @@ class ExecutiveMcpGateway:
         )
         self._write_lock = asyncio.Lock()
         self._closed = False
+        # One-time host binding of a bounded Fabric Runtime source.  Setup is
+        # inert: the trusted zero-argument getter is stored, never called here,
+        # and the legacy read factory above is never a fallback for it.
+        self._fabric_source_binding: tuple[Any, Mapping[str, Any], Mapping[str, Any]] | None = (
+            None
+        )
+        self._fabric_bind_window_closed = False
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -348,6 +356,54 @@ class ExecutiveMcpGateway:
         """Compatibility projection; the shared executor owns these attempts."""
 
         return set(self._read_executor.attempts_snapshot())
+
+    def _close_fabric_bind_window(self) -> None:
+        """Any first public call closes the one-time Fabric bind window."""
+
+        self._fabric_bind_window_closed = True
+
+    def bind_fabric_source(
+        self,
+        *,
+        bounded_runtime: Callable[[], Any],
+        armed: Mapping[str, Any],
+        runtime_identity: Mapping[str, Any],
+    ) -> None:
+        """Bind the one-time trusted bounded Fabric Runtime source (host-only).
+
+        Ratified public capability for the versioned Web-CEO v2 Fabric reads.
+        ``bounded_runtime`` is an inert zero-argument callable the host owns;
+        each admitted physical v2 Fabric read evaluates it freshly inside the
+        existing read executor.  ``armed`` and ``runtime_identity`` are the
+        existing Mapping public projections the Fabric v2 owner functions
+        consume; nested values are copied and deep-frozen so a later mutation
+        of the caller's structures cannot rewrite admitted facts.  Setup opens
+        nothing, calls nothing, and confers no authority: the actual Runtime
+        observation remains the only generation/SAME authority.  Rebinding,
+        binding after any first call, and binding after close are refused.
+        """
+
+        if self._closed:
+            raise GatewayError(
+                "backend_unavailable",
+                "gateway is closed and cannot bind a Fabric source",
+            )
+        if self._fabric_bind_window_closed:
+            raise GatewayError(
+                "invalid_input",
+                "the Fabric source bind window is closed after the first call",
+            )
+        if self._fabric_source_binding is not None:
+            raise GatewayError(
+                "invalid_input", "a Fabric source is already bound"
+            )
+        if not callable(bounded_runtime):
+            raise GatewayError(
+                "invalid_input", "bounded_runtime must be a zero-argument callable"
+            )
+        frozen_armed = _freeze_public_facts(armed, field="armed")
+        frozen_identity = _freeze_public_facts(runtime_identity, field="runtime_identity")
+        self._fabric_source_binding = (bounded_runtime, frozen_armed, frozen_identity)
 
     async def aclose(self) -> None:
         """Close admission and truthfully drain the single attempt owner."""
@@ -390,6 +446,9 @@ class ExecutiveMcpGateway:
         """
 
         generated_at = self._clock()
+        # Any first call — including one that refuses an unknown tool or
+        # invalid arguments — closes the one-time Fabric bind window.
+        self._close_fabric_bind_window()
         try:
             spec = self._resolve_tool_spec(tool_name)
         except GatewayError as exc:
@@ -983,6 +1042,27 @@ def _open_readonly_runtime(root: Path) -> Runtime:
     """The ONLY runtime handle this package opens: read-only, never creating."""
 
     return Runtime.at(root, create=False)
+
+
+def _freeze_public_facts(value: Any, *, field: str) -> Any:
+    """Deep-copy and freeze one public JSON-shaped projection at bind time.
+
+    Mappings become read-only proxy mappings, sequences become tuples, and
+    anything that is not closed JSON material refuses the bind.  The result
+    shares no mutable structure with the caller's input.
+    """
+
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _freeze_public_facts(item, field=field) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_public_facts(item, field=field) for item in value)
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise GatewayError(
+        "invalid_input", f"{field} must contain only public JSON facts"
+    )
 
 
 def _utc_now_z() -> str:

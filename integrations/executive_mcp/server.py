@@ -782,6 +782,42 @@ def build_web_ceo_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
         profile_create_app=create_web_ceo_app,
     )
 
+
+def build_web_ceo_v2_mcp_app(
+    settings: Any,
+    *,
+    audit_sink: Any,
+    workspace_app=None,
+    content_app=None,
+    os_app=None,
+) -> Any:
+    """Static Web-CEO v2 composition (server 1.2.0) over the same owners.
+
+    The optional mounted apps and their behavior are the parent composition's
+    existing surface, passed through unchanged; this profile adds none of its
+    own and alters none of theirs.
+    """
+
+    from integrations.executive_mcp.web_ceo import (
+        WEB_CEO_V2_SERVER_NAME,
+        WEB_CEO_V2_SERVER_VERSION,
+        validate_web_ceo_v2_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.app import create_web_ceo_v2_app
+
+    return _build_profile_mcp_app(
+        settings,
+        audit_sink=audit_sink,
+        profile_server_name=WEB_CEO_V2_SERVER_NAME,
+        profile_server_version=WEB_CEO_V2_SERVER_VERSION,
+        profile_tools=tuple(build_web_ceo_v2_tools()),
+        profile_validator=validate_web_ceo_v2_tool_arguments,
+        profile_create_app=create_web_ceo_v2_app,
+        workspace_app=workspace_app,
+        content_app=content_app,
+        os_app=os_app,
+    )
+
 def build_tools() -> list[mcp_types.Tool]:
     """The static five-tool advertisement, built from the reviewed table.
 
@@ -814,6 +850,22 @@ def build_web_ceo_tools() -> list[mcp_types.Tool]:
             annotations=mcp_types.ToolAnnotations(**spec.annotations),
         )
         for spec in WEB_CEO_TOOL_SPECS
+    ]
+
+
+def build_web_ceo_v2_tools() -> list[mcp_types.Tool]:
+    """Static Web-CEO v2 advertisement; earlier advertisements stay frozen."""
+
+    from integrations.executive_mcp.web_ceo import WEB_CEO_V2_TOOL_SPECS
+
+    return [
+        mcp_types.Tool(
+            name=spec.name,
+            description=spec.description,
+            inputSchema=spec.input_schema,
+            annotations=mcp_types.ToolAnnotations(**spec.annotations),
+        )
+        for spec in WEB_CEO_V2_TOOL_SPECS
     ]
 
 

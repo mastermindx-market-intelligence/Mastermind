@@ -91,3 +91,75 @@ proof.
 The older Astra external-delegation freeze remains controlling for its own
 five-tool client generation. This amendment does not silently upgrade existing
 clients or reinterpret historical production evidence.
+
+## Static bounded-result profile: web_ceo_v2
+
+The additive `web_ceo_v2` profile uses server `1.2.0`, static schema digest
+`df6bfc6ead2177f6487a51f4bbc2a5ef660d4d6ab248bee2e727e416d0678975`,
+and App-read `mastermind.executive_ceo_ingress_app_read.v3`. The legacy five-tool
+and historical `web_ceo_v1` schemas and digests above remain unchanged. Profile
+selection stays in host composition; request input cannot choose a profile.
+
+The existing `executive_fabric` tool has three mutually exclusive selections:
+
+- `roots`: optional bounded rendering `limit`; uses the accepted
+  `list_roots_v2_from_runtime` producer. One retained discovery observation
+  supplies its finalized generation and snapshot digest. Creation provenance
+  remains explicitly `PARTIAL`; enumeration performs no creation-Event or
+  result-detail fanout. Acquisition unavailability retains the producer's
+  explicit unknown generation, unknown total and named degradation.
+- `root`: exact `root_job_id`; uses the existing bounded Fabric v2 detail owner.
+- `result`: exact `root_job_id`, `job_id`, `attempt_id` and
+  `result_envelope_digest`, with no limit, cursor, path, budget or extra field.
+  Job IDs are `JOB-` followed by 1–9 digits; Attempt IDs are `ATT-` followed by
+  32 lowercase hexadecimal characters; the envelope digest is 64 lowercase
+  hexadecimal characters. No whitespace normalization is performed.
+
+The existing reader exposes a host-only, one-time `bind_fabric_source` method.
+It stores an inert trusted zero-argument Runtime getter and copied, immutable
+public armed/identity facts. Rebinding, binding after the first call and binding
+following close are refused. Each physical read evaluates the getter once
+inside the existing executor. There is no legacy Runtime factory or path-open
+fallback. The parent supplies the actual retained-service getter before
+admission and drains the same reader before relinquishing Runtime custody.
+
+A result read selects one bounded canonical result on that retained Runtime,
+then obtains the observation receipt after physical close. It verifies the
+requested tuple and uses the shared `fabric_result_projection` owner. The
+snapshot's non-null observation identity must match the finalized receipt;
+`UNKNOWN` never becomes `SAME` through presentation. The canonical envelope
+lookup digest remains distinct from the reviewed work's role-result digest.
+
+The permitted result contains structured role result, summary and next actions,
+with exact identity, counts and omission metadata. It does not expose raw
+provider transcripts, execution-principal material or arbitrary file contents.
+A review describes only its selected reviewed Job/Attempt/digest; latest-revision
+currentness remains `UNPROVEN`, and acceptance is `NOT_PROJECTED`.
+
+The complete CeoIngress success wrapper `{ok:true,result:ExecutiveMcpEnvelope}`
+plus LF must fit **16,384 actual UTF-8 bytes**, including final profile metadata.
+After successful canonical acquisition, presentation overflow selects the shared
+`CONTENT_OVER_BUDGET` document with null content and validated counts; the full
+fallback wrapper is measured again. Oversized fallback metadata is a typed
+refusal. Acquisition-budget failure is an error without result material or
+validated counts. Generic preview conversion is not used for result content.
+
+The actual escaped MCP JSON-RPC/TextContent transport retains its independent
+**256 KiB cap** and its existing maximum-request-ID reservation. The full MCP
+wire is not advertised as 16 KiB. Legacy/global framing limits are unchanged.
+
+The existing company-read JWT authenticator verifies before invocation and again
+before response release for this new profile. The same immutable principal must
+be verified twice. A token that expires during acquisition is denied and the
+acquired material is discarded. This is company-read permission, not a per-root
+ACL or a new dynamic revocation authority.
+
+Focused tests cover the actual JWT → App-read v3 socket → retained Runtime
+result path, the six-node review/repair lineage, exact tuple refusals, bounded
+roots without Event fanout, one getter per read, immutable binding and drain,
+closed schema parity, legacy digests, exact Unicode 16 KiB boundaries, fallback
+remeasurement and actual MCP escaping with a large request ID. Local fixtures
+and source acceptance do not establish installation or live provider execution.
+Complete oversized findings remain unavailable: no pagination or second result
+store is introduced. Parent foundation publication, installed host composition
+and the authenticated live first vertical remain separate release gates.
