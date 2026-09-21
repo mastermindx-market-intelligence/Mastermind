@@ -28,6 +28,7 @@ RESOURCE_URL = f"https://{PUBLIC_HOST}{RESOURCE_PATH}"
 METADATA_URL = f"https://{PUBLIC_HOST}{METADATA_PATH}"
 UNIT_TEMPLATE = "ops/steward_public_edge/mastermind-steward.service"
 CADDY_TEMPLATE = "ops/steward_public_edge/mastermind-steward.caddy"
+CADDY_TEMPLATE_SHA256 = "bde4f3a14d6289bdca12ee593220837ff2e02a08f405a687991102190b6ed7b3"
 ARCHIVE_NAME = "steward-release.tar"
 UNIT_NAME = "mastermind-steward.service"
 CADDY_NAME = "mastermind-steward.caddy"
@@ -145,7 +146,11 @@ def _render_unit(template: str, commit: str) -> str:
 
 
 def _render_caddy(template: str) -> str:
-    if _SAFE_HOST.fullmatch(PUBLIC_HOST) is None or template.count("@PUBLIC_HOST@") != 3:
+    if (
+        _SAFE_HOST.fullmatch(PUBLIC_HOST) is None
+        or hashlib.sha256(template.encode("utf-8")).hexdigest() != CADDY_TEMPLATE_SHA256
+        or template.count("@PUBLIC_HOST@") != 3
+    ):
         _refuse("CADDY_TEMPLATE_INVALID")
     rendered = template.replace("@PUBLIC_HOST@", PUBLIC_HOST)
     required = (
@@ -174,11 +179,6 @@ def _render_caddy(template: str) -> str:
         "debug",
     )
     if any(item in rendered for item in forbidden):
-        _refuse("CADDY_TEMPLATE_INVALID")
-    if any(
-        re.match(r"\s*(?:tls|on_demand_tls)\b", line, flags=re.IGNORECASE)
-        for line in rendered.splitlines()
-    ):
         _refuse("CADDY_TEMPLATE_INVALID")
     return rendered
 
@@ -232,7 +232,7 @@ def _archive_member_allowed(name: str, *, is_directory: bool) -> bool:
     return is_directory and name in ancestors
 
 
-def _archive(source: Path, commit: str, target: Path) -> tuple[str, int, int]:
+def _archive(source: Path, commit: str, target: Path) -> tuple[str, int, int, int]:
     try:
         with target.open("xb") as stream:
             subprocess.run(
@@ -281,7 +281,7 @@ def _archive(source: Path, commit: str, target: Path) -> tuple[str, int, int]:
                         _refuse("ARCHIVE_FAILED")
     except (OSError, tarfile.TarError):
         _refuse("ARCHIVE_FAILED")
-    return _sha256_file(target), count, expanded
+    return _sha256_file(target), count, expanded, size
 
 
 def _sha256_file(path: Path) -> str:
@@ -310,36 +310,81 @@ def _write(path: Path, content: bytes) -> str:
     return _sha256_file(path)
 
 
-def _published_bundle_matches(output: Path, expected: dict[str, str]) -> bool:
+def _sha256_fd_exact(fd: int, expected_size: int) -> str | None:
+    """Hash exactly the admitted size plus one bounded overflow observation."""
+    if not 0 <= expected_size <= MAX_ARCHIVE_BYTES:
+        return None
+    digest = hashlib.sha256()
+    remaining = expected_size
+    while remaining:
+        block = os.read(fd, min(remaining, 1024 * 1024))
+        if not block:
+            return None
+        digest.update(block)
+        remaining -= len(block)
+    if os.read(fd, 1):
+        return None
+    return digest.hexdigest()
+
+
+def _published_bundle_matches(
+    output: Path, expected: dict[str, tuple[str, int]],
+) -> bool:
     """Bounded, read-only verification of a possibly published release directory."""
+    directory_fd = -1
     try:
-        output_info = output.lstat()
+        directory_flags = os.O_RDONLY
+        directory_flags |= getattr(os, "O_DIRECTORY", 0)
+        directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+        directory_fd = os.open(output, directory_flags)
+        output_info = os.fstat(directory_fd)
         if (
             not stat.S_ISDIR(output_info.st_mode)
-            or stat.S_ISLNK(output_info.st_mode)
             or output_info.st_uid != os.getuid()
             or stat.S_IMODE(output_info.st_mode) != OUTPUT_DIR_MODE
         ):
             return False
-        children: list[Path] = []
-        for child in output.iterdir():
-            if len(children) == len(expected):
-                return False
-            children.append(child)
-        if {child.name for child in children} != set(expected):
+        names: list[str] = []
+        with os.scandir(directory_fd) as entries:
+            for entry in entries:
+                names.append(entry.name)
+                if len(names) > len(expected):
+                    return False
+        if set(names) != set(expected):
             return False
-        for child in children:
-            info = child.lstat()
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or stat.S_ISLNK(info.st_mode)
-                or info.st_uid != os.getuid()
-                or stat.S_IMODE(info.st_mode) != OUTPUT_FILE_MODE
-                or _sha256_file(child) != expected[child.name]
-            ):
-                return False
-    except (OSError, StageError):
+        file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        for name in names:
+            expected_digest, expected_size = expected[name]
+            file_fd = os.open(name, file_flags, dir_fd=directory_fd)
+            try:
+                before = os.fstat(file_fd)
+                if (
+                    not stat.S_ISREG(before.st_mode)
+                    or before.st_uid != os.getuid()
+                    or stat.S_IMODE(before.st_mode) != OUTPUT_FILE_MODE
+                    or before.st_size != expected_size
+                    or _sha256_fd_exact(file_fd, expected_size) != expected_digest
+                ):
+                    return False
+                after = os.fstat(file_fd)
+                if (
+                    after.st_dev != before.st_dev
+                    or after.st_ino != before.st_ino
+                    or after.st_uid != os.getuid()
+                    or after.st_size != expected_size
+                    or stat.S_IMODE(after.st_mode) != OUTPUT_FILE_MODE
+                ):
+                    return False
+            finally:
+                os.close(file_fd)
+    except (OSError, TypeError, ValueError):
         return False
+    finally:
+        if directory_fd >= 0:
+            try:
+                os.close(directory_fd)
+            except OSError:
+                pass
     return True
 
 
@@ -381,12 +426,14 @@ def stage(
     published = False
     try:
         archive_path = temporary / ARCHIVE_NAME
-        archive_digest, member_count, expanded_bytes = _archive(
+        archive_digest, member_count, expanded_bytes, archive_size = _archive(
             source, accepted_commit, archive_path
         )
         os.chmod(archive_path, OUTPUT_FILE_MODE)
-        unit_digest = _write(temporary / UNIT_NAME, unit.encode("utf-8"))
-        caddy_digest = _write(temporary / CADDY_NAME, caddy.encode("utf-8"))
+        unit_bytes = unit.encode("utf-8")
+        caddy_bytes = caddy.encode("utf-8")
+        unit_digest = _write(temporary / UNIT_NAME, unit_bytes)
+        caddy_digest = _write(temporary / CADDY_NAME, caddy_bytes)
         manifest = {
             "schema": SCHEMA,
             "status": "STAGED_INERT",
@@ -426,10 +473,10 @@ def stage(
             _refuse("WRITE_FAILED")
 
         expected = {
-            ARCHIVE_NAME: archive_digest,
-            UNIT_NAME: unit_digest,
-            CADDY_NAME: caddy_digest,
-            MANIFEST_NAME: manifest_digest,
+            ARCHIVE_NAME: (archive_digest, archive_size),
+            UNIT_NAME: (unit_digest, len(unit_bytes)),
+            CADDY_NAME: (caddy_digest, len(caddy_bytes)),
+            MANIFEST_NAME: (manifest_digest, len(manifest_bytes)),
         }
         try:
             os.replace(temporary, output)
@@ -445,12 +492,12 @@ def stage(
                 os.fsync(parent_fd)
             finally:
                 os.close(parent_fd)
-            if not _published_bundle_matches(output, expected):
-                _refuse("PUBLISH_EFFECT_UNKNOWN")
-        except (OSError, StageError):
+        except OSError:
             # The output may already be visible. Preserve it for same-carrier
             # reconciliation and return only the fixed uncertainty classification.
             _published_bundle_matches(output, expected)
+            _refuse("PUBLISH_EFFECT_UNKNOWN")
+        if not _published_bundle_matches(output, expected):
             _refuse("PUBLISH_EFFECT_UNKNOWN")
         return manifest
     finally:

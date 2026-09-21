@@ -250,6 +250,8 @@ def test_caddy_renderer_refuses_route_or_host_widening(mutation):
     "tls internal",
     "tls /tmp/cert.pem /tmp/key.pem",
     "tls {\n\t\ton_demand\n\t}",
+    '"tls" internal',
+    "`tls` internal",
 ])
 def test_caddy_renderer_requires_automatic_public_tls(directive):
     template = CADDY.read_text(encoding="utf-8").replace("\n\ttls internal", "")
@@ -257,6 +259,83 @@ def test_caddy_renderer_requires_automatic_public_tls(directive):
     mutated = template.replace("\n}", f"\n\t{directive}\n}}")
     with pytest.raises(subject.StageError, match="CADDY_TEMPLATE_INVALID"):
         subject._render_caddy(mutated)
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda text: text + "# harmless-looking drift\n",
+    lambda text: text.replace('Cache-Control "private, no-store"',
+                              'Cache-Control "private, no-store"\n\t\t# drift'),
+])
+def test_caddy_renderer_refuses_noncanonical_template_drift(mutation):
+    with pytest.raises(subject.StageError, match="CADDY_TEMPLATE_INVALID"):
+        subject._render_caddy(mutation(CADDY.read_text(encoding="utf-8")))
+
+
+def _published_fixture(tmp_path):
+    output = tmp_path / "published"
+    output.mkdir(mode=subject.OUTPUT_DIR_MODE)
+    expected = {}
+    for name, content in (
+        (subject.ARCHIVE_NAME, b"archive"),
+        (subject.UNIT_NAME, b"unit"),
+        (subject.CADDY_NAME, b"caddy"),
+        (subject.MANIFEST_NAME, b"manifest"),
+    ):
+        path = output / name
+        path.write_bytes(content)
+        path.chmod(subject.OUTPUT_FILE_MODE)
+        expected[name] = (hashlib.sha256(content).hexdigest(), len(content))
+    return output, expected
+
+
+def test_published_verifier_stops_at_fifth_directory_observation(tmp_path, monkeypatch):
+    output, expected = _published_fixture(tmp_path)
+    for name in ("unexpected-1", "unexpected-2"):
+        (output / name).write_text("extra", encoding="utf-8")
+    scandir = os.scandir
+    observed = 0
+
+    class GuardedScandir:
+        def __init__(self, path):
+            self._iterator = scandir(path)
+
+        def __enter__(self):
+            self._iterator.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._iterator.__exit__(*args)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            nonlocal observed
+            observed += 1
+            if observed > len(expected) + 1:
+                raise AssertionError("directory verification exceeded its observation bound")
+            return next(self._iterator)
+
+    monkeypatch.setattr(subject.os, "scandir", GuardedScandir)
+    assert subject._published_bundle_matches(output, expected) is False
+    assert observed == len(expected) + 1
+
+
+def test_published_verifier_refuses_size_mismatch_before_hashing(tmp_path, monkeypatch):
+    output, expected = _published_fixture(tmp_path)
+    archive = output / subject.ARCHIVE_NAME
+    archive.write_bytes(b"archive-overflow")
+    archive.chmod(subject.OUTPUT_FILE_MODE)
+
+    sha256_fd_exact = subject._sha256_fd_exact
+
+    def bounded_hash_forbidden(fd, size):
+        if os.fstat(fd).st_size != size:
+            raise AssertionError("size mismatch must refuse before a hash read")
+        return sha256_fd_exact(fd, size)
+
+    monkeypatch.setattr(subject, "_sha256_fd_exact", bounded_hash_forbidden)
+    assert subject._published_bundle_matches(output, expected) is False
 
 
 def test_replace_that_publishes_then_errors_is_effect_unknown(tmp_path, monkeypatch):
@@ -296,14 +375,10 @@ def test_postrename_failure_is_effect_unknown_and_preserves_output(
 
         monkeypatch.setattr(subject.os, "fsync", fail_parent_fsync)
     elif failure == "readback":
-        sha256_file = subject._sha256_file
+        def fail_published_readback(_fd, _size):
+            raise OSError("published descriptor read failed")
 
-        def fail_published_readback(path):
-            if output in path.parents:
-                raise subject.StageError("READBACK_FAILED")
-            return sha256_file(path)
-
-        monkeypatch.setattr(subject, "_sha256_file", fail_published_readback)
+        monkeypatch.setattr(subject, "_sha256_fd_exact", fail_published_readback)
     else:
         replace = os.replace
 
