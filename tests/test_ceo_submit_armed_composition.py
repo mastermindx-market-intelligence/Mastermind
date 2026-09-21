@@ -257,6 +257,21 @@ def _line_mentions_identity_name(line: str) -> bool:
     )
 
 
+def _line_mentions_binding_identity_name(line: str) -> bool:
+    """Identity words on bound values, excluding invoked member spellings."""
+    normalized = unicodedata.normalize("NFKC", line)
+    if "_mastermind_" in normalized.lower():
+        return True
+    words: set[str] = set()
+    for match in re.finditer(r"[^\W\d]\w*", normalized, flags=re.UNICODE):
+        before = normalized[:match.start()].rstrip()
+        after = normalized[match.end():].lstrip()
+        if before[-1:] == "." and after[:1] == "(":
+            continue
+        words.update(_semantic_words(match.group(0)))
+    return bool(words & _SOURCE_IDENTITY_WORDS)
+
+
 def _import_bindings(names: str) -> list[tuple[str, str]]:
     """Return (exported, local) names from a bounded Python/JS named import."""
     bindings: list[tuple[str, str]] = []
@@ -324,6 +339,421 @@ def _js_import_source_paths(importer: str, specifier: str) -> tuple[str, ...]:
         [combined + extension for extension in extensions]
         + [f"{combined}/index{extension}" for extension in extensions]
     )
+
+
+class _BindingScope:
+    """One lexical binding contour: module, or one function/arrow parameter list."""
+
+    __slots__ = ("parent", "bindings", "aliases")
+
+    def __init__(self, parent: int | None = None) -> None:
+        self.parent = parent
+        self.bindings: set[str] = set()
+        self.aliases: set[str] = set()
+
+
+def _scope_language(path: str) -> str:
+    suffix = Path(path).suffix.lower()
+    if suffix == ".py":
+        return "py"
+    if suffix in {".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}:
+        return "js"
+    return "module"
+
+
+def _leading_indent(line: str) -> int | None:
+    stripped = line.lstrip(" \t")
+    if not stripped or stripped.startswith(_COMMENT_PREFIXES):
+        return None
+    return len(line[: len(line) - len(stripped)].expandtabs(8))
+
+
+def _assignment_operands(normalized: str) -> tuple[str, str] | None:
+    """Split a real assignment; comparisons and arrows are not bindings."""
+    masked = re.sub(
+        r"===|!==|==|!=|<=|>=|=>",
+        lambda match: " " * len(match.group(0)),
+        normalized,
+    )
+    left, separator, right = masked.partition("=")
+    if not separator:
+        return None
+    return left, right
+
+
+def _simple_names(fragment: str) -> set[str]:
+    """Identifiers that stand as values, not property, call, or index bases."""
+    names: set[str] = set()
+    for match in re.finditer(r"[^\W\d]\w*", fragment, flags=re.UNICODE):
+        name = match.group(0)
+        if name.lower() in _SOURCE_SYNTAX_NAMES:
+            continue
+        before = fragment[:match.start()].rstrip()
+        after = fragment[match.end():].lstrip()
+        if before[-1:] == "." or after[:1] in {".", "(", "["}:
+            continue
+        names.add(name)
+    return names
+
+
+def _bound_names(left: str) -> set[str]:
+    """Simple names this assignment binds, excluding property/index targets."""
+    stripped = left.strip().rstrip(",")
+    stripped = re.sub(
+        r"^(?:export\s+)?(?:default\s+)?(?:const|let|var)\s+",
+        "",
+        stripped,
+        flags=re.UNICODE,
+    )
+    match = re.fullmatch(
+        r"([^\W\d]\w*)(?:\s*:[^=]+)?",
+        stripped,
+        flags=re.UNICODE,
+    )
+    if match and match.group(1).lower() not in _SOURCE_SYNTAX_NAMES:
+        return {match.group(1)}
+    return set()
+
+
+def _parameter_item_name(item: str) -> set[str]:
+    stripped = unicodedata.normalize("NFKC", item).strip()
+    if not stripped:
+        return set()
+    stripped = re.sub(r"^(\*\*|\*|\.\.\.)\s*", "", stripped)
+    if stripped.startswith(("{", "[")):
+        return set()
+    match = re.match(r"([^\W\d]\w*)", stripped, flags=re.UNICODE)
+    if match and match.group(1).lower() not in _SOURCE_SYNTAX_NAMES:
+        return {match.group(1)}
+    return set()
+
+
+def _parameter_names(inner: str) -> set[str]:
+    names: set[str] = set()
+    depth_paren = depth_bracket = depth_brace = 0
+    current: list[str] = []
+    for char in inner:
+        if char == "(":
+            depth_paren += 1
+        elif char == ")" and depth_paren:
+            depth_paren -= 1
+        elif char == "[":
+            depth_bracket += 1
+        elif char == "]" and depth_bracket:
+            depth_bracket -= 1
+        elif char == "{":
+            depth_brace += 1
+        elif char == "}" and depth_brace:
+            depth_brace -= 1
+        elif (
+            char == ","
+            and depth_paren == 0
+            and depth_bracket == 0
+            and depth_brace == 0
+        ):
+            names.update(_parameter_item_name("".join(current)))
+            current = []
+            continue
+        current.append(char)
+    names.update(_parameter_item_name("".join(current)))
+    return names
+
+
+def _mask_js_literals(line: str, state: str) -> tuple[str, str]:
+    """Replace JS string/comment contents with spaces; carry block/template state."""
+    out: list[str] = []
+    i = 0
+    while i < len(line):
+        char = line[i]
+        if state == "block":
+            out.append(" ")
+            if char == "*" and i + 1 < len(line) and line[i + 1] == "/":
+                out.append(" ")
+                i += 2
+                state = "normal"
+                continue
+            i += 1
+            continue
+        if state in {"sq", "dq", "tmpl"}:
+            out.append(" ")
+            if char == "\\" and i + 1 < len(line):
+                out.append(" ")
+                i += 2
+                continue
+            if (
+                (state == "sq" and char == "'")
+                or (state == "dq" and char == '"')
+                or (state == "tmpl" and char == "`")
+            ):
+                state = "normal"
+            i += 1
+            continue
+        if char == "/" and i + 1 < len(line) and line[i + 1] == "/":
+            out.extend(" " * (len(line) - i))
+            break
+        if char == "/" and i + 1 < len(line) and line[i + 1] == "*":
+            out.extend("  ")
+            i += 2
+            state = "block"
+            continue
+        if char == "'":
+            out.append(" ")
+            state = "sq"
+            i += 1
+            continue
+        if char == '"':
+            out.append(" ")
+            state = "dq"
+            i += 1
+            continue
+        if char == "`":
+            out.append(" ")
+            state = "tmpl"
+            i += 1
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out), state
+
+
+def _paren_delta(masked: str) -> int:
+    return masked.count("(") - masked.count(")")
+
+
+def _function_header(line: str, language: str) -> tuple[int, str | None] | None:
+    """Return (indent, function name) when this line opens a function binding."""
+    if language == "py":
+        match = re.match(
+            r"^(\s*)(?:async\s+)?def\s+([^\W\d]\w*)",
+            line, flags=re.UNICODE,
+        )
+        if match:
+            return len(match.group(1).expandtabs(8)), match.group(2)
+        return None
+    if language != "js":
+        return None
+    match = re.match(
+        r"^(\s*)(?:export\s+)?(?:async\s+)?function\s+([^\W\d]\w*)\s*(?:<[^>]*>)?\s*\(",
+        line, flags=re.UNICODE,
+    )
+    if match:
+        return len(match.group(1).expandtabs(8)), match.group(2)
+    match = re.match(
+        r"^(\s*)(?:export\s+)?(?:const|let|var)\s+([^\W\d]\w*)\s*="
+        r"\s*(?:async\s*)?(?:function\b|\()",
+        line, flags=re.UNICODE,
+    )
+    if match:
+        return len(match.group(1).expandtabs(8)), match.group(2)
+    return None
+
+
+def _single_arrow_header(line: str, language: str) -> tuple[int, str, str] | None:
+    """Return an unparenthesized one-parameter JS arrow binding."""
+    if language != "js":
+        return None
+    match = re.match(
+        r"^(\s*)(?:export\s+)?(?:const|let|var)\s+([^\W\d]\w*)\s*="
+        r"\s*(?:async\s+)?([^\W\d]\w*)\s*=>",
+        line,
+        flags=re.UNICODE,
+    )
+    if not match:
+        return None
+    return len(match.group(1).expandtabs(8)), match.group(2), match.group(3)
+
+
+def _is_header_continuation(line: str) -> bool:
+    stripped = line.lstrip()
+    return stripped.startswith((")", "=>", "{", ":", ",", "}"))
+
+
+def _build_source_scopes(
+    path: str, lines: list[str],
+) -> tuple[list[_BindingScope], list[int]]:
+    """Map each added line to a lexical scope; unknown languages stay module-wide."""
+    language = _scope_language(path)
+    scopes = [_BindingScope()]
+    line_scope: list[int] = []
+    current = 0
+    stack: list[tuple[int, int]] = []  # (scope_idx, header_indent)
+    paren_depth = 0
+    header_parts: list[str] = []
+    collecting_params = False
+    js_state = "normal"
+
+    def close_params() -> None:
+        nonlocal collecting_params, header_parts
+        if collecting_params:
+            joined = "".join(header_parts)
+            start = joined.find("(")
+            end = joined.rfind(")")
+            if start >= 0 and end > start:
+                scopes[current].bindings.update(
+                    _parameter_names(joined[start + 1:end])
+                )
+        collecting_params = False
+        header_parts = []
+
+    for line in lines:
+        normalized = unicodedata.normalize("NFKC", line)
+        indent = _leading_indent(normalized)
+        while (
+            stack
+            and paren_depth <= 0
+            and indent is not None
+            and indent <= stack[-1][1]
+            and not _is_header_continuation(normalized)
+        ):
+            close_params()
+            parent = scopes[stack.pop()[0]].parent
+            current = 0 if parent is None else parent
+        single_arrow = _single_arrow_header(normalized, language)
+        header = (
+            (single_arrow[0], single_arrow[1])
+            if single_arrow is not None
+            else _function_header(normalized, language)
+        )
+        if header is not None:
+            header_indent, name = header
+            if name:
+                scopes[current].bindings.add(name)
+            child = len(scopes)
+            scopes.append(_BindingScope(parent=current))
+            stack.append((child, header_indent))
+            current = child
+            if single_arrow is not None:
+                scopes[current].bindings.add(single_arrow[2])
+                collecting_params = False
+            else:
+                collecting_params = True
+            header_parts = []
+            paren_depth = 0
+        if language == "js":
+            masked, js_state = _mask_js_literals(normalized, js_state)
+        else:
+            masked = normalized.split("#", 1)[0] if language == "py" else normalized
+        if collecting_params:
+            header_parts.append(masked)
+            paren_depth += _paren_delta(masked)
+            if paren_depth <= 0:
+                close_params()
+                paren_depth = 0
+        line_scope.append(current)
+        operands = _assignment_operands(normalized)
+        if operands:
+            scopes[current].bindings.update(_bound_names(operands[0]))
+    close_params()
+    return scopes, line_scope
+
+
+def _scope_with_binding(
+    scopes: list[_BindingScope], idx: int, name: str,
+) -> int | None:
+    while True:
+        if name in scopes[idx].bindings:
+            return idx
+        parent = scopes[idx].parent
+        if parent is None:
+            return None
+        idx = parent
+
+
+def _taint_bound_name(
+    scopes: list[_BindingScope], use_idx: int, name: str,
+) -> bool:
+    found = _scope_with_binding(scopes, use_idx, name)
+    if found is None or name in scopes[found].aliases:
+        return False
+    scopes[found].aliases.add(name)
+    return True
+
+
+def _name_is_alias(scopes: list[_BindingScope], use_idx: int, name: str) -> bool:
+    found = _scope_with_binding(scopes, use_idx, name)
+    return found is not None and name in scopes[found].aliases
+
+
+def _visible_aliased_names(scopes: list[_BindingScope], idx: int) -> set[str]:
+    shadowed: set[str] = set()
+    aliased: set[str] = set()
+    while True:
+        scope = scopes[idx]
+        for name in scope.aliases:
+            if name not in shadowed:
+                aliased.add(name)
+        shadowed.update(scope.bindings)
+        if scope.parent is None:
+            return aliased
+        idx = scope.parent
+
+
+def _ast_simple_value_names(node: ast.AST) -> set[str]:
+    """Names used as values in a Python argument, excluding access/call targets."""
+    if isinstance(node, ast.Name):
+        return {node.id}
+    if isinstance(node, (ast.Attribute, ast.Subscript, ast.Lambda)):
+        return set()
+    if isinstance(node, ast.Call):
+        names: set[str] = set()
+        for argument in node.args:
+            names.update(_ast_simple_value_names(argument))
+        for keyword in node.keywords:
+            names.update(_ast_simple_value_names(keyword.value))
+        return names
+    names: set[str] = set()
+    for child in ast.iter_child_nodes(node):
+        names.update(_ast_simple_value_names(child))
+    return names
+
+
+def _python_identity_call_argument_names(line: str) -> set[str]:
+    """Bound-value candidates from every identity-bearing Python call on a line."""
+    source = line.lstrip()
+    try:
+        tree = ast.parse(source, mode="exec")
+    except (SyntaxError, ValueError, TypeError):
+        return set()
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        segment = ast.get_source_segment(source, node) or ""
+        if not _line_mentions_identity_name(segment):
+            continue
+        for argument in node.args:
+            names.update(_ast_simple_value_names(argument))
+        for keyword in node.keywords:
+            names.update(_ast_simple_value_names(keyword.value))
+    return names
+
+
+def _masked_identity_call_arguments(line: str, masked: str) -> list[str]:
+    """Argument fragments for every identity-bearing JS call on one masked line."""
+    calls: list[tuple[int, int | None]] = []
+    arguments: list[str] = []
+    identifier = r"[^\W\d]\w*"
+    callee_pattern = re.compile(
+        rf"({identifier}(?:\s*\.\s*{identifier})*)\s*$",
+        flags=re.UNICODE,
+    )
+    for index, char in enumerate(masked):
+        if char == "(":
+            match = callee_pattern.search(masked[:index])
+            start = match.start(1) if match else None
+            if match and match.group(1).strip().lower() in _SOURCE_SYNTAX_NAMES:
+                start = None
+            calls.append((index, start))
+            continue
+        if char != ")" or not calls:
+            continue
+        open_index, callee_start = calls.pop()
+        if callee_start is None:
+            continue
+        segment = line[callee_start:index + 1]
+        if _line_mentions_identity_name(segment):
+            arguments.append(masked[open_index + 1:index])
+    return arguments
 
 
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
@@ -402,10 +832,10 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
     """Reject added identity/topology literals without classifying unrelated numbers.
 
     Numeric literals are security-relevant only when their path, line, or an alias chain
-    gives them identity/topology meaning. Alias propagation spans all added production
-    files, so moving a generic constant away from its UID/GID/peer/port consumer does not
-    bypass the guard. Explicit HTTP-status and permission-mode lines remain semantic
-    non-identity contexts unless the line itself names an identity.
+    gives them identity/topology meaning. Alias taint follows lexical bindings and
+    resolved import edges, so a same-file parameter or local does not leak through
+    unrelated uses of the same spelling. Explicit HTTP-status and permission-mode lines
+    remain semantic non-identity contexts unless the line itself names an identity.
     """
     additions_by_path: dict[str, list[str]] = {}
     current_path: str | None = None
@@ -430,16 +860,12 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
         if _is_production_identity_scan_path(path)
     }
 
-    definitions: dict[str, set[str]] = {path: set() for path in production}
     import_edges: dict[str, dict[str, set[tuple[str, str]]]] = {
         path: {} for path in production
     }
     for path, lines in production.items():
         for line in lines:
             normalized = unicodedata.normalize("NFKC", line)
-            left, separator, right = normalized.partition("=")
-            if separator:
-                definitions[path].update(_source_identifiers(left))
             python_import = _python_import_edge(normalized)
             js_import = re.match(
                 r"\s*import\s*\{([^}]+)\}\s*from\s*['\"]([^'\"]+)['\"]",
@@ -471,48 +897,110 @@ def _scan_added_identity_diff(diff: str) -> list[str]:
     imported: dict[str, set[str]] = {
         path: set(edges) for path, edges in import_edges.items()
     }
-
-    aliases: dict[str, set[str]] = {path: set() for path in production}
+    scopes_by_path = {
+        path: _build_source_scopes(path, lines) for path, lines in production.items()
+    }
+    masked_js_by_path: dict[str, list[str]] = {}
     for path, lines in production.items():
+        if _scope_language(path) != "js":
+            continue
+        state = "normal"
+        masked_lines: list[str] = []
         for line in lines:
+            masked, state = _mask_js_literals(
+                unicodedata.normalize("NFKC", line), state,
+            )
+            masked_lines.append(masked)
+        masked_js_by_path[path] = masked_lines
+    for path, locals_imported in imported.items():
+        scopes_by_path[path][0][0].bindings.update(locals_imported)
+
+    def taint_simple_names(
+        scopes: list[_BindingScope], use_idx: int, fragment: str,
+    ) -> bool:
+        changed_local = False
+        for name in _simple_names(fragment):
+            changed_local = _taint_bound_name(scopes, use_idx, name) or changed_local
+        return changed_local
+
+    def taint_identity_call_values(
+        path: str,
+        index: int,
+        normalized: str,
+        scopes: list[_BindingScope],
+        use_idx: int,
+    ) -> None:
+        language = _scope_language(path)
+        if language == "py":
+            for name in _python_identity_call_argument_names(normalized):
+                _taint_bound_name(scopes, use_idx, name)
+        elif language == "js":
+            for arguments in _masked_identity_call_arguments(
+                normalized, masked_js_by_path[path][index],
+            ):
+                taint_simple_names(scopes, use_idx, arguments)
+
+    for path, lines in production.items():
+        scopes, line_scope = scopes_by_path[path]
+        for index, line in enumerate(lines):
             normalized = unicodedata.normalize("NFKC", line)
-            if not _line_mentions_identity_name(normalized):
-                continue
-            left, separator, right = normalized.partition("=")
-            candidates = _source_identifiers(right if separator else normalized)
-            aliases[path].update(candidates & (definitions[path] | imported[path]))
+            operands = _assignment_operands(normalized)
+            use_idx = line_scope[index]
+            if operands is not None:
+                if _line_mentions_binding_identity_name(normalized):
+                    left, right = operands
+                    for name in _bound_names(left):
+                        _taint_bound_name(scopes, use_idx, name)
+                    taint_simple_names(scopes, use_idx, right)
+                elif _line_mentions_identity_name(normalized):
+                    taint_identity_call_values(
+                        path, index, normalized, scopes, use_idx,
+                    )
+            else:
+                if _line_mentions_identity_name(normalized):
+                    taint_identity_call_values(
+                        path, index, normalized, scopes, use_idx,
+                    )
 
     changed = True
     while changed:
         changed = False
         for path, lines in production.items():
-            for line in lines:
+            scopes, line_scope = scopes_by_path[path]
+            for index, line in enumerate(lines):
                 normalized = unicodedata.normalize("NFKC", line)
-                left, separator, right = normalized.partition("=")
-                if not separator or not (_source_identifiers(left) & aliases[path]):
+                operands = _assignment_operands(normalized)
+                if operands is None:
                     continue
-                before = len(aliases[path])
-                aliases[path].update(
-                    _source_identifiers(right) & (definitions[path] | imported[path])
-                )
-                changed = changed or len(aliases[path]) != before
+                left, right = operands
+                use_idx = line_scope[index]
+                if not any(_name_is_alias(scopes, use_idx, name) for name in _bound_names(left)):
+                    continue
+                changed = taint_simple_names(scopes, use_idx, right) or changed
 
             # Cross-file taint follows the resolved import module and exported binding;
             # a same-named definition in any other file has no dataflow edge.
-            for local_name in aliases[path] & imported[path]:
+            for local_name in imported[path]:
+                if local_name not in scopes[0].aliases:
+                    continue
                 for source_path, source_name in import_edges[path][local_name]:
-                    if source_name not in definitions[source_path]:
+                    source_scopes = scopes_by_path[source_path][0]
+                    if source_name not in source_scopes[0].bindings:
                         continue
-                    before = len(aliases[source_path])
-                    aliases[source_path].add(source_name)
-                    changed = changed or len(aliases[source_path]) != before
+                    changed = _taint_bound_name(
+                        source_scopes, 0, source_name,
+                    ) or changed
 
     flagged: list[str] = []
     for path, lines in production.items():
         path_identity = bool(_semantic_words(path) & _SOURCE_IDENTITY_WORDS)
-        flagged.extend(_scan_identity_source_lines(
-            lines, path_identity=path_identity, identity_aliases=aliases[path],
-        ))
+        scopes, line_scope = scopes_by_path[path]
+        for index, line in enumerate(lines):
+            flagged.extend(_scan_identity_source_lines(
+                [line],
+                path_identity=path_identity,
+                identity_aliases=_visible_aliased_names(scopes, line_scope[index]),
+            ))
     return flagged
 
 
@@ -934,6 +1422,348 @@ def _d8_frozen_added_diff(entries: list[tuple[str, str]]) -> str:
             "+" + line,
         ))
     return "\n".join(sections)
+
+
+def _d8_frozen_source_diff(path: str, source: str) -> str:
+    """Build a zero-context added-file diff from frozen source text."""
+    lines = source.splitlines()
+    return "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            "--- /dev/null",
+            f"+++ b/{path}",
+            f"@@ -0,0 +1,{len(lines)} @@",
+            *(f"+{line}" for line in lines),
+        ]
+    )
+
+
+_PR887_BASE = "a3bcfdbb4d99f6af7c3a86a7fed730cbd0184465"
+_PR887_HEAD = "46c566eeee62c05695eda5ece384812e65e5d3c9"
+
+
+def test_d8_pr887_ordinary_bounds_are_not_identity():
+    """Exact frozen source: all ten rows from D8_EXACT_CONTEXT.json pass silently.
+
+    Frozen from PR #887 head 46c566ee... covering mission.ts after file-global
+    alias leakage of v, value, len, length, raw, items, ntext, and x.
+    No runtime git-diff dependency; all source is embedded here.
+    """
+    ts = _d8_frozen_source_diff(
+        "app/mastermind_os/src/mission.ts",
+        "\n".join([
+            "export function ownerCheck(v: unknown) {",
+            "  len = 512;",
+            "}",
+            "export function urlBound(v: unknown) {",
+            "  return v.url.length <= 512 && ntext(v.branch, 512);",
+            "}",
+            "export function strings(v: unknown) {",
+            "  return v.items.length > 500;",
+            "}",
+            "export function decodeMission(value: unknown) {",
+            "  return !strings(value.children.unjoined_job_ids, 50, 512, true)",
+            "    && !ntext(ac.ruling, 512)",
+            "    && text(x.reason, 512);",
+            "}",
+            "export function location(raw: string) {",
+            "  if (!raw || raw.length > 640) return null;",
+            "}",
+            "export function programs(value: unknown) {",
+            "  const au = value.autonomy;",
+            "  return value.work.length > 500 || au.responsibilities.length > 500;",
+            "}",
+        ]),
+    )
+    # Also cover the non-mission.ts entries from D8_EXACT_CONTEXT.json base/head range.
+    other = _d8_frozen_added_diff([
+        ("control_plane/mission_workspace.py",
+         "    if text in (None, _REDACTED_TEXT) or len(text) > 512:"),
+        ("control_plane/mission_workspace.py",
+         "    month_lengths = (31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,"),
+        ("app/mastermind_os/src-tauri/tauri.conf.json",
+         '{"app":{"windows":[{"width":1200,"height":820,"minWidth":390,"minHeight":600}]}}'),
+        ("app/mastermind_os/src/styles.css", "  font-weight: 750;"),
+        ("app/mastermind_os/src/styles.css", "  font-weight: 700;"),
+        ("app/mastermind_os/src/styles.css", "  border-radius: 999px;"),
+        ("app/mastermind_os/src/styles.css", "  max-width: 760px;"),
+        ("app/mastermind_os/src/styles.css", "@media (max-width: 800px) {"),
+        ("app/mastermind_os/src/styles.css", "@media (max-width: 420px) {"),
+    ])
+    assert _scan_added_identity_diff("\n".join([ts, other])) == []
+
+
+def test_d8_same_file_scoped_bindings_do_not_leak_through_unrelated_uses():
+    """Same-file parameter/local bindings do not taint unrelated uses of the spelling.
+
+    Identity assignment to a function-local `v` must still flag that binding, and
+    module-level multi-hop aliases, topology names, and Unicode/camel-case identity
+    keys must still fail closed.
+    """
+    ts = _d8_frozen_source_diff(
+        "app/scope.ts",
+        "\n".join([
+            "function ownerCheck(v: unknown) {",
+            "  const peer_uid = v;",
+            "  v = 777;",
+            "}",
+            "function urlBound(v: unknown) {",
+            "  return v.url.length <= 512 && ntext(v.branch, 512);",
+            "}",
+            "const token = (v: unknown, n = 256): v is string =>",
+            "  !/\\\\/(?:Users|home|private|Volumes|var|etc)\\\\//i.test(v);",
+            "const strings = (",
+            "  v: unknown,",
+            "  count = 128,",
+            "  len = 512,",
+            "): v is string[] =>",
+            "  Array.isArray(v) && v.length <= count;",
+            "function section(v: unknown) {",
+            "  return v.items.length > 500;",
+            "}",
+            "export function decodeMission(value: unknown) {",
+            "  const pr = value.principal;",
+            "  const ac = value.acceptance;",
+            "  return ntext(ac.owner, 128)",
+            "    && ntext(ac.ruling, 512)",
+            "    && strings(value.children.unjoined_job_ids, 50, 512, true)",
+            "    && text(x.reason, 512);",
+            "}",
+            "export function selectionFromLocation(raw: string) {",
+            "  if (!raw || raw.length > 640) return null;",
+            "}",
+            "export function locationSelectionInput(raw: string) {",
+            "  if (!raw) return { hasIdentity: false, selection: null };",
+            "}",
+            "export function programsFromControlRoom(value: unknown) {",
+            "  const au = value.autonomy;",
+            "  return value.work.length > 500 || au.responsibilities.length > 500;",
+            "}",
+            "const FALLBACK = 501;",
+            "const SECONDARY = FALLBACK;",
+            "const peer_uid = SECONDARY;",
+            "const endpointPort = 684;",
+            'const accountUser = "_mastermind_shadow";',
+        ]),
+    )
+    py = _d8_frozen_source_diff(
+        "control_plane/scope.py",
+        "\n".join([
+            "def owner_check(v):",
+            "    peer_uid = v",
+            "    v = 459",
+            "def length_bound(v):",
+            "    return v > 512",
+        ]),
+    )
+    json_diff = _d8_frozen_source_diff(
+        "config/service.json",
+        "\n".join([
+            '{"allowedPeerUIDs": [450]}',
+            '{"peer\uff3fuid": 452}',
+        ]),
+    )
+    flagged = _scan_added_identity_diff("\n".join([ts, py, json_diff]))
+    assert flagged == [
+        "777", "501", "684", "_mastermind_shadow", "459", "450", "452",
+    ]
+
+
+def test_d8_direct_consumer_python_import_flags_source_literal():
+    """RED: set_uid(FALLBACK) must flag 501 through the resolved import edge.
+
+    This is the primary regression from the prior candidate: a non-assignment
+    identity-bearing call was silently skipping its argument names, so the import
+    edge never reached the source literal.
+    """
+    diff = _d8_frozen_added_diff([
+        ("common/defaults.py", "FALLBACK = 501"),
+        ("control_plane/credentials.py", "from common.defaults import FALLBACK"),
+        ("control_plane/credentials.py", "set_uid(FALLBACK)"),
+        ("app/constants.py", "FALLBACK = 512"),
+    ])
+    assert _scan_added_identity_diff(diff) == ["501"]
+
+
+def test_d8_direct_consumer_js_relative_import_flags_source_literal():
+    """RED: setPeerUid(FALLBACK) must flag 459 through the resolved import edge."""
+    diff = _d8_frozen_added_diff([
+        ("common/defaults.ts", "export const FALLBACK = 459;"),
+        ("control_plane/credentials.ts",
+         "import { FALLBACK } from '../common/defaults';"),
+        ("control_plane/credentials.ts", "setPeerUid(FALLBACK);"),
+        ("app/constants.ts", "export const FALLBACK = 512;"),
+    ])
+    assert _scan_added_identity_diff(diff) == ["459"]
+
+
+def test_d8_nested_function_scope_isolates_parameter_from_sibling_identity():
+    """Narrow scope control: nested function parameter does not leak to sibling.
+
+    The outer `v` parameter and inner `v` parameter are in separate binding
+    contours; assigning identity to the inner `v` must not taint the outer.
+    """
+    diff = _d8_frozen_added_diff([
+        ("control_plane/nested_scope.py",
+         "def outer(v):"),
+        ("control_plane/nested_scope.py",
+         "    def inner(v):"),
+        ("control_plane/nested_scope.py",
+         "        peer_uid = v"),
+        ("control_plane/nested_scope.py",
+         "        v = 777"),
+        ("control_plane/nested_scope.py",
+         "    result = v"),
+    ])
+    # Only 777 (direct identity assignment on the inner v) is flagged.
+    # The outer `v` used in `result = v` is not identity context here.
+    assert _scan_added_identity_diff(diff) == ["777"]
+
+
+def test_d8_arrow_functions_with_single_parameter_isolated():
+    """Narrow scope control: single-parameter arrow does not taint caller context.
+
+    The scanner tracks const/let/var=function headers but not arrow parameters.
+    Here n is not an identity word so the line is not identity-bearing; the
+    argument 501 is identity-bearing (peer context from makePeer) but n is not
+    a bound alias, so only 501 is flagged.
+    """
+    diff = _d8_frozen_added_diff([
+        ("app/arrow_scope.ts",
+         "const makePeer = (n: number) => setUid(n);"),
+        ("app/arrow_scope.ts",
+         "const bound = makePeer(501);"),
+    ])
+    # makePeer contains 'peer' → line is identity-bearing; 501 is in range.
+    # n is not in aliases (not a tracked binding), so 501 is flagged.
+    assert _scan_added_identity_diff(diff) == ["501"]
+
+
+def test_d8_parenthesized_arrow_body_is_not_an_assignment():
+    """Narrow scope control: parenthesized arrow body is not an assignment.
+
+    setUid contains 'uid' making the first line identity-bearing.  The arrow
+    body (n + 0) is not an assignment so n is not a bound alias.  The call
+    setUid(501) then taints 501 via the setUid alias.  No 500 appears.
+    """
+    diff = _d8_frozen_added_diff([
+        ("app/arrow_scope.ts",
+         "const setUid = (n) => (n + 0);"),
+        ("app/arrow_scope.ts",
+         "const result = setUid(501);"),
+    ])
+    assert _scan_added_identity_diff(diff) == ["501"]
+
+
+def test_d8_duplicate_parameter_spelling_in_sibling_scope():
+    """Narrow scope control: same spelling in different sibling scopes are distinct.
+
+    Python def headers are parsed correctly. The first function's peer_uid = v
+    creates an alias for v. The second function's return v uses the second's
+    own v parameter which is a distinct binding; v is not an alias in the
+    second scope so the return is not identity-bearing. Only peer_uid=501 is
+    flagged from the first function; v=777 is skipped because v is already an
+    alias from peer_uid=v.
+    """
+    diff = _d8_frozen_source_diff(
+        "control_plane/sibling_scope.py",
+        "\n".join([
+            "def first(v):",
+            "    peer_uid = v",
+            "    v = 501",
+            "def second(v):",
+            "    return v",
+            "    v = 777",
+        ]),
+    )
+    # peer_uid=501 is flagged (identity-bearing left side, 501 in range).
+    # v=501 is skipped (v is an alias from peer_uid=v above it).
+    # return v is skipped (second's v is a bound parameter, not an alias there).
+    # v=777 is skipped (v is already an alias from peer_uid=v, left is an alias).
+    assert _scan_added_identity_diff(diff) == ["501"]
+
+
+def test_d8_identity_call_after_ordinary_call_taints_only_its_argument():
+    diff = _d8_frozen_added_diff([
+        ("common/defaults.py", "FALLBACK = 501"),
+        ("control_plane/credentials.py",
+         "from common.defaults import FALLBACK"),
+        ("control_plane/credentials.py",
+         "if ready(state) and set_uid(FALLBACK): pass"),
+    ])
+    assert _scan_added_identity_diff(diff) == ["501"]
+
+
+def test_d8_quoted_parenthesis_before_identity_call_does_not_hide_argument():
+    diff = _d8_frozen_added_diff([
+        ("common/defaults.py", "FALLBACK = 501"),
+        ("control_plane/credentials.py",
+         "from common.defaults import FALLBACK"),
+        ("control_plane/credentials.py",
+         'log("uid("); set_uid(FALLBACK)'),
+    ])
+    assert _scan_added_identity_diff(diff) == ["501"]
+
+
+def test_d8_attribute_member_does_not_taint_same_named_import():
+    diff = _d8_frozen_added_diff([
+        ("common/defaults.py", "FALLBACK = 501"),
+        ("control_plane/credentials.py",
+         "from common.defaults import FALLBACK"),
+        ("control_plane/credentials.py", "set_uid(config.FALLBACK)"),
+    ])
+    assert _scan_added_identity_diff(diff) == []
+
+
+def test_d8_python_identity_attribute_target_taints_imported_rhs():
+    diff = _d8_frozen_added_diff([
+        ("common/defaults.py", "FALLBACK = 501"),
+        ("control_plane/adapter.py",
+         "from common.defaults import FALLBACK"),
+        ("control_plane/adapter.py", "config.peer_uid = FALLBACK"),
+    ])
+    assert _scan_added_identity_diff(diff) == ["501"]
+
+
+def test_d8_js_identity_attribute_target_taints_imported_rhs():
+    diff = _d8_frozen_added_diff([
+        ("common/defaults.ts", "export const FALLBACK = 459;"),
+        ("control_plane/adapter.ts",
+         "import { FALLBACK } from '../common/defaults';"),
+        ("control_plane/adapter.ts", "config.peerUid = FALLBACK;"),
+    ])
+    assert _scan_added_identity_diff(diff) == ["459"]
+
+
+def test_d8_unparenthesized_arrow_parameter_shadows_import():
+    diff = "\n".join([
+        _d8_frozen_added_diff([
+            ("common/defaults.ts", "export const FALLBACK = 459;"),
+        ]),
+        _d8_frozen_source_diff(
+            "control_plane/credentials.ts",
+            "\n".join([
+                "import { FALLBACK } from '../common/defaults';",
+                "const consumer = FALLBACK => setPeerUid(FALLBACK);",
+            ]),
+        ),
+    ])
+    assert _scan_added_identity_diff(diff) == []
+
+
+def test_d8_regex_group_method_does_not_taint_calendar_bindings():
+    diff = _d8_frozen_source_diff(
+        "control_plane/mission_workspace.py",
+        "\n".join([
+            "def _safe_timestamp(value):",
+            "    text = _safe_identifier(value)",
+            '    year = int(match.group("year"))',
+            '    month = int(match.group("month"))',
+            "    month_lengths = (31, 29 if year % 4 == 0",
+            "        and (year % 100 != 0 or year % 400 == 0) else 28, 31)",
+        ]),
+    )
+    assert _scan_added_identity_diff(diff) == []
 
 
 def test_d8_actual_pr882_and_pr887_semantic_numbers_are_not_identity():
