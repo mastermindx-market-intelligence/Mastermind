@@ -474,6 +474,79 @@ def build_receipt_from_effective_tool_schema(
     )
 
 
+def build_receipt_from_negative_schema_projection(
+    *,
+    absent_capabilities: Sequence[str],
+    tool_schema_digest: str,
+    worker_id: str,
+    quota_class: str,
+    session_ref: str,
+    binding_ref: str,
+    binding_generation: int,
+    observed_at_ms: int,
+    expires_at_ms: int,
+) -> WebCeoSessionCapabilityReceipt:
+    """Consume a complete-schema, negative-only exact-session projection.
+
+    This seam exists for transports that can attribute one finished turn to an
+    exact RuntimeBinding but must not expose raw transcript or raw tool names.
+    The projection may remove capabilities from eligibility only. Every closed
+    capability not declared absent remains UNKNOWN; this function can never
+    mint PRESENT or grant authority.
+
+    absent_capabilities MUST be the complete absent subset of the closed
+    KNOWN_EFFECTIVE_CAPABILITIES vocabulary for the observed schema generation,
+    not merely the current demand's missing subset.
+    """
+
+    if (
+        isinstance(absent_capabilities, (str, bytes))
+        or not isinstance(absent_capabilities, Sequence)
+    ):
+        raise WebCeoSessionCapabilityError(
+            "NEGATIVE_SCHEMA_PROJECTION_INVALID"
+        )
+    absent = tuple(sorted(_capability(item) for item in absent_capabilities))
+    if not absent or len(set(absent)) != len(absent):
+        raise WebCeoSessionCapabilityError(
+            "NEGATIVE_SCHEMA_PROJECTION_INVALID"
+        )
+    if any(item not in KNOWN_EFFECTIVE_CAPABILITIES for item in absent):
+        raise WebCeoSessionCapabilityError(
+            "NEGATIVE_CAPABILITY_OUTSIDE_CLOSED_SET"
+        )
+    if (
+        not isinstance(tool_schema_digest, str)
+        or _DIGEST_RE.fullmatch(tool_schema_digest) is None
+    ):
+        raise WebCeoSessionCapabilityError("TOOL_SCHEMA_DIGEST_INVALID")
+
+    observations = tuple(
+        CapabilityObservation(
+            name=name,
+            state=(
+                CapabilityObservationState.ABSENT
+                if name in absent
+                else CapabilityObservationState.UNKNOWN
+            ),
+            proof_class=CapabilityProofClass.EFFECTIVE_SCHEMA,
+        )
+        for name in KNOWN_EFFECTIVE_CAPABILITIES
+    )
+    return WebCeoSessionCapabilityReceipt(
+        worker_id=worker_id,
+        quota_class=quota_class,
+        session_ref=session_ref,
+        binding_ref=binding_ref,
+        binding_generation=binding_generation,
+        observed_at_ms=observed_at_ms,
+        expires_at_ms=expires_at_ms,
+        schema_complete=True,
+        tool_schema_digest=tool_schema_digest,
+        observations=observations,
+    )
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class WebCeoCapabilityPreflightDecision:
     """Machine-readable pre-START fence; never a placement commitment."""
@@ -743,16 +816,11 @@ def assess_web_ceo_session_capabilities(
             unknown=unknown_tuple,
         )
 
-    if unknown_tuple:
-        return _decision(
-            state=PreflightState.CAPABILITY_PROOF_REQUIRED,
-            receipt=receipt,
-            required=required,
-            proven=proven_tuple,
-            missing=missing_tuple,
-            unknown=unknown_tuple,
-        )
-
+    # A proven required absence is dispositive: the candidate cannot satisfy
+    # the accepted demand even if sibling required capabilities are still
+    # UNKNOWN. Before START with no effect, exclude/rebind now rather than
+    # waiting for irrelevant positive proof. After START the same known
+    # absence is sticky degradation and never authorizes carrier movement.
     if missing_tuple:
         if (
             start_state is SessionStartState.PRE_START
@@ -769,6 +837,16 @@ def assess_web_ceo_session_capabilities(
             )
         return _decision(
             state=PreflightState.STICKY_DEGRADED,
+            receipt=receipt,
+            required=required,
+            proven=proven_tuple,
+            missing=missing_tuple,
+            unknown=unknown_tuple,
+        )
+
+    if unknown_tuple:
+        return _decision(
+            state=PreflightState.CAPABILITY_PROOF_REQUIRED,
             receipt=receipt,
             required=required,
             proven=proven_tuple,
@@ -847,5 +925,6 @@ __all__ = [
     "assess_web_ceo_session_capabilities",
     "build_guarded_commitment_plan_from_selection_decision",
     "build_receipt_from_effective_tool_schema",
+    "build_receipt_from_negative_schema_projection",
     "validate_session_capability_receipt",
 ]

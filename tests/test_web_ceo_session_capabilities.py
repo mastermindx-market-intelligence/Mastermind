@@ -713,3 +713,138 @@ def test_positive_capability_requires_serviceability_probe_proof() -> None:
             wcap.CapabilityObservationState.PRESENT,
             wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
         )
+
+
+def test_proven_missing_required_capability_outweighs_sibling_unknown_prestart() -> None:
+    receipt = _receipt(
+        _observation(
+            "executive_submit",
+            wcap.CapabilityObservationState.ABSENT,
+            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+        ),
+        _observation(
+            "studio_direct_write",
+            wcap.CapabilityObservationState.UNKNOWN,
+            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+        ),
+    )
+    preflight = _assess(
+        receipt,
+        required=frozenset({"executive_submit", "studio_direct_write"}),
+    )
+    assert preflight.state is wcap.PreflightState.PRESTART_REBIND_REQUIRED
+    assert preflight.rebind_allowed is True
+    assert preflight.missing_capabilities == ("executive_submit",)
+    assert preflight.unknown_capabilities == ("studio_direct_write",)
+
+
+def test_proven_missing_required_capability_is_sticky_after_start_even_with_unknown() -> None:
+    receipt = _receipt(
+        _observation(
+            "executive_submit",
+            wcap.CapabilityObservationState.ABSENT,
+            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+        ),
+        _observation(
+            "studio_direct_write",
+            wcap.CapabilityObservationState.UNKNOWN,
+            wcap.CapabilityProofClass.EFFECTIVE_SCHEMA,
+        ),
+    )
+    preflight = _assess(
+        receipt,
+        required=frozenset({"executive_submit", "studio_direct_write"}),
+        start_state=wcap.SessionStartState.STARTED,
+    )
+    assert preflight.state is wcap.PreflightState.STICKY_DEGRADED
+    assert preflight.rebind_allowed is False
+
+
+def test_negative_schema_projection_can_only_remove_capabilities() -> None:
+    receipt = wcap.build_receipt_from_negative_schema_projection(
+        absent_capabilities=(
+            "desktop_commander_write",
+            "executive_submit",
+            "studio_direct_write",
+        ),
+        tool_schema_digest="b" * 64,
+        worker_id="web-ceo-c3-astra",
+        quota_class="chatgpt-pro",
+        session_ref="websol-c3-session-17",
+        binding_ref="runtimebinding-websol-c3-17",
+        binding_generation=7,
+        observed_at_ms=1_789_870_000_000,
+        expires_at_ms=1_789_870_120_000,
+    )
+    observations = {item.name: item for item in receipt.observations}
+    for name in (
+        "desktop_commander_write",
+        "executive_submit",
+        "studio_direct_write",
+    ):
+        assert observations[name].state is wcap.CapabilityObservationState.ABSENT
+        assert (
+            observations[name].proof_class
+            is wcap.CapabilityProofClass.EFFECTIVE_SCHEMA
+        )
+    for name, observation in observations.items():
+        if name not in {
+            "desktop_commander_write",
+            "executive_submit",
+            "studio_direct_write",
+        }:
+            assert observation.state is wcap.CapabilityObservationState.UNKNOWN
+    assert all(
+        observation.state is not wcap.CapabilityObservationState.PRESENT
+        for observation in observations.values()
+    )
+
+    preflight = _assess(receipt)
+    assert preflight.state is wcap.PreflightState.PRESTART_REBIND_REQUIRED
+    assert preflight.rebind_allowed is True
+
+
+def test_negative_schema_projection_refuses_empty_duplicate_or_foreign_capabilities() -> None:
+    common = {
+        "tool_schema_digest": "b" * 64,
+        "worker_id": "web-ceo-c3-astra",
+        "quota_class": "chatgpt-pro",
+        "session_ref": "websol-c3-session-17",
+        "binding_ref": "runtimebinding-websol-c3-17",
+        "binding_generation": 7,
+        "observed_at_ms": 1_789_870_000_000,
+        "expires_at_ms": 1_789_870_120_000,
+    }
+    for absent in ((), ("executive_submit", "executive_submit")):
+        with pytest.raises(
+            wcap.WebCeoSessionCapabilityError,
+            match="NEGATIVE_SCHEMA_PROJECTION_INVALID",
+        ):
+            wcap.build_receipt_from_negative_schema_projection(
+                absent_capabilities=absent,
+                **common,
+            )
+
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="NEGATIVE_CAPABILITY_OUTSIDE_CLOSED_SET",
+    ):
+        wcap.build_receipt_from_negative_schema_projection(
+            absent_capabilities=("invented_super_write",),
+            **common,
+        )
+
+
+def test_negative_schema_projection_round_trips_through_closed_receipt_wire() -> None:
+    receipt = wcap.build_receipt_from_negative_schema_projection(
+        absent_capabilities=("executive_submit",),
+        tool_schema_digest="c" * 64,
+        worker_id="web-ceo-c3-astra",
+        quota_class="chatgpt-pro",
+        session_ref="websol-c3-session-17",
+        binding_ref="runtimebinding-websol-c3-17",
+        binding_generation=7,
+        observed_at_ms=1_789_870_000_000,
+        expires_at_ms=1_789_870_120_000,
+    )
+    assert wcap.validate_session_capability_receipt(receipt.to_dict()) == receipt
