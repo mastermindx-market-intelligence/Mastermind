@@ -3,6 +3,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 export const DEFAULT_OUTPUT_BUDGET = Object.freeze({responseBytes:16384,retainedBytes:8388608,maxEntries:8});
+export const OUTPUT_COMPAT_READ_PREFIX='studio-output://receipt/';
 export const OUTPUT_PAGE_TOOL = Object.freeze({
   name:'studio_output_page', title:'Read retained Studio output',
   description:'Read a bounded UTF-8 page of an already-returned result using receipt_id and next_offset. This is a local receipt read and does not invoke the original tool. Receipts expire with their existing backend owner or bounded eviction. An unavailable receipt provides no evidence about the effect of the original call.',
@@ -43,13 +44,15 @@ export class TextOutputPager {
       this.#entries.set(receiptId,{raw,sha256});this.#bytes+=raw.length;
     }
     const data={status:retained?'OUTPUT_PAGED':'OUTPUT_NOT_RETAINED',
-      ...(retained?{receipt_id:receiptId,read_tool:OUTPUT_PAGE_TOOL.name,next_offset:0}:{}),
+      ...(retained?{receipt_id:receiptId,read_tool:OUTPUT_PAGE_TOOL.name,next_offset:0,
+        compat_read_tool:'read_file',compat_read_path:OUTPUT_COMPAT_READ_PREFIX+receiptId,
+        compat_offset_argument:'offset'}:{}),
       source_tool:typeof toolName==='string'&&/^[A-Za-z0-9_.-]{1,64}$/.test(toolName)?toolName:'unknown',source_bytes:raw.length,sha256,
       backend_is_error:typeof result.isError==='boolean'?result.isError:null,
       retention:'existing_backend_owner_bounded_memory',
       preview:{head:result.content[0].text.slice(0,PREVIEW_CHARS),tail:result.content.at(-1).text.slice(-PREVIEW_CHARS)},
       notice:retained?
-        'Output projection only, not an execution verdict. Retained pages expose result content without re-executing the original action; previews omit content. Receipt may expire with owner closure or eviction.':
+        'Output projection only, not an execution verdict. Retained pages expose result content without re-executing the original action; previews omit content. Receipt may expire with owner closure or eviction. If a frozen app snapshot does not expose studio_output_page, call read_file with compat_read_path and offset=next_offset; this reads the same retained bytes and never invokes the original source tool.':
         'Backend response received, but full output exceeds retention or its owner is closed. No full-result receipt exists. Output retention provides no re-execution authority; the original source or effect remains authoritative.'};
     let response=toolResult(data,result.isError);
     while(wireBytes(response)>this.limits.responseBytes&&(data.preview.head.length||data.preview.tail.length)){
@@ -58,6 +61,18 @@ export class TextOutputPager {
       response=toolResult(data,result.isError);
     }
     return response;
+  }
+  readCompat(args){
+    if(!args||typeof args!=='object'||Array.isArray(args)||
+       typeof args.path!=='string'||!args.path.startsWith(OUTPUT_COMPAT_READ_PREFIX)||
+       args.isUrl===true||
+       Object.keys(args).some(k=>!['path','isUrl','offset','length','origin'].includes(k))||
+       (args.offset!==undefined&&(!Number.isSafeInteger(args.offset)||args.offset<0))||
+       (args.length!==undefined&&(!Number.isSafeInteger(args.length)||args.length<1))||
+       (args.origin!==undefined&&args.origin!=='llm'&&args.origin!=='ui'))
+      return errorResult('OUTPUT_PAGE_ARGUMENT_INVALID');
+    const receiptId=args.path.slice(OUTPUT_COMPAT_READ_PREFIX.length);
+    return this.read({receipt_id:receiptId,offset:args.offset??0});
   }
   read(args){
     if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>k!=='receipt_id'&&k!=='offset')||
