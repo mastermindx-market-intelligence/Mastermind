@@ -661,8 +661,8 @@ if FastAPI is not None:
                     elif et == "done" and ev.get("session_id"):
                         last_sid = ev["session_id"]
                     yield _sse(ev)
-            except Exception as exc:                       # never leave the stream hanging
-                yield _sse({"type": "error", "error": repr(exc)[:300]})
+            except Exception:                              # never leave the stream hanging
+                yield _sse(cli_bridge.public_chat_error_event())
             finally:
                 advisor.set_session(conv_id, last_sid)
                 advisor.append_turn(conv_id, "brain", acc, tools, papers)

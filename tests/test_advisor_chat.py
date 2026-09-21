@@ -182,7 +182,9 @@ def test_chat_stream_surfaces_sdk_exception(monkeypatch):
     # carries the resume session_id + tools_used even on a failed turn) — post-stream
     # bookkeeping (key-failure detection, response ledger) runs between the two.
     err = next(e for e in evs if e["type"] == "error")
-    assert "cli exploded" in err["error"]
+    assert err["code"] == cli_bridge.CHAT_ERROR_CODE
+    assert err["error"] == cli_bridge.CHAT_ERROR_MESSAGE
+    assert "cli exploded" not in err["error"]
     assert evs[-1]["type"] == "done"
 
 
