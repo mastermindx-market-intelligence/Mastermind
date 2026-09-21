@@ -617,6 +617,50 @@ def test_matching_crash_identity_reconciles_partial_control_construction(
     assert not (root / ".commission-acquisition").exists()
 
 
+def test_matching_crash_identity_refuses_final_destination_symlink(
+    tmp_path: Path,
+) -> None:
+    source, base_sha = _base_repository(tmp_path / "source")
+    commission_source, commission_sha, brief = _commission_repository(
+        tmp_path, source, include_unrelated=False
+    )
+    plan = _acquiring_plan(commission_source, commission_sha, brief)
+    root = tmp_path / "workspaces"
+    root.mkdir(mode=0o700)
+    victim = root / "victim"
+    victim.mkdir(mode=0o700)
+    marker = victim / "must-survive"
+    marker.write_text("preserve\n", encoding="utf-8")
+    destination = root / "job-commission-symlink"
+    destination.symlink_to(victim.name, target_is_directory=True)
+
+    acquisition_root = root / ".commission-acquisition"
+    acquisition_root.mkdir(mode=0o700)
+    operation = acquisition_root / "job-commission-symlink"
+    operation.mkdir(mode=0o700)
+    (operation / "identity").write_bytes(
+        workspace._commission_acquisition_identity(
+            job_id="JOB-COMMISSION-SYMLINK",
+            base_sha=base_sha,
+            ref=plan.commission_ref,
+        )
+    )
+
+    with pytest.raises(workspace.WorkspaceError, match="ambiguous workspace path"):
+        workspace.prepare_credentialless_clone(
+            source,
+            root,
+            job_id="JOB-COMMISSION-SYMLINK",
+            base_sha=base_sha,
+            commission_dependency=plan,
+        )
+
+    assert destination.is_symlink()
+    assert destination.readlink() == Path("victim")
+    assert marker.read_text(encoding="utf-8") == "preserve\n"
+    assert operation.is_dir()
+
+
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX process crash")
 def test_crash_after_workspace_validation_before_commit_remains_recoverable(
     tmp_path: Path,

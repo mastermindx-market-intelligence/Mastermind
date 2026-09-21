@@ -745,6 +745,15 @@ def _reconcile_stale_acquisition(
     if observed != expected:
         raise WorkspaceError("commission acquisition crash identity drifted")
 
+    expected_destination = root / job_id.lower()
+    if destination != expected_destination or destination.parent != root:
+        raise WorkspaceError(
+            "commission acquisition crash workspace is not the exact direct child"
+        )
+    _require_private_control_directory(
+        root, label="commission acquisition workspace root"
+    )
+
     # The acquisition operation is removed before STATE B begins.  Therefore a
     # matching leftover proves any same-name destination is still a partial
     # STATE A construction from this exact operation, not a handed-off worker
@@ -1548,7 +1557,7 @@ def prepare_credentialless_clone(
     if not source.is_dir():
         raise WorkspaceError(f"source repository is not a directory: {source}")
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    destination = (root / safe_job_id.lower()).resolve()
+    destination = root / safe_job_id.lower()
     if destination.parent != root:
         raise WorkspaceError("workspace destination escaped its assigned root")
 
@@ -1584,7 +1593,7 @@ def prepare_credentialless_clone(
             base_sha=resolved_base,
             ref=commission_dependency.commission_ref,
         )
-    if destination.exists():
+    if os.path.lexists(destination):
         raise WorkspaceError(f"workspace already exists: {destination}")
     _run(
         ["git", "check-ref-format", "--branch", selected_branch],
