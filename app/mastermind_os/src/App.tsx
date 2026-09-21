@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   allEvidence,
   decodeMission,
+  locationSelectionInput,
   normalizeSelection,
   programsFromControlRoom,
   relationshipsForMission,
@@ -10,6 +11,7 @@ import {
   type MissionDocument,
   type MissionRead,
   type MissionSelection,
+  type ProgramRead,
   type UnavailableMission,
 } from "./mission";
 export const navigation = [
@@ -32,11 +34,14 @@ declare global {
   interface Window {
     MastermindMissionHost?: {
       readMission?: MissionRead;
+      readPrograms?: ProgramRead;
       selection?: unknown;
-      controlRoom?: unknown;
     };
   }
 }
+type ProgramIndex =
+  | ReturnType<typeof programsFromControlRoom>
+  | { programs: []; state: "PENDING"; reason: "SOURCE_READ_PENDING" };
 const display = (v: unknown, f = "Not established") =>
   typeof v === "string" && v ? v : f;
 const label = (v: unknown) => display(v, "UNKNOWN").replaceAll("_", " ");
@@ -385,20 +390,44 @@ function Evidence({ d }: { d: MissionDocument }) {
     </>
   );
 }
+function Conversation() {
+  return (
+    <section className="card">
+      <div className="section-title">
+        <h2>Conversation</h2>
+        <State value="UNAVAILABLE" />
+      </div>
+      <p className="muted">
+        This app has no connected conversation source yet.
+      </p>
+      <Empty>
+        No conversation content is shown until a connected source is installed.
+        Existing owner and effect boundaries remain unchanged.
+      </Empty>
+      <details className="reason-details">
+        <summary>Technical details</summary>
+        <code>CONVERSATION_TRANSPORT_UNAVAILABLE</code>
+      </details>
+    </section>
+  );
+}
 export function App() {
   const native = "__TAURI_INTERNALS__" in window,
+    initialLocation = useMemo(() => locationSelectionInput(), []),
     initial = useMemo(
       () =>
-        normalizeSelection(window.MastermindMissionHost?.selection) ??
-        selectionFromLocation(),
-      [],
-    ),
-    index = useMemo(
-      () => programsFromControlRoom(window.MastermindMissionHost?.controlRoom),
-      [],
+        initialLocation.hasIdentity
+          ? initialLocation.selection
+          : normalizeSelection(window.MastermindMissionHost?.selection),
+      [initialLocation],
     ),
     [selection, setSelection] = useState<MissionSelection | null>(initial),
     [active, setActive] = useState<View>("Today"),
+    [index, setIndex] = useState<ProgramIndex>({
+      programs: [],
+      state: "PENDING",
+      reason: "SOURCE_READ_PENDING",
+    }),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
       unavailableMission(
         initial,
@@ -407,27 +436,132 @@ export function App() {
     ),
     [notice, setNotice] = useState("A qualified source has not been read."),
     [build, setBuild] = useState<BuildReceipt | null>(null),
-    request = useRef(0);
+    missionRequest = useRef(0),
+    programRequest = useRef(0),
+    missionSelectionState = native ? "NATIVE" : index.state,
+    selectionRefused =
+      !native &&
+      index.state === "AVAILABLE" &&
+      !!selection &&
+      !index.programs.some(
+        (program) =>
+          program.workRef === selection.workRef &&
+          program.rootState === "RESOLVED" &&
+          program.rootJobId === selection.rootJobId,
+      );
+  useEffect(() => {
+    if (!initialLocation.hasIdentity && initial) {
+      const location = new URL(window.location.href);
+      location.search = new URLSearchParams({
+        work_ref: initial.workRef,
+        root_job_id: initial.rootJobId,
+      }).toString();
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${location.pathname}${location.search}${location.hash}`,
+      );
+    }
+  }, [initial, initialLocation.hasIdentity]);
   useEffect(() => {
     let attached = true;
-    const current = ++request.current,
+    if (!native) return () => {
+      attached = false;
+    };
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke<BuildReceipt>("readiness"))
+      .then((r) => {
+        if (attached) setBuild(r);
+      })
+      .catch(() => {
+        if (attached)
+          setNotice(
+            "Native readiness receipt unavailable. No source request was attempted.",
+          );
+      });
+    return () => {
+      attached = false;
+    };
+  }, [native]);
+  useEffect(() => {
+    let attached = true;
+    const current = ++programRequest.current,
+      controller = new AbortController();
+    if (native) {
+      setIndex({
+        programs: [],
+        state: "UNAVAILABLE",
+        reason: "NATIVE_TRANSPORT_UNCONFIGURED",
+      });
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
+    const read = window.MastermindMissionHost?.readPrograms;
+    if (typeof read !== "function") {
+      setIndex({
+        programs: [],
+        state: "UNAVAILABLE",
+        reason: "QUALIFIED_PROGRAM_READ_UNAVAILABLE",
+      });
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
+    setIndex({
+      programs: [],
+      state: "PENDING",
+      reason: "SOURCE_READ_PENDING",
+    });
+    Promise.resolve()
+      .then(() => read({ signal: controller.signal }))
+      .then((raw) => {
+        if (attached && programRequest.current === current)
+          setIndex(programsFromControlRoom(raw));
+      })
+      .catch(() => {
+        if (
+          attached &&
+          programRequest.current === current &&
+          !controller.signal.aborted
+        )
+          setIndex({
+            programs: [],
+            state: "UNAVAILABLE",
+            reason: "SOURCE_UNAVAILABLE",
+          });
+      });
+    return () => {
+      attached = false;
+      controller.abort();
+    };
+  }, [native]);
+  useEffect(() => {
+    const restoreSelection = () => {
+      const next = selectionFromLocation();
+      setMission(
+        unavailableMission(
+          next,
+          next ? "PROGRAM_SELECTION_PENDING" : "EXACT_SELECTION_REQUIRED",
+        ),
+      );
+      setSelection(next);
+      setActive("Mission Workspace");
+    };
+    window.addEventListener("popstate", restoreSelection);
+    return () => window.removeEventListener("popstate", restoreSelection);
+  }, []);
+  useEffect(() => {
+    let attached = true;
+    const current = ++missionRequest.current,
       controller = new AbortController();
     if (native) {
       setMission(
         unavailableMission(selection, "NATIVE_TRANSPORT_UNCONFIGURED"),
       );
       setNotice("Workspace connection unavailable. Current work was not read.");
-      import("@tauri-apps/api/core")
-        .then(({ invoke }) => invoke<BuildReceipt>("readiness"))
-        .then((r) => {
-          if (attached && request.current === current) setBuild(r);
-        })
-        .catch(() => {
-          if (attached && request.current === current)
-            setNotice(
-              "Native readiness receipt unavailable. No source request was attempted.",
-            );
-        });
       return () => {
         attached = false;
         controller.abort();
@@ -443,8 +577,34 @@ export function App() {
         controller.abort();
       };
     }
-    const read = window.MastermindMissionHost?.readMission ?? null;
-    if (!read) {
+    if (missionSelectionState === "PENDING") {
+      setMission(unavailableMission(selection, "PROGRAM_SELECTION_PENDING"));
+      setNotice("Reading Programs before resolving the exact mission pair…");
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
+    if (missionSelectionState === "UNAVAILABLE") {
+      setMission(unavailableMission(selection, "PROGRAM_SOURCE_UNAVAILABLE"));
+      setNotice("Program source unavailable. No mission pair was guessed.");
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
+    if (selectionRefused) {
+      setMission(unavailableMission(selection, "EXACT_SELECTION_UNRESOLVED"));
+      setNotice(
+        "The Program source did not resolve one exact mission pair. No mission was read.",
+      );
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
+    const read = window.MastermindMissionHost?.readMission;
+    if (typeof read !== "function") {
       setMission(
         unavailableMission(selection, "QUALIFIED_HOST_READ_UNAVAILABLE"),
       );
@@ -456,9 +616,10 @@ export function App() {
     }
     setMission(unavailableMission(selection, "SOURCE_READ_PENDING"));
     setNotice("Reading the exact selected mission pair…");
-    read({ ...selection, signal: controller.signal })
+    Promise.resolve()
+      .then(() => read({ ...selection, signal: controller.signal }))
       .then((raw) => {
-        if (!attached || request.current !== current) return;
+        if (!attached || missionRequest.current !== current) return;
         const decoded = decodeMission(raw, selection);
         if (decoded) {
           setMission(decoded);
@@ -477,7 +638,7 @@ export function App() {
       .catch(() => {
         if (
           attached &&
-          request.current === current &&
+          missionRequest.current === current &&
           !controller.signal.aborted
         ) {
           setMission(unavailableMission(selection, "SOURCE_UNAVAILABLE"));
@@ -490,7 +651,7 @@ export function App() {
       attached = false;
       controller.abort();
     };
-  }, [selection, native]);
+  }, [selection, native, missionSelectionState, selectionRefused]);
   const candidate = isDoc(mission) ? mission : null,
     d =
       candidate &&
@@ -502,14 +663,25 @@ export function App() {
         : null,
     open = (w: string, r: string | null) => {
       if (r) {
+        const next = { workRef: w, rootJobId: r },
+          location = new URL(window.location.href);
+        location.search = new URLSearchParams({
+          work_ref: next.workRef,
+          root_job_id: next.rootJobId,
+        }).toString();
+        window.history.pushState(
+          null,
+          "",
+          `${location.pathname}${location.search}${location.hash}`,
+        );
         setMission(
           unavailableMission(
-            { workRef: w, rootJobId: r },
+            next,
             "SOURCE_READ_PENDING",
           ),
         );
         setNotice("Reading the exact selected mission pair…");
-        setSelection({ workRef: w, rootJobId: r });
+        setSelection(next);
         setActive("Mission Workspace");
       }
     };
@@ -532,9 +704,11 @@ export function App() {
       <section className="card">
         <div className="section-title">
           <h2>Programs</h2>
-          <State value={index.state} />
+          <State value={index.state === "PENDING" ? "SOURCE_READ_PENDING" : index.state} />
         </div>
-        {index.programs.length ? (
+        {index.state === "PENDING" ? (
+          <Empty>Reading the bounded Control Room projection…</Empty>
+        ) : index.programs.length ? (
           <div className="programs">
             {index.programs.map((p) => (
               <button
@@ -557,15 +731,25 @@ export function App() {
               </button>
             ))}
           </div>
+        ) : index.state === "AVAILABLE" ? (
+          <Empty>
+            No Programs were projected. This is not evidence of zero work.
+          </Empty>
         ) : (
           <Empty>
-            {window.MastermindMissionHost?.controlRoom == null
-              ? "Workspace connection unavailable. Programs will appear when an approved source is available."
-              : `The supplied Programs source did not match the required contract (${index.reason}).`}
+            Workspace connection unavailable. Programs will appear when an
+            approved source is available.
           </Empty>
         )}
+        {index.state === "UNAVAILABLE" ? (
+          <details className="reason-details">
+            <summary>Technical details</summary>
+            <code>{index.reason}</code>
+          </details>
+        ) : null}
       </section>
     );
+  else if (active === "Conversation") content = <Conversation />;
   else if (!d)
     content = (
       <section className="card empty-panel">
@@ -586,21 +770,7 @@ export function App() {
   else if (active === "Mission Workspace") content = <Mission d={d} />;
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <Evidence d={d} />;
-  else
-    content = (
-      <section className="card">
-        <div className="section-title">
-          <h2>Conversation</h2>
-          <State value={d.conversation.state} />
-        </div>
-        <p className="muted">{d.conversation.reason_codes.join(" · ")}</p>
-        <Empty>
-          No qualified Steward endpoint, viewer grant, connected reader,
-          lifecycle control, or content store is installed. Existing owner and
-          effect boundaries remain unchanged.
-        </Empty>
-      </section>
-    );
+  else content = <Conversation />;
   return (
     <div className="shell">
       <a className="skip" href="#content">

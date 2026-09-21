@@ -272,6 +272,7 @@ export interface UnavailableMission {
 export type MissionRead = (
   selection: MissionSelection & { signal: AbortSignal },
 ) => Promise<unknown>;
+export type ProgramRead = (request: { signal: AbortSignal }) => Promise<unknown>;
 export interface ProgramCard {
   workRef: string;
   title: string | null;
@@ -1335,6 +1336,18 @@ export function selectionFromLocation(
   const w = map.get("work_ref"),
     r = map.get("root_job_id");
   return ws(w) && job(r) ? { workRef: w, rootJobId: r } : null;
+}
+export function locationSelectionInput(
+  search = window.location.search,
+): { hasIdentity: boolean; selection: MissionSelection | null } {
+  const raw = search.startsWith("?") ? search.slice(1) : search;
+  if (!raw) return { hasIdentity: false, selection: null };
+  const hasIdentity = raw.split("&").some((pair) => {
+    const at = pair.indexOf("=");
+    const key = part(at === -1 ? pair : pair.slice(0, at));
+    return key === "work_ref" || key === "root_job_id";
+  });
+  return { hasIdentity, selection: selectionFromLocation(search) };
 }
 export function normalizeSelection(v: unknown): MissionSelection | null {
   return obj(v) &&
