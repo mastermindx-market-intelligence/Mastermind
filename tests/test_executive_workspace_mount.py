@@ -79,7 +79,10 @@ def test_asset_manifest_and_callback_headers(static_source,settings):
                 assert reply.headers['cache-control']=='no-store'
                 assert reply.headers['referrer-policy']=='no-referrer'
                 assert reply.headers['x-content-type-options']=='nosniff'
-                assert 'https://dev-eo0jf8us5mup7wd5.us.auth0.com' in reply.headers['content-security-policy']
+                directives = [directive.split() for directive in reply.headers['content-security-policy'].split(';')]
+                assert [tokens for tokens in directives if tokens and tokens[0] == 'connect-src'] == [
+                    ['connect-src', "'self'", 'https://dev-eo0jf8us5mup7wd5.us.auth0.com']
+                ]
             assert (await client.get('/os/assets/index-def.js')).headers['content-type']=='text/javascript; charset=utf-8'
             for path in ('/os/?x=1','/os/?work_ref=WS:ONE','/os/auth/callback?code=a&code=b',
                          '/os/auth/callback?next=https://evil.example','/os/assets/index-def.js?x=1',
