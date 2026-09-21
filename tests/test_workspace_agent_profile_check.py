@@ -113,6 +113,8 @@ class WorkspaceAgentProfileCheckTests(unittest.TestCase):
                         "agtch_synthetic123",
                         "--agent-version-ref",
                         "agent-version-20260919-01",
+                        "--return-subject-digest",
+                        RETURN_SUBJECT_DIGEST,
                         "--now-ms",
                         str(NOW + 2),
                     ]
