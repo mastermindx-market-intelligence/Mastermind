@@ -30,7 +30,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
-from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
+from control_plane.executive_runtime import RuntimeProofError
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
     validate_runtime_guard_file,
@@ -39,6 +39,8 @@ from control_plane.executive_service import (
     ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
     CeoIngressAppBinding,
+    CEO_APP_READ_SCHEMA,
+    CEO_WEB_CEO_V2_READ_SCHEMA,
     ServiceConfig,
     ServiceError,
     activate_launchd_socket,
@@ -135,6 +137,10 @@ _CONFIG_REQUIRED = frozenset(
 )
 _CONFIG_OPTIONAL = frozenset(
     {
+        "content_observer",
+        "workspace_acquisition",
+        "workspace_resource_policy",
+        "workspace_control_room",
         "proof_branch",
         "exact_worker_claim_target",
         "worker_id",
@@ -163,6 +169,7 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_app_armed",
         "ceo_ingress_app_macro_root",
         "ceo_ingress_app_boot_python",
+        "executive_mcp_profile",
         "terminal_return_armed",
         "terminal_return_socket_path",
         "dialogue_observation_socket_path",
@@ -222,6 +229,9 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--config", type=_absolute_path, required=True)
 
     for name, help_text in (
+        ("content-observer-enroll", "Explicitly enroll the installed content profile as control uid."),
+        ("content-observer-status", "Reconcile the installed content profile without enrollment."),
+        ("content-observer-revoke", "Revoke the installed content profile as control uid."),
         ("status", "Show service and startup-reconciliation status."),
         ("health", "Check SQLite migration and integrity health."),
         ("activate-canary", "Validate and activate the current PID-bound canary."),
@@ -232,7 +242,13 @@ def _parser() -> argparse.ArgumentParser:
         ("reconcile", "Reconcile durable attempts without automatic requeue."),
         ("backup", "Create an online DB backup in the configured backup root."),
     ):
-        sub.add_parser(name, help=help_text)
+        cmd_parser = sub.add_parser(name, help=help_text)
+        if name.startswith("content-observer-"):
+            cmd_parser.add_argument(
+                "--profile-key",
+                choices=["web", "mac"],
+                help="Content profile key (web or mac). Omit for legacy single-profile.",
+            )
 
     job = sub.add_parser("job", help="Inspect one Job.")
     job.add_argument("job_id")
@@ -533,6 +549,16 @@ def load_control_config(
         raise ServiceError("App binding requires all App and CeoIngress configuration fields")
     if "ceo_ingress_app_boot_python" in keys and app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
         raise ServiceError("App boot interpreter requires the complete App binding")
+    from integrations.executive_mcp.web_ceo import validate_installed_mcp_profile
+    try:
+        validate_installed_mcp_profile(config.get("executive_mcp_profile", "legacy"))
+    except ValueError:
+        raise ServiceError("installed Executive MCP profile is invalid") from None
+    if "executive_mcp_profile" in keys and (
+        app_present != _CEO_INGRESS_APP_CONFIG_KEYS
+        or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
     terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
     if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
         raise ServiceError("terminal-return control config fields must be supplied together")
@@ -608,6 +634,32 @@ def load_control_config(
             config["ceo_ingress_app_boot_python"] = _attest_app_boot_runtime(
                 sealed_boot_python
             )
+    workspace_keys = {"workspace_acquisition", "workspace_resource_policy", "workspace_control_room"}
+    if keys & workspace_keys:
+        if keys & workspace_keys != workspace_keys or app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
+            raise ServiceError("workspace acquisition requires its policy and installed App peer")
+        topology = config["workspace_control_room"]
+        if (type(topology) is not dict or set(topology) != {"port"}
+                or type(topology["port"]) is not int or not 1 <= topology["port"] <= 65535):
+            raise ServiceError("workspace Control Room topology refused")
+        from integrations.business_mcp_auth.contracts import load_resource_policy
+        from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
+        try:
+            workspace_policy = load_resource_policy(config["workspace_resource_policy"])
+            config["workspace_acquisition"] = validate_workspace_bindings(config["workspace_acquisition"], workspace_policy)
+        except Exception:
+            raise ServiceError("workspace acquisition policy or binding refused") from None
+    if "content_observer" in config:
+        from integrations.executive_content_contract import ContentObserverProfile, load_content_profiles
+        if not app_present:
+            raise ServiceError("content observer requires installed App peer")
+        configured = load_content_profiles(config["content_observer"])
+        profiles = (configured,) if type(configured) is ContentObserverProfile else tuple(
+            slot.profile for slot in (configured.web, configured.mac)
+            if slot.profile is not None
+        )
+        if any(profile.release_sha != config["proof_base_sha"] for profile in profiles):
+            raise ServiceError("content observer release differs from control source")
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
             config["dialogue_observation_peer_uid"],
@@ -1110,7 +1162,10 @@ def _service_from_config(
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     autonomy_guard: Callable[[], None] | None = None,
     initial_canary: Mapping[str, Any] | None = None,
+    content_profile_loader: Callable[[], Any] | None = None,
+    workspace_acquisition_loader: Callable[[], Any] | None = None,
     exact_target_source: _ExactWorkerTargetSource | None = None,
+    workspace_bindings_path: Path | None = None,
 ) -> ExecutiveControlService:
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
@@ -1268,11 +1323,29 @@ def _service_from_config(
             return ExecutiveTerminalReturnProjector(
                 RuntimeTerminalReturnBindingResolver(runtime_provider),
                 socket_path=socket_path,
+                result_synopsis_version="v2",
             )
 
         terminal_return_kwargs["terminal_return_projector_factory"] = (
             terminal_return_projector_factory
         )
+
+    from integrations.executive_mcp.web_ceo import (
+        WEB_CEO_V2_PROFILE,
+        validate_installed_mcp_profile,
+    )
+
+    try:
+        installed_profile = validate_installed_mcp_profile(
+            raw.get("executive_mcp_profile", "legacy")
+        )
+    except ValueError:
+        raise ServiceError("installed Executive MCP profile is invalid") from None
+    if "executive_mcp_profile" in raw and not (
+        _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw)
+        and _CEO_INGRESS_CONFIG_KEYS <= set(raw)
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
 
     listener = activate_launchd_socket(str(raw["launchd_socket_name"]))
     activated_listeners = [listener]
@@ -1289,11 +1362,11 @@ def _service_from_config(
             "ceo_ingress_armed": False,
             "ceo_ingress_activated_socket": ceo_listener,
         }
+    workspace_control_room = None
     if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
         # SDK-free canonical projection runs under the existing control uid.
         # The network App has no Runtime database or source-checkout access.
-        from integrations.executive_mcp.installed import InstalledExecutiveReaders
-        readers = InstalledExecutiveReaders(
+        reader_kwargs = dict(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
             runtime_root=Path(raw["runtime_root"]),
@@ -1302,10 +1375,109 @@ def _service_from_config(
             code_root=Path(__file__).resolve().parents[1],
             expected_source_sha=str(raw["proof_base_sha"]),
         )
+        if installed_profile == WEB_CEO_V2_PROFILE:
+            from integrations.executive_mcp.web_ceo import (
+                WebCeoV2InstalledExecutiveReaders,
+            )
+            readers = WebCeoV2InstalledExecutiveReaders(**reader_kwargs)
+            from control_plane.fabric_job_view import ARM_KEYS
+            readers.bind_fabric_source(
+                bounded_runtime=lambda: service._namespace_custody.bound_runtime(
+                    service._require_runtime()
+                ),
+                armed={
+                    **{
+                        key: raw.get(key) if type(raw.get(key)) is bool else None
+                        for key in ARM_KEYS
+                    },
+                    "source": "control.json",
+                },
+                runtime_identity={"root": None, "db_present": True, "identity": None},
+            )
+            app_read_schema = CEO_WEB_CEO_V2_READ_SCHEMA
+        else:
+            from integrations.executive_mcp.installed import InstalledExecutiveReaders
+            readers = InstalledExecutiveReaders(**reader_kwargs)
+            app_read_schema = CEO_APP_READ_SCHEMA
+        content_factories = {}
+        if "content_observer" in raw:
+            from control_plane.executive_content_observer import ExecutiveContentObserver
+            from integrations.mastermind_steward_app.installed_reads import InstalledStewardReadProvider
+            from datetime import datetime, timezone
+            import time
+            if content_profile_loader is None:
+                raise ServiceError("sealed current content profile loader is required")
+            content_factories = {
+                "content_provider_factory": lambda runtime: ExecutiveContentObserver(
+                    runtime=runtime, broker_client=client, profile_loader=content_profile_loader,
+                    now=lambda: int(time.time())),
+                "steward_provider_factory": lambda runtime: InstalledStewardReadProvider(
+                    readers=readers, runtime=runtime, bindings_path=None,
+                    now=lambda: datetime.now(timezone.utc)),
+            }
+        workspace_factories = {}
+        if "workspace_acquisition" in raw:
+            from integrations.business_mcp_auth.contracts import load_resource_policy
+            from integrations.mastermind_workspace_app.contract import workspace_authorizers
+            from control_plane.workspace_control_room_lifecycle import HostedControlRoom
+            from control_plane.workspace_read_service import workspace_provider_factory
+            from scripts.chairman_control_room import ServerConfig
+            from control_plane.fabric_job_view import ARM_KEYS
+            import secrets
+            if workspace_acquisition_loader is None:
+                raise ServiceError("sealed current workspace acquisition loader is required")
+            policy = load_resource_policy(raw["workspace_resource_policy"])
+            _, authorize = workspace_authorizers(policy=policy, load_bindings=workspace_acquisition_loader)
+            # Installed source join: the trusted parent builds the composer from
+            # the same sealed roots the readers use, never from the public App.
+            # The collector is the existing installed one, constructed directly
+            # with the attested boot interpreter and sealed source SHA.  The
+            # custody callback stays late-bound: it closes over the local
+            # ``service`` built below and is only ever invoked by the off-demand
+            # refresh, after that service has started.  A ``None`` bindings path
+            # stays an explicit unavailable binding — no HOME expansion.
+            if "ceo_ingress_app_boot_python" not in raw:
+                raise ServiceError("workspace acquisition requires the sealed boot interpreter")
+            from control_plane.workspace_source_join import build_workspace_composer
+            from integrations.executive_mcp.installed import InstalledBootPacketCollector
+            packet_collector = InstalledBootPacketCollector(
+                source_root=Path(raw["proof_source_repository"]),
+                macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+                code_root=Path(__file__).resolve().parents[1],
+                python_executable=_attest_app_boot_runtime(
+                    Path(raw["ceo_ingress_app_boot_python"])),
+                expected_source_sha=str(raw["proof_base_sha"]),
+            )
+            compose_inputs = build_workspace_composer(
+                packet_collector=packet_collector,
+                repo_root=Path(raw["proof_source_repository"]),
+                macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+                bounded_runtime=lambda: service._namespace_custody.bound_runtime(
+                    service._require_runtime()),
+                bindings_path=workspace_bindings_path,
+            )
+            # Existing source paths and existing controller permissions only.
+            # Bind the installation-selected incumbent topology before publishing.
+            port = raw["workspace_control_room"]["port"]
+            workspace_control_room = HostedControlRoom(ServerConfig(
+                repo_root=Path(raw["proof_source_repository"]),
+                macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=workspace_bindings_path,
+                token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port,
+                compose_inputs=compose_inputs))
+            workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
+                control_room=workspace_control_room, authorize=authorize,
+                armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
+                runtime_identity={"root": None, "db_present": True, "identity": None},
+                # The factory is inert until the actual service has started.
+                # Namespace custody belongs to that service and validates the
+                # exact Runtime supplied by its App request handler.
+                bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime))
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
             grounding_provider=readers, read_provider=readers,
+            read_schema=app_read_schema,
+            **content_factories, **workspace_factories,
         )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
@@ -1359,7 +1531,7 @@ def _service_from_config(
                     "terminal-return Relay socket must be distinct from every "
                     "activated listener"
                 )
-    return ExecutiveControlService(
+    service = ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
         operator_supervisor_factory=operator_supervisor_factory,
@@ -1370,10 +1542,12 @@ def _service_from_config(
         activated_socket=listener,
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
+        workspace_control_room=workspace_control_room,
         **ceo_ingress_kwargs,
         **dialogue_observation_kwargs,
         **terminal_return_kwargs,
     )
+    return service
 
 
 async def _request_boot_autonomy_canary(
@@ -1468,6 +1642,8 @@ async def _serve_from_config(config_path: Path) -> None:
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         initial_canary=initial_canary,
+        content_profile_loader=lambda: load_control_config(config_path)["content_observer"],
+        workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
@@ -1475,6 +1651,7 @@ async def _serve_from_config(config_path: Path) -> None:
 
 def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     if args.command in {
+        "content-observer-enroll", "content-observer-status", "content-observer-revoke",
         "status",
         "health",
         "activate-canary",
@@ -1485,6 +1662,8 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         "reconcile",
         "backup",
     }:
+        if args.command.startswith("content-observer-") and hasattr(args, 'profile_key') and args.profile_key:
+            return args.command, {"profile_key": args.profile_key}
         return args.command, {}
     if args.command in {"job", "dispatch", "cancel", "requeue"}:
         return args.command, {"job_id": args.job_id}
@@ -1517,13 +1696,8 @@ def _offline_restore(args: argparse.Namespace) -> Any:
     database, manifest = _backup_paths(config, args.name)
     if args.command == "restore-verify":
         return verify_restore_drill(database, manifest)
-    store = RuntimeStore(config["runtime_root"])
     return restore_backup_offline(
-        store,
-        database,
-        manifest,
-        service_marker_path=store.path.parent / "executive-service.running",
-        service_lock_path=store.path.parent / "executive-service.lock",
+        Path(config["runtime_root"]), database, manifest,
     )
 
 

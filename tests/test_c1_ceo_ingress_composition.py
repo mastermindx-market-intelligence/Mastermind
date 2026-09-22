@@ -235,3 +235,204 @@ def test_app_boot_python_without_app_binding_is_refused(tmp_path):
     raw['ceo_ingress_app_boot_python'] = '/Library/Application Support/MastermindExecutive/capacity-runtimes/example/bin/python3.12'
     with pytest.raises(module.ServiceError, match='complete App binding'):
         module.load_control_config(_write_config(tmp_path, raw))
+
+
+@pytest.mark.parametrize("armed", [None, False, True])
+def test_terminal_return_factory_selects_v2_only_when_explicitly_armed(
+    monkeypatch, tmp_path, armed,
+):
+    """Exercise the production composition without starting a service or sending."""
+    from integrations.slack_agent_dialogue import executive_terminal_return_projector as projection
+    from tests.test_slack_agent_dialogue_executive_terminal_return_projector import (
+        _binding, _candidate,
+    )
+
+    module = _module()
+    raw = _raw(tmp_path)
+    if armed is not None:
+        raw["terminal_return_armed"] = armed
+        raw["terminal_return_socket_path"] = module._CANONICAL_AGENT_RELAY_SOCKET
+    captured = {}
+    monkeypatch.setattr(
+        importlib.import_module("control_plane.executive_worker_broker"),
+        "WorkerBrokerClient", lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(module, "activate_launchd_socket", lambda _name: object())
+
+    class CapturedService:
+        def __init__(self, config, **kwargs):
+            captured["config"] = config
+            captured.update(kwargs)
+
+    monkeypatch.setattr(module, "ExecutiveControlService", CapturedService)
+    module._service_from_config(raw)
+    assert captured["config"].terminal_return_armed is (armed is True)
+    assert captured["config"].ceo_submit_armed is False
+    assert captured["config"].coo_autonomy_armed is False
+    assert captured["ceo_ingress_armed"] is False
+    if armed is not True:
+        assert "terminal_return_projector_factory" not in captured
+        return
+
+    candidate = _candidate()
+    provider_calls = []
+    runtime_marker = object()
+
+    def runtime_provider():
+        provider_calls.append(True)
+        return runtime_marker
+
+    projector = captured["terminal_return_projector_factory"](
+        runtime_provider, raw["terminal_return_socket_path"],
+    )
+    assert type(projector) is projection.ExecutiveTerminalReturnProjector
+    assert type(projector._binding_resolver) is projection.RuntimeTerminalReturnBindingResolver
+    assert projector._socket_path == module._CANONICAL_AGENT_RELAY_SOCKET
+    assert provider_calls == []  # Construction is inert.
+
+    def resolve_fixture(resolver, observed):
+        assert observed is candidate
+        assert resolver._runtime_provider() is runtime_marker
+        return _binding(candidate)
+
+    monkeypatch.setattr(projection.RuntimeTerminalReturnBindingResolver, "resolve", resolve_fixture)
+    _context, _thread, message = projector._resolve(candidate)
+    payload = json.loads(message["body"]["result"])
+    assert payload["schema"] == "mastermind.executive_terminal_result_synopsis/v2"
+    assert payload["root_job_id"] == candidate.root_job_id
+    assert message["message_key"] == candidate.message_key
+    assert provider_calls == [True]
+
+
+INVALID_INSTALLED_PROFILES = (
+    None, False, True, 0, 1, 3.14, [], {}, "", " ", "\t", "legacy ", " legacy",
+    "Legacy", "LEGACY", "web_ceo_v1", "web_ceo_v2 ", "WEB_CEO_V2",
+    "mastermind.executive_ceo_ingress_app_read.v1",
+    "mastermind.executive_ceo_ingress_app_read.v3",
+    "unknown",
+)
+
+
+def _app_raw(tmp_path: Path) -> dict[str, object]:
+    raw = _raw(tmp_path)
+    raw.update(
+        ceo_ingress_app_peer_uid=os.geteuid() + 10,
+        ceo_ingress_app_armed=True,
+        ceo_ingress_app_macro_root=tmp_path / "macro",
+        ceo_ingress_app_boot_python=APP_BOOT_PYTHON,
+    )
+    return raw
+
+
+def _capture_service(module, monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        importlib.import_module("control_plane.executive_worker_broker"),
+        "WorkerBrokerClient", lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(module, "activate_launchd_socket", lambda _name: object())
+
+    class FakeService:
+        def __init__(self, _config, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(module, "ExecutiveControlService", FakeService)
+    return captured
+
+
+def test_omitted_and_explicit_legacy_profile_keep_installed_reader(monkeypatch, tmp_path):
+    from control_plane.executive_service import CEO_APP_READ_SCHEMA
+    from integrations.executive_mcp.adapter import ExecutiveMcpGateway
+    from integrations.executive_mcp.installed import InstalledExecutiveReaders
+
+    module = _module()
+    binds: list[object] = []
+    original = ExecutiveMcpGateway.bind_fabric_source
+
+    def tracking(self, **kwargs):
+        binds.append(self)
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(ExecutiveMcpGateway, "bind_fabric_source", tracking)
+    for profile in (None, "legacy"):
+        raw = _app_raw(tmp_path)
+        if profile is not None:
+            raw["executive_mcp_profile"] = profile
+        captured = _capture_service(module, monkeypatch)
+        binds.clear()
+        module._service_from_config(raw)
+        binding = captured["ceo_ingress_app_binding"]
+        assert type(binding.read_provider) is InstalledExecutiveReaders
+        assert binding.read_schema == CEO_APP_READ_SCHEMA
+        assert binding.read_provider is binding.grounding_provider
+        assert binds == []
+        assert captured["ceo_ingress_armed"] is False
+
+
+def test_exact_v2_profile_selects_accepted_reader_and_inert_bind(monkeypatch, tmp_path):
+    from control_plane.executive_service import CEO_WEB_CEO_V2_READ_SCHEMA
+    from control_plane.fabric_job_view import ARM_KEYS
+    from integrations.executive_mcp.web_ceo import WebCeoV2InstalledExecutiveReaders
+
+    module = _module()
+    raw = _app_raw(tmp_path)
+    raw["executive_mcp_profile"] = "web_ceo_v2"
+    captured = _capture_service(module, monkeypatch)
+    module._service_from_config(raw)
+    binding = captured["ceo_ingress_app_binding"]
+    readers = binding.read_provider
+    assert type(readers) is WebCeoV2InstalledExecutiveReaders
+    assert binding.read_schema == CEO_WEB_CEO_V2_READ_SCHEMA
+    assert readers._fabric_source_binding is not None
+    getter, armed, identity = readers._fabric_source_binding
+    assert callable(getter)
+    assert identity == {"root": None, "db_present": True, "identity": None}
+    assert armed["source"] == "control.json"
+    assert armed["ceo_ingress_app_armed"] is True
+    for key in ARM_KEYS:
+        if key != "ceo_ingress_app_armed":
+            assert armed[key] is None
+    with pytest.raises((AttributeError, TypeError)):
+        getter()
+    assert captured["ceo_ingress_armed"] is False
+
+
+def test_v2_profile_does_not_require_workspace(monkeypatch, tmp_path):
+    from integrations.executive_mcp.web_ceo import WebCeoV2InstalledExecutiveReaders
+
+    module = _module()
+    raw = _app_raw(tmp_path)
+    raw["executive_mcp_profile"] = "web_ceo_v2"
+    assert "workspace_acquisition" not in raw
+    captured = _capture_service(module, monkeypatch)
+    module._service_from_config(raw)
+    assert type(captured["ceo_ingress_app_binding"].read_provider) is WebCeoV2InstalledExecutiveReaders
+    assert captured.get("workspace_control_room") is None
+
+
+@pytest.mark.parametrize("value", INVALID_INSTALLED_PROFILES)
+def test_control_config_refuses_invalid_installed_profile(tmp_path, value):
+    module = _module()
+    raw = _app_raw(tmp_path)
+    raw["executive_mcp_profile"] = value
+    with pytest.raises(module.ServiceError, match="installed Executive MCP profile is invalid"):
+        module.load_control_config(_write_config(tmp_path, raw))
+
+
+def test_present_profile_without_app_group_is_refused_before_source(tmp_path, monkeypatch):
+    module = _module()
+    raw = _raw(tmp_path)
+    raw["executive_mcp_profile"] = "legacy"
+    with pytest.raises(module.ServiceError, match="App binding requires all App"):
+        module.load_control_config(_write_config(tmp_path, raw))
+    captured = _capture_service(module, monkeypatch)
+    with pytest.raises(module.ServiceError, match="App binding requires all App"):
+        module._service_from_config(raw)
+    assert captured == {}
+
+
+def test_omitted_profile_does_not_manufacture_app_binding(tmp_path):
+    module = _module()
+    loaded = module.load_control_config(_write_config(tmp_path, _raw(tmp_path)))
+    assert "executive_mcp_profile" not in loaded
+    assert "ceo_ingress_app_peer_uid" not in loaded

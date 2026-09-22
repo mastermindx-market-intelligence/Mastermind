@@ -35,6 +35,7 @@ import os
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable
 
 from common.bounded_sync_executor import (
@@ -45,7 +46,7 @@ from common.bounded_sync_executor import (
     SyncExecutorLoopConflict,
 )
 from common.redaction import sanitize_external_text
-from control_plane import ceo_boot_packet, ceo_intent, executive_inbox
+from control_plane import ceo_boot_packet, ceo_intent, executive_inbox, fabric_job_view
 from control_plane.executive_runtime import Runtime
 from control_plane.executive_service import send_control_request
 
@@ -313,7 +314,7 @@ _CLOSE_TIMEOUT_SECONDS = 5.0
 
 
 class ExecutiveMcpGateway:
-    """Five tools over existing Executive OS primitives.  No new authority."""
+    """Five legacy tools over existing Executive OS primitives.  No new authority."""
 
     def __init__(
         self,
@@ -329,6 +330,7 @@ class ExecutiveMcpGateway:
         self.config = config
         self._packet_builder = packet_builder or ceo_boot_packet.build_packet
         self._inbox_builder = inbox_builder or executive_inbox.build_inbox
+        self._runtime_factory_is_explicit = runtime_factory is not None
         self._runtime_factory = runtime_factory or _open_readonly_runtime
         self._transport = transport or send_control_request
         self._clock = clock or _utc_now_z
@@ -339,6 +341,13 @@ class ExecutiveMcpGateway:
         )
         self._write_lock = asyncio.Lock()
         self._closed = False
+        # One-time host binding of a bounded Fabric Runtime source.  Setup is
+        # inert: the trusted zero-argument getter is stored, never called here,
+        # and the legacy read factory above is never a fallback for it.
+        self._fabric_source_binding: tuple[Any, Mapping[str, Any], Mapping[str, Any]] | None = (
+            None
+        )
+        self._fabric_bind_window_closed = False
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -347,6 +356,54 @@ class ExecutiveMcpGateway:
         """Compatibility projection; the shared executor owns these attempts."""
 
         return set(self._read_executor.attempts_snapshot())
+
+    def _close_fabric_bind_window(self) -> None:
+        """Any first public call closes the one-time Fabric bind window."""
+
+        self._fabric_bind_window_closed = True
+
+    def bind_fabric_source(
+        self,
+        *,
+        bounded_runtime: Callable[[], Any],
+        armed: Mapping[str, Any],
+        runtime_identity: Mapping[str, Any],
+    ) -> None:
+        """Bind the one-time trusted bounded Fabric Runtime source (host-only).
+
+        Ratified public capability for the versioned Web-CEO v2 Fabric reads.
+        ``bounded_runtime`` is an inert zero-argument callable the host owns;
+        each admitted physical v2 Fabric read evaluates it freshly inside the
+        existing read executor.  ``armed`` and ``runtime_identity`` are the
+        existing Mapping public projections the Fabric v2 owner functions
+        consume; nested values are copied and deep-frozen so a later mutation
+        of the caller's structures cannot rewrite admitted facts.  Setup opens
+        nothing, calls nothing, and confers no authority: the actual Runtime
+        observation remains the only generation/SAME authority.  Rebinding,
+        binding after any first call, and binding after close are refused.
+        """
+
+        if self._closed:
+            raise GatewayError(
+                "backend_unavailable",
+                "gateway is closed and cannot bind a Fabric source",
+            )
+        if self._fabric_bind_window_closed:
+            raise GatewayError(
+                "invalid_input",
+                "the Fabric source bind window is closed after the first call",
+            )
+        if self._fabric_source_binding is not None:
+            raise GatewayError(
+                "invalid_input", "a Fabric source is already bound"
+            )
+        if not callable(bounded_runtime):
+            raise GatewayError(
+                "invalid_input", "bounded_runtime must be a zero-argument callable"
+            )
+        frozen_armed = _freeze_public_facts(armed, field="armed")
+        frozen_identity = _freeze_public_facts(runtime_identity, field="runtime_identity")
+        self._fabric_source_binding = (bounded_runtime, frozen_armed, frozen_identity)
 
     async def aclose(self) -> None:
         """Close admission and truthfully drain the single attempt owner."""
@@ -369,6 +426,16 @@ class ExecutiveMcpGateway:
 
     # -- public entry point ------------------------------------------------
 
+    def _resolve_tool_spec(self, tool_name: str):
+        """Legacy public contract lookup; versioned profiles override this seam."""
+
+        return tool_spec(tool_name)
+
+    def _validate_call_arguments(self, tool_name: str, arguments: Any) -> dict[str, Any]:
+        """Legacy public contract validation; versioned profiles override this seam."""
+
+        return validate_tool_arguments(tool_name, arguments)
+
     async def call(self, tool_name: str, arguments: Any) -> dict[str, Any]:
         """Run one tool call and return one response envelope.
 
@@ -379,8 +446,11 @@ class ExecutiveMcpGateway:
         """
 
         generated_at = self._clock()
+        # Any first call — including one that refuses an unknown tool or
+        # invalid arguments — closes the one-time Fabric bind window.
+        self._close_fabric_bind_window()
         try:
-            spec = tool_spec(tool_name)
+            spec = self._resolve_tool_spec(tool_name)
         except GatewayError as exc:
             return error_envelope(
                 str(tool_name), mode=self.config.mode, generated_at=generated_at,
@@ -392,7 +462,7 @@ class ExecutiveMcpGateway:
                     "backend_unavailable",
                     "gateway is closed and cannot admit new calls",
                 )
-            validated = validate_tool_arguments(spec.name, arguments)
+            validated = self._validate_call_arguments(spec.name, arguments)
             if spec.name == MODIFYING_TOOL:
                 return await self._run_submit(validated, generated_at)
             return await self._run_read(spec.name, validated, generated_at)
@@ -471,6 +541,8 @@ class ExecutiveMcpGateway:
             data, grounding, degraded = self._executive_inbox()
         elif name == "executive_job":
             data, grounding, degraded = self._executive_job(str(arguments["job_id"]))
+        elif name == "executive_fabric":
+            data, grounding, degraded = self._executive_fabric(arguments)
         elif name == "ceo_intent_status":
             data, grounding, degraded = self._ceo_intent_status(str(arguments["intent_id"]))
         else:  # pragma: no cover — tool_spec already refused an unknown name
@@ -611,6 +683,93 @@ class ExecutiveMcpGateway:
             "source": "control_plane.executive_runtime registries (no raw SQL)",
         }
         return data, grounding, self._mode_note()
+
+    @staticmethod
+    def _redact_runtime_coordinates(value: Any, paths: tuple[str, ...], label: str) -> Any:
+        """Replace configured host runtime coordinates before crossing MCP."""
+
+        if isinstance(value, Mapping):
+            return {
+                str(key): ExecutiveMcpGateway._redact_runtime_coordinates(
+                    item, paths, label
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [
+                ExecutiveMcpGateway._redact_runtime_coordinates(item, paths, label)
+                for item in value
+            ]
+        if isinstance(value, str):
+            redacted = value
+            for path in paths:
+                if path:
+                    redacted = redacted.replace(path, label)
+            return redacted
+        return value
+
+    def _fabric_runtime_root(self) -> Path:
+        """Resolve the root owned by the configured read provider."""
+
+        self.config.reverify_read_runtime_root()
+        configured_root = Path(self.config.runtime_root)
+        if not self._runtime_factory_is_explicit:
+            return configured_root
+        try:
+            runtime = self._runtime()
+            runtime_root = runtime.store.root
+        except Exception as exc:  # noqa: BLE001 — path-safe typed refusal
+            raise GatewayError(
+                "backend_unavailable", "Fabric job view is unavailable"
+            ) from exc
+        if not isinstance(runtime_root, (str, Path)):
+            raise GatewayError(
+                "backend_unavailable", "Fabric job view is unavailable"
+            )
+        return Path(runtime_root)
+
+    def _executive_fabric(
+        self, arguments: Mapping[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+        """Read one canonical Fabric projection without adding a lifecycle owner."""
+
+        runtime_root = self._fabric_runtime_root()
+        try:
+            if arguments["view"] == "roots":
+                document = fabric_job_view.list_roots(
+                    runtime_root,
+                    limit=int(arguments["limit"]),
+                    control_config_path=None,
+                )
+            else:
+                document = fabric_job_view.read_fabric_view(
+                    runtime_root,
+                    str(arguments["root_job_id"]),
+                    control_config_path=None,
+                )
+        except Exception as exc:  # noqa: BLE001 — path-safe typed refusal
+            raise GatewayError(
+                "backend_unavailable", "Fabric job view is unavailable"
+            ) from exc
+
+        runtime_label = self._runtime_label()
+        paths = tuple(
+            sorted(
+                {str(runtime_root), str(runtime_root.resolve())},
+                key=len,
+                reverse=True,
+            )
+        )
+        data = self._redact_runtime_coordinates(document, paths, runtime_label)
+        if not isinstance(data, dict):  # defensive: projector contract is a document
+            raise GatewayError("backend_unavailable", "Fabric job view is unavailable")
+        degraded = [str(entry) for entry in (data.get("degraded") or [])]
+        degraded.extend(self._mode_note())
+        grounding = {
+            "runtime": runtime_label,
+            "source": "control_plane.fabric_job_view (existing registries; no raw SQL)",
+        }
+        return data, grounding, degraded
 
     def _ceo_intent_status(
         self, intent_id: str
@@ -883,6 +1042,27 @@ def _open_readonly_runtime(root: Path) -> Runtime:
     """The ONLY runtime handle this package opens: read-only, never creating."""
 
     return Runtime.at(root, create=False)
+
+
+def _freeze_public_facts(value: Any, *, field: str) -> Any:
+    """Deep-copy and freeze one public JSON-shaped projection at bind time.
+
+    Mappings become read-only proxy mappings, sequences become tuples, and
+    anything that is not closed JSON material refuses the bind.  The result
+    shares no mutable structure with the caller's input.
+    """
+
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _freeze_public_facts(item, field=field) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_public_facts(item, field=field) for item in value)
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    raise GatewayError(
+        "invalid_input", f"{field} must contain only public JSON facts"
+    )
 
 
 def _utc_now_z() -> str:
