@@ -1089,30 +1089,73 @@ def assess_web_ceo_session_capabilities(
 
 def _placement_action_requirements(
     decision: c1.PlacementSelectionDecision,
+    *,
+    principal_action_demand: c1.PrincipalActionDemandReceipt,
+    expected_principal_action_demand_digest: str,
+    expected_action_partition_evidence_digest: str,
+    expected_worker_route_evidence_digest: str,
 ) -> tuple[frozenset[str], ReceiverBindingMode]:
-    """Project action requirements from the already-frozen C1 demand.
+    """Consume C1-owned principal-local action demand without guessing locality.
 
-    The effect guard must not accept a second, caller-supplied requirement or
-    binding-mode claim that can understate the work after selection. C1 already
-    carries both facts on its immutable decision: required capabilities and
-    allowed placement modes.
+    General PlacementDemand capabilities may include downstream worker-local
+    requirements. Only the C1 sidecar may identify what this concrete
+    principal must invoke. The sidecar is bound to the immutable selection and
+    to current partition/worker-route evidence, so action-time callers cannot
+    silently narrow the principal requirement set after selection.
     """
 
+    if not isinstance(principal_action_demand, c1.PrincipalActionDemandReceipt):
+        raise WebCeoSessionCapabilityError("PRINCIPAL_ACTION_DEMAND_INVALID")
+    for value, code in (
+        (
+            expected_principal_action_demand_digest,
+            "EXPECTED_PRINCIPAL_ACTION_DEMAND_DIGEST_INVALID",
+        ),
+        (
+            expected_action_partition_evidence_digest,
+            "EXPECTED_ACTION_PARTITION_EVIDENCE_DIGEST_INVALID",
+        ),
+        (
+            expected_worker_route_evidence_digest,
+            "EXPECTED_WORKER_ROUTE_EVIDENCE_DIGEST_INVALID",
+        ),
+    ):
+        if not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None:
+            raise WebCeoSessionCapabilityError(code)
+
     demand = decision.demand
-    action_capabilities = frozenset(
-        capability
-        for capability in demand.required_capabilities
-        if capability in _KNOWN_EFFECTIVE_CAPABILITY_SET
-    )
-    if not action_capabilities:
-        raise WebCeoSessionCapabilityError("WEB_ACTION_DEMAND_MISSING")
+    if (
+        principal_action_demand.selection_document_digest
+        != c1.placement_selection_document_digest(decision)
+        or principal_action_demand.evidence_digest
+        != expected_principal_action_demand_digest
+        or principal_action_demand.action_partition_evidence_digest
+        != expected_action_partition_evidence_digest
+        or principal_action_demand.worker_route_evidence_digest
+        != expected_worker_route_evidence_digest
+    ):
+        raise WebCeoSessionCapabilityError(
+            "PRINCIPAL_ACTION_DEMAND_RECONCILIATION_REQUIRED"
+        )
+
+    principal = frozenset(principal_action_demand.principal_required_capabilities)
+    if not principal.issubset(demand.required_capabilities):
+        raise WebCeoSessionCapabilityError("PRINCIPAL_ACTION_DEMAND_INVALID")
+    if any(
+        capability not in _KNOWN_EFFECTIVE_CAPABILITY_SET
+        for capability in principal
+    ):
+        raise WebCeoSessionCapabilityError(
+            "PRINCIPAL_ACTION_DEMAND_OUTSIDE_CONTRACT"
+        )
+
     binding_mode = (
         ReceiverBindingMode.EXACT_SESSION_REQUIRED
         if demand.allowed_modes
         == frozenset({c1.PlacementMode.EXISTING_SESSION_REUSE})
         else ReceiverBindingMode.CAPACITY_SELECTABLE
     )
-    return action_capabilities, binding_mode
+    return principal, binding_mode
 
 
 def build_guarded_commitment_plan_from_selection_decision(
@@ -1123,6 +1166,10 @@ def build_guarded_commitment_plan_from_selection_decision(
     validated_target_facts: Any,
     capability_receipt: WebCeoSessionCapabilityReceipt,
     current_binding: CurrentSessionBindingFacts,
+    principal_action_demand: c1.PrincipalActionDemandReceipt,
+    expected_principal_action_demand_digest: str,
+    expected_action_partition_evidence_digest: str,
+    expected_worker_route_evidence_digest: str,
     expected_capability_contract_digest: str,
     expected_observer_evidence_digest: str,
     expected_serviceability_evidence_digest: str,
@@ -1137,7 +1184,17 @@ def build_guarded_commitment_plan_from_selection_decision(
     if not isinstance(current_binding, CurrentSessionBindingFacts):
         raise WebCeoSessionCapabilityError("CURRENT_BINDING_INVALID")
     required_capabilities, receiver_binding_mode = _placement_action_requirements(
-        placement_selection
+        placement_selection,
+        principal_action_demand=principal_action_demand,
+        expected_principal_action_demand_digest=(
+            expected_principal_action_demand_digest
+        ),
+        expected_action_partition_evidence_digest=(
+            expected_action_partition_evidence_digest
+        ),
+        expected_worker_route_evidence_digest=(
+            expected_worker_route_evidence_digest
+        ),
     )
     wire = placement_selection.to_dict()
     selected = wire.get("selected")

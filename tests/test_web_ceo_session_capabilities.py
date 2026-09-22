@@ -22,6 +22,8 @@ OBSERVED_AT_MS = 1_789_870_000_000
 EXPIRES_AT_MS = 1_789_870_120_000
 NOW_MS = 1_789_870_060_000
 OBSERVER_DIGEST = "e" * 64
+ACTION_PARTITION_DIGEST = "a" * 64
+WORKER_ROUTE_DIGEST = "b" * 64
 
 
 def _source(owner: SourceOwner, ref: str) -> SourceRef:
@@ -86,6 +88,25 @@ def _selection(
     )
     assert decision.state is c1.SelectionState.SELECTED
     return decision
+
+
+def _principal_action_demand(
+    selection: c1.PlacementSelectionDecision,
+    *,
+    principal_required: frozenset[str] | None = None,
+    action_partition_digest: str = ACTION_PARTITION_DIGEST,
+    worker_route_digest: str = WORKER_ROUTE_DIGEST,
+) -> c1.PrincipalActionDemandReceipt:
+    return c1.build_principal_action_demand_receipt(
+        decision=selection,
+        principal_required_capabilities=(
+            principal_required
+            if principal_required is not None
+            else selection.demand.required_capabilities
+        ),
+        action_partition_evidence_digest=action_partition_digest,
+        worker_route_evidence_digest=worker_route_digest,
+    )
 
 
 def _target_facts() -> dict[str, object]:
@@ -306,7 +327,11 @@ def _guard(
     receipt: wcap.WebCeoSessionCapabilityReceipt,
     *,
     selection: c1.PlacementSelectionDecision | None = None,
+    principal_action_demand: c1.PrincipalActionDemandReceipt | None = None,
     binding: wcap.CurrentSessionBindingFacts | None = None,
+    expected_principal_action_demand_digest: str | None = None,
+    expected_action_partition_digest: str | None = None,
+    expected_worker_route_digest: str | None = None,
     expected_contract_digest: str | None = None,
     expected_observer_digest: str | None = None,
     expected_serviceability_digest: str | None = None,
@@ -314,13 +339,30 @@ def _guard(
     start_state: wcap.SessionStartState = wcap.SessionStartState.PRE_START,
     effect_state: EffectState = EffectState.NONE,
 ) -> c2.PlacementCommitmentPlan:
+    bound_selection = selection or _selection()
+    action_demand = principal_action_demand or _principal_action_demand(
+        bound_selection
+    )
     return wcap.build_guarded_commitment_plan_from_selection_decision(
         source_root_job_id="job-source-1",
         expected_source_root_revision=7,
-        placement_selection=selection or _selection(),
+        placement_selection=bound_selection,
         validated_target_facts=_target_facts(),
         capability_receipt=receipt,
         current_binding=binding or _binding(),
+        principal_action_demand=action_demand,
+        expected_principal_action_demand_digest=(
+            expected_principal_action_demand_digest
+            or action_demand.evidence_digest
+        ),
+        expected_action_partition_evidence_digest=(
+            expected_action_partition_digest
+            or action_demand.action_partition_evidence_digest
+        ),
+        expected_worker_route_evidence_digest=(
+            expected_worker_route_digest
+            or action_demand.worker_route_evidence_digest
+        ),
         expected_capability_contract_digest=(
             expected_contract_digest or receipt.capability_contract_digest
         ),
@@ -356,6 +398,9 @@ def test_v2_schema_and_guard_signature_are_pinned() -> None:
         wcap.build_guarded_commitment_plan_from_selection_decision
     ).parameters
     assert "current_binding" in guard_parameters
+    assert "principal_action_demand" in guard_parameters
+    assert "expected_principal_action_demand_digest" in guard_parameters
+    assert "expected_worker_route_evidence_digest" in guard_parameters
     assert "required_capabilities" not in guard_parameters
     assert "receiver_binding_mode" not in guard_parameters
 
@@ -367,7 +412,7 @@ def test_effect_guard_refuses_selection_without_web_action_demand() -> None:
     )
     with pytest.raises(
         wcap.WebCeoSessionCapabilityError,
-        match="WEB_ACTION_DEMAND_MISSING",
+        match="PRINCIPAL_ACTION_DEMAND_OUTSIDE_CONTRACT",
     ):
         _guard(receipt, selection=selection)
 
@@ -377,7 +422,18 @@ def test_effect_guard_derives_exact_session_mode_from_c1_demand() -> None:
         required_capabilities=frozenset({"executive_submit"}),
         allowed_modes=frozenset({c1.PlacementMode.EXISTING_SESSION_REUSE}),
     )
-    required, mode = wcap._placement_action_requirements(selection)
+    action_demand = _principal_action_demand(selection)
+    required, mode = wcap._placement_action_requirements(
+        selection,
+        principal_action_demand=action_demand,
+        expected_principal_action_demand_digest=action_demand.evidence_digest,
+        expected_action_partition_evidence_digest=(
+            action_demand.action_partition_evidence_digest
+        ),
+        expected_worker_route_evidence_digest=(
+            action_demand.worker_route_evidence_digest
+        ),
+    )
     assert required == frozenset({"executive_submit"})
     assert mode is wcap.ReceiverBindingMode.EXACT_SESSION_REQUIRED
 
@@ -399,6 +455,175 @@ def test_exact_fresh_action_capabilities_allow_guarded_commitment() -> None:
     assert isinstance(plan, c2.PlacementCommitmentPlan)
     assert plan.selected_worker_id == "web-ceo-c3-astra"
     assert plan.selected_quota_class == "chatgpt-pro"
+
+
+def test_principal_action_demand_wire_round_trip_is_closed() -> None:
+    selection = _selection()
+    action_demand = _principal_action_demand(
+        selection,
+        principal_required=frozenset(
+            {"executive_submit", "studio_direct_write"}
+        ),
+    )
+    rebuilt = c1.validate_principal_action_demand_receipt(
+        action_demand.to_dict()
+    )
+    assert rebuilt == action_demand
+    assert (
+        rebuilt.selection_document_digest
+        == c1.placement_selection_document_digest(selection)
+    )
+
+
+def test_worker_local_host_write_does_not_block_principal_submit_start() -> None:
+    selection = _selection(
+        required_capabilities=frozenset(
+            {
+                "executive_submit",
+                "studio_direct_write",
+                "desktop_commander_write",
+            }
+        )
+    )
+    action_demand = _principal_action_demand(
+        selection,
+        principal_required=frozenset({"executive_submit"}),
+    )
+    contracts = _contracts()
+    exec_submit = next(
+        item for item in contracts if item.capability == "executive_submit"
+    )
+    receipt = _receipt(
+        contracts=contracts,
+        schema_complete=True,
+        effective_tools=exec_submit.required_actions,
+        serviceability=tuple(
+            _serviceability_fact(action)
+            for action in exec_submit.required_actions
+        ),
+    )
+
+    plan = _guard(
+        receipt,
+        selection=selection,
+        principal_action_demand=action_demand,
+    )
+    assert isinstance(plan, c2.PlacementCommitmentPlan)
+
+
+def test_principal_local_host_write_still_requires_exact_serviceability() -> None:
+    selection = _selection(
+        required_capabilities=frozenset(
+            {"executive_submit", "studio_direct_write"}
+        )
+    )
+    action_demand = _principal_action_demand(selection)
+    contracts = _contracts()
+    exec_submit = next(
+        item for item in contracts if item.capability == "executive_submit"
+    )
+    receipt = _receipt(
+        contracts=contracts,
+        schema_complete=True,
+        effective_tools=exec_submit.required_actions,
+        serviceability=tuple(
+            _serviceability_fact(action)
+            for action in exec_submit.required_actions
+        ),
+    )
+
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="CAPABILITY_PREFLIGHT_NOT_READY",
+    ):
+        _guard(
+            receipt,
+            selection=selection,
+            principal_action_demand=action_demand,
+        )
+
+
+def test_mixed_known_and_unclassified_principal_action_cannot_ready() -> None:
+    selection = _selection(
+        required_capabilities=frozenset(
+            {"executive_submit", "future_web_action"}
+        )
+    )
+    action_demand = _principal_action_demand(selection)
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="PRINCIPAL_ACTION_DEMAND_OUTSIDE_CONTRACT",
+    ):
+        _guard(
+            _receipt(),
+            selection=selection,
+            principal_action_demand=action_demand,
+        )
+
+
+def test_principal_action_subset_is_bound_and_cannot_be_caller_narrowed() -> None:
+    selection = _selection(
+        required_capabilities=frozenset(
+            {"executive_submit", "studio_direct_write"}
+        )
+    )
+    canonical = _principal_action_demand(selection)
+    narrowed = _principal_action_demand(
+        selection,
+        principal_required=frozenset({"executive_submit"}),
+    )
+    assert narrowed.evidence_digest != canonical.evidence_digest
+
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="PRINCIPAL_ACTION_DEMAND_RECONCILIATION_REQUIRED",
+    ):
+        _guard(
+            _receipt(),
+            selection=selection,
+            principal_action_demand=narrowed,
+            expected_principal_action_demand_digest=canonical.evidence_digest,
+        )
+
+
+def test_worker_route_change_invalidates_principal_action_partition() -> None:
+    selection = _selection(
+        required_capabilities=frozenset({"executive_submit"})
+    )
+    action_demand = _principal_action_demand(selection)
+
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="PRINCIPAL_ACTION_DEMAND_RECONCILIATION_REQUIRED",
+    ):
+        _guard(
+            _receipt(),
+            selection=selection,
+            principal_action_demand=action_demand,
+            expected_worker_route_digest="c" * 64,
+        )
+
+
+def test_action_demand_for_different_selection_is_refused() -> None:
+    original = _selection(
+        required_capabilities=frozenset({"executive_submit"})
+    )
+    changed = _selection(
+        required_capabilities=frozenset(
+            {"executive_submit", "studio_direct_write"}
+        )
+    )
+    action_demand = _principal_action_demand(original)
+
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="PRINCIPAL_ACTION_DEMAND_RECONCILIATION_REQUIRED",
+    ):
+        _guard(
+            _receipt(),
+            selection=changed,
+            principal_action_demand=action_demand,
+        )
 
 
 def test_github_read_only_astra_is_prestart_rebindable() -> None:

@@ -82,6 +82,7 @@ from typing import Any
 from control_plane.executive_orchestration_principal import (
     OrchestrationPrincipalError,
     build_placement_snapshot,
+    digest,
     validate_placement_snapshot,
 )
 from control_plane.executive_steward import (
@@ -97,6 +98,11 @@ from control_plane.executive_steward import (
 #: Schema version of the wire document :meth:`PlacementSelectionDecision.to_dict`
 #: emits and :func:`validate_placement_selection` accepts.
 SELECTION_SCHEMA = "mastermind.executive_placement_selection.v1"
+
+#: Sidecar evidence owned by Capacity-C1. It binds a principal-local action
+#: partition to one immutable selection without changing the existing
+#: placement-selection wire schema.
+PRINCIPAL_ACTION_DEMAND_SCHEMA = "mastermind.executive_principal_action_demand.v1"
 
 
 class _ValueEnum(str, enum.Enum):
@@ -847,6 +853,167 @@ class PlacementSelectionDecision:
             "selection_is_commitment": False,
             "evidence": evidence,
         }
+
+
+def _require_sha256(name: str, value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(ch not in "0123456789abcdef" for ch in value)
+    ):
+        raise ValueError(f"{name} must be a lowercase sha256 digest")
+    return value
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PrincipalActionDemandReceipt:
+    """C1-owned sidecar binding principal-local actions to one selection.
+
+    The existing placement demand remains the broad capability requirement
+    used for candidate eligibility. This receipt carries only the subset the
+    selected Web principal itself must invoke. It is separately bound to
+    current partition-owner and downstream-worker-route evidence so a route
+    change cannot silently reuse an older locality decision.
+    """
+
+    selection_document_digest: str
+    principal_required_capabilities: tuple[str, ...]
+    action_partition_evidence_digest: str
+    worker_route_evidence_digest: str
+
+    def __post_init__(self) -> None:
+        _require_sha256(
+            "selection_document_digest", self.selection_document_digest
+        )
+        _require_sha256(
+            "action_partition_evidence_digest",
+            self.action_partition_evidence_digest,
+        )
+        _require_sha256(
+            "worker_route_evidence_digest", self.worker_route_evidence_digest
+        )
+        if (
+            not isinstance(self.principal_required_capabilities, tuple)
+            or not self.principal_required_capabilities
+        ):
+            raise ValueError(
+                "principal_required_capabilities must be a non-empty tuple"
+            )
+        if (
+            tuple(sorted(self.principal_required_capabilities))
+            != self.principal_required_capabilities
+            or len(set(self.principal_required_capabilities))
+            != len(self.principal_required_capabilities)
+        ):
+            raise ValueError(
+                "principal_required_capabilities must be sorted and unique"
+            )
+        for capability in self.principal_required_capabilities:
+            _require_token("principal_required_capabilities item", capability)
+
+    def _evidence_body(self) -> dict[str, Any]:
+        return {
+            "schema_version": PRINCIPAL_ACTION_DEMAND_SCHEMA,
+            "selection_document_digest": self.selection_document_digest,
+            "principal_required_capabilities": list(
+                self.principal_required_capabilities
+            ),
+            "action_partition_evidence_digest": (
+                self.action_partition_evidence_digest
+            ),
+            "worker_route_evidence_digest": self.worker_route_evidence_digest,
+        }
+
+    @property
+    def evidence_digest(self) -> str:
+        return digest(self._evidence_body())
+
+    def to_dict(self) -> dict[str, Any]:
+        value = self._evidence_body()
+        value["evidence_digest"] = self.evidence_digest
+        return value
+
+
+_PRINCIPAL_ACTION_DEMAND_KEYS = frozenset(
+    {
+        "schema_version",
+        "selection_document_digest",
+        "principal_required_capabilities",
+        "action_partition_evidence_digest",
+        "worker_route_evidence_digest",
+        "evidence_digest",
+    }
+)
+
+
+def placement_selection_document_digest(
+    decision: PlacementSelectionDecision,
+) -> str:
+    if not isinstance(decision, PlacementSelectionDecision):
+        raise TypeError("decision must be PlacementSelectionDecision")
+    return digest(decision.to_dict())
+
+
+def build_principal_action_demand_receipt(
+    *,
+    decision: PlacementSelectionDecision,
+    principal_required_capabilities: frozenset[str],
+    action_partition_evidence_digest: str,
+    worker_route_evidence_digest: str,
+) -> PrincipalActionDemandReceipt:
+    """Bind owner-issued principal-local action demand to immutable C1."""
+
+    if not isinstance(decision, PlacementSelectionDecision):
+        raise TypeError("decision must be PlacementSelectionDecision")
+    if decision.state is not SelectionState.SELECTED:
+        raise ValueError("principal action demand requires selected placement")
+    principal = _require_capability_set(
+        "principal_required_capabilities", principal_required_capabilities
+    )
+    if not principal:
+        raise ValueError("principal_required_capabilities must not be empty")
+    if not principal.issubset(decision.demand.required_capabilities):
+        raise ValueError(
+            "principal_required_capabilities must be a subset of placement demand"
+        )
+    return PrincipalActionDemandReceipt(
+        selection_document_digest=placement_selection_document_digest(decision),
+        principal_required_capabilities=tuple(sorted(principal)),
+        action_partition_evidence_digest=_require_sha256(
+            "action_partition_evidence_digest",
+            action_partition_evidence_digest,
+        ),
+        worker_route_evidence_digest=_require_sha256(
+            "worker_route_evidence_digest",
+            worker_route_evidence_digest,
+        ),
+    )
+
+
+def validate_principal_action_demand_receipt(
+    value: object,
+) -> PrincipalActionDemandReceipt:
+    if not isinstance(value, Mapping):
+        raise ValueError("principal action demand must be an object")
+    raw = dict(value)
+    if set(raw) != _PRINCIPAL_ACTION_DEMAND_KEYS:
+        raise ValueError("principal action demand has invalid keys")
+    if raw.get("schema_version") != PRINCIPAL_ACTION_DEMAND_SCHEMA:
+        raise ValueError("principal action demand schema is invalid")
+    principal = raw.get("principal_required_capabilities")
+    if not isinstance(principal, list):
+        raise ValueError("principal_required_capabilities must be a list")
+    receipt = PrincipalActionDemandReceipt(
+        selection_document_digest=raw["selection_document_digest"],
+        principal_required_capabilities=tuple(principal),
+        action_partition_evidence_digest=raw[
+            "action_partition_evidence_digest"
+        ],
+        worker_route_evidence_digest=raw["worker_route_evidence_digest"],
+    )
+    if raw["evidence_digest"] != receipt.evidence_digest:
+        raise ValueError("principal action demand digest mismatch")
+    return receipt
 
 
 # ---------------------------------------------------------------------------
