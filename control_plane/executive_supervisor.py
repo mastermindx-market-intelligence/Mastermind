@@ -45,6 +45,8 @@ from control_plane.worker_adapter import WorkerExecutionAdapter
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
+    is_sealed_worker_execution_surface,
 )
 from control_plane.executive_authority import (
     AuthorityDenied,
@@ -1094,7 +1096,14 @@ class ExecutiveSupervisor:
         )
         if quota is None:
             raise SupervisorError("claimed worker quota class disappeared")
+        worker = self.runtime.workers.get_worker(lease.attempt.worker_id)
+        if worker is None:
+            raise SupervisorError("claimed worker identity disappeared")
+        adapter_id = str(worker.worker_type or "").strip().lower()
         metadata = quota.metadata
+        metadata_adapter_id = str(metadata.get("adapter_id") or "").strip().lower()
+        if metadata_adapter_id and metadata_adapter_id != adapter_id:
+            raise SupervisorError("claimed capacity adapter identity drifted")
         keys = (
             "execution_profile_id",
             "execution_profile_digest",
@@ -1122,7 +1131,10 @@ class ExecutiveSupervisor:
         ):
             raise SupervisorError("installed execution capability policy drifted")
         if (
-            profile.execution_surface != "codex-exec"
+            not is_sealed_worker_execution_surface(profile.execution_surface)
+            or not adapter_supports_execution_surface(
+                adapter_id, profile.execution_surface
+            )
             or profile.auth_realm != "dedicated-worker-account"
             or profile.approval_policy != "never"
             or profile.network_policy != "disabled"
@@ -1132,7 +1144,7 @@ class ExecutiveSupervisor:
             or profile.plugins
         ):
             raise SupervisorError(
-                "sealed worker refuses an execution profile with an unimplemented surface"
+                "sealed worker refuses an incompatible execution profile"
             )
         authorities = (
             effective_grant["authorities"]
