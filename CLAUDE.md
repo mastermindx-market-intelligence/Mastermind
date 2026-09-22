@@ -40,6 +40,20 @@ changes; do not rebuild an existing system without evidence it is unusable.
 **Completion.** Writing code does not complete a job. The job's stated acceptance
 evidence completes it.
 
+### Start assigned work; do not wait for administrative ceremony
+
+A current explicit handoff is sufficient assignment at the human/session layer; record pickup
+when the existing carrier requires it, but do not ask for a second Slack claim or ACK-of-ACK.
+A historical owner label is not a live execution lease. Recover actual writer/lease/effect state;
+never duplicate a live or effect-unknown modifier, but do not wait for an abandoned chat to reply.
+CI blocks merge/release, not independent useful work. Repair in-scope failures and advance safe
+independent work while one existing observer handles the release wait. A missing optional watcher
+blocks unattended-continuation claims, not authorized foreground work. The active assigned session
+owns recovery until a real successor accepts; do not end with an unbound "owner must act".
+Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no
+runtime authority, required form, new watcher or extra human approval. Existing exact grants,
+source custody, effect reconciliation, review and release controls remain in force.
+
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the

@@ -226,6 +226,13 @@ specific law.
 
 ## Modification handshake
 
+Apply gates to the specific next action, not every possible future action. Repository-only source
+work does not require a healthy Executive runtime unless that action actually invokes or depends on
+Executive authority. A later deployment or reciprocal-dialogue gate does not freeze independent
+permitted source work. No new permission is created by this scoping rule: the applicable current
+assignment, source custody, protected procedure, resource permission and effect fences remain mandatory.
+Use ACTIVE_EXECUTION's start/recovery defaults; do not add a second Slack claim or human approval.
+
 Before any modifying CEO action, all applicable gates must be true:
 
 - explicit Chairman intent;

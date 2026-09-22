@@ -27,6 +27,55 @@ Advance the highest-leverage unfinished capability through the real critical pat
 A detailed status artifact is not a substitute for capability advancement. A blocker on one lane is
 not permission to end the whole turn while another in-scope critical-path lane remains executable.
 
+## Start and recover without administrative ceremony
+
+These are decision checks, not additional forms or approval messages. Apply them to Web, Claude,
+Codex and other assigned sessions through their existing instruction/admission owners.
+
+**Assignment is permission to begin the permitted work, not proof it ran.** A current explicit
+Chairman instruction or accepted direct handoff supplies human/session assignment. Read the packet,
+record required pickup, and start the permitted next action without an ACK-of-ACK or redundant Slack
+claim. A retrieved packet alone does not assign work. Do not ask the Chairman to re-approve routine
+in-scope execution; return only material scope, risk, spend or authority expansion to its decision owner.
+A task-local planning, design or testing playbook must not create a second human-approval round for
+an already-commissioned routine plan/build/test/repair cycle. Resolve ordinary reversible design
+choices inside the assignment. Preserve any actual reserved decision and platform-required confirmation,
+authentication or user-consent boundary; do not treat those as administrative ceremony.
+
+**Responsibility survives a chat; a chat does not own work forever.** Separate the accountable role,
+current receiver assignment and exclusive execution/source lease. A historical title, old PR author,
+archived Web chat or Agent OS claim is not current liveness. Inspect fresh live claim, source-writer
+custody and pending effects once through their existing owners. An observation failure means unknown
+is not expired. Preserve any live or EFFECT_UNKNOWN modifier; no timeout, archived tab or handoff
+silently clears its fence. Use existing compare-and-swap/fencing and successor/recovery admission to
+replace an actual lease. Where current assignment exists and no lease, writer or pending effect is
+displaced, proceed with permitted independent work instead of demanding a reply from a ghost owner.
+Do not wait indefinitely for an abandoned conversation to ACK. The active assigned session owns the
+next recovery action: reconcile/recover through the incumbent owner, continue another safe in-scope
+lane, or expose the exact unavailable recovery capability and a real action target, not merely an
+historical owner name. This procedure does not itself transfer a STARTed operation.
+
+**Gate the action, not the entire mission.** Apply current admission, permission and proof only to
+the effect or dependency that needs them. A later deployment, Slack dialogue, worker dispatch or
+runtime gate does not block otherwise-permitted source investigation, implementation or tests.
+A transport failure still blocks the required transport-dependent effect. A missing watcher prevents
+reliance on unattended return, not safe foreground execution. Never fabricate receipt or persistence.
+
+**CI is a release dependency.** Pending checks do not stop implementation, test repair, review or
+other independent authorized work. Preserve the exact candidate identity, use one existing cheap
+observer, and consume its result before the gated merge/release; follow `docs/DELIVERY_WORKFLOW.md`.
+Do not bypass required checks or independent review, and do not generate empty pushes or repeated
+status turns. When changing the candidate is necessary, invalidate only evidence affected by that
+change and bind subsequent observation to the new head. Do not duplicate a worker's assigned work.
+
+**Problem-solve before escalating.** Reuse the current checkpoint and minimum relevant source; do
+not reload unrelated history. Inspect the exact failure, try the bounded lawful repair, or change to
+an independent lane. Two equivalent failures without new evidence require a changed hypothesis or
+re-plan, not a third identical loop. Ask a human only for the precise decision or action actually
+reserved to them. A real blocker has an affected action, evidence and a reachable resolver/return
+condition in the existing checkpoint; this is not a new ledger. These checks create no new lifecycle,
+scheduler, lock service, retry budget, authority grant or background execution.
+
 ## Step 1 — Freeze the active-turn frame
 
 After recovery/reconciliation, keep one compact working frame:
