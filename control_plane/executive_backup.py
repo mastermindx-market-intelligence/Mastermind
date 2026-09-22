@@ -1865,8 +1865,14 @@ def _default_upgrade_census(
             else (os.getuid(), os.geteuid())
         )
     )
+    # The complete argv for every process is unbounded input: long-lived agent
+    # hosts can legitimately push ``ps ... command=`` beyond the census wire's
+    # 512 KiB fail-closed limit even when no process shares the control UID.
+    # Only UID membership affects admission below.  Keep one bounded executable
+    # identity for the adverse-process diagnostic digest without collecting
+    # unrelated processes' arguments.
     ps_status, ps_output, ps_error, ps_pid = _run_census_command(
-        ["/bin/ps", "-axo", "pid=,svuid=,ruid=,uid=,command="]
+        ["/bin/ps", "-axo", "pid=,svuid=,ruid=,uid=,comm="]
     )
     if ps_status != 0 or ps_error:
         raise RestoreSafetyError("independent process census failed closed")
@@ -1908,10 +1914,18 @@ def _default_upgrade_census(
     ]
     existing = [path for path in inspected if os.path.lexists(path)]
     lsof = Path("/usr/sbin/lsof")
+    # ``lsof`` otherwise emits host-global mount warnings on stderr (for
+    # example, an unrelated App Translocation nullfs that it cannot stat).
+    # Suppress warnings at the sensor while retaining its exit status and the
+    # closed machine-readable rows for the exact inspected paths.
     status, output, error, _lsof_pid = _run_census_command(
-        [str(lsof), "-nP", "-F", "pufn", "--", *existing]
+        [str(lsof), "-w", "-nP", "-F", "pufn", "--", *existing]
     )
-    if status != 0 or error:
+    # Darwin lsof exits 1 when at least one named path has no matching open
+    # descriptor, even when it emits the complete row for another named path.
+    # The closed parser below still requires exactly our held lock descriptor;
+    # accept only that ordinary partial/no-match status and no diagnostics.
+    if status not in (0, 1) or error:
         raise RestoreSafetyError("independent file census failed closed")
     file_rows: list[dict[str, Any]] = []
     current_pid: int | None = None

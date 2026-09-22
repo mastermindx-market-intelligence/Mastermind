@@ -750,6 +750,11 @@ def test_default_upgrade_census_requires_positive_process_and_lock_sentinels(
 
     def observe(argv):
         if argv[0] == "/bin/ps":
+            assert argv == [
+                "/bin/ps",
+                "-axo",
+                "pid=,svuid=,ruid=,uid=,comm=",
+            ]
             return (
                 0,
                 f"{os.getpid()} {uids[0]} {uids[1]} {uids[2]} python-upgrader\n"
@@ -758,8 +763,9 @@ def test_default_upgrade_census_requires_positive_process_and_lock_sentinels(
                 sensor_pid,
             )
         assert argv[0] == "/usr/sbin/lsof"
+        assert argv[1:5] == ["-w", "-nP", "-F", "pufn"]
         return (
-            0,
+            1,
             f"p{os.getpid()}\nu{os.geteuid()}\nf{descriptor}u\nn{lock}\n",
             "",
             sensor_pid + 1,
@@ -831,7 +837,7 @@ def test_default_upgrade_census_uses_saved_real_and_effective_uid_union(
     [
         ("", 0, "", "required sentinel"),
         ("own-only", 0, "", "required sentinel"),
-        ("valid", 1, "", "file census failed"),
+        ("valid", 2, "", "file census failed"),
         ("valid", 0, "", "omitted or duplicated"),
         ("valid", 0, "foreign", "another open runtime file"),
         ("malformed", 0, "", "process census is malformed"),
