@@ -22,6 +22,18 @@ It is deliberately narrow:
   submission still reaches ``control_plane.ceo_intent.submit_intent`` and
   ``resolve_intent`` — this module adds admission/replay/error law around that
   existing sink, never a second one, and no new SQLite table/store/queue.
+* **The optional admission callback is host composition, never wire.**  A
+  trusted host may pass ``admission_guard`` — a keyword-only, private
+  composition parameter — to ``handle_frame``.  It is not a request schema
+  key, socket capability, token, or alternate sink: only a FRESH submission
+  (never a durable replay) invokes it exactly once, off the event loop, on a
+  detached deep copy of the canonical normalized envelope, after the final
+  trusted grounding/dialogue-source re-observation and immediately before the
+  one sink call.  Success is ``None`` only; a non-callable guard, a non-None
+  return, or any raised exception refuses with the FIXED existing
+  ``backend_refused`` classification and zero sink calls, so callback text can
+  never reach the wire.  Guard success is not launch authority; the canonical
+  sink/Runtime keep final authority and transactional checks.
 * **Errors are typed and closed (§12, R1 §3/§4).**  :class:`CeoIngressError`
   carries one of :data:`ERROR_CODES` plus a message.  For the four dependency-
   failure codes named in the R1 security correction, the wire message is a
@@ -49,6 +61,7 @@ Usage
 from __future__ import annotations
 
 import asyncio
+import copy
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -453,6 +466,7 @@ async def _handle_submit(
     runtime: Any,
     grounding_provider: GroundingProvider,
     workspace_root: "Path | str",
+    admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
 ) -> dict[str, Any]:
     """§11.2 submit pre-reconciliation — this order is load-bearing."""
 
@@ -479,6 +493,7 @@ async def _handle_submit(
         runtime=runtime,
         grounding_provider=grounding_provider,
         workspace_root=workspace_root,
+        admission_guard=admission_guard,
     )
 
 
@@ -493,6 +508,7 @@ async def _handle_submit_v2(
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
+    admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
 ) -> dict[str, Any]:
     """AD-ID1 automated submit with the same load-bearing v1 order.
 
@@ -522,6 +538,7 @@ async def _handle_submit_v2(
         strict_v2=strict_v2_admission,
         execution_binding_provider=execution_binding_provider,
         dialogue_source_provider=dialogue_source_provider,
+        admission_guard=admission_guard,
     )
 
 
@@ -555,8 +572,16 @@ async def _handle_normalized_submit(
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
+    admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
 ) -> dict[str, Any]:
-    """Shared replay/grounding/sink law after version-specific validation."""
+    """Shared replay/grounding/sink law after version-specific validation.
+
+    ``admission_guard`` is optional trusted host composition (never a request
+    field).  Only the FRESH path below reaches it, exactly once, strictly
+    between the final trusted re-observation and the one sink call; the
+    durable replay in step 5 bypasses it entirely, including when the guard
+    would refuse or raise.
+    """
 
     # 3. construct the candidate envelope using the CALLER's observed_grounding
     #    claim ONLY for identity comparison (never for a new submission).
@@ -632,6 +657,32 @@ async def _handle_normalized_submit(
         )
         if reobserved_source != admitted_source:
             raise _classification_failure("operation_conflict")
+
+    # 10. optional host-only admission gate.  Exactly one synchronous
+    #     callback over a DETACHED deep copy of the canonical trusted
+    #     envelope — the exact ``_build_envelope``/``validate_intent``
+    #     material the sink will receive, JSON-compatible, with no writable
+    #     alias into the trusted original (nested mappings/lists included).
+    #     A non-callable guard, a non-None return, or any raised exception
+    #     refuses with the FIXED existing ``backend_refused``
+    #     classification and ZERO sink calls, so callback text or private
+    #     content can never reach the wire.  ``None`` means admitted; the
+    #     guard cannot replace the envelope by returning another object, and
+    #     its success is not launch authority — the canonical sink/Runtime
+    #     still own final authority and the concurrent transactional checks.
+    if admission_guard is not None:
+        if not callable(admission_guard):
+            raise _dependency_failure("backend_refused")
+        try:
+            verdict = await asyncio.to_thread(
+                admission_guard, copy.deepcopy(trusted_envelope)
+            )
+        except Exception as exc:
+            # Dependency boundary: opaque by design — the callback's own
+            # exception text is never forwarded (R1 §3.2 convention).
+            raise _dependency_failure("backend_refused") from exc
+        if verdict is not None:
+            raise _dependency_failure("backend_refused")
 
     # 11. call the existing v1 mutation sink.
     receipt = await _submit(
@@ -744,6 +795,7 @@ async def handle_frame(
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
+    admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
@@ -758,6 +810,13 @@ async def handle_frame(
     connection handler) owns the raw socket framing (newline/oversize/UTF-8/
     JSON-syntax) and peer authentication; this function receives an already
     UTF-8-decoded, already ``json.loads``-parsed Python object.
+
+    ``admission_guard`` is private host composition forwarded ONLY down the
+    two public submit branches: status and state requests never invoke it, a
+    frame carrying it as a top-level key still fails the closed-schema check,
+    and a durable exact-command replay inside the submit path bypasses it
+    entirely.  See :func:`_handle_normalized_submit` for the one fresh-path
+    invocation point and its refusal law.
     """
 
     if not isinstance(parsed, Mapping):
@@ -770,6 +829,7 @@ async def handle_frame(
             runtime=runtime,
             grounding_provider=grounding_provider,
             workspace_root=workspace_root,
+            admission_guard=admission_guard,
         )
     if schema == STATUS_SCHEMA:
         _exact_top_keys(parsed, "status frame", _STATUS_TOP_KEYS)
@@ -787,6 +847,7 @@ async def handle_frame(
             strict_v2_admission=strict_v2_admission,
             execution_binding_provider=execution_binding_provider,
             dialogue_source_provider=dialogue_source_provider,
+            admission_guard=admission_guard,
         )
     if schema == STATUS_SCHEMA_V2:
         _require_v2_admission(
