@@ -332,14 +332,16 @@ def test_actual_operator_backup_shutdown_and_delayed_connection(tmp_path):
         idle_reader, idle_writer = await asyncio.open_unix_connection(str(service.socket_path))
         # Use the real local socket and existing backup business owner.
         request = asyncio.create_task(send_control_request(service.socket_path, 'backup', {}))
+        handler_tasks = ()
+        physical_tasks = ()
         try:
-            for _ in range(100):
-                if entered.is_set():
-                    break
-                await asyncio.sleep(.01)
-            assert entered.is_set()
+            assert await asyncio.to_thread(entered.wait, 5)
             with pytest.raises(ServiceError, match='not drained'):
                 await service.close()
+            handler_tasks = tuple(service._operator_handlers)
+            physical_tasks = tuple(service._physical_workers)
+            assert handler_tasks and all(not task.done() for task in handler_tasks)
+            assert physical_tasks and all(not task.done() for task in physical_tasks)
             assert service._lock_fd is not None
             assert service._namespace_custody._connection is not None
             assert service.running_marker_path.exists()
@@ -348,7 +350,14 @@ def test_actual_operator_backup_shutdown_and_delayed_connection(tmp_path):
                 await service._dispatch_request({'version': 'mastermind.executive_control/v1', 'command': 'health', 'args': {}})
         finally:
             release.set()
+            owned_tasks = set(handler_tasks) | set(physical_tasks)
+            if owned_tasks:
+                done, pending = await asyncio.wait(owned_tasks, timeout=3)
+                assert not pending
+                await asyncio.gather(*done, return_exceptions=True)
             await asyncio.gather(request, return_exceptions=True)
+            assert not service._operator_handlers
+            assert not service._physical_workers
             await service.close()
             idle_writer.close()
             await idle_writer.wait_closed()
