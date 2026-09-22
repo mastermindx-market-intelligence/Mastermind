@@ -4,14 +4,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import stat
-import sys
-from types import SimpleNamespace
 import time
 
 import pytest
 
-import integrations.workbench_action_mcp.fleet_ops as fleet_ops_module
 from integrations.workbench_action_mcp.fleet_ops import (
     FleetOperationError,
     doctor,
@@ -44,7 +40,10 @@ def _document(tmp_path: Path, *, expires_at_ms: int | None = None) -> tuple[dict
     key = tmp_path / "action.hex"
     key.write_text("9" * 64 + "\n", encoding="ascii")
     os.chmod(key, 0o600)
-    python_executable = os.path.realpath(sys.executable)
+    python_executable_path = tmp_path / "runtime-python"
+    python_executable_path.write_bytes(b"#!/bin/sh\nexit 0\n")
+    os.chmod(python_executable_path, 0o700)
+    python_executable = str(python_executable_path)
     recipe_root = (
         Path(__file__).resolve().parents[2]
         / "integrations"
@@ -102,9 +101,10 @@ def _wrapper(tmp_path: Path, config_path: Path) -> Path:
     launcher = release / "mastermind_workbench_action_stdio.py"
     launcher.write_text("# source fixture\n", encoding="utf-8")
     wrapper = tmp_path / "mastermind-workbench-c1"
+    document = json.loads(config_path.read_text(encoding="ascii"))
     wrapper.write_text(
         "#!/bin/sh\n"
-        f'exec "{os.path.realpath(sys.executable)}" "{launcher}" --config "{config_path}"\n',
+        f'exec "{document["python_executable"]}" "{launcher}" --config "{config_path}"\n',
         encoding="utf-8",
     )
     os.chmod(wrapper, 0o700)
@@ -175,45 +175,6 @@ def _result(
     )
 
 
-def test_pinned_executable_owner_and_link_rules(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    selected = Path("/private/fake-python")
-    monkeypatch.setattr(fleet_ops_module.os, "access", lambda _path, _mode: True)
-    monkeypatch.setattr(fleet_ops_module.os, "geteuid", lambda: 501)
-
-    monkeypatch.setattr(
-        Path,
-        "lstat",
-        lambda _self: SimpleNamespace(
-            st_mode=stat.S_IFREG | 0o755, st_uid=0, st_nlink=78
-        ),
-    )
-    fleet_ops_module._trusted_pinned_executable(str(selected))
-
-    monkeypatch.setattr(
-        Path,
-        "lstat",
-        lambda _self: SimpleNamespace(
-            st_mode=stat.S_IFREG | 0o755, st_uid=501, st_nlink=2
-        ),
-    )
-    with pytest.raises(FleetOperationError) as current_owner:
-        fleet_ops_module._trusted_pinned_executable(str(selected))
-    assert current_owner.value.code == "TARGET_REFUSED"
-
-    monkeypatch.setattr(
-        Path,
-        "lstat",
-        lambda _self: SimpleNamespace(
-            st_mode=stat.S_IFREG | 0o755, st_uid=12345, st_nlink=1
-        ),
-    )
-    with pytest.raises(FleetOperationError) as foreign_owner:
-        fleet_ops_module._trusted_pinned_executable(str(selected))
-    assert foreign_owner.value.code == "TARGET_REFUSED"
-
-
 def test_doctor_accepts_exact_ready_binding(tmp_path: Path) -> None:
     document, config_path = _document(tmp_path)
     wrapper = _wrapper(tmp_path, config_path)
@@ -266,6 +227,42 @@ def test_doctor_refuses_wrapper_interpreter_drift(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     os.chmod(wrapper, 0o700)
+
+    with pytest.raises(FleetOperationError) as caught:
+        doctor(
+            alias="mastermind-workbench-c1",
+            config_path=str(config_path),
+            expected_source_sha=SOURCE_SHA,
+            runner=lambda _argv: _status(wrapper),
+            tool_probe=lambda _argv: None,
+        )
+
+    assert caught.value.code == "TARGET_REFUSED"
+
+
+def test_doctor_refuses_multiply_linked_runtime_python(tmp_path: Path) -> None:
+    document, config_path = _document(tmp_path)
+    wrapper = _wrapper(tmp_path, config_path)
+    runtime_python = Path(document["python_executable"])
+    os.link(runtime_python, tmp_path / "runtime-python-second-link")
+
+    with pytest.raises(FleetOperationError) as caught:
+        doctor(
+            alias="mastermind-workbench-c1",
+            config_path=str(config_path),
+            expected_source_sha=SOURCE_SHA,
+            runner=lambda _argv: _status(wrapper),
+            tool_probe=lambda _argv: None,
+        )
+
+    assert caught.value.code == "TARGET_REFUSED"
+
+
+def test_doctor_refuses_group_writable_runtime_python(tmp_path: Path) -> None:
+    document, config_path = _document(tmp_path)
+    wrapper = _wrapper(tmp_path, config_path)
+    runtime_python = Path(document["python_executable"])
+    os.chmod(runtime_python, 0o720)
 
     with pytest.raises(FleetOperationError) as caught:
         doctor(

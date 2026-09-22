@@ -162,28 +162,13 @@ def _same_euid_private_regular(path: str, *, exact_mode: int | None = None) -> o
     return before
 
 
-def _trusted_pinned_executable(path: str) -> os.stat_result:
-    selected = Path(path)
-    if not selected.is_absolute():
-        raise FleetOperationError("TARGET_REFUSED")
+def _target_private_regular(path: str) -> os.stat_result:
     try:
-        before = selected.lstat()
-    except OSError:
-        raise FleetOperationError("TARGET_REFUSED") from None
-    mode = stat.S_IMODE(before.st_mode)
-    owner_uid = before.st_uid
-    current_uid = os.geteuid()
-    if (
-        stat.S_ISLNK(before.st_mode)
-        or not stat.S_ISREG(before.st_mode)
-        or owner_uid not in {0, current_uid}
-        or before.st_nlink < 1
-        or (owner_uid == current_uid and before.st_nlink != 1)
-        or mode & 0o022
-        or not os.access(selected, os.X_OK)
-    ):
-        raise FleetOperationError("TARGET_REFUSED")
-    return before
+        return _same_euid_private_regular(path)
+    except FleetOperationError as error:
+        if error.code != "CONFIG_PATH_REFUSED":
+            raise
+        raise FleetOperationError("TARGET_REFUSED") from error
 
 
 def _load_config(path: str) -> TunnelConfig:
@@ -550,7 +535,7 @@ def _target_release_sha(
     target = process.get("target_value")
     if not isinstance(target, str) or not target.startswith("/"):
         raise FleetOperationError("TARGET_REFUSED")
-    _same_euid_private_regular(target)
+    _target_private_regular(target)
     try:
         raw = Path(target).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
@@ -579,14 +564,16 @@ def _target_release_sha(
     configured_python = os.path.realpath(config.python_executable)
     if selected_python != configured_python:
         raise FleetOperationError("TARGET_REFUSED")
-    _trusted_pinned_executable(selected_python)
+    _target_private_regular(selected_python)
+    if not os.access(selected_python, os.X_OK):
+        raise FleetOperationError("TARGET_REFUSED")
     try:
         observed_python_sha = hashlib.sha256(Path(selected_python).read_bytes()).hexdigest()
     except OSError:
         raise FleetOperationError("TARGET_REFUSED") from None
     if observed_python_sha != config.python_sha256:
         raise FleetOperationError("TARGET_REFUSED")
-    _same_euid_private_regular(launcher)
+    _target_private_regular(launcher)
     if Path(launcher).name != "mastermind_workbench_action_stdio.py":
         raise FleetOperationError("TARGET_REFUSED")
     match = re.search(r"/releases/([0-9a-f]{40})/scripts/mastermind_workbench_action_stdio\.py$", launcher)
