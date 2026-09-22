@@ -1144,7 +1144,7 @@ class ExecutiveSupervisor:
             or profile.plugins
         ):
             raise SupervisorError(
-                "sealed worker refuses an incompatible execution profile"
+                "sealed worker refuses an incompatible execution profile or unimplemented surface"
             )
         authorities = (
             effective_grant["authorities"]
