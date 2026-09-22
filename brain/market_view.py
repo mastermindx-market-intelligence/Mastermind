@@ -107,6 +107,10 @@ PLANE_ORDER: tuple[str, ...] = (
     "intl_spillover",
     # W-NW.1 Neural Web bridge (ADVISORY-ONLY; dark-ship; validated=False per §3.3.1)
     "neural_web",
+    # W-LIQ.2 Global Liquidity Transmission (SHADOW/ADVISORY/INERT; validated=False; its
+    # direction is a LIQUIDITY vocabulary and is never mapped into the risk vocabulary, so
+    # this plane carries direction=None and can touch neither tilt nor disagreement)
+    "liquidity_transmission",
 )
 
 # The validated set — the ONLY planes that may sign net_posture_tilt (P3).
@@ -1062,6 +1066,120 @@ def _adapt_neural_web(nw_out: Any) -> dict[str, Any]:
         )
 
 
+def _adapt_liquidity_transmission(lt_out: Any) -> dict[str, Any]:
+    """Adapt liquidity_transmission.market_plane() output to a PlaneRecord (W-LIQ.2).
+
+    SHADOW / ADVISORY / INERT.  Three structural refusals make this plane unable to move
+    anything, by construction rather than by policy:
+
+    * ``validated=False`` always -> the tilt guard is status-based, so it can never sign
+      ``net_posture_tilt``.
+    * ``direction=None`` always -> the GLT vocabulary (expanding/flat/contracting) is a
+      LIQUIDITY-state direction, not a risk tilt.  Translating it into risk_off/risk_on
+      would both break the producer's vocabulary law and inject a shadow plane into the
+      disagreement and coherence math, which count only planes with a risk direction.  The
+      liquidity direction stays intact under ``raw.direction_label`` with its own
+      vocabulary named beside it.
+    * ``magnitude=None`` always -> the producer publishes TWO magnitudes with different
+      units (raw ``weekly_change_in_expanding_z_score`` and the standardized
+      ``magnitude_z``).  A bare number in the view's generic magnitude field is exactly the
+      raw-mislabelled-as-z error; both stay in ``raw`` next to their own unit strings.
+
+    Freshness uses the plane's OWN evidence clock (``observed_at`` =
+    ``freshness.clocks.evidence_available_at``), never ``meta.generated_at`` and never the
+    file mtime.  Absent / invalid input -> ``_absent_record``.  A STALE artifact keeps its
+    provenance and is recorded present-but-stale: it exists, its identity validated, and
+    its evidence is simply too old to read -- which the view counts as stale rather than
+    missing, and which excludes it from the tilt, the disagreements and the coherence
+    exactly as an absent plane is excluded.
+    """
+    contract = "vendor/macro/site/liquiditydata/global_liquidity_transmission.json"
+    if not isinstance(lt_out, dict):
+        return _absent_record(contract, "liquidity_transmission reader unavailable")
+    status = lt_out.get("status")
+    # Three-way split, because the view's own bookkeeping distinguishes missing from stale:
+    #   absent/invalid -> _absent_record (no identity we are entitled to trust)
+    #   stale          -> a present-but-stale record that KEEPS its provenance
+    #   present        -> the full record
+    # A stale artifact is not a missing one, and reporting it as missing would erase the
+    # very provenance that lets a reader see WHY it cannot be used.
+    if status not in ("present", "stale") or not lt_out.get("observed_at"):
+        return _absent_record(
+            contract,
+            f"GLT {status or 'absent'}: {lt_out.get('reason') or 'no evidence clock'}",
+        )
+    try:
+        is_stale = status == "stale" or bool(lt_out.get("stale"))
+        direction_label = lt_out.get("direction_label")
+        quality = lt_out.get("quality")
+        if is_stale:
+            # The reader already withheld the state; say what was found and how old it is,
+            # never a last-known reading dressed as current.
+            reading = f"GLT stale: {lt_out.get('reason') or 'evidence beyond horizon'}"
+        else:
+            reading = (
+                f"GLT: liquidity {direction_label}; state-vs-US quality {quality}"
+                if direction_label else None
+            )
+        rec = _plane_record(
+            reading=reading,
+            direction=None,      # liquidity vocabulary never becomes a risk direction
+            magnitude=None,      # two units; never a bare number here
+            # The EVIDENCE clock, never generated_at -- as a DATE, because _freshness()
+            # counts trading days and cannot parse a full ISO timestamp (an unparsed asof
+            # is fail-closed stale, which would pin this plane stale forever).
+            asof=lt_out.get("observed_date") or lt_out.get("observed_at"),
+            confidence=lt_out.get("confidence"),
+            validated=False,     # SHADOW: never signs net_posture_tilt
+            source_contract=contract,
+            raw={
+                "direction_label": direction_label,
+                "direction_vocabulary": lt_out.get("direction_vocabulary"),
+                "quality": quality,
+                "quality_vocabulary": lt_out.get("quality_vocabulary"),
+                "magnitude": lt_out.get("magnitude"),
+                "magnitude_unit": lt_out.get("magnitude_unit"),
+                "magnitude_z": lt_out.get("magnitude_z"),
+                "magnitude_z_unit": lt_out.get("magnitude_z_unit"),
+                "coverage": lt_out.get("coverage"),
+                "breadth": lt_out.get("breadth"),
+                "credit_impulse_global": lt_out.get("credit_impulse_global"),
+                "confidence_kind": lt_out.get("confidence_kind"),
+                "state_asof": lt_out.get("state_asof"),
+                "observed_at": lt_out.get("observed_at"),
+                "observed_date": lt_out.get("observed_date"),
+                "known_at": lt_out.get("known_at"),
+                "age_days": lt_out.get("age_days"),
+                "mode": lt_out.get("mode"),
+                "authority": lt_out.get("authority"),
+                "provenance": lt_out.get("provenance"),
+                "advisory": True,
+                "signs_posture": False,
+                "decision_effect": "none",
+                # The artifact exists on disk; staleness is a freshness verdict, not absence.
+                # freshness.stale (computed from observed_at) is what excludes it downstream.
+                "artifact_present": True,
+                "reader_status": status,
+                "reader_reason": lt_out.get("reason"),
+                "signal_active": False,
+            },
+        )
+        # Staleness is the UNION of two independent verdicts, never the intersection:
+        # the reader owns the producer's clock law (future-dated evidence, an evidence
+        # clock postdating first-known, a producer declaring itself degraded), and
+        # _freshness() owns the view's own trading-day horizon.  Neither may RELEASE what
+        # the other condemned.  This is load-bearing rather than belt-and-braces:
+        # _trading_days_since clamps a future date to 0 sessions, so the view's own
+        # future_dated guard cannot fire here at all -- without this union a clock dated
+        # next week would read as a fresh plane.
+        if is_stale:
+            rec["freshness"]["stale"] = True
+            rec["freshness"]["stale_reason"] = lt_out.get("reason")
+        return rec
+    except Exception:  # noqa: BLE001
+        return _absent_record(contract, "liquidity_transmission adapter error")
+
+
 # ---------------------------------------------------------------------------
 # label plane — the regime label direction (what the tilt is measured AGAINST)
 # ---------------------------------------------------------------------------
@@ -1383,6 +1501,7 @@ def view(
     liquidity_quality_out: Any = None,
     regime_nowcast_out: Any = None,
     neural_web_out: Any = None,
+    liquidity_transmission_out: Any = None,
     prev_view: Any = None,
     seq: int = 0,
 ) -> dict[str, Any]:
@@ -1428,6 +1547,7 @@ def view(
                                               "H4 handoff — pending")
     # W-NW.1 Neural Web advisory plane — dark-ship (always-on reader; flag gates prompt/sizing)
     planes["neural_web"] = _adapt_neural_web(neural_web_out)
+    planes["liquidity_transmission"] = _adapt_liquidity_transmission(liquidity_transmission_out)
 
     # keep planes in golden order (dict insertion order == PLANE_ORDER above)
     ordered_planes = {k: planes[k] for k in PLANE_ORDER}
@@ -1540,6 +1660,7 @@ def build(
     liquidity_quality_out: Any = None,
     regime_nowcast_out: Any = None,
     neural_web_out: Any = None,
+    liquidity_transmission_out: Any = None,
     seq: int | None = None,
 ) -> dict[str, Any]:
     """Build the view and (optionally) atomically publish latest.json + a dated copy.
@@ -1563,6 +1684,7 @@ def build(
         liquidity_quality_out=liquidity_quality_out,
         regime_nowcast_out=regime_nowcast_out,
         neural_web_out=neural_web_out,
+        liquidity_transmission_out=liquidity_transmission_out,
         prev_view=prev,
         seq=resolved_seq,
     )

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import copy
 import dataclasses
+import fcntl
 import grp
 import hashlib
 import json
@@ -25,6 +26,7 @@ import plistlib
 import pwd
 import re
 import secrets
+import selectors
 import stat
 import subprocess
 import sys
@@ -75,11 +77,27 @@ AUTONOMY_TRANSACTION = CONFIG_ROOT / "autonomy-transaction.lock"
 CEO_SUBMIT_RECEIPT = CONFIG_ROOT / "ceo-submit-state-v1.json"
 CEO_SUBMIT_RECEIPT_SCHEMA = "mastermind.executive_ceo_submit_receipt/v1"
 CEO_SUBMIT_OPERATIONS = frozenset({"CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"})
+_CONTROL_LAUNCHD_PREIMAGE_FIELD = "control_launchd_disabled_before_reconcile"
+_CONTROL_LAUNCHD_DISABLED_ROW_RE = re.compile(
+    r'^"(?P<label>[^"]+)"\s*=>\s*(?P<state>enabled|disabled|true|false)$'
+)
+_CONTROL_LAUNCHD_DISABLED_SPELLINGS = {
+    "disabled": True,
+    "true": True,
+    "enabled": False,
+    "false": False,
+}
+_MAX_LAUNCHCTL_DISABLED_BYTES = 64 * 1024
 # R17 B1: the CEO-submit operation domain as it is reachable from THIS CLI.  A
-# closed set, so `main` can route the three verbs with one membership test and no
+# closed set, so `main` can route the four verbs with one membership test and no
 # string prefix matching.
 CEO_SUBMIT_COMMANDS = frozenset(
-    {"ceo-submit-status", "ceo-submit-arm", "ceo-submit-disarm"}
+    {
+        "ceo-submit-status",
+        "ceo-submit-arm",
+        "ceo-submit-disarm",
+        "ceo-submit-reconcile",
+    }
 )
 EXECUTIVE_APP_USER = "_mastermind_executive_mcp"
 CEO_INGRESS_LAUNCHD_SOCKET_NAME = "CeoIngress"
@@ -153,6 +171,9 @@ _ARM_ADMISSION_CODES = frozenset(
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
 _TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM"}) | CEO_SUBMIT_OPERATIONS
+# One manifest name for the canonical marker and for the private generation it
+# is published from, so a renamed generation is always readable in place.
+_TRANSACTION_MANIFEST_NAME = "transaction.json"
 _CEO_SUBMIT_ADMISSION_CODES = frozenset(
     {
         "release_identity_mismatch",
@@ -333,6 +354,10 @@ class TransactionEffectUnknown(RuntimeError):
             raise ValueError("unknown autonomy effect-unknown code")
         self.code = code
         super().__init__(code)
+
+
+class TransactionOwnershipError(TransactionEffectUnknown):
+    """The transaction began but this process never acquired its owner."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -583,6 +608,10 @@ class CeoSubmitTransactionHost(Protocol):
         self, transaction: TransactionContext, receipt: Mapping[str, Any]
     ) -> None: ...
 
+    def recover_ceo_submit_effect_unknown(
+        self, request: CeoSubmitRequest, *, now: datetime
+    ) -> TransactionResult: ...
+
 
 class _StoreOnce(argparse.Action):
     """Reject repeated authority-bearing flags instead of silently taking last."""
@@ -661,6 +690,14 @@ def _parser() -> argparse.ArgumentParser:
         "ceo-submit-disarm", help="Disarm only the CEO-submit sink."
     )
     ceo_disarm.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
+
+    ceo_reconcile = sub.add_parser(
+        "ceo-submit-reconcile",
+        help="Reconcile one existing effect-unknown CEO-submit transaction to its archived preimage.",
+    )
+    ceo_reconcile.add_argument(
         "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
     )
     return parser
@@ -1372,6 +1409,15 @@ def execute_arm(
         # atomic mkdir belongs to another root transaction. Never "recover"
         # it through this operation's rollback carrier.
         raise
+    except TransactionOwnershipError:
+        # A failed begin may have left durable marker evidence, but without the
+        # execution owner this process may neither stop services nor roll back.
+        raise
+    except TransactionEffectUnknown:
+        # Publication or another owner boundary may already have taken effect.
+        # Preserve its identity and exclusion for explicit reconciliation;
+        # uncertainty is not permission to stop services or manufacture rollback.
+        raise
     except Exception as exc:
         try:
             host.stop_services(request.expected_sha)
@@ -1579,6 +1625,10 @@ def execute_ceo_submit_arm(
             request.expected_sha, transaction.candidates.control_sha256
         )
         host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        # An effect boundary explicitly classified UNKNOWN keeps this transaction
+        # marker sticky. Do not convert it into an automatic rollback/retry.
+        raise
     except Exception as exc:
         try:
             rollback = dataclasses.replace(
@@ -1736,6 +1786,10 @@ def execute_ceo_submit_disarm(
             request.expected_sha, transaction.candidates.control_sha256
         )
         host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        # An effect boundary explicitly classified UNKNOWN keeps this transaction
+        # marker sticky. Do not convert it into an automatic rollback/retry.
+        raise
     except Exception as exc:
         try:
             rollback = dataclasses.replace(
@@ -2451,6 +2505,7 @@ class ProductionTransactionHost(ProductionArmHost):
     def __init__(self) -> None:
         super().__init__()
         self._active_transaction: TransactionContext | None = None
+        self._transaction_owner_fd: int | None = None
 
     @staticmethod
     def _candidate_paths(transaction_id: str) -> tuple[Path, Path]:
@@ -2464,7 +2519,7 @@ class ProductionTransactionHost(ProductionArmHost):
 
     @staticmethod
     def _manifest_path() -> Path:
-        return AUTONOMY_TRANSACTION / "transaction.json"
+        return AUTONOMY_TRANSACTION / _TRANSACTION_MANIFEST_NAME
 
     @staticmethod
     def _archive_paths() -> tuple[Path, Path]:
@@ -2489,6 +2544,57 @@ class ProductionTransactionHost(ProductionArmHost):
         ):
             raise TransactionEffectUnknown()
 
+    def _claim_transaction_owner(self) -> None:
+        """Exclusively own the existing marker directory for this process.
+
+        The persistent directory remains the single transaction owner.  Its
+        advisory lock only distinguishes a crashed owner from a still-running
+        ARM/DISARM or recovery process; it does not create another lifecycle.
+        """
+
+        if self._transaction_owner_fd is not None:
+            raise TransactionEffectUnknown()
+        self._config_root_safe()
+        descriptor: int | None = None
+        try:
+            if not self._transaction_present():
+                raise TransactionEffectUnknown()
+            descriptor = os.open(
+                AUTONOMY_TRANSACTION,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            )
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o700
+            ):
+                raise TransactionEffectUnknown()
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if not self._transaction_present():
+                raise TransactionEffectUnknown()
+            path_info = AUTONOMY_TRANSACTION.lstat()
+            if (
+                path_info.st_dev != info.st_dev
+                or path_info.st_ino != info.st_ino
+            ):
+                raise TransactionEffectUnknown()
+        except Exception as exc:
+            if descriptor is not None:
+                os.close(descriptor)
+            if isinstance(exc, TransactionEffectUnknown):
+                raise
+            raise TransactionEffectUnknown() from exc
+        self._transaction_owner_fd = descriptor
+
+    def _release_transaction_owner(self) -> None:
+        descriptor = self._transaction_owner_fd
+        if descriptor is None:
+            raise TransactionEffectUnknown()
+        self._transaction_owner_fd = None
+        os.close(descriptor)
+
     def _manifest(self) -> dict[str, Any]:
         try:
             value, _raw = _root_json(
@@ -2510,8 +2616,14 @@ class ProductionTransactionHost(ProductionArmHost):
             "target_control_sha256",
             "target_worker_sha256",
         }
+        keys = set(value)
+        allowed_with_control_preimage = required | {_CONTROL_LAUNCHD_PREIMAGE_FIELD}
         if (
-            set(value) != required
+            frozenset(keys)
+            not in {
+                frozenset(required),
+                frozenset(allowed_with_control_preimage),
+            }
             or value.get("schema_version") != _TRANSACTION_SCHEMA
             or value.get("operation") not in _TRANSACTION_OPERATIONS
             or not isinstance(value.get("phase"), str)
@@ -2529,15 +2641,24 @@ class ProductionTransactionHost(ProductionArmHost):
                     "target_worker_sha256",
                 )
             )
+            or (
+                _CONTROL_LAUNCHD_PREIMAGE_FIELD in value
+                and (
+                    value.get("operation") not in CEO_SUBMIT_OPERATIONS
+                    or type(value.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)) is not bool
+                )
+            )
         ):
             raise TransactionEffectUnknown()
         return value
 
-    def _persist_phase(self, transaction: TransactionContext, phase: str, *, operation: str | None = None) -> None:
-        if operation is None:
-            current = self._manifest()
-            operation = str(current["operation"])
-        value = {
+    @staticmethod
+    def _manifest_document(
+        transaction: TransactionContext, phase: str, *, operation: str
+    ) -> dict[str, Any]:
+        """The one recoverable identity document, unchanged across phases."""
+
+        return {
             "schema_version": _TRANSACTION_SCHEMA,
             "operation": operation,
             "phase": phase,
@@ -2548,6 +2669,17 @@ class ProductionTransactionHost(ProductionArmHost):
             "target_control_sha256": transaction.candidates.control_sha256,
             "target_worker_sha256": transaction.candidates.worker_sha256,
         }
+
+    def _persist_phase(self, transaction: TransactionContext, phase: str, *, operation: str | None = None) -> None:
+        current: Mapping[str, Any] | None = None
+        if operation is None:
+            current = self._manifest()
+            operation = str(current["operation"])
+        value = self._manifest_document(transaction, phase, operation=operation)
+        if current is not None and _CONTROL_LAUNCHD_PREIMAGE_FIELD in current:
+            value[_CONTROL_LAUNCHD_PREIMAGE_FIELD] = current[
+                _CONTROL_LAUNCHD_PREIMAGE_FIELD
+            ]
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -2557,46 +2689,275 @@ class ProductionTransactionHost(ProductionArmHost):
             replace=self._manifest_path().exists(),
         )
 
-    def _create_marker(self, transaction: TransactionContext, *, operation: str) -> None:
-        self._config_root_safe()
+    @staticmethod
+    def _generation_path(transaction_id: str) -> Path:
+        """This creator's private, not-yet-canonical marker generation."""
+
+        if re.fullmatch(r"autonomy-[0-9a-f]{12}", transaction_id) is None:
+            raise TransactionEffectUnknown()
+        suffix = transaction_id.removeprefix("autonomy-")
+        return CONFIG_ROOT / (
+            f".autonomy-transaction-{suffix}.{os.getpid()}"
+            f".{secrets.token_hex(8)}.generating"
+        )
+
+    @staticmethod
+    def _generation_archive_paths(generation: Path) -> tuple[Path, Path]:
+        return (
+            generation / "prior-control.json",
+            generation / "prior-worker.json",
+        )
+
+    def _seal_generation(
+        self, generation: Path, transaction: TransactionContext, *, operation: str
+    ) -> None:
+        """Write the COMPLETE recoverable marker into the private generation.
+
+        Everything a later recovery needs -- the identity manifest and both
+        exact preimages, each fsynced -- is sealed here, before the canonical
+        ``AUTONOMY_TRANSACTION`` path can become visible at all.  Nothing in
+        this method reads or writes the canonical path.
+        """
+
+        control_bytes = transaction.prior_configs.control_bytes or encode_config(
+            transaction.prior_configs.control
+        )
+        worker_bytes = transaction.prior_configs.worker_bytes or encode_config(
+            transaction.prior_configs.worker
+        )
+        if (
+            sha256_bytes(control_bytes)
+            != transaction.prior_configs.control_sha256
+            or sha256_bytes(worker_bytes)
+            != transaction.prior_configs.worker_sha256
+        ):
+            raise TransactionEffectUnknown()
+        prior_control, prior_worker = self._generation_archive_paths(generation)
+        _atomic_file(
+            prior_control,
+            control_bytes,
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=False,
+        )
+        _atomic_file(
+            prior_worker,
+            worker_bytes,
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=False,
+        )
+        _atomic_file(
+            generation / _TRANSACTION_MANIFEST_NAME,
+            _encoded_json(
+                self._manifest_document(transaction, "LOCKED", operation=operation)
+            ),
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=False,
+        )
+        _fsync_directory(generation)
+
+    @staticmethod
+    def _publication_mutex() -> int:
+        """Serialize FIRST publication on the existing config-directory inode.
+
+        Every creator takes this same lock on the trusted ``CONFIG_ROOT``
+        directory itself, so only one generation can be renamed onto the
+        canonical marker at a time.  It adds no lock file and no second owner
+        registry; the kernel releases it if this process dies.
+        """
+
+        descriptor = os.open(
+            CONFIG_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
         try:
-            os.mkdir(AUTONOMY_TRANSACTION, 0o700)
-            os.chown(AUTONOMY_TRANSACTION, 0, 0)
-            os.chmod(AUTONOMY_TRANSACTION, 0o700)
-            _fsync_directory(CONFIG_ROOT)
-            prior_control, prior_worker = self._archive_paths()
-            control_bytes = transaction.prior_configs.control_bytes or encode_config(
-                transaction.prior_configs.control
-            )
-            worker_bytes = transaction.prior_configs.worker_bytes or encode_config(
-                transaction.prior_configs.worker
-            )
+            info = os.fstat(descriptor)
+            path_info = CONFIG_ROOT.lstat()
             if (
-                sha256_bytes(control_bytes)
-                != transaction.prior_configs.control_sha256
-                or sha256_bytes(worker_bytes)
-                != transaction.prior_configs.worker_sha256
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o755
+                or path_info.st_dev != info.st_dev
+                or path_info.st_ino != info.st_ino
             ):
                 raise TransactionEffectUnknown()
-            _atomic_file(
-                prior_control,
-                control_bytes,
-                mode=0o400,
-                uid=0,
-                gid=0,
-                replace=False,
-            )
-            _atomic_file(
-                prior_worker,
-                worker_bytes,
-                mode=0o400,
-                uid=0,
-                gid=0,
-                replace=False,
-            )
-            self._persist_phase(transaction, "LOCKED", operation=operation)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
         except Exception:
-            # A partially created marker is evidence and is deliberately kept.
+            os.close(descriptor)
+            raise
+        return descriptor
+
+    @staticmethod
+    def _require_canonical_absent() -> None:
+        """No-clobber, rechecked under the publication mutex.
+
+        ``rename`` CAN replace an existing empty directory, so the competing
+        canonical identity is preserved explicitly: any entry at the canonical
+        path -- directory, file or symlink -- refuses this publication and is
+        never removed or replaced here.
+        """
+
+        try:
+            AUTONOMY_TRANSACTION.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise FileExistsError(os.fspath(AUTONOMY_TRANSACTION)) from exc
+        raise FileExistsError(os.fspath(AUTONOMY_TRANSACTION))
+
+    def _verify_published_inode(self, descriptor: int) -> None:
+        """The canonical path must resolve to the exact held inode."""
+
+        info = os.fstat(descriptor)
+        try:
+            path_info = AUTONOMY_TRANSACTION.lstat()
+        except OSError as exc:
+            raise TransactionEffectUnknown() from exc
+        if (
+            not stat.S_ISDIR(path_info.st_mode)
+            or path_info.st_dev != info.st_dev
+            or path_info.st_ino != info.st_ino
+            or stat.S_IMODE(path_info.st_mode) != 0o700
+        ):
+            raise TransactionEffectUnknown()
+
+    def _discard_own_generation(self, generation: Path, descriptor: int) -> None:
+        """Dispose of this process's own generation that never published.
+
+        Confined to a proven own unpublished inode: the canonical path must
+        still be absent, the open descriptor must still be that generation's
+        directory inode, and every entry must be a plain regular file this
+        process sealed itself.  Anything else is ambiguous publication
+        evidence and is deliberately left in place.
+        """
+
+        if self._transaction_owner_fd is not None:
+            return
+        try:
+            AUTONOMY_TRANSACTION.lstat()
+            return  # a canonical marker appeared: this is publication evidence
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return
+        try:
+            held = os.fstat(descriptor)
+            path_info = generation.lstat()
+            if (
+                not stat.S_ISDIR(path_info.st_mode)
+                or path_info.st_dev != held.st_dev
+                or path_info.st_ino != held.st_ino
+            ):
+                return
+            for entry in sorted(os.listdir(generation)):
+                candidate = generation / entry
+                entry_info = candidate.lstat()
+                if stat.S_ISLNK(entry_info.st_mode) or not stat.S_ISREG(
+                    entry_info.st_mode
+                ):
+                    return
+                candidate.unlink()
+            os.rmdir(generation)
+            _fsync_directory(CONFIG_ROOT)
+        except OSError:
+            return
+
+    @staticmethod
+    def _generation_definitely_unpublished(generation: Path, descriptor: int) -> bool:
+        """Prove the held inode is still private while the publication mutex is held.
+
+        A failed rename acknowledgment says nothing about whether rename took
+        effect.  Only an absent canonical name AND this exact still-private
+        inode permit the known-prepublication cleanup path.  Missing, replaced,
+        or unreadable names leave publication uncertain and retain the owner.
+        """
+
+        try:
+            AUTONOMY_TRANSACTION.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+        else:
+            return False
+        try:
+            held = os.fstat(descriptor)
+            private = generation.lstat()
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(private.st_mode)
+            and stat.S_ISDIR(held.st_mode)
+            and (private.st_dev, private.st_ino) == (held.st_dev, held.st_ino)
+        )
+
+    def _create_marker(self, transaction: TransactionContext, *, operation: str) -> None:
+        """Publish the ONE transaction marker complete, or not at all.
+
+        The recoverable identity, both exact preimages and this creator's own
+        directory flock are sealed into a private generation first, so the
+        canonical path never exists in an empty or partial state.  First
+        publication is then serialized on the config-directory inode lock,
+        canonical absence is rechecked under that mutex, the generation is
+        renamed into place while this process keeps its marker descriptor, the
+        parent directory is fsynced, and the canonical path is verified to be
+        the exact held inode before ownership is recorded.
+        """
+
+        self._config_root_safe()
+        generation = self._generation_path(transaction.transaction_id)
+        descriptor = -1
+        try:
+            os.mkdir(generation, 0o700)
+            os.chown(generation, 0, 0)
+            os.chmod(generation, 0o700)
+            descriptor = os.open(
+                generation, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            )
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o700
+            ):
+                raise TransactionEffectUnknown()
+            # Creator-owned exclusion exists BEFORE the canonical path does.
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._seal_generation(generation, transaction, operation=operation)
+            lock = self._publication_mutex()
+            try:
+                self._require_canonical_absent()
+                try:
+                    os.rename(generation, AUTONOMY_TRANSACTION)
+                    _fsync_directory(CONFIG_ROOT)
+                    self._verify_published_inode(descriptor)
+                except Exception as exc:
+                    # Reconcile actual names/inodes under the same mutex, not
+                    # a boolean inferred from whether rename returned normally.
+                    if not self._generation_definitely_unpublished(generation, descriptor):
+                        self._transaction_owner_fd = descriptor
+                        raise TransactionEffectUnknown() from exc
+                    raise
+                self._transaction_owner_fd = descriptor
+            finally:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                finally:
+                    os.close(lock)
+        except Exception as exc:
+            if descriptor >= 0 and self._transaction_owner_fd == descriptor:
+                # Successful or uncertain publication retains the original
+                # held inode even if parent-fsync, readback or unlock fails.
+                raise TransactionEffectUnknown() from exc
+            if descriptor >= 0:
+                self._discard_own_generation(generation, descriptor)
+                os.close(descriptor)
             raise
 
     def existing_arm(
@@ -2672,6 +3033,7 @@ class ProductionTransactionHost(ProductionArmHost):
 
     def new_transaction_id(self) -> str:
         if AUTONOMY_TRANSACTION.exists() and not AUTONOMY_TRANSACTION.is_symlink():
+            self._claim_transaction_owner()
             return str(self._manifest()["transaction_id"])
         return f"autonomy-{secrets.token_hex(6)}"
 
@@ -2682,8 +3044,15 @@ class ProductionTransactionHost(ProductionArmHost):
         try:
             self._create_marker(transaction, operation="ARM")
         except FileExistsError as exc:
+            if self._transaction_owner_fd is not None:
+                raise
             self._active_transaction = None
             raise ArmAdmissionError("transaction_incomplete") from exc
+        except Exception as exc:
+            if self._transaction_owner_fd is None:
+                self._active_transaction = None
+                raise TransactionOwnershipError() from exc
+            raise
 
     def write_candidates(self, transaction: TransactionContext) -> None:
         self._active_transaction = transaction
@@ -2929,6 +3298,8 @@ class ProductionTransactionHost(ProductionArmHost):
         _fsync_directory(CONFIG_ROOT)
 
     def complete_transaction(self, transaction: TransactionContext) -> None:
+        if self._transaction_owner_fd is None:
+            raise TransactionEffectUnknown()
         manifest = self._manifest()
         if (
             manifest.get("transaction_id") != transaction.transaction_id
@@ -2959,6 +3330,7 @@ class ProductionTransactionHost(ProductionArmHost):
         AUTONOMY_TRANSACTION.rmdir()
         _fsync_directory(CONFIG_ROOT)
         self._active_transaction = None
+        self._release_transaction_owner()
 
     def _archived_configs(self, expected_sha: str) -> ConfigEvidence:
         control_path, worker_path = self._archive_paths()
@@ -2986,6 +3358,8 @@ class ProductionTransactionHost(ProductionArmHost):
 
     def begin_disarm(self, expected_sha: str, transaction_id: str) -> ConfigEvidence:
         if AUTONOMY_TRANSACTION.exists() and not AUTONOMY_TRANSACTION.is_symlink():
+            if self._transaction_owner_fd is None:
+                self._claim_transaction_owner()
             manifest = self._manifest()
             if (
                 manifest.get("transaction_id") != transaction_id
@@ -3225,6 +3599,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
 
     def new_transaction_id(self) -> str:
         if AUTONOMY_TRANSACTION.exists() and not AUTONOMY_TRANSACTION.is_symlink():
+            self._claim_transaction_owner()
             return str(self._manifest()["transaction_id"])
         return f"autonomy-{secrets.token_hex(6)}"
 
@@ -3357,15 +3732,266 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         )
         self._persist_phase(transaction, "RECEIPT_REPLACED")
 
+    @staticmethod
+    def _terminate_launchctl_reader(process: subprocess.Popen[bytes]) -> None:
+        """Terminate and reap the fixed read-only launchctl child."""
+
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            if process.poll() is None:
+                raise TransactionEffectUnknown() from exc
+        try:
+            process.wait(timeout=0.5)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        except OSError as exc:
+            raise TransactionEffectUnknown() from exc
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            if process.poll() is None:
+                raise TransactionEffectUnknown() from exc
+        try:
+            process.wait(timeout=0.5)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise TransactionEffectUnknown() from exc
+        if process.poll() is None:
+            raise TransactionEffectUnknown()
+
+    @staticmethod
+    def _capture_control_launchd_disabled_output() -> bytes:
+        """Capture fixed ``print-disabled`` output without unbounded buffering."""
+
+        deadline = time.monotonic() + 5.0
+        try:
+            process = subprocess.Popen(
+                ["/bin/launchctl", "print-disabled", "system"],
+                shell=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=False,
+                close_fds=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise TransactionEffectUnknown() from exc
+        stdout = process.stdout
+        if stdout is None:
+            ProductionCeoSubmitHost._terminate_launchctl_reader(process)
+            raise TransactionEffectUnknown()
+
+        selector: selectors.BaseSelector | None = None
+        payload = bytearray()
+        succeeded = False
+        try:
+            selector = selectors.DefaultSelector()
+            descriptor = stdout.fileno()
+            os.set_blocking(descriptor, False)
+            selector.register(descriptor, selectors.EVENT_READ)
+            eof = False
+            while not eof:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TransactionEffectUnknown()
+                events = selector.select(remaining)
+                if not events:
+                    raise TransactionEffectUnknown()
+                for _key, _mask in events:
+                    while True:
+                        remaining_capacity = (
+                            _MAX_LAUNCHCTL_DISABLED_BYTES + 1 - len(payload)
+                        )
+                        if remaining_capacity <= 0:
+                            raise TransactionEffectUnknown()
+                        try:
+                            chunk = os.read(
+                                descriptor, min(65_536, remaining_capacity)
+                            )
+                        except BlockingIOError:
+                            break
+                        if not chunk:
+                            eof = True
+                            break
+                        payload.extend(chunk)
+                        if len(payload) > _MAX_LAUNCHCTL_DISABLED_BYTES:
+                            raise TransactionEffectUnknown()
+                    if eof:
+                        break
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TransactionEffectUnknown()
+            try:
+                returncode = process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired as exc:
+                raise TransactionEffectUnknown() from exc
+            if returncode != 0 or process.poll() is None:
+                raise TransactionEffectUnknown()
+            succeeded = True
+            return bytes(payload)
+        except TransactionEffectUnknown:
+            raise
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise TransactionEffectUnknown() from exc
+        finally:
+            if not succeeded:
+                ProductionCeoSubmitHost._terminate_launchctl_reader(process)
+            if selector is not None:
+                try:
+                    selector.close()
+                except Exception as exc:
+                    if succeeded:
+                        raise TransactionEffectUnknown() from exc
+            try:
+                stdout.close()
+            except (OSError, ValueError) as exc:
+                if succeeded:
+                    raise TransactionEffectUnknown() from exc
+
+    @staticmethod
+    def _read_control_launchd_disabled_override() -> bool:
+        """Read one exact persistent launchd override with a closed parser.
+
+        ``print-disabled`` is a global table. Before a CEO-submit transaction may
+        mutate the fixed control label, every non-empty row must parse, labels must
+        be unique, output is acquired under a hard byte/time bound, and the control
+        label itself must be explicitly present. Missing/ambiguous output is not
+        interpreted as the launchd default because rollback must restore an
+        observed preimage, not an inferred one.
+        """
+
+        raw = ProductionCeoSubmitHost._capture_control_launchd_disabled_output()
+        try:
+            text = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise TransactionEffectUnknown() from exc
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if len(lines) < 3 or lines[0] != "disabled services = {" or lines[-1] != "}":
+            raise TransactionEffectUnknown()
+        observed: dict[str, bool] = {}
+        for line in lines[1:-1]:
+            match = _CONTROL_LAUNCHD_DISABLED_ROW_RE.fullmatch(line)
+            if match is None:
+                raise TransactionEffectUnknown()
+            label = match.group("label")
+            state = match.group("state")
+            if label in observed or state not in _CONTROL_LAUNCHD_DISABLED_SPELLINGS:
+                raise TransactionEffectUnknown()
+            observed[label] = _CONTROL_LAUNCHD_DISABLED_SPELLINGS[state]
+        if CONTROL_LABEL not in observed:
+            raise TransactionEffectUnknown()
+        return observed[CONTROL_LABEL]
+
+    def _persist_control_launchd_preimage(
+        self, transaction: TransactionContext, disabled: bool
+    ) -> None:
+        """Persist the fixed-label launchd preimage before the first enable."""
+
+        if type(disabled) is not bool:
+            raise TransactionEffectUnknown()
+        current = self._manifest()
+        if (
+            current.get("operation") not in CEO_SUBMIT_OPERATIONS
+            or current.get("transaction_id") != transaction.transaction_id
+            or current.get("expected_sha") != transaction.expected_sha
+        ):
+            raise TransactionEffectUnknown()
+        existing = current.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)
+        if existing is not None:
+            if type(existing) is not bool or existing is not disabled:
+                raise TransactionEffectUnknown()
+            return
+        value = dict(current)
+        value[_CONTROL_LAUNCHD_PREIMAGE_FIELD] = disabled
+        value["phase"] = "CONTROL_OVERRIDE_SNAPSHOTTED"
+        _atomic_file(
+            self._manifest_path(),
+            _encoded_json(value),
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=True,
+        )
+        reread = self._manifest()
+        if reread.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD) is not disabled:
+            raise TransactionEffectUnknown()
+
+    def _ensure_control_launchd_preimage(self) -> bool:
+        transaction = self._active_transaction
+        if transaction is None:
+            raise TransactionEffectUnknown()
+        current = self._manifest()
+        existing = current.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)
+        if existing is not None:
+            if type(existing) is not bool:
+                raise TransactionEffectUnknown()
+            return existing
+        disabled = self._read_control_launchd_disabled_override()
+        self._persist_control_launchd_preimage(transaction, disabled)
+        return disabled
+
+    def _restore_control_launchd_preimage_if_recorded(
+        self, transaction: TransactionContext
+    ) -> None:
+        """Restore and prove a recorded launchd override before marker release."""
+
+        current = self._manifest()
+        if (
+            current.get("transaction_id") != transaction.transaction_id
+            or current.get("expected_sha") != transaction.expected_sha
+        ):
+            raise TransactionEffectUnknown()
+        if _CONTROL_LAUNCHD_PREIMAGE_FIELD not in current:
+            # Legacy transactions created before this repair made no launchd
+            # override effect through this source path. Their separate same-carrier
+            # reconciliation remains evidence-driven; never invent a preimage here.
+            return
+        disabled = current.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)
+        if type(disabled) is not bool:
+            raise TransactionEffectUnknown()
+        release = SYSTEM_ROOT / "releases" / transaction.expected_sha
+        if disabled:
+            try:
+                self._run_fixed(
+                    ["/bin/launchctl", "disable", f"system/{CONTROL_LABEL}"],
+                    cwd=release,
+                    timeout=45.0,
+                )
+            except Exception as exc:
+                raise TransactionEffectUnknown() from exc
+        if self._read_control_launchd_disabled_override() is not disabled:
+            raise TransactionEffectUnknown()
+        self._persist_phase(transaction, "CONTROL_OVERRIDE_RESTORED")
+
     def _reconcile_control_boundary(self, expected_sha: str) -> None:
         """Converge ONLY the control launchd boundary. Never the worker.
 
         R17 B2: the reviewed lifecycle script exposes no control-only verb and its
         ``start`` bootstraps the worker daemon first, so it is not used from the
-        CEO-submit domain at all.  The two argv forms below are fixed and name the
+        CEO-submit domain at all. The two argv forms below are fixed and name the
         hard-coded control label and control plist; nothing is caller-selected.
+        The persistent disabled-state preimage is sealed in the existing
+        transaction marker before the fixed ``enable`` effect.
         """
         release = SYSTEM_ROOT / "releases" / expected_sha
+        self._ensure_control_launchd_preimage()
+        try:
+            self._run_fixed(
+                ["/bin/launchctl", "enable", f"system/{CONTROL_LABEL}"],
+                cwd=release,
+                timeout=45.0,
+            )
+        except Exception as exc:
+            # The command may have crossed the launchd effect boundary even when
+            # its response is unavailable. Preserve the marker; do not convert a
+            # possibly-applied enable into a false-clean rollback.
+            raise TransactionEffectUnknown() from exc
         if self._loaded(CONTROL_LABEL):
             self._run_fixed(
                 ["/bin/launchctl", "kickstart", "-k", f"system/{CONTROL_LABEL}"],
@@ -3682,7 +4308,75 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         ):
             raise TransactionEffectUnknown()
         self._prove_rolled_back_control_live(transaction)
+        self._restore_control_launchd_preimage_if_recorded(transaction)
         self.complete_transaction(transaction)
+
+    def recover_ceo_submit_effect_unknown(
+        self, request: CeoSubmitRequest, *, now: datetime
+    ) -> TransactionResult:
+        """Rollback one existing CEO-submit marker without minting a new operation.
+
+        Recovery is available only to repaired-generation markers that sealed the
+        persistent launchd preimage before the first enable. Legacy markers that
+        lack that evidence remain EFFECT_UNKNOWN and require a separate,
+        evidence-driven same-carrier reconciliation.
+        """
+
+        require_root_privilege(self.effective_uid())
+        installed_sha = self.require_exact_install(request.expected_sha)
+        if installed_sha != request.expected_sha:
+            raise CeoSubmitAdmissionError("release_identity_mismatch")
+        self._claim_transaction_owner()
+        manifest = self._manifest()
+        if (
+            manifest.get("operation") not in CEO_SUBMIT_OPERATIONS
+            or manifest.get("expected_sha") != request.expected_sha
+            or _CONTROL_LAUNCHD_PREIMAGE_FIELD not in manifest
+            or type(manifest.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)) is not bool
+        ):
+            raise TransactionEffectUnknown()
+        prior = self._archived_configs(request.expected_sha)
+        prior_armed = dict(prior.control).get("ceo_submit_armed")
+        if type(prior_armed) is not bool:
+            raise TransactionEffectUnknown()
+        control_bytes = prior.control_bytes or encode_config(prior.control)
+        worker_bytes = prior.worker_bytes or encode_config(prior.worker)
+        candidates = CandidateConfigs(
+            control=copy.deepcopy(dict(prior.control)),
+            worker=copy.deepcopy(dict(prior.worker)),
+            control_bytes=control_bytes,
+            worker_bytes=worker_bytes,
+            control_sha256=prior.control_sha256,
+            worker_sha256=prior.worker_sha256,
+        )
+        transaction = TransactionContext(
+            transaction_id=str(manifest["transaction_id"]),
+            expected_sha=request.expected_sha,
+            prior_configs=prior,
+            candidates=candidates,
+            admission=None,
+        )
+        self._active_transaction = transaction
+        binding = self.executive_app_binding()
+        separation = self.ceo_submit_separation(prior)
+        admission = CeoSubmitAdmission(
+            expected_sha=request.expected_sha,
+            installed_sha=installed_sha,
+            binding=binding,
+            separation=separation,
+            configs=prior,
+        )
+        receipt = build_ceo_submit_receipt(
+            transaction, admission, armed=prior_armed, now=now
+        )
+        self.rollback_ceo_submit(transaction, receipt)
+        state = "CEO_SUBMIT_ARMED" if prior_armed else "CEO_SUBMIT_DISARMED"
+        return TransactionResult(
+            state=state,
+            status=state,
+            transaction_id=transaction.transaction_id,
+            replayed=True,
+        )
 
     def proves_safe_coexistence(self, configs: ConfigEvidence) -> bool:
         """Default is REFUSE: no source today proves coexistence with full autonomy."""
@@ -3760,13 +4454,17 @@ def _run_ceo_submit_command(
             result = execute_ceo_submit_arm(host, request, now=now)
             code = "ceo_submit_armed"
             exit_code = 0
-        else:
+        elif args.command == "ceo-submit-disarm":
             result = execute_ceo_submit_disarm(host, request, now=now)
             code = (
                 "ceo_submit_already_disarmed"
                 if result.replayed
                 else "ceo_submit_disarmed"
             )
+            exit_code = 0
+        else:
+            result = host.recover_ceo_submit_effect_unknown(request, now=now)
+            code = "ceo_submit_reconciled"
             exit_code = 0
         document = operation_document(
             code=code,

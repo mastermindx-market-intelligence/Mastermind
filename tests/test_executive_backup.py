@@ -191,6 +191,149 @@ def _populate_v3_ohf_evidence(path: Path) -> None:
         connection.close()
 
 
+def _exact_v4(path: Path) -> Path:
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE schema_migrations (
+              version INTEGER PRIMARY KEY,
+              name TEXT NOT NULL UNIQUE,
+              checksum TEXT NOT NULL,
+              applied_at_ms INTEGER NOT NULL
+            )
+            """
+        )
+        for version, name, statements in executive_runtime._MIGRATIONS[:4]:
+            for statement in statements:
+                connection.execute(statement)
+            connection.execute(
+                "INSERT INTO schema_migrations VALUES(?,?,?,?)",
+                (
+                    version,
+                    name,
+                    executive_runtime._migration_checksum(statements),
+                    -version,
+                ),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+    path.chmod(0o600)
+    return path
+
+
+_V4_PRINCIPAL_MARKER = '{"principal":"UNIQUE-V4-PRINCIPAL-MARKER-abc"}'
+
+
+def _populate_v4_evidence(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("BEGIN")
+        connection.execute(
+            """
+            INSERT INTO workers(
+              worker_id,provider,account_label,worker_type,last_seen_at_ms,
+              created_at_ms,updated_at_ms
+            ) VALUES('worker-v4','codex','company','fixture',1,1,1)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO worker_quota_classes(
+              worker_id,quota_class,status,provider,last_seen_at_ms,
+              created_at_ms,updated_at_ms
+            ) VALUES('worker-v4','default','ERROR','codex',1,1,7)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO jobs(
+              job_id,objective,department,status,authority_level,
+              constraints_json,requested_authorities_json,authority_policy_hash,
+              available_at_ms,created_at_ms,updated_at_ms,attempt_count,
+              attempt_limit,root_job_id,depth,orchestration_role,
+              orchestration_provenance_json,orchestration_provenance_digest
+            ) VALUES(
+              'JOB-V4-ROOT','preserve finite arm root','fixture','QUEUED','A0',
+              '{}','["READ"]',
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              1,1,1,0,3,'JOB-V4-ROOT',0,'plan','{"origin":"v4-fixture"}',
+              'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO attempts(
+              attempt_id,job_id,attempt_number,worker_id,quota_class,status,
+              fence_generation,authority_policy_hash,lease_owner,
+              lease_expires_at_ms,heartbeat_at_ms,started_at_ms,created_at_ms,
+              updated_at_ms,finished_at_ms,execution_mode,
+              requested_execution_profile_json,requested_execution_profile_digest,
+              effective_grant_json,effective_grant_digest,
+              placement_snapshot_json,placement_snapshot_digest,
+              execution_principal_snapshot_json,execution_principal_snapshot_digest
+            ) VALUES(
+              'ATT-V4','JOB-V4-ROOT',1,'worker-v4','default','LOST',1,
+              'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              'fixture',1,1,1,1,7,7,'OPERATOR_HARNESS','{}','profile',
+              '{"grant":"v4"}',
+              'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+              '{"placement":"v4"}',
+              'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+              '{"principal":"UNIQUE-V4-PRINCIPAL-MARKER-abc"}',
+              'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO harness_session_epochs(
+              session_epoch_id,attempt_id,worker_id,epoch_number,
+              provider_session_id,state,created_at_ms,ended_at_ms,abandonment_class
+            ) VALUES('EPOCH-V4','ATT-V4','worker-v4',1,'SESSION-V4',
+                     'ABANDONED',1,7,'RESTORE')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO process_generations(
+              process_generation_id,session_epoch_id,worker_id,
+              provider_session_id,generation_number,started_at_ms,
+              ended_at_ms,termination_class,executive_writer_held,
+              provider_writer_state,created_at_ms
+            ) VALUES('GEN-V4','EPOCH-V4','worker-v4','SESSION-V4',1,1,7,
+                     'RESTORE',0,'RELEASED',1)
+            """
+        )
+        for aggregate, sequence, event_type, command, payload in (
+            ("attempt", 1, "OHF_RESTORE_INVALIDATED", "ohf-restore:ATT-V4",
+             '{"transaction_group":"TX-9"}'),
+            ("job", 1, "COO_PLAN_ADMITTED", "coo-plan:JOB-V4-ROOT",
+             '{"plan":"v4"}'),
+            ("job", 2, "COO_FINITE_DRIVE_ARMED", "finite-arm:JOB-V4-ROOT",
+             '{"arm":"v4"}'),
+        ):
+            connection.execute(
+                """
+                INSERT INTO events(
+                  aggregate_type,aggregate_id,sequence,event_type,command_id,
+                  actor,job_id,attempt_id,worker_id,quota_class,payload_json,
+                  created_at_ms
+                ) VALUES(?,?,?,?,?,'fixture','JOB-V4-ROOT','ATT-V4',
+                         'worker-v4','default',?,7)
+                """,
+                (aggregate, "ATT-V4" if aggregate == "attempt" else "JOB-V4-ROOT",
+                 sequence, event_type, command, payload),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def _upgrade_census_material(
     database: Path, lock: Path, barrier: Path, lock_fd: int
 ) -> dict:
@@ -232,9 +375,13 @@ def _upgrade_census_material(
 
 
 def _upgrade_test_release_and_census(monkeypatch, tmp_path: Path) -> str:
-    release_sha = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], text=True
-    ).strip()
+    # The candidate tree is a non-Git artifact copy, so there is no `git
+    # rev-parse HEAD` to observe.  Use an explicit test-only fixed release SHA
+    # under the already mocked release observer; production release proof in
+    # `_prove_upgrade_release` is unchanged and still demands a real installed
+    # release root named after the SHA it proves.
+    release_sha = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    assert len(release_sha) == 40
     release_root = tmp_path / release_sha
     release_root.mkdir(mode=0o700)
     runtime_root = tmp_path / "runtime"
@@ -298,11 +445,18 @@ def test_online_backup_is_private_verified_and_manifest_is_receipt_only(tmp_path
         assert connection.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 1
 
 
-def test_frozen_schema_digests_match_test_only_v3_and_v4_references():
+def test_frozen_schema_digests_match_test_only_v3_v4_and_v5_references():
     assert executive_backup._NORMALIZED_SCHEMA_DIGESTS == {
         3: executive_backup._reference_normalized_schema_digest_for_tests(3),
         4: executive_backup._reference_normalized_schema_digest_for_tests(4),
+        5: executive_backup._reference_normalized_schema_digest_for_tests(5),
     }
+    assert executive_backup._NORMALIZED_SCHEMA_DIGESTS[5] == (
+        executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST
+    )
+    assert executive_backup._NORMALIZED_SCHEMA_DIGESTS[4] == (
+        "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
+    )
 
 
 def test_exact_v3_offline_backup_and_drill_preserve_full_legacy_projection(tmp_path):
@@ -1066,6 +1220,473 @@ def test_upgrade_rejects_unproven_release_and_cli_is_directly_runnable(tmp_path)
     assert sorted(item.name for item in database.parent.iterdir()) == [database.name]
 
 
+def test_default_v5_online_backup_and_drill_succeed(tmp_path):
+    runtime, _lease_token = _runtime_with_claim(tmp_path / "runtime")
+
+    receipt = create_online_backup(runtime.store, tmp_path / "backups")
+    verified = verify_backup(receipt.database_path, receipt.manifest_path)
+    drill = verify_restore_drill(receipt.database_path, receipt.manifest_path)
+
+    assert verified.normalized_schema_digest == (
+        executive_backup._NORMALIZED_SCHEMA_DIGESTS[5]
+    )
+    assert [item.version for item in verified.migrations] == [1, 2, 3, 4, 5]
+    assert drill.runtime_schema_version == 5
+    assert drill.migration_versions == (1, 2, 3, 4, 5)
+
+
+def test_exact_v4_offline_backup_drill_and_full_v4_projection_roundtrip(tmp_path):
+    source = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(source)
+    with executive_backup._readonly_database(source) as connection:
+        before_full = executive_backup.full_v4_content_digest(connection)
+
+    receipt = create_offline_backup(
+        source, tmp_path / "backups", expected_schema_version=4
+    )
+    drill = verify_restore_drill(
+        receipt.database_path, receipt.manifest_path, expected_schema_version=4
+    )
+    with executive_backup._readonly_database(Path(receipt.database_path)) as connection:
+        backup_full = executive_backup.full_v4_content_digest(connection)
+
+    assert receipt.migrations[-1].version == 4
+    assert drill.runtime_schema_version == 4
+    assert drill.migration_versions == (1, 2, 3, 4)
+    assert backup_full == before_full
+
+
+def test_full_v4_projection_catches_byte_tamper_confined_to_v4_only_fields(tmp_path):
+    source = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(source)
+    with executive_backup._readonly_database(source) as connection:
+        before_full = executive_backup.full_v4_content_digest(connection)
+        before_legacy = executive_backup.legacy_content_digest(
+            connection, expected_schema_version=4
+        )
+
+    tampered = _private_copy(source, tmp_path / "tampered.sqlite3")
+    marker = _V4_PRINCIPAL_MARKER.encode("utf-8")
+    raw = tampered.read_bytes()
+    assert raw.count(marker) == 1
+    replaced = marker[:-2] + b"d}"
+    assert len(replaced) == len(marker)
+    tampered.write_bytes(raw.replace(marker, replaced))
+
+    with executive_backup._readonly_database(tampered) as connection:
+        after_full = executive_backup.full_v4_content_digest(connection)
+        after_legacy = executive_backup.legacy_content_digest(
+            connection, expected_schema_version=4
+        )
+
+    assert after_full != before_full
+    # The closed v1-v3 projection is deliberately blind to v4-only cells; the
+    # full-v4 preservation digest is the proof that closes that hole.
+    assert after_legacy == before_legacy
+
+
+def test_explicit_v4_to_v5_upgrade_preserves_populated_v4_content(
+    tmp_path, monkeypatch
+):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(database)
+    before = verify_backup(database, expected_schema_version=4)
+    with executive_backup._readonly_database(database) as connection:
+        before_full = executive_backup.full_v4_content_digest(connection)
+        before_migrations = connection.execute(
+            "SELECT version,applied_at_ms FROM schema_migrations ORDER BY version"
+        ).fetchall()
+    inode = database.stat().st_ino
+
+    receipt = executive_backup.upgrade_v4_to_v5(
+        database, tmp_path / "backups", release_sha=release_sha
+    )
+
+    assert receipt.source_schema_version == 4
+    assert receipt.target_schema_version == 5
+    assert receipt.full_v4_content_equal is True
+    assert receipt.pre_full_v4_content_digest == before_full
+    assert receipt.post_full_v4_content_digest == before_full
+    assert receipt.database_identity["inode"] == inode
+    assert database.stat().st_ino == inode
+    assert receipt.release_sha == release_sha
+
+    after = verify_backup(database, expected_schema_version=5)
+    assert [item.version for item in after.migrations] == [1, 2, 3, 4, 5]
+    assert after.migrations[4].name == "executive_finite_drive_arm_contract"
+    with executive_backup._readonly_database(database) as connection:
+        after_full = executive_backup.full_v4_content_digest(connection)
+        after_migrations = connection.execute(
+            "SELECT version,applied_at_ms FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        principal = connection.execute(
+            "SELECT execution_principal_snapshot_json FROM attempts "
+            "WHERE attempt_id='ATT-V4'"
+        ).fetchone()[0]
+    assert after_full == before_full
+    assert after_migrations[:4] == before_migrations[:4]
+    assert principal == _V4_PRINCIPAL_MARKER
+    assert before.normalized_schema_digest != after.normalized_schema_digest
+
+    v4_backup_verified = verify_backup(
+        receipt.v4_backup_path, receipt.v4_backup_manifest_path,
+        expected_schema_version=4,
+    )
+    v5_backup_verified = verify_backup(
+        receipt.v5_backup_path, receipt.v5_backup_manifest_path,
+        expected_schema_version=5,
+    )
+    for backup_path in (receipt.v4_backup_path, receipt.v5_backup_path):
+        with executive_backup._readonly_database(Path(backup_path)) as connection:
+            assert (
+                executive_backup.full_v4_content_digest(connection) == before_full
+            )
+    assert v4_backup_verified.legacy_content_digest == before.legacy_content_digest
+    assert v5_backup_verified.legacy_content_digest == before.legacy_content_digest
+    assert verify_restore_drill(
+        receipt.v4_backup_path, receipt.v4_backup_manifest_path,
+        expected_schema_version=4,
+    ).legacy_content_digest == before.legacy_content_digest
+    assert verify_restore_drill(
+        receipt.v5_backup_path, receipt.v5_backup_manifest_path,
+        expected_schema_version=5,
+    ).legacy_content_digest == before.legacy_content_digest
+
+    assert not (database.parent / "executive-schema-upgrade.in-progress.json").exists()
+    preflight = json.loads(Path(receipt.preflight_receipt_path).read_text())
+    completion = json.loads(Path(receipt.completion_receipt_path).read_text())
+    assert preflight["full_v4_content_digest"] == before_full
+    assert completion["source_schema_version"] == 4
+    assert completion["target_schema_version"] == 5
+    assert completion["full_v4_content_equal"] is True
+    assert completion["release_sha"] == release_sha
+
+    from control_plane.executive_runtime import RuntimeStore
+
+    upgraded_store = RuntimeStore(
+        tmp_path, create=False, existing_writable=True, database_path=database
+    )
+    with upgraded_store.read() as connection:
+        assert connection.execute(
+            "SELECT MAX(version) FROM schema_migrations"
+        ).fetchone()[0] == 5
+
+
+def test_v4_to_v5_after_v3_to_v4_preserves_prior_transition_receipts(
+    tmp_path, monkeypatch
+):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v3(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v3_ohf_evidence(database)
+    first = upgrade_v3_to_v4(database, tmp_path / "backups", release_sha=release_sha)
+    prior = {
+        path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        for path in (first.preflight_receipt_path, first.completion_receipt_path)
+    }
+
+    second = executive_backup.upgrade_v4_to_v5(
+        database, tmp_path / "backups", release_sha=release_sha
+    )
+
+    assert {
+        path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        for path in (first.preflight_receipt_path, first.completion_receipt_path)
+    } == prior
+    assert second.pre_full_v4_content_digest == second.post_full_v4_content_digest
+    verify_backup(database, expected_schema_version=5)
+    from control_plane.executive_runtime import RuntimeStore
+
+    with RuntimeStore(
+        tmp_path, create=False, existing_writable=True, database_path=database
+    ).read() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='OHF_RESTORE_INVALIDATED'"
+        ).fetchone()[0] == 1
+
+
+_M5_STATEMENT_COUNT = (
+    len(executive_runtime._MIGRATIONS[4][2])
+    if len(executive_runtime._MIGRATIONS) > 4
+    else 1
+)
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "exclusive_v4_verified",
+        *(
+            f"after_m5_statement:{ordinal:02d}"
+            for ordinal in range(1, _M5_STATEMENT_COUNT + 1)
+        ),
+        "after_m5_receipt",
+        "before_v5_commit",
+    ],
+)
+def test_precommit_v4_to_v5_faults_rollback_to_preflight_exact_v4(
+    tmp_path, monkeypatch, phase
+):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(database)
+    before = verify_backup(database, expected_schema_version=4)
+
+    def fail(observed):
+        if observed == phase:
+            raise RuntimeError("injected precommit fault")
+
+    monkeypatch.setattr(executive_backup, "_SCHEMA_UPGRADE_TEST_HOOK", fail)
+    with pytest.raises(ExecutiveSchemaUpgradeError, match="rolled back"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha=release_sha
+        )
+    after = verify_backup(database, expected_schema_version=4)
+    assert after.to_dict() == before.to_dict()
+    assert not (database.parent / "executive-schema-upgrade.in-progress.json").exists()
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version=5"
+        ).fetchone()[0] == 0
+
+
+def test_duplicate_preexisting_finite_arm_rows_fail_transition_atomically(
+    tmp_path, monkeypatch
+):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO events(
+              aggregate_type,aggregate_id,sequence,event_type,command_id,actor,
+              job_id,payload_json,created_at_ms
+            ) VALUES('job','JOB-V4-ROOT',3,'COO_FINITE_DRIVE_ARMED',
+                     'finite-arm:JOB-V4-ROOT:duplicate','fixture','JOB-V4-ROOT',
+                     '{"arm":"v4-duplicate"}',7)
+            """
+        )
+        connection.commit()
+    before = verify_backup(database, expected_schema_version=4)
+
+    with pytest.raises(ExecutiveSchemaUpgradeError, match="rolled back"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha=release_sha
+        )
+
+    after = verify_backup(database, expected_schema_version=4)
+    assert after.to_dict() == before.to_dict()
+    with sqlite3.connect(database) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='COO_FINITE_DRIVE_ARMED'"
+        ).fetchone()[0] == 2
+        assert connection.execute(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version=5"
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "phase",
+    ["after_v5_commit_before_checkpoint", "after_v5_checkpoint", "completion_persisted"],
+)
+def test_postcommit_v4_to_v5_faults_keep_v5_quarantined(
+    tmp_path, monkeypatch, phase
+):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(database)
+
+    def fail(observed):
+        if observed == phase:
+            raise RuntimeError("injected postcommit fault")
+
+    monkeypatch.setattr(executive_backup, "_SCHEMA_UPGRADE_TEST_HOOK", fail)
+    with pytest.raises(ExecutiveSchemaUpgradeError, match="forward fix"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha=release_sha
+        )
+    assert (database.parent / "executive-schema-upgrade.in-progress.json").is_file()
+    verify_backup(database, expected_schema_version=5)
+
+
+@pytest.mark.parametrize("failure", ["v5_backup", "v5_drill", "v5_checkpoint"])
+def test_postcommit_v4_to_v5_backup_drill_checkpoint_failures_keep_barrier(
+    tmp_path, monkeypatch, failure
+):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(database)
+    original_backup = executive_backup.create_offline_backup
+    original_drill = executive_backup.verify_restore_drill
+    original_checkpoint = executive_backup._checkpoint_quiesced_wal
+    checkpoint_calls = 0
+
+    def backup(*args, **kwargs):
+        if failure == "v5_backup" and kwargs.get("expected_schema_version") == 5:
+            raise BackupVerificationError("injected v5 backup failure")
+        return original_backup(*args, **kwargs)
+
+    def drill(*args, **kwargs):
+        if failure == "v5_drill" and kwargs.get("expected_schema_version") == 5:
+            raise BackupVerificationError("injected v5 drill failure")
+        return original_drill(*args, **kwargs)
+
+    def checkpoint(path):
+        nonlocal checkpoint_calls
+        checkpoint_calls += 1
+        if failure == "v5_checkpoint" and checkpoint_calls == 2:
+            raise RestoreSafetyError("injected postcommit checkpoint failure")
+        return original_checkpoint(path)
+
+    monkeypatch.setattr(executive_backup, "create_offline_backup", backup)
+    monkeypatch.setattr(executive_backup, "verify_restore_drill", drill)
+    monkeypatch.setattr(executive_backup, "_checkpoint_quiesced_wal", checkpoint)
+    with pytest.raises(ExecutiveSchemaUpgradeError, match="forward fix"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha=release_sha
+        )
+    assert (database.parent / "executive-schema-upgrade.in-progress.json").is_file()
+    verify_backup(database, expected_schema_version=5)
+
+
+def test_v4_to_v5_refuses_adverse_custody_and_occupied_receipt(tmp_path, monkeypatch):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(database)
+    barrier = database.parent / "executive-schema-upgrade.in-progress.json"
+
+    lock = database.parent / executive_backup.DEFAULT_SERVICE_LOCK_NAME
+    lock.unlink()
+    before = hashlib.sha256(database.read_bytes()).hexdigest()
+    with pytest.raises(RestoreSafetyError, match="missing"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha=release_sha
+        )
+    assert hashlib.sha256(database.read_bytes()).hexdigest() == before
+    assert not os.path.lexists(barrier)
+    lock.touch(mode=0o600)
+    lock.chmod(0o600)
+
+    marker = database.parent / executive_backup.DEFAULT_SERVICE_MARKER_NAME
+    marker.write_text("running\n", encoding="utf-8")
+    marker.chmod(0o600)
+    with pytest.raises(RestoreSafetyError, match="service marker exists"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha=release_sha
+        )
+    marker.unlink()
+
+    descriptor = os.open(lock, os.O_RDWR)
+    try:
+        os.fchmod(descriptor, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(RestoreSafetyError, match="service lock is held"):
+            executive_backup.upgrade_v4_to_v5(
+                database, tmp_path / "backups", release_sha=release_sha
+            )
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+    assert not os.path.lexists(barrier)
+
+    occupied = database.parent / "executive-schema-upgrade.v4-to-v5.preflight.json"
+    occupied.write_text("{}\n", encoding="utf-8")
+    occupied.chmod(0o600)
+    with pytest.raises(ExecutiveSchemaUpgradeError, match="operator reconciliation"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha=release_sha
+        )
+    assert hashlib.sha256(database.read_bytes()).hexdigest() == before
+    verify_backup(database, expected_schema_version=4)
+
+    with pytest.raises(ExecutiveSchemaUpgradeError, match="installed release"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha="a" * 40
+        )
+
+
+def test_v4_to_v5_census_drift_after_preflight_keeps_barrier(tmp_path, monkeypatch):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(database)
+    calls = 0
+
+    def changing(database, lock, barrier, lock_fd):
+        nonlocal calls
+        calls += 1
+        value = _upgrade_census_material(database, lock, barrier, lock_fd)
+        if calls >= 2:
+            value["open_files"] = [
+                {"pid": os.getpid(), "uid": os.geteuid(), "fd": "999u", "path": str(database)}
+            ]
+        return value
+
+    monkeypatch.setattr(
+        executive_backup, "_SCHEMA_UPGRADE_CENSUS_OBSERVER", changing
+    )
+    with pytest.raises(ExecutiveSchemaUpgradeError, match="barrier remains"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha=release_sha
+        )
+    assert (database.parent / "executive-schema-upgrade.in-progress.json").is_file()
+    verify_backup(database, expected_schema_version=4)
+
+
+def test_v4_to_v5_v4_only_source_drift_after_preflight_quarantines(
+    tmp_path, monkeypatch
+):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(database)
+
+    def drift(phase):
+        if phase != "preflight_persisted":
+            return
+        marker = _V4_PRINCIPAL_MARKER.encode("utf-8")
+        raw = database.read_bytes()
+        assert raw.count(marker) == 1
+        database.write_bytes(raw.replace(marker, marker[:-2] + b"e}"))
+
+    monkeypatch.setattr(executive_backup, "_SCHEMA_UPGRADE_TEST_HOOK", drift)
+    with pytest.raises(ExecutiveSchemaUpgradeError, match="barrier remains"):
+        executive_backup.upgrade_v4_to_v5(
+            database, tmp_path / "backups", release_sha=release_sha
+        )
+    assert (database.parent / "executive-schema-upgrade.in-progress.json").is_file()
+    # The drifted store still satisfies every v1-v3-era proof exactly; only the
+    # full-v4 preservation digest refused the confined v4-only cell change.
+    verify_backup(database, expected_schema_version=4)
+
+
+@pytest.mark.parametrize("substitute", ["v4_backup", "v4_backup_manifest"])
+def test_v4_to_v5_late_retained_v4_backup_substitution_before_release_quarantines(
+    tmp_path, monkeypatch, substitute
+):
+    # The retained source backup is still custody after the v5 commit, so a
+    # substitution at the final adversarial seam must refuse barrier release
+    # exactly like a late authoritative v5 backup or manifest substitution.
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(database)
+    backup_directory = tmp_path / "backups"
+
+    def mutate(phase):
+        if phase != "before_barrier_unlink":
+            return
+        suffix = ".manifest.json" if substitute == "v4_backup_manifest" else ".sqlite3"
+        retained = next(backup_directory.glob(f"executive-v4-*{suffix}"))
+        retained.write_bytes(retained.read_bytes() + b"changed")
+
+    monkeypatch.setattr(executive_backup, "_SCHEMA_UPGRADE_TEST_HOOK", mutate)
+    with pytest.raises(ExecutiveSchemaUpgradeError, match="forward fix"):
+        executive_backup.upgrade_v4_to_v5(
+            database, backup_directory, release_sha=release_sha
+        )
+    assert (database.parent / "executive-schema-upgrade.in-progress.json").is_file()
+    verify_backup(database, expected_schema_version=5)
+
+
 def test_verify_backup_rejects_manifest_tampering_and_public_permissions(tmp_path):
     runtime, _lease_token = _runtime_with_claim(tmp_path / "runtime")
     receipt = create_online_backup(runtime.store, tmp_path / "backups")
@@ -1124,7 +1745,7 @@ def test_restore_drill_uses_an_isolated_copy_and_leaves_live_state_unchanged(tmp
     assert drill.database_sha256 == receipt.database_sha256
     assert drill.integrity_check == "ok"
     assert drill.foreign_key_check == "ok"
-    assert drill.migration_versions == (1, 2, 3, 4)
+    assert drill.migration_versions == (1, 2, 3, 4, 5)
     assert _logical_state(runtime) == before
 
 

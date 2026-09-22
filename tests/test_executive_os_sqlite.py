@@ -109,6 +109,7 @@ def test_sqlite_defaults_pragmas_migration_and_five_durable_objects(tmp_path):
         (2, "durable_parent_child_review_contract"),
         (3, "ohf_session_epochs_and_process_generations"),
         (4, "executive_phase1fc_orchestration_contract"),
+        (5, "executive_finite_drive_arm_contract"),
     ]
     assert all(len(row[2]) == 64 for row in migrations)
 
@@ -806,6 +807,119 @@ def test_v4_runtime_normal_open_refuses_existing_v2_without_v3_artifacts(
     assert "harness_session_epochs" not in tables
     assert "process_generations" not in tables
     assert "execution_mode" not in columns
+
+
+def test_v5_fresh_schema_pins_vector_fingerprint_and_finite_arm_index_ddl(tmp_path):
+    runtime = _runtime(tmp_path)
+    with runtime.store.read() as connection:
+        vector = connection.execute(
+            "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        fresh_digest = executive_runtime._normalized_schema_digest(connection)
+        index_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' "
+            "AND name='events_one_coo_finite_drive_arm_per_root'"
+        ).fetchone()
+    assert [tuple(row)[:2] for row in vector][-1] == (
+        5,
+        "executive_finite_drive_arm_contract",
+    )
+    assert vector[-1][2] == executive_runtime._migration_checksum(
+        executive_runtime._MIGRATIONS[4][2]
+    )
+    assert index_row is not None
+    assert executive_runtime._normalize_schema_sql(str(index_row[0])) == (
+        executive_runtime._normalize_schema_sql(
+            "CREATE UNIQUE INDEX events_one_coo_finite_drive_arm_per_root "
+            "ON events(job_id) WHERE event_type='COO_FINITE_DRIVE_ARMED'"
+        )
+    )
+    assert fresh_digest == executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST
+    # The historical v4 fingerprint stays frozen for prior-version verification.
+    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
+        "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
+    )
+
+
+def test_v5_runtime_normal_open_refuses_existing_v4_until_explicit_upgrade(
+    tmp_path, monkeypatch
+):
+    migrations = executive_runtime._MIGRATIONS
+    monkeypatch.setattr(executive_runtime, "_MIGRATIONS", migrations[:4])
+    v4 = _runtime(tmp_path)
+    database = v4.store.path
+    before = (
+        database.read_bytes(),
+        stat.S_IMODE(database.stat().st_mode),
+        database.stat().st_ino,
+        database.stat().st_dev,
+    )
+
+    monkeypatch.setattr(executive_runtime, "_MIGRATIONS", migrations)
+    with pytest.raises(
+        executive_runtime.ExecutiveSchemaUpgradeRequired,
+        match="upgrade_v4_to_v5",
+    ):
+        _runtime(tmp_path)
+
+    info = database.stat()
+    assert (
+        database.read_bytes(),
+        stat.S_IMODE(info.st_mode),
+        info.st_ino,
+        info.st_dev,
+    ) == before
+    assert not any(
+        database.with_name(database.name + suffix).exists()
+        for suffix in ("-wal", "-shm", "-journal")
+    )
+    connection = sqlite3.connect(database)
+    try:
+        assert (
+            connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[
+                0
+            ]
+            == 4
+        )
+        index_row = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name='events_one_coo_finite_drive_arm_per_root'"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert index_row is None
+
+
+def test_v5_finite_drive_arm_index_admits_one_arm_event_per_root(tmp_path):
+    runtime = _runtime(tmp_path)
+    first = runtime.jobs.create_job("finite arm root one")
+    second = runtime.jobs.create_job("finite arm root two")
+
+    def insert_event(job_id: str, command: str, event_type: str) -> None:
+        with runtime.store.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO events(
+                  aggregate_type,aggregate_id,sequence,event_type,command_id,actor,
+                  job_id,payload_json,created_at_ms
+                ) VALUES('job',?,1,?,?,'coo',?,'{}',1)
+                """,
+                (f"finite-arm-stream:{command}", event_type, command, job_id),
+            )
+
+    insert_event(first.job_id, "finite-arm:first", "COO_FINITE_DRIVE_ARMED")
+    # SQLite reports partial-index violations by column, not by index name; the
+    # bare events.job_id uniqueness can only come from the migration-5 index.
+    with pytest.raises(StateConflict, match=r"UNIQUE constraint failed: events\.job_id"):
+        insert_event(
+            first.job_id, "finite-arm:first-again", "COO_FINITE_DRIVE_ARMED"
+        )
+    insert_event(second.job_id, "finite-arm:second", "COO_FINITE_DRIVE_ARMED")
+    insert_event(first.job_id, "unrelated:first", "JOB_FENCED")
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='COO_FINITE_DRIVE_ARMED'"
+        ).fetchone()[0] == 2
 
 
 def _c2_r1a_ready_source(tmp_path, monkeypatch):
@@ -1832,11 +1946,13 @@ def test_c2_r1a_second_root_refuses_existing_generation_one_carrier_before_c1(
     ).carrier_job_id == (first.carrier_job_id)
     assert second_runtime.current_capacity_commitment(second_root.job_id) is None
 
-# M2 is deliberately absent from the production migration vector. Only this
-# synthetic fixture changes the three coupled expectations, with real verifiers.
-_M2_V4_VECTOR = executive_runtime._MIGRATIONS
-_M2_V4_DIGEST = executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST
-_M2_CANDIDATE_DIGEST = 'cd6fe8982e5b8ca8ea40ffff1dee089b5ab0d395916e7384a1ff14b5748f0caf'
+# M2 is deliberately absent from the production migration vector. Production
+# schema v5 carries only the finite-arm index; this synthetic fixture defers
+# the inactive candidate to the next synthetic version 6 and changes the three
+# coupled expectations, with real verifiers.
+_M2_V5_VECTOR = executive_runtime._MIGRATIONS
+_M2_V5_DIGEST = getattr(executive_runtime, '_NORMALIZED_V5_SCHEMA_DIGEST', None)
+_M2_V6_CANDIDATE_DIGEST = '2618959767e49acc70db044ee1e86441feb2bd39ed413afe0c86e455ea0b21b4'
 _M2_CANDIDATE_CHECKSUM = '9bee01a6ee1f129a9c6b6fb24f52012d2cb790c39057722c5a6867163055b3d8'
 
 
@@ -1851,10 +1967,10 @@ def m2_store(tmp_path, monkeypatch):
     import copy
     candidate = executive_runtime._PHYSICAL_RESOURCE_SCHEMA_CANDIDATE
     assert executive_runtime._migration_checksum(candidate) == _M2_CANDIDATE_CHECKSUM
-    monkeypatch.setattr(executive_runtime, '_MIGRATIONS', _M2_V4_VECTOR + (
-        (5, 'synthetic_m2_physical_resources', candidate),))
-    monkeypatch.setattr(executive_runtime, 'SCHEMA_VERSION', 5)
-    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V4_SCHEMA_DIGEST', _M2_CANDIDATE_DIGEST)
+    monkeypatch.setattr(executive_runtime, '_MIGRATIONS', _M2_V5_VECTOR + (
+        (6, 'synthetic_m2_physical_resources', candidate),))
+    monkeypatch.setattr(executive_runtime, 'SCHEMA_VERSION', 6)
+    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V5_SCHEMA_DIGEST', _M2_V6_CANDIDATE_DIGEST)
     contexts = {}
     def admission(self, request, caller_context, *, connection=None, stage='entry'):
         context = contexts[str(self.store.path)]
@@ -1865,7 +1981,7 @@ def m2_store(tmp_path, monkeypatch):
     def create(name='one'):
         runtime = Runtime.at(tmp_path / name, clock=MutableClock(100), busy_timeout_ms=1000)
         with runtime.store.read() as connection:
-            assert executive_runtime._normalized_schema_digest(connection) == _M2_CANDIDATE_DIGEST
+            assert executive_runtime._normalized_schema_digest(connection) == _M2_V6_CANDIDATE_DIGEST
         request, context = _m2_inputs()
         # Synthetic timing allowances include real filesystem/schema validation.
         context['policy']['waits'] = {'service_request_max_ms': 2000, 'database_lock_max_ms': 1000}
@@ -1899,14 +2015,17 @@ def _m2_reserve(runtime, request):
     return runtime.broker.reserve_physical(request, caller_context=None)
 
 
-def test_m2_default_runtime_keeps_exact_v4_vector_and_has_no_candidate_tables(tmp_path):
+def test_m2_default_runtime_keeps_exact_v5_vector_and_has_no_candidate_tables(tmp_path):
     runtime = Runtime.at(tmp_path)
-    assert executive_runtime.SCHEMA_VERSION == 4
-    assert executive_runtime._MIGRATIONS == _M2_V4_VECTOR
-    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == _M2_V4_DIGEST
+    assert executive_runtime.SCHEMA_VERSION == 5
+    assert executive_runtime._MIGRATIONS == _M2_V5_VECTOR
+    assert executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST == _M2_V5_DIGEST
+    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
+        '56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4'
+    )
     with runtime.store.read() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name LIKE 'physical_resource_%'").fetchall() == []
-        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 4
+        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 5
 
 
 def test_m2_default_resource_entry_refuses_before_database_open(tmp_path):
@@ -1932,9 +2051,9 @@ def test_m2_candidate_schema_uses_same_store_and_existing_events_without_jobs(m2
         assert [tuple(r) for r in events] == [('physical_resource_operation', None, None, None)]
         assert connection.execute('SELECT count(*) FROM physical_resource_demands').fetchone()[0] == 6
         assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
-        assert executive_runtime._normalized_schema_digest(connection) == _M2_CANDIDATE_DIGEST
+        assert executive_runtime._normalized_schema_digest(connection) == _M2_V6_CANDIDATE_DIGEST
     with runtime.store.transaction() as connection:
-        connection.execute("UPDATE schema_migrations SET checksum='bad' WHERE version=5")
+        connection.execute("UPDATE schema_migrations SET checksum='bad' WHERE version=6")
     with pytest.raises(PersistenceError):
         Runtime.at(runtime.store.root, clock=MutableClock(100))
 
@@ -3150,3 +3269,239 @@ def test_fp1b_m2_host_qualification_move_inside_write_lock_fails_closed(m2_store
     assert result["fresh_begin"] is False
     assert result["code"] == "ADMISSION_MOVED"
     assert _m2_rows(runtime) == before
+
+
+# HF1-B: exercise the original Runtime and admitted COO child, not copied methods.
+def _hf1b_claim_fixture(tmp_path):
+    import test_executive_os_phase1fc as phase1fc
+    runtime = Runtime.at(tmp_path / "hf1b-runtime")
+    runtime.workers.register_worker(
+        "worker-a", provider="codex", account_label="hf1b-fixture-a",
+        worker_type="mock", capabilities=["read", "research"],
+        quota_classes={"default": {"provider": "codex", "capabilities": ["read", "research"],
+            "cost_class": "small", "model": "gpt-5.6-sol", "effort": "xhigh"}},
+    )
+    workspace = tmp_path / "workspaces" / "hf1b-work"
+    workspace.mkdir(parents=True, mode=0o700)
+    intent = phase1fc._v2_intent(intent_id="CEO-HF1B-FIXTURE-001", business_impact="routine",
+        execution_contract={"requested_authorities": ["READ"], "attempt_limit": 2,
+                            "worktree": str(workspace.resolve())})
+    receipt = phase1fc.submit_intent(runtime, intent, workspace_root=workspace.parent)
+    root = runtime.jobs.get_job(receipt["job_id"])
+    planner = runtime.jobs.create_cycle_planner(root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0")
+    planned = runtime.attempts.dispatch_cycle_job(planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a", quota_class="default")
+    plan = {"schema_version": "mastermind.execution_plan/v1", "root_job_id": root.job_id,
+            "plan_attempt_id": planned.attempt.attempt_id, "steps": [{
+                "ordinal": 0, "step_id": "step-0", "objective": "Read one synthetic fixture.",
+                "business_impact": "routine", "review_required": False,
+                "requested_authorities": ["READ"], "allowed_write_paths": [],
+                "validation_ids": [], "attempt_limit": 1, "cost_class": "small"}]}
+    phase1fc._complete_ohf_role(runtime, planned, plan, identity_seed=7301)
+    runtime.jobs.admit_cycle_plan(root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:admit-plan:{planned.attempt.attempt_id}")
+    work = next(j for j in runtime.jobs.list_jobs()
+                if j.root_job_id == root.job_id and j.orchestration_role == "work")
+    now = runtime.store.now_ms()
+    definition = {
+        "schema_version": "mastermind.exact_worker_claim_target/v1",
+        "operation_key": root.orchestration_provenance["source_id"], "root_job_id": root.job_id,
+        "job_id": work.job_id, "worker_id": "worker-a", "quota_class": "default",
+        "expected_provider": "codex", "expected_account_label": "hf1b-fixture-a",
+        "expected_model": "gpt-5.6-sol", "expected_effort": "xhigh", "expected_cost_class": "small",
+        "expected_capabilities": ["read", "research"], "excluded_worker_ids": [],
+        "source_owner": "executive-control", "source_generation": "fixture-generation-1",
+        "authority_policy_hash": work.authority_policy_hash, "expires_at_ms": now + 60000,
+    }
+    observation = {"schema_version": "mastermind.exact_worker_target_observation/v1",
+        "source_sha256": "d" * 64, "control_attestation_sha256": "e" * 64,
+        "observed_at_ms": now, "max_age_ms": 30000}
+    command = f"coo-cycle:{root.job_id}:dispatch:{work.job_id}:attempt:1"
+    return runtime, root, work, command, definition, observation
+
+
+def _hf1b_issue(definition, observation, revalidate=lambda: None):
+    import control_plane.executive_runtime as runtime_module
+    factory = getattr(runtime_module, "_issue_exact_worker_claim_target", None)
+    assert callable(factory), "HF1-B trusted target issuance is not implemented"
+    return factory(definition, observation,
+                   _producer_capability=runtime_module._EXACT_WORKER_TARGET_PRODUCER,
+                   revalidate=revalidate)
+
+
+def test_hf1b_exact_claim_retains_original_target_and_fresh_origin(tmp_path):
+    runtime, root, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue(definition, observation)
+    first = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert first is not None and first.claimed_now is True
+    assert first.attempt.worker_id == definition["worker_id"]
+    assert first.attempt.quota_class == definition["quota_class"]
+    event = runtime.store.get_event_by_command_id(command)
+    assert event is not None
+    binding = event.payload["exact_worker_target"]
+    assert binding["definition"] == definition
+    assert binding["observation"] == observation
+    assert first.attempt.placement_snapshot_digest
+    replay = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert replay is not None and replay.claimed_now is False
+    assert replay.attempt.attempt_id == first.attempt.attempt_id
+    assert first.to_dict() == replay.to_dict()  # internal issuance evidence is not public authority
+    assert len(runtime.attempts.list_attempts(work.job_id)) == 1
+    assert runtime.jobs.get_job(root.job_id).current_attempt_id is None
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source_generation", "fixture-generation-2"),
+    ("expected_account_label", "different-account"),
+    ("expires_at_ms", 9999999999999),
+])
+def test_hf1b_same_pair_changed_definition_conflicts(tmp_path, field, value):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    first = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                              exact_target=_hf1b_issue(definition, observation))
+    changed = {**definition, field: value}
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                           exact_target=_hf1b_issue(changed, observation))
+    assert len(runtime.attempts.list_attempts(work.job_id)) == 1
+    assert runtime.attempts.get_attempt(first.attempt.attempt_id).worker_id == "worker-a"
+
+
+def test_hf1b_reobservation_does_not_rewrite_original_claim(tmp_path):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    first = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                              exact_target=_hf1b_issue(definition, observation))
+    before = runtime.store.get_event_by_command_id(command).payload
+    expired = {**observation, "observed_at_ms": 1, "source_sha256": "f" * 64}
+    replay = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                               exact_target=_hf1b_issue(definition, expired))
+    assert replay.attempt.attempt_id == first.attempt.attempt_id and not replay.claimed_now
+    assert runtime.store.get_event_by_command_id(command).payload == before
+
+
+@pytest.mark.parametrize("target_first", [True, False])
+def test_hf1b_targeted_and_untargeted_history_cannot_switch(tmp_path, target_first):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue(definition, observation)
+    target_args = {"exact_target": target}
+    plain_args = {"worker_id": definition["worker_id"], "quota_class": definition["quota_class"]}
+    first_args, second_args = (target_args, plain_args) if target_first else (plain_args, target_args)
+    runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, **first_args)
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, **second_args)
+    assert len(runtime.attempts.list_attempts(work.job_id)) == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("expected_account_label", "wrong-account"), ("expected_provider", "wrong-provider"),
+    ("expected_model", "wrong-model"), ("expected_effort", "wrong-effort"),
+    ("expected_cost_class", "frontier"), ("expected_capabilities", ["read"]),
+    ("excluded_worker_ids", ["worker-a"]), ("authority_policy_hash", "f" * 64),
+    ("root_job_id", "JOB-FOREIGN"), ("job_id", "JOB-FOREIGN"),
+    ("operation_key", "CEO-FOREIGN"),
+])
+def test_hf1b_target_mismatch_refuses_without_claim(tmp_path, field, value):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue({**definition, field: value}, observation)
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert runtime.attempts.list_attempts(work.job_id) == []
+    assert runtime.jobs.get_job(work.job_id).status == JobStatus.QUEUED
+
+
+@pytest.mark.parametrize("definition_change,observation_change", [
+    ({"expires_at_ms": 1}, {}), ({}, {"observed_at_ms": 1}),
+    ({}, {"observed_at_ms": 9999999999999}),
+])
+def test_hf1b_first_claim_requires_fresh_observation_and_grant(tmp_path, definition_change, observation_change):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue({**definition, **definition_change}, {**observation, **observation_change})
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert runtime.attempts.list_attempts(work.job_id) == []
+
+
+def test_hf1b_plain_caller_dictionary_is_not_a_trusted_target(tmp_path):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    _hf1b_issue(definition, observation)
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                           exact_target={"definition": definition, "observation": observation})
+    assert runtime.attempts.list_attempts(work.job_id) == []
+
+
+def test_hf1b_target_copies_source_and_has_closed_fields(tmp_path):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue(definition, observation)
+    definition["worker_id"] = "caller-tampered"
+    observation["source_sha256"] = "f" * 64
+    first = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert first.attempt.worker_id == "worker-a"
+    assert runtime.store.get_event_by_command_id(command).payload["exact_worker_target"]["observation"]["source_sha256"] == "d" * 64
+    with pytest.raises(StateConflict, match="target"):
+        _hf1b_issue({**definition, "fallback": "worker-b"}, observation)
+
+
+@pytest.mark.parametrize("value", [None, {}, {"definition": None}])
+def test_hf1b_explicit_null_or_partial_target_never_means_automatic(tmp_path, value):
+    runtime, _, work, command, _, _ = _hf1b_claim_fixture(tmp_path)
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=value)
+    assert runtime.attempts.list_attempts(work.job_id) == []
+
+
+def test_hf1b_concurrent_claims_have_one_original_issuance(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue(definition, observation)
+    barrier = threading.Barrier(2)
+    def claim():
+        barrier.wait(timeout=5)
+        return runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(claim) for _ in range(2)]
+        results = [f.result(timeout=10) for f in futures]
+    assert sum(result.claimed_now for result in results) == 1
+    assert len({result.attempt.attempt_id for result in results}) == 1
+    assert len(runtime.attempts.list_attempts(work.job_id)) == 1
+
+
+def test_hf1b_failed_event_write_rolls_back_target_attempt_and_quota(tmp_path, monkeypatch):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    original = runtime.store.append_event
+    def fail_claim(*args, **kwargs):
+        if kwargs.get("event_type") == "JOB_CLAIMED":
+            raise RuntimeError("fixture claim event unavailable")
+        return original(*args, **kwargs)
+    monkeypatch.setattr(runtime.store, "append_event", fail_claim)
+    with pytest.raises(RuntimeError, match="claim event unavailable"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                           exact_target=_hf1b_issue(definition, observation))
+    assert runtime.attempts.list_attempts(work.job_id) == []
+    assert runtime.store.get_event_by_command_id(command) is None
+    assert runtime.jobs.get_job(work.job_id).status is JobStatus.QUEUED
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT held_attempt_id FROM worker_quota_classes WHERE worker_id=? AND quota_class=?", ("worker-a", "default")).fetchone()[0] is None
+
+
+def test_hf1b_missing_exact_worker_cannot_choose_available_alternative(tmp_path):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue({**definition, "worker_id": "missing-worker"}, observation)
+    assert runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target) is None
+    assert runtime.attempts.list_attempts(work.job_id) == []
+
+
+@pytest.mark.parametrize("key,value", [
+    ("worker_id", ""), ("worker_id", "/private/worker"),
+    ("expected_capabilities", ["read", "read"]),
+    ("expected_account_label", "account@example.com"),
+    ("expected_account_label", "sk-abcdefghijklmnop"),
+    ("source_generation", None), ("expires_at_ms", True),
+])
+def test_hf1b_target_definition_is_closed_and_secret_safe(tmp_path, key, value):
+    _, _, _, _, definition, observation = _hf1b_claim_fixture(tmp_path)
+    with pytest.raises(StateConflict, match="target"):
+        _hf1b_issue({**definition, key: value}, observation)
