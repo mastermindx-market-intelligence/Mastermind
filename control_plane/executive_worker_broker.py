@@ -1314,6 +1314,8 @@ class ExecutiveWorkerBroker:
         sweeper: ResidualSweeper,
         *,
         adapter_id: str = "codex-cli",
+        validation_adapter: WorkerExecutionAdapter | None = None,
+        validation_adapter_id: str | None = None,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
@@ -1334,6 +1336,47 @@ class ExecutiveWorkerBroker:
             ) from exc
         self.adapter = adapter
         self.adapter_id = descriptor.adapter_id
+        if validation_adapter is None:
+            if validation_adapter_id not in (None, self.adapter_id):
+                raise WorkerBrokerError(
+                    "validation adapter identity was supplied without an adapter"
+                )
+            if self.adapter_id == "claude-code":
+                raise WorkerBrokerError(
+                    "Claude broker requires the reviewed common validation adapter"
+                )
+            validation_descriptor = descriptor
+            validation_adapter = adapter
+        else:
+            if not isinstance(validation_adapter_id, str) or not validation_adapter_id:
+                raise WorkerBrokerError(
+                    "validation adapter requires one exact reviewed identity"
+                )
+            try:
+                validation_descriptor = bind_reviewed_adapter(
+                    validation_adapter, validation_adapter_id
+                )
+            except AdapterBindingError as exc:
+                raise WorkerBrokerError(str(exc)) from exc
+            except Exception as exc:
+                raise WorkerBrokerError(
+                    f"validation adapter {validation_adapter_id!r} failed to bind"
+                ) from exc
+            if self.adapter_id == "codex-cli" and (
+                validation_adapter is not adapter
+                or validation_descriptor.adapter_id != self.adapter_id
+            ):
+                raise WorkerBrokerError(
+                    "Codex broker validation must remain on its primary reviewed adapter"
+                )
+            if self.adapter_id == "claude-code" and (
+                validation_descriptor.adapter_id != "codex-cli"
+            ):
+                raise WorkerBrokerError(
+                    "Claude broker validation requires the reviewed common Codex sandbox"
+                )
+        self.validation_adapter = validation_adapter
+        self.validation_adapter_id = validation_descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -2926,6 +2969,7 @@ class ExecutiveWorkerBroker:
                     self._active_run_id = spec.run_id
                 self._starting = False
         return {
+            "adapter_id": self.adapter_id,
             "process_ref": process_ref,
             "launch_attestation": attestation,
             "startup_sweep": self.startup_sweep,
@@ -2968,6 +3012,7 @@ class ExecutiveWorkerBroker:
                 if status_sweep is not None:
                     self.last_sweep = status_sweep
                 result: dict[str, Any] = {
+                    "adapter_id": self.adapter_id,
                     "broker_pid": os.getpid(),
                     "worker_uid": os.geteuid(),
                     "worker_gid": os.getegid(),
@@ -3143,7 +3188,7 @@ class ExecutiveWorkerBroker:
             adapter_error: Exception | None = None
             receipt: ValidationReceipt | None = None
             try:
-                receipt = await self.adapter.run_validation_argv(
+                receipt = await self.validation_adapter.run_validation_argv(
                     state.spec,
                     command,
                     timeout_seconds=timeout,
@@ -3765,7 +3810,7 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
 
 
 class RemoteCodexWorkerAdapter:
-    """Control-side Codex adapter facade backed by the distinct-UID broker."""
+    """Control-side fixed-identity adapter facade backed by the worker broker."""
 
     adapter_id = "codex-cli"
 
@@ -3795,6 +3840,8 @@ class RemoteCodexWorkerAdapter:
                 "validation_commands": commands,
             },
         )
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote broker adapter identity does not match facade")
         process_ref = _process_ref_from_json(result.get("process_ref"))
         if process_ref.run_id != spec.run_id:
             raise BrokerProtocolError("remote process run_id does not match LaunchSpec")
@@ -3971,6 +4018,12 @@ class RemoteCodexWorkerAdapter:
         )
         self._uid_sweeps[spec.run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
         return _validation_from_json(result.get("validation"))
+
+
+class RemoteClaudeWorkerAdapter(RemoteCodexWorkerAdapter):
+    """Control-side native Claude facade with immutable broker identity."""
+
+    adapter_id = "claude-code"
 
 
 class RemoteWorkerProcessController:
@@ -4166,6 +4219,7 @@ __all__ = [
     "PeerAuthorizationError",
     "PeerCredentials",
     "RemoteBrokerError",
+    "RemoteClaudeWorkerAdapter",
     "RemoteCodexWorkerAdapter",
     "RemoteWorkerProcessController",
     "UIDSweepReceipt",
