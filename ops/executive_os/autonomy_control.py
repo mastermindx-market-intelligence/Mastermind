@@ -171,6 +171,9 @@ _ARM_ADMISSION_CODES = frozenset(
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
 _TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM"}) | CEO_SUBMIT_OPERATIONS
+# One manifest name for the canonical marker and for the private generation it
+# is published from, so a renamed generation is always readable in place.
+_TRANSACTION_MANIFEST_NAME = "transaction.json"
 _CEO_SUBMIT_ADMISSION_CODES = frozenset(
     {
         "release_identity_mismatch",
@@ -1410,6 +1413,11 @@ def execute_arm(
         # A failed begin may have left durable marker evidence, but without the
         # execution owner this process may neither stop services nor roll back.
         raise
+    except TransactionEffectUnknown:
+        # Publication or another owner boundary may already have taken effect.
+        # Preserve its identity and exclusion for explicit reconciliation;
+        # uncertainty is not permission to stop services or manufacture rollback.
+        raise
     except Exception as exc:
         try:
             host.stop_services(request.expected_sha)
@@ -2511,7 +2519,7 @@ class ProductionTransactionHost(ProductionArmHost):
 
     @staticmethod
     def _manifest_path() -> Path:
-        return AUTONOMY_TRANSACTION / "transaction.json"
+        return AUTONOMY_TRANSACTION / _TRANSACTION_MANIFEST_NAME
 
     @staticmethod
     def _archive_paths() -> tuple[Path, Path]:
@@ -2644,12 +2652,13 @@ class ProductionTransactionHost(ProductionArmHost):
             raise TransactionEffectUnknown()
         return value
 
-    def _persist_phase(self, transaction: TransactionContext, phase: str, *, operation: str | None = None) -> None:
-        current: Mapping[str, Any] | None = None
-        if operation is None:
-            current = self._manifest()
-            operation = str(current["operation"])
-        value = {
+    @staticmethod
+    def _manifest_document(
+        transaction: TransactionContext, phase: str, *, operation: str
+    ) -> dict[str, Any]:
+        """The one recoverable identity document, unchanged across phases."""
+
+        return {
             "schema_version": _TRANSACTION_SCHEMA,
             "operation": operation,
             "phase": phase,
@@ -2660,6 +2669,13 @@ class ProductionTransactionHost(ProductionArmHost):
             "target_control_sha256": transaction.candidates.control_sha256,
             "target_worker_sha256": transaction.candidates.worker_sha256,
         }
+
+    def _persist_phase(self, transaction: TransactionContext, phase: str, *, operation: str | None = None) -> None:
+        current: Mapping[str, Any] | None = None
+        if operation is None:
+            current = self._manifest()
+            operation = str(current["operation"])
+        value = self._manifest_document(transaction, phase, operation=operation)
         if current is not None and _CONTROL_LAUNCHD_PREIMAGE_FIELD in current:
             value[_CONTROL_LAUNCHD_PREIMAGE_FIELD] = current[
                 _CONTROL_LAUNCHD_PREIMAGE_FIELD
@@ -2673,47 +2689,275 @@ class ProductionTransactionHost(ProductionArmHost):
             replace=self._manifest_path().exists(),
         )
 
-    def _create_marker(self, transaction: TransactionContext, *, operation: str) -> None:
-        self._config_root_safe()
+    @staticmethod
+    def _generation_path(transaction_id: str) -> Path:
+        """This creator's private, not-yet-canonical marker generation."""
+
+        if re.fullmatch(r"autonomy-[0-9a-f]{12}", transaction_id) is None:
+            raise TransactionEffectUnknown()
+        suffix = transaction_id.removeprefix("autonomy-")
+        return CONFIG_ROOT / (
+            f".autonomy-transaction-{suffix}.{os.getpid()}"
+            f".{secrets.token_hex(8)}.generating"
+        )
+
+    @staticmethod
+    def _generation_archive_paths(generation: Path) -> tuple[Path, Path]:
+        return (
+            generation / "prior-control.json",
+            generation / "prior-worker.json",
+        )
+
+    def _seal_generation(
+        self, generation: Path, transaction: TransactionContext, *, operation: str
+    ) -> None:
+        """Write the COMPLETE recoverable marker into the private generation.
+
+        Everything a later recovery needs -- the identity manifest and both
+        exact preimages, each fsynced -- is sealed here, before the canonical
+        ``AUTONOMY_TRANSACTION`` path can become visible at all.  Nothing in
+        this method reads or writes the canonical path.
+        """
+
+        control_bytes = transaction.prior_configs.control_bytes or encode_config(
+            transaction.prior_configs.control
+        )
+        worker_bytes = transaction.prior_configs.worker_bytes or encode_config(
+            transaction.prior_configs.worker
+        )
+        if (
+            sha256_bytes(control_bytes)
+            != transaction.prior_configs.control_sha256
+            or sha256_bytes(worker_bytes)
+            != transaction.prior_configs.worker_sha256
+        ):
+            raise TransactionEffectUnknown()
+        prior_control, prior_worker = self._generation_archive_paths(generation)
+        _atomic_file(
+            prior_control,
+            control_bytes,
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=False,
+        )
+        _atomic_file(
+            prior_worker,
+            worker_bytes,
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=False,
+        )
+        _atomic_file(
+            generation / _TRANSACTION_MANIFEST_NAME,
+            _encoded_json(
+                self._manifest_document(transaction, "LOCKED", operation=operation)
+            ),
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=False,
+        )
+        _fsync_directory(generation)
+
+    @staticmethod
+    def _publication_mutex() -> int:
+        """Serialize FIRST publication on the existing config-directory inode.
+
+        Every creator takes this same lock on the trusted ``CONFIG_ROOT``
+        directory itself, so only one generation can be renamed onto the
+        canonical marker at a time.  It adds no lock file and no second owner
+        registry; the kernel releases it if this process dies.
+        """
+
+        descriptor = os.open(
+            CONFIG_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
         try:
-            os.mkdir(AUTONOMY_TRANSACTION, 0o700)
-            os.chown(AUTONOMY_TRANSACTION, 0, 0)
-            os.chmod(AUTONOMY_TRANSACTION, 0o700)
-            _fsync_directory(CONFIG_ROOT)
-            self._claim_transaction_owner()
-            prior_control, prior_worker = self._archive_paths()
-            control_bytes = transaction.prior_configs.control_bytes or encode_config(
-                transaction.prior_configs.control
-            )
-            worker_bytes = transaction.prior_configs.worker_bytes or encode_config(
-                transaction.prior_configs.worker
-            )
+            info = os.fstat(descriptor)
+            path_info = CONFIG_ROOT.lstat()
             if (
-                sha256_bytes(control_bytes)
-                != transaction.prior_configs.control_sha256
-                or sha256_bytes(worker_bytes)
-                != transaction.prior_configs.worker_sha256
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o755
+                or path_info.st_dev != info.st_dev
+                or path_info.st_ino != info.st_ino
             ):
                 raise TransactionEffectUnknown()
-            _atomic_file(
-                prior_control,
-                control_bytes,
-                mode=0o400,
-                uid=0,
-                gid=0,
-                replace=False,
-            )
-            _atomic_file(
-                prior_worker,
-                worker_bytes,
-                mode=0o400,
-                uid=0,
-                gid=0,
-                replace=False,
-            )
-            self._persist_phase(transaction, "LOCKED", operation=operation)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
         except Exception:
-            # A partially created marker is evidence and is deliberately kept.
+            os.close(descriptor)
+            raise
+        return descriptor
+
+    @staticmethod
+    def _require_canonical_absent() -> None:
+        """No-clobber, rechecked under the publication mutex.
+
+        ``rename`` CAN replace an existing empty directory, so the competing
+        canonical identity is preserved explicitly: any entry at the canonical
+        path -- directory, file or symlink -- refuses this publication and is
+        never removed or replaced here.
+        """
+
+        try:
+            AUTONOMY_TRANSACTION.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise FileExistsError(os.fspath(AUTONOMY_TRANSACTION)) from exc
+        raise FileExistsError(os.fspath(AUTONOMY_TRANSACTION))
+
+    def _verify_published_inode(self, descriptor: int) -> None:
+        """The canonical path must resolve to the exact held inode."""
+
+        info = os.fstat(descriptor)
+        try:
+            path_info = AUTONOMY_TRANSACTION.lstat()
+        except OSError as exc:
+            raise TransactionEffectUnknown() from exc
+        if (
+            not stat.S_ISDIR(path_info.st_mode)
+            or path_info.st_dev != info.st_dev
+            or path_info.st_ino != info.st_ino
+            or stat.S_IMODE(path_info.st_mode) != 0o700
+        ):
+            raise TransactionEffectUnknown()
+
+    def _discard_own_generation(self, generation: Path, descriptor: int) -> None:
+        """Dispose of this process's own generation that never published.
+
+        Confined to a proven own unpublished inode: the canonical path must
+        still be absent, the open descriptor must still be that generation's
+        directory inode, and every entry must be a plain regular file this
+        process sealed itself.  Anything else is ambiguous publication
+        evidence and is deliberately left in place.
+        """
+
+        if self._transaction_owner_fd is not None:
+            return
+        try:
+            AUTONOMY_TRANSACTION.lstat()
+            return  # a canonical marker appeared: this is publication evidence
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return
+        try:
+            held = os.fstat(descriptor)
+            path_info = generation.lstat()
+            if (
+                not stat.S_ISDIR(path_info.st_mode)
+                or path_info.st_dev != held.st_dev
+                or path_info.st_ino != held.st_ino
+            ):
+                return
+            for entry in sorted(os.listdir(generation)):
+                candidate = generation / entry
+                entry_info = candidate.lstat()
+                if stat.S_ISLNK(entry_info.st_mode) or not stat.S_ISREG(
+                    entry_info.st_mode
+                ):
+                    return
+                candidate.unlink()
+            os.rmdir(generation)
+            _fsync_directory(CONFIG_ROOT)
+        except OSError:
+            return
+
+    @staticmethod
+    def _generation_definitely_unpublished(generation: Path, descriptor: int) -> bool:
+        """Prove the held inode is still private while the publication mutex is held.
+
+        A failed rename acknowledgment says nothing about whether rename took
+        effect.  Only an absent canonical name AND this exact still-private
+        inode permit the known-prepublication cleanup path.  Missing, replaced,
+        or unreadable names leave publication uncertain and retain the owner.
+        """
+
+        try:
+            AUTONOMY_TRANSACTION.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+        else:
+            return False
+        try:
+            held = os.fstat(descriptor)
+            private = generation.lstat()
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(private.st_mode)
+            and stat.S_ISDIR(held.st_mode)
+            and (private.st_dev, private.st_ino) == (held.st_dev, held.st_ino)
+        )
+
+    def _create_marker(self, transaction: TransactionContext, *, operation: str) -> None:
+        """Publish the ONE transaction marker complete, or not at all.
+
+        The recoverable identity, both exact preimages and this creator's own
+        directory flock are sealed into a private generation first, so the
+        canonical path never exists in an empty or partial state.  First
+        publication is then serialized on the config-directory inode lock,
+        canonical absence is rechecked under that mutex, the generation is
+        renamed into place while this process keeps its marker descriptor, the
+        parent directory is fsynced, and the canonical path is verified to be
+        the exact held inode before ownership is recorded.
+        """
+
+        self._config_root_safe()
+        generation = self._generation_path(transaction.transaction_id)
+        descriptor = -1
+        try:
+            os.mkdir(generation, 0o700)
+            os.chown(generation, 0, 0)
+            os.chmod(generation, 0o700)
+            descriptor = os.open(
+                generation, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            )
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o700
+            ):
+                raise TransactionEffectUnknown()
+            # Creator-owned exclusion exists BEFORE the canonical path does.
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._seal_generation(generation, transaction, operation=operation)
+            lock = self._publication_mutex()
+            try:
+                self._require_canonical_absent()
+                try:
+                    os.rename(generation, AUTONOMY_TRANSACTION)
+                    _fsync_directory(CONFIG_ROOT)
+                    self._verify_published_inode(descriptor)
+                except Exception as exc:
+                    # Reconcile actual names/inodes under the same mutex, not
+                    # a boolean inferred from whether rename returned normally.
+                    if not self._generation_definitely_unpublished(generation, descriptor):
+                        self._transaction_owner_fd = descriptor
+                        raise TransactionEffectUnknown() from exc
+                    raise
+                self._transaction_owner_fd = descriptor
+            finally:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                finally:
+                    os.close(lock)
+        except Exception as exc:
+            if descriptor >= 0 and self._transaction_owner_fd == descriptor:
+                # Successful or uncertain publication retains the original
+                # held inode even if parent-fsync, readback or unlock fails.
+                raise TransactionEffectUnknown() from exc
+            if descriptor >= 0:
+                self._discard_own_generation(generation, descriptor)
+                os.close(descriptor)
             raise
 
     def existing_arm(
