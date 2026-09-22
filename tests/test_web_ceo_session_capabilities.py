@@ -205,6 +205,7 @@ def _receipt(
     binding_generation: int = 7,
     observed_at_ms: int = OBSERVED_AT_MS,
     expires_at_ms: int = EXPIRES_AT_MS,
+    schema_complete: bool = True,
 ) -> wcap.WebCeoSessionCapabilityReceipt:
     bound_contracts = contracts or _contracts()
     bound_tools = effective_tools if effective_tools is not None else _all_actions(
@@ -228,6 +229,7 @@ def _receipt(
     return wcap.build_receipt_from_effective_tool_schema(
         effective_tools=bound_tools,
         capability_contracts=bound_contracts,
+        schema_complete=schema_complete,
         observer_evidence_digest=OBSERVER_DIGEST,
         worker_id=worker_id,
         quota_class=quota_class,
@@ -504,6 +506,132 @@ def test_failed_serviceability_probe_remains_unknown_not_absent() -> None:
         _assess(receipt, required=frozenset({"executive_submit"})).state
         is wcap.PreflightState.CAPABILITY_PROOF_REQUIRED
     )
+
+
+def test_incomplete_surface_omission_stays_unknown_and_never_rebinds() -> None:
+    contracts = _contracts()
+    github_read = next(
+        c for c in contracts if c.capability == "github_read"
+    )
+    receipt = _receipt(
+        contracts=contracts,
+        schema_complete=False,
+        effective_tools=github_read.required_actions,
+        serviceability=tuple(
+            _serviceability_fact(action)
+            for action in github_read.required_actions
+        ),
+    )
+
+    observation = _observations(receipt)["executive_submit"]
+    assert observation.state is wcap.CapabilityObservationState.UNKNOWN
+    assert observation.proof_class is wcap.CapabilityProofClass.EFFECTIVE_SCHEMA
+
+    preflight = _assess(
+        receipt,
+        required=frozenset({"executive_submit"}),
+    )
+    assert preflight.state is wcap.PreflightState.CAPABILITY_PROOF_REQUIRED
+    assert preflight.rebind_allowed is False
+    assert preflight.missing_capabilities == ()
+    assert preflight.unknown_capabilities == ("executive_submit",)
+
+
+def test_incomplete_surface_exact_positive_facts_can_prove_exact_action() -> None:
+    contracts = _contracts()
+    exec_submit = next(
+        c for c in contracts if c.capability == "executive_submit"
+    )
+    receipt = _receipt(
+        contracts=contracts,
+        schema_complete=False,
+        effective_tools=(),
+        serviceability=tuple(
+            _serviceability_fact(action)
+            for action in exec_submit.required_actions
+        ),
+    )
+
+    observation = _observations(receipt)["executive_submit"]
+    assert observation.state is wcap.CapabilityObservationState.PRESENT
+    assert observation.proof_class is wcap.CapabilityProofClass.NO_EFFECT_PROBE
+    assert (
+        _assess(receipt, required=frozenset({"executive_submit"})).state
+        is wcap.PreflightState.READY
+    )
+
+
+def test_incomplete_surface_failed_probe_stays_unknown() -> None:
+    contracts = _contracts()
+    exec_submit = next(
+        c for c in contracts if c.capability == "executive_submit"
+    )
+    facts = tuple(
+        _serviceability_fact(
+            action,
+            serviceable=index != 0,
+        )
+        for index, action in enumerate(exec_submit.required_actions)
+    )
+    receipt = _receipt(
+        contracts=contracts,
+        schema_complete=False,
+        effective_tools=(),
+        serviceability=facts,
+    )
+
+    observation = _observations(receipt)["executive_submit"]
+    assert observation.state is wcap.CapabilityObservationState.UNKNOWN
+    assert observation.proof_class is wcap.CapabilityProofClass.NO_EFFECT_PROBE
+    assert (
+        _assess(receipt, required=frozenset({"executive_submit"})).state
+        is wcap.PreflightState.CAPABILITY_PROOF_REQUIRED
+    )
+
+
+def test_complete_surface_absence_conflicting_positive_fact_refuses() -> None:
+    contracts = _contracts()
+    exec_submit = next(
+        c for c in contracts if c.capability == "executive_submit"
+    )
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="COMPLETE_SCHEMA_CONTRADICTS_POSITIVE_SERVICEABILITY",
+    ):
+        _receipt(
+            contracts=contracts,
+            schema_complete=True,
+            effective_tools=(),
+            serviceability=tuple(
+                _serviceability_fact(action)
+                for action in exec_submit.required_actions
+            ),
+        )
+
+
+def test_tool_schema_digest_binds_completeness_fact() -> None:
+    contracts = _contracts()
+    github_read = next(
+        c for c in contracts if c.capability == "github_read"
+    )
+    tools = github_read.required_actions
+    serviceability = tuple(
+        _serviceability_fact(action)
+        for action in github_read.required_actions
+    )
+    complete = _receipt(
+        contracts=contracts,
+        schema_complete=True,
+        effective_tools=tools,
+        serviceability=serviceability,
+    )
+    incomplete = _receipt(
+        contracts=contracts,
+        schema_complete=False,
+        effective_tools=tools,
+        serviceability=serviceability,
+    )
+    assert complete.tool_schema_digest != incomplete.tool_schema_digest
 
 
 def test_effect_unknown_freezes_prestart_failover() -> None:
@@ -1030,6 +1158,7 @@ def test_capability_contracts_must_cover_entire_closed_vocabulary() -> None:
         wcap.build_receipt_from_effective_tool_schema(
             effective_tools=(),
             capability_contracts=_contracts()[:-1],
+            schema_complete=True,
             observer_evidence_digest=OBSERVER_DIGEST,
             worker_id="web-ceo-c3-astra",
             quota_class="chatgpt-pro",

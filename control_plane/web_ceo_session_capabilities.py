@@ -317,6 +317,7 @@ def _surface_state_for_contract(
     *,
     effective: tuple[EffectiveToolDescriptor, ...],
     contract: CapabilityActionContract,
+    schema_complete: bool,
 ) -> CapabilityObservationState:
     by_name = {item.tool_name: item for item in effective}
     saw_missing = False
@@ -328,7 +329,11 @@ def _surface_state_for_contract(
         if actual.invocation_schema_digest != required.invocation_schema_digest:
             return CapabilityObservationState.UNKNOWN
     if saw_missing:
-        return CapabilityObservationState.ABSENT
+        return (
+            CapabilityObservationState.ABSENT
+            if schema_complete
+            else CapabilityObservationState.UNKNOWN
+        )
     return CapabilityObservationState.PRESENT
 
 
@@ -487,6 +492,7 @@ def build_receipt_from_effective_tool_schema(
     *,
     effective_tools: Sequence[EffectiveToolDescriptor],
     capability_contracts: Sequence[CapabilityActionContract],
+    schema_complete: bool,
     observer_evidence_digest: str,
     worker_id: str,
     quota_class: str,
@@ -508,6 +514,8 @@ def build_receipt_from_effective_tool_schema(
 
     effective = _normalize_tool_descriptors(effective_tools)
     contracts = _normalize_capability_contracts(capability_contracts)
+    if type(schema_complete) is not bool:
+        raise WebCeoSessionCapabilityError("SCHEMA_COMPLETENESS_INVALID")
     if (
         not isinstance(observer_evidence_digest, str)
         or _DIGEST_RE.fullmatch(observer_evidence_digest) is None
@@ -572,13 +580,39 @@ def build_receipt_from_effective_tool_schema(
     observations: list[CapabilityObservation] = []
     for contract in contracts:
         surface_state = _surface_state_for_contract(
-            effective=effective, contract=contract
+            effective=effective,
+            contract=contract,
+            schema_complete=schema_complete,
         )
+        by_name = {item.tool_name: item for item in effective}
         bound_facts = [
             facts_by_name.get(action.tool_name)
             for action in contract.required_actions
         ]
+        missing_actions = [
+            action
+            for action in contract.required_actions
+            if by_name.get(action.tool_name) is None
+        ]
+        schema_drift = any(
+            (
+                actual := by_name.get(action.tool_name)
+            ) is not None
+            and actual.invocation_schema_digest
+            != action.invocation_schema_digest
+            for action in contract.required_actions
+        )
         if surface_state is CapabilityObservationState.ABSENT:
+            if any(
+                (
+                    fact := facts_by_name.get(action.tool_name)
+                ) is not None
+                and fact.serviceable is True
+                for action in missing_actions
+            ):
+                raise WebCeoSessionCapabilityError(
+                    "COMPLETE_SCHEMA_CONTRADICTS_POSITIVE_SERVICEABILITY"
+                )
             if any(item is not None for item in bound_facts):
                 raise WebCeoSessionCapabilityError(
                     "SERVICEABILITY_FACT_WITHOUT_SURFACE"
@@ -586,12 +620,28 @@ def build_receipt_from_effective_tool_schema(
             state = CapabilityObservationState.ABSENT
             proof = CapabilityProofClass.EFFECTIVE_SCHEMA
         elif surface_state is CapabilityObservationState.UNKNOWN:
-            if any(item is not None for item in bound_facts):
-                raise WebCeoSessionCapabilityError(
-                    "SERVICEABILITY_FACT_WITH_SCHEMA_DRIFT"
-                )
-            state = CapabilityObservationState.UNKNOWN
-            proof = CapabilityProofClass.EFFECTIVE_SCHEMA
+            if schema_drift:
+                if any(item is not None for item in bound_facts):
+                    raise WebCeoSessionCapabilityError(
+                        "SERVICEABILITY_FACT_WITH_SCHEMA_DRIFT"
+                    )
+                state = CapabilityObservationState.UNKNOWN
+                proof = CapabilityProofClass.EFFECTIVE_SCHEMA
+            elif all(
+                item is not None and item.serviceable is True
+                for item in bound_facts
+            ):
+                state = CapabilityObservationState.PRESENT
+                proof = CapabilityProofClass.NO_EFFECT_PROBE
+            elif any(
+                item is not None and item.serviceable is False
+                for item in bound_facts
+            ):
+                state = CapabilityObservationState.UNKNOWN
+                proof = CapabilityProofClass.NO_EFFECT_PROBE
+            else:
+                state = CapabilityObservationState.UNKNOWN
+                proof = CapabilityProofClass.EFFECTIVE_SCHEMA
         else:
             if all(
                 item is not None and item.serviceable is True
@@ -615,7 +665,10 @@ def build_receipt_from_effective_tool_schema(
         )
 
     tool_schema_digest = _digest(
-        {"tools": [item.to_dict() for item in effective]}
+        {
+            "schema_complete": schema_complete,
+            "tools": [item.to_dict() for item in effective],
+        }
     )
     capability_contract_digest = _digest(
         {"contracts": [item.to_dict() for item in contracts]}
@@ -635,7 +688,7 @@ def build_receipt_from_effective_tool_schema(
         binding_generation=binding_generation,
         observed_at_ms=observed_at_ms,
         expires_at_ms=expires_at_ms,
-        schema_complete=True,
+        schema_complete=schema_complete,
         tool_schema_digest=tool_schema_digest,
         capability_contract_digest=capability_contract_digest,
         observer_evidence_digest=observer_evidence_digest,
