@@ -1136,6 +1136,44 @@ def test_sparse_macro_yaml_forms_preserve_canonical_path_existence(tmp_path: Pat
         assert not (materialized / "research/its.md").exists()
 
 
+@pytest.mark.parametrize("path_fields", [
+    "# Valid YAML with a uniformly indented root mapping.\n\n"
+    "  repos: [macro]\n  artifacts:\n    - research/evidence.md\n"
+    "  owns_paths:\n    - data/probe/**\n",
+    "defaults: &paths\n  repos: [macro]\n  artifacts:\n    - research/evidence.md\n"
+    "  owns_paths:\n    - data/probe/**\n<<: *paths\n",
+    "<<: {repos: [macro], artifacts: [research/evidence.md], owns_paths: [data/probe/**]}\n",
+    "&root\n  repos: [macro]\n  artifacts:\n    - research/evidence.md\n"
+    "  owns_paths:\n    - data/probe/**\n",
+])
+def test_sparse_macro_refuses_unsupported_yaml_root_and_merges(tmp_path: Path, path_fields: str):
+    import yaml
+    from integrations.executive_mcp.installed import (
+        _build_macro_materialization_plan, _default_packet_runner,
+        _frontmatter_lists, _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    macro, _head = _macro_sparse_fixture(tmp_path)
+    canonical = yaml.safe_load(path_fields)
+    assert canonical["repos"] == ["macro"]
+    assert canonical["artifacts"] == ["research/evidence.md"]
+    assert canonical["owns_paths"] == ["data/probe/**"]
+    assert (macro / canonical["artifacts"][0]).is_file()
+    payload = ("---\n" + path_fields + "---\nbody\n").encode()
+    (macro / "agentos/workstreams/WS-SPARSE.md").write_bytes(payload)
+    _git(macro, "add", ".")
+    _git(macro, "commit", "-q", "-m", "unsupported valid YAML root")
+    # These forms are outside the closed parser subset, never empty path lists.
+    with pytest.raises(ValueError, match="unsupported"):
+        _frontmatter_lists(payload)
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    with pytest.raises(GatewayError, match="path-list frontmatter is unsupported"):
+        _build_macro_materialization_plan(
+            macro, runner=_default_packet_runner, env=env, deadline=None,
+        )
+
+
 def _direct_pair_collector(tmp_path: Path):
     from integrations.executive_mcp.installed import InstalledBootPacketCollector
 

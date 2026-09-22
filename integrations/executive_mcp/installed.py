@@ -629,6 +629,15 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
     except StopIteration as exc:
         raise ValueError("frontmatter closing fence is missing") from exc
     body = lines[1:end]
+    first_entry = next(
+        (line for line in body if line.strip() and not line.lstrip().startswith("#")),
+        "",
+    )
+    # Nested fields are deliberately ignored below, so accepting an indented
+    # root would silently erase every path. Root node properties/aliases can
+    # similarly hide the mapping; both are outside this closed YAML subset.
+    if first_entry and (first_entry[0].isspace() or first_entry[0] in "&*!"):
+        raise ValueError("unsupported YAML root indentation or node properties")
     targets = {"repos", "artifacts", "owns_paths"}
     out = {field: [] for field in targets}
     seen: set[str] = set()
@@ -640,6 +649,8 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
             continue
         key, raw_value = line.split(":", 1)
         key = _frontmatter_scalar(key)
+        if key == "<<":
+            raise ValueError("unsupported YAML merge key")
         if key not in targets:
             index += 1
             continue
