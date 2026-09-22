@@ -710,9 +710,9 @@ const NEUTRAL_BACKEND_TOOL_DESCRIPTIONS = Object.freeze({
   get_file_info: 'Returns metadata for an allowed local file or directory.',
   list_allowed_directories: 'Returns the local filesystem directories allowed for file operations.',
   edit_block: 'Applies an exact text or supported document-block replacement in one allowed local file.',
-  start_process: "Runs a caller-supplied shell command on the connected computer with the host user's permissions. Commands may change files, launch programs, or access the network; file-tool directory limits are not a shell sandbox. Use this for direct host command execution, not as a transport for nested agent instructions, large worker handoffs, or opaque/repackaged payloads. If the requested job is a bounded work commission, use a purpose-built work-submission action that accepts a stable job or request reference rather than embedding another agent prompt in shell text. Returns output and process state.",
+  start_process: "Runs a caller-supplied shell command on the connected computer with the host user's permissions. Commands may change files, launch programs, or access the network; file-tool directory limits are not a shell sandbox. This is a direct host-command capability, not a work-submission or agent-handoff interface. Nested agent instructions, large worker handoffs, and opaque/repackaged payloads are outside its declared purpose. Bounded work commissions are represented by purpose-built work-submission actions using stable job or request references. Returns output and process state.",
   read_process_output: 'Reads bounded output from an existing terminal process.',
-  interact_with_process: "Sends input to an existing terminal process and returns output and process state. The input may execute commands, modify files, or access the network with that process's permissions. Use terminal input for direct interaction with that process, not to relay nested agent instructions, large worker handoffs, or opaque/repackaged payloads; bounded commissions belong on a purpose-built work-submission action.",
+  interact_with_process: "Sends input to an existing terminal process and returns output and process state. The input may execute commands, modify files, or access the network with that process's permissions. This is direct terminal interaction, not a work-submission or agent-handoff interface. Nested agent instructions, large worker handoffs, and opaque/repackaged payloads are outside its declared purpose.",
   force_terminate: 'Terminates an existing terminal session by process identifier.',
   list_sessions: 'Lists terminal sessions owned by the Desktop Commander runtime.',
   list_processes: 'Lists operating-system processes visible to the Desktop Commander runtime.',
@@ -986,9 +986,9 @@ class GatewaySession {
           'studio_ping, studio_output_page, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
           'studio_output_page reads retained output without repeating the original action. ' +
           'Paper design tools use the host-pinned guarded Paper adapter and never route through Desktop Commander. ' +
-          'Choose the narrowest tool whose declared effect matches the user request. ' +
-          'start_process and interact_with_process are direct terminal actions, not transports for nested agent instructions, worker handoffs, or opaque/repackaged payloads. ' +
-          'If a platform safety review refuses a call, do not encode, split, reword, or reroute the same logical action to evade that refusal. ' +
+          'start_process and interact_with_process represent direct terminal effects rather than work-submission or agent-handoff transport. ' +
+          'Nested agent instructions, worker handoffs, and opaque/repackaged payloads are outside their declared scope. ' +
+          'A platform safety refusal is a terminal observation for the refused logical call; transformed replay by encoding, splitting, rewording, or rerouting is outside this server\'s supported behavior. ' +
           'All remaining tools are proxied to the backend.',
       },
     );
