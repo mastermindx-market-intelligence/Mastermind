@@ -6,13 +6,13 @@ Temporary E1/fixture configuration and their production-path fences are unchange
 """
 from __future__ import annotations
 
-import ast
 import concurrent.futures
 import configparser
 import ctypes
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -587,11 +587,23 @@ def _frontmatter_scalar(raw: str) -> str:
     value = raw.strip()
     if not value:
         raise ValueError("empty list item")
-    if value[0] in {"'", '"'}:
+    if value[0] == "'":
+        # YAML doubles apostrophes inside single quotes. Python literal parsing
+        # would instead concatenate the pieces and silently change a path.
+        match = re.fullmatch(r"'((?:[^']|'')*)'(?:[ \t]+#.*)?", value)
+        if match is None or not match.group(1):
+            raise ValueError("invalid single-quoted list item")
+        return match.group(1).replace("''", "'")
+    if value[0] == '"':
+        # JSON's double-quoted subset has identical YAML string semantics.
+        # Other YAML escapes are explicitly refused instead of guessed.
         try:
-            parsed = ast.literal_eval(value)
-        except (SyntaxError, ValueError) as exc:
+            parsed, end = json.JSONDecoder().raw_decode(value)
+        except ValueError as exc:
             raise ValueError("invalid quoted list item") from exc
+        tail = value[end:]
+        if tail and not re.fullmatch(r"[ \t]+#.*", tail):
+            raise ValueError("unsupported quoted list item suffix")
         if not isinstance(parsed, str) or not parsed:
             raise ValueError("list item is not a non-empty string")
         return parsed
@@ -623,10 +635,11 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
     index = 0
     while index < len(body):
         line = body[index]
-        if not line or line[0].isspace() or ":" not in line:
+        if not line or line.lstrip().startswith("#") or line[0].isspace() or ":" not in line:
             index += 1
             continue
         key, raw_value = line.split(":", 1)
+        key = _frontmatter_scalar(key)
         if key not in targets:
             index += 1
             continue
@@ -634,6 +647,8 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
             raise ValueError(f"duplicate {key} field")
         seen.add(key)
         value = raw_value.strip()
+        if value.startswith("#"):
+            value = ""
         if value:
             if value == "[]":
                 index += 1
@@ -648,15 +663,21 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
             continue
         items: list[str] = []
         cursor = index + 1
+        item_indent: int | None = None
         while cursor < len(body):
             candidate = body[cursor]
-            if candidate and not candidate[0].isspace():
+            if not candidate.strip() or candidate.lstrip().startswith("#"):
+                cursor += 1
+                continue
+            # YAML permits an indentless sequence directly below a mapping key.
+            if not candidate[0].isspace() and not candidate.startswith("- "):
                 break
-            if candidate.strip():
-                stripped = candidate.lstrip()
-                if not stripped.startswith("- "):
-                    raise ValueError(f"unsupported nested {key} field")
-                items.append(_frontmatter_scalar(stripped[2:]))
+            stripped = candidate.lstrip(" ")
+            indent = len(candidate) - len(stripped)
+            if not stripped.startswith("- ") or (item_indent is not None and indent != item_indent):
+                raise ValueError(f"unsupported nested {key} field")
+            item_indent = indent
+            items.append(_frontmatter_scalar(stripped[2:]))
             cursor += 1
         out[key] = items
         index = cursor
@@ -968,9 +989,9 @@ def _clean_git_snapshot(
 
     # Commit graphs can enumerate missing parents as bare object IDs, so every
     # ancestry commit still crosses the no-lazy-fetch object database boundary.
-    # Historical trees/blobs are not consumed by installed reads and can number in
-    # the millions; current HEAD bytes are instead bound by the complete ls-tree
-    # inventory and a second bounded batch over every current blob.
+    # Current HEAD blobs stay fully checked. Agent OS also consumes historical
+    # record trees for git log -- <record> dates, but not millions of unrelated
+    # historical blobs/trees; prove that path-limited tree closure separately.
     def _object_closure() -> None:
         _require_git_object_types(
             path, {object_id: "commit" for object_id in ancestry_commits},
@@ -980,6 +1001,29 @@ def _clean_git_snapshot(
             path, {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()},
             runner=runner, env=env, deadline=deadline, label=label,
         )
+        if content_scope == "macro_brief":
+            try:
+                record_history = _bounded_git_text(
+                    path,
+                    ["rev-list", "--objects", "--no-object-names", "--filter=blob:none",
+                     "--full-history", head, "--", *_MACRO_RECORD_DIRS],
+                    runner=runner, env=env, deadline=deadline, label=label,
+                    max_bytes=32 * 1024 * 1024,
+                )
+                historical_trees: dict[str, str] = {}
+                for oid in record_history.splitlines():
+                    if not _valid_sha(oid):
+                        raise ValueError("record history contains an invalid object")
+                    if oid not in ancestry_commits:
+                        historical_trees[oid] = "tree"
+                _require_git_object_types(
+                    path, historical_trees, runner=runner, env=env,
+                    deadline=deadline, label=label,
+                )
+            except (GatewayError, ValueError) as exc:
+                raise GatewayError(
+                    "backend_unavailable", f"installed {label} repository objects are incomplete"
+                ) from exc
 
     def _worktree_inventory() -> tuple[dict[str, str], set[str], str]:
         try:

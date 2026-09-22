@@ -13,6 +13,7 @@ import os
 import re
 import stat
 import subprocess
+import time
 from pathlib import Path
 from typing import Sequence
 
@@ -41,14 +42,23 @@ def _git_env() -> dict[str, str]:
     }
 
 
-def _run_git(checkout: Path, *args: str, maximum: int = _MAX_GIT_OUTPUT) -> bytes:
+def _run_git(
+    checkout: Path, *args: str, maximum: int = _MAX_GIT_OUTPUT,
+    input_bytes: bytes | None = None, deadline: float | None = None,
+) -> bytes:
+    timeout = _GIT_TIMEOUT_SECONDS
+    if deadline is not None:
+        timeout = min(timeout, deadline - time.monotonic())
+    if timeout <= 0 or (input_bytes is not None and len(input_bytes) > maximum):
+        raise AdminCheckoutError("Git observation exceeded its bound")
     try:
         result = subprocess.run(
             [_GIT, "-C", os.fspath(checkout), *args],
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=_GIT_TIMEOUT_SECONDS,
+            timeout=timeout,
+            input=input_bytes,
             env=_git_env(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -133,6 +143,8 @@ def _require_no_partial_config(checkout: Path) -> None:
 
 def _require_complete_closure(checkout: Path, expected_commit: str) -> int:
     _require_direct_object_store(checkout / ".git")
+    # Enumeration and every existence batch share the old ten-second bound.
+    deadline = time.monotonic() + _GIT_TIMEOUT_SECONDS
     raw = _run_git(
         checkout,
         "rev-list",
@@ -140,19 +152,41 @@ def _require_complete_closure(checkout: Path, expected_commit: str) -> int:
         "--missing=print",
         "--no-object-names",
         expected_commit,
+        deadline=deadline,
     )
-    count = 0
+    objects: set[str] = set()
     for line in raw.splitlines():
         try:
             value = line.decode("ascii")
         except UnicodeDecodeError as exc:
             raise AdminCheckoutError("reachable object closure is incomplete") from exc
-        if not _SHA.fullmatch(value):
+        if not _SHA.fullmatch(value) or value in objects:
             raise AdminCheckoutError("reachable object closure is incomplete")
-        count += 1
-    if count == 0:
+        objects.add(value)
+    if expected_commit not in objects:
         raise AdminCheckoutError("reachable object closure is incomplete")
-    return count
+    # A commit graph may enumerate a missing commit as an ordinary SHA. Every
+    # enumerated object must cross the no-lazy-fetch object database boundary,
+    # both on initial admission and on the caller's immediately pre-unlink pass.
+    ordered = sorted(objects)
+    for start in range(0, len(ordered), 4096):
+        batch = ordered[start:start + 4096]
+        observed = _run_git(
+            checkout, "cat-file", "--buffer", "--batch-check=%(objectname) %(objecttype)",
+            input_bytes=("\n".join(batch) + "\n").encode("ascii"), deadline=deadline,
+        ).splitlines()
+        if len(observed) != len(batch):
+            raise AdminCheckoutError("reachable object closure is incomplete")
+        for oid, line in zip(batch, observed):
+            parts = line.split()
+            if (
+                len(parts) != 2
+                or parts[0] != oid.encode("ascii")
+                or parts[1] not in {b"blob", b"tree", b"commit"}
+                or (oid == expected_commit and parts[1] != b"commit")
+            ):
+                raise AdminCheckoutError("reachable object closure is incomplete")
+    return len(objects)
 
 
 def _pack_directory(git_dir: Path) -> tuple[int, int, int, list[str]]:

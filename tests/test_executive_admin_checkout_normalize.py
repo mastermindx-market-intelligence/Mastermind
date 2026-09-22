@@ -86,6 +86,59 @@ def test_missing_reachable_object_refuses_and_preserves_promisor_evidence(tmp_pa
     assert marker.is_file()
 
 
+@pytest.mark.parametrize("disappear_at", ["initial", "before_unlink"])
+def test_normalize_refuses_commit_graph_hidden_missing_parent(
+    tmp_path: Path, monkeypatch, disappear_at: str,
+):
+    from ops.executive_os import admin_checkout
+
+    root, parent = _repo(tmp_path)
+    (root / "payload.txt").write_text("second\n")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "second")
+    head = _git(root, "rev-parse", "HEAD").stdout.strip()
+    _git(root, "commit-graph", "write", "--reachable")
+    marker = _marker(root)
+    loose = root / ".git/objects" / parent[:2] / parent[2:]
+    if disappear_at == "initial":
+        loose.unlink()
+    else:
+        original = admin_checkout._validated_markers
+
+        def remove_parent(*args):
+            result = original(*args)
+            loose.unlink()
+            return result
+
+        monkeypatch.setattr(admin_checkout, "_validated_markers", remove_parent)
+    with pytest.raises(admin_checkout.AdminCheckoutError, match="reachable object closure is incomplete"):
+        admin_checkout.normalize_admin_checkout(root, expected_commit=head)
+    # rev-list can still print the missing parent's SHA from its commit graph.
+    assert parent in _git(root, "rev-list", "--objects", "--missing=print", "--no-object-names", head).stdout
+    assert marker.is_file() and marker.read_bytes() == b""
+
+
+def test_normalize_checks_all_enumerated_object_types_twice_without_lazy_fetch(tmp_path: Path, monkeypatch):
+    from ops.executive_os import admin_checkout
+
+    root, head = _repo(tmp_path)
+    marker = _marker(root)
+    expected = set(_git(root, "rev-list", "--objects", "--no-object-names", head).stdout.splitlines())
+    original = admin_checkout._run_git
+    batches = []
+
+    def observe(checkout, *args, **kwargs):
+        if "cat-file" in args:
+            batches.append(set(kwargs["input_bytes"].decode("ascii").splitlines()))
+            assert admin_checkout._git_env()["GIT_NO_LAZY_FETCH"] == "1"
+        return original(checkout, *args, **kwargs)
+
+    monkeypatch.setattr(admin_checkout, "_run_git", observe)
+    admin_checkout.normalize_admin_checkout(root, expected_commit=head)
+    assert batches == [expected, expected]
+    assert not marker.exists()
+
+
 @pytest.mark.parametrize("case", ["nonempty", "symlink", "hardlink", "writable"])
 def test_unsafe_promisor_marker_refuses_without_deleting_evidence(tmp_path: Path, case: str):
     from ops.executive_os.admin_checkout import AdminCheckoutError, normalize_admin_checkout

@@ -584,6 +584,64 @@ def test_clean_snapshot_refuses_missing_reachable_parent_even_with_commit_graph(
         )
 
 
+@pytest.mark.parametrize("tree_suffix", ["^{tree}", ":agentos", ":agentos/workstreams"])
+def test_macro_snapshot_refuses_missing_historical_record_tree(tmp_path: Path, tree_suffix: str):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot, _default_packet_runner, _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    macro, _head = _macro_sparse_fixture(tmp_path)
+    old_tree = _git(macro, "rev-parse", "HEAD" + tree_suffix).stdout.strip()
+    record = macro / "agentos/workstreams/WS-SPARSE.md"
+    record.write_text(record.read_text() + "second version\n")
+    _git(macro, "add", ".")
+    _git(macro, "commit", "-q", "-m", "second")
+    _git(macro, "commit-graph", "write", "--reachable")
+    (macro / ".git/objects" / old_tree[:2] / old_tree[2:]).unlink()
+    # HEAD bytes remain readable, but the exact history reader loses dates.
+    assert _git(macro, "ls-tree", "-r", "HEAD").returncode == 0
+    broken_log = subprocess.run(
+        ["git", "-C", str(macro), "log", "--diff-filter=A", "--format=%as", "--",
+         "agentos/workstreams/WS-SPARSE.md"], capture_output=True,
+    )
+    assert broken_log.returncode != 0
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    with pytest.raises(GatewayError, match="repository objects are incomplete"):
+        _clean_git_snapshot(
+            macro, runner=_default_packet_runner, env=env, label="Macro source",
+            content_scope="macro_brief",
+        )
+
+
+def test_macro_history_proof_excludes_unconsumed_historical_objects(tmp_path: Path):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot, _default_packet_runner, _installed_child_env,
+    )
+
+    macro, _head = _macro_sparse_fixture(tmp_path)
+    old_blob = _git(macro, "rev-parse", "HEAD:unrelated/large.bin").stdout.strip()
+    old_tree = _git(macro, "rev-parse", "HEAD:unrelated").stdout.strip()
+    (macro / "unrelated/large.bin").write_bytes(b"changed")
+    _git(macro, "add", ".")
+    _git(macro, "commit", "-q", "-m", "unrelated history")
+    for oid in (old_blob, old_tree):
+        (macro / ".git/objects" / oid[:2] / oid[2:]).unlink()
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append(tuple(argv))
+        assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
+        return _default_packet_runner(argv, **kwargs)
+
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    assert _clean_git_snapshot(
+        macro, runner=runner, env=env, label="Macro source", content_scope="macro_brief",
+    ) == _git(macro, "rev-parse", "HEAD").stdout.strip()
+    tree_walks = [call for call in calls if "--objects" in call]
+    assert tree_walks and all("--filter=blob:none" in call and "--" in call for call in tree_walks)
+
+
 @pytest.mark.parametrize("shape", ["ignored", "tracked", "no-repository"])
 def test_clean_snapshot_refuses_root_without_direct_git_before_git(
     tmp_path: Path, shape: str,
@@ -1045,6 +1103,37 @@ def test_sparse_macro_materialization_refuses_unsupported_path_list_shape(tmp_pa
         _build_macro_materialization_plan(
             macro, runner=_default_packet_runner, env=env, deadline=None,
         )
+
+
+@pytest.mark.parametrize("path_fields", [
+    "repos:\n- macro\nartifacts:\n- research/it's.md\nowns_paths:\n- data/probe/**\n",
+    "'repos': [macro]\n\"artifacts\":\n  - research/it's.md\n'owns_paths':\n  - data/probe/**\n",
+    "repos: [macro]\nartifacts:\n  - 'research/it''s.md'\nowns_paths:\n  - 'data/probe/**'\n",
+])
+def test_sparse_macro_yaml_forms_preserve_canonical_path_existence(tmp_path: Path, path_fields: str):
+    import yaml
+    from integrations.executive_mcp.installed import (
+        _build_macro_materialization_plan, _default_packet_runner,
+        _frontmatter_lists, _installed_child_env, _materialized_macro_root,
+    )
+
+    macro, _head = _macro_sparse_fixture(tmp_path)
+    payload = ("---\n" + path_fields + "---\nbody\n").encode()
+    (macro / "agentos/workstreams/WS-SPARSE.md").write_bytes(payload)
+    (macro / "research/it's.md").write_text("evidence\n")
+    _git(macro, "add", ".")
+    _git(macro, "commit", "-q", "-m", "valid YAML path forms")
+    canonical = yaml.safe_load(path_fields)
+    assert _frontmatter_lists(payload) == canonical
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    plan = _build_macro_materialization_plan(
+        macro, runner=_default_packet_runner, env=env, deadline=None,
+    )
+    with _materialized_macro_root(macro, timeout=5.0, plan=plan) as materialized:
+        for relative in canonical["artifacts"]:
+            assert (materialized / relative).exists() == (macro / relative).exists() is True
+        assert (materialized / "data/probe").is_dir()
+        assert not (materialized / "research/its.md").exists()
 
 
 def _direct_pair_collector(tmp_path: Path):
