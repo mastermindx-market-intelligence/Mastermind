@@ -314,7 +314,7 @@ describe("window v2 tagged union and observed association", () => {
   it("does not associate an otherwise-qualified gapped v2 window", async () => {
     const selection = { workRef: "WS:B5", rootJobId: "JOB-100" };
     const mission = qualifyingMission();
-    const gapped = v2Window();
+    const gapped = v2Window() as any;
     gapped.view.coverage = "GAP_PRESENT";
     gapped.view.gaps = [
       { first: 1, last: 1, reason: "SOURCE_REPORTED_GAP" },
