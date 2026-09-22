@@ -510,7 +510,14 @@ def context() -> dict[str, Any]:
 
 def _empty_plane(status: str, reason: str, provenance: Any = None,
                  freshness: Any = None) -> dict[str, Any]:
-    """The inert plane payload: identity and status only, no readings."""
+    """The inert plane payload: identity and status only, no readings.
+
+    The KEY SET is identical to a present payload's — every reading is simply None or
+    'unknown'.  A payload whose shape changes with its status is a trap: a later wave
+    reading ``plane["state_family"]`` would work against a fresh artifact and KeyError
+    against a stale one, which is exactly the ad-hoc breakage the stable-shape rule in
+    #119 exists to prevent.
+    """
     return {
         "status": status,
         "reason": reason,
@@ -518,17 +525,23 @@ def _empty_plane(status: str, reason: str, provenance: Any = None,
         "authority": "shadow_advisory_inert",
         "direction_label": _UNKNOWN,
         "direction_vocabulary": "direction_label_enum",
+        "direction_sign": None,
         "quality": _UNKNOWN,
         "quality_vocabulary": "quality_enum",
+        "quality_status": None,
         "magnitude": None,
         "magnitude_unit": None,
         "magnitude_z": None,
         "magnitude_z_unit": None,
+        "magnitude_semantics": None,
         "coverage": None,
         "confidence": None,
         "confidence_kind": None,
         "breadth": None,
+        "monetary_coverage_ratio": None,
+        "funding_coverage_ratio": None,
         "credit_impulse_global": None,
+        "state_family": None,
         "state_asof": None,
         "observed_at": (freshness or {}).get("observed_at") if isinstance(freshness, dict) else None,
         "observed_date": (freshness or {}).get("observed_date") if isinstance(freshness, dict) else None,
@@ -544,7 +557,9 @@ def _empty_plane(status: str, reason: str, provenance: Any = None,
 def market_plane() -> dict[str, Any]:
     """Return the compact ``liquidity_transmission`` market_view plane payload.
 
-    ADVISORY / SHADOW / INERT.  It carries the producer's own vocabularies and both
+    ADVISORY / SHADOW / INERT.  The key set is the SAME in every status — absent, invalid,
+    stale and present differ only in their values — so a consumer can read a field without
+    first branching on status.  It carries the producer's own vocabularies and both
     magnitudes with their own unit strings; it never translates either into the
     market_view risk vocabulary (risk_off/neutral/risk_on) and never emits a bare
     magnitude.  Absent / invalid / stale → an inert payload that still names what it

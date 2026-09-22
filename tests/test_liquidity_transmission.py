@@ -366,6 +366,60 @@ class TestSemantics:
         assert mp["magnitude"] is None and mp["magnitude_z"] is None
 
 
+class TestStableShape:
+    """A payload whose key set changes with its status is a trap for later waves."""
+
+    def _plane_keys(self, glt):
+        return set(glt.market_plane().keys())
+
+    def _audit_keys(self, glt):
+        return set(glt.audit_row().keys())
+
+    def test_market_plane_key_set_is_identical_in_every_status(
+            self, tmp_path, monkeypatch, glt):
+        _patch_path(monkeypatch, _write(tmp_path, _freshen(_raw())))
+        present = self._plane_keys(glt)
+
+        _patch_path(monkeypatch, _write(tmp_path, _raw()))          # stale
+        assert self._plane_keys(glt) == present
+
+        _patch_path(monkeypatch, _write(tmp_path, "{bad"))          # absent
+        assert self._plane_keys(glt) == present
+
+        _patch_path(monkeypatch, _write(tmp_path, '{"meta": {}}'))  # invalid
+        assert self._plane_keys(glt) == present
+
+    def test_audit_row_key_set_is_identical_in_every_status(
+            self, tmp_path, monkeypatch, glt):
+        _patch_path(monkeypatch, _write(tmp_path, _freshen(_raw())))
+        present = self._audit_keys(glt)
+        for body in (_raw(), "{bad", '{"meta": {}}'):
+            _patch_path(monkeypatch, _write(tmp_path, body))
+            assert self._audit_keys(glt) == present
+
+    def test_reader_error_paths_keep_the_same_shape(self, tmp_path, monkeypatch, glt):
+        """Even the never-raise fallbacks return the full contract, not a stub."""
+        _patch_path(monkeypatch, _write(tmp_path, _freshen(_raw())))
+        plane_keys, audit_keys = self._plane_keys(glt), self._audit_keys(glt)
+
+        def _boom(*a, **k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(glt, "_snapshot", _boom)
+        assert set(glt.market_plane().keys()) == plane_keys
+        assert set(glt.audit_row().keys()) == audit_keys
+        assert glt.market_plane()["status"] == "absent"
+        assert glt.audit_row()["status"] == "absent"
+
+    def test_decision_signals_shape_is_stable_across_modes(self, monkeypatch, fresh):
+        keys = None
+        for mode in ("off", "shadow", "display", "candidacy", "context", "vote", "garbled"):
+            monkeypatch.setenv("MASTERMIND_GLT_MODE", mode)
+            k = set(fresh.decision_signals("SPY").keys())
+            keys = k if keys is None else keys
+            assert k == keys
+
+
 # --------------------------------------------------------------------------- #
 # authority ladder
 # --------------------------------------------------------------------------- #
