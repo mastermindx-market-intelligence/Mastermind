@@ -102,8 +102,14 @@ MAX_REQUEST_BYTES = 8192
 #: this bound is a protocol/backend defect and must refuse, never truncate.
 MAX_RESPONSE_BYTES = 32768
 
-# Closed internal read capabilities for the separately configured App peer.
+# Closed internal read capabilities for separately configured App peers.
+# v1 is the immutable BSC-E1 four-reader profile. v2 is the separately
+# versioned Web-CEO profile and does not change v1's admitted surface.
+# v3 is the static Web-CEO v2 profile (server 1.2.0) and likewise changes
+# neither earlier admitted surface.
 APP_READ_SCHEMA = "mastermind.executive_ceo_ingress_app_read.v1"
+APP_READ_SCHEMA_V2 = "mastermind.executive_ceo_ingress_app_read.v2"
+APP_READ_SCHEMA_V3 = "mastermind.executive_ceo_ingress_app_read.v3"
 APP_GROUNDING_SCHEMA = "mastermind.executive_ceo_ingress_app_grounding.v1"
 
 #: §7.2 — exact status id validation.

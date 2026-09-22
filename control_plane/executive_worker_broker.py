@@ -173,6 +173,9 @@ _OHF_OPERATIONS = frozenset(
         "ohf-deliver-attention",
         "ohf-collect-turn",
         "ohf-observe-turn",
+        "ohf-observer-enroll",
+        "ohf-observer-status",
+        "ohf-observer-revoke",
         "ohf-interrupt",
         "ohf-stop",
         "ohf-cancel",
@@ -1405,6 +1408,7 @@ class ExecutiveWorkerBroker:
                 ProcessGenerationRef,
                 ReconcileObservation,
                 BrowserReviewReceipt | None,
+                Any,  # Original bounded observer registry; no adapter/process.
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
@@ -1523,6 +1527,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
+        if operation in {"ohf-observer-enroll", "ohf-observer-status", "ohf-observer-revoke"}:
+            return await self._ohf_observer_lifecycle(operation, payload)
         if operation == "ohf-observe-turn":
             return await self._ohf_observe_turn(payload)
         if operation == "ohf-interrupt":
@@ -2168,6 +2174,65 @@ class ExecutiveWorkerBroker:
         finally:
             await self._operator_release_busy(state)
 
+    async def _ohf_observer_lifecycle(self, operation, payload):
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        if set(payload) != {"attempt", "epoch", "generation", "turn"} | binding_fields:
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        if any(not isinstance(v, str) or not 1 <= len(v) <= 256 for v in payload.values()):
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        binding = {name: payload[name] for name in binding_fields}
+        identity = (
+            payload["attempt"], payload["epoch"], payload["generation"], payload["turn"],
+        )
+        async with self._state_lock:
+            active = self._operator_run
+            same_active = active is not None and (
+                payload["attempt"] == active.epoch.attempt_id
+                and payload["epoch"] == active.epoch.session_epoch_id
+                and payload["generation"] == active.generation.process_generation_id
+            )
+            if not same_active:
+                if operation == "ohf-observer-enroll":
+                    raise BrokerStateError("UNKNOWN_GENERATION")
+                # Historical reconciliation uses the original registry already
+                # retained by the bounded terminal receipt owner. A different
+                # active run cannot replace or authorize this exact old binding.
+                terminal = self._operator_terminal.get(payload["generation"])
+                projection = terminal[3] if terminal is not None else None
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None,
+                            "turn_key": None, "grant_generation": None}
+                try:
+                    if operation == "ohf-observer-revoke":
+                        return projection.revoke_observer_by_binding(identity, **binding)
+                    return projection.observer_status_by_binding(identity, **binding)
+                except Exception as exc:
+                    code = getattr(exc, "code", None)
+                    raise BrokerStateError(
+                        code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
+                        else "GRANT_INVALIDATED"
+                    ) from None
+            state = active.adapter._generations.get(payload["generation"])
+            native = state.turns.get(payload["turn"]) if state else None
+            if not native:
+                raise BrokerStateError("TURN_NOT_BOUND")
+            key = TurnKey(payload["attempt"], payload["epoch"], payload["generation"],
+                          active.generation.generation_number, active.generation.worker_id,
+                          payload["turn"], native)
+            try:
+                if operation == "ohf-observer-enroll":
+                    turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
+                    result = active.adapter.mint_observer_grant(turn, binding=binding)
+                    return result
+                projection = getattr(active.adapter, "visible_turn_projection", None)
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None, "turn_key": None, "grant_generation": None}
+                method = projection.revoke_observer if operation == "ohf-observer-revoke" else projection.observer_status
+                return method(key, **binding)
+            except Exception as exc:
+                code = getattr(exc, "code", None)
+                raise BrokerStateError(code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"} else "GRANT_INVALIDATED") from None
+
     async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
         expected = {
             "attempt",
@@ -2178,7 +2243,9 @@ class ExecutiveWorkerBroker:
             "cursor",
             "max_items",
         }
-        if set(payload) != expected:
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        binding = {name: payload[name] for name in binding_fields if name in payload}
+        if set(payload) not in (expected, expected | binding_fields):
             raise BrokerStateError("ohf-observe-turn payload fields are invalid")
         identity_fields = (
             "attempt",
@@ -2214,6 +2281,9 @@ class ExecutiveWorkerBroker:
         if projection is None:
             self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
             raise BrokerStateError("UNKNOWN_GENERATION")
+        if not projection.check_observer_binding(payload["reader_grant"], binding):
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
         grant_key = projection.check_grant(payload["reader_grant"])
         if grant_key is None:
             self._observer_refusals.append((None, "READER_REVOKED"))
@@ -2526,10 +2596,14 @@ class ExecutiveWorkerBroker:
         artifact_receipt: BrowserReviewReceipt | None = None,
     ) -> None:
         async with self._state_lock:
+            projection = getattr(state.adapter, "visible_turn_projection", None)
+            if projection is not None:
+                projection.retire_generation(state.generation.process_generation_id)
             self._operator_terminal[state.generation.process_generation_id] = (
                 state.generation,
                 observation,
                 artifact_receipt,
+                projection,
             )
             self._operator_terminal.move_to_end(
                 state.generation.process_generation_id
@@ -2710,7 +2784,7 @@ class ExecutiveWorkerBroker:
                 generation.process_generation_id
             )
         if terminal_receipt is not None:
-            terminal_generation, terminal, artifact_receipt = terminal_receipt
+            terminal_generation, terminal, artifact_receipt, _projection = terminal_receipt
             if terminal_generation != generation:
                 raise BrokerProtocolError(
                     "operator terminal generation identity drifted"
