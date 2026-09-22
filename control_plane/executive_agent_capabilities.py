@@ -1457,7 +1457,7 @@ class ExecutionCapabilityRegistry:
             ):
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot grant MCP/plugins or resources "
-                    "to a sealed worker execution surface"
+                    f"to sealed worker execution surface {execution_surface!r}"
                 )
             is_browser_profile = profile_id == "operator.browser.local-review.v1"
             if is_browser_profile:
@@ -1498,7 +1498,7 @@ class ExecutionCapabilityRegistry:
                 if is_sealed_worker_execution_surface(execution_surface):
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} cannot grant skill_capabilities "
-                        "to a sealed worker execution surface"
+                        f"to sealed worker execution surface {execution_surface!r}"
                     )
                 if write_capable:
                     raise CapabilityPolicyError(
