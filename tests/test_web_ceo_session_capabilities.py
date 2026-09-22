@@ -22,7 +22,6 @@ OBSERVED_AT_MS = 1_789_870_000_000
 EXPIRES_AT_MS = 1_789_870_120_000
 NOW_MS = 1_789_870_060_000
 OBSERVER_DIGEST = "e" * 64
-ACTION_PARTITION_DIGEST = "a" * 64
 WORKER_ROUTE_DIGEST = "b" * 64
 
 
@@ -90,22 +89,50 @@ def _selection(
     return decision
 
 
+def _principal_action_owner_facts(
+    selection: c1.PlacementSelectionDecision,
+    *,
+    principal_required: frozenset[str] | None = None,
+    action_partition_source: SourceRef | None = None,
+    worker_route_source: SourceRef | None = None,
+    worker_route_digest: str = WORKER_ROUTE_DIGEST,
+) -> c1.PrincipalActionOwnerFacts:
+    required = (
+        principal_required
+        if principal_required is not None
+        else selection.demand.required_capabilities
+    )
+    return c1.PrincipalActionOwnerFacts(
+        principal_required_capabilities=tuple(sorted(required)),
+        action_partition_source=(
+            action_partition_source
+            or _source(SourceOwner.CAPACITY, "capacity-action-partition-current")
+        ),
+        worker_route_source=(
+            worker_route_source
+            or _source(SourceOwner.EXECUTIVE_OS, "executive-worker-route-current")
+        ),
+        worker_route_evidence_digest=worker_route_digest,
+    )
+
+
 def _principal_action_demand(
     selection: c1.PlacementSelectionDecision,
     *,
     principal_required: frozenset[str] | None = None,
-    action_partition_digest: str = ACTION_PARTITION_DIGEST,
+    action_partition_source: SourceRef | None = None,
+    worker_route_source: SourceRef | None = None,
     worker_route_digest: str = WORKER_ROUTE_DIGEST,
 ) -> c1.PrincipalActionDemandReceipt:
     return c1.build_principal_action_demand_receipt(
         decision=selection,
-        principal_required_capabilities=(
-            principal_required
-            if principal_required is not None
-            else selection.demand.required_capabilities
+        owner_facts=_principal_action_owner_facts(
+            selection,
+            principal_required=principal_required,
+            action_partition_source=action_partition_source,
+            worker_route_source=worker_route_source,
+            worker_route_digest=worker_route_digest,
         ),
-        action_partition_evidence_digest=action_partition_digest,
-        worker_route_evidence_digest=worker_route_digest,
     )
 
 
@@ -328,10 +355,8 @@ def _guard(
     *,
     selection: c1.PlacementSelectionDecision | None = None,
     principal_action_demand: c1.PrincipalActionDemandReceipt | None = None,
+    current_principal_action_facts: c1.PrincipalActionOwnerFacts | None = None,
     binding: wcap.CurrentSessionBindingFacts | None = None,
-    expected_principal_action_demand_digest: str | None = None,
-    expected_action_partition_digest: str | None = None,
-    expected_worker_route_digest: str | None = None,
     expected_contract_digest: str | None = None,
     expected_observer_digest: str | None = None,
     expected_serviceability_digest: str | None = None,
@@ -343,6 +368,19 @@ def _guard(
     action_demand = principal_action_demand or _principal_action_demand(
         bound_selection
     )
+    current_action_facts = (
+        current_principal_action_facts
+        or c1.PrincipalActionOwnerFacts(
+            principal_required_capabilities=(
+                action_demand.principal_required_capabilities
+            ),
+            action_partition_source=action_demand.action_partition_source,
+            worker_route_source=action_demand.worker_route_source,
+            worker_route_evidence_digest=(
+                action_demand.worker_route_evidence_digest
+            ),
+        )
+    )
     return wcap.build_guarded_commitment_plan_from_selection_decision(
         source_root_job_id="job-source-1",
         expected_source_root_revision=7,
@@ -351,18 +389,7 @@ def _guard(
         capability_receipt=receipt,
         current_binding=binding or _binding(),
         principal_action_demand=action_demand,
-        expected_principal_action_demand_digest=(
-            expected_principal_action_demand_digest
-            or action_demand.evidence_digest
-        ),
-        expected_action_partition_evidence_digest=(
-            expected_action_partition_digest
-            or action_demand.action_partition_evidence_digest
-        ),
-        expected_worker_route_evidence_digest=(
-            expected_worker_route_digest
-            or action_demand.worker_route_evidence_digest
-        ),
+        current_principal_action_facts=current_action_facts,
         expected_capability_contract_digest=(
             expected_contract_digest or receipt.capability_contract_digest
         ),
@@ -399,8 +426,9 @@ def test_v2_schema_and_guard_signature_are_pinned() -> None:
     ).parameters
     assert "current_binding" in guard_parameters
     assert "principal_action_demand" in guard_parameters
-    assert "expected_principal_action_demand_digest" in guard_parameters
-    assert "expected_worker_route_evidence_digest" in guard_parameters
+    assert "current_principal_action_facts" in guard_parameters
+    assert "expected_principal_action_demand_digest" not in guard_parameters
+    assert "expected_worker_route_evidence_digest" not in guard_parameters
     assert "required_capabilities" not in guard_parameters
     assert "receiver_binding_mode" not in guard_parameters
 
@@ -423,16 +451,11 @@ def test_effect_guard_derives_exact_session_mode_from_c1_demand() -> None:
         allowed_modes=frozenset({c1.PlacementMode.EXISTING_SESSION_REUSE}),
     )
     action_demand = _principal_action_demand(selection)
+    current_action_facts = _principal_action_owner_facts(selection)
     required, mode = wcap._placement_action_requirements(
         selection,
         principal_action_demand=action_demand,
-        expected_principal_action_demand_digest=action_demand.evidence_digest,
-        expected_action_partition_evidence_digest=(
-            action_demand.action_partition_evidence_digest
-        ),
-        expected_worker_route_evidence_digest=(
-            action_demand.worker_route_evidence_digest
-        ),
+        current_principal_action_facts=current_action_facts,
     )
     assert required == frozenset({"executive_submit"})
     assert mode is wcap.ReceiverBindingMode.EXACT_SESSION_REQUIRED
@@ -473,6 +496,88 @@ def test_principal_action_demand_wire_round_trip_is_closed() -> None:
         rebuilt.selection_document_digest
         == c1.placement_selection_document_digest(selection)
     )
+
+
+def test_principal_action_partition_digest_is_subset_bound() -> None:
+    selection = _selection(
+        required_capabilities=frozenset(
+            {"executive_submit", "studio_direct_write"}
+        )
+    )
+    canonical_facts = _principal_action_owner_facts(selection)
+    canonical = c1.build_principal_action_demand_receipt(
+        decision=selection,
+        owner_facts=canonical_facts,
+    )
+    narrowed = _principal_action_owner_facts(
+        selection,
+        principal_required=frozenset({"executive_submit"}),
+    )
+
+    assert (
+        narrowed.action_partition_evidence_digest
+        != canonical.action_partition_evidence_digest
+    )
+    with pytest.raises(ValueError, match="action partition evidence digest mismatch"):
+        c1.PrincipalActionDemandReceipt(
+            selection_document_digest=canonical.selection_document_digest,
+            principal_required_capabilities=narrowed.principal_required_capabilities,
+            action_partition_source=canonical.action_partition_source,
+            action_partition_evidence_digest=(
+                canonical.action_partition_evidence_digest
+            ),
+            worker_route_source=canonical.worker_route_source,
+            worker_route_evidence_digest=canonical.worker_route_evidence_digest,
+        )
+
+
+def test_principal_action_partition_requires_current_capacity_owner() -> None:
+    selection = _selection()
+    with pytest.raises(ValueError, match="action_partition_source owner must be capacity"):
+        _principal_action_owner_facts(
+            selection,
+            action_partition_source=_source(
+                SourceOwner.EXECUTIVE_OS,
+                "executive-not-capacity-partition",
+            ),
+        )
+
+    stale = SourceRef(
+        owner=SourceOwner.CAPACITY,
+        ref="capacity-action-partition-stale",
+        observed_at="2026-09-19T00:00:00Z",
+        freshness=Freshness.STALE,
+    )
+    with pytest.raises(ValueError, match="action_partition_source must be current"):
+        _principal_action_owner_facts(
+            selection,
+            action_partition_source=stale,
+        )
+
+
+def test_worker_route_source_rollover_invalidates_principal_action_partition() -> None:
+    selection = _selection(
+        required_capabilities=frozenset({"executive_submit"})
+    )
+    action_demand = _principal_action_demand(selection)
+    changed_route_facts = _principal_action_owner_facts(
+        selection,
+        worker_route_source=_source(
+            SourceOwner.EXECUTIVE_OS,
+            "executive-worker-route-generation-2",
+        ),
+    )
+
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="PRINCIPAL_ACTION_DEMAND_RECONCILIATION_REQUIRED",
+    ):
+        _guard(
+            _receipt(),
+            selection=selection,
+            principal_action_demand=action_demand,
+            current_principal_action_facts=changed_route_facts,
+        )
 
 
 def test_worker_local_host_write_does_not_block_principal_submit_start() -> None:
@@ -567,12 +672,20 @@ def test_principal_action_subset_is_bound_and_cannot_be_caller_narrowed() -> Non
             {"executive_submit", "studio_direct_write"}
         )
     )
-    canonical = _principal_action_demand(selection)
+    canonical_facts = _principal_action_owner_facts(selection)
+    canonical = c1.build_principal_action_demand_receipt(
+        decision=selection,
+        owner_facts=canonical_facts,
+    )
     narrowed = _principal_action_demand(
         selection,
         principal_required=frozenset({"executive_submit"}),
     )
     assert narrowed.evidence_digest != canonical.evidence_digest
+    assert (
+        narrowed.action_partition_evidence_digest
+        != canonical.action_partition_evidence_digest
+    )
 
     with pytest.raises(
         wcap.WebCeoSessionCapabilityError,
@@ -582,7 +695,7 @@ def test_principal_action_subset_is_bound_and_cannot_be_caller_narrowed() -> Non
             _receipt(),
             selection=selection,
             principal_action_demand=narrowed,
-            expected_principal_action_demand_digest=canonical.evidence_digest,
+            current_principal_action_facts=canonical_facts,
         )
 
 
@@ -591,6 +704,10 @@ def test_worker_route_change_invalidates_principal_action_partition() -> None:
         required_capabilities=frozenset({"executive_submit"})
     )
     action_demand = _principal_action_demand(selection)
+    changed_route_facts = _principal_action_owner_facts(
+        selection,
+        worker_route_digest="c" * 64,
+    )
 
     with pytest.raises(
         wcap.WebCeoSessionCapabilityError,
@@ -600,7 +717,7 @@ def test_worker_route_change_invalidates_principal_action_partition() -> None:
             _receipt(),
             selection=selection,
             principal_action_demand=action_demand,
-            expected_worker_route_digest="c" * 64,
+            current_principal_action_facts=changed_route_facts,
         )
 
 

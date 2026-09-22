@@ -1091,48 +1091,38 @@ def _placement_action_requirements(
     decision: c1.PlacementSelectionDecision,
     *,
     principal_action_demand: c1.PrincipalActionDemandReceipt,
-    expected_principal_action_demand_digest: str,
-    expected_action_partition_evidence_digest: str,
-    expected_worker_route_evidence_digest: str,
+    current_principal_action_facts: c1.PrincipalActionOwnerFacts,
 ) -> tuple[frozenset[str], ReceiverBindingMode]:
-    """Consume C1-owned principal-local action demand without guessing locality.
+    """Consume source-attributed principal-local action demand at C2 time.
 
     General PlacementDemand capabilities may include downstream worker-local
-    requirements. Only the C1 sidecar may identify what this concrete
-    principal must invoke. The sidecar is bound to the immutable selection and
-    to current partition/worker-route evidence, so action-time callers cannot
-    silently narrow the principal requirement set after selection.
+    requirements. The C1 receipt carries the exact principal subset plus its
+    Capacity and worker-route provenance. At the effect boundary we compare it
+    to freshly supplied owner facts; no parallel caller-owned "expected"
+    digest can self-certify a narrowed subset.
     """
 
     if not isinstance(principal_action_demand, c1.PrincipalActionDemandReceipt):
         raise WebCeoSessionCapabilityError("PRINCIPAL_ACTION_DEMAND_INVALID")
-    for value, code in (
-        (
-            expected_principal_action_demand_digest,
-            "EXPECTED_PRINCIPAL_ACTION_DEMAND_DIGEST_INVALID",
-        ),
-        (
-            expected_action_partition_evidence_digest,
-            "EXPECTED_ACTION_PARTITION_EVIDENCE_DIGEST_INVALID",
-        ),
-        (
-            expected_worker_route_evidence_digest,
-            "EXPECTED_WORKER_ROUTE_EVIDENCE_DIGEST_INVALID",
-        ),
-    ):
-        if not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None:
-            raise WebCeoSessionCapabilityError(code)
+    if not isinstance(current_principal_action_facts, c1.PrincipalActionOwnerFacts):
+        raise WebCeoSessionCapabilityError(
+            "CURRENT_PRINCIPAL_ACTION_FACTS_INVALID"
+        )
 
     demand = decision.demand
     if (
         principal_action_demand.selection_document_digest
         != c1.placement_selection_document_digest(decision)
-        or principal_action_demand.evidence_digest
-        != expected_principal_action_demand_digest
+        or principal_action_demand.principal_required_capabilities
+        != current_principal_action_facts.principal_required_capabilities
+        or principal_action_demand.action_partition_source
+        != current_principal_action_facts.action_partition_source
         or principal_action_demand.action_partition_evidence_digest
-        != expected_action_partition_evidence_digest
+        != current_principal_action_facts.action_partition_evidence_digest
+        or principal_action_demand.worker_route_source
+        != current_principal_action_facts.worker_route_source
         or principal_action_demand.worker_route_evidence_digest
-        != expected_worker_route_evidence_digest
+        != current_principal_action_facts.worker_route_evidence_digest
     ):
         raise WebCeoSessionCapabilityError(
             "PRINCIPAL_ACTION_DEMAND_RECONCILIATION_REQUIRED"
@@ -1167,9 +1157,7 @@ def build_guarded_commitment_plan_from_selection_decision(
     capability_receipt: WebCeoSessionCapabilityReceipt,
     current_binding: CurrentSessionBindingFacts,
     principal_action_demand: c1.PrincipalActionDemandReceipt,
-    expected_principal_action_demand_digest: str,
-    expected_action_partition_evidence_digest: str,
-    expected_worker_route_evidence_digest: str,
+    current_principal_action_facts: c1.PrincipalActionOwnerFacts,
     expected_capability_contract_digest: str,
     expected_observer_evidence_digest: str,
     expected_serviceability_evidence_digest: str,
@@ -1186,15 +1174,7 @@ def build_guarded_commitment_plan_from_selection_decision(
     required_capabilities, receiver_binding_mode = _placement_action_requirements(
         placement_selection,
         principal_action_demand=principal_action_demand,
-        expected_principal_action_demand_digest=(
-            expected_principal_action_demand_digest
-        ),
-        expected_action_partition_evidence_digest=(
-            expected_action_partition_evidence_digest
-        ),
-        expected_worker_route_evidence_digest=(
-            expected_worker_route_evidence_digest
-        ),
+        current_principal_action_facts=current_principal_action_facts,
     )
     wire = placement_selection.to_dict()
     selected = wire.get("selected")

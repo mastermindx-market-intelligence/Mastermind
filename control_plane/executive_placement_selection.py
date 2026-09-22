@@ -865,25 +865,110 @@ def _require_sha256(name: str, value: object) -> str:
     return value
 
 
+_ACTION_PARTITION_SOURCE_OWNERS = (SourceOwner.CAPACITY,)
+_WORKER_ROUTE_SOURCE_OWNERS = (SourceOwner.CAPACITY, SourceOwner.EXECUTIVE_OS)
+
+
+def _require_current_owner_source(
+    source: object,
+    *,
+    allowed: tuple[SourceOwner, ...],
+    fact_name: str,
+) -> SourceRef:
+    bound = _require_source_owner(source, allowed, fact_name)
+    if bound.freshness is not Freshness.CURRENT:
+        raise ValueError(f"{fact_name} must be current")
+    return bound
+
+
+def _principal_capability_tuple(value: object) -> tuple[str, ...]:
+    if (
+        not isinstance(value, tuple)
+        or not value
+        or tuple(sorted(value)) != value
+        or len(set(value)) != len(value)
+    ):
+        raise ValueError(
+            "principal_required_capabilities must be a non-empty sorted unique tuple"
+        )
+    for capability in value:
+        _require_token("principal_required_capabilities item", capability)
+    return value
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PrincipalActionOwnerFacts:
+    """Current owner facts used to mint/revalidate one principal-action partition."""
+
+    principal_required_capabilities: tuple[str, ...]
+    action_partition_source: SourceRef
+    worker_route_source: SourceRef
+    worker_route_evidence_digest: str
+
+    def __post_init__(self) -> None:
+        _principal_capability_tuple(self.principal_required_capabilities)
+        _require_current_owner_source(
+            self.action_partition_source,
+            allowed=_ACTION_PARTITION_SOURCE_OWNERS,
+            fact_name="action_partition_source",
+        )
+        _require_current_owner_source(
+            self.worker_route_source,
+            allowed=_WORKER_ROUTE_SOURCE_OWNERS,
+            fact_name="worker_route_source",
+        )
+        _require_sha256(
+            "worker_route_evidence_digest", self.worker_route_evidence_digest
+        )
+
+    @property
+    def action_partition_evidence_digest(self) -> str:
+        return digest(
+            {
+                "principal_required_capabilities": list(
+                    self.principal_required_capabilities
+                ),
+                "action_partition_source": _source_ref_dict(
+                    self.action_partition_source
+                ),
+            }
+        )
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class PrincipalActionDemandReceipt:
     """C1-owned sidecar binding principal-local actions to one selection.
 
-    The existing placement demand remains the broad capability requirement
-    used for candidate eligibility. This receipt carries only the subset the
-    selected Web principal itself must invoke. It is separately bound to
-    current partition-owner and downstream-worker-route evidence so a route
-    change cannot silently reuse an older locality decision.
+    It carries source-attributed current owner facts rather than caller-owned
+    expectation strings. The action-partition digest is mechanically derived
+    from the exact principal subset plus Capacity source, so narrowing the
+    subset changes the digest. Worker-route evidence remains a distinct owner
+    fact and is re-read at the C2 effect boundary.
     """
 
     selection_document_digest: str
     principal_required_capabilities: tuple[str, ...]
+    action_partition_source: SourceRef
     action_partition_evidence_digest: str
+    worker_route_source: SourceRef
     worker_route_evidence_digest: str
 
     def __post_init__(self) -> None:
         _require_sha256(
             "selection_document_digest", self.selection_document_digest
+        )
+        principal = _principal_capability_tuple(
+            self.principal_required_capabilities
+        )
+        action_source = _require_current_owner_source(
+            self.action_partition_source,
+            allowed=_ACTION_PARTITION_SOURCE_OWNERS,
+            fact_name="action_partition_source",
+        )
+        _require_current_owner_source(
+            self.worker_route_source,
+            allowed=_WORKER_ROUTE_SOURCE_OWNERS,
+            fact_name="worker_route_source",
         )
         _require_sha256(
             "action_partition_evidence_digest",
@@ -892,24 +977,14 @@ class PrincipalActionDemandReceipt:
         _require_sha256(
             "worker_route_evidence_digest", self.worker_route_evidence_digest
         )
-        if (
-            not isinstance(self.principal_required_capabilities, tuple)
-            or not self.principal_required_capabilities
-        ):
-            raise ValueError(
-                "principal_required_capabilities must be a non-empty tuple"
-            )
-        if (
-            tuple(sorted(self.principal_required_capabilities))
-            != self.principal_required_capabilities
-            or len(set(self.principal_required_capabilities))
-            != len(self.principal_required_capabilities)
-        ):
-            raise ValueError(
-                "principal_required_capabilities must be sorted and unique"
-            )
-        for capability in self.principal_required_capabilities:
-            _require_token("principal_required_capabilities item", capability)
+        expected_partition = digest(
+            {
+                "principal_required_capabilities": list(principal),
+                "action_partition_source": _source_ref_dict(action_source),
+            }
+        )
+        if self.action_partition_evidence_digest != expected_partition:
+            raise ValueError("action partition evidence digest mismatch")
 
     def _evidence_body(self) -> dict[str, Any]:
         return {
@@ -918,9 +993,13 @@ class PrincipalActionDemandReceipt:
             "principal_required_capabilities": list(
                 self.principal_required_capabilities
             ),
+            "action_partition_source": _source_ref_dict(
+                self.action_partition_source
+            ),
             "action_partition_evidence_digest": (
                 self.action_partition_evidence_digest
             ),
+            "worker_route_source": _source_ref_dict(self.worker_route_source),
             "worker_route_evidence_digest": self.worker_route_evidence_digest,
         }
 
@@ -939,7 +1018,9 @@ _PRINCIPAL_ACTION_DEMAND_KEYS = frozenset(
         "schema_version",
         "selection_document_digest",
         "principal_required_capabilities",
+        "action_partition_source",
         "action_partition_evidence_digest",
+        "worker_route_source",
         "worker_route_evidence_digest",
         "evidence_digest",
     }
@@ -957,36 +1038,30 @@ def placement_selection_document_digest(
 def build_principal_action_demand_receipt(
     *,
     decision: PlacementSelectionDecision,
-    principal_required_capabilities: frozenset[str],
-    action_partition_evidence_digest: str,
-    worker_route_evidence_digest: str,
+    owner_facts: PrincipalActionOwnerFacts,
 ) -> PrincipalActionDemandReceipt:
-    """Bind owner-issued principal-local action demand to immutable C1."""
+    """Bind source-attributed owner facts to one immutable C1 selection."""
 
     if not isinstance(decision, PlacementSelectionDecision):
         raise TypeError("decision must be PlacementSelectionDecision")
     if decision.state is not SelectionState.SELECTED:
         raise ValueError("principal action demand requires selected placement")
-    principal = _require_capability_set(
-        "principal_required_capabilities", principal_required_capabilities
-    )
-    if not principal:
-        raise ValueError("principal_required_capabilities must not be empty")
+    if not isinstance(owner_facts, PrincipalActionOwnerFacts):
+        raise TypeError("owner_facts must be PrincipalActionOwnerFacts")
+    principal = frozenset(owner_facts.principal_required_capabilities)
     if not principal.issubset(decision.demand.required_capabilities):
         raise ValueError(
             "principal_required_capabilities must be a subset of placement demand"
         )
     return PrincipalActionDemandReceipt(
         selection_document_digest=placement_selection_document_digest(decision),
-        principal_required_capabilities=tuple(sorted(principal)),
-        action_partition_evidence_digest=_require_sha256(
-            "action_partition_evidence_digest",
-            action_partition_evidence_digest,
+        principal_required_capabilities=owner_facts.principal_required_capabilities,
+        action_partition_source=owner_facts.action_partition_source,
+        action_partition_evidence_digest=(
+            owner_facts.action_partition_evidence_digest
         ),
-        worker_route_evidence_digest=_require_sha256(
-            "worker_route_evidence_digest",
-            worker_route_evidence_digest,
-        ),
+        worker_route_source=owner_facts.worker_route_source,
+        worker_route_evidence_digest=owner_facts.worker_route_evidence_digest,
     )
 
 
@@ -1003,12 +1078,28 @@ def validate_principal_action_demand_receipt(
     principal = raw.get("principal_required_capabilities")
     if not isinstance(principal, list):
         raise ValueError("principal_required_capabilities must be a list")
+    action_partition_source = _source_ref_from_dict(
+        _validate_source_ref_dict(
+            raw["action_partition_source"],
+            name="action_partition_source",
+            allowed=_ACTION_PARTITION_SOURCE_OWNERS,
+        )
+    )
+    worker_route_source = _source_ref_from_dict(
+        _validate_source_ref_dict(
+            raw["worker_route_source"],
+            name="worker_route_source",
+            allowed=_WORKER_ROUTE_SOURCE_OWNERS,
+        )
+    )
     receipt = PrincipalActionDemandReceipt(
         selection_document_digest=raw["selection_document_digest"],
         principal_required_capabilities=tuple(principal),
+        action_partition_source=action_partition_source,
         action_partition_evidence_digest=raw[
             "action_partition_evidence_digest"
         ],
+        worker_route_source=worker_route_source,
         worker_route_evidence_digest=raw["worker_route_evidence_digest"],
     )
     if raw["evidence_digest"] != receipt.evidence_digest:
