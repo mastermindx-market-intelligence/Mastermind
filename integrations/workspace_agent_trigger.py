@@ -197,9 +197,9 @@ def trigger_once(
     """Submit exactly one POST and never retry, redirect, or infer no effect.
 
     Any transport failure after the effect boundary becomes TRIGGER_EFFECT_UNKNOWN.
-    A received 202 establishes provider queue acceptance only. The supported
-    contract exposes no response body/run id, so this path never reads a success
-    body and never grants company acceptance or Wake acknowledgement.
+    A received 202 establishes provider queue acceptance only. This admitted
+    profile requests no beta run correlation and never reads a success body, so
+    it never grants company acceptance or Wake acknowledgement.
     """
 
     if type(plan) is not WorkspaceAgentTriggerPlan:

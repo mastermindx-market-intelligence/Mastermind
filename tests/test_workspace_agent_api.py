@@ -116,8 +116,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(result["network_methods"], [])
         self.assertIsNone(result["network_host"])
-        self.assertFalse(result["trigger_response_body_supported"])
-        self.assertFalse(result["run_status_supported"])
+        self.assertFalse(result["success_body_consumed"])
+        self.assertFalse(result["beta_run_observation_admitted"])
         self.assertFalse(result["can_trigger"])
         self.assertFalse(result["registered_with_executive"])
 

@@ -99,7 +99,7 @@ def decode_run(
     observed_at: int,
     expected_conversation_url: str | None = None,
 ) -> RunObservation:
-    """Fail closed for the previously researched but unsupported run-status API."""
+    """Fail closed because beta run observation is not admitted by Mastermind."""
 
     del status, body, expected_conversation_url
     channel = validate_channel_id(channel_id)
