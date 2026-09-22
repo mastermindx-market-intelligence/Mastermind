@@ -84,6 +84,15 @@ test('descriptions disclose command, access-policy and external-data effects', (
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /usage|statistics/i);
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /identifier/i);
 });
+test('generic terminal tools steer bounded commissions to semantic actions', () => {
+  for (const name of ['start_process', 'interact_with_process']) {
+    const description = tools.get(name).description;
+    assert.match(description, /not (?:as|to) (?:a )?(?:transport|relay)/i, name);
+    assert.match(description, /nested agent instructions|worker handoffs/i, name);
+    assert.match(description, /Executive|Workbench/i, name);
+  }
+});
+
 test('catalog hardening preserves caller schemas and the existing page reader', () => {
   assert.deepEqual(tools.get('start_process').inputSchema,
     {type: 'object', properties: {}, additionalProperties: false});
