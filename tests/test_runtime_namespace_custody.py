@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import fcntl
 import gc
 import json
@@ -211,6 +212,87 @@ def test_arbitrary_symlink_is_refused_without_opening_target(owned, tmp_path):
     assert owner._canonical(alias) == alias
     with pytest.raises(RuntimeReadUnavailable):
         owner._seal_chain(alias)
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='Darwin search-only descriptors')
+@pytest.mark.parametrize('missing_search_symbols', [False, True])
+def test_darwin_custody_accepts_traverse_only_ancestor(
+    tmp_path, monkeypatch, missing_search_symbols,
+):
+    if os.geteuid() == 0:
+        pytest.skip('requires an unprivileged UID to enforce directory permissions')
+    if missing_search_symbols:
+        monkeypatch.delattr(os, 'O_SEARCH', raising=False)
+        monkeypatch.delattr(os, 'O_EXEC', raising=False)
+    ancestor = tmp_path.resolve() / 'traverse-only'
+    private = ancestor / 'private'
+    private.mkdir(parents=True, mode=0o700)
+    ancestor.chmod(0o111)
+    owner = None
+    fd = None
+    try:
+        with pytest.raises(PermissionError) as refusal:
+            os.open(ancestor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        assert refusal.value.errno == errno.EACCES
+        runtime, owner, fd = make_owner(private)
+        with owner.bound_runtime(runtime).store.read() as connection:
+            assert connection.execute('SELECT COUNT(*) FROM events').fetchone()[0] == 0
+        assert ancestor.stat().st_mode & 0o777 == 0o111
+        seal = os.fstat(owner._fds[ancestor])
+        named = ancestor.lstat()
+        assert (seal.st_dev, seal.st_ino) == (named.st_dev, named.st_ino)
+    finally:
+        try:
+            if owner is not None:
+                owner.close()
+            if fd is not None:
+                os.close(fd)
+        finally:
+            ancestor.chmod(0o700)
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='Darwin search-only descriptors')
+def test_darwin_search_flags_apply_only_to_directories(owned, tmp_path, monkeypatch):
+    _, owner = owned
+    directory = tmp_path / 'unsealed-directory'
+    directory.mkdir()
+    file = directory / 'private-file'
+    file.write_bytes(b'fixture')
+    file.chmod(0o600)
+    opened = []
+    original_open = os.open
+
+    def recording_open(path, flags, *args, **kwargs):
+        opened.append((path, flags))
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, 'open', recording_open)
+    owner._seal(directory, directory=True)
+    owner._seal(file)
+    assert opened == [
+        (directory, getattr(os, 'O_SEARCH', 0x40000000 | os.O_DIRECTORY) | os.O_NOFOLLOW),
+        (file, os.O_RDONLY | os.O_NOFOLLOW),
+    ]
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='Darwin search-only descriptors')
+@pytest.mark.parametrize('missing_flag', ['O_DIRECTORY', 'O_NOFOLLOW'])
+def test_darwin_missing_search_flags_refuse_before_open(
+    owned, tmp_path, monkeypatch, missing_flag,
+):
+    _, owner = owned
+    directory = tmp_path / 'unsealed-directory'
+    directory.mkdir()
+    monkeypatch.delattr(os, missing_flag)
+
+    def unexpected_open(*args, **kwargs):
+        pytest.fail('missing directory search flags must refuse before opening')
+
+    monkeypatch.setattr(os, 'open', unexpected_open)
+    with pytest.raises(RuntimeReadUnavailable, match='directory search flags unavailable'):
+        owner._seal(directory, directory=True)
+    assert directory not in owner._fds
+    assert directory not in owner._seals
 
 
 def test_darwin_var_alias_is_explicit_and_sealed(owned):
