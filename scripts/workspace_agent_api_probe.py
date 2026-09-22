@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument(
         "--read-run",
         action="store_true",
-        help="Compatibility flag: run polling is unsupported and performs no network.",
+        help="Compatibility flag: beta run observation is not admitted and performs no network.",
     )
     parser.add_argument("--channel")
     parser.add_argument("--run")

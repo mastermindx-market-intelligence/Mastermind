@@ -133,7 +133,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result["reason"], "ACCEPTED_UNCORRELATED")
         self.assertFalse(result["correlation_available"])
 
-    def test_cli_run_decode_is_explicitly_unsupported(self):
+    def test_cli_run_decode_is_explicitly_not_admitted(self):
         rc, result = self.invoke(
             "--decode-run",
             "--http-status",
