@@ -89,7 +89,7 @@ test('generic terminal tools steer bounded commissions to semantic actions', () 
     const description = tools.get(name).description;
     assert.match(description, /not (?:as|to) (?:a )?(?:transport|relay)/i, name);
     assert.match(description, /nested agent instructions|worker handoffs/i, name);
-    assert.match(description, /Executive|Workbench/i, name);
+    assert.match(description, /purpose-built work-submission/i, name);
   }
 });
 
