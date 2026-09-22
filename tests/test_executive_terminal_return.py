@@ -35,6 +35,7 @@ from control_plane.executive_runtime import (
 from control_plane.executive_supervisor import ExecutiveSupervisor
 from control_plane.executive_terminal_return import (
     TerminalReturnError,
+    TerminalReviewFinding,
     reduce_terminal_return,
 )
 from tests.test_executive_os_phase1fc import (
@@ -530,6 +531,101 @@ def test_reducer_is_deterministic_and_preserves_review_verdict_shape(
 
     assert first == second
     assert first.review_verdict == verdict
+
+
+def test_reducer_preserves_review_findings_and_next_actions_from_sealed_result(
+    tmp_path,
+) -> None:
+    runtime, job, attempt = _completed_review(tmp_path, "reject")
+    material = runtime.validated_role_completion(
+        job.job_id,
+        expected_attempt_id=attempt.attempt_id,
+    )
+    changed = dict(material.result_envelope)
+    role_result = dict(changed["role_result"])
+    role_result["findings"] = [
+        {
+            "code": "MISSING_DATA",
+            "severity": "blocking",
+            "message": "Missing data can overstate confidence.",
+            "evidence_digests": ["a" * 64],
+        },
+        {
+            "code": "LANG_PARITY",
+            "severity": "warning",
+            "message": "English and Chinese states diverge.",
+            "evidence_digests": [],
+        },
+    ]
+    changed["role_result"] = role_result
+    changed["next_actions"] = ["Repair both findings.", "Rerun independent review."]
+    changed_digest = canonical_digest(changed)
+    terminal_receipt = dict(material.terminal_receipt)
+    terminal_receipt["result_envelope_digest"] = changed_digest
+    candidate = reduce_terminal_return(
+        material=dataclasses.replace(
+            material,
+            result_envelope=changed,
+            terminal_receipt=terminal_receipt,
+            result_digest=changed_digest,
+            role_result_digest=canonical_digest(role_result),
+        )
+    )
+
+    assert candidate.next_actions == (
+        "Repair both findings.",
+        "Rerun independent review.",
+    )
+    assert candidate.review_findings == (
+        TerminalReviewFinding(
+            code="MISSING_DATA",
+            severity="blocking",
+            message="Missing data can overstate confidence.",
+            evidence_digests=("a" * 64,),
+        ),
+        TerminalReviewFinding(
+            code="LANG_PARITY",
+            severity="warning",
+            message="English and Chinese states diverge.",
+        ),
+    )
+
+
+def test_reducer_refuses_malformed_review_findings_even_after_terminal_seal(
+    tmp_path,
+) -> None:
+    runtime, job, attempt = _completed_review(tmp_path, "reject")
+    material = runtime.validated_role_completion(
+        job.job_id,
+        expected_attempt_id=attempt.attempt_id,
+    )
+    changed = dict(material.result_envelope)
+    role_result = dict(changed["role_result"])
+    role_result["findings"] = [
+        {
+            "code": "BROKEN",
+            "severity": "critical",
+            "message": "unsupported severity",
+            "evidence_digests": [],
+        }
+    ]
+    changed["role_result"] = role_result
+    changed_digest = canonical_digest(changed)
+    terminal_receipt = dict(material.terminal_receipt)
+    terminal_receipt["result_envelope_digest"] = changed_digest
+
+    with pytest.raises(TerminalReturnError) as refused:
+        reduce_terminal_return(
+            material=dataclasses.replace(
+                material,
+                result_envelope=changed,
+                terminal_receipt=terminal_receipt,
+                result_digest=changed_digest,
+                role_result_digest=canonical_digest(role_result),
+            )
+        )
+
+    assert refused.value.code == "EVIDENCE_REFUSED"
 
 
 @pytest.mark.parametrize(
