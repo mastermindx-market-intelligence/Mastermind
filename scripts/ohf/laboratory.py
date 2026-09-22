@@ -531,6 +531,7 @@ class AppServerClient:
         message: dict[str, Any] = {"method": method, "id": request_id}
         if params is not None:
             message["params"] = dict(params)
+        payload: dict[str, Any] | None = None
         try:
             self._send(message)
             try:

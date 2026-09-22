@@ -4,7 +4,11 @@ The port is deliberately narrower than a filesystem API. Preparation is
 read-only. Commit consumes one signed prepared action and performs at most one
 same-directory atomic file publication after a durable per-action claim.
 Reconciliation never replays a write and never infers an effect from current
-project bytes alone.
+project bytes alone.  An action with no artifact at all is ``NOT_APPLIED`` only
+when the entry point's durable pre-dispatch admission ledger proves the commit
+was refused before dispatch and never accepted for that exact reference, and
+the source still reads as never patched; absent that proof it stays
+``EFFECT_UNKNOWN``.
 
 Attended F0 write paths are direct children of the owned project root.
 Arbitrary POSIX rename is publication, not compare-and-swap against a
@@ -84,6 +88,11 @@ class ProjectActionRefused(Exception):
 
 ActionBindingResolver = Callable[[ActionCaller, str], ProjectActionBinding | None]
 ActionExecutor = Callable[[Callable[[], dict[str, Any]]], Awaitable[dict[str, Any]]]
+# Durable pre-dispatch admission verdict for one exact action reference, owned
+# by the entry point that audits admission.  Only this exact verdict may ever
+# turn artifact absence into NOT_APPLIED.
+AdmissionEvidence = Callable[[object], str]
+ADMISSION_REFUSED_ONLY = "REFUSED_ONLY"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -742,11 +751,19 @@ def create_text_patch_port(
     artifact_store: ActionArtifactStore,
     host: ActionHostBinding,
     action_ttl_ms: int = MAX_ACTION_TTL_MS,
+    admission_evidence: AdmissionEvidence | None = None,
 ):
-    """Create prepare/commit/reconcile callbacks over existing owner services."""
+    """Create prepare/commit/reconcile callbacks over existing owner services.
+
+    ``admission_evidence`` is the entry point's durable pre-dispatch admission
+    reader.  Without it (the OAuth adapter), artifact absence stays
+    ``EFFECT_UNKNOWN`` exactly as before.
+    """
 
     if not all(callable(value) for value in (resolve_binding, clock_ms, run_io)):
         raise TypeError("explicit binding, clock and I/O integration required")
+    if admission_evidence is not None and not callable(admission_evidence):
+        raise TypeError("admission evidence must be callable")
     if not isinstance(token_codec, ActionTokenCodec):
         raise TypeError("explicit action token codec required")
     if type(action_ttl_ms) is not int or not 1000 <= action_ttl_ms <= MAX_ACTION_TTL_MS:
@@ -970,6 +987,36 @@ def create_text_patch_port(
             observed_sha256=observed_sha256,
         )
 
+    def _unclaimed_effect(
+        prepared: PreparedTextPatch,
+        action_ref: object,
+        *,
+        observed_sha256: str | None,
+        observation_ok: bool,
+    ) -> str:
+        # No claim artifact exists.  Absence alone is never NOT_APPLIED: the
+        # commit may have been admitted and lost before its claim.  It becomes
+        # NOT_APPLIED only when the durable admission ledger proves the commit
+        # was refused before dispatch and never accepted for this exact
+        # reference, and the source still reads as never patched.  The ledger
+        # is consulted last so a commit admitted during this read is seen.
+        if admission_evidence is None or not observation_ok:
+            return "EFFECT_UNKNOWN"
+        if prepared.mode == "CREATE":
+            untouched = observed_sha256 is None
+        else:
+            untouched = (
+                observed_sha256 is not None
+                and observed_sha256 == prepared.preimage_sha256
+            )
+        if not untouched:
+            return "EFFECT_UNKNOWN"
+        try:
+            verdict = admission_evidence(action_ref)
+        except Exception:
+            return "EFFECT_UNKNOWN"
+        return "NOT_APPLIED" if verdict == ADMISSION_REFUSED_ONLY else "EFFECT_UNKNOWN"
+
     async def commit(caller: ActionCaller, action_ref: object) -> Mapping[str, Any]:
         prepared = _decode_for_caller(caller, action_ref, evidence=False)
         original = _binding_for_prepared(caller, prepared)
@@ -1120,14 +1167,24 @@ def create_text_patch_port(
                 or live.inode != prepared.artifact_store_inode
             ):
                 return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=None)
+            observed = None
+            observation_ok = True
             try:
                 observed = _observe(store, current.scope, prepared.relative_path)
             except ProjectActionRefused:
-                observed = None
+                observation_ok = False
             existing = _classified_receipt(prepared, observed_sha256=observed)
             if existing is not None:
                 return existing
-            return _receipt(effect_state="EFFECT_UNKNOWN", observed_sha256=observed)
+            return _receipt(
+                effect_state=_unclaimed_effect(
+                    prepared,
+                    action_ref,
+                    observed_sha256=observed,
+                    observation_ok=observation_ok,
+                ),
+                observed_sha256=observed,
+            )
 
         pending = run_io(operation)
         if not inspect.isawaitable(pending):
@@ -1155,8 +1212,10 @@ def create_text_patch_port(
 
 
 __all__ = [
+    "ADMISSION_REFUSED_ONLY",
     "ActionBindingResolver",
     "ActionExecutor",
+    "AdmissionEvidence",
     "MAX_FILE_BYTES",
     "ProjectActionRefused",
     "create_text_patch_port",

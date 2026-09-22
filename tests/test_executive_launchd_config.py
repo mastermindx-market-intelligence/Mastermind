@@ -741,7 +741,18 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
 
     value = json.loads((OPS / "control.json.template").read_text(encoding="utf-8"))
     assert value["schema_version"] == CONTROL_CONFIG_SCHEMA_VERSION
-    assert set(value) == _CONFIG_REQUIRED | _CONFIG_OPTIONAL
+    # Installed product groups and the optional read-profile selector stay
+    # omitted in the unconfigured template. Null groups fail validation;
+    # an omitted executive_mcp_profile preserves the legacy generation.
+    installed_product_keys = {
+        "executive_mcp_profile",
+        "content_observer",
+        "workspace_acquisition",
+        "workspace_resource_policy",
+        "workspace_control_room",
+    }
+    assert installed_product_keys <= _CONFIG_OPTIONAL
+    assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)
 
 
 def _membership_snapshot() -> dict:
@@ -1679,3 +1690,965 @@ def test_privileged_broker_cli_rejects_unknown_command_without_traceback(tmp_pat
     assert result.returncode == 2
     assert "arguments are required: command" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+# === W1H3F R13: wrapper-owned live-attestation validator (Sol R80, PR #677) ===
+#
+# The wrapper writes the document; the same wrapper now owns the validator
+# that H3 consumes.  ``ATTESTATION_FIELDS`` and ``PROCESS_IDENTITY_FIELDS``
+# are the closed field sets the wrapper writes and that the validator
+# enforces; ``SCHEMA_VERSION`` is the wrapper's own constant.  H3 must NOT
+# restate any of them.
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class _FakeIdentity:
+    pgid: int
+    session_id: int
+    start_identity: str
+    effective_uid: int
+    effective_gid: int
+    real_uid: int
+    real_gid: int
+
+
+class _FakeProcessInspector:
+    """Stand-in for ``control_plane.codex_worker.ProcessInspector``.
+
+    The validator's only injection point; tests pin the live observation
+    (``boot_session_id`` and ``inspect(pid)``) so the fresh-observation
+    refusal path is deterministic on Linux.
+    """
+
+    def __init__(self, *, boot_id: str = "boot-aaaa", identity: _FakeIdentity | None = None):
+        self.boot_id = boot_id
+        self.identity = identity or _FakeIdentity(
+            pgid=4242,
+            session_id=4242,
+            start_identity="1723500000.000000",
+            effective_uid=501,
+            effective_gid=20,
+            real_uid=501,
+            real_gid=20,
+        )
+        self.calls: list[int] = []
+
+    def boot_session_id(self) -> str:
+        return self.boot_id
+
+    def inspect(self, pid: int) -> _FakeIdentity:
+        self.calls.append(pid)
+        return self.identity
+
+
+_EXPECTED_CONFIG_SHA = "a" * 64
+_EXPECTED_RELEASE_SHA = "b" * 40
+_EXPECTED_PID = 4242
+
+
+def _good_document() -> dict[str, object]:
+    """A document the validator accepts, byte-for-byte what the producer writes."""
+
+    return {
+        "schema_version": "mastermind.executive_control_environment_attestation/v1",
+        "observed_at": "2026-09-16T12:00:00+00:00",
+        "process_identity": {
+            "pid": _EXPECTED_PID,
+            "pgid": 4242,
+            "session_id": 4242,
+            "start_identity": "1723500000.000000",
+            "boot_id": "boot-aaaa",
+            "effective_uid": 501,
+            "effective_gid": 20,
+            "real_uid": 501,
+            "real_gid": 20,
+        },
+        "config_sha256": _EXPECTED_CONFIG_SHA,
+        "release_manifest_sha256": "c" * 64,
+        "release_commit_sha": _EXPECTED_RELEASE_SHA,
+        "python_executable_path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "python_executable_sha256": "d" * 64,
+        "sentinel_name_sha256": "e" * 64,
+        "sentinel_value_sha256": "f" * 64,
+        "sentinel_present": True,
+    }
+
+
+def test_attestation_validator_accepts_the_producers_own_output():
+    """D10 (positive, wrapper-self-validation): the wrapper writes what it validates."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    inspector = _FakeProcessInspector()
+    document = _good_document()
+
+    assert (
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=inspector,
+        )
+        == document
+    )
+    # The validator really did consult the inspector (fresh-observation).
+    assert inspector.calls == [_EXPECTED_PID]
+
+
+def test_attestation_validator_refuses_a_stale_attested_config_digest():
+    """D1: config_sha256 in the document does not match the disk digest."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["config_sha256"] = "9" * 64
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_a_stale_attested_release_sha():
+    """D2: release_commit_sha in the document does not match the installed SHA."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["release_commit_sha"] = "z" * 40
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_a_stale_start_identity_with_the_same_pid():
+    """D3a: same PID, different start_identity -> fresh observation refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    # Pin a stale start_identity the LIVE process no longer carries.
+    document["process_identity"]["start_identity"] = "1723499999.999999"
+    inspector = _FakeProcessInspector()
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=inspector,
+        )
+
+
+def test_attestation_validator_refuses_a_stale_boot_identity_with_the_same_pid():
+    """D3b: same PID, different boot_id -> fresh observation refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["process_identity"]["boot_id"] = "boot-stale-bbbb"
+    inspector = _FakeProcessInspector(boot_id="boot-live-cccc")
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=inspector,
+        )
+
+
+def test_attestation_validator_refuses_a_status_pid_that_differs_from_the_attested_pid():
+    """D4a: status ``pid`` != document ``pid`` refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID + 1,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize("bad_pid", [True, False, "4242", 1.5, None, 0, -1, 2**31])
+def test_attestation_validator_refuses_a_non_int_or_out_of_range_pid(bad_pid):
+    """D4b: non-int / bool / out-of-range status PID refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=bad_pid,  # type: ignore[arg-type]
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_malformed_top_level_fields():
+    """D6a: extra / missing / renamed top-level fields refuse."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    base = _good_document()
+
+    # Missing field
+    missing = {k: v for k, v in base.items() if k != "sentinel_present"}
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            missing,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Extra field
+    extra = dict(base)
+    extra["extra_top"] = "nope"
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            extra,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Renamed field
+    renamed = dict(base)
+    renamed["schemaVersion"] = renamed.pop("schema_version")
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            renamed,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Wrong schema_version
+    wrong_schema = dict(base)
+    wrong_schema["schema_version"] = "wrong"
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            wrong_schema,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_non_utc_or_unparseable_observed_at():
+    """D6b: observed_at must be an ISO-8601 UTC string."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    base = _good_document()
+
+    for bad in ("2026-09-16 12:00:00", "not-a-date", "", "2026-09-16T12:00:00"):
+        document = dict(base)
+        document["observed_at"] = bad
+        with pytest.raises(wrapper.ControlWrapperError):
+            wrapper.validate_control_environment_attestation(
+                document,
+                expected_config_sha256=_EXPECTED_CONFIG_SHA,
+                expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+                expected_pid=_EXPECTED_PID,
+                inspector=_FakeProcessInspector(),
+            )
+
+
+def test_attestation_validator_refuses_malformed_process_identity_fields():
+    """D6c: extra / missing / renamed process_identity fields refuse."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    base = _good_document()
+
+    # Missing
+    missing = dict(base)
+    missing["process_identity"] = {k: v for k, v in base["process_identity"].items() if k != "boot_id"}
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            missing,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Extra
+    extra = dict(base)
+    extra["process_identity"] = dict(base["process_identity"], extra_field="x")
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            extra,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+    # Renamed
+    renamed = dict(base)
+    inner = dict(base["process_identity"])
+    inner["process_id"] = inner.pop("pid")
+    renamed["process_identity"] = inner
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            renamed,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_sentinel_present_when_not_exactly_true():
+    """D6d: ``sentinel_present`` must be the literal ``True``."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    base = _good_document()
+    for bad in (1, "true", 1.0, None, False):
+        document = dict(base)
+        document["sentinel_present"] = bad
+        with pytest.raises(wrapper.ControlWrapperError):
+            wrapper.validate_control_environment_attestation(
+                document,
+                expected_config_sha256=_EXPECTED_CONFIG_SHA,
+                expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+                expected_pid=_EXPECTED_PID,
+                inspector=_FakeProcessInspector(),
+            )
+
+
+def test_attestation_validator_refuses_non_dict_documents():
+    """D6e: the validator refuses non-dict, list, int, None, str inputs."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    for bad in ([], "string", 1, 1.5, None):
+        with pytest.raises(wrapper.ControlWrapperError):
+            wrapper.validate_control_environment_attestation(
+                bad,
+                expected_config_sha256=_EXPECTED_CONFIG_SHA,
+                expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+                expected_pid=_EXPECTED_PID,
+                inspector=_FakeProcessInspector(),
+            )
+
+
+def test_attestation_validator_is_import_safe_and_pure():
+    """Importing the wrapper does not execve / fork / touch the FS."""
+
+    import importlib
+
+    import scripts.executive_os_phase1c_control_wrapper as wrapper_module
+
+    module = importlib.reload(wrapper_module)
+    assert module.validate_control_environment_attestation.__module__ == (
+        "scripts.executive_os_phase1c_control_wrapper"
+    )
+    # Validator signature is pure: only the document, expected digests, expected
+    # PID, and inspector are parameters; no filesystem, no execve.
+    import inspect
+
+    signature = inspect.signature(module.validate_control_environment_attestation)
+    assert set(signature.parameters) == {
+        "document",
+        "expected_config_sha256",
+        "expected_release_commit_sha",
+        "expected_pid",
+        "inspector",
+    }
+    assert all(
+        parameter.default is inspect.Parameter.empty
+        for parameter in signature.parameters.values()
+    )
+
+
+def test_attestation_validator_is_owned_only_by_the_wrapper_module():
+    """H3 must NOT restate the closed field sets; they live in the wrapper."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    assert isinstance(wrapper.ATTESTATION_FIELDS, frozenset)
+    assert isinstance(wrapper.PROCESS_IDENTITY_FIELDS, frozenset)
+    assert (
+        wrapper.ATTESTATION_FIELDS
+        == frozenset(
+            {
+                "schema_version",
+                "observed_at",
+                "process_identity",
+                "config_sha256",
+                "release_manifest_sha256",
+                "release_commit_sha",
+                "python_executable_path",
+                "python_executable_sha256",
+                "sentinel_name_sha256",
+                "sentinel_value_sha256",
+                "sentinel_present",
+            }
+        )
+    )
+    assert wrapper.PROCESS_IDENTITY_FIELDS == frozenset(
+        {
+            "pid",
+            "pgid",
+            "session_id",
+            "start_identity",
+            "boot_id",
+            "effective_uid",
+            "effective_gid",
+            "real_uid",
+            "real_gid",
+        }
+    )
+
+
+def test_attestation_validator_treats_inspector_exceptions_as_refusals():
+    """The fresh-observation call is the ONLY injection point; an exception refuses."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    class _BoomInspector(_FakeProcessInspector):
+        def inspect(self, pid):  # type: ignore[override]
+            raise RuntimeError("inspector failure")
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            _good_document(),
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_BoomInspector(),
+        )
+
+
+def _producer_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Config / release / attestation triple the real producer accepts."""
+
+    release = tmp_path / "release"
+    release.mkdir()
+    (release / ".executive-release-manifest.json").write_text(
+        json.dumps({"commit_sha": _EXPECTED_RELEASE_SHA}), encoding="utf-8"
+    )
+    config = tmp_path / "control.json"
+    config.write_text(json.dumps({"control_uid": os.geteuid()}), encoding="utf-8")
+    tmp_path.chmod(0o700)
+    return config, release, tmp_path / "attestation.json"
+
+
+def test_producer_refuses_to_write_a_document_its_own_validator_rejects(
+    monkeypatch, tmp_path
+) -> None:
+    """Sol R80 item 2 (WRITER side): ``attest_current_service_environment`` validates
+    the document it constructs THROUGH the wrapper-owned validator BEFORE the atomic
+    write, and a document that fails that validator is NEVER written.
+
+    This is the discriminator for the producer. ``..._accepts_the_producers_own_output``
+    validates a SYNTHETIC document, so it stays green even when the producer never calls
+    the validator at all -- bypassing the call is a mutation that must turn THIS test red.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    config, release, target = _producer_fixture(tmp_path)
+    inspector = _FakeProcessInspector()
+    monkeypatch.setattr(wrapper, "ProcessInspector", lambda: inspector)
+
+    seen: list[dict[str, object]] = []
+
+    def refusing(document, **kwargs):
+        seen.append({"document": document, **kwargs})
+        raise wrapper.ControlWrapperError("fixture refusal")
+
+    monkeypatch.setattr(wrapper, "validate_control_environment_attestation", refusing)
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.attest_current_service_environment(
+            config_path=config,
+            attestation_path=target,
+            release=release,
+            sentinel="c" * 64,
+        )
+
+    # The producer consulted the ONE wrapper-owned validator, with explicit expected
+    # facts taken from current evidence -- not from the document it just built.
+    assert len(seen) == 1
+    assert seen[0]["expected_pid"] == os.getpid()
+    assert seen[0]["expected_release_commit_sha"] == _EXPECTED_RELEASE_SHA
+    assert seen[0]["expected_config_sha256"] == wrapper._sha256(config)
+    assert seen[0]["inspector"] is inspector
+    # ...and nothing reached disk.
+    assert not target.exists()
+
+
+def test_producer_output_is_written_only_after_it_passes_the_real_validator(
+    monkeypatch, tmp_path
+) -> None:
+    """Sol R80 discriminator: the wrapper producer's OWN output passes its OWN validator.
+
+    Unlike the synthetic-document positive, this drives the real writer end to end and
+    then re-validates the bytes that actually landed on disk.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    config, release, target = _producer_fixture(tmp_path)
+    inspector = _FakeProcessInspector()
+    monkeypatch.setattr(wrapper, "ProcessInspector", lambda: inspector)
+
+    returned = wrapper.attest_current_service_environment(
+        config_path=config,
+        attestation_path=target,
+        release=release,
+        sentinel="c" * 64,
+    )
+
+    assert target.exists()
+    assert stat.S_IMODE(target.lstat().st_mode) == 0o400
+    written = json.loads(target.read_text(encoding="utf-8"))
+    assert written == returned
+    assert set(written) == wrapper.ATTESTATION_FIELDS
+    assert written["config_sha256"] == wrapper._sha256(config)
+    assert written["release_commit_sha"] == _EXPECTED_RELEASE_SHA
+    assert written["process_identity"]["pid"] == os.getpid()
+
+    # The bytes on disk validate under the same closed rules, with the same observation.
+    assert (
+        wrapper.validate_control_environment_attestation(
+            written,
+            expected_config_sha256=wrapper._sha256(config),
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=os.getpid(),
+            inspector=inspector,
+        )
+        == written
+    )
+
+
+# R13 blocking finding (W1H3F): every fact the validator re-observes through the
+# injected ProcessInspector is an authority check, so every one of them needs its
+# OWN stale-value discriminator. Before this, only ``start_identity`` and ``boot_id``
+# had one, and deleting any of the other six comparisons left both owning suites green.
+_FRESH_OBSERVATION_FACTS = frozenset(
+    {
+        "pgid",
+        "session_id",
+        "start_identity",
+        "boot_id",
+        "effective_uid",
+        "effective_gid",
+        "real_uid",
+        "real_gid",
+    }
+)
+
+
+def test_every_process_identity_fact_has_a_stale_observation_discriminator() -> None:
+    """Structural guard: the parameterization below must cover the whole closed set.
+
+    ``pid`` is excluded because it is bound by ``expected_pid`` and has its own
+    dedicated tests. If a tenth identity fact is ever added to the wrapper's closed
+    set, this test fails until a stale-observation discriminator exists for it.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    assert set(wrapper.PROCESS_IDENTITY_FIELDS) == _FRESH_OBSERVATION_FACTS | {"pid"}
+
+
+@pytest.mark.parametrize("fact", sorted(_FRESH_OBSERVATION_FACTS))
+def test_attestation_validator_refuses_each_stale_fresh_observation_fact(fact: str) -> None:
+    """Sol R80 item 4: the attested identity must equal the FRESHLY OBSERVED identity.
+
+    One case per fact, so each individual comparison is load-bearing: removing any
+    single fact from the validator's fresh-observation comparison turns exactly this
+    test red for that fact instead of leaving the suites green.
+    """
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    live = document["process_identity"][fact]
+    document["process_identity"][fact] = (
+        live + 1 if isinstance(live, int) and not isinstance(live, bool) else f"{live}-stale"
+    )
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("pgid", 4242.0),
+        ("session_id", 4242.0),
+        ("effective_uid", 501.0),
+        ("effective_gid", 20.0),
+        ("real_uid", 501.0),
+        ("real_gid", 20.0),
+        ("pgid", True),
+        ("effective_uid", -1),
+    ],
+)
+def test_attestation_validator_refuses_non_exact_identity_integer_types(
+    field, bad_value
+):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["process_identity"][field] = bad_value
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+def test_attestation_validator_refuses_unicode_control_in_matching_identity_text():
+    """B2: fresh matching identity text still refuses Unicode Cc controls."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    unsafe_identity = "1723500000.\u0085"
+    document = _good_document()
+    document["process_identity"]["start_identity"] = unsafe_identity
+    inspector = _FakeProcessInspector(
+        identity=_FakeIdentity(
+            pgid=4242,
+            session_id=4242,
+            start_identity=unsafe_identity,
+            effective_uid=501,
+            effective_gid=20,
+            real_uid=501,
+            real_gid=20,
+        )
+    )
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=inspector,
+        )
+
+
+def test_attestation_validator_refuses_unicode_control_in_executable_path():
+    """B2: a canonical-looking absolute path refuses Unicode Cc controls."""
+
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["python_executable_path"] = "/tmp/python\u0085bin"
+
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    [
+        ("start_identity", ""),
+        ("start_identity", "value\nsecond"),
+        ("boot_id", "value\x00suffix"),
+        ("boot_id", "x" * 257),
+        ("boot_id", 7),
+    ],
+)
+def test_attestation_validator_refuses_unsafe_identity_text(field, bad_value):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["process_identity"][field] = bad_value
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "/tmp/\x00bad",
+        "/tmp/python\nother",
+        "/tmp/../python",
+        "/tmp//python",
+        "//tmp/python",
+        "relative/python",
+    ],
+)
+def test_attestation_validator_refuses_noncanonical_executable_paths(bad_path):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["python_executable_path"] = bad_path
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=_EXPECTED_RELEASE_SHA,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+@pytest.mark.parametrize(
+    "expected,document_value",
+    [
+        ("B" * 40, "b" * 40),
+        ("b" * 39, "b" * 39),
+        ("b" * 40, "B" * 40),
+        ("b" * 40, "b" * 39),
+    ],
+)
+def test_attestation_validator_requires_exact_lowercase_commit_identity(
+    expected, document_value
+):
+    from scripts import executive_os_phase1c_control_wrapper as wrapper
+
+    document = _good_document()
+    document["release_commit_sha"] = document_value
+    with pytest.raises(wrapper.ControlWrapperError):
+        wrapper.validate_control_environment_attestation(
+            document,
+            expected_config_sha256=_EXPECTED_CONFIG_SHA,
+            expected_release_commit_sha=expected,
+            expected_pid=_EXPECTED_PID,
+            inspector=_FakeProcessInspector(),
+        )
+
+
+# HF1-B uses the real loader and configuration-bound producer. Native process
+# attestation remains the existing loader; tests inject only its observed result.
+def _hf1b_control_fixture(tmp_path):
+    import hashlib
+    from test_executive_os_sqlite import _hf1b_claim_fixture
+    from scripts import executive_os_phase1c as cli
+    runtime, root, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    raw = {
+        "schema_version": cli.CONTROL_CONFIG_SCHEMA_VERSION,
+        "runtime_root": str(runtime.store.root),
+        "control_socket_path": str(tmp_path / "control.sock"),
+        "launchd_socket_name": "Operator", "worker_broker_socket_path": str(tmp_path / "worker.sock"),
+        "worker_provider_home": str(tmp_path / "worker-home"),
+        "worker_runs_root": str(tmp_path / "runs"), "receipts_root": str(tmp_path / "receipts"),
+        "proof_source_repository": str(tmp_path / "source"),
+        "proof_workspace_root": str(tmp_path / "workspaces"), "proof_base_sha": "a" * 40,
+        "backup_root": str(tmp_path / "backups"), "control_uid": os.geteuid(),
+        "worker_uid": os.geteuid() + 10000, "worker_gid": os.getegid(),
+        "worker_user": "fixture-worker", "shared_run_gid": os.getegid(),
+        "allowed_peer_uids": [os.geteuid()],
+        "secret_canary_receipt_path": str(tmp_path / "canary.json"),
+        "control_environment_attestation_path": str(tmp_path / "attestation.json"),
+        "worker_id": "worker-a", "worker_account_label": "hf1b-fixture-a",
+        "quota_class": "default", "model": "gpt-5.6-sol", "effort": "xhigh", "cost_class": "small",
+        "exact_worker_claim_target": {"mode": "fixed", "definition": definition, "max_age_ms": 30000},
+    }
+    path = tmp_path / "hf1b-control.json"
+    data = json.dumps(raw, sort_keys=True).encode()
+    path.write_bytes(data)
+    path.chmod(0o600)
+    # This result stands in for native process/release observation, not its test.
+    attestation = {"config_sha256": hashlib.sha256(data).hexdigest(),
+                   "process_identity": {"pid": 4242}, "release_commit_sha": "a" * 40}
+    return cli, runtime, root, work, command, raw, path, attestation
+
+
+def _hf1b_bind(cli, raw, path, attestation):
+    binder = getattr(cli, "_bind_exact_worker_target_source", None)
+    assert callable(binder), "HF1-B attested configuration producer is not implemented"
+    return binder(raw, attestation, _producer_capability=cli._CONTROL_TARGET_COMPOSITION,
+                  attestation_loader=lambda: dict(attestation))
+
+
+def test_hf1b_template_target_is_explicitly_disabled():
+    raw = json.loads((OPS / "control.json.template").read_text())
+    assert raw.get("exact_worker_claim_target") == {"mode": "disabled"}
+
+
+def test_hf1b_real_loader_snapshot_binds_first_claim(tmp_path):
+    cli, runtime, _, work, command, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    loaded = cli.load_control_config(path)
+    producer = _hf1b_bind(cli, loaded, path, attestation)
+    target = producer.for_job(work.job_id, now_ms=runtime.store.now_ms())
+    claim = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert claim.claimed_now and claim.attempt.worker_id == "worker-a"
+    evidence = runtime.store.get_event_by_command_id(command).payload["exact_worker_target"]
+    assert evidence["observation"]["source_sha256"] == attestation["config_sha256"]
+    assert evidence["definition"]["job_id"] == work.job_id
+
+
+def test_hf1b_plain_mapping_cannot_replace_loaded_source(tmp_path):
+    cli, _, _, _, _, raw, path, attestation = _hf1b_control_fixture(tmp_path)
+    _hf1b_bind_method = getattr(cli, "_bind_exact_worker_target_source", None)
+    assert callable(_hf1b_bind_method), "HF1-B attested configuration producer is not implemented"
+    with pytest.raises(cli.ServiceError, match="target"):
+        _hf1b_bind(cli, raw, path, attestation)
+
+
+@pytest.mark.parametrize("mutation", ["atomic_replace", "same_inode", "attestation", "raw_target", "raw_broker"])
+def test_hf1b_consumed_snapshot_cannot_be_freshened_by_later_hash(tmp_path, mutation):
+    import hashlib
+    cli, _, _, _, _, raw, path, attestation = _hf1b_control_fixture(tmp_path)
+    loaded = cli.load_control_config(path)
+    if mutation in {"atomic_replace", "same_inode"}:
+        raw["exact_worker_claim_target"]["definition"]["source_generation"] = "changed-generation"
+        data = json.dumps(raw, sort_keys=True).encode()
+        if mutation == "atomic_replace":
+            replacement = path.with_suffix(".replacement")
+            replacement.write_bytes(data)
+            replacement.chmod(0o600)
+            replacement.replace(path)
+        else:
+            path.write_bytes(data)
+        # Attesting the NEW path must never authenticate the earlier object.
+        attestation["config_sha256"] = hashlib.sha256(data).hexdigest()
+    elif mutation == "attestation":
+        attestation["config_sha256"] = "0" * 64
+    elif mutation == "raw_target":
+        loaded["exact_worker_claim_target"]["definition"]["source_generation"] = "caller-changed"
+    else:
+        loaded["worker_broker_socket_path"] = tmp_path / "different-worker.sock"
+    with pytest.raises(cli.ServiceError, match="target"):
+        _hf1b_bind(cli, loaded, path, attestation)
+
+
+@pytest.mark.parametrize("bad", [None, {}, {"mode": "fixed"}, {"mode": "disabled", "fallback": "auto"},
+                                 {"mode": "automatic"}])
+def test_hf1b_malformed_target_config_does_not_enable_default_selection(tmp_path, bad):
+    cli, _, _, _, _, raw, path, _ = _hf1b_control_fixture(tmp_path)
+    raw["exact_worker_claim_target"] = bad
+    path.write_text(json.dumps(raw))
+    with pytest.raises(cli.ServiceError, match="target"):
+        cli.load_control_config(path)
+
+
+def test_hf1b_fixed_broker_worker_mismatch_refuses(tmp_path):
+    cli, _, _, _, _, raw, path, attestation = _hf1b_control_fixture(tmp_path)
+    raw["worker_id"] = "another-broker-worker"
+    path.write_text(json.dumps(raw))
+    with pytest.raises(cli.ServiceError, match="target"):
+        cli.load_control_config(path)
+
+
+def test_hf1b_source_changes_after_binding_refuse_fresh_issue(tmp_path):
+    cli, runtime, _, work, _, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    loaded = cli.load_control_config(path)
+    producer = _hf1b_bind(cli, loaded, path, attestation)
+    path.write_bytes(path.read_bytes() + b" ")
+    with pytest.raises(cli.ServiceError, match="target"):
+        producer.for_job(work.job_id, now_ms=runtime.store.now_ms())
+
+
+def test_hf1b_foreign_job_does_not_fall_through_to_untargeted_mode(tmp_path):
+    cli, runtime, _, _, _, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    producer = _hf1b_bind(cli, cli.load_control_config(path), path, attestation)
+    with pytest.raises(cli.ServiceError, match="target"):
+        producer.for_job("JOB-OTHER", now_ms=runtime.store.now_ms())
+
+
+def test_hf1b_factory_requires_and_consumes_attested_producer(tmp_path, monkeypatch):
+    cli, runtime, _, work, _, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    loaded = cli.load_control_config(path)
+    with pytest.raises(cli.ServiceError, match="target"):
+        cli._service_from_config(loaded)
+    producer = _hf1b_bind(cli, loaded, path, attestation)
+    captured = {}
+    def capture_service(config, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(config=config)
+    monkeypatch.setattr(cli, "activate_launchd_socket", lambda name: object())
+    monkeypatch.setattr(cli, "ExecutiveControlService", capture_service)
+    cli._service_from_config(loaded, exact_target_source=producer)
+    supervisor = captured["supervisor_factory"](runtime)
+    selected = supervisor._exact_target_provider(work.job_id)
+    assert selected.definition["worker_id"] == "worker-a"
+    assert selected.observation["source_sha256"] == attestation["config_sha256"]
+    assert supervisor.adapter is not None
+
+
+def test_hf1b_absent_and_disabled_config_preserve_legacy_composition(tmp_path):
+    cli, _, _, _, _, raw, path, _ = _hf1b_control_fixture(tmp_path)
+    for optional in (None, {"mode": "disabled"}):
+        if optional is None:
+            raw.pop("exact_worker_claim_target", None)
+        else:
+            raw["exact_worker_claim_target"] = optional
+        path.write_text(json.dumps(raw))
+        loaded = cli.load_control_config(path)
+        assert getattr(loaded, "_target_snapshot", None) is None
+
+
+
+def test_hf1b_loaded_source_through_supervisor_returns_consumable_result(tmp_path):
+    import asyncio
+    from test_executive_supervisor import Hf1bResultAdapter, FakeInspector, _supervisor
+    from control_plane.executive_runtime import JobStatus
+    from control_plane.executive_coo_cycle import CooCycle
+    cli, runtime, root, work, command, _, path, attestation = _hf1b_control_fixture(tmp_path)
+    producer = _hf1b_bind(cli, cli.load_control_config(path), path, attestation)
+    adapter = Hf1bResultAdapter(FakeInspector(), runtime, work)
+    supervisor = _supervisor(runtime, tmp_path, adapter,
+        exact_target_provider=lambda job_id: producer.for_job(job_id, now_ms=runtime.store.now_ms()))
+    os.chown(adapter.provider_home, -1, os.getegid())
+    async def exercise():
+        active = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        adapter.inspector.live = False
+        finished = await supervisor.finish_job(active)
+        assert finished.job.status is JobStatus.COMPLETED
+        replay = await supervisor.start_cycle_job(work.job_id, command_id=command)
+        assert replay.outcome == "TERMINAL" and adapter.start_count == 1
+        event = runtime.store.get_event_by_command_id(command)
+        assert event.payload["exact_worker_target"]["observation"]["source_sha256"] == attestation["config_sha256"]
+        assert CooCycle(runtime).run_once(root.job_id).action == "HANDOFF_CREATED"
+    asyncio.run(exercise())

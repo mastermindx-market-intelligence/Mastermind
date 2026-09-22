@@ -96,7 +96,7 @@ def assert_credential_mutation_disarmed(
         _require_safe_config(path)
     transaction_present = autonomy_transaction.exists() or autonomy_transaction.is_symlink()
     try:
-        control = load_control_config(control_config)
+        control = load_control_config(control_config, enforce_current_uid=False)
         worker = load_worker_config(worker_config, require_root_owner=True)
     except Exception as exc:
         raise CredentialInterlockError("autonomy config validation refused") from exc
