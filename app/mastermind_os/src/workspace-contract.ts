@@ -185,24 +185,57 @@ export interface WindowItem {
   representation: "VISIBLE_TEXT" | "FILTERED_VISIBLE_TEXT" | "WITHHELD";
   display_sha256: string | null;
 }
-export interface WindowDocument {
-  schema: "mastermind.workspace.window_read_candidate.v1";
+export interface WindowView {
+  schema: "mastermind.workspace.visible_window_candidate.v1";
+  source_ref: string;
+  scope: "one-managed-turn-window";
+  observed_at: string;
+  epoch: string;
+  terminal: boolean;
+  coverage: "OBSERVED_WINDOW" | "READ_LIMIT_REACHED" | "GAP_PRESENT";
+  history: "NOT_PROVEN";
+  acceptance: "NOT_PROJECTED";
+  capabilities: { send: false; provider_control: false; history: false };
+  items: WindowItem[];
+  gaps: Array<{ first: number; last: number; reason: "SOURCE_REPORTED_GAP" }>;
+}
+export interface ObservationBinding {
+  job_id: string;
+  attempt_id: string;
+}
+interface WindowEnvelope {
   selection_ref: string;
   mode: "observed-turn-window";
-  view: {
-    schema: "mastermind.workspace.visible_window_candidate.v1";
-    source_ref: string;
-    scope: "one-managed-turn-window";
-    observed_at: string;
-    epoch: string;
-    terminal: boolean;
-    coverage: "OBSERVED_WINDOW" | "READ_LIMIT_REACHED" | "GAP_PRESENT";
-    history: "NOT_PROVEN";
-    acceptance: "NOT_PROJECTED";
-    capabilities: { send: false; provider_control: false; history: false };
-    items: WindowItem[];
-    gaps: Array<{ first: number; last: number; reason: "SOURCE_REPORTED_GAP" }>;
-  };
+  view: WindowView;
+}
+export interface WindowDocumentV1 extends WindowEnvelope {
+  schema: "mastermind.workspace.window_read_candidate.v1";
+}
+export interface WindowDocumentV2 extends WindowEnvelope {
+  schema: "mastermind.workspace.window_read_candidate.v2";
+  observation_binding: ObservationBinding;
+}
+export type WindowDocument = WindowDocumentV1 | WindowDocumentV2;
+export interface ObservedMissionAssociation {
+  state: "OBSERVED_MISSION_ASSOCIATION";
+  job_id: string;
+  attempt_id: string;
+  window_observed_at: string;
+  mission_generated_at: string | null;
+}
+const JOB_ID = /^JOB-[0-9]{1,9}$/;
+const ATTEMPT_ID = /^ATT-[0-9a-f]{32}$/;
+function decodeObservationBinding(value: unknown): ObservationBinding | null {
+  if (
+    !record(value) ||
+    !exact(value, ["job_id", "attempt_id"]) ||
+    typeof value.job_id !== "string" ||
+    typeof value.attempt_id !== "string" ||
+    !JOB_ID.test(value.job_id) ||
+    !ATTEMPT_ID.test(value.attempt_id)
+  )
+    return null;
+  return { job_id: value.job_id, attempt_id: value.attempt_id };
 }
 async function digest(value: string) {
   return Array.from(
@@ -221,10 +254,22 @@ export async function decodeWindow(
   } catch {
     return null;
   }
+  if (!record(value)) return null;
+  const schema = value.schema;
+  const v1 = schema === "mastermind.workspace.window_read_candidate.v1";
+  const v2 = schema === "mastermind.workspace.window_read_candidate.v2";
   if (
-    !record(value) ||
-    !exact(value, ["schema", "selection_ref", "mode", "view"]) ||
-    value.schema !== "mastermind.workspace.window_read_candidate.v1" ||
+    !(v1
+      ? exact(value, ["schema", "selection_ref", "mode", "view"])
+      : v2
+        ? exact(value, [
+            "schema",
+            "selection_ref",
+            "mode",
+            "view",
+            "observation_binding",
+          ])
+        : false) ||
     value.mode !== "observed-turn-window" ||
     typeof value.selection_ref !== "string" ||
     !/^managed-window:[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/.test(
@@ -233,6 +278,8 @@ export async function decodeWindow(
     value.selection_ref.includes("..")
   )
     return null;
+  const binding = v2 ? decodeObservationBinding(value.observation_binding) : null;
+  if (v2 && !binding) return null;
   const v = value.view;
   if (
     !record(v) ||
@@ -344,4 +391,95 @@ export async function decodeWindow(
   )
     return null;
   return structuredClone(value) as unknown as WindowDocument;
+}
+type AssociationMission = {
+  schema: string;
+  generated_at: string | null;
+  program: { work_ref: string };
+  mission: {
+    root_job_id: string | null;
+    runtime_root_state: string;
+    root_job_ambiguous: boolean;
+  };
+  read_state: { state: string };
+  source: {
+    owner_observation?: {
+      state: string;
+      runtime?: { state: string } | null;
+    };
+  };
+  children: {
+    state: string;
+    coverage: string;
+    items: Array<{
+      job_id: string;
+      status: string | null;
+      parent_job_id: string;
+      depth: number | null;
+      orchestration_role: string | null;
+      current_attempt_id: string | null;
+      latest_attempt: {
+        attempt_id: string | null;
+        status: string | null;
+      } | null;
+    }>;
+  };
+};
+type AssociationSelection = { workRef: string; rootJobId: string };
+export function observedMissionAssociation(
+  window: WindowDocument | null | undefined,
+  mission: AssociationMission | null | undefined,
+  selection: AssociationSelection | null | undefined,
+): ObservedMissionAssociation | null {
+  if (
+    !window ||
+    window.schema !== "mastermind.workspace.window_read_candidate.v2" ||
+    window.view.terminal !== false ||
+    !mission ||
+    !selection ||
+    mission.schema !== "mastermind.mission_workspace.v3"
+  )
+    return null;
+  const binding = window.observation_binding;
+  const observation = mission.source.owner_observation;
+  const runtime = observation?.runtime;
+  if (
+    mission.program.work_ref !== selection.workRef ||
+    mission.mission.root_job_id !== selection.rootJobId ||
+    mission.read_state.state !== "CURRENT" ||
+    mission.mission.runtime_root_state !== "RESOLVED" ||
+    mission.mission.root_job_ambiguous !== false ||
+    observation?.state !== "SAME" ||
+    runtime?.state !== "SAME" ||
+    mission.children.state !== "AVAILABLE" ||
+    mission.children.coverage !== "COMPLETE"
+  )
+    return null;
+  const matches = mission.children.items.filter(
+    (row) => row.job_id === binding.job_id,
+  );
+  if (matches.length !== 1) return null;
+  const child = matches[0];
+  const live = child.status === "RUNNING" || child.status === "CHECKPOINTED";
+  const latest = child.latest_attempt;
+  const attemptLive =
+    latest?.status === "RUNNING" || latest?.status === "CHECKPOINTED";
+  if (
+    child.orchestration_role !== "plan" ||
+    child.parent_job_id !== selection.rootJobId ||
+    child.depth !== 1 ||
+    child.current_attempt_id !== binding.attempt_id ||
+    !live ||
+    !latest ||
+    latest.attempt_id !== binding.attempt_id ||
+    !attemptLive
+  )
+    return null;
+  return {
+    state: "OBSERVED_MISSION_ASSOCIATION",
+    job_id: binding.job_id,
+    attempt_id: binding.attempt_id,
+    window_observed_at: window.view.observed_at,
+    mission_generated_at: mission.generated_at,
+  };
 }

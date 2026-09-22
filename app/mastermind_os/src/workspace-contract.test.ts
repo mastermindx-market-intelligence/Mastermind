@@ -11,7 +11,9 @@ import {
   decodeOwnerObservation,
   decodeProgramsEnvelope,
   decodeWindow,
+  observedMissionAssociation,
 } from "./workspace-contract";
+import v3Current17 from "./fixtures/mission-v3-design-current-17-slots.json";
 
 const pair = { work_ref: "WS:ONE", root_job_id: "JOB-1" };
 const selection = { workRef: pair.work_ref, rootJobId: pair.root_job_id };
@@ -215,6 +217,121 @@ describe("current permitted window", () => {
     const source = windowFixture();
     source.view.source_ref = "managed-window:other";
     expect(await decodeWindow(source)).toBeNull();
+  });
+});
+
+const ATT = "ATT-" + "ab".repeat(16);
+const planChild = {
+  job_id: "JOB-101",
+  status: "RUNNING",
+  parent_job_id: "JOB-100",
+  depth: 1,
+  orchestration_role: "plan",
+  plan_step_id: null,
+  attempt_count: 1,
+  attempt_limit: 2,
+  current_attempt_id: ATT,
+  latest_attempt: {
+    attempt_id: ATT,
+    attempt_number: 1,
+    status: "RUNNING",
+    started_at: "2026-09-20T00:00:00Z",
+    finished_at: null,
+    exit_code: null,
+    has_result: false,
+    error_present: false,
+    error_class: null,
+  },
+  worker_id: null,
+};
+function v2Window() {
+  const v = windowFixture();
+  return {
+    ...v,
+    schema: "mastermind.workspace.window_read_candidate.v2" as const,
+    observation_binding: { job_id: "JOB-101", attempt_id: ATT },
+  };
+}
+function qualifyingMission() {
+  const mission = structuredClone(v3Current17) as any;
+  mission.children = {
+    ...mission.children,
+    state: "AVAILABLE",
+    coverage: "COMPLETE",
+    items: [planChild],
+    total_count: 1,
+    overflow_count: 0,
+    unjoined_job_count: 0,
+    unjoined_job_ids: [],
+  };
+  return mission;
+}
+
+describe("window v2 tagged union and observed association", () => {
+  it("accepts exact v2 and refuses extra, missing, or coerced tuple members", async () => {
+    const decoded = await decodeWindow(v2Window());
+    expect(decoded?.schema).toBe(
+      "mastermind.workspace.window_read_candidate.v2",
+    );
+    expect(
+      decoded && "observation_binding" in decoded
+        ? decoded.observation_binding
+        : null,
+    ).toEqual({ job_id: "JOB-101", attempt_id: ATT });
+    expect(await decodeWindow(windowFixture())).toMatchObject({
+      schema: "mastermind.workspace.window_read_candidate.v1",
+    });
+    const extra = v2Window() as Record<string, unknown>;
+    extra.root = "JOB-100";
+    expect(await decodeWindow(extra)).toBeNull();
+    const missing = { ...v2Window() } as Record<string, unknown>;
+    delete missing.observation_binding;
+    expect(await decodeWindow(missing)).toBeNull();
+    const badJob = v2Window();
+    badJob.observation_binding.job_id = "JOB-CHILD";
+    expect(await decodeWindow(badJob)).toBeNull();
+    const trimmed = v2Window();
+    trimmed.observation_binding.job_id = " JOB-101";
+    expect(await decodeWindow(trimmed)).toBeNull();
+    const extraTuple = v2Window() as any;
+    extraTuple.observation_binding.root = "JOB-100";
+    expect(await decodeWindow(extraTuple)).toBeNull();
+  });
+  it("v1 can display content but never associates; v2 associates only the conservative plan child", async () => {
+    const selection = { workRef: "WS:B5", rootJobId: "JOB-100" };
+    const v1 = await decodeWindow(windowFixture());
+    const mission = qualifyingMission();
+    expect(observedMissionAssociation(v1, mission, selection)).toBeNull();
+    const v2 = await decodeWindow(v2Window());
+    const observed = observedMissionAssociation(v2, mission, selection);
+    expect(observed?.state).toBe("OBSERVED_MISSION_ASSOCIATION");
+    expect(observed?.job_id).toBe("JOB-101");
+    expect(observed?.attempt_id).toBe(ATT);
+    expect(observed?.window_observed_at).toBe("2026-09-21T07:00:00Z");
+    expect(observed?.mission_generated_at).toBe(mission.generated_at);
+    const foreign = structuredClone(mission);
+    foreign.children.items[0].current_attempt_id =
+      "ATT-" + "cd".repeat(16);
+    foreign.children.items[0].latest_attempt.attempt_id =
+      "ATT-" + "cd".repeat(16);
+    expect(observedMissionAssociation(v2, foreign, selection)).toBeNull();
+    const work = structuredClone(mission);
+    work.children.items[0].orchestration_role = "work";
+    expect(observedMissionAssociation(v2, work, selection)).toBeNull();
+    const terminal = structuredClone(v2Window());
+    terminal.view.terminal = true;
+    expect(
+      observedMissionAssociation(
+        await decodeWindow(terminal),
+        mission,
+        selection,
+      ),
+    ).toBeNull();
+    const unjoined = structuredClone(mission);
+    unjoined.children.coverage = "INCOMPLETE";
+    unjoined.children.unjoined_job_ids = ["JOB-102"];
+    unjoined.children.unjoined_job_count = 1;
+    expect(observedMissionAssociation(v2, unjoined, selection)).toBeNull();
   });
 });
 

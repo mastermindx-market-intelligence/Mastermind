@@ -127,3 +127,43 @@ def test_window_status_aligns_with_content(connected):
     p,_,s,_,_,_=connected;s.publish('a','Visible');refresh(p)
     status=p.locator('#window-state').bounding_box();content=p.locator('#review-warning').bounding_box()
     assert abs(status['x']-content['x'])<1
+
+
+def test_v2_window_renders_inert_and_does_not_infer_mission(connected):
+    p,_,s,_,errors,_=connected
+    s.publish('a','<b>not html</b> Observed text')
+    p.evaluate('''ref=>{
+      window.MastermindReadConnection.attach({
+        expectedLane:ref,sourceKind:'live-window',
+        read:async()=>{
+          const raw=await window.fixtureOwnerRead();
+          if(raw.status!==200)return raw;
+          const body=raw.body;
+          body.schema='mastermind.workspace.window_read_candidate.v2';
+          body.observation_binding={job_id:'JOB-12',attempt_id:'ATT-'+'ab'.repeat(16)};
+          return {status:200,body};
+        }
+      });
+    }''',REF)
+    assert refresh(p) is True
+    expect(p.locator('.message-text')).to_have_text('<b>not html</b> Observed text')
+    html=p.content()
+    assert 'Observed window for this Mission' not in html
+    assert 'OBSERVED_MISSION_ASSOCIATION' not in html
+    assert 'JOB-12' not in p.locator('.message-text').inner_text()
+    assert p.evaluate('document.querySelector(".message-text").innerHTML.includes("<b>")') is False
+    p.evaluate('''ref=>{
+      window.MastermindReadConnection.attach({
+        expectedLane:ref,sourceKind:'live-window',
+        read:async()=>{
+          const raw=await window.fixtureOwnerRead();
+          if(raw.status!==200)return raw;
+          const body=raw.body;
+          body.schema='mastermind.workspace.window_read_candidate.v2';
+          body.observation_binding={job_id:'JOB-12',attempt_id:'ATT-'+'ab'.repeat(16),root:'JOB-1'};
+          return {status:200,body};
+        }
+      });
+    }''',REF)
+    assert refresh(p) is False
+    assert p.locator('.message-text').count()==0 and not errors
