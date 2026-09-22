@@ -4,15 +4,22 @@ from __future__ import annotations
 import dataclasses
 import json
 
+import pytest
+
 from control_plane.ceo_intent import submit_intent
 from control_plane.executive_coo_cycle import CooCycle
 from control_plane.executive_orchestration_result import canonical_digest as result_digest
-from control_plane.executive_runtime import OrchestrationDispatchOutcome, Runtime
+from control_plane.executive_runtime import (
+    OrchestrationDispatchOutcome,
+    Runtime,
+    StateConflict,
+)
 from test_executive_os_phase1fc import (
     _admit_v2_plan,
     _complete_ohf_role,
     _register_placement_union,
     _v2_intent,
+    _v3_execution_binding,
 )
 
 _CODEX = {"provider_realm": "codex", "quota_class": "codex-hf1q-step"}
@@ -453,3 +460,265 @@ def test_ready_frontier_open_requires_current_lineage(tmp_path):
     assert not cycle._ready_frontier_open(
         [active], [candidate], current_by_step
     )
+
+
+# ---------------------------------------------------------------------------
+# Dependency-ready V3 work materialization
+# ---------------------------------------------------------------------------
+
+
+def _admitted_v3_chain(
+    runtime: Runtime,
+    *,
+    prerequisite_review_required: bool = False,
+):
+    _register_placement_union(runtime)
+    _register_codex_peer(runtime, "worker-c")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id=(
+                "CEO-V3-READY-REVIEW-001"
+                if prerequisite_review_required
+                else "CEO-V3-READY-001"
+            ),
+            business_impact="routine",
+        ),
+        execution_binding=_v3_execution_binding(),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    planner_dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+        quota_class="codex-hf1q-step",
+    )
+    assert isinstance(planner_dispatch, OrchestrationDispatchOutcome)
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner_dispatch.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Produce prerequisite evidence.",
+                "business_impact": "routine",
+                "review_required": prerequisite_review_required,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": _CODEX,
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Remain an independent initial-wave sibling.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": _CLAUDE,
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 2,
+                "step_id": "step-2",
+                "objective": "Consume the accepted prerequisite revision.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": _CODEX,
+                "prerequisite_step_ids": ["step-0"],
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner_dispatch, plan_body, identity_seed=7501)
+    admitted = runtime.jobs.admit_cycle_plan(
+        root.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:admit-plan:"
+            f"{planner_dispatch.attempt.attempt_id}"
+        ),
+    )
+    by_step = {job.plan_step_id: job for job in admitted}
+    assert set(by_step) == {"step-0", "step-1"}
+    return root, planner_dispatch, plan_body, by_step
+
+
+def _complete_v3_prerequisite(
+    runtime: Runtime,
+    root,
+    planner_dispatch: OrchestrationDispatchOutcome,
+    plan_body: dict,
+    job,
+):
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        job.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{job.job_id}:attempt:1",
+        worker_id="worker-a",
+        quota_class="codex-hf1q-step",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    body = {
+        "schema_version": "mastermind.work_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner_dispatch.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-0",
+        "repair_round": 0,
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    seal, _terminal = _complete_ohf_role(
+        runtime,
+        dispatch,
+        body,
+        identity_seed=7502,
+    )
+    return dispatch, seal
+
+
+def test_dependency_ready_work_creation_precedes_queued_sibling_dispatch(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, planner, plan_body, by_step = _admitted_v3_chain(runtime)
+    prerequisite, seal = _complete_v3_prerequisite(
+        runtime,
+        root,
+        planner,
+        plan_body,
+        by_step["step-0"],
+    )
+
+    outcome = CooCycle(runtime).run_once(root.job_id)
+
+    assert outcome.action == "WORK_CREATED"
+    created = runtime.jobs.get_job(str(outcome.selected_job_id))
+    assert created is not None
+    assert created.plan_step_id == "step-2"
+    assert created.attempt_count == 0
+    assert runtime.jobs.get_job(by_step["step-1"].job_id).attempt_count == 0
+    with runtime.store.read() as connection:
+        payload = json.loads(
+            str(
+                connection.execute(
+                    """
+                    SELECT e.payload_json FROM events e
+                    WHERE e.job_id=? AND e.event_type='JOB_CREATED'
+                    """,
+                    (created.job_id,),
+                ).fetchone()[0]
+            )
+        )
+    manifest = payload["dependency_manifest"]
+    assert manifest["prerequisite_step_ids"] == ["step-0"]
+    assert len(manifest["revisions"]) == 1
+    assert manifest["revisions"][0]["current_job_id"] == by_step["step-0"].job_id
+    assert manifest["revisions"][0]["current_attempt_id"] == (
+        prerequisite.attempt.attempt_id
+    )
+    assert manifest["revisions"][0]["current_result_digest"] == (
+        seal["role_result_digest"]
+    )
+
+
+def test_deferred_materialization_replays_one_exact_work_job(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, planner, plan_body, by_step = _admitted_v3_chain(runtime)
+    _complete_v3_prerequisite(
+        runtime,
+        root,
+        planner,
+        plan_body,
+        by_step["step-0"],
+    )
+    manifest = runtime.jobs.project_cycle_work_dependency_manifest(
+        root.job_id,
+        "step-2",
+    )
+    command = (
+        f"coo-cycle:{root.job_id}:create-work:step-2:"
+        f"{manifest['dependency_manifest_digest']}"
+    )
+
+    first = runtime.jobs.create_cycle_work(
+        root.job_id,
+        "step-2",
+        dependency_manifest=manifest,
+        command_id=command,
+    )
+    replay = runtime.jobs.create_cycle_work(
+        root.job_id,
+        "step-2",
+        dependency_manifest=manifest,
+        command_id=command,
+    )
+
+    assert replay.job_id == first.job_id
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM jobs
+            WHERE root_job_id=? AND plan_step_id='step-2'
+              AND orchestration_role='work'
+            """,
+            (root.job_id,),
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE command_id=?",
+            (command,),
+        ).fetchone()[0] == 1
+
+
+def test_deferred_materialization_refuses_review_pending_prerequisite(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, planner, plan_body, by_step = _admitted_v3_chain(
+        runtime,
+        prerequisite_review_required=True,
+    )
+    _complete_v3_prerequisite(
+        runtime,
+        root,
+        planner,
+        plan_body,
+        by_step["step-0"],
+    )
+    review = runtime.jobs.create_cycle_review(
+        root.job_id,
+        by_step["step-0"].job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:create-review:"
+            f"{by_step['step-0'].job_id}:1"
+        ),
+    )
+    assert review.attempt_count == 0
+
+    with pytest.raises(StateConflict):
+        runtime.jobs.project_cycle_work_dependency_manifest(
+            root.job_id,
+            "step-2",
+        )
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM jobs
+            WHERE root_job_id=? AND plan_step_id='step-2'
+              AND orchestration_role='work'
+            """,
+            (root.job_id,),
+        ).fetchone()[0] == 0

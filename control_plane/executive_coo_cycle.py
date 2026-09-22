@@ -628,13 +628,60 @@ class CooCycle:
                     return self._block(root_id, selected.job_id, _classify_invalid(exc))
                 return self._outcome(root_id, "REPAIR_CREATED", receipt.job_id, command, receipt)
 
-        # 4. Create exactly the sole planner.
+        # 4. Materialize one lowest-ordinal missing dependency-ready V3 work Job.
+        if (
+            admission is not None
+            and plan_body is not None
+            and admission.get("schema_version") == "mastermind.coo_plan_admission/v2"
+            and plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+        ):
+            materialized_steps = {
+                str(job.plan_step_id)
+                for job in children
+                if job.orchestration_role in {"work", "repair"}
+                and job.plan_step_id is not None
+            }
+            for step in plan_body["steps"]:
+                step_id = str(step["step_id"])
+                if (
+                    not step["prerequisite_step_ids"]
+                    or step_id in materialized_steps
+                ):
+                    continue
+                try:
+                    manifest = (
+                        self.runtime.jobs.project_cycle_work_dependency_manifest(
+                            root_id, step_id
+                        )
+                    )
+                except StateConflict:
+                    continue
+                command = (
+                    f"coo-cycle:{root_id}:create-work:{step_id}:"
+                    f"{manifest['dependency_manifest_digest']}"
+                )
+                try:
+                    job = self.runtime.jobs.create_cycle_work(
+                        root_id,
+                        step_id,
+                        dependency_manifest=manifest,
+                        command_id=command,
+                    )
+                except StateConflict as exc:
+                    return self._block(
+                        root_id, root_id, _classify_invalid(exc)
+                    )
+                return self._outcome(
+                    root_id, "WORK_CREATED", job.job_id, command, job
+                )
+
+        # 5. Create exactly the sole planner.
         if not children and not admission_events:
             command = f"coo-cycle:{root_id}:create-planner:0"
             planner = self.runtime.jobs.create_cycle_planner(root_id, command_id=command)
             return self._outcome(root_id, "PLANNER_CREATED", planner.job_id, command, planner)
 
-        # 5. Service one bounded ready sibling only when every active child is
+        # 6. Service one bounded ready sibling only when every active child is
         # exact, lease-live, read-only work from the same sealed plan.  Any stale
         # Attempt, review/repair activity, write authority, or source-custody risk
         # preserves reconciliation-first behavior.
@@ -666,7 +713,7 @@ class CooCycle:
             if ready is not None:
                 return self._dispatch_queued(root_id, ready)
 
-        # 6. Reconcile an active exact dispatch before any coupled/new work.
+        # 7. Reconcile an active exact dispatch before any coupled/new work.
         # Replaying the original command resumes or returns the same Attempt;
         # it never claims a replacement or another Job.
         if active:
@@ -684,11 +731,11 @@ class CooCycle:
                 )
             return self._outcome(root_id, "DISPATCHED", selected.job_id, command, receipt)
 
-        # 7. With no active child, dispatch the first queued non-root.
+        # 8. With no active child, dispatch the first queued non-root.
         if queued:
             return self._dispatch_queued(root_id, queued[0])
 
-        # 8. Admit the completed plan and its ordered initial work wave.
+        # 9. Admit the completed plan and its ordered initial work wave.
         if not admission_events:
             planners = [job for job in children if job.orchestration_role == "plan"]
             if len(planners) != 1 or len(children) != 1:
@@ -708,7 +755,7 @@ class CooCycle:
                     {"work_job_ids": [member.job_id for member in members]},
                 )
 
-        # 9. Create one missing review for the lowest completed current revision.
+        # 10. Create one missing review for the lowest completed current revision.
         if admission is not None:
             missing: list[Job] = []
             for step_id, material in current_by_step.items():
@@ -728,7 +775,7 @@ class CooCycle:
                 )
                 return self._outcome(root_id, "REVIEW_CREATED", review.job_id, command, review)
 
-        # 10. Derived approvals flow directly to the immutable handoff mutation.
+        # 11. Derived approvals flow directly to the immutable handoff mutation.
         if admission is not None and not handoff_events:
             living = [
                 job
@@ -758,7 +805,7 @@ class CooCycle:
                 except StateConflict as exc:
                     return self._block(root_id, root_id, _classify_invalid(exc))
 
-        # 11. Dispatch/reconcile the exact root only after immutable handoff.
+        # 12. Dispatch/reconcile the exact root only after immutable handoff.
         if handoff_events and root.status in {
             JobStatus.RUNNING,
             JobStatus.CHECKPOINTED,

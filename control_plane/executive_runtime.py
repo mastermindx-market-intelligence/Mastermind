@@ -8807,7 +8807,23 @@ def _current_orchestration_tree_material_for_dispatch(
             ],
             key=lambda row: (int(row["repair_round"]), str(row["job_id"])),
         )
-        if not revisions or revisions[0]["orchestration_role"] != "work":
+        reviews = [
+            row
+            for row in children
+            if row["orchestration_role"] == "review" and row["plan_step_id"] == step_id
+        ]
+        if not revisions:
+            deferred_v3 = bool(
+                admission.get("schema_version") == _COO_PLAN_ADMISSION_SCHEMA_V2
+                and plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+                and step.get("prerequisite_step_ids")
+                and reservation.get("initial_work_job_id") is None
+                and reservation.get("initial_work_command_id") is None
+            )
+            if deferred_v3 and not reviews:
+                continue
+            raise StateConflict("admitted step lost its initial work revision")
+        if revisions[0]["orchestration_role"] != "work":
             raise StateConflict("admitted step lost its initial work revision")
         for index, revision in enumerate(revisions):
             if (
@@ -8822,11 +8838,6 @@ def _current_orchestration_tree_material_for_dispatch(
                 )
             ):
                 raise StateConflict("dispatch lineage is forked or skipped")
-        reviews = [
-            row
-            for row in children
-            if row["orchestration_role"] == "review" and row["plan_step_id"] == step_id
-        ]
         for revision in revisions:
             if (
                 len(
@@ -10872,6 +10883,202 @@ class JobRegistry:
             )
             _validated_plan_admission(connection, root)
         return [self.get_job(job_id) for job_id in created_ids if self.get_job(job_id)]
+
+
+    def project_cycle_work_dependency_manifest(
+        self,
+        root_job_id: str,
+        plan_step_id: str,
+    ) -> dict[str, Any]:
+        """Project one ready deferred V3 step without minting authority."""
+
+        root_token = str(root_job_id or "").strip()
+        step_token = str(plan_step_id or "").strip()
+        with self.store.read() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            if root is None:
+                raise StateConflict("deferred work root does not exist")
+            admission, plan_body = _validated_plan_admission(connection, root)
+            step = next(
+                (
+                    item
+                    for item in plan_body["steps"]
+                    if item["step_id"] == step_token
+                ),
+                None,
+            )
+            if (
+                admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
+                or plan_body["schema_version"] != "mastermind.execution_plan/v3"
+                or step is None
+                or not step["prerequisite_step_ids"]
+            ):
+                raise StateConflict("dependency projection requires a deferred V3 step")
+            existing = connection.execute(
+                """
+                SELECT 1 FROM jobs
+                WHERE root_job_id=? AND plan_step_id=?
+                  AND orchestration_role IN ('work','repair')
+                LIMIT 1
+                """,
+                (root_token, step_token),
+            ).fetchone()
+            if existing is not None:
+                raise StateConflict("deferred V3 step already has a work revision")
+            return _work_dependency_manifest(
+                connection,
+                root_row=root,
+                admission=admission,
+                plan_body=plan_body,
+                plan_step_id=step_token,
+            )
+
+    def create_cycle_work(
+        self,
+        root_job_id: str,
+        plan_step_id: str,
+        *,
+        dependency_manifest: Mapping[str, Any],
+        command_id: str,
+    ) -> Job:
+        """Create/reconcile one dependency-ready reserved V3 work Job."""
+
+        root_token = str(root_job_id or "").strip()
+        step_token = str(plan_step_id or "").strip()
+        created_id: str | None = None
+        with self.store.transaction() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            if root is None:
+                raise StateConflict("deferred work root does not exist")
+            admission, plan_body = _validated_plan_admission(connection, root)
+            step = next(
+                (
+                    item
+                    for item in plan_body["steps"]
+                    if item["step_id"] == step_token
+                ),
+                None,
+            )
+            reservation = next(
+                (
+                    item
+                    for item in admission["steps"]
+                    if item["plan_step_id"] == step_token
+                ),
+                None,
+            )
+            if (
+                admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
+                or plan_body["schema_version"] != "mastermind.execution_plan/v3"
+                or step is None
+                or reservation is None
+                or not step["prerequisite_step_ids"]
+                or reservation["initial_work_job_id"] is not None
+                or reservation["initial_work_command_id"] is not None
+            ):
+                raise StateConflict("work creation requires one deferred V3 reservation")
+            expected_manifest = _work_dependency_manifest(
+                connection,
+                root_row=root,
+                admission=admission,
+                plan_body=plan_body,
+                plan_step_id=step_token,
+            )
+            supplied_manifest = _validate_work_dependency_manifest(
+                dependency_manifest,
+                root_job_id=root_token,
+                plan_attempt_id=str(admission["plan_attempt_id"]),
+                plan_digest=str(admission["plan_digest"]),
+                plan_step_id=step_token,
+            )
+            if supplied_manifest != expected_manifest:
+                raise StateConflict("work dependency manifest is no longer current")
+            expected_command = (
+                f"coo-cycle:{root_token}:create-work:{step_token}:"
+                f"{expected_manifest['dependency_manifest_digest']}"
+            )
+            if command_id != expected_command:
+                raise StateConflict("work creation command_id is not deterministic")
+            root_validations = _strict_canonical_json_loads(
+                str(root["validation_commands_json"]), name="root validations"
+            )
+            has_tests = "RUN_TESTS" in step["requested_authorities"]
+            validations = root_validations if has_tests else []
+            existing_command = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (command_id,)
+            ).fetchone()
+            if existing_command is not None:
+                row = _reconcile_cycle_child_creation(
+                    connection,
+                    event_row=existing_command,
+                    root_row=root,
+                    role="work",
+                    objective=str(step["objective"]),
+                    requested_authorities=list(step["requested_authorities"]),
+                    allowed_write_paths=list(step["allowed_write_paths"]),
+                    validation_commands=validations,
+                    cost_class=str(step["cost_class"]),
+                    attempt_limit=int(step["attempt_limit"]),
+                    review_required=bool(reservation["review_required"]),
+                    command_id=command_id,
+                    plan_attempt_id=str(admission["plan_attempt_id"]),
+                    plan_digest=str(admission["plan_digest"]),
+                    plan_step_id=step_token,
+                    repair_round=0,
+                    placement=step.get("placement"),
+                    dependency_manifest=expected_manifest,
+                )
+                return _job_from_row(row)
+            _assert_cycle_root_open_for_child_mutation(connection, root)
+            existing_step_rows = connection.execute(
+                """
+                SELECT * FROM jobs
+                WHERE root_job_id=? AND plan_step_id=?
+                  AND orchestration_role IN ('work','repair','review')
+                ORDER BY job_id
+                """,
+                (root_token, step_token),
+            ).fetchall()
+            if existing_step_rows:
+                raise StateConflict("deferred V3 step already consumed a reserved slot")
+            child_count = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE parent_job_id=?", (root_token,)
+                ).fetchone()[0]
+            )
+            if (
+                int(reservation["step_slots"]) < 1
+                or child_count + 1 > int(admission["reserved_children_total"])
+            ):
+                raise StateConflict("deferred work exceeds its reserved slot capacity")
+            row = _insert_cycle_child(
+                connection,
+                self.store,
+                root_row=root,
+                role="work",
+                objective=str(step["objective"]),
+                requested_authorities=list(step["requested_authorities"]),
+                allowed_write_paths=list(step["allowed_write_paths"]),
+                validation_commands=validations,
+                cost_class=str(step["cost_class"]),
+                attempt_limit=int(step["attempt_limit"]),
+                review_required=bool(reservation["review_required"]),
+                command_id=command_id,
+                plan_attempt_id=str(admission["plan_attempt_id"]),
+                plan_digest=str(admission["plan_digest"]),
+                plan_step_id=step_token,
+                repair_round=0,
+                placement=step.get("placement"),
+                dependency_manifest=expected_manifest,
+            )
+            created_id = str(row["job_id"])
+        result = self.get_job(str(created_id))
+        assert result is not None
+        return result
 
     def create_cycle_review(
         self,
