@@ -84,12 +84,13 @@ test('descriptions disclose command, access-policy and external-data effects', (
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /usage|statistics/i);
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /identifier/i);
 });
-test('generic terminal tools steer bounded commissions to semantic actions', () => {
+test('generic terminal tools declare a bounded direct-terminal purpose', () => {
   for (const name of ['start_process', 'interact_with_process']) {
     const description = tools.get(name).description;
-    assert.match(description, /not (?:as|to) (?:a )?(?:transport|relay)/i, name);
+    assert.match(description, /not a work-submission or agent-handoff interface/i, name);
     assert.match(description, /nested agent instructions|worker handoffs/i, name);
-    assert.match(description, /purpose-built work-submission/i, name);
+    assert.match(description, /outside (?:its|their) declared (?:purpose|scope)/i, name);
+    assert.doesNotMatch(description, /\b(?:always|never|must|mandatory|only correct|prefer)\b/i, name);
   }
 });
 
