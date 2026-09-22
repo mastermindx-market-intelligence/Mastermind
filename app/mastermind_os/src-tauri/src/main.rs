@@ -117,18 +117,25 @@ mod readiness_tests {
     }
 
     #[test]
-    fn configured_identity_validation_is_closed_and_bounded() {
-        for invalid in ["", "invalid client", "client/slash", "client\nnewline"] {
+    fn configured_identity_validation_matches_the_native_auth_owner() {
+        for invalid in [
+            "",
+            "invalid client",
+            "client/slash",
+            "client.dot",
+            "client:colon",
+            "client\nnewline",
+        ] {
             assert!(
                 readiness_from_client_id(Some(invalid)).is_err(),
                 "{invalid:?}"
             );
         }
-        let oversized = "a".repeat(161);
+        let oversized = "a".repeat(129);
         assert!(readiness_from_client_id(Some(&oversized)).is_err());
 
-        let boundary = "a".repeat(160);
+        let boundary = "a".repeat(128);
         assert!(readiness_from_client_id(Some(&boundary)).is_ok());
-        assert!(readiness_from_client_id(Some("tpc_A1._-:valid")).is_ok());
+        assert!(readiness_from_client_id(Some("tpc_A1_-valid")).is_ok());
     }
 }

@@ -799,6 +799,31 @@ mod tests {
         assert!(i.transaction(Resource::Acquisition).is_err());
     }
     #[test]
+    fn native_client_identity_uses_the_closed_shared_grammar() {
+        for invalid in [
+            "",
+            "invalid client",
+            "client/slash",
+            "client.dot",
+            "client:colon",
+            "client\nnewline",
+        ] {
+            assert_eq!(Inner::new(Some(invalid)).status().status, "unconfigured");
+        }
+        assert_eq!(
+            Inner::new(Some(&"a".repeat(129))).status().status,
+            "unconfigured"
+        );
+        assert_eq!(
+            Inner::new(Some(&"a".repeat(128))).status().status,
+            "signed_out"
+        );
+        assert_eq!(
+            Inner::new(Some("tpc_A1_-valid")).status().status,
+            "signed_out"
+        );
+    }
+    #[test]
     fn separate_authorizations_have_exact_custom_scope_and_s256() {
         for resource in [Resource::Acquisition, Resource::Content] {
             let url =
