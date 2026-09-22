@@ -67,8 +67,27 @@ _DUPLICATE_JSON_KEY_REASON = "capability policy has a duplicate JSON key"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 _CONFIG_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-_EXECUTION_SURFACES = frozenset({"codex-exec", "codex-app-server"})
+_EXECUTION_SURFACES = frozenset({"codex-exec", "codex-app-server", "claude-code"})
 _AUTH_REALMS = frozenset({"dedicated-worker-account"})
+_ADAPTER_EXECUTION_SURFACES = {
+    "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
+    "claude-code": frozenset({"claude-code"}),
+}
+_SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
+
+
+def adapter_supports_execution_surface(adapter_id: str, execution_surface: str) -> bool:
+    """Return whether one reviewed adapter owns the declared execution surface."""
+
+    adapter = str(adapter_id or "").strip().lower()
+    surface = str(execution_surface or "").strip().lower()
+    return surface in _ADAPTER_EXECUTION_SURFACES.get(adapter, frozenset())
+
+
+def is_sealed_worker_execution_surface(execution_surface: str) -> bool:
+    """Return whether the surface is a foreground sealed worker process."""
+
+    return str(execution_surface or "").strip().lower() in _SEALED_WORKER_EXECUTION_SURFACES
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
 _NETWORK_POLICIES = frozenset({"disabled", "loopback-browser-only"})
@@ -1433,12 +1452,12 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} both requires and forbids: {', '.join(collision)}"
                 )
-            if execution_surface == "codex-exec" and (
+            if is_sealed_worker_execution_surface(execution_surface) and (
                 mcp_server_ids or resource_ids or plugins
             ):
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot grant MCP/plugins or resources "
-                    "to sealed codex-exec"
+                    "to a sealed worker execution surface"
                 )
             is_browser_profile = profile_id == "operator.browser.local-review.v1"
             if is_browser_profile:
@@ -1476,10 +1495,10 @@ class ExecutionCapabilityRegistry:
                         "skill_capabilities; exact V4 company-Skill profiles "
                         "require skills=[]"
                     )
-                if execution_surface == "codex-exec":
+                if is_sealed_worker_execution_surface(execution_surface):
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} cannot grant skill_capabilities "
-                        "to sealed codex-exec"
+                        "to a sealed worker execution surface"
                     )
                 if write_capable:
                     raise CapabilityPolicyError(
