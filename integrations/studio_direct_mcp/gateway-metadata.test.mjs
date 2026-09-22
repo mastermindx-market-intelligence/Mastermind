@@ -84,6 +84,17 @@ test('descriptions disclose command, access-policy and external-data effects', (
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /usage|statistics/i);
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /identifier/i);
 });
+test('published catalog descriptions remain capability-focused', () => {
+  for (const [name, tool] of tools) {
+    assert.equal(typeof tool.description, 'string', name);
+    assert.doesNotMatch(
+      tool.description,
+      /\b(?:always|never|mandatory|only correct|primary tool|critical rule|prefer)\b/i,
+      name,
+    );
+  }
+});
+
 test('server instructions remain descriptive rather than policy-prescriptive', () => {
   const instructions = client.getInstructions();
   assert.equal(typeof instructions, 'string');
