@@ -272,6 +272,113 @@ def _reviewed_codex_adapter(root: Path) -> CodexWorkerAdapter:
     )
 
 
+_CLAUDE_FIXTURE_VERSION = "2.1.239"
+_CLAUDE_FIXTURE_MODEL = "claude-opus-4-6"
+
+
+class _TypedClaudePolicyObserver:
+    """Consumer-side typed seam fake for the native Claude adapter.
+
+    No producer is synthesized: this only satisfies the frozen seam the worker
+    consumes, exactly as the ``claude-code`` tests require.
+    """
+
+    def __init__(self, attestation: object, exact_model: str) -> None:
+        self._attestation = attestation
+        self._exact_model = exact_model
+        self.generation: object = 1
+        self.calls = 0
+
+    def observe(self) -> object:
+        from control_plane.claude_worker import ManagedModelPolicyObservation
+
+        self.calls += 1
+        return ManagedModelPolicyObservation(
+            exact_model=self._exact_model,
+            binary_sha256=self._attestation.sha256,
+            binary_version=self._attestation.version,
+            generation=self.generation,
+        )
+
+
+def _reviewed_claude_code_kwargs(root: Path) -> dict:
+    """Reviewed native-Claude construction arguments over one fixture binary."""
+
+    from control_plane.claude_worker import attest_claude_code_binary
+
+    root.mkdir(parents=True, exist_ok=True)
+    binary = root / "fixture-claude"
+    if not binary.exists():
+        binary.write_text(
+            f"#!/bin/sh\nprintf '{_CLAUDE_FIXTURE_VERSION} (Claude Code)\\n'\n",
+            encoding="utf-8",
+        )
+        binary.chmod(0o700)
+    allowed_versions = frozenset({_CLAUDE_FIXTURE_VERSION})
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=allowed_versions
+    )
+    return {
+        "binary_path": binary,
+        "allowed_versions": allowed_versions,
+        "exact_model": _CLAUDE_FIXTURE_MODEL,
+        "max_turns": 4,
+        "managed_policy_observer": _TypedClaudePolicyObserver(
+            attestation, _CLAUDE_FIXTURE_MODEL
+        ),
+    }
+
+
+def _reviewed_claude_code_adapter(root: Path) -> object:
+    """One native Claude adapter built through the reviewed factory only."""
+
+    from control_plane.claude_worker import ClaudeCodeWorkerAdapter
+
+    kwargs = _reviewed_claude_code_kwargs(root)
+    adapter = construct_reviewed_adapter(
+        "claude-code", kwargs.pop("binary_path"), **kwargs
+    )
+    assert type(adapter) is ClaudeCodeWorkerAdapter
+    return adapter
+
+
+def _audit_codex_project_configuration(workspace: Path) -> str:
+    """Give the workspace the existing audited Codex project config and a HEAD.
+
+    Validation fixtures hand the spec to the reviewed common Codex adapter,
+    whose project-configuration preflight demands the audited ``.codex``
+    bytes inside its own clean clone.  The audited checkout content is
+    ``control_plane``'s own ``.codex/config.toml``; nothing is invented here.
+    """
+
+    from control_plane.codex_worker import _PROJECT_ROOT
+
+    def git(*arguments: str) -> str:
+        completed = subprocess.run(
+            ["/usr/bin/git", *arguments],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+        )
+        return completed.stdout.decode("utf-8", errors="strict")
+
+    project_config = workspace / ".codex" / "config.toml"
+    project_config.parent.mkdir(mode=0o700, exist_ok=True)
+    project_config.write_bytes(
+        (_PROJECT_ROOT / ".codex" / "config.toml").read_bytes()
+    )
+    project_config.chmod(0o600)
+    (workspace / "README.md").write_text("fixture\n", encoding="utf-8")
+    git("init", "-q")
+    git("add", "README.md", ".codex/config.toml")
+    git(
+        "-c", "user.name=Broker Fixture",
+        "-c", "user.email=broker-fixture@example.invalid",
+        "commit", "-qm", "fixture",
+    )
+    return git("rev-parse", "HEAD").strip()
+
+
 def _fixture(tmp_path: Path):
     worker_uid = os.geteuid()
     worker_gid = os.getegid()
@@ -285,8 +392,13 @@ def _fixture(tmp_path: Path):
     run_dir = run_root / "run-1"
     schema = run_dir / "input" / "result.schema.json"
     workspace.mkdir(mode=0o700)
+    # Create the run directory itself at the audited worker-private mode:
+    # mkdir(parents=True) would leave the intermediate directory world-readable
+    # and the reviewed run-directory boundary would correctly refuse it.
+    run_dir.mkdir(mode=0o700)
     schema.parent.mkdir(parents=True, mode=0o700)
     schema.write_text("{}\n", encoding="utf-8")
+    expected_base_sha = _audit_codex_project_configuration(workspace)
     policy = BrokerPolicy(
         control_uid=control_uid,
         worker_uid=worker_uid,
@@ -304,7 +416,11 @@ def _fixture(tmp_path: Path):
     adapter = FakeAdapter()
     sweeper = FakeSweeper()
     broker = ExecutiveWorkerBroker(reviewed, policy, sweeper)
+    # The reviewed construction above proves the binding law; the recording
+    # fake then stands in for the adapter on both the primary and validation
+    # seams, which are the same reviewed adapter for the Codex broker.
     broker.adapter = adapter
+    broker.validation_adapter = adapter
     peer = PeerCredentials(uid=control_uid, gid=worker_gid, pid=100)
     spec = {
         "run_id": "run-1",
@@ -317,7 +433,7 @@ def _fixture(tmp_path: Path):
         "authorities": ["READ", "RUN_TESTS"],
         "authority": None,
         "worker_user": "fixture-worker",
-        "expected_base_sha": "b" * 40,
+        "expected_base_sha": expected_base_sha,
         "allowed_artifact_paths": [],
         "isolation_roots": [str(workspace_root), str(run_root)],
         "isolation_denied_paths": [],
@@ -2570,8 +2686,9 @@ def test_broker_success_publication_does_not_reopen_launch_admission(
             assert response["request_id"] == "req-publish-a"
             assert response["operation"] == "start" and response["ok"] is True
             assert set(response["result"]) == {
-                "process_ref", "launch_attestation", "startup_sweep"
+                "adapter_id", "process_ref", "launch_attestation", "startup_sweep"
             }
+            assert response["result"]["adapter_id"] == "codex-cli"
             assert response["result"]["process_ref"]["run_id"] == spec["run_id"]
             assert response["result"]["launch_attestation"] == adapter.launch_attestation(adapter.ref)
             assert response["result"]["startup_sweep"] is None
@@ -2738,3 +2855,166 @@ def test_remote_adapter_reattaches_exact_broker_run_without_starting_again(
     assert remote._refs[ref.run_id] == ref
     assert remote._specs[ref.run_id] == spec
     assert client.calls == [("status", {"run_id": ref.run_id})]
+
+
+# ---------------------------------------------------------------------------
+# Discriminators for the broker response identity, the reviewed common Codex
+# validation adapter binding, and the inert descriptor floor.  These tests
+# must fail RED against the supplied preimage and turn GREEN only after the
+# corrections in control_plane/executive_worker_broker.py reconcile the
+# adapter-identity return/check, the RemoteClaudeWorkerAdapter, and the
+# separate common Codex validation adapter.
+# ---------------------------------------------------------------------------
+
+
+def test_claude_code_descriptor_remains_unarmed_after_correction(
+    tmp_path: Path,
+) -> None:
+    from control_plane.worker_adapter import adapter_descriptor, adapter_implementation
+
+    from control_plane.claude_worker import ClaudeCodeWorkerAdapter
+
+    descriptor = adapter_descriptor("claude-code")
+    assert descriptor.implemented is False
+    assert descriptor.implementation == (
+        "control_plane.claude_worker.ClaudeCodeWorkerAdapter"
+    )
+    assert adapter_implementation("claude-code") is ClaudeCodeWorkerAdapter
+    assert (
+        adapter_descriptor("claude-compatible-subscription").implementation
+        != descriptor.implementation
+    )
+    # The distinct subscription realm keeps its own inert descriptor; the two
+    # adapter ids are never interchangeable.
+    assert (
+        adapter_descriptor("claude-compatible-subscription").adapter_id
+        == "claude-compatible-subscription"
+        != descriptor.adapter_id
+    )
+
+
+def test_broker_response_identity_mismatch_refuses_start(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+
+        class IdentitySpoof(FakeAdapter):
+            @property
+            def adapter_id(self) -> str:
+                return "claude-code"
+
+        original_adapter = adapter
+
+        async def attempt() -> None:
+            with pytest.raises(WorkerBrokerError, match="does not match descriptor"):
+                ExecutiveWorkerBroker(
+                    IdentitySpoof(),
+                    broker.policy,
+                    broker.sweeper,
+                    adapter_id="codex-cli",
+                )
+
+        await attempt()
+        assert broker.adapter is original_adapter
+
+    asyncio.run(scenario())
+
+
+def test_claude_broker_uses_common_codex_validation_adapter(tmp_path: Path) -> None:
+    from control_plane.claude_worker import ClaudeCodeWorkerAdapter
+    from control_plane.codex_worker import CodexWorkerAdapter as ExactCodexAdapter
+    from control_plane.worker_adapter import adapter_descriptor
+
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    # The primary native Claude adapter is reviewed-constructed, never a stub.
+    claude_adapter = _reviewed_claude_code_adapter(tmp_path / "claude-primary")
+    # The validation adapter is a separately reviewed common Codex adapter.
+    validation_adapter = _reviewed_codex_adapter(tmp_path / "validation-codex")
+    broker_obj = ExecutiveWorkerBroker(
+        claude_adapter,
+        broker.policy,
+        sweeper,
+        adapter_id="claude-code",
+        validation_adapter=validation_adapter,
+        validation_adapter_id="codex-cli",
+    )
+    # Exact class plus reviewed-construction binding stay active on both sides.
+    assert type(broker_obj.adapter) is ClaudeCodeWorkerAdapter
+    assert broker_obj.adapter is claude_adapter
+    assert bind_reviewed_adapter(broker_obj.adapter, "claude-code") == (
+        adapter_descriptor("claude-code")
+    )
+    assert bind_reviewed_adapter(
+        broker_obj.adapter, "claude-code"
+    ).implemented is False
+    assert broker_obj.adapter_id == "claude-code"
+    assert type(validation_adapter) is ExactCodexAdapter
+    assert bind_reviewed_adapter(validation_adapter, "codex-cli") == (
+        adapter_descriptor("codex-cli")
+    )
+    assert broker_obj.validation_adapter is validation_adapter
+    assert broker_obj.validation_adapter_id == "codex-cli"
+
+
+def test_claude_broker_refuses_non_codex_validation_adapter(tmp_path: Path) -> None:
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    # Both sides are real reviewed adapters: the refusal must come from the
+    # broker's validation-identity law, not from a stub failing to bind.
+    claude_adapter = _reviewed_claude_code_adapter(tmp_path / "claude-primary")
+    other_claude_adapter = _reviewed_claude_code_adapter(
+        tmp_path / "claude-wrong-validation"
+    )
+    with pytest.raises(WorkerBrokerError, match="common Codex sandbox") as refused:
+        ExecutiveWorkerBroker(
+            claude_adapter,
+            broker.policy,
+            sweeper,
+            adapter_id="claude-code",
+            validation_adapter=other_claude_adapter,
+            validation_adapter_id="claude-code",
+        )
+    # The reviewed Claude adapter is not the reviewed common Codex sandbox, and
+    # it is never conflated with the separate subscription realm descriptor.
+    assert refused.value.__cause__ is None
+    assert "claude-compatible-subscription" not in str(refused.value)
+
+
+def test_remote_claude_worker_adapter_has_immutable_claude_identity() -> None:
+    from control_plane.executive_worker_broker import (
+        RemoteClaudeWorkerAdapter,
+        RemoteCodexWorkerAdapter,
+    )
+
+    assert RemoteClaudeWorkerAdapter.adapter_id == "claude-code"
+    assert RemoteCodexWorkerAdapter.adapter_id == "codex-cli"
+    assert issubclass(RemoteClaudeWorkerAdapter, RemoteCodexWorkerAdapter)
+
+
+def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        adapter.finished.set()
+        await broker.execute(
+            _request(
+                "start",
+                {"launch_spec": spec, "validation_commands": [["/usr/bin/true"]]},
+            ),
+            peer=peer,
+        )
+        await broker.execute(
+            _request("collect", {"run_id": "run-1"}),
+            peer=peer,
+        )
+        with pytest.raises(BrokerProtocolError, match="not frozen"):
+            await broker.execute(
+                _request(
+                    "validate",
+                    {
+                        "run_id": "run-1",
+                        "argv": ["/usr/bin/false"],
+                        "timeout_seconds": 10,
+                    },
+                ),
+                peer=peer,
+            )
+
+    asyncio.run(scenario())

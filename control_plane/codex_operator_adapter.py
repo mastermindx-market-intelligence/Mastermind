@@ -2119,7 +2119,7 @@ class CodexOperatorAdapter:
             self.visible_turn_projection = projection
         return projection
 
-    def mint_observer_grant(self, turn: TurnRef) -> str:
+    def mint_observer_grant(self, turn: TurnRef, *, binding=None):
         state = self._generations.get(turn.process_generation_id)
         if state is None:
             raise CodexAdapterError(
@@ -2131,8 +2131,7 @@ class CodexOperatorAdapter:
             raise CodexAdapterError(
                 AdapterFailureClass.SESSION_MISSING, "native turn is missing"
             )
-        return self._visible_projection().mint_grant(
-            TurnKey(
+        key = TurnKey(
                 turn.attempt_id,
                 turn.session_epoch_id,
                 turn.process_generation_id,
@@ -2140,8 +2139,11 @@ class CodexOperatorAdapter:
                 state.generation.worker_id,
                 turn.turn_id,
                 native_turn,
-            )
         )
+        projection = self._visible_projection()
+        if binding is not None:
+            return projection.enroll_observer(key, **binding)
+        return projection.mint_grant(key)
 
     def _ingest_turn_notifications(
         self,
