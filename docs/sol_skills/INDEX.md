@@ -85,6 +85,8 @@ Do not call architecture/docs “built,” a merged implementation “proven liv
 ### `COLD_START.md`
 Use when opening/recovering a program, workstream, unfamiliar task, or fresh CEO session.
 Produces a current-state model, disagreement ledger and exact next action.
+Host-file, shell, process and desktop capability questions also require its Step 1A
+before declaring local access unavailable or delegating routine host commands.
 
 ### `ACTIVE_EXECUTION.md`
 Mandatory after current-state recovery for substantial continuing or modifying CEO work in the
