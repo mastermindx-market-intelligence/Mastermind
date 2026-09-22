@@ -851,9 +851,15 @@ def _build_macro_materialization_plan(
                     stem = _static_macro_probe(entry, repos)
                     if stem is None:
                         continue
+                    # A tracked symlink can make an otherwise untracked stem
+                    # exist in the canonical checkout. Refuse every prefix,
+                    # including glob bases, without following the link target.
+                    parts = stem.split("/")
+                    for end in range(1, len(parts) + 1):
+                        prefix = "/".join(parts[:end])
+                        if prefix in expected and expected[prefix][0] == "120000":
+                            raise ValueError("path-existence probe traverses a symlink")
                     if stem in expected:
-                        if expected[stem][0] == "120000":
-                            raise ValueError("path-existence probe is a symlink")
                         files.add(stem)
                     elif stem in tree_directories:
                         probe_directories.add(stem)

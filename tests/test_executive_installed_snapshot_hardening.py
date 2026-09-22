@@ -1080,6 +1080,74 @@ def test_sparse_macro_materialization_preserves_brief_and_path_existence_closure
         assert observed[0] == head
 
 
+@pytest.mark.parametrize("field", ["artifacts", "owns_paths"])
+@pytest.mark.parametrize("suffix", ["evidence.md", "nested/**"])
+@pytest.mark.parametrize("link_path", ["alias", "links/alias"])
+@pytest.mark.parametrize("target_kind", ["internal", "external", "dangling"])
+def test_sparse_macro_materialization_refuses_symlink_prefix(
+    tmp_path: Path, field: str, suffix: str, link_path: str, target_kind: str,
+):
+    from integrations.executive_mcp.installed import (
+        _build_macro_materialization_plan, _default_packet_runner, _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    macro, _head = _macro_sparse_fixture(tmp_path)
+    target = macro / "research" if target_kind == "internal" else tmp_path / target_kind
+    if target_kind != "dangling":
+        (target / "nested").mkdir(parents=True)
+        (target / "evidence.md").write_text("evidence\n")
+        (target / "nested/payload.md").write_text("nested evidence\n")
+    link = macro / link_path
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link_target = ("../" * (len(link.parts) - len(macro.parts) - 1) + "research") \
+        if target_kind == "internal" else target
+    link.symlink_to(link_target, target_is_directory=True)
+    (macro / "agentos/workstreams/WS-SPARSE.md").write_text(
+        f"---\nrepos: [macro]\n{field}:\n  - {link_path}/{suffix}\n---\n",
+    )
+    _git(macro, "add", ".")
+    _git(macro, "commit", "-q", "-m", "path probe through tracked symlink")
+    assert not _git(macro, "status", "--porcelain").stdout
+    probe = f"{link_path}/nested" if suffix.endswith("/**") else f"{link_path}/{suffix}"
+    assert (macro / probe).exists() is (target_kind != "dangling")
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+
+    with pytest.raises(GatewayError, match="path-list frontmatter is unsupported") as refused:
+        _build_macro_materialization_plan(
+            macro, runner=_default_packet_runner, env=env, deadline=None,
+        )
+    assert "symlink" in str(refused.value.__cause__)
+
+
+@pytest.mark.parametrize("field", ["artifacts", "owns_paths"])
+@pytest.mark.parametrize("suffix", ["evidence.md", "nested/**"])
+def test_sparse_macro_materialization_preserves_direct_directory_prefix(
+    tmp_path: Path, field: str, suffix: str,
+):
+    from integrations.executive_mcp.installed import (
+        _build_macro_materialization_plan, _default_packet_runner,
+        _installed_child_env, _materialized_macro_root,
+    )
+
+    macro, _head = _macro_sparse_fixture(tmp_path)
+    (macro / "links/alias/nested").mkdir(parents=True)
+    (macro / "links/alias/evidence.md").write_text("evidence\n")
+    (macro / "links/alias/nested/payload.md").write_text("nested evidence\n")
+    (macro / "agentos/workstreams/WS-SPARSE.md").write_text(
+        f"---\nrepos: [macro]\n{field}:\n  - links/alias/{suffix}\n---\n",
+    )
+    _git(macro, "add", ".")
+    _git(macro, "commit", "-q", "-m", "path probe through direct directories")
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    plan = _build_macro_materialization_plan(
+        macro, runner=_default_packet_runner, env=env, deadline=None,
+    )
+    probe = "links/alias/nested" if suffix.endswith("/**") else f"links/alias/{suffix}"
+    with _materialized_macro_root(macro, timeout=5.0, plan=plan) as materialized:
+        assert (materialized / probe).exists() == (macro / probe).exists() is True
+
+
 def test_sparse_macro_materialization_refuses_unsupported_path_list_shape(tmp_path: Path):
     from integrations.executive_mcp.installed import (
         _build_macro_materialization_plan,
