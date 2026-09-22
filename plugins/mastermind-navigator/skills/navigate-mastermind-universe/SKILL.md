@@ -60,6 +60,15 @@ The discovery call is evidence about that exact surface and moment. It is not a 
 - Exact ChatGPT observation or actuation routes through Web-Sol plus a current RuntimeBinding; never select a target by title, recency, or newest tab.
 - Deployment, data, design, and communications work routes to the actual domain owner for the named target.
 
+## Least-privilege actuator routing
+
+Classify the requested effect by its owned object, not by the fact that a local command could emulate it.
+
+- Selected-project source edits, repository reconciliation, build/test work, and Git-oriented delivery stay on the selected-project/source path. Use an exact current Workbench action when its contract covers the effect. If the attended Workbench contract does not cover the needed repo/build effect, keep the project/source binding and, before any effect begins, move the bounded outcome only through an already-authorized native builder or Executive Job/Attempt/Worker owner. Do not synthesize the missing capability with Studio Direct `start_process` or `interact_with_process`.
+- Use Studio Direct's generic process surface for genuine bound host/process operations. A shell happening to be able to edit source, run Git, or invoke a build does not make that selected-project effect a host/process action.
+- A narrow typed owner-native action may be used only when its actual contract binds the requested target/effect and current owner evidence admits it; tool presence or a friendly name is not enough.
+- After an explicit platform safety refusal for a modifying action, freeze that logical operation on its carrier and reconcile owner-native effect evidence. Never change account, plugin, connector, worker, device, or generic tool merely to obtain the same refused effect. Independent path-disjoint work may continue.
+
 ## Bounded execution sequence
 
 1. Establish protected-source and Skillpack compatibility.
