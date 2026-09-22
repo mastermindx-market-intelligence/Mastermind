@@ -35,7 +35,7 @@ def _git(cwd: Path, *args: str) -> str:
 def _repository(tmp_path: Path) -> tuple[Path, str]:
     source = tmp_path / "source"
     source.mkdir()
-    _git(source, "init", "-q")
+    _git(source, "init", "-q", "--initial-branch=master")
     _git(source, "config", "user.name", "Executive Test")
     _git(source, "config", "user.email", "executive@example.invalid")
     (source / "README.md").write_text("proof fixture\n", encoding="utf-8")
@@ -551,6 +551,8 @@ def test_terminal_assignment_seal_revokes_group_traversal_at_both_boundaries(
     run_dir = tmp_path / "runs" / "ATT-001"
     workspace.mkdir(parents=True, mode=0o750)
     run_dir.mkdir(parents=True, mode=0o770)
+    workspace.chmod(0o750)
+    run_dir.chmod(0o770)
     (workspace / "artifact.txt").write_text("preserved\n", encoding="utf-8")
 
     receipt = seal_control_owned_paths(
@@ -572,6 +574,8 @@ def test_terminal_assignment_seal_fails_closed_for_unowned_or_world_boundary(
     run_dir = tmp_path / "run"
     workspace.mkdir(mode=0o755)
     run_dir.mkdir(mode=0o700)
+    # mkdir is filtered by the operator umask; force the tested boundary.
+    workspace.chmod(0o755)
 
     with pytest.raises(AssignmentSealError, match="failed closed"):
         seal_control_owned_paths({"workspace": workspace, "run": run_dir})
