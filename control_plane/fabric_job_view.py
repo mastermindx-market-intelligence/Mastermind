@@ -1242,7 +1242,7 @@ def _observe_bounded_root(runtime, root_job_id, *, notes, present):
                     candidate, warning = _bounded_plan_child(
                         job, root=root_job, root_validated=root_validated)
                     if candidate is not None:
-                        planner_candidates.append(candidate)
+                        planner_candidates = planner_candidates + [candidate]
                         continue
                     unjoined = unjoined + [job.job_id]
                     notes = notes + [f"provenance not projected: {job.job_id}: {warning or 'workstream unavailable'}"]
