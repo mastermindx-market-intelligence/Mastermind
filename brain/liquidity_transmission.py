@@ -13,8 +13,9 @@ empty / advisory / inert.  This module never raises into a build.
 
 PUBLIC API
 ----------
-* ``context()``              — cached full artifact dict; ``{}`` unless present AND valid
-                               AND fresh (never a partially-trusted state).
+* ``context()``              — full artifact dict; ``{}`` unless present AND valid AND
+                               fresh (never a partially-trusted state).  The file read is
+                               cached; the freshness verdict is NOT (see CACHING below).
 * ``market_plane()``         — compact dict for the ``liquidity_transmission`` market_view
                                plane; truthful provenance even when absent/stale.
 * ``target(symbol)``         — ``{}`` in this wave (see CONTRACT SCOPE below).
@@ -82,6 +83,14 @@ MISSING IS NOT ZERO
 -------------------
 ``credit_impulse_global = null`` means insufficient comparable PIT coverage.  Nulls are
 preserved as ``None`` and never coerced to 0.0.
+
+CACHING
+-------
+The process cache holds the file read and its structural validation — never a freshness
+verdict.  Caching the verdict would freeze both status and age for the life of the
+process, so a long-running consumer that loaded a fresh artifact would keep reporting it
+fresh at its load-time age forever.  That is the same "stale reads as current" failure as
+a laundered wrapper, arriving through the cache, so the clock is re-judged on every call.
 
 AUTHORITY LADDER
 ----------------
@@ -162,16 +171,13 @@ _ST_INVALID = "invalid"
 # --------------------------------------------------------------------------- #
 # process-level cache — reset via _reset_context_cache() for tests
 # --------------------------------------------------------------------------- #
-_CACHE: dict[str, Any] | None = None
-_CACHE_LOADED: bool = False
+# Caches the FILE READ and its structural validation only — never a freshness verdict.
 _SNAP_CACHE: dict[str, Any] | None = None
 
 
 def _reset_context_cache() -> None:
-    """Invalidate the per-process cache.  Tests MUST call this around fixtures."""
-    global _CACHE, _CACHE_LOADED, _SNAP_CACHE
-    _CACHE = None
-    _CACHE_LOADED = False
+    """Invalidate the per-process read cache.  Tests MUST call this around fixtures."""
+    global _SNAP_CACHE
     _SNAP_CACHE = None
 
 
@@ -436,35 +442,44 @@ def _snapshot(now: Optional[datetime] = None) -> dict[str, Any]:
     producer is reported as absent or stale WITH its identity rather than as silence.
     """
     global _SNAP_CACHE
-    if _SNAP_CACHE is not None and now is None:
-        return _SNAP_CACHE
     try:
-        raw = _load_raw()
-        if raw is _UNREADABLE:
-            snap = {"status": _ST_ABSENT, "reason": "artifact absent or unreadable",
-                    "raw": None, "provenance": None, "freshness": None}
-        else:
-            valid, reason = _validate_contract(raw)
-            if not valid:
-                snap = {"status": _ST_INVALID, "reason": reason, "raw": None,
-                        # provenance is only trustworthy once the contract validates
-                        "provenance": None, "freshness": None}
+        # Only the READ and the structural validation are cached -- never the freshness
+        # verdict.  Caching the verdict would freeze both the status and the age for the
+        # life of the process: a long-running consumer that loaded a fresh artifact would
+        # go on reporting it fresh, at its load-time age, indefinitely.  That is the
+        # headline "stale artifact appears current" attack arriving through the cache
+        # instead of through the wrapper, so the clock is re-judged on every call.
+        cached = _SNAP_CACHE
+        if cached is None:
+            raw = _load_raw()
+            if raw is _UNREADABLE:
+                cached = {"status": _ST_ABSENT, "reason": "artifact absent or unreadable",
+                          "raw": None, "provenance": None}
             else:
-                fresh = _freshness_verdict(raw, now=now)
-                snap = {
-                    "status": _ST_STALE if fresh["stale"] else _ST_PRESENT,
-                    "reason": fresh["reason"],
-                    "raw": raw,
-                    "provenance": _provenance(raw),
-                    "freshness": fresh,
-                }
+                valid, reason = _validate_contract(raw)
+                if not valid:
+                    # provenance is only trustworthy once the contract validates
+                    cached = {"status": _ST_INVALID, "reason": reason, "raw": None,
+                              "provenance": None}
+                else:
+                    cached = {"status": None, "reason": None, "raw": raw,
+                              "provenance": _provenance(raw)}
+            _SNAP_CACHE = cached
+
+        if cached["raw"] is None:                     # absent / invalid — no clock to judge
+            return {**cached, "freshness": None}
+        fresh = _freshness_verdict(cached["raw"], now=now)
+        return {
+            "status": _ST_STALE if fresh["stale"] else _ST_PRESENT,
+            "reason": fresh["reason"],
+            "raw": cached["raw"],
+            "provenance": cached["provenance"],
+            "freshness": fresh,
+        }
     except Exception as e:  # noqa: BLE001 — fail-soft: never raise into a build
         log.warning("liquidity_transmission: unexpected error reading artifact (%s)", e)
-        snap = {"status": _ST_ABSENT, "reason": f"reader error: {e}", "raw": None,
+        return {"status": _ST_ABSENT, "reason": f"reader error: {e}", "raw": None,
                 "provenance": None, "freshness": None}
-    if now is None:
-        _SNAP_CACHE = snap
-    return snap
 
 
 # --------------------------------------------------------------------------- #
@@ -478,22 +493,18 @@ def context() -> dict[str, Any]:
     stale — a partially-trusted state is never handed out.  Cached for the process
     lifetime; call ``_reset_context_cache()`` to force a re-read.
     """
-    global _CACHE, _CACHE_LOADED
-    if _CACHE_LOADED:
-        return _CACHE or {}
-    _CACHE_LOADED = True
     try:
+        # Deliberately NOT memoised on the freshness verdict: _snapshot() re-judges the
+        # clock on every call (the file read behind it IS cached), so a document that ages
+        # out mid-process stops being handed out instead of persisting as once-fresh.
         snap = _snapshot()
         if snap["status"] != _ST_PRESENT or not isinstance(snap.get("raw"), dict):
             log.debug("liquidity_transmission: context withheld (%s: %s)",
                       snap["status"], snap.get("reason"))
-            _CACHE = {}
             return {}
-        _CACHE = snap["raw"]
-        return _CACHE
+        return snap["raw"]
     except Exception as e:  # noqa: BLE001
         log.warning("liquidity_transmission: unexpected error loading context (%s)", e)
-        _CACHE = {}
         return {}
 
 

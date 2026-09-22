@@ -253,6 +253,36 @@ class TestClockLaw:
         assert row["observed_at"] != row["known_at"]
         assert row["observed_date"] == row["observed_at"][:10]
 
+    def test_the_cache_never_freezes_a_freshness_verdict(self, tmp_path, monkeypatch, glt):
+        """A long-running process must not keep reporting a once-fresh artifact as fresh.
+
+        The process cache holds the file READ; caching the freshness VERDICT would freeze
+        both status and age for the life of the process, which is the same "stale reads as
+        current" failure as a laundered wrapper, arriving through the cache.
+        """
+        import unittest.mock as mock
+        import brain.liquidity_transmission as GLT
+
+        _patch_path(monkeypatch, _write(tmp_path, _freshen(_raw(), days_old=1.0)))
+        assert glt.audit_row()["status"] == "present"
+        assert glt.context() != {}
+
+        later = _now() + timedelta(days=9)
+
+        class _FakeDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return later
+
+        with mock.patch.object(GLT, "datetime", _FakeDatetime):
+            row = glt.audit_row()
+            assert row["status"] == "stale", "cache froze the freshness verdict"
+            assert row["age_days"] > 9
+            assert glt.context() == {}, "a once-fresh document was still being handed out"
+
+        # the READ itself is still cached — re-judging costs no extra I/O
+        assert GLT._SNAP_CACHE is not None
+
     def test_file_mtime_is_never_an_input(self, tmp_path, monkeypatch, glt):
         """Touching the file cannot change the verdict."""
         p = _write(tmp_path, _raw())          # the real, stale sample
