@@ -240,8 +240,10 @@ def test_runtime_composition_refuses_widened_auth_policy(
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="requires Unix sockets")
-def test_readiness_is_passive_and_requires_live_dialogue_socket(tmp_path: Path) -> None:
-    dialogue = tmp_path / "dialogue.sock"
+def test_readiness_is_passive_and_requires_live_dialogue_socket(
+    short_socket_root: Path,
+) -> None:
+    dialogue = short_socket_root / "dialogue.sock"
     runtime = WorkspaceReturnServiceRuntime(
         executive_runtime=object(),
         gateway=object(),
@@ -257,7 +259,7 @@ def test_readiness_is_passive_and_requires_live_dialogue_socket(tmp_path: Path) 
 
     owned = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        tmp_path.chmod(0o700)
+        short_socket_root.chmod(0o700)
         owned.bind(str(dialogue))
         dialogue.chmod(0o600)
         assert is_ready(runtime, state) is True
@@ -274,13 +276,13 @@ def test_readiness_is_passive_and_requires_live_dialogue_socket(tmp_path: Path) 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="requires Unix sockets")
 def test_dialogue_effect_refuses_untrusted_local_socket_before_client_io(
-    tmp_path: Path,
+    short_socket_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import integrations.workspace_agent_return_service as module
 
-    dialogue = tmp_path / "dialogue.sock"
-    tmp_path.chmod(0o700)
+    dialogue = short_socket_root / "dialogue.sock"
+    short_socket_root.chmod(0o700)
     owned = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     calls = []
 
