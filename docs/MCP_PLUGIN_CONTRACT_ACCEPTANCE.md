@@ -138,6 +138,13 @@ backend refusal after dispatch, timeout with a proven read-only no-effect path, 
 `EFFECT_UNKNOWN` after a possibly effectful call. Never infer an account-level reputation score,
 a fixed recovery period, or a weekly throttle from an individual refusal without platform evidence.
 
+For a repeated clearly benign platform refusal, preserve a minimal redacted incident receipt in
+the existing evidence/checkpoint owner: exact displayed safety message, product/model surface,
+UTC time, app/action name, request id when exposed, and whether the Studio gateway observed the
+call. Do not store the raw nested prompt, credentials, private file contents, or a guessed risk
+score. That receipt supports same-carrier reconciliation and provider support; it grants no retry
+or account-failover authority.
+
 ## Distinguish five layers
 
 1. **Source:** reviewed metadata and exact executable/input contracts in GitHub.
