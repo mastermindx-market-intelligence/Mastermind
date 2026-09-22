@@ -1291,3 +1291,49 @@ def test_skill_emits_typed_negative_capability_receipt_fields() -> None:
         "schema-invalid unless the safe probe path is exhausted",
     ):
         assert phrase in skill
+
+
+def test_source_work_does_not_fall_through_to_generic_studio_shell() -> None:
+    routing = _load("references/owner-routing.json")
+    by_class = {route["capability_class"]: route for route in routing["routes"]}
+    project = by_class["selected_project_action"]
+    local = by_class["local_machine_process"]
+
+    assert project["generic_shell_fallback"] is False
+    assert project["platform_refusal_policy"] == "SAME_OPERATION_SAME_CARRIER_RECONCILIATION_NO_FAILOVER"
+    assert "already-authorized native builder or Executive Job/Attempt/Worker" in project["unsupported_effect_route"]
+    assert any("Studio Direct generic shell" in item for item in project["forbidden_substitutions"])
+
+    assert local["generic_shell_scope"] == "GENUINE_BOUND_HOST_PROCESS_ONLY"
+    assert local["selected_project_source_fallback"] is False
+    assert local["platform_refusal_policy"] == "SAME_OPERATION_SAME_CARRIER_RECONCILIATION_NO_FAILOVER"
+    assert any("selected-project source" in item for item in local["forbidden_substitutions"])
+
+    skill = (PACKAGE / "skills/navigate-mastermind-universe/SKILL.md").read_text(encoding="utf-8")
+    for phrase in (
+        "Least-privilege actuator routing",
+        "Do not synthesize the missing capability with Studio Direct",
+        "genuine bound host/process operations",
+        "freeze that logical operation on its carrier",
+        "Never change account, plugin, connector, worker, device, or generic tool",
+    ):
+        assert phrase in skill
+
+
+def test_fresh_session_source_and_safety_refusal_cases_preserve_owner_boundaries() -> None:
+    fixture = _load("fixtures/fresh-session-routing-cases.json")
+    cases = {case["id"]: case for case in fixture["cases"]}
+
+    source = cases["selected-source-work-no-generic-shell-fallback"]
+    assert source["capability_class"] == "selected_project_action"
+    assert source["expected_owner"] == "Workbench"
+    assert source["expected_tool_family"] == "workbench"
+    assert source["requested_action_class"] == "WRITE"
+    assert source["expected_disposition"] == "NO_GENERIC_STUDIO_SHELL_FALLBACK"
+    assert "do not substitute Studio Direct start_process or interact_with_process" in source["owner_native_action"]
+
+    refused = cases["platform-safety-refusal-preserves-carrier"]
+    assert refused["capability_class"] == "selected_project_action"
+    assert refused["expected_disposition"] == "SAME_OPERATION_FREEZE_AND_RECONCILE_NO_FAILOVER"
+    assert "Freeze the original logical operation on its carrier" in refused["owner_native_action"]
+    assert "Do not switch account, plugin, connector, worker, device, or generic tool" in refused["owner_native_action"]
