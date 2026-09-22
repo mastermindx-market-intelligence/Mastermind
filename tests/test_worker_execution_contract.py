@@ -424,6 +424,11 @@ def test_common_artifact_limit_source_mutation_reaches_defaults_and_adapter_vali
         mutated_root / "control_plane",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    shutil.copytree(
+        _ROOT / "common",
+        mutated_root / "common",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     contract_path = mutated_root / "control_plane" / "worker_execution_contract.py"
     tree = ast.parse(contract_path.read_text(encoding="utf-8"))
     replacements = {

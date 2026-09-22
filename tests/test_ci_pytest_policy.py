@@ -876,5 +876,250 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     gate_steps = [step for step in job["steps"]
                   if step.get("name") == "Run repository test gate"]
     assert len(gate_steps) == 1
-    assert gate_steps[0]["run"] == "python scripts/ci_pytest.py"
+    # The gate is still one job producing the single required check `test`
+    # (branch protection on master requires exactly that context, with
+    # enforce_admins true). `--jobs` shards inside the job; it is the only
+    # argument the hosted gate may carry, and its value must be a positive
+    # integer the runner can actually run in parallel.
+    command = gate_steps[0]["run"].split()
+    assert command[:2] == ["python", "scripts/ci_pytest.py"]
+    assert command[2:3] == ["--jobs"], "the hosted gate takes no other argument"
+    assert command[3].isdigit() and int(command[3]) >= 1
+    assert len(command) == 4
     assert all(step.get("continue-on-error", False) is False for step in job["steps"])
+
+
+def test_hosted_gate_stays_a_single_required_check_job():
+    """A matrix here would rename the check to `test (0)`..., which branch
+    protection on master (required context `test`, enforce_admins true) would
+    never see satisfied -- blocking every merge. Parallelism must stay inside
+    the job."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    assert list(workflow["jobs"]) == ["test"]
+    job = workflow["jobs"]["test"]
+    assert "strategy" not in job, "a matrix would rename the required check"
+    assert job["runs-on"] == "ubuntu-latest"
+
+
+# --- `--jobs` sharding: placement only, never a coverage reduction -----------
+#
+# The gate may split its resolved module set across concurrent pytest
+# processes to cut wall-clock. The safety property under test is that the
+# split can never quietly shrink what runs: every shard plan must be a
+# total, disjoint cover of exactly the set the discovery/exclusion policy
+# already produced, and any shard failing must fail the gate.
+
+
+@pytest.mark.parametrize("jobs", [2, 3, 4, 5, 8])
+def test_shard_plan_is_a_total_disjoint_cover(jobs):
+    included = tuple(f"tests/test_m{index:03d}.py" for index in range(37))
+    shards = cip.partition_modules(included, jobs=jobs)
+    assert len(shards) == jobs
+    flattened = [path for shard in shards for path in shard]
+    assert sorted(flattened) == sorted(included)
+    assert len(flattened) == len(set(flattened))
+
+
+def test_real_shard_plan_stays_reasonably_balanced():
+    # Hash assignment trades exact evenness for stability, so pin the real
+    # repository's actual spread rather than an idealised one.
+    gate = cip.resolve_gate(_ROOT)
+    sizes = [len(shard) for shard in cip.partition_modules(gate["included"], jobs=4)]
+    assert min(sizes) >= 0.75 * (len(gate["included"]) / 4)
+    assert max(sizes) <= 1.25 * (len(gate["included"]) / 4)
+
+
+def test_shard_plan_is_deterministic_across_processes():
+    """sha256, never the salted builtin `hash()`.
+
+    A per-process salt would shard the same checkout differently on every run,
+    so a shard-specific failure could not be reproduced. Pin an exact expected
+    assignment: this fails if the hash function or its input ever changes.
+    """
+    included = tuple(f"tests/test_m{index:03d}.py" for index in range(20))
+    first = cip.partition_modules(included, jobs=4)
+    assert first == cip.partition_modules(included, jobs=4)
+
+    import hashlib
+
+    expected: list[list[str]] = [[] for _ in range(4)]
+    for path in included:
+        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        expected[int.from_bytes(digest[:8], "big") % 4].append(path)
+    assert first == tuple(tuple(bucket) for bucket in expected)
+
+
+def test_adding_a_module_does_not_move_the_others():
+    """The stability property that motivated hashing over round-robin.
+
+    Sharding changes which modules share a pytest process, so a reshuffle can
+    surface a latent cross-module ordering dependency. Round-robin moved every
+    module after an insertion; hashing moves only the inserted one, keeping
+    that blast radius on the PR that actually caused it.
+    """
+    before = tuple(f"tests/test_m{index:03d}.py" for index in range(40))
+    after = tuple(sorted(before + ("tests/test_aaa_brand_new.py",)))
+    placement_before = {
+        path: index
+        for index, shard in enumerate(cip.partition_modules(before, jobs=4))
+        for path in shard
+    }
+    placement_after = {
+        path: index
+        for index, shard in enumerate(cip.partition_modules(after, jobs=4))
+        for path in shard
+    }
+    moved = [p for p in before if placement_before[p] != placement_after[p]]
+    assert moved == []
+
+
+def test_single_job_shard_plan_is_the_whole_included_set():
+    included = ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py")
+    assert cip.partition_modules(included, jobs=1) == (included,)
+
+
+@pytest.mark.parametrize("jobs", [0, -1, -9])
+def test_non_positive_job_count_is_rejected(jobs):
+    with pytest.raises(cip.PolicyError, match="at least 1"):
+        cip.partition_modules(("tests/test_a.py",), jobs=jobs)
+
+
+def test_job_count_above_module_count_is_rejected():
+    with pytest.raises(cip.PolicyError, match="cannot exceed"):
+        cip.partition_modules(("tests/test_a.py", "tests/test_b.py"), jobs=3)
+
+
+def test_dropped_module_in_a_shard_plan_is_rejected():
+    included = ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py")
+    with pytest.raises(cip.PolicyError, match="resolved"):
+        cip.verify_partition(included, (("tests/test_a.py",), ("tests/test_b.py",)))
+
+
+def test_duplicated_module_hiding_a_dropped_one_is_rejected():
+    # Same total count as `included`, so a length-only check would pass.
+    included = ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py")
+    with pytest.raises(cip.PolicyError, match="exact cover"):
+        cip.verify_partition(
+            included, (("tests/test_a.py", "tests/test_a.py"), ("tests/test_b.py",))
+        )
+
+
+def test_substituted_module_in_a_shard_plan_is_rejected():
+    included = ("tests/test_a.py", "tests/test_b.py")
+    with pytest.raises(cip.PolicyError, match="exact cover"):
+        cip.verify_partition(included, (("tests/test_a.py",), ("tests/test_zz.py",)))
+
+
+def test_empty_shard_is_rejected():
+    included = ("tests/test_a.py", "tests/test_b.py")
+    with pytest.raises(cip.PolicyError, match="empty shard"):
+        cip.verify_partition(included, (("tests/test_a.py", "tests/test_b.py"), ()))
+
+
+def test_plan_line_reports_shard_sizes_and_default_omits_them():
+    plan = {"discovered": 9, "excluded": 0, "running": 9}
+    assert cip.format_plan(plan) == "discovered=9 excluded=0 running=9"
+    shards = cip.partition_modules(
+        tuple(f"tests/test_m{index}.py" for index in range(9)), jobs=3
+    )
+    rendered = cip.format_plan(plan, shards=shards)
+    assert "jobs=3" in rendered
+    # Sizes are whatever the hash produced; what the plan line must prove is
+    # that the printed per-shard counts still add up to `running`.
+    sizes = rendered.split("shard_modules=")[1].split()[0]
+    assert len(sizes.split(",")) == 3
+    assert sum(int(size) for size in sizes.split(",")) == plan["running"]
+
+
+def test_sharded_gate_runs_every_resolved_module_once(tmp_path, monkeypatch):
+    included = tuple(f"tests/test_m{index}.py" for index in range(10))
+    shards = cip.partition_modules(included, jobs=3)
+    seen: list[str] = []
+
+    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+        seen.extend(argv[argv.index("-q") + 1 :])
+        return _Completed(0, "")
+
+    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    assert cip.run_shards(shards, root=tmp_path) == 0
+    assert sorted(seen) == sorted(included)
+
+
+class _Completed:
+    def __init__(self, returncode: int, stdout: str) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = ""
+
+
+def test_one_failing_shard_fails_the_whole_gate(tmp_path, monkeypatch):
+    shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
+
+    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+        failing = "tests/test_b.py" in argv
+        return _Completed(1 if failing else 0, "boom" if failing else "ok")
+
+    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    assert cip.run_shards(shards, root=tmp_path) != 0
+
+
+def test_every_shard_runs_even_after_an_earlier_one_fails(tmp_path, monkeypatch):
+    shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
+    ran: list[str] = []
+
+    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+        module = argv[-1]
+        ran.append(module)
+        return _Completed(1 if module == "tests/test_a.py" else 0, "")
+
+    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    cip.run_shards(shards, root=tmp_path)
+    assert sorted(ran) == ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py"]
+
+
+def test_shard_output_is_reported_under_an_attributable_banner(tmp_path, monkeypatch, capsys):
+    shards = (("tests/test_a.py",), ("tests/test_b.py",))
+
+    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+        return _Completed(0, f"result for {argv[-1]}")
+
+    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    cip.run_shards(shards, root=tmp_path)
+    out = capsys.readouterr().out
+    assert "shard 1/2" in out and "shard 2/2" in out
+    assert "result for tests/test_a.py" in out
+    assert "result for tests/test_b.py" in out
+
+
+def test_real_repository_shard_plan_covers_the_real_gate():
+    gate = cip.resolve_gate(_ROOT)
+    shards = cip.partition_modules(gate["included"], jobs=4)
+    flattened = [path for shard in shards for path in shard]
+    assert sorted(flattened) == sorted(gate["included"])
+    assert len(flattened) == len(set(flattened))
+
+
+def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
+    tmp_path, monkeypatch
+):
+    # Shard 0 fails slowly with 3; shard 2 fails quickly with 4. The reported
+    # code must be shard 0's, so reruns of the same failure report the same
+    # code regardless of scheduling.
+    import time
+
+    shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
+
+    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+        module = argv[-1]
+        if module == "tests/test_a.py":
+            time.sleep(0.15)
+            return _Completed(3, "slow failure")
+        if module == "tests/test_c.py":
+            return _Completed(4, "fast failure")
+        return _Completed(0, "")
+
+    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    assert cip.run_shards(shards, root=tmp_path) == 3
