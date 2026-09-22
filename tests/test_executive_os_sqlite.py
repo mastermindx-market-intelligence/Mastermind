@@ -109,6 +109,7 @@ def test_sqlite_defaults_pragmas_migration_and_five_durable_objects(tmp_path):
         (2, "durable_parent_child_review_contract"),
         (3, "ohf_session_epochs_and_process_generations"),
         (4, "executive_phase1fc_orchestration_contract"),
+        (5, "executive_finite_drive_arm_contract"),
     ]
     assert all(len(row[2]) == 64 for row in migrations)
 
@@ -806,6 +807,119 @@ def test_v4_runtime_normal_open_refuses_existing_v2_without_v3_artifacts(
     assert "harness_session_epochs" not in tables
     assert "process_generations" not in tables
     assert "execution_mode" not in columns
+
+
+def test_v5_fresh_schema_pins_vector_fingerprint_and_finite_arm_index_ddl(tmp_path):
+    runtime = _runtime(tmp_path)
+    with runtime.store.read() as connection:
+        vector = connection.execute(
+            "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        fresh_digest = executive_runtime._normalized_schema_digest(connection)
+        index_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' "
+            "AND name='events_one_coo_finite_drive_arm_per_root'"
+        ).fetchone()
+    assert [tuple(row)[:2] for row in vector][-1] == (
+        5,
+        "executive_finite_drive_arm_contract",
+    )
+    assert vector[-1][2] == executive_runtime._migration_checksum(
+        executive_runtime._MIGRATIONS[4][2]
+    )
+    assert index_row is not None
+    assert executive_runtime._normalize_schema_sql(str(index_row[0])) == (
+        executive_runtime._normalize_schema_sql(
+            "CREATE UNIQUE INDEX events_one_coo_finite_drive_arm_per_root "
+            "ON events(job_id) WHERE event_type='COO_FINITE_DRIVE_ARMED'"
+        )
+    )
+    assert fresh_digest == executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST
+    # The historical v4 fingerprint stays frozen for prior-version verification.
+    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
+        "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
+    )
+
+
+def test_v5_runtime_normal_open_refuses_existing_v4_until_explicit_upgrade(
+    tmp_path, monkeypatch
+):
+    migrations = executive_runtime._MIGRATIONS
+    monkeypatch.setattr(executive_runtime, "_MIGRATIONS", migrations[:4])
+    v4 = _runtime(tmp_path)
+    database = v4.store.path
+    before = (
+        database.read_bytes(),
+        stat.S_IMODE(database.stat().st_mode),
+        database.stat().st_ino,
+        database.stat().st_dev,
+    )
+
+    monkeypatch.setattr(executive_runtime, "_MIGRATIONS", migrations)
+    with pytest.raises(
+        executive_runtime.ExecutiveSchemaUpgradeRequired,
+        match="upgrade_v4_to_v5",
+    ):
+        _runtime(tmp_path)
+
+    info = database.stat()
+    assert (
+        database.read_bytes(),
+        stat.S_IMODE(info.st_mode),
+        info.st_ino,
+        info.st_dev,
+    ) == before
+    assert not any(
+        database.with_name(database.name + suffix).exists()
+        for suffix in ("-wal", "-shm", "-journal")
+    )
+    connection = sqlite3.connect(database)
+    try:
+        assert (
+            connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[
+                0
+            ]
+            == 4
+        )
+        index_row = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name='events_one_coo_finite_drive_arm_per_root'"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert index_row is None
+
+
+def test_v5_finite_drive_arm_index_admits_one_arm_event_per_root(tmp_path):
+    runtime = _runtime(tmp_path)
+    first = runtime.jobs.create_job("finite arm root one")
+    second = runtime.jobs.create_job("finite arm root two")
+
+    def insert_event(job_id: str, command: str, event_type: str) -> None:
+        with runtime.store.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO events(
+                  aggregate_type,aggregate_id,sequence,event_type,command_id,actor,
+                  job_id,payload_json,created_at_ms
+                ) VALUES('job',?,1,?,?,'coo',?,'{}',1)
+                """,
+                (f"finite-arm-stream:{command}", event_type, command, job_id),
+            )
+
+    insert_event(first.job_id, "finite-arm:first", "COO_FINITE_DRIVE_ARMED")
+    # SQLite reports partial-index violations by column, not by index name; the
+    # bare events.job_id uniqueness can only come from the migration-5 index.
+    with pytest.raises(StateConflict, match=r"UNIQUE constraint failed: events\.job_id"):
+        insert_event(
+            first.job_id, "finite-arm:first-again", "COO_FINITE_DRIVE_ARMED"
+        )
+    insert_event(second.job_id, "finite-arm:second", "COO_FINITE_DRIVE_ARMED")
+    insert_event(first.job_id, "unrelated:first", "JOB_FENCED")
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='COO_FINITE_DRIVE_ARMED'"
+        ).fetchone()[0] == 2
 
 
 def _c2_r1a_ready_source(tmp_path, monkeypatch):
@@ -1832,11 +1946,13 @@ def test_c2_r1a_second_root_refuses_existing_generation_one_carrier_before_c1(
     ).carrier_job_id == (first.carrier_job_id)
     assert second_runtime.current_capacity_commitment(second_root.job_id) is None
 
-# M2 is deliberately absent from the production migration vector. Only this
-# synthetic fixture changes the three coupled expectations, with real verifiers.
-_M2_V4_VECTOR = executive_runtime._MIGRATIONS
-_M2_V4_DIGEST = executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST
-_M2_CANDIDATE_DIGEST = 'cd6fe8982e5b8ca8ea40ffff1dee089b5ab0d395916e7384a1ff14b5748f0caf'
+# M2 is deliberately absent from the production migration vector. Production
+# schema v5 carries only the finite-arm index; this synthetic fixture defers
+# the inactive candidate to the next synthetic version 6 and changes the three
+# coupled expectations, with real verifiers.
+_M2_V5_VECTOR = executive_runtime._MIGRATIONS
+_M2_V5_DIGEST = getattr(executive_runtime, '_NORMALIZED_V5_SCHEMA_DIGEST', None)
+_M2_V6_CANDIDATE_DIGEST = '2618959767e49acc70db044ee1e86441feb2bd39ed413afe0c86e455ea0b21b4'
 _M2_CANDIDATE_CHECKSUM = '9bee01a6ee1f129a9c6b6fb24f52012d2cb790c39057722c5a6867163055b3d8'
 
 
@@ -1851,10 +1967,10 @@ def m2_store(tmp_path, monkeypatch):
     import copy
     candidate = executive_runtime._PHYSICAL_RESOURCE_SCHEMA_CANDIDATE
     assert executive_runtime._migration_checksum(candidate) == _M2_CANDIDATE_CHECKSUM
-    monkeypatch.setattr(executive_runtime, '_MIGRATIONS', _M2_V4_VECTOR + (
-        (5, 'synthetic_m2_physical_resources', candidate),))
-    monkeypatch.setattr(executive_runtime, 'SCHEMA_VERSION', 5)
-    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V4_SCHEMA_DIGEST', _M2_CANDIDATE_DIGEST)
+    monkeypatch.setattr(executive_runtime, '_MIGRATIONS', _M2_V5_VECTOR + (
+        (6, 'synthetic_m2_physical_resources', candidate),))
+    monkeypatch.setattr(executive_runtime, 'SCHEMA_VERSION', 6)
+    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V5_SCHEMA_DIGEST', _M2_V6_CANDIDATE_DIGEST)
     contexts = {}
     def admission(self, request, caller_context, *, connection=None, stage='entry'):
         context = contexts[str(self.store.path)]
@@ -1865,7 +1981,7 @@ def m2_store(tmp_path, monkeypatch):
     def create(name='one'):
         runtime = Runtime.at(tmp_path / name, clock=MutableClock(100), busy_timeout_ms=1000)
         with runtime.store.read() as connection:
-            assert executive_runtime._normalized_schema_digest(connection) == _M2_CANDIDATE_DIGEST
+            assert executive_runtime._normalized_schema_digest(connection) == _M2_V6_CANDIDATE_DIGEST
         request, context = _m2_inputs()
         # Synthetic timing allowances include real filesystem/schema validation.
         context['policy']['waits'] = {'service_request_max_ms': 2000, 'database_lock_max_ms': 1000}
@@ -1899,14 +2015,17 @@ def _m2_reserve(runtime, request):
     return runtime.broker.reserve_physical(request, caller_context=None)
 
 
-def test_m2_default_runtime_keeps_exact_v4_vector_and_has_no_candidate_tables(tmp_path):
+def test_m2_default_runtime_keeps_exact_v5_vector_and_has_no_candidate_tables(tmp_path):
     runtime = Runtime.at(tmp_path)
-    assert executive_runtime.SCHEMA_VERSION == 4
-    assert executive_runtime._MIGRATIONS == _M2_V4_VECTOR
-    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == _M2_V4_DIGEST
+    assert executive_runtime.SCHEMA_VERSION == 5
+    assert executive_runtime._MIGRATIONS == _M2_V5_VECTOR
+    assert executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST == _M2_V5_DIGEST
+    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
+        '56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4'
+    )
     with runtime.store.read() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name LIKE 'physical_resource_%'").fetchall() == []
-        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 4
+        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 5
 
 
 def test_m2_default_resource_entry_refuses_before_database_open(tmp_path):
@@ -1932,9 +2051,9 @@ def test_m2_candidate_schema_uses_same_store_and_existing_events_without_jobs(m2
         assert [tuple(r) for r in events] == [('physical_resource_operation', None, None, None)]
         assert connection.execute('SELECT count(*) FROM physical_resource_demands').fetchone()[0] == 6
         assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
-        assert executive_runtime._normalized_schema_digest(connection) == _M2_CANDIDATE_DIGEST
+        assert executive_runtime._normalized_schema_digest(connection) == _M2_V6_CANDIDATE_DIGEST
     with runtime.store.transaction() as connection:
-        connection.execute("UPDATE schema_migrations SET checksum='bad' WHERE version=5")
+        connection.execute("UPDATE schema_migrations SET checksum='bad' WHERE version=6")
     with pytest.raises(PersistenceError):
         Runtime.at(runtime.store.root, clock=MutableClock(100))
 

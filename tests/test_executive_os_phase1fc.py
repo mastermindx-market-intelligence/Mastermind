@@ -707,10 +707,10 @@ def test_fresh_schema_v4_has_exact_additive_columns_and_migration(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(attempts)")
         ]
 
-    assert [tuple(row) for row in migrations][-1] == (
-        4,
-        "executive_phase1fc_orchestration_contract",
-    )
+    assert [tuple(row) for row in migrations][-2:] == [
+        (4, "executive_phase1fc_orchestration_contract"),
+        (5, "executive_finite_drive_arm_contract"),
+    ]
     assert job_columns[-8:] == [
         "orchestration_role",
         "orchestration_provenance_json",
@@ -3893,7 +3893,7 @@ def test_fph0_v3_refuses_caller_union_collision(
 
 
 def test_fph0_d7_composition_and_v2_constant_are_byte_preserved():
-    assert executive_runtime.SCHEMA_VERSION == 4
+    assert executive_runtime.SCHEMA_VERSION == 5
     assert executive_runtime.V3_HOST_EXECUTION_BINDING_KEYS == (
         executive_runtime.V2_HOST_EXECUTION_BINDING_KEYS
         | {"work_placement_union"}
