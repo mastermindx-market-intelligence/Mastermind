@@ -985,7 +985,7 @@ class GatewaySession {
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
           'studio_ping, studio_output_page, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
           'studio_output_page reads retained output without repeating the original action. ' +
-          'Paper design tools use the host-pinned guarded Paper adapter and never route through Desktop Commander. ' +
+          'Paper design tools use the host-pinned guarded Paper adapter; Desktop Commander is not on their dispatch path. ' +
           'start_process and interact_with_process represent direct terminal effects rather than work-submission or agent-handoff transport. ' +
           'Nested agent instructions, worker handoffs, and opaque/repackaged payloads are outside their declared scope. ' +
           'A platform safety refusal is a terminal observation for the refused logical call; transformed replay by encoding, splitting, rewording, or rerouting is outside this server\'s supported behavior. ' +
