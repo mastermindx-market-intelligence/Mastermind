@@ -297,6 +297,37 @@ describe("window v2 tagged union and observed association", () => {
     extraTuple.observation_binding.root = "JOB-100";
     expect(await decodeWindow(extraTuple)).toBeNull();
   });
+  it("does not associate an otherwise-qualified read-limited v2 window", async () => {
+    const selection = { workRef: "WS:B5", rootJobId: "JOB-100" };
+    const mission = qualifyingMission();
+    const limited = v2Window();
+    limited.view.coverage = "READ_LIMIT_REACHED";
+    expect(
+      observedMissionAssociation(
+        await decodeWindow(limited),
+        mission,
+        selection,
+      ),
+    ).toBeNull();
+  });
+
+  it("does not associate an otherwise-qualified gapped v2 window", async () => {
+    const selection = { workRef: "WS:B5", rootJobId: "JOB-100" };
+    const mission = qualifyingMission();
+    const gapped = v2Window();
+    gapped.view.coverage = "GAP_PRESENT";
+    gapped.view.gaps = [
+      { first: 1, last: 1, reason: "SOURCE_REPORTED_GAP" },
+    ];
+    expect(
+      observedMissionAssociation(
+        await decodeWindow(gapped),
+        mission,
+        selection,
+      ),
+    ).toBeNull();
+  });
+
   it("v1 can display content but never associates; v2 associates only the conservative plan child", async () => {
     const selection = { workRef: "WS:B5", rootJobId: "JOB-100" };
     const v1 = await decodeWindow(windowFixture());

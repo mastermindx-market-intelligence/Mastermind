@@ -435,6 +435,7 @@ export function observedMissionAssociation(
     !window ||
     window.schema !== "mastermind.workspace.window_read_candidate.v2" ||
     window.view.terminal !== false ||
+    window.view.coverage !== "OBSERVED_WINDOW" ||
     !mission ||
     !selection ||
     mission.schema !== "mastermind.mission_workspace.v3"
