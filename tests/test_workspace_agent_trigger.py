@@ -6,7 +6,6 @@ import unittest
 
 from integrations.workspace_agent_api import HOST, InvalidObservation
 from integrations.workspace_agent_trigger import (
-    BETA_HEADER,
     MAX_TRIGGER_BODY_BYTES,
     WorkspaceAgentTriggerPlan,
     build_trigger_plan,
@@ -142,7 +141,7 @@ class TriggerTransportTests(unittest.TestCase):
         self.assertEqual(path, f"/v1/workspace_agents/{CHANNEL}/trigger")
         self.assertEqual(request["body"], self.plan._body)
         headers = request["headers"]
-        self.assertEqual(headers["OpenAI-Beta"], BETA_HEADER)
+        self.assertNotIn("OpenAI-Beta", headers)
         self.assertEqual(headers["Idempotency-Key"], self.plan.idempotency_key)
         self.assertEqual(headers["Authorization"], "Bearer " + TOKEN)
         self.assertNotIn(TOKEN, path)

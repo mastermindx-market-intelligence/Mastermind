@@ -1,15 +1,23 @@
-# Workspace Agent API trigger acceptance: no run-status API
+# Workspace Agent API trigger acceptance: Mastermind acceptance-only profile
 
 Status: source correction / `BUILT_NOT_PROVEN` / production-disarmed.
 
-## Current supported contract
+## Current admitted contract
 
-OpenAI's current Workspace Agents product documentation states that an API
-trigger queues the agent run and returns HTTP `202 Accepted` with **no response
-body and no run id**. The agent's response cannot currently be retrieved through
-the trigger API.
+Current official OpenAI sources are not fully aligned on the baseline `202`
+response shape. The Workspace Agents Help Center says the trigger returns
+`202 Accepted` with no response body or run id. The developer trigger
+documentation shows a baseline `conversation_url` response and separately
+documents an opt-in beta run-observation contract using
+`OpenAI-Beta: workspace_agent_runs=v1`. Both sources say the agent's answer is
+not retrieved through the trigger API.
 
-Mastermind therefore treats the provider API as a one-way attention edge:
+Mastermind deliberately chooses a narrower acceptance-only production profile:
+it does not send the beta run-observation header, does not consume a successful
+`202` response body, and does not make provider run polling a production
+dependency. Candidate return through Mastermind remains the useful result edge.
+
+Mastermind therefore treats the provider trigger as a one-way attention edge:
 
 ```text
 exact admitted event
@@ -23,13 +31,16 @@ A `202` proves provider queue acceptance only. It does not prove START, agent
 execution, completion, useful output, Wake ACK, company result acceptance, or
 permission to send another trigger.
 
-The previously researched beta run-id/status contract is superseded for current
-production planning. `decode_run` and `read_run_once` remain compatibility
-surfaces only; they return `RUN_OBSERVATION_UNSUPPORTED` and perform zero
-run-status network I/O.
+The developer documentation currently exposes an optional beta run-id/status
+contract. Mastermind does not admit that optional provider observation into this
+production profile. `decode_run` and `read_run_once` remain compatibility
+surfaces only; they return `RUN_OBSERVATION_NOT_ADMITTED` and perform zero
+run-status network I/O. This is a Mastermind scope decision, not a claim that the
+provider lacks the beta endpoint.
 
-Current product reference rechecked 2026-09-21:
+Current official references rechecked 2026-09-22:
 https://help.openai.com/en/articles/20001143
+https://developers.openai.com/workspace-agents/trigger-runs
 
 ## Read-only operator probe
 
@@ -57,7 +68,7 @@ python3 scripts/workspace_agent_api_probe.py --read-run \
   --channel agtch_EXAMPLE --run apirun_EXAMPLE
 ```
 
-Expected result: `RUN_OBSERVATION_UNSUPPORTED`.
+Expected result: `RUN_OBSERVATION_NOT_ADMITTED`.
 
 ## Dark trigger source
 
@@ -104,13 +115,14 @@ No one of these implies another.
 3. Provision the Workspace-scoped trigger token through existing secret custody.
 4. Freeze one finite economic/authority envelope and one exact trigger event.
 5. Bind the exact trigger plan in Executive Events, then issue one POST.
-6. Observe only the HTTP disposition; do not poll a fabricated run-status API.
+6. Observe only the HTTP disposition; do not poll beta run status in this admitted profile.
 7. Require the useful candidate to return through the authenticated return MCP.
 8. Verify stale/duplicate/late return refusal, result review, and truthful Control
    Room projection before any broader continuation.
 
-No cancellation endpoint, response retrieval, run-status endpoint, exact-agent
-attestation, concurrency guarantee, or credit ceiling is invented here.
+No cancellation endpoint, answer retrieval, exact-agent attestation, concurrency
+guarantee, or credit ceiling is invented here. Documented beta run status is
+intentionally not an admitted production dependency.
 
 ## Supporting checks
 

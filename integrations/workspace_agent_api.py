@@ -1,13 +1,14 @@
-"""Supported Workspace Agent trigger-acceptance observation only.
+"""Mastermind Workspace Agent trigger-acceptance observation only.
 
-Current OpenAI product documentation states that an API trigger queues the run and
-returns HTTP 202 with no response body or run id, and that the agent response cannot
-be retrieved through this API.  Therefore Mastermind may observe trigger acceptance
-but must not infer or poll provider run state from a trigger response.
+Current official OpenAI sources are not fully aligned on the baseline HTTP 202
+body shape, and the developer trigger documentation separately exposes opt-in
+beta run-status polling. Mastermind's accepted production contract deliberately
+does not request that beta contract: a 202 is queue acceptance only, any success
+body is ignored, and the agent answer is not retrieved through the trigger API.
 
-The RunObservation/decode_run/read_run_once names remain as fail-closed compatibility
-surfaces for older callers.  They perform no run-status network request and always
-report RUN_OBSERVATION_UNSUPPORTED after identifier validation.
+The RunObservation/decode_run/read_run_once names remain as fail-closed
+compatibility surfaces for older callers. They perform no run-status network
+request and report RUN_OBSERVATION_NOT_ADMITTED after identifier validation.
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ class TriggerObservation:
 
 @dataclass(frozen=True)
 class RunObservation:
-    """Compatibility projection for an unsupported public run-status surface."""
+    """Compatibility projection for run status not admitted by Mastermind."""
 
     channel_id: str
     run_id: str
@@ -108,7 +109,7 @@ def decode_run(
         channel_id=channel,
         run_id=run,
         available=False,
-        reason="RUN_OBSERVATION_UNSUPPORTED",
+        reason="RUN_OBSERVATION_NOT_ADMITTED",
         observed_at=observed,
     )
 
@@ -133,7 +134,7 @@ def read_run_once(
         channel_id=channel,
         run_id=run,
         available=False,
-        reason="RUN_OBSERVATION_UNSUPPORTED",
+        reason="RUN_OBSERVATION_NOT_ADMITTED",
         observed_at=observed,
     )
 

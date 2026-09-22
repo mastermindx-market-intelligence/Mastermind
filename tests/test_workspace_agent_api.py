@@ -53,8 +53,8 @@ class TriggerTests(unittest.TestCase):
             decode_trigger(202, "not-bytes")
 
 
-class UnsupportedRunObservationTests(unittest.TestCase):
-    def test_decode_run_is_explicitly_unsupported(self):
+class NotAdmittedRunObservationTests(unittest.TestCase):
+    def test_decode_run_is_explicitly_not_admitted(self):
         result = decode_run(
             200,
             b'{"status":"completed"}',
@@ -64,7 +64,7 @@ class UnsupportedRunObservationTests(unittest.TestCase):
             expected_conversation_url="https://chatgpt.com/c/synthetic",
         )
         self.assertFalse(result.available)
-        self.assertEqual(result.reason, "RUN_OBSERVATION_UNSUPPORTED")
+        self.assertEqual(result.reason, "RUN_OBSERVATION_NOT_ADMITTED")
         self.assertIsNone(result.provider_state)
         self.assertIsNone(result.provider_terminal)
 
@@ -73,7 +73,7 @@ class UnsupportedRunObservationTests(unittest.TestCase):
 
         def forbidden(*args, **kwargs):
             calls.append((args, kwargs))
-            self.fail("unsupported run observation reached network")
+            self.fail("non-admitted run observation reached network")
 
         result = read_run_once(
             channel_id=CHANNEL,
@@ -83,7 +83,7 @@ class UnsupportedRunObservationTests(unittest.TestCase):
             clock=lambda: NOW,
         )
         self.assertFalse(result.available)
-        self.assertEqual(result.reason, "RUN_OBSERVATION_UNSUPPORTED")
+        self.assertEqual(result.reason, "RUN_OBSERVATION_NOT_ADMITTED")
         self.assertEqual(result.observed_at, NOW)
         self.assertEqual(calls, [])
 
@@ -145,12 +145,12 @@ class CliTests(unittest.TestCase):
             data=b'{"status":"completed"}',
         )
         self.assertEqual(rc, 3)
-        self.assertEqual(result["reason"], "RUN_OBSERVATION_UNSUPPORTED")
+        self.assertEqual(result["reason"], "RUN_OBSERVATION_NOT_ADMITTED")
 
     def test_cli_read_run_needs_no_token_and_performs_no_network(self):
         rc, result = self.invoke("--read-run", "--channel", CHANNEL, "--run", RUN)
         self.assertEqual(rc, 3)
-        self.assertEqual(result["reason"], "RUN_OBSERVATION_UNSUPPORTED")
+        self.assertEqual(result["reason"], "RUN_OBSERVATION_NOT_ADMITTED")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Describe supported Workspace trigger acceptance or decode supplied receipts.
+"""Describe Mastermind's accepted Workspace trigger-observation surface.
 
-The current public contract does not expose a run id, run-status read, or agent
-response through the trigger API.  Legacy run-observation flags remain only to
-return an explicit fail-closed unsupported result with zero network activity.
+Current official OpenAI sources disagree on the baseline 202 body shape, and the
+developer docs separately expose beta run-status polling. This probe describes
+Mastermind's deliberately narrower production contract: trigger acceptance only,
+no beta run observation, no answer retrieval, and zero run-status network I/O.
+Legacy run-observation flags remain only as fail-closed compatibility surfaces.
 """
 from __future__ import annotations
 
@@ -38,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument(
         "--decode-run",
         action="store_true",
-        help="Compatibility flag: run observation is unsupported and performs no network.",
+        help="Compatibility flag: run observation is not admitted by Mastermind and performs no network.",
     )
     group.add_argument(
         "--read-run",
@@ -57,12 +59,12 @@ def main(argv: list[str] | None = None) -> int:
             "capability_state": "BUILT_NOT_PROVEN",
             "operations": [
                 "decode_trigger_acceptance",
-                "run_observation_unsupported",
+                "run_observation_not_admitted",
             ],
             "network_methods": [],
             "network_host": None,
-            "trigger_response_body_supported": False,
-            "run_status_supported": False,
+            "success_body_consumed": False,
+            "beta_run_observation_admitted": False,
             "can_trigger": False,
             "can_retrieve_answer": False,
             "can_ack_wake": False,

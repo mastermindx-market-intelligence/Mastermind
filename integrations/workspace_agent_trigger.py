@@ -5,10 +5,12 @@ Wake acknowledgement, result acceptance, or Workspace Agent registration. It is
 an effectful provider transport primitive for a later reviewed Executive owner.
 
 Important boundary: a provider 202 means only that the trigger was accepted by
-the provider. The supported API contract returns no run id or response body and
-does not expose the agent response. Acceptance therefore does not prove that the
-agent consumed the prompt, produced a useful candidate, returned anything to
-Mastermind, or satisfied a canonical Wake acknowledgement.
+the provider. Mastermind deliberately does not request beta run correlation and
+never depends on a success response body. Current official sources disagree on
+the baseline 202 body shape, while developer docs separately document beta run
+status. Acceptance therefore does not prove that the agent consumed the prompt,
+produced a useful candidate, returned anything to Mastermind, or satisfied a
+canonical Wake acknowledgement.
 
 The caller must create and durably reconcile one WorkspaceAgentTriggerPlan
 through the existing Executive operation/event owner before production use.
@@ -34,7 +36,6 @@ from integrations.workspace_agent_api import (
 )
 
 MAX_TRIGGER_BODY_BYTES = 32_768
-BETA_HEADER = "workspace_agent_runs=v1"
 _OPERATION_KEY = re.compile(r"[a-z0-9][a-z0-9-]{2,95}\Z", re.ASCII)
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _IDEMPOTENCY_KEY = re.compile(r"mmx-wa-v1-[0-9a-f]{64}\Z", re.ASCII)
@@ -225,15 +226,15 @@ def trigger_once(
                 "Accept": "application/json",
                 "Accept-Encoding": "identity",
                 "Cache-Control": "no-cache",
-                "OpenAI-Beta": BETA_HEADER,
                 "Idempotency-Key": plan.idempotency_key,
             },
         )
         response = connection.getresponse()
         status = response.status
         if status == 202:
-            # Current supported contract: 202 has no response body or run id.
-            # Never read or trust correlation bytes from an intermediary/old beta.
+            # Acceptance correctness must survive both currently documented
+            # baseline body shapes. We did not request beta run correlation, so
+            # never read or promote success-body bytes into Mastermind authority.
             observation = decode_trigger(202, b"")
         else:
             observation = decode_trigger(status, b"")
@@ -249,7 +250,6 @@ def trigger_once(
 
 
 __all__ = [
-    "BETA_HEADER",
     "MAX_TRIGGER_BODY_BYTES",
     "WorkspaceAgentTriggerPlan",
     "build_trigger_plan",
