@@ -1174,6 +1174,112 @@ def test_sparse_macro_refuses_unsupported_yaml_root_and_merges(tmp_path: Path, p
         )
 
 
+@pytest.mark.parametrize("document", [
+    "{\n  repos: [macro],\n  artifacts: [research/evidence.md]\n}\n",
+    "[\n  {artifacts: [research/evidence.md]}\n]\n",
+    "- artifacts: [research/evidence.md]\n",
+    "a plain scalar root\n",
+    "null\n",
+    "\n# Empty YAML document.\n",
+    "? artifacts\n: [research/evidence.md]\n",
+    "!!map\nartifacts: [research/evidence.md]\n",
+    "artifacts: [research/evidence.md]\n...\n",
+    "artifacts:\n  - research/evidence.md\n    folded continuation\n",
+])
+def test_frontmatter_closed_grammar_refuses_valid_unsupported_roots(document: str):
+    import yaml
+    from integrations.executive_mcp.installed import _frontmatter_lists
+
+    # Every discriminator is valid canonical YAML, not a malformed-input check.
+    yaml.safe_load(document)
+    payload = ("---\n" + document + "---\n").encode()
+    with pytest.raises(ValueError, match="unsupported"):
+        _frontmatter_lists(payload)
+
+
+@pytest.mark.parametrize("document", [
+    "artifacts: []\n%YAML 1.1\n",
+    "artifacts: []\nstray structural line\n",
+    "artifacts: []\n  stray indentation\n",
+    "artifacts: []\n- stray sequence item\n",
+])
+def test_frontmatter_closed_grammar_refuses_unowned_structure(document: str):
+    from integrations.executive_mcp.installed import _frontmatter_lists
+
+    with pytest.raises(ValueError, match="unsupported"):
+        _frontmatter_lists(("---\n" + document + "---\n").encode())
+
+
+def test_frontmatter_closed_grammar_preserves_explicit_nested_metadata():
+    import yaml
+    from integrations.executive_mcp.installed import _frontmatter_lists
+
+    document = """title: A record
+objective: >
+  Plain folded metadata can mention artifacts: without becoming a root key.
+waves:
+  - id: W0
+    status: in_progress
+    pr: [834, 900]
+    note: |
+      Literal metadata remains metadata.
+      repos: [terminal]
+    details:
+      owner: Sol
+repos: [macro, terminal]
+artifacts:
+- research/evidence.md
+owns_paths:
+  - data/probe/**
+landmines:
+  - 'Do not drop read paths.'
+  - "A quoted metadata item may continue
+    on an indented line without consuming a root field."
+  - Unquoted narrative metadata may also
+    continue on an indented line.
+other_waves:
+  - {id: W1, title: "A bounded metadata map", status: done, pr: 834}
+"""
+    canonical = yaml.safe_load(document)
+    assert _frontmatter_lists(("---\n" + document + "---\n").encode()) == {
+        field: canonical[field] for field in ("repos", "artifacts", "owns_paths")
+    }
+
+
+@pytest.mark.parametrize("value", ["*paths", "&paths []", "!!seq []", "{artifacts: []}", "|"])
+def test_frontmatter_consumed_fields_refuse_node_properties_and_nonlists(value: str):
+    from integrations.executive_mcp.installed import _frontmatter_lists
+
+    with pytest.raises(ValueError, match="unsupported"):
+        _frontmatter_lists(f"---\nartifacts: {value}\n---\n".encode())
+
+
+@pytest.mark.parametrize("item", ["? research/evidence.md", "- research/evidence.md", "0x10", ".5", "2026-09-22", "# comment"])
+def test_frontmatter_consumed_items_refuse_yaml_nonstring_nodes(item: str):
+    import yaml
+    from integrations.executive_mcp.installed import _frontmatter_lists
+
+    document = f"artifacts:\n  - {item}\n"
+    assert not isinstance(yaml.safe_load(document)["artifacts"][0], str)
+    with pytest.raises(ValueError, match="unsupported"):
+        _frontmatter_lists(("---\n" + document + "---\n").encode())
+
+
+@pytest.mark.parametrize("document", [
+    'title: "unfinished\nartifacts: []\nowner: Sol"\n',
+    'metadata:\n  - "unfinished\nartifacts: []\nowner: Sol"\n',
+    'metadata:\n  nested: {note: "unfinished\nartifacts: []\nowner: Sol"}\n',
+])
+def test_frontmatter_metadata_cannot_hide_root_fields_in_unfinished_quotes(document: str):
+    import yaml
+    from integrations.executive_mcp.installed import _frontmatter_lists
+
+    canonical = yaml.safe_load(document)
+    assert "artifacts" not in canonical
+    with pytest.raises(ValueError, match="unsupported"):
+        _frontmatter_lists(("---\n" + document + "---\n").encode())
+
+
 def _direct_pair_collector(tmp_path: Path):
     from integrations.executive_mcp.installed import InstalledBootPacketCollector
 

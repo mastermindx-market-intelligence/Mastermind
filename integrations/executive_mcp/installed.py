@@ -609,8 +609,7 @@ def _frontmatter_scalar(raw: str) -> str:
         return parsed
     if value[0] in "[{>|&*!":
         raise ValueError("structured YAML list item is unsupported")
-    if " #" in value:
-        value = value.split(" #", 1)[0].rstrip()
+    value = re.split(r"[ \t]+#", value, maxsplit=1)[0].rstrip()
     if not value:
         raise ValueError("empty list item")
     return value
@@ -628,70 +627,156 @@ def _frontmatter_lists(payload: bytes) -> dict[str, list[str]]:
         end = next(index for index in range(1, len(lines)) if lines[index].strip() == "---")
     except StopIteration as exc:
         raise ValueError("frontmatter closing fence is missing") from exc
-    body = lines[1:end]
-    first_entry = next(
-        (line for line in body if line.strip() and not line.lstrip().startswith("#")),
-        "",
+    # A root block mapping is mandatory. Consumed fields have a closed string-
+    # list grammar; unrelated metadata may own an indented block, but cannot
+    # hide a root field inside an unfinished quoted/flow value. This is a path
+    # extractor, not a second YAML implementation for waves or narrative prose.
+    tokens = [
+        (len(line) - len(line.lstrip(" ")), line.lstrip(" "))
+        for line in lines[1:end]
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    entry_pattern = re.compile(
+        r"^([A-Za-z_][A-Za-z0-9_-]*|'(?:[^']|'')*'|\"(?:[^\"\\]|\\.)*\")"
+        r"[ \t]*:(?:[ \t]+(.*))?$"
     )
-    # Nested fields are deliberately ignored below, so accepting an indented
-    # root would silently erase every path. Root node properties/aliases can
-    # similarly hide the mapping; both are outside this closed YAML subset.
-    if first_entry and (first_entry[0].isspace() or first_entry[0] in "&*!"):
-        raise ValueError("unsupported YAML root indentation or node properties")
+    flow_item_pattern = re.compile(
+        r"\s*(\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*'|[^,\[\]{}]+)\s*(?:,|$)"
+    )
     targets = {"repos", "artifacts", "owns_paths"}
     out = {field: [] for field in targets}
+
+    def refuse() -> None:
+        raise ValueError("unsupported YAML structure in path-list frontmatter")
+
+    def string_item(raw: str) -> str:
+        value = _frontmatter_scalar(raw)
+        if raw[0] not in "\"'" and (
+            value.lower() in {"null", "~", "true", "false", "yes", "no", "on", "off",
+                              ".inf", "+.inf", "-.inf", ".nan"}
+            or re.match(r"[-+]?(?:[0-9]|\.[0-9])", value)
+            or re.search(r":(?:[ \t]|$)", value)
+            or value.startswith(("? ", "- ")) or value in {"?", "-"}
+            or value[0] in "]}%@`#"
+        ):
+            refuse()
+        return value
+
+    def metadata_value_end(index: int, raw: str) -> int:
+        # Quoted/flow metadata may continue only on indented lines. Track its
+        # delimiters so a colon in prose or a root-looking continuation cannot
+        # become an independently interpreted consumed field. No metadata
+        # values are reconstructed or used to choose materialized paths.
+        if raw and raw[0] in "&*!%@`":
+            refuse()
+        if raw and raw[0] in "\"'[{":
+            stack: list[str] = []
+            quote: str | None = None
+            text = raw
+            cursor = 0
+            finished = False
+            while not finished:
+                while cursor < len(text):
+                    character = text[cursor]
+                    if quote is not None:
+                        if quote == '"' and character == "\\":
+                            cursor += 2
+                            continue
+                        if character == quote:
+                            if quote == "'" and cursor + 1 < len(text) and text[cursor + 1] == "'":
+                                cursor += 2
+                                continue
+                            quote = None
+                    elif character in "\"'":
+                        quote = character
+                    elif character in "[{":
+                        stack.append(character)
+                    elif character in "]}":
+                        if not stack or stack.pop() != ("[" if character == "]" else "{"):
+                            refuse()
+                    cursor += 1
+                    if quote is None and not stack:
+                        if text[cursor:].strip() and not text[cursor:].lstrip().startswith("#"):
+                            refuse()
+                        finished = True
+                        break
+                if not finished:
+                    if index >= len(tokens) or tokens[index][0] == 0:
+                        refuse()
+                    text += "\n" + tokens[index][1]
+                    index += 1
+        return index
+
+    def metadata_end(index: int, raw: str) -> int:
+        index = metadata_value_end(index, raw)
+        # Every remaining continuation is explicitly owned by this unconsumed
+        # root entry. Indentless sequences belong only to a block-valued entry.
+        prose_indent: int | None = 0 if raw.startswith(("|", ">")) else None
+        while index < len(tokens):
+            indent, text = tokens[index]
+            if not (indent > 0 or (not raw and (text == "-" or text.startswith("- ")))):
+                break
+            index += 1
+            if prose_indent is not None and indent > prose_indent:
+                continue
+            prose_indent = None
+            # A nested quoted/flow metadata value also must close before a new
+            # root entry. Otherwise root-looking text inside that value could
+            # be misinterpreted as a real consumed field.
+            if text.startswith("- "):
+                text = text[2:].strip()
+            nested = entry_pattern.fullmatch(text)
+            nested_value = (nested.group(2) or "").strip() if nested else text
+            if nested_value.startswith(("|", ">")):
+                prose_indent = indent
+            else:
+                index = metadata_value_end(index, nested_value)
+        return index
+
+    if not tokens:
+        refuse()
     seen: set[str] = set()
     index = 0
-    while index < len(body):
-        line = body[index]
-        if not line or line.lstrip().startswith("#") or line[0].isspace() or ":" not in line:
-            index += 1
-            continue
-        key, raw_value = line.split(":", 1)
-        key = _frontmatter_scalar(key)
-        if key == "<<":
-            raise ValueError("unsupported YAML merge key")
-        if key not in targets:
-            index += 1
-            continue
-        if key in seen:
-            raise ValueError(f"duplicate {key} field")
+    while index < len(tokens):
+        indent, text = tokens[index]
+        match = entry_pattern.fullmatch(text) if indent == 0 else None
+        if match is None:
+            refuse()
+        key = _frontmatter_scalar(match.group(1))
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", key) is None or key in seen:
+            refuse()
         seen.add(key)
-        value = raw_value.strip()
-        if value.startswith("#"):
-            value = ""
-        if value:
-            if value == "[]":
-                index += 1
-                continue
-            if key != "repos" or not (value.startswith("[") and value.endswith("]")):
-                raise ValueError(f"unsupported inline {key} field")
-            inner = value[1:-1].strip()
-            out[key] = [] if not inner else [
-                _frontmatter_scalar(item) for item in inner.split(",")
-            ]
-            index += 1
+        raw = (match.group(2) or "").strip()
+        if raw.startswith("#"):
+            raw = ""
+        index += 1
+        if key not in targets:
+            index = metadata_end(index, raw)
             continue
-        items: list[str] = []
-        cursor = index + 1
+        if raw:
+            if not (raw.startswith("[") and raw.endswith("]")):
+                refuse()
+            inner = raw[1:-1].strip()
+            cursor = 0
+            while cursor < len(inner):
+                item = flow_item_pattern.match(inner, cursor)
+                if item is None:
+                    refuse()
+                out[key].append(string_item(item.group(1).strip()))
+                cursor = item.end()
+            continue
         item_indent: int | None = None
-        while cursor < len(body):
-            candidate = body[cursor]
-            if not candidate.strip() or candidate.lstrip().startswith("#"):
-                cursor += 1
-                continue
-            # YAML permits an indentless sequence directly below a mapping key.
-            if not candidate[0].isspace() and not candidate.startswith("- "):
+        while index < len(tokens):
+            indent, text = tokens[index]
+            if indent == 0 and not text.startswith("- "):
                 break
-            stripped = candidate.lstrip(" ")
-            indent = len(candidate) - len(stripped)
-            if not stripped.startswith("- ") or (item_indent is not None and indent != item_indent):
-                raise ValueError(f"unsupported nested {key} field")
+            if not text.startswith("- ") or (item_indent is not None and indent != item_indent):
+                refuse()
             item_indent = indent
-            items.append(_frontmatter_scalar(stripped[2:]))
-            cursor += 1
-        out[key] = items
-        index = cursor
+            out[key].append(string_item(text[2:].strip()))
+            index += 1
+        if item_indent is None:
+            refuse()
     return out
 
 
