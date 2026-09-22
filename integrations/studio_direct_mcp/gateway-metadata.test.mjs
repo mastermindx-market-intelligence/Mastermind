@@ -84,6 +84,14 @@ test('descriptions disclose command, access-policy and external-data effects', (
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /usage|statistics/i);
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /identifier/i);
 });
+test('server instructions remain descriptive rather than policy-prescriptive', () => {
+  const instructions = client.getInstructions();
+  assert.equal(typeof instructions, 'string');
+  assert.match(instructions, /direct terminal effects/i);
+  assert.match(instructions, /terminal observation/i);
+  assert.doesNotMatch(instructions, /\b(?:always|never|must|mandatory|only correct|prefer|choose)\b/i);
+});
+
 test('generic terminal tools declare a bounded direct-terminal purpose', () => {
   for (const name of ['start_process', 'interact_with_process']) {
     const description = tools.get(name).description;
