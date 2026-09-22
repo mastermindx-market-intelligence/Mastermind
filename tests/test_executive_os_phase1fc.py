@@ -5125,3 +5125,333 @@ def test_accepted_current_step_revision_repaired_multistep_nonzero_ordinal_match
     assert rejected["independent"] is True
     for item in history:
         assert item["attempt_id"] is None or item["attempt_id"] != "None"
+
+
+# ---------------------------------------------------------------------------
+# Dependency-ready V3 admission
+# ---------------------------------------------------------------------------
+
+
+def test_v3_plan_admission_reserves_deferred_work_and_seals_initial_manifests(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-V3-PLAN-ADMISSION-001",
+            business_impact="routine",
+        ),
+        execution_binding=_v3_execution_binding(),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": dispatch.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Acquire source evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Run independent analysis.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 2,
+                "step_id": "step-2",
+                "objective": "Consume accepted step-0 evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-0"],
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, dispatch, plan_body, identity_seed=7601)
+    command = f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}"
+
+    admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert [job.plan_step_id for job in admitted] == ["step-0", "step-1"]
+
+    replay = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert [job.job_id for job in replay] == [job.job_id for job in admitted]
+
+    with runtime.store.read() as connection:
+        deferred = connection.execute(
+            """
+            SELECT job_id FROM jobs
+            WHERE root_job_id=? AND plan_step_id='step-2'
+              AND orchestration_role='work'
+            """,
+            (root.job_id,),
+        ).fetchall()
+        admission_row = connection.execute(
+            """
+            SELECT payload_json FROM events
+            WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+            """,
+            (root.job_id,),
+        ).fetchone()
+        assert admission_row is not None
+        admission = json.loads(str(admission_row["payload_json"]))
+        creation_rows = connection.execute(
+            """
+            SELECT j.plan_step_id,e.payload_json
+            FROM jobs j JOIN events e ON e.job_id=j.job_id
+            WHERE j.root_job_id=? AND j.orchestration_role='work'
+              AND e.event_type='JOB_CREATED'
+            ORDER BY j.plan_step_id
+            """,
+            (root.job_id,),
+        ).fetchall()
+
+    assert deferred == []
+    assert admission["schema_version"] == "mastermind.coo_plan_admission/v2"
+    assert admission["reserved_children_total"] == (
+        executive_runtime.CooCyclePolicy.load().reserved_children_total(
+            (False, False, False)
+        )
+    )
+    assert [step["plan_step_id"] for step in admission["steps"]] == [
+        "step-0",
+        "step-1",
+        "step-2",
+    ]
+    assert admission["steps"][0]["prerequisite_step_ids"] == []
+    assert admission["steps"][1]["prerequisite_step_ids"] == []
+    assert admission["steps"][2]["prerequisite_step_ids"] == ["step-0"]
+    assert admission["steps"][2]["initial_work_job_id"] is None
+    assert admission["steps"][2]["initial_work_command_id"] is None
+    assert len(creation_rows) == 2
+    for row in creation_rows:
+        payload = json.loads(str(row["payload_json"]))
+        manifest = payload["dependency_manifest"]
+        manifest_without_digest = dict(manifest)
+        manifest_digest = manifest_without_digest.pop("dependency_manifest_digest")
+        assert payload["dependency_manifest_digest"] == manifest_digest
+        assert executive_runtime.orchestration_digest(manifest_without_digest) == (
+            manifest_digest
+        )
+        assert manifest == {
+            "schema_version": "mastermind.work_dependency_manifest/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": dispatch.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": row["plan_step_id"],
+            "prerequisite_step_ids": [],
+            "revisions": [],
+            "dependency_manifest_digest": manifest_digest,
+        }
+
+    connection = sqlite3.connect(runtime.store.path)
+    try:
+        trigger_sql = connection.execute(
+            """
+            SELECT sql FROM sqlite_master
+            WHERE type='trigger' AND name='events_are_immutable_update'
+            """
+        ).fetchone()[0]
+        event = connection.execute(
+            """
+            SELECT e.event_id,e.payload_json FROM events e
+            JOIN jobs j ON j.job_id=e.job_id
+            WHERE j.root_job_id=? AND j.plan_step_id='step-0'
+              AND e.event_type='JOB_CREATED'
+            """,
+            (root.job_id,),
+        ).fetchone()
+        corrupted = json.loads(str(event[1]))
+        corrupted["dependency_manifest"]["dependency_manifest_digest"] = "f" * 64
+        corrupted["dependency_manifest_digest"] = "f" * 64
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(
+                    corrupted,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ),
+                int(event[0]),
+            ),
+        )
+        connection.execute(trigger_sql)
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(StateConflict, match="semantic payload drifted"):
+        runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+
+
+
+def test_work_dependency_manifest_validator_is_closed_and_typed() -> None:
+    manifest = {
+        "schema_version": "mastermind.work_dependency_manifest/v1",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-manifest-001",
+        "plan_digest": "a" * 64,
+        "plan_step_id": "step-0",
+        "prerequisite_step_ids": [],
+        "revisions": [],
+    }
+    manifest["dependency_manifest_digest"] = (
+        executive_runtime.orchestration_digest(manifest)
+    )
+    assert executive_runtime._validate_work_dependency_manifest(
+        manifest,
+        root_job_id="JOB-001",
+        plan_attempt_id="ATT-manifest-001",
+        plan_digest="a" * 64,
+        plan_step_id="step-0",
+    ) == manifest
+
+    opened = {**manifest, "unexpected": True}
+    with pytest.raises(StateConflict, match="closed wire"):
+        executive_runtime._validate_work_dependency_manifest(
+            opened,
+            root_job_id="JOB-001",
+            plan_attempt_id="ATT-manifest-001",
+            plan_digest="a" * 64,
+            plan_step_id="step-0",
+        )
+
+    drifted = {**manifest, "dependency_manifest_digest": "b" * 64}
+    with pytest.raises(StateConflict, match="digest drifted"):
+        executive_runtime._validate_work_dependency_manifest(
+            drifted,
+            root_job_id="JOB-001",
+            plan_attempt_id="ATT-manifest-001",
+            plan_digest="a" * 64,
+            plan_step_id="step-0",
+        )
+
+    wrong_type = {
+        **manifest,
+        "prerequisite_step_ids": [{"not": "an identifier"}],
+        "revisions": [{}],
+    }
+    wrong_type["dependency_manifest_digest"] = (
+        executive_runtime.orchestration_digest(
+            {
+                key: value
+                for key, value in wrong_type.items()
+                if key != "dependency_manifest_digest"
+            }
+        )
+    )
+    with pytest.raises(StateConflict, match="identity is invalid"):
+        executive_runtime._validate_work_dependency_manifest(
+            wrong_type,
+            root_job_id="JOB-001",
+            plan_attempt_id="ATT-manifest-001",
+            plan_digest="a" * 64,
+            plan_step_id="step-0",
+        )
+
+
+def test_v2_plan_admission_retains_v1_wire_without_dependency_manifest(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    placements = [
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+    ]
+    runtime, root, _plan_body, admitted = _admit_v2_plan(
+        runtime,
+        placements=placements,
+    )
+    assert len(admitted) == 2
+    with runtime.store.read() as connection:
+        admission_row = connection.execute(
+            """
+            SELECT payload_json FROM events
+            WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+            """,
+            (root.job_id,),
+        ).fetchone()
+        assert admission_row is not None
+        admission = json.loads(str(admission_row["payload_json"]))
+        creation_payloads = [
+            json.loads(str(row[0]))
+            for row in connection.execute(
+                """
+                SELECT e.payload_json FROM events e
+                JOIN jobs j ON j.job_id=e.job_id
+                WHERE j.root_job_id=? AND j.orchestration_role='work'
+                  AND e.event_type='JOB_CREATED'
+                ORDER BY j.plan_step_id
+                """,
+                (root.job_id,),
+            ).fetchall()
+        ]
+    assert admission["schema_version"] == "mastermind.coo_plan_admission/v1"
+    assert all(
+        set(step)
+        == {
+            "ordinal",
+            "plan_step_id",
+            "step_slots",
+            "review_required",
+            "work_job_id",
+            "member_command_id",
+        }
+        for step in admission["steps"]
+    )
+    assert all("dependency_manifest" not in payload for payload in creation_payloads)
+    assert all(
+        "dependency_manifest_digest" not in payload for payload in creation_payloads
+    )
