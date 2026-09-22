@@ -986,6 +986,9 @@ class GatewaySession {
           'studio_ping, studio_output_page, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
           'studio_output_page reads retained output without repeating the original action. ' +
           'Paper design tools use the host-pinned guarded Paper adapter and never route through Desktop Commander. ' +
+          'Choose the narrowest tool whose declared effect matches the user request. ' +
+          'start_process and interact_with_process are direct terminal actions, not transports for nested agent instructions, worker handoffs, or opaque/repackaged payloads. ' +
+          'If a platform safety review refuses a call, do not encode, split, reword, or reroute the same logical action to evade that refusal. ' +
           'All remaining tools are proxied to the backend.',
       },
     );
