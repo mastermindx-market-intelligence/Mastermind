@@ -57,6 +57,7 @@ PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v2")
 PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
 PAPER_BRIDGE_SHA256 = "83e36b0bcd0acabbf5dd6ace5b708e5797a52e7db732e8dbbf848ded781c231d"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
+PAPER_APP_REL = Path("Applications/Paper.app")
 
 # CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
@@ -492,6 +493,7 @@ def _paper_design_config(user_root: Path) -> dict:
         "pythonPath": str(runtime / "venv" / "bin" / "python"),
         "bridgePath": str(runtime / "source" / "bridge.py"),
         "bridgeSha256": PAPER_BRIDGE_SHA256,
+        "appPath": str(user_root / PAPER_APP_REL),
         "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
     }
 

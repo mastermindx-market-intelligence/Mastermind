@@ -28,8 +28,8 @@ def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
             or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'executive_mcp_profile'}):
         raise ValueError('installed MCP configuration fields differ')
-    from integrations.executive_mcp.web_ceo import validate_installed_mcp_profile
-    validate_installed_mcp_profile(raw.get('executive_mcp_profile', 'legacy'))
+    from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
+    validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
     if raw['schema'] != CONFIG_SCHEMA:
         raise ValueError('installed MCP schema differs')
     if not isinstance(raw['release_sha'], str) or re.fullmatch('[0-9a-f]{40}', raw['release_sha']) is None:
@@ -278,9 +278,11 @@ def main(argv=None):
     from integrations.mastermind_executive_app.gateway import load_app_policies
     from integrations.executive_mcp.server import (
         build_executive_mcp_app, build_web_ceo_v2_mcp_app,
+        build_web_ceo_v3_mcp_app,
     )
-    from integrations.executive_mcp.web_ceo import (
-        WEB_CEO_V2_PROFILE, validate_installed_mcp_profile,
+    from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_v3 import (
+        WEB_CEO_V3_PROFILE, validate_installed_mcp_profile_current,
     )
     import uvicorn
 
@@ -293,10 +295,24 @@ def main(argv=None):
     sink = PolicyAuditSink(policies, Path(raw['audit_root']), optional=optional_policies(raw))
     try:
         mounts = build_optional_apps(raw, source, args.config, sink)
-        profile = validate_installed_mcp_profile(raw.get('executive_mcp_profile', 'legacy'))
-        builder = (build_web_ceo_v2_mcp_app if profile == WEB_CEO_V2_PROFILE
-                   else build_executive_mcp_app)
-        app = builder(settings, audit_sink=sink, **mounts)
+        profile = validate_installed_mcp_profile_current(
+            raw.get('executive_mcp_profile', 'legacy')
+        )
+        if profile == WEB_CEO_V3_PROFILE:
+            from integrations.mosyle_mdm.client import MosyleInventoryClient
+            from integrations.mosyle_mdm.credential import FileMosyleCredentialSource
+            mdm_reader = MosyleInventoryClient(
+                FileMosyleCredentialSource(
+                    expected_uid=os.geteuid(), expected_gid=os.getegid()
+                )
+            )
+            app = build_web_ceo_v3_mcp_app(
+                settings, audit_sink=sink, mdm_reader=mdm_reader, **mounts
+            )
+        elif profile == WEB_CEO_V2_PROFILE:
+            app = build_web_ceo_v2_mcp_app(settings, audit_sink=sink, **mounts)
+        else:
+            app = build_executive_mcp_app(settings, audit_sink=sink, **mounts)
         uvicorn.run(app, host='127.0.0.1', port=raw['port'], access_log=False,
                     proxy_headers=True, forwarded_allow_ips='127.0.0.1')
     finally:
