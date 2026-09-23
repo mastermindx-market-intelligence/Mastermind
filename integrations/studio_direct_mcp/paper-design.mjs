@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 const execFileDefault = promisify(execFileCallback);
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const OPERATION_RE = /^[A-Za-z0-9_.:-]{1,120}$/;
+const PAPER_FILE_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const SNAPSHOT_RE = /^[0-9a-f]{64}$/;
 const MAX_ARGUMENT_BYTES = 1 << 19;
 const MAX_STDIO_BYTES = 12 * 1024 * 1024;
@@ -78,6 +79,30 @@ export const PAPER_READ_TOOL = Object.freeze({
   _meta: { 'private-studio-mcp/gateway': true, 'mastermind/paper-design': true },
 });
 
+export const PAPER_PREPARE_TOOL = Object.freeze({
+  name: 'paper_prepare',
+  title: 'Prepare Paper Design',
+  description:
+    'Open or focus one exact existing Paper file through the host-pinned Paper Desktop application, then verify the active file through the guarded adapter. ' +
+    'The caller supplies only a Paper file ID; arbitrary URLs, application paths and filesystem paths are refused. This does not modify design content.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      file_id: { type: 'string', pattern: '^[0-9A-HJKMNP-TV-Z]{26}$' },
+    },
+    required: ['file_id'],
+    additionalProperties: false,
+  },
+  annotations: {
+    title: 'Prepare Paper Design',
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  },
+  _meta: { 'private-studio-mcp/gateway': true, 'mastermind/paper-design': true },
+});
+
 export const PAPER_EDIT_TOOL = Object.freeze({
   name: 'paper_edit',
   title: 'Edit Paper Design',
@@ -110,6 +135,7 @@ export const PAPER_DESIGN_TOOLS = Object.freeze([
   PAPER_INSPECT_TOOL,
   PAPER_CATALOG_TOOL,
   PAPER_READ_TOOL,
+  PAPER_PREPARE_TOOL,
   PAPER_EDIT_TOOL,
 ]);
 
@@ -176,6 +202,36 @@ function minimalEnv() {
     if (typeof process.env[key] === 'string') out[key] = process.env[key];
   }
   return out;
+}
+
+function hostPaperAppPath() {
+  const home = process.env.HOME;
+  if (typeof home !== 'string' || !home || !path.isAbsolute(home) || home.includes('\0')) return null;
+  return path.join(home, 'Applications', 'Paper.app');
+}
+
+async function openPaperFileDefault(appPath, fileId) {
+  if (typeof appPath !== 'string' || !path.isAbsolute(appPath)) {
+    const error = new Error('PAPER_APP_PATH_UNAVAILABLE');
+    error.code = 'ENOENT';
+    throw error;
+  }
+  const info = await lstat(appPath);
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    const error = new Error('PAPER_APP_IDENTITY_REFUSED');
+    error.code = 'EACCES';
+    throw error;
+  }
+  return execFileDefault(
+    '/usr/bin/open',
+    ['-a', appPath, `paper://file/${fileId}`],
+    {
+      timeout: 15_000,
+      maxBuffer: 1 << 20,
+      env: minimalEnv(),
+      windowsHide: true,
+    },
+  );
 }
 
 async function verifyBridge(config, deps) {
@@ -267,10 +323,13 @@ function localFailure(editing, code) {
 export function createPaperDesigner(config, dependencies = {}) {
   const resolved = resolvePaperDesignConfig(config);
   if (!resolved) return null;
+  const paperAppPath = dependencies.paperAppPath ?? hostPaperAppPath();
   const deps = {
     execFile: dependencies.execFile ?? execFileDefault,
     readFile: dependencies.readFile ?? readFile,
     lstat: dependencies.lstat ?? lstat,
+    openFile: dependencies.openFile ?? openPaperFileDefault,
+    sleep: dependencies.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
   };
 
   async function dispatch(action, args, { editing = false } = {}) {
@@ -324,6 +383,53 @@ export function createPaperDesigner(config, dependencies = {}) {
     };
   }
 
+  function compactPreparedDocument(value) {
+    const basic = value?.document?.basic_info ?? {};
+    return {
+      file_id: value?.document?.identity?.id ?? basic.fileId ?? null,
+      file_name: basic.fileName ?? null,
+      page_id: basic.pageId ?? null,
+      page_name: basic.pageName ?? null,
+      snapshot_sha256: value?.document?.snapshot_sha256 ?? null,
+      write_binding_ready: value?.document?.write_binding_ready === true,
+    };
+  }
+
+  async function preparedObservation(fileId, prepareEffect) {
+    const observed = await dispatch('status', ['status']);
+    const observedId =
+      observed.value?.document?.identity?.id ??
+      observed.value?.document?.basic_info?.fileId ??
+      null;
+    if (observed.isError || observedId !== fileId) return { matched: false, observed };
+
+    const catalog = await dispatch('catalog', ['catalog']);
+    const writeSchema = catalog.isError ? null : (catalog.value?.write_schema ?? null);
+    const writeAllowed =
+      observed.value?.document?.write_binding_ready === true &&
+      writeSchema?.accepted_for_write === true;
+    return {
+      matched: true,
+      result: {
+        value: {
+          state: writeAllowed ? 'PAPER_READY' : 'PAPER_READY_READ_ONLY',
+          retry_allowed: false,
+          content_mutated: false,
+          prepare_effect: prepareEffect,
+          server: observed.value?.server ?? null,
+          document: compactPreparedDocument(observed.value),
+          write_allowed: writeAllowed,
+          write_schema: writeSchema,
+          write_reason: writeAllowed
+            ? null
+            : (catalog.isError ? 'WRITE_ADMISSION_UNVERIFIED' : 'WRITE_ADMISSION_REFUSED'),
+        },
+        isError: false,
+        effectUnknown: false,
+      },
+    };
+  }
+
   return Object.freeze({
     async call(name, input = {}) {
       if (name === PAPER_INSPECT_TOOL.name) {
@@ -331,6 +437,54 @@ export function createPaperDesigner(config, dependencies = {}) {
       }
       if (name === PAPER_CATALOG_TOOL.name) {
         return dispatch('catalog', ['catalog']);
+      }
+      if (name === PAPER_PREPARE_TOOL.name) {
+        const fileId = String(input?.file_id ?? '');
+        if (!PAPER_FILE_ID_RE.test(fileId)) {
+          return localFailure(false, 'PAPER_INVALID_FILE_ID');
+        }
+        try {
+          await verifyBridge(resolved, deps);
+        } catch {
+          return localFailure(false, 'PAPER_BRIDGE_IDENTITY_REFUSED');
+        }
+
+        const current = await preparedObservation(fileId, 'already_active');
+        if (current.matched) return current.result;
+
+        let openError = null;
+        try {
+          await deps.openFile(paperAppPath, fileId);
+        } catch (error) {
+          openError = error;
+        }
+
+        const delays = [250, 1000, 2500];
+        let lastObserved = current.observed;
+        for (const delay of delays) {
+          await deps.sleep(delay);
+          const observed = await preparedObservation(fileId, 'open_observed');
+          if (observed.matched) return observed.result;
+          lastObserved = observed.observed;
+        }
+
+        const observedId =
+          lastObserved?.value?.document?.identity?.id ??
+          lastObserved?.value?.document?.basic_info?.fileId ??
+          null;
+        return {
+          value: {
+            state: 'PAPER_DOCUMENT_TRANSITION_UNCONFIRMED',
+            retry_allowed: false,
+            content_mutated: false,
+            requires_inspect: true,
+            target_file_id: fileId,
+            observed_file_id: observedId,
+            open_error_code: openError?.code ?? null,
+          },
+          isError: true,
+          effectUnknown: false,
+        };
       }
       if (name === PAPER_READ_TOOL.name) {
         if (typeof input?.tool !== 'string' || !input.tool ||
