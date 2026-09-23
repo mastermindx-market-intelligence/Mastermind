@@ -70,10 +70,21 @@ async function verifyLauncher(cfg) {
   if (digest !== cfg.launcherSha256) throw new Error('FLEET_STATUS_LAUNCHER_DRIFT');
 }
 
-const ACCOUNT = /^[a-z0-9][a-z0-9_-]{0,47}$/;
+const PUBLIC_ACCOUNTS = new Set([
+  'admin-business',
+  'chatgpt1',
+  'chatgpt2',
+  'chatgpt2-personal',
+  'chatgpt2-business',
+  'chatgpt3',
+  'chatgpt3-w570f6f34',
+  'chatgpt3-wa2a9e6f9',
+  'chatgpt4',
+]);
+const PUBLIC_TRANSPORT_TTL = '5h';
 const TUNNEL_ID = /^tunnel_[0-9a-f]{32}$/;
 const ORGANIZATION_ID = /^org-[A-Za-z0-9]+$/;
-const MAX_ACCOUNTS = 64;
+const MAX_ACCOUNTS = PUBLIC_ACCOUNTS.size;
 const MAX_OWNER_ERROR_CHARS = 4096;
 
 function invalidOwner() {
@@ -119,7 +130,7 @@ function expectNullableBoundedString(value, maxChars, pattern = null) {
 }
 
 function expectAccount(value) {
-  if (typeof value !== 'string' || !ACCOUNT.test(value)) invalidOwner();
+  if (typeof value !== 'string' || !PUBLIC_ACCOUNTS.has(value)) invalidOwner();
   return value;
 }
 
@@ -165,6 +176,7 @@ function projectStatusRow(row) {
       'healthy',
       'ready',
       'tunnelReady',
+      'controlPlanePollReady',
       'gatewayReady',
       'transportTTL',
       'maxConcurrentRequests',
@@ -173,8 +185,8 @@ function projectStatusRow(row) {
       'tunnelId',
       'managedAlias',
       'managedAliasRunning',
+      'organizationId',
     ],
-    ['controlPlanePollReady', 'organizationId'],
   );
   if (row.tunnel.account !== account) invalidOwner();
   expectNullableBoundedString(row.tunnel.label, 128);
@@ -192,19 +204,33 @@ function projectStatusRow(row) {
   const gatewayReady = expectBoolean(row.tunnel.gatewayReady);
   const managedAliasRunning = expectBoolean(row.tunnel.managedAliasRunning);
   if (managedAliasRunning) invalidOwner();
-  const pollReady = Object.hasOwn(row.tunnel, 'controlPlanePollReady')
-    ? expectBoolean(row.tunnel.controlPlanePollReady)
-    : null;
-  const transportTTL = expectNullableBoundedString(row.tunnel.transportTTL, 32);
+  const pollReady = expectBoolean(row.tunnel.controlPlanePollReady);
+  const transportTTL = row.tunnel.transportTTL;
+  if (transportTTL !== PUBLIC_TRANSPORT_TTL) invalidOwner();
   const maxConcurrentRequests = row.tunnel.maxConcurrentRequests === null
     ? null
     : expectBoundedInteger(row.tunnel.maxConcurrentRequests, 1, 64);
 
-  const computedReady = gatewayRunning && tunnelReady;
+  if (gatewayRunning && !gatewayLoaded) invalidOwner();
+  if (tunnelRunning && !tunnelLoaded) invalidOwner();
+  if (tunnelReady !== (transportReady && gatewayReady)) invalidOwner();
+  const computedReady = (
+    gatewayLoaded
+    && gatewayRunning
+    && tunnelLoaded
+    && tunnelRunning
+    && tunnelHealthy
+    && tunnelReady
+    && transportReady
+    && pollReady
+    && gatewayReady
+  );
   if (ready !== computedReady) invalidOwner();
 
   const issues = [];
+  if (!gatewayLoaded) issues.push('GATEWAY_NOT_LOADED');
   if (!gatewayRunning) issues.push('GATEWAY_NOT_RUNNING');
+  if (!tunnelLoaded) issues.push('TUNNEL_NOT_LOADED');
   if (!tunnelRunning) {
     issues.push('TUNNEL_NOT_RUNNING');
   } else {

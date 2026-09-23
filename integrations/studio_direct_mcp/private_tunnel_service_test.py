@@ -103,7 +103,9 @@ def IsolatedHome():
         home = tmp / "home"
         home.mkdir()
         (home / "Library" / "LaunchAgents").mkdir(parents=True)
-        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+        with mock.patch.dict(os.environ, {"HOME": str(home)}), mock.patch.object(
+            svc, "_resolve_tunnel_client", side_effect=lambda value: Path(value)
+        ):
             yield tmp, home
 
 
@@ -263,11 +265,26 @@ class TestStrictTunnelHealth(unittest.TestCase):
             "result": "fail",
         }
         with mock.patch.object(
-            svc, "_run", return_value=FakeResult(1, json.dumps(payload), "")
+            svc, "_run", return_value=FakeResult(0, json.dumps(payload), "")
         ):
             self.assertEqual(
                 svc._strict_tunnel_health(Path("/tc"), 45031),
                 (True, False, False),
+            )
+
+    def test_nonzero_health_exit_cannot_false_green(self):
+        payload = {
+            "healthz": {"ok": True},
+            "readyz": {"ok": True},
+            "control_plane_poll": {"ok": True},
+            "result": "ok",
+        }
+        with mock.patch.object(
+            svc, "_run", return_value=FakeResult(1, json.dumps(payload), "")
+        ):
+            self.assertEqual(
+                svc._strict_tunnel_health(Path("/tc"), 45031),
+                (False, False, False),
             )
 
     def test_ready_only_when_local_and_poll_are_ready(self):
@@ -284,6 +301,21 @@ class TestStrictTunnelHealth(unittest.TestCase):
                 svc._strict_tunnel_health(Path("/tc"), 45031),
                 (True, True, True),
             )
+
+
+class TestPinnedTunnelClient(unittest.TestCase):
+    def test_non_pinned_tunnel_client_refused(self):
+        with self.assertRaisesRegex(SystemExit, "pinned path"):
+            svc._resolve_tunnel_client("/tmp/not-the-pinned-client")
+
+    def test_pinned_tunnel_client_resolves_exact_path(self):
+        expected = Path(svc.PINNED_TUNNEL_CLIENT)
+        with mock.patch.object(gw, "_resolve_abs", return_value=expected) as resolve:
+            self.assertEqual(
+                svc._resolve_tunnel_client(svc.PINNED_TUNNEL_CLIENT),
+                expected,
+            )
+        resolve.assert_called_once_with("--tunnel-client", svc.PINNED_TUNNEL_CLIENT)
 
 
 class TestStageHappyPath(unittest.TestCase):
@@ -461,12 +493,20 @@ class TestStageHappyPath(unittest.TestCase):
             manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
             self.assertEqual(manifest["organizationId"], "org-ChrisAdmin123")
 
+            accepted = (
+                roots["profile"].read_bytes(),
+                roots["plist"].read_bytes(),
+                roots["manifest"].read_bytes(),
+            )
             args.organization_id = "org-Different123"
             with mock.patch.object(
                 svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
             ):
                 with self.assertRaisesRegex(SystemExit, "one-way addition"):
                     svc.cmd_stage(args)
+            self.assertEqual(roots["profile"].read_bytes(), accepted[0])
+            self.assertEqual(roots["plist"].read_bytes(), accepted[1])
+            self.assertEqual(roots["manifest"].read_bytes(), accepted[2])
 
             args.organization_id = None
             with mock.patch.object(
@@ -474,6 +514,9 @@ class TestStageHappyPath(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(SystemExit, "one-way addition"):
                     svc.cmd_stage(args)
+            self.assertEqual(roots["profile"].read_bytes(), accepted[0])
+            self.assertEqual(roots["plist"].read_bytes(), accepted[1])
+            self.assertEqual(roots["manifest"].read_bytes(), accepted[2])
 
     def test_other_account_uses_manifest_port(self):
         with IsolatedHome() as (tmp, home):
@@ -533,6 +576,29 @@ class TestWrongInputs(unittest.TestCase):
                     svc.cmd_stage(args)
             self.assertFalse(svc._canonical_profile(C1).exists())
 
+    def test_group_writable_home_refused_before_stage(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(home, tmp)
+            home.chmod(0o775)
+            with self.assertRaisesRegex(SystemExit, "HOME permissions"):
+                svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
+    def test_symlinked_home_refused(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            target = root / "real-home"
+            target.mkdir()
+            target.chmod(0o700)
+            link = root / "linked-home"
+            link.symlink_to(target, target_is_directory=True)
+            key = target / "runtime-key"
+            key.write_text("fixture\n", encoding="utf-8")
+            key.chmod(0o600)
+            with mock.patch.dict(os.environ, {"HOME": str(link)}):
+                with self.assertRaisesRegex(SystemExit, "HOME must be a non-symlink"):
+                    svc._parse_file_ref(f"file:{link / 'runtime-key'}")
+
     def test_group_or_other_readable_runtime_key_refused_before_stage(self):
         with IsolatedHome() as (tmp, home):
             args, _, _ = _stage_args(home, tmp)
@@ -569,7 +635,14 @@ class TestWrongInputs(unittest.TestCase):
             key_path = Path(args.runtime_key_ref[5:])
             info = os.lstat(key_path)
             foreign = mock.Mock(st_mode=info.st_mode, st_uid=os.getuid() + 1)
-            with mock.patch.object(svc.os, "lstat", return_value=foreign):
+            real_lstat = os.lstat
+
+            def fake_lstat(candidate):
+                if Path(candidate) == key_path:
+                    return foreign
+                return real_lstat(candidate)
+
+            with mock.patch.object(svc.os, "lstat", side_effect=fake_lstat):
                 with self.assertRaisesRegex(SystemExit, "owner mismatch"):
                     svc.cmd_stage(args)
             self.assertFalse(svc._canonical_profile(C1).exists())

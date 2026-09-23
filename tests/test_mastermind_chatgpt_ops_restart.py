@@ -112,6 +112,14 @@ class OpsRestartTests(unittest.TestCase):
             self.assertEqual(owner.actions, [])
             self.assertEqual(len(owner.observations), 1)
 
+    def test_owner_action_refuses_before_subprocess_when_bundle_unverified(self):
+        with patch.object(
+            ops, "verify_studio_control_owner", side_effect=RuntimeError("bundle drift")
+        ), patch.object(ops.subprocess, "run") as run:
+            with self.assertRaisesRegex(RuntimeError, "bundle drift"):
+                ops._run_owner_action("chatgpt1", "stop")
+        run.assert_not_called()
+
     def test_service_mapping_is_closed_to_isolated_studio_routes(self):
         self.assertEqual(
             ops.SERVICE_TO_ACCOUNT,

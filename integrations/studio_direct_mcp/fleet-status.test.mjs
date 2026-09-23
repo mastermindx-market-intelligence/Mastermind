@@ -180,6 +180,7 @@ test('closed issue codes explain degraded known status without raw internals', a
   assert.equal(result.accounts[0].state, 'DEGRADED');
   assert.deepEqual(result.accounts[0].issues, [
     'GATEWAY_NOT_RUNNING',
+    'TUNNEL_NOT_LOADED',
     'TUNNEL_NOT_RUNNING',
   ]);
 });
@@ -217,6 +218,30 @@ test('owner counts, readiness, duplicates, types, and future fields fail closed'
   {
     const row = statusRow('chatgpt1', true);
     row.tunnel.ready = 'yes';
+    cases.push(ownerFor([row]));
+  }
+  {
+    const row = statusRow('sk-proj-secret-shaped', true);
+    cases.push(ownerFor([row]));
+  }
+  {
+    const row = statusRow('chatgpt1', true);
+    row.tunnel.transportTTL = '/Users/chriswong/private-secret';
+    cases.push(ownerFor([row]));
+  }
+  for (const field of ['controlPlanePollReady', 'healthy', 'running']) {
+    const row = statusRow('chatgpt1', true);
+    row.tunnel[field] = false;
+    cases.push(ownerFor([row]));
+  }
+  {
+    const row = statusRow('chatgpt1', true);
+    row.tunnel.gatewayReady = false;
+    cases.push(ownerFor([row]));
+  }
+  {
+    const row = statusRow('chatgpt1', true);
+    delete row.tunnel.controlPlanePollReady;
     cases.push(ownerFor([row]));
   }
 

@@ -32,6 +32,38 @@ class ChatGptOpsHealthTests(unittest.TestCase):
         )
         self.assertNotIn("chatgpt2", ops.STUDIO_ACCOUNTS)
         self.assertNotIn("chatgpt3", ops.STUDIO_ACCOUNTS)
+        self.assertEqual(
+            ops.STUDIO_ACCOUNT_SCOPES,
+            {
+                "chatgpt1": "personal_account",
+                "chatgpt2-personal": "personal_account",
+                "chatgpt2-business": "business_workspace",
+                "admin-business": "business_workspace",
+                "chatgpt3-w570f6f34": "workspace_account",
+                "chatgpt3-wa2a9e6f9": "workspace_account",
+                "chatgpt4": "personal_account",
+            },
+        )
+
+    def test_personal_status_attests_bundle_and_launcher_before_helper(self):
+        expected = {"account": "chatgpt1", "ready": True}
+        with patch.object(
+            ops, "verify_studio_control_owner", return_value={"state": "CONTROL_BUNDLE_VERIFIED"}
+        ) as verify, patch.object(ops, "_run_json", return_value=expected) as run:
+            self.assertEqual(ops.read_personal_status("chatgpt1"), expected)
+        verify.assert_called_once_with(
+            control_root=ops.CONTROL_ROOT,
+            launcher=ops.STUDIO_LAUNCHER,
+        )
+        self.assertEqual(run.call_count, 1)
+
+    def test_personal_status_refuses_before_helper_when_bundle_unverified(self):
+        with patch.object(
+            ops, "verify_studio_control_owner", side_effect=RuntimeError("drift")
+        ), patch.object(ops, "_run_json") as run:
+            with self.assertRaisesRegex(RuntimeError, "drift"):
+                ops.read_personal_status("chatgpt1")
+        run.assert_not_called()
 
     def test_personal_fact_preserves_owner_status_without_paths_or_args(self):
         status = {

@@ -34,7 +34,12 @@ from control_plane.sol_ops_restart import (
     preflight_restart,
     validate_request,
 )
-from scripts.mastermind_chatgpt_ops_health import CONTROL_ROOT, read_personal_status
+from scripts.mastermind_chatgpt_ops_health import (
+    CONTROL_ROOT,
+    STUDIO_LAUNCHER,
+    read_personal_status,
+    verify_studio_control_owner,
+)
 
 SERVICE_TO_ACCOUNT = {
     "studio-direct.chatgpt1": "chatgpt1",
@@ -214,6 +219,7 @@ def _run_owner_action(account: str, action: str) -> dict[str, object]:
         raise ValueError("account is outside the closed allowlist")
     if action not in {"stop", "start"}:
         raise ValueError("owner action is outside the closed restart sequence")
+    verify_studio_control_owner(control_root=CONTROL_ROOT, launcher=STUDIO_LAUNCHER)
     helper = CONTROL_ROOT / "studio_direct_control.py"
     result = subprocess.run(
         [sys.executable, str(helper), action, "--account", account],

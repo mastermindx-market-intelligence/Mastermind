@@ -154,6 +154,19 @@ def _parse_file_ref(value: str) -> Path:
     if not os.path.isabs(raw):
         raise SystemExit("runtime key ref path must be absolute")
     path = Path(raw)
+    home = _user_root()
+    if not home.is_absolute():
+        raise SystemExit("HOME must be absolute")
+    try:
+        home_info = os.lstat(home)
+    except OSError:
+        raise SystemExit("HOME is unavailable")
+    if stat.S_ISLNK(home_info.st_mode) or not stat.S_ISDIR(home_info.st_mode):
+        raise SystemExit("HOME must be a non-symlink directory")
+    if home_info.st_uid != os.getuid():
+        raise SystemExit("HOME owner mismatch")
+    if stat.S_IMODE(home_info.st_mode) & 0o022:
+        raise SystemExit("HOME permissions must deny group/other writes")
     _assert_no_symlink_ancestors(path)
     try:
         info = os.lstat(path)
@@ -167,7 +180,6 @@ def _parse_file_ref(value: str) -> Path:
         raise SystemExit("runtime key ref owner mismatch")
     if stat.S_IMODE(info.st_mode) & 0o077:
         raise SystemExit("runtime key ref permissions must deny group/other access")
-    home = _user_root()
     parent = path.parent
     while parent != home:
         try:
@@ -187,7 +199,9 @@ def _parse_file_ref(value: str) -> Path:
 
 
 def _resolve_tunnel_client(value: str) -> Path:
-    return gw._resolve_abs("--tunnel-client", value)
+    if value != PINNED_TUNNEL_CLIENT:
+        raise SystemExit(f"--tunnel-client must be the pinned path {PINNED_TUNNEL_CLIENT}")
+    return gw._resolve_abs("--tunnel-client", PINNED_TUNNEL_CLIENT)
 
 
 def _canonical_profile(account: str) -> Path:
@@ -605,6 +619,8 @@ def _strict_tunnel_health(
         check=False,
         timeout=5.0,
     )
+    if result.returncode != 0:
+        return False, False, False
     try:
         payload = json.loads(result.stdout)
     except (TypeError, json.JSONDecodeError):

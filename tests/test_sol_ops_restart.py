@@ -1,6 +1,7 @@
 import unittest
 
 from control_plane.sol_ops_restart import (
+    ALLOWED_SERVICES,
     RestartObservation,
     RestartRequest,
     RestartState,
@@ -57,6 +58,22 @@ class SolOpsRestartContractTests(unittest.TestCase):
         )
         self.assertEqual(result.state, RestartState.NOT_APPLIED)
         self.assertEqual(result.code, "CONFIGURATION_DRIFT")
+
+    def test_allowed_services_are_exactly_the_isolated_routes(self):
+        self.assertEqual(
+            ALLOWED_SERVICES,
+            frozenset(
+                {
+                    "studio-direct.chatgpt1",
+                    "studio-direct.chatgpt2-personal",
+                    "studio-direct.chatgpt2-business",
+                    "studio-direct.admin-business",
+                    "studio-direct.chatgpt3-w570f6f34",
+                    "studio-direct.chatgpt3-wa2a9e6f9",
+                    "studio-direct.chatgpt4",
+                }
+            ),
+        )
 
     def test_admin_business_is_an_explicit_isolated_service(self):
         request = self.request(service_ref="studio-direct.admin-business")

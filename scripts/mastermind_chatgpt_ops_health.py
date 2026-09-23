@@ -26,6 +26,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from integrations.studio_direct_mcp import control_bundle as studio_control_bundle
+
 from control_plane.sol_ops_health import (
     OpsHealthEnvelope,
     ServiceFact,
@@ -45,6 +47,7 @@ STUDIO_ACCOUNT_SCOPES = {
 STUDIO_ACCOUNTS = tuple(STUDIO_ACCOUNT_SCOPES)
 TUNNEL_RE = re.compile(r"^tunnel_[0-9a-f]{32}$")
 CONTROL_ROOT = Path.home() / ".local" / "share" / "studio-direct-mcp" / "control"
+STUDIO_LAUNCHER = Path.home() / ".local" / "bin" / "studio-direct"
 MAX_PROFILE_BYTES = 64 * 1024
 MAX_HEALTH_REF_BYTES = 256
 MAX_HEALTH_RESPONSE_BYTES = 256
@@ -96,9 +99,27 @@ def _run_json(argv: list[str]) -> dict[str, object]:
     return value
 
 
+def verify_studio_control_owner(
+    *,
+    control_root: Path = CONTROL_ROOT,
+    launcher: Path = STUDIO_LAUNCHER,
+) -> dict[str, object]:
+    try:
+        value = studio_control_bundle.verify(
+            control_root=control_root,
+            launcher=launcher,
+        )
+    except (OSError, studio_control_bundle.Refusal) as error:
+        raise RuntimeError("existing Studio Direct control bundle is unverified") from error
+    if not isinstance(value, dict) or value.get("state") != "CONTROL_BUNDLE_VERIFIED":
+        raise RuntimeError("existing Studio Direct control bundle is unverified")
+    return value
+
+
 def read_personal_status(account: str) -> dict[str, object]:
     if account not in STUDIO_ACCOUNTS:
         raise ValueError("account is outside the closed Studio seat allowlist")
+    verify_studio_control_owner(control_root=CONTROL_ROOT, launcher=STUDIO_LAUNCHER)
     helper = CONTROL_ROOT / "studio_direct_control.py"
     return _run_json(
         [sys.executable, str(helper), "status", "--account", account]
