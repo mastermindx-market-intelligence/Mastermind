@@ -42,10 +42,17 @@ try {
     assert.ok(tools.some(t => t.name === required), `${required} exposed`);
   const ping = await measure('studio_ping', () => client.callTool({ name: 'studio_ping', arguments: {} }));
   receipt.ping = ping;
+  const systemReadProbe = process.platform === 'darwin'
+    ? { path: '/System/Library/CoreServices/SystemVersion.plist', marker: 'plist' }
+    : process.platform === 'linux'
+      ? { path: '/etc/os-release', marker: 'NAME=' }
+      : null;
+  assert.ok(systemReadProbe, `unsupported acceptance platform: ${process.platform}`);
   for (let i = 0; i < 3; i++) {
     const read = await measure('read_file', () => client.callTool({ name: 'read_file', arguments: {
-      path: '/System/Library/CoreServices/SystemVersion.plist', offset: 0, length: 8 } }));
-    assert.ok(read.content.some(c => c.type === 'text' && c.text.includes('plist')), 'real system file read');
+      path: systemReadProbe.path, offset: 0, length: 8 } }));
+    assert.ok(read.content.some(c => c.type === 'text' && c.text.includes(systemReadProbe.marker)),
+      'real system file read');
   }
   const marker = `STUDIO_PRIVATE_ACCEPTANCE_${Date.now()}`;
   const command = await measure('start_process', () => client.callTool({ name: 'start_process', arguments: {
