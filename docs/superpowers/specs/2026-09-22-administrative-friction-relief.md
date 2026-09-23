@@ -129,3 +129,32 @@ changed to conceal either limitation. Required hosted CI and independent review 
 The 12 new regression cases initially failed against the old source and passed after the amendment.
 These are source-contract checks, not fresh-model behavioral proof. Candidate adoption and actual
 runtime successor/ready-frontier behavior remain separately unproven.
+
+
+## Follow-through: native role boundaries and executable recovery regressions
+
+The continuation found two additional instruction-level causes in both native entrypoints:
+the portfolio invocation's read-only restriction was written as an unconditional session identity,
+and Fable was described as owning all adjudication/routing/merges. The candidate now scopes
+read-only to portfolio reasoning and makes Fable's role assignment-specific. Current grants,
+independent review, runtime admission, credentials, paper-only and trading boundaries are unchanged.
+Four added source tests fail before these edits and pass afterward; the source-test total is 16.
+
+`tests/test_administrative_dispatch_recovery.py` adds hermetic cases using the incumbent Runtime
+and existing Phase 1F-C fixtures. No production store, provider call or new scheduler is involved.
+Run `python3 -m pytest -o addopts='' -q --runxfail tests/test_administrative_dispatch_recovery.py`
+to expose acceptance status rather than treating the source-policy result as runtime acceptance.
+
+At the tested #918 source parent `75e32a747b636bda3ca20b40ae2101cc95b44dd2`, the two recovery
+cases fail: a preclaim-unavailable child starves a ready read-only sibling, and capacity restoration
+still returns the stored root blocker without any dispatch call. Both children initially have zero
+Attempts. The two safety controls pass: None after a durable claim reconciles the same command
+without a sibling/duplicate Attempt, and an invalid root never dispatches unrelated work.
+The unresolved cases are strict expected failures in normal test runs, not successful acceptance.
+Their owning integration remains #870/#600; no competing Runtime edit is included in this patch.
+
+The fresh governing source was protected `b4493b52810a43a413e381a07e1194ca905b4851`.
+That pin also adds finite COO cutoff ordering; the runtime repair must preserve it. During bounded
+recovery, #870's actual registered worktree had newer local head `8f46c1561a3bb959fecc7e8433073fe6a7203afa`
+than its published `a745399823a02e35a5f57eb96cdcbc157f7a6398`. Do not repeat its old Task-2 frontier,
+overwrite that local work, or assume this #918 regression run proves the newer candidate's behavior.

@@ -119,3 +119,22 @@ def test_relief_does_not_waive_real_boundaries():
         "current admission",
     ):
         assert phrase in source
+
+
+@pytest.mark.parametrize("path", ["AGENTS.md", "CLAUDE.md"])
+def test_portfolio_read_only_does_not_misclassify_assigned_engineering(path):
+    source = text(path)
+    assert "portfolio-reasoning invocation is read-only" in source
+    assert "An explicitly assigned engineering/operations session is a different role" in source
+    assert "current assignment and applicable grants" in source
+    assert "does not grant runtime, credential, trading, or source-write authority" in source
+    assert "You are **read-only**" not in source
+
+
+@pytest.mark.parametrize("path", ["AGENTS.md", "CLAUDE.md"])
+def test_fable_is_not_a_universal_routing_or_merge_prerequisite(path):
+    source = text(path)
+    assert "Fable is not a mandatory relay or universal merge approver" in source
+    assert "currently authorized role and operation" in source
+    assert "Independent review and source/release protections still apply" in source
+    assert "Owns adjudication, routing, and merges" not in source
