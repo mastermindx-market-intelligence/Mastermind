@@ -23,6 +23,8 @@ from control_plane.web_sol_cognition_assignment import (
 
 DIGEST_A = "a" * 64
 DIGEST_B = "b" * 64
+NATIVE_FRAME_BYTES = 64 * 1024
+FRAME_RESERVE_BYTES = 16 * 1024
 
 
 def _agentos() -> dict:
@@ -196,6 +198,10 @@ def _build(**kwargs):
     return build_web_sol_cognition_assignment(**args)
 
 
+def test_declared_prompt_ceiling_survives_worst_case_native_frame_escaping() -> None:
+    assert (2 * MAX_RENDERED_ASSIGNMENT_BYTES) + FRAME_RESERVE_BYTES <= NATIVE_FRAME_BYTES
+
+
 def test_builds_bounded_deterministic_assignment_without_raw_context() -> None:
     first = _build()
     second = _build()
@@ -203,6 +209,7 @@ def test_builds_bounded_deterministic_assignment_without_raw_context() -> None:
     assert first.assignment_digest == second.assignment_digest
     assert first.rendered_prompt == second.rendered_prompt
     assert first.rendered_prompt_bytes <= MAX_RENDERED_ASSIGNMENT_BYTES
+    assert (2 * first.rendered_prompt_bytes) + FRAME_RESERVE_BYTES <= NATIVE_FRAME_BYTES
     assert first.document["schema_version"] == ASSIGNMENT_SCHEMA
     assert first.document["job"]["job_id"] == "JOB-200"
     assert first.document["job"]["attempt_id"] == "ATT-200"
