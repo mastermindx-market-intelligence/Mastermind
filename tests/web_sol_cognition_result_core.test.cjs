@@ -321,3 +321,11 @@ test("refuses Mastermind environment or secret-marker material before browser ex
     assert.equal(result.status, "RESULT_REFUSED", text);
   }
 });
+
+
+test("reserves worst-case string-framing headroom under the incumbent 64 KiB native frame", () => {
+  const nativeFrameBytes = 64 * 1024;
+  const reservedFramingBytes = 16 * 1024;
+  assert.equal(core.MAX_CANONICAL_RESULT_BYTES, 24 * 1024);
+  assert.ok((2 * core.MAX_CANONICAL_RESULT_BYTES) + reservedFramingBytes <= nativeFrameBytes);
+});

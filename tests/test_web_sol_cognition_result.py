@@ -166,3 +166,10 @@ def test_native_boundary_rejects_exact_environment_secret_identity(
         _build(_canonical(value))
 
     assert excinfo.value.code == "RESULT_REFUSED"
+
+
+def test_browser_result_budget_reserves_native_frame_headroom() -> None:
+    native_frame_bytes = 64 * 1024
+    reserved_framing_bytes = 16 * 1024
+    assert MAX_WEB_SOL_COGNITION_RESULT_BYTES == 24 * 1024
+    assert (2 * MAX_WEB_SOL_COGNITION_RESULT_BYTES) + reserved_framing_bytes <= native_frame_bytes
