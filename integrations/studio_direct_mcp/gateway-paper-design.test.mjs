@@ -70,6 +70,7 @@ test('gateway advertises and dispatches guarded Paper design tools locally', asy
       pythonPath: process.execPath,
       bridgePath,
       bridgeSha256,
+      appPath: '/Applications/Paper.app',
       commandTimeoutMs: 5000,
     },
   }, auth());
@@ -81,11 +82,13 @@ test('gateway advertises and dispatches guarded Paper design tools locally', asy
 
   const listed = await client.listTools();
   const byName = new Map(listed.tools.map((tool) => [tool.name, tool]));
-  for (const name of ['paper_inspect', 'paper_catalog', 'paper_read', 'paper_edit']) {
+  for (const name of ['paper_inspect', 'paper_catalog', 'paper_read', 'paper_prepare', 'paper_edit']) {
     assert.ok(byName.has(name), `missing ${name}`);
   }
   assert.equal(byName.get('paper_inspect').annotations.readOnlyHint, true);
   assert.equal(byName.get('paper_read').annotations.readOnlyHint, true);
+  assert.equal(byName.get('paper_prepare').annotations.readOnlyHint, false);
+  assert.equal(byName.get('paper_prepare').annotations.destructiveHint, false);
   assert.equal(byName.get('paper_edit').annotations.readOnlyHint, false);
   assert.equal(byName.get('paper_edit').annotations.idempotentHint, false);
 

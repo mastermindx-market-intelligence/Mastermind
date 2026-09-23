@@ -21,8 +21,8 @@ configuration -> `mcp_server.py` (official MCP SDK, stdio) -> `bridge.py` ->
 Paper's fixed loopback MCP `http://127.0.0.1:29979/mcp`.
 
 ChatGPT Web -> existing Studio Direct private Secure MCP Tunnel -> Studio Direct
-gateway-owned `paper_inspect` / `paper_catalog` / `paper_read` / `paper_edit`
-tools -> the SAME SHA-pinned `bridge.py` -> Paper's fixed loopback endpoint.
+gateway-owned `paper_inspect` / `paper_catalog` / `paper_read` / `paper_prepare` /
+`paper_edit` tools -> the SAME SHA-pinned `bridge.py` -> Paper's fixed loopback endpoint.
 Screenshots remain native MCP image blocks. The Web caller cannot provide an
 arbitrary host path, Paper endpoint, account or credential.
 
@@ -59,6 +59,21 @@ single real execution seat compatible with multiple governed agent workflows wit
 credential sharing between fake Paper members. Our bridge still serializes modifying
 calls on one desktop until stronger multi-file isolation is explicitly proven.
 
+### Dual-Studio concurrency boundary - 2026-09-22
+
+The same real Paper editor identity may back the governed Paper Desktop processes on
+both M1 and M2; do not buy or fabricate a separate Paper member merely because another
+agent session runs on another owned Mac. Each host remains a separate local MCP process
+and may work on a different Paper file in parallel.
+
+Concurrency is bounded by **file identity**, not by Paper account identity. Until a
+stronger accepted isolation mechanism exists, exactly one modifying session may own a
+given `fileId` across all hosts. Another session may inspect/review that same file
+read-only. Different `fileId` values may have independent modifying owners. The local
+per-OS-user mutex does not provide a distributed lock, and `paper_prepare` does not
+mint ownership or replace the existing Capacity/routing owner. Never infer that two
+successful host-local preflights make same-file concurrent edits serializable.
+
 ## Existing harness integration boundary
 
 Protected `control_plane/executive_agent_capabilities.py` already owns named MCP,
@@ -94,7 +109,17 @@ dry run, then the same command with `--apply`. Existing destinations refuse rath
 than overwrite. It creates runtime files, actual isolated project configurations,
 and `INSTALLATION.json`. This receipt is installation evidence, not runtime authority.
 
-Launch Paper, sign in through its normal UI, and open the intended design file.
+Launch Paper and sign in through its normal UI. The private Studio Direct host pins
+`~/Applications/Paper.app`; a Web caller cannot supply another application path, URL,
+account or credential. When the exact Paper file ID is known, `paper_prepare(file_id)`
+may launch/focus that pinned app through the observed `paper://file/<id>` desktop URL,
+then repeatedly observes the guarded bridge until the exact file identity is proven.
+If the transition cannot be proven, it returns
+`PAPER_DOCUMENT_TRANSITION_UNCONFIRMED`, performs no automatic replay, and exposes no
+content edit capability. When the file is already active, prepare skips the desktop
+launch entirely and returns the current snapshot plus write-schema qualification.
+Use `paper_read` with `tool=list_files` first when the file ID is unknown.
+
 No paid plan is needed for initial smoke proof. Paper 0.5.11 returns a compact
 structured file header plus a richer JSON text block from `get_basic_info`; the
 adapter merges them only when file identities/names agree, preserving provider file
@@ -115,14 +140,17 @@ authorization boundaries.
 ## Deterministic behavior and limits
 
 `status` observes server/document; `catalog` discovers real upstream input schemas;
-`read` allows the documented inspection/screenshot/JSX tools; `edit` requires an
-explicit opt-in, operation ID and immediately compared basic-info snapshot hash.
+`read` allows the documented inspection/screenshot/JSX tools; the Studio Direct
+`paper_prepare` wrapper performs only a bounded host-pinned desktop/file transition
+and exact-file verification; `edit` requires an explicit opt-in, operation ID and
+immediately compared basic-info snapshot hash.
 Paper validates its current input schema. Safe Paper 0.5.11 reads additionally include file listing, node search, tokens and
 comment inspection. Guarded edits additionally cover page creation, token create/
 update and comment-resolution state; token deletion is explicitly refused.
-Cross-team `create_file`, document-transition `open_file`, native path-writing
-exports and consequential node deletion remain excluded until they have their own
-bounded transition/effect contract. Image artifacts accept only PNG/JPEG into an
+Cross-team `create_file`, the raw upstream document-transition `open_file`, native
+path-writing exports and consequential node deletion remain excluded. Studio Direct
+uses only its separately bounded `paper_prepare` wrapper for file focus; callers cannot
+forward an arbitrary Paper URL or application path. Image artifacts accept only PNG/JPEG into an
 explicit private output directory, content-addressed and never overwritten.
 
 A snapshot is NOT a revision, identity credential, authorization or full content
@@ -172,9 +200,10 @@ code output is a starting point, not automatic tested production implementation.
 1. Exact source runtime installed without changing other worker homes.
 2. Native MCP initialize/list and real CLI read against Paper after login/file-open.
 3. Approved scratch edit, screenshot, JSX extraction; no wrong-document changes.
-4. Fresh ChatGPT Web session runs the same journey through a Paper-enabled Studio
-   Direct seat and receives the native MCP image/JSX result. Tunnel health alone is
-   not the design-journey proof.
+4. Fresh ChatGPT Web session runs `paper_inspect`; when needed, `paper_read` with
+   `tool=list_files` -> `paper_prepare(file_id)`; then the same read/edit/screenshot/JSX
+   journey through a Paper-enabled Studio Direct seat. Tunnel health alone is not the
+   design-journey proof.
 5. Existing capability registry attests a bounded worker; no second control plane.
 6. One real product design-to-code/browser journey before Figma retirement.
 

@@ -578,10 +578,12 @@ class TestBuildConfig(unittest.TestCase):
                     "pythonPath": str(paper_runtime / "venv" / "bin" / "python"),
                     "bridgePath": str(paper_runtime / "source" / "bridge.py"),
                     "bridgeSha256": svc.PAPER_BRIDGE_SHA256,
+                    "appPath": str(home / "Applications" / "Paper.app"),
                     "commandTimeoutMs": 70_000,
                 },
             )
             self.assertNotIn("fileId", config["paperDesign"])
+            self.assertNotIn("appPathOverride", config["paperDesign"])
             self.assertNotIn("account", config["paperDesign"])
             self.assertNotIn("token", config["paperDesign"])
 
