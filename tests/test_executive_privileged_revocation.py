@@ -5,14 +5,29 @@ no test invokes sudo, changes a real service, or touches real credential state.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
+from control_plane.executive_privileged_action import (
+    REQUEST_SCHEMA,
+    canonical_request_bytes,
+    validate_request,
+)
+from control_plane.executive_privileged_broker import (
+    PrivilegedActionBroker,
+    PrivilegedBrokerConfig,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "ops/executive_os/uninstall.sh"
+BROKER_SPEC = ROOT / "docs/superpowers/specs/2026-09-13-executive-privileged-action-broker-design.md"
+PERMANENT_PLAN = ROOT / "docs/superpowers/plans/2026-09-14-permanent-privileged-execution-program.md"
 PRIVILEGED = "com.mastermind.executive.privileged"
 CONTROL = "com.mastermind.executive.control"
 WORKER = "com.mastermind.executive.worker.codex"
@@ -31,6 +46,103 @@ def host(tmp_path: Path):
     (receipts / "completed.json").write_text('{"evidence":"retain"}\n')
     (tmp_path / "runtime/auth-sentinel").write_text("fixture-not-a-secret\n")
     return tmp_path
+
+
+_TARGET_ID = "req-reconciled-001"
+_TARGET_RELEASE = "a" * 40
+_CURRENT_RELEASE = "b" * 40
+_READINESS_SHA = "c" * 64
+_AUTH_IDENTITY = {"uid": 451, "gid": 451, "mode": 0o600, "inode": 101}
+_BINARY_IDENTITY = {
+    "path": "/Library/Application Support/MastermindExecutive/bin/codex-0.147.0",
+    "version": "0.147.0",
+    "sha256": "1" * 64,
+    "team_identifier": "2DC432GLL2",
+    "uid": 0,
+    "gid": 0,
+    "mode": 0o555,
+    "inode": 202,
+}
+
+
+def _write_reconciled_pair(host: Path) -> tuple[Path, Path]:
+    receipt_root = host / "runtime/privileged-actions/receipts"
+    release = host / "release" / _CURRENT_RELEASE
+    release.mkdir(parents=True, exist_ok=True)
+    readiness = {
+        "readiness_receipt_sha256": _READINESS_SHA,
+        "readiness_document": {
+            "schema_version": "mastermind.executive_provider_readiness/v2",
+            "passed": True,
+            "refusal": None,
+            "observed_at": "2026-09-21T22:49:00Z",
+            "expected_credential_kind": "device-auth",
+            "workspace_binding_class": "company-workspace-admin-attested",
+            "credential_expires_at": "2026-09-22T10:30:00Z",
+            "credential_lstat": dict(_AUTH_IDENTITY),
+            "codex_binary": dict(_BINARY_IDENTITY),
+            "provider_identity": {
+                "credential_lstat": dict(_AUTH_IDENTITY),
+                "codex_binary": dict(_BINARY_IDENTITY),
+            },
+        },
+        "readiness_transaction_lock_present": False,
+        "verify_ready_processes": (),
+        "current_auth_identity": dict(_AUTH_IDENTITY),
+        "current_binary_identity": dict(_BINARY_IDENTITY),
+    }
+    broker = PrivilegedActionBroker(
+        PrivilegedBrokerConfig(
+            release_root=release,
+            receipt_root=receipt_root,
+            allowed_peer_uids=(450, 501),
+            timeout_seconds=30,
+            broker_version="test",
+        ),
+        require_root=False,
+        trust_validator=lambda _config: None,
+        reconciliation_observer=lambda: readiness,
+    )
+    raw = {
+        "schema": REQUEST_SCHEMA,
+        "request_id": _TARGET_ID,
+        "action": "executive.worker_auth.verify_ready",
+        "args": {
+            "expected_credential_kind": "device-auth",
+            "workspace_binding_class": "company-workspace-admin-attested",
+            "credential_expires_at": "2026-09-30T02:00:00Z",
+        },
+    }
+    validated = validate_request(raw)
+    digest = hashlib.sha256(canonical_request_bytes(validated)).hexdigest()
+    marker_value = {
+        "schema": "mastermind.executive_privileged_action_inflight.v1",
+        "request_id": _TARGET_ID,
+        "request_sha256": digest,
+        "action": validated.action,
+        "effect_class": validated.effect_class,
+        "started_at": "2026-09-23T01:46:34Z",
+        "release_sha": _TARGET_RELEASE,
+    }
+    marker_raw = (
+        json.dumps(marker_value, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    marker = broker.inflight_path(_TARGET_ID)
+    marker.write_bytes(marker_raw)
+    marker.chmod(0o600)
+    request = {
+        "schema": "mastermind.executive_privileged_action_reconcile_not_applied_request.v1",
+        "target_request_id": _TARGET_ID,
+        "target_request_sha256": digest,
+        "target_marker_sha256": hashlib.sha256(marker_raw).hexdigest(),
+        "target_release_sha": _TARGET_RELEASE,
+        "readiness_receipt_sha256": _READINESS_SHA,
+        "expected_credential_kind": "device-auth",
+        "workspace_binding_class": "company-workspace-admin-attested",
+        "credential_expires_at": "2026-09-30T02:00:00Z",
+    }
+    broker.reconcile_not_applied(request, peer_uid=501)
+    return marker, broker.reconciliation_path(_TARGET_ID)
 
 
 _NATIVE_DOUBLES = r'''
@@ -88,6 +200,14 @@ def run_uninstall(host: Path, *args: str, **changes: str):
     text = text.replace("/Library/LaunchDaemons", str(host / "plists"))
     text = text.replace("/var/db/mastermind-executive", str(host / "runtime"))
     text = text.replace("/var/run/mastermind-executive", str(host / "sockets"))
+    text = text.replace(
+        'RELEASE_ROOT="$(cd -P "$SCRIPT_DIR/../.." && /bin/pwd)"',
+        f'RELEASE_ROOT="{ROOT}"',
+    )
+    text = text.replace(
+        'PYTHON_BINARY="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"',
+        f'PYTHON_BINARY="{Path(sys.executable).resolve()}"',
+    )
     script = host / "uninstall.sh"
     script.write_text(text)
     doubles = host / "native-doubles.sh"
@@ -150,6 +270,55 @@ def test_inflight_race_preserves_uncertain_effect_and_does_not_claim_clean_remov
     assert "EFFECT_RECONCILIATION_REQUIRED" in result.stderr
     assert (host / "runtime/privileged-actions/receipts/inflight/race.json").exists()
     assert not any(call.startswith("remove ") for call in calls)
+
+
+def test_valid_reconciled_marker_allows_revocation_and_preserves_both_records(host):
+    marker, reconciliation = _write_reconciled_pair(host)
+    marker_before = marker.read_bytes()
+    reconciliation_before = reconciliation.read_bytes()
+
+    result, calls = run_uninstall(host, "--privileged-only")
+
+    assert result.returncode == 0, result.stderr
+    assert marker.read_bytes() == marker_before
+    assert reconciliation.read_bytes() == reconciliation_before
+    assert any(call.startswith("remove ") for call in calls)
+
+
+def test_tampered_reconciliation_keeps_revocation_fail_closed(host):
+    marker, reconciliation = _write_reconciled_pair(host)
+    document = json.loads(reconciliation.read_text())
+    document["target_marker_sha256"] = "f" * 64
+    reconciliation.write_text(json.dumps(document, sort_keys=True) + "\n")
+
+    result, calls = run_uninstall(host, "--privileged-only")
+
+    assert result.returncode == 75
+    assert "EFFECT_RECONCILIATION_REQUIRED" in result.stderr
+    assert marker.exists() and reconciliation.exists()
+    assert not any(call.startswith("remove ") for call in calls)
+
+
+def test_orphan_reconciliation_record_keeps_revocation_fail_closed(host):
+    marker, reconciliation = _write_reconciled_pair(host)
+    marker.unlink()
+
+    result, calls = run_uninstall(host, "--privileged-only")
+
+    assert result.returncode == 75
+    assert "EFFECT_RECONCILIATION_REQUIRED" in result.stderr
+    assert reconciliation.exists()
+    assert not any(call.startswith("remove ") for call in calls)
+
+
+def test_governing_contracts_name_reconciled_not_applied_status_and_revocation_semantics():
+    spec = BROKER_SPEC.read_text()
+    plan = PERMANENT_PLAN.read_text()
+
+    assert "RECONCILED_NOT_APPLIED" in spec
+    assert "RECONCILED_NOT_APPLIED" in plan
+    assert "marker" in plan and "reconciliation" in plan
+    assert "preserv" in plan.lower()
 
 
 @pytest.mark.parametrize("changes,code", [({"TEST_UID": "501"}, 77), ({"TEST_OS": "Linux"}, 69)])

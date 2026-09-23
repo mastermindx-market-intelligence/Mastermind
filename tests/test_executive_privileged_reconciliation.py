@@ -25,6 +25,7 @@ from control_plane.executive_privileged_broker import (
     PrivilegedBrokerError,
     ReconciledNotAppliedError,
     serve_connection,
+    validate_reconciliation_pair,
 )
 from scripts import mmx_privileged_reconcile
 
@@ -233,6 +234,25 @@ def test_reconcile_refuses_wrong_marker_hash_or_non_readiness_action(tmp_path: P
         other.reconcile_not_applied(
             _reconcile_request(digest, marker_bytes),
             peer_uid=501,
+        )
+
+
+def test_reconciliation_pair_refuses_unreviewed_namespace_shape(tmp_path: Path) -> None:
+    broker = _broker(tmp_path)
+    digest, marker_bytes = _marker(broker)
+    broker.reconcile_not_applied(_reconcile_request(digest, marker_bytes), peer_uid=501)
+    record = broker.reconciliation_path(TARGET_ID)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    relocated = outside / record.name
+    relocated.write_bytes(record.read_bytes())
+
+    with pytest.raises(PrivilegedBrokerError):
+        validate_reconciliation_pair(
+            broker.inflight_path(TARGET_ID),
+            relocated,
+            expected_request_id=TARGET_ID,
+            require_root_metadata=False,
         )
 
 

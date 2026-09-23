@@ -623,6 +623,143 @@ def validate_reconciliation_record(
     return record
 
 
+def _read_strict_inflight_marker_file(
+    path: str | os.PathLike[str],
+    *,
+    expected_request_id: str,
+    require_root_metadata: bool,
+) -> tuple[dict[str, Any], bytes]:
+    marker_path = Path(path)
+    raw, info = _read_stable_bounded_bytes(marker_path)
+    if require_root_metadata and (
+        info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink != 1
+    ):
+        raise BrokerTrustError("in-flight marker metadata is unsafe")
+    try:
+        marker = json.loads(raw.decode("utf-8", errors="strict"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise BrokerTrustError("in-flight marker is invalid JSON") from exc
+    if not isinstance(marker, dict) or frozenset(marker) != _INFLIGHT_RECORD_KEYS:
+        raise BrokerTrustError("in-flight marker fields are invalid")
+    if (
+        marker.get("schema") != INFLIGHT_SCHEMA
+        or marker.get("request_id") != expected_request_id
+    ):
+        raise BrokerTrustError("in-flight marker identity is invalid")
+    _validate_stored_digest(marker.get("request_sha256"))
+    _validate_stored_release_sha(marker.get("release_sha"))
+    action = marker.get("action")
+    if not isinstance(action, str) or action not in ACTION_EFFECT_CLASS:
+        raise BrokerTrustError("in-flight marker action is invalid")
+    if marker.get("effect_class") != ACTION_EFFECT_CLASS[action]:
+        raise BrokerTrustError("in-flight marker effect class is invalid")
+    _validate_receipt_time(marker.get("started_at"), "started_at")
+    return marker, raw
+
+
+def _read_strict_reconciliation_record_file(
+    path: str | os.PathLike[str],
+    *,
+    expected_request_id: str,
+    require_root_metadata: bool,
+) -> dict[str, Any]:
+    record_path = Path(path)
+    raw, info = _read_stable_bounded_bytes(record_path)
+    if require_root_metadata and (
+        info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink != 1
+    ):
+        raise BrokerTrustError("reconciliation record metadata is unsafe")
+    try:
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise BrokerTrustError("reconciliation record is invalid JSON") from exc
+    return validate_reconciliation_record(
+        value,
+        expected_request_id=expected_request_id,
+    )
+
+
+def validate_reconciliation_pair(
+    marker_path: str | os.PathLike[str],
+    reconciliation_path: str | os.PathLike[str],
+    *,
+    expected_request_id: str,
+    require_root_metadata: bool = True,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate one preserved marker and its create-only NOT_APPLIED record."""
+
+    marker_path = Path(marker_path)
+    reconciliation_path = Path(reconciliation_path)
+    expected_name = f"{expected_request_id}.json"
+    if (
+        marker_path.name != expected_name
+        or reconciliation_path.name != expected_name
+        or marker_path.parent.name != "inflight"
+        or reconciliation_path.parent.name != "reconciled"
+        or marker_path.parent.parent != reconciliation_path.parent.parent
+    ):
+        raise BrokerTrustError("reconciliation evidence paths are not the reviewed pair")
+
+    receipt_root = marker_path.parent.parent
+    if require_root_metadata:
+        if receipt_root != _RECEIPT_ROOT:
+            raise BrokerTrustError("reconciliation evidence is outside the privileged receipt root")
+        for ancestor in (
+            receipt_root.parent.parent,
+            receipt_root.parent,
+            receipt_root,
+            marker_path.parent,
+            reconciliation_path.parent,
+        ):
+            try:
+                info = ancestor.lstat()
+            except OSError as exc:
+                raise BrokerTrustError(
+                    "reconciliation evidence namespace is unavailable"
+                ) from exc
+            if (
+                stat.S_ISLNK(info.st_mode)
+                or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) & 0o022
+            ):
+                raise BrokerTrustError(
+                    "reconciliation evidence namespace metadata is unsafe"
+                )
+
+    record = _read_strict_reconciliation_record_file(
+        reconciliation_path,
+        expected_request_id=expected_request_id,
+        require_root_metadata=require_root_metadata,
+    )
+    marker, raw = _read_strict_inflight_marker_file(
+        marker_path,
+        expected_request_id=expected_request_id,
+        require_root_metadata=require_root_metadata,
+    )
+    if hashlib.sha256(raw).hexdigest() != record["target_marker_sha256"]:
+        raise BrokerTrustError("reconciled in-flight marker bytes changed")
+    for marker_field, record_field in (
+        ("request_sha256", "target_request_sha256"),
+        ("action", "target_action"),
+        ("effect_class", "target_effect_class"),
+        ("started_at", "target_started_at"),
+        ("release_sha", "target_release_sha"),
+    ):
+        if marker.get(marker_field) != record.get(record_field):
+            raise BrokerTrustError(
+                f"reconciliation no longer matches marker field {marker_field}"
+            )
+    return record, marker
+
+
 def _default_reconciliation_observer() -> Mapping[str, Any]:
     raw, info = _read_stable_bounded_bytes(_READINESS_RECEIPT_PATH)
     if (
@@ -865,61 +1002,40 @@ class PrivilegedActionBroker:
     def _read_strict_inflight_marker(
         self, request_id: str
     ) -> tuple[dict[str, Any], bytes]:
-        path = self.inflight_path(request_id)
-        raw, info = _read_stable_bounded_bytes(path)
-        if self._require_root and (
-            info.st_uid != 0
-            or info.st_gid != 0
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or info.st_nlink != 1
-        ):
-            raise BrokerTrustError("in-flight marker metadata is unsafe")
-        try:
-            marker = json.loads(raw.decode("utf-8", errors="strict"))
-        except (UnicodeError, json.JSONDecodeError) as exc:
-            raise BrokerTrustError("in-flight marker is invalid JSON") from exc
-        if not isinstance(marker, dict) or frozenset(marker) != _INFLIGHT_RECORD_KEYS:
-            raise BrokerTrustError("in-flight marker fields are invalid")
-        if marker.get("schema") != INFLIGHT_SCHEMA or marker.get("request_id") != request_id:
-            raise BrokerTrustError("in-flight marker identity is invalid")
-        _validate_stored_digest(marker.get("request_sha256"))
-        _validate_stored_release_sha(marker.get("release_sha"))
-        action = marker.get("action")
-        if not isinstance(action, str) or action not in ACTION_EFFECT_CLASS:
-            raise BrokerTrustError("in-flight marker action is invalid")
-        if marker.get("effect_class") != ACTION_EFFECT_CLASS[action]:
-            raise BrokerTrustError("in-flight marker effect class is invalid")
-        _validate_receipt_time(marker.get("started_at"), "started_at")
-        return marker, raw
+        return _read_strict_inflight_marker_file(
+            self.inflight_path(request_id),
+            expected_request_id=request_id,
+            require_root_metadata=self._require_root,
+        )
 
     def _read_reconciliation_for_status(
         self, request_id: str
     ) -> dict[str, Any] | None:
-        value = _read_optional_bounded_json(self.reconciliation_path(request_id))
-        if value is None:
+        path = self.reconciliation_path(request_id)
+        try:
+            path.lstat()
+        except FileNotFoundError:
             return None
-        return validate_reconciliation_record(
-            value, expected_request_id=request_id
+        except OSError as exc:
+            raise BrokerTrustError("reconciliation record is unreadable") from exc
+        return _read_strict_reconciliation_record_file(
+            path,
+            expected_request_id=request_id,
+            require_root_metadata=self._require_root,
         )
 
     def _validate_reconciliation_marker(
         self, record: Mapping[str, Any]
     ) -> dict[str, Any]:
         request_id = str(record["target_request_id"])
-        marker, raw = self._read_strict_inflight_marker(request_id)
-        if hashlib.sha256(raw).hexdigest() != record["target_marker_sha256"]:
-            raise BrokerTrustError("reconciled in-flight marker bytes changed")
-        for marker_field, record_field in (
-            ("request_sha256", "target_request_sha256"),
-            ("action", "target_action"),
-            ("effect_class", "target_effect_class"),
-            ("started_at", "target_started_at"),
-            ("release_sha", "target_release_sha"),
-        ):
-            if marker.get(marker_field) != record.get(record_field):
-                raise BrokerTrustError(
-                    f"reconciliation no longer matches marker field {marker_field}"
-                )
+        validated_record, marker = validate_reconciliation_pair(
+            self.inflight_path(request_id),
+            self.reconciliation_path(request_id),
+            expected_request_id=request_id,
+            require_root_metadata=self._require_root,
+        )
+        if dict(record) != validated_record:
+            raise BrokerTrustError("reconciliation record changed during validation")
         return marker
 
     def _existing_reconciliation_for_request(
@@ -1576,6 +1692,7 @@ __all__ = [
     "run_broker",
     "serve_connection",
     "validate_reconcile_not_applied_request",
+    "validate_reconciliation_pair",
     "validate_reconciliation_record",
     "validate_terminal_receipt",
     "verify_production_trust",
