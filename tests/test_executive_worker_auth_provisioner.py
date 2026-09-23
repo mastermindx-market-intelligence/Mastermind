@@ -349,6 +349,49 @@ wait "$child_pid"
                 pass
 
 
+def test_installed_binary_uses_sealed_attestation_without_slow_reverification() -> None:
+    source = _source()
+    branch = source.split(
+        'if [ "$USE_INSTALLED_CODEX_ATTESTATION" = "true" ]; then', 1
+    )[1].split("\nelse\n", 1)[0]
+
+    assert "load_codex_attestation_receipt" in branch
+    assert 'EXECUTABLE_CODEX_BINARY="$INSTALLED_CODEX_BINARY"' in branch
+    for forbidden in (
+        "/usr/bin/ditto",
+        "/usr/bin/codesign --verify --strict",
+        "/usr/bin/shasum -a 256",
+        '/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-',
+        '/bin/rm -f -- "$PINNED_CODEX_BINARY"',
+    ):
+        assert forbidden not in branch
+
+
+def test_preinstall_binary_retains_strict_attestation_and_temp_cleanup() -> None:
+    source = _source()
+    branch = source.split(
+        'if [ "$USE_INSTALLED_CODEX_ATTESTATION" = "true" ]; then', 1
+    )[1].split("\nelse\n", 1)[1].split("\nfi\n", 1)[0]
+
+    assert '/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX"' in branch
+    assert '/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"' in branch
+    assert '/usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY"' in branch
+    assert '/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY"' in branch
+    assert 'EXECUTABLE_CODEX_BINARY="$PINNED_CODEX_BINARY"' in branch
+
+    cleanup = source.split("cleanup() {", 1)[1].split("\n}", 1)[0]
+    assert '/bin/rm -f -- "$PINNED_CODEX_BINARY"' in cleanup
+    assert "EXECUTABLE_CODEX_BINARY" not in cleanup
+
+
+def test_worker_execution_uses_separate_attested_executable_path() -> None:
+    source = _source()
+    runner = source.split("run_codex_as_worker() {", 1)[1].split("\n}", 1)[0]
+
+    assert '"$EXECUTABLE_CODEX_BINARY" "$@"' in runner
+    assert '"$PINNED_CODEX_BINARY" "$@"' not in runner
+
+
 def test_post_install_auth_operations_prefer_installed_binary_over_mutable_source() -> None:
     source = _source()
     selection = source.index('if [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ]; then')

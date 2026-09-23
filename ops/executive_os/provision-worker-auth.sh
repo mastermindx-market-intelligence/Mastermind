@@ -35,6 +35,8 @@ READINESS_LOCK_HELD="false"
 READINESS_LOCK_RELEASE_ON_EXIT="true"
 INSTALLED_CODEX_BINARY=""
 PINNED_CODEX_BINARY=""
+EXECUTABLE_CODEX_BINARY=""
+USE_INSTALLED_CODEX_ATTESTATION="false"
 IDENTITY_RESULT=""
 POST_IDENTITY_RESULT=""
 CANARY_RESULT=""
@@ -208,6 +210,7 @@ case "$CODEX_VERSION" in
   ''|*[!0-9A-Za-z._-]*) /bin/echo "Codex version is invalid" >&2; exit 65 ;;
 esac
 INSTALLED_CODEX_BINARY="$SYSTEM_BIN/codex-$CODEX_VERSION"
+CODEX_ATTESTATION_RECEIPT="$SYSTEM_ROOT/codex-attestation-$CODEX_VERSION.json"
 # Once this reviewed version is installed, bind every auth/readiness operation
 # to that root-owned versioned binary. The mutable Homebrew enrollment source is
 # only a pre-install bootstrap input and may legitimately upgrade afterward; it
@@ -216,6 +219,7 @@ INSTALLED_CODEX_BINARY="$SYSTEM_BIN/codex-$CODEX_VERSION"
 # strictly post-install and therefore refuses when the installed binary is absent.
 if [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ]; then
   CODEX_BINARY="$INSTALLED_CODEX_BINARY"
+  USE_INSTALLED_CODEX_ATTESTATION="true"
 elif [ "$VERIFY_READY" = "true" ]; then
   /bin/echo "install the exact release before --verify-ready" >&2
   exit 65
@@ -318,7 +322,7 @@ run_codex_as_worker() {
         LC_ALL="C.UTF-8" \
         NO_COLOR="1" \
         PATH="/usr/bin:/bin" \
-        "$PINNED_CODEX_BINARY" "$@"
+        "$EXECUTABLE_CODEX_BINARY" "$@"
   )
 }
 
@@ -369,45 +373,78 @@ esac
   exit 65
 }
 
-# Never execute the Homebrew/user-owned source while this script is root. Copy
-# it first to a root-owned, non-writable temporary path, then attest and execute
-# only that pinned copy. A raced or partial copy cannot pass strict codesign.
-PINNED_CODEX_BINARY="$(/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX")"
-/bin/rm -f -- "$PINNED_CODEX_BINARY"
-/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"
-/usr/sbin/chown root:wheel "$PINNED_CODEX_BINARY"
-/bin/chmod 0555 "$PINNED_CODEX_BINARY"
-[ -f "$PINNED_CODEX_BINARY" ] && [ ! -L "$PINNED_CODEX_BINARY" ] \
-  && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PINNED_CODEX_BINARY")" = "0:0:555:1" ] || {
-    /bin/echo "staged Codex binary is not an immutable root-owned regular file" >&2
+if [ "$USE_INSTALLED_CODEX_ATTESTATION" = "true" ]; then
+  "$PYTHON_BINARY" -I -S -B - \
+    "$SCRIPT_DIR" "$CODEX_ATTESTATION_RECEIPT" "$INSTALLED_CODEX_BINARY" \
+    "$WORKER_GID" "$CODEX_VERSION" "$CODEX_SHA256" "$CODEX_TEAM_ID" <<'PY'
+import pathlib
+import sys
+
+script_dir = pathlib.Path(sys.argv[1]).resolve()
+repository_root = script_dir.parents[1]
+sys.path.insert(0, str(repository_root))
+
+from control_plane.codex_worker import load_codex_attestation_receipt
+
+receipt_path, binary_path, worker_gid, version, digest, team = sys.argv[2:]
+try:
+    attestation = load_codex_attestation_receipt(
+        receipt_path,
+        expected_binary_path=binary_path,
+        expected_owner_gid=int(worker_gid),
+    )
+except Exception:
+    raise SystemExit("installed Codex attestation receipt validation failed") from None
+if (
+    attestation.version != version
+    or attestation.sha256 != digest
+    or attestation.team_identifier != team
+):
+    raise SystemExit("installed Codex attestation differs from the reviewed allowlist")
+PY
+  EXECUTABLE_CODEX_BINARY="$INSTALLED_CODEX_BINARY"
+else
+  # Never execute the Homebrew/user-owned source while this script is root. Copy
+  # it first to a root-owned, non-writable temporary path, then attest and execute
+  # only that pinned copy. A raced or partial copy cannot pass strict codesign.
+  PINNED_CODEX_BINARY="$(/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX")"
+  /bin/rm -f -- "$PINNED_CODEX_BINARY"
+  /usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"
+  /usr/sbin/chown root:wheel "$PINNED_CODEX_BINARY"
+  /bin/chmod 0555 "$PINNED_CODEX_BINARY"
+  [ -f "$PINNED_CODEX_BINARY" ] && [ ! -L "$PINNED_CODEX_BINARY" ] \
+    && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PINNED_CODEX_BINARY")" = "0:0:555:1" ] || {
+      /bin/echo "staged Codex binary is not an immutable root-owned regular file" >&2
+      exit 65
+    }
+  case "$(/usr/bin/stat -f '%Sp' "$PINNED_CODEX_BINARY")" in
+    *+) /bin/echo "staged Codex binary has an unexpected filesystem ACL" >&2; exit 65 ;;
+  esac
+  /usr/bin/file -b "$PINNED_CODEX_BINARY" | /usr/bin/grep -q '^Mach-O ' || {
+    /bin/echo "Codex binary must be the native macOS executable, not a script or shim" >&2
     exit 65
   }
-case "$(/usr/bin/stat -f '%Sp' "$PINNED_CODEX_BINARY")" in
-  *+) /bin/echo "staged Codex binary has an unexpected filesystem ACL" >&2; exit 65 ;;
-esac
-/usr/bin/file -b "$PINNED_CODEX_BINARY" | /usr/bin/grep -q '^Mach-O ' || {
-  /bin/echo "Codex binary must be the native macOS executable, not a script or shim" >&2
-  exit 65
-}
-/usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY" >/dev/null 2>&1 || {
-  /bin/echo "Codex binary signature is invalid" >&2
-  exit 65
-}
-OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
-[ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
-  /bin/echo "Codex binary bytes do not match the exact reviewed 0.147.0 allowlist" >&2
-  exit 65
-}
-OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
-[ "$OBSERVED_TEAM" = "$CODEX_TEAM_ID" ] || {
-  /bin/echo "Codex binary signer is not OpenAI" >&2
-  exit 65
-}
-OBSERVED_VERSION="$(run_codex_as_worker --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
-[ "$OBSERVED_VERSION" = "$CODEX_VERSION" ] || {
-  /bin/echo "Codex binary version does not match the explicit allowlist" >&2
-  exit 65
-}
+  /usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY" >/dev/null 2>&1 || {
+    /bin/echo "Codex binary signature is invalid" >&2
+    exit 65
+  }
+  OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
+  [ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
+    /bin/echo "Codex binary bytes do not match the exact reviewed 0.147.0 allowlist" >&2
+    exit 65
+  }
+  OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
+  [ "$OBSERVED_TEAM" = "$CODEX_TEAM_ID" ] || {
+    /bin/echo "Codex binary signer is not OpenAI" >&2
+    exit 65
+  }
+  EXECUTABLE_CODEX_BINARY="$PINNED_CODEX_BINARY"
+  OBSERVED_VERSION="$(run_codex_as_worker --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
+  [ "$OBSERVED_VERSION" = "$CODEX_VERSION" ] || {
+    /bin/echo "Codex binary version does not match the explicit allowlist" >&2
+    exit 65
+  }
+fi
 
 AUTH_PATH="$PROVIDER_HOME/auth.json"
 
