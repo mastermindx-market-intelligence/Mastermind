@@ -464,15 +464,18 @@ def _verify_prior_install(
     gateway_port: int,
     health_port: int,
     organization_id: str | None,
+    allow_runtime_key_rotation: bool,
     roots: dict,
 ) -> None:
     prior_organization_id = prior.get("organizationId")
+    prior_runtime_key_ref = prior.get("runtimeKeyRef")
+    runtime_key_rotation = prior_runtime_key_ref != runtime_key_ref
     organization_enrichment = (
         prior_organization_id is None and organization_id is not None
     )
     if (
         prior.get("tunnelId") != tunnel_id
-        or prior.get("runtimeKeyRef") != runtime_key_ref
+        or (runtime_key_rotation and not allow_runtime_key_rotation)
         or prior.get("tunnelClient") != str(tunnel_client)
         or prior.get("gatewayPort") != gateway_port
         or prior.get("healthPort") != health_port
@@ -486,8 +489,8 @@ def _verify_prior_install(
     ):
         raise SystemExit(
             "refusing restage: existing tunnel manifest diverges; "
-            "only one-way addition of a previously missing organization id "
-            "is permitted"
+            "runtime key changes require --rotate-runtime-key and only "
+            "one-way addition of a previously missing organization id is permitted"
         )
     if roots["profile"].is_symlink() or not roots["profile"].is_file():
         raise SystemExit("refusing restage: existing profile missing")
@@ -496,7 +499,7 @@ def _verify_prior_install(
     _profile_matches(
         roots["profile"],
         tunnel_id,
-        runtime_key_ref,
+        prior_runtime_key_ref,
         gateway_port,
         health_port,
         prior_organization_id,
@@ -629,6 +632,7 @@ def cmd_stage(args) -> int:
             gateway_port,
             health_port,
             organization_id,
+            bool(getattr(args, "rotate_runtime_key", False)),
             roots,
         )
     else:
@@ -702,6 +706,10 @@ def cmd_stage(args) -> int:
                 "gatewayPort": gateway_port,
                 "healthPort": health_port,
                 "organizationId": organization_id,
+                "runtimeKeyRotated": bool(
+                    prior is not None
+                    and prior.get("runtimeKeyRef") != runtime_key_ref
+                ),
                 "transportTTL": TRANSPORT_TTL,
                 "maxConcurrentRequests": MAX_CONCURRENT_REQUESTS,
             }
@@ -840,6 +848,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--profile", required=True)
     s.add_argument("--runtime-key-ref", required=True)
     s.add_argument("--organization-id")
+    s.add_argument(
+        "--rotate-runtime-key",
+        action="store_true",
+        help=(
+            "allow an explicit runtime-key file-reference change for the same "
+            "stopped account/tunnel; current owned artifacts must verify exactly"
+        ),
+    )
     s.add_argument("--tunnel-client", default=PINNED_TUNNEL_CLIENT)
     s.set_defaults(func=cmd_stage)
 

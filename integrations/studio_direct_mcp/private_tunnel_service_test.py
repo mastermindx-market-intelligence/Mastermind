@@ -175,6 +175,7 @@ def _stage_args(
     profile=None,
     binary=None,
     organization_id=None,
+    rotate_runtime_key=False,
 ):
     _seed_gateway(account, port)
     key_ref = key_ref or _make_key(home, account)
@@ -186,6 +187,7 @@ def _stage_args(
         profile=profile,
         runtime_key_ref=key_ref,
         organization_id=organization_id,
+        rotate_runtime_key=rotate_runtime_key,
         tunnel_client=str(binary),
     ), binary, key_ref
 
@@ -331,6 +333,115 @@ class TestStageHappyPath(unittest.TestCase):
             self.assertEqual(roots["profile"].read_bytes(), before[0])
             self.assertEqual(roots["plist"].read_bytes(), before[1])
             self.assertEqual(roots["manifest"].read_bytes(), before[2])
+
+    def test_runtime_key_rotation_requires_explicit_flag_and_preserves_prior(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, old_key_ref, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            before = (
+                roots["profile"].read_bytes(),
+                roots["plist"].read_bytes(),
+                roots["manifest"].read_bytes(),
+            )
+            new_key_ref = _make_key(home, "rotated")
+            args.runtime_key_ref = new_key_ref
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                with self.assertRaisesRegex(SystemExit, "--rotate-runtime-key"):
+                    svc.cmd_stage(args)
+            self.assertEqual(roots["profile"].read_bytes(), before[0])
+            self.assertEqual(roots["plist"].read_bytes(), before[1])
+            self.assertEqual(roots["manifest"].read_bytes(), before[2])
+            self.assertNotEqual(old_key_ref, new_key_ref)
+
+    def test_runtime_key_rotation_succeeds_only_when_explicit_and_stopped(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, old_key_ref, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            new_key_ref = _make_key(home, "rotated")
+            args.runtime_key_ref = new_key_ref
+            args.rotate_runtime_key = True
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                rc2, out = _capture_stdout(lambda: svc.cmd_stage(args))
+            self.assertEqual(rc2, 0)
+            self.assertTrue(json.loads(out)["runtimeKeyRotated"])
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(profile["control_plane"]["api_key"], new_key_ref)
+            self.assertEqual(manifest["runtimeKeyRef"], new_key_ref)
+            self.assertNotEqual(manifest["runtimeKeyRef"], old_key_ref)
+
+    def test_runtime_key_rotation_can_pair_with_one_way_org_enrichment(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            new_key_ref = _make_key(home, "rotated")
+            args.runtime_key_ref = new_key_ref
+            args.organization_id = "org-ChrisAdmin123"
+            args.rotate_runtime_key = True
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                rc2, _ = _capture_stdout(lambda: svc.cmd_stage(args))
+            self.assertEqual(rc2, 0)
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(profile["control_plane"]["api_key"], new_key_ref)
+            self.assertEqual(
+                profile["control_plane"]["organization_id"], "org-ChrisAdmin123"
+            )
+            self.assertEqual(manifest["runtimeKeyRef"], new_key_ref)
+            self.assertEqual(manifest["organizationId"], "org-ChrisAdmin123")
+
+    def test_runtime_key_rotation_refuses_tampered_owned_profile(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            original_manifest = roots["manifest"].read_bytes()
+            roots["profile"].write_text('{"tampered":true}\n', encoding="utf-8")
+            args.runtime_key_ref = _make_key(home, "rotated")
+            args.rotate_runtime_key = True
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                with self.assertRaisesRegex(SystemExit, "profile hash diverges"):
+                    svc.cmd_stage(args)
+            self.assertEqual(roots["manifest"].read_bytes(), original_manifest)
+
+    def test_runtime_key_rotation_refuses_while_launchd_service_is_loaded(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            args.runtime_key_ref = _make_key(home, "rotated")
+            args.rotate_runtime_key = True
+            label = svc._tunnel_label(C1)
+
+            def handler(cmd):
+                if cmd[:2] == ["launchctl", "print"]:
+                    return FakeResult(
+                        0, _print_running(str(roots["plist"]), label), ""
+                    )
+                if len(cmd) >= 4 and cmd[1:4] == [
+                    "runtimes", "status", "studio-direct-private-chatgpt1"
+                ]:
+                    return FakeResult(0, _alias_stopped_json(C1), "")
+                return FakeResult(1, "", "unused")
+
+            before = roots["manifest"].read_bytes()
+            with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)):
+                with self.assertRaisesRegex(
+                    SystemExit, "while tunnel service is running"
+                ):
+                    svc.cmd_stage(args)
+            self.assertEqual(roots["manifest"].read_bytes(), before)
 
     def test_restage_can_add_missing_organization_once_but_not_rebind(self):
         with IsolatedHome() as (tmp, home):
