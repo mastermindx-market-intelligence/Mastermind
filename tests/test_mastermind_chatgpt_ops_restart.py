@@ -112,16 +112,20 @@ class OpsRestartTests(unittest.TestCase):
             self.assertEqual(owner.actions, [])
             self.assertEqual(len(owner.observations), 1)
 
-    def test_service_mapping_is_closed_to_four_personal_seats(self):
+    def test_service_mapping_is_closed_to_isolated_studio_routes(self):
         self.assertEqual(
             ops.SERVICE_TO_ACCOUNT,
             {
                 "studio-direct.chatgpt1": "chatgpt1",
-                "studio-direct.chatgpt2": "chatgpt2",
-                "studio-direct.chatgpt3": "chatgpt3",
+                "studio-direct.chatgpt2-personal": "chatgpt2-personal",
+                "studio-direct.chatgpt2-business": "chatgpt2-business",
+                "studio-direct.chatgpt3-w570f6f34": "chatgpt3-w570f6f34",
+                "studio-direct.chatgpt3-wa2a9e6f9": "chatgpt3-wa2a9e6f9",
                 "studio-direct.chatgpt4": "chatgpt4",
             },
         )
+        self.assertNotIn("studio-direct.chatgpt2", ops.SERVICE_TO_ACCOUNT)
+        self.assertNotIn("studio-direct.chatgpt3", ops.SERVICE_TO_ACCOUNT)
         self.assertNotIn("studio-direct.all", ops.SERVICE_TO_ACCOUNT)
 
     def test_manifest_identity_is_secret_free_and_changes_on_build_change(self):

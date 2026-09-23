@@ -61,6 +61,8 @@ class SolOpsRestartContractTests(unittest.TestCase):
     def test_unknown_service_reason_and_bad_digest_refuse(self):
         for request in (
             self.request(service_ref="studio-direct.all"),
+            self.request(service_ref="studio-direct.chatgpt2"),
+            self.request(service_ref="studio-direct.chatgpt3"),
             self.request(reason_code="restart_everything"),
             self.request(expected_instance_identity="not-a-digest"),
         ):

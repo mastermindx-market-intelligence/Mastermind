@@ -17,11 +17,20 @@ class ChatGptOpsHealthTests(unittest.TestCase):
         self.assertLess(root_line, insert_line)
         self.assertLess(insert_line, import_line)
 
-    def test_personal_accounts_are_closed_allowlist(self):
+    def test_studio_accounts_are_closed_to_isolated_routes(self):
         self.assertEqual(
-            ops.PERSONAL_ACCOUNTS,
-            ("chatgpt1", "chatgpt2", "chatgpt3", "chatgpt4"),
+            ops.STUDIO_ACCOUNTS,
+            (
+                "chatgpt1",
+                "chatgpt2-personal",
+                "chatgpt2-business",
+                "chatgpt3-w570f6f34",
+                "chatgpt3-wa2a9e6f9",
+                "chatgpt4",
+            ),
         )
+        self.assertNotIn("chatgpt2", ops.STUDIO_ACCOUNTS)
+        self.assertNotIn("chatgpt3", ops.STUDIO_ACCOUNTS)
 
     def test_personal_fact_preserves_owner_status_without_paths_or_args(self):
         status = {
@@ -46,9 +55,29 @@ class ChatGptOpsHealthTests(unittest.TestCase):
         self.assertEqual(tunnel.tunnel_ref, status["tunnel"]["tunnelId"])
         self.assertNotIn("/Users/", json.dumps({"service": service.source_refs, "tunnel": tunnel.source_refs}))
 
+    def test_personal_fact_falls_back_to_owner_end_to_end_ready(self):
+        status = {
+            "account": "chatgpt2-personal",
+            "ready": True,
+            "gateway": {
+                "running": True,
+                "configurationDrift": False,
+            },
+            "tunnel": {
+                "healthy": True,
+                "ready": True,
+                "tunnelId": "tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+        }
+        service, _ = ops.personal_facts(
+            "chatgpt2-personal", status, "2026-09-20T05:30:00Z"
+        )
+        self.assertTrue(service.live)
+        self.assertTrue(service.ready)
+
     def test_personal_configuration_drift_is_explicit_issue(self):
         status = {
-            "account": "chatgpt2",
+            "account": "chatgpt2-personal",
             "gateway": {
                 "running": True,
                 "runtimeReady": True,
@@ -61,7 +90,7 @@ class ChatGptOpsHealthTests(unittest.TestCase):
                 "tunnelId": "tunnel_1123456789abcdef0123456789abcdef",
             },
         }
-        service, _ = ops.personal_facts("chatgpt2", status, "2026-09-20T05:30:00Z")
+        service, _ = ops.personal_facts("chatgpt2-personal", status, "2026-09-20T05:30:00Z")
         self.assertIn("CONFIGURATION_DRIFT", service.issues)
 
     def test_business_profile_extracts_only_tunnel_identity(self):
@@ -147,21 +176,25 @@ class ChatGptOpsHealthTests(unittest.TestCase):
                 ],
             )
 
-    def test_build_snapshot_composes_four_personal_and_two_business_services(self):
+    def test_build_snapshot_composes_six_isolated_studio_and_two_business_services(self):
+        tunnel_ids = {
+            account: f"tunnel_{index:032x}"
+            for index, account in enumerate(ops.STUDIO_ACCOUNTS, start=1)
+        }
+
         def personal_reader(account):
-            digit = account[-1]
             return {
                 "account": account,
                 "gateway": {
                     "running": True,
                     "runtimeReady": True,
-                    "runtimeVersion": "0.1.5",
+                    "runtimeVersion": "0.1.6",
                     "configurationDrift": False,
                 },
                 "tunnel": {
                     "healthy": True,
                     "ready": True,
-                    "tunnelId": f"tunnel_{digit * 32}",
+                    "tunnelId": tunnel_ids[account],
                 },
             }
 
@@ -217,11 +250,14 @@ class ChatGptOpsHealthTests(unittest.TestCase):
             ]
             out = ops.build_snapshot(observed_at="2026-09-20T05:30:00Z")
 
-        self.assertEqual(len(out.services), 6)
-        self.assertEqual(len(out.tunnels), 6)
+        self.assertEqual(len(out.services), 8)
+        self.assertEqual(len(out.tunnels), 8)
         self.assertEqual(out.overall_state, OpsState.READY)
         scopes = {row.scope for row in out.services}
-        self.assertEqual(scopes, {"personal_account", "business_workspace"})
+        self.assertEqual(
+            scopes,
+            {"personal_account", "business_workspace", "workspace_account"},
+        )
 
 
 if __name__ == "__main__":
