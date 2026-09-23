@@ -11,12 +11,17 @@ import httpx
 
 ORIGIN = "https://businessapi.mosyle.com"
 DEVICES_URL = ORIGIN + "/v1/devices"
+LOGIN_URL = ORIGIN + "/v1/login"
 FLEET_SCHEMA = "mastermind.mosyle_fleet_snapshot.v1"
 DEVICE_SCHEMA = "mastermind.mosyle_device.v1"
 MAX_DEVICES = 500
 MAX_PAGES = 10
 MAX_PAGE_BYTES = 2 * 1024 * 1024
+MAX_LOGIN_BYTES = 64 * 1024
 TIMEOUT_SECONDS = 15.0
+AUTH_MODE_JWT = "jwt"
+AUTH_MODE_SESSION_LOGIN = "session_login"
+AUTH_MODES = frozenset({AUTH_MODE_JWT, AUTH_MODE_SESSION_LOGIN})
 DEVICE_COLUMNS = (
     "serial_number", "device_name", "device_model", "model_name", "device_type",
     "os", "osversion", "BuildVersion", "date_last_beat", "date_checkin",
@@ -35,14 +40,22 @@ class MosyleTelemetryError(RuntimeError):
 
 @dataclass(frozen=True)
 class MosyleCredential:
+    auth_mode: str
     access_token: str = field(repr=False)
-    bearer_token: str | None = field(default=None, repr=False)
+    email: str | None = field(default=None, repr=False)
+    password: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        if type(self.auth_mode) is not str or self.auth_mode not in AUTH_MODES:
+            raise ValueError("Mosyle authentication mode is unavailable")
         if not _secret(self.access_token):
             raise ValueError("Mosyle access token is unavailable")
-        if self.bearer_token is not None and not _secret(self.bearer_token):
-            raise ValueError("Mosyle bearer token is unavailable")
+        if self.auth_mode == AUTH_MODE_JWT:
+            if self.email is not None or self.password is not None:
+                raise ValueError("Mosyle JWT mode refuses user credentials")
+            return
+        if not _email(self.email) or not _password(self.password):
+            raise ValueError("Mosyle session login credential is unavailable")
 
 
 class CredentialSource(Protocol):
@@ -53,6 +66,7 @@ class CredentialSource(Protocol):
 class HttpResult:
     status_code: int
     body: bytes
+    authorization: str | None = None
 
 
 class JsonPoster(Protocol):
@@ -67,7 +81,7 @@ class HttpxJsonPoster:
         self, *, url: str, headers: Mapping[str, str], body: Mapping[str, Any],
         timeout_seconds: float, max_response_bytes: int,
     ) -> HttpResult:
-        if url != DEVICES_URL:
+        if url not in {DEVICES_URL, LOGIN_URL}:
             raise MosyleTelemetryError("invalid_request", "Mosyle endpoint is not admitted")
         chunks, total = [], 0
         async with httpx.AsyncClient(
@@ -83,7 +97,16 @@ class HttpxJsonPoster:
                             "output_too_large", "Mosyle response exceeds the page budget"
                         )
                     chunks.append(chunk)
-        return HttpResult(response.status_code, b"".join(chunks))
+        authorization = response.headers.get("authorization")
+        if authorization is not None and (
+            len(authorization.encode("utf-8")) > 16384
+            or "\r" in authorization
+            or "\n" in authorization
+        ):
+            raise MosyleTelemetryError(
+                "invalid_response", "Mosyle authorization response header is invalid"
+            )
+        return HttpResult(response.status_code, b"".join(chunks), authorization)
 
 
 class MosyleInventoryClient:
@@ -101,8 +124,8 @@ class MosyleInventoryClient:
             "Content-Type": "application/json",
             "accessToken": credential.access_token,
         }
-        if credential.bearer_token is not None:
-            headers["Authorization"] = "Bearer " + credential.bearer_token
+        if credential.auth_mode == AUTH_MODE_SESSION_LOGIN:
+            headers["Authorization"] = "Bearer " + await self._login(credential)
         devices: list[dict[str, Any]] = []
         declared_rows: int | None = None
         pages = 0
@@ -206,6 +229,59 @@ class MosyleInventoryClient:
             )
         return value
 
+    async def _login(self, credential: MosyleCredential) -> str:
+        """Obtain one ephemeral bearer for this inventory read; never cache it."""
+        request = {"email": credential.email, "password": credential.password}
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "accessToken": credential.access_token,
+        }
+        try:
+            result = await self._poster.post_json(
+                url=LOGIN_URL,
+                headers=headers,
+                body=request,
+                timeout_seconds=TIMEOUT_SECONDS,
+                max_response_bytes=MAX_LOGIN_BYTES,
+            )
+        except asyncio.CancelledError:
+            raise
+        except MosyleTelemetryError:
+            raise
+        except Exception as exc:
+            raise MosyleTelemetryError(
+                "provider_unavailable", "Mosyle session login is unavailable"
+            ) from exc
+        if not isinstance(result, HttpResult):
+            raise MosyleTelemetryError(
+                "provider_unavailable", "Mosyle login transport result is invalid"
+            )
+        if result.status_code in {401, 403}:
+            raise MosyleTelemetryError(
+                "credential_refused", "Mosyle refused the session login credential"
+            )
+        if result.status_code != 200:
+            raise MosyleTelemetryError(
+                "provider_unavailable", "Mosyle session login failed"
+            )
+        # Mosyle's session credential is carried by the response header.
+        # Do not invent or depend on undocumented response-body identity fields.
+        authorization = result.authorization
+        if (
+            not isinstance(authorization, str)
+            or not authorization.startswith("Bearer ")
+        ):
+            raise MosyleTelemetryError(
+                "invalid_response", "Mosyle login response is missing its bearer"
+            )
+        token = authorization[len("Bearer "):]
+        if not _secret(token) or token.startswith("Bearer "):
+            raise MosyleTelemetryError(
+                "invalid_response", "Mosyle login bearer is invalid"
+            )
+        return token
+
     async def _page(self, headers: Mapping[str, str], number: int) -> dict[str, Any]:
         request = {
             "operation": "list",
@@ -256,13 +332,16 @@ def _page_shape(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, Mapping) or raw.get("status") != "OK":
         raise MosyleTelemetryError("invalid_response", "Mosyle response status is invalid")
     response = raw.get("response")
-    if (
-        not isinstance(response, list)
-        or len(response) != 1
-        or not isinstance(response[0], Mapping)
+    if isinstance(response, Mapping):
+        page = response
+    elif (
+        isinstance(response, list)
+        and len(response) == 1
+        and isinstance(response[0], Mapping)
     ):
+        page = response[0]
+    else:
         raise MosyleTelemetryError("invalid_response", "Mosyle response envelope is invalid")
-    page = response[0]
     devices = page.get("devices")
     rows, size, number = page.get("rows"), page.get("page_size"), page.get("page")
     if (
@@ -328,5 +407,34 @@ def _selector(value: Any) -> str:
     return value
 
 
+def _email(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and value.strip() == value
+        and 3 <= len(value) <= 320
+        and "@" in value
+        and "\x00" not in value
+        and "\r" not in value
+        and "\n" not in value
+    )
+
+
+def _password(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= 16384
+        and "\x00" not in value
+        and "\r" not in value
+        and "\n" not in value
+    )
+
+
 def _secret(value: Any) -> bool:
-    return isinstance(value, str) and value.strip() == value and 8 <= len(value) <= 16384
+    return (
+        isinstance(value, str)
+        and value.strip() == value
+        and 8 <= len(value) <= 16384
+        and "\x00" not in value
+        and "\r" not in value
+        and "\n" not in value
+    )

@@ -13,7 +13,11 @@ import stat
 from pathlib import Path
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
-from integrations.mosyle_mdm.client import MosyleCredential
+from integrations.mosyle_mdm.client import (
+    AUTH_MODE_JWT,
+    AUTH_MODE_SESSION_LOGIN,
+    MosyleCredential,
+)
 
 CREDENTIAL_PATH = Path(
     "/Library/Application Support/MastermindExecutive/config/mosyle-readonly.json"
@@ -167,20 +171,31 @@ def _parse_credential(raw: bytes) -> MosyleCredential:
         ) from exc
     if (
         not isinstance(value, dict)
-        or set(value) - {"access_token", "bearer_token"}
-        or "access_token" not in value
-        or (
-            value.get("bearer_token") is not None
-            and not isinstance(value.get("bearer_token"), str)
-        )
+        or set(value) - {"auth_mode", "access_token", "email", "password"}
+        or not {"auth_mode", "access_token"} <= set(value)
+        or type(value.get("auth_mode")) is not str
+        or (value.get("email") is not None and not isinstance(value.get("email"), str))
+        or (value.get("password") is not None and not isinstance(value.get("password"), str))
     ):
         raise MosyleCredentialFileError(
             "Mosyle service credential is unavailable"
         )
+    mode = value["auth_mode"]
+    user_fields = {field for field in ("email", "password") if field in value}
+    if mode == AUTH_MODE_JWT and user_fields:
+        raise MosyleCredentialFileError(
+            "Mosyle JWT credential must not contain user credentials"
+        )
+    if mode == AUTH_MODE_SESSION_LOGIN and user_fields != {"email", "password"}:
+        raise MosyleCredentialFileError(
+            "Mosyle session login requires email and password"
+        )
     try:
         return MosyleCredential(
+            auth_mode=mode,
             access_token=value["access_token"],
-            bearer_token=value.get("bearer_token"),
+            email=value.get("email"),
+            password=value.get("password"),
         )
     except (TypeError, ValueError) as exc:
         raise MosyleCredentialFileError(

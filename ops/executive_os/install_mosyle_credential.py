@@ -54,9 +54,14 @@ def _fsync_directory(path: Path) -> None:
 
 def _canonical_payload(raw: bytes) -> bytes:
     parsed = credential_file._parse_credential(raw)
-    value: dict[str, Any] = {"access_token": parsed.access_token}
-    if parsed.bearer_token is not None:
-        value["bearer_token"] = parsed.bearer_token
+    value: dict[str, Any] = {
+        "auth_mode": parsed.auth_mode,
+        "access_token": parsed.access_token,
+    }
+    if parsed.email is not None:
+        value["email"] = parsed.email
+    if parsed.password is not None:
+        value["password"] = parsed.password
     return (
         json.dumps(
             value,

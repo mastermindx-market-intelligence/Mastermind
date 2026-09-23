@@ -209,12 +209,19 @@ def test_current_installed_selector_adds_v3_without_expanding_old_validator():
         v2.validate_installed_mcp_profile("web_ceo_v3")
 
 
-def test_service_owned_credential_file_resolves_without_secret_repr(
+def test_service_owned_session_credential_resolves_without_secret_repr(
     tmp_path, monkeypatch
 ):
     path = tmp_path / "mosyle-readonly.json"
     path.write_text(
-        json.dumps({"access_token": "a" * 32, "bearer_token": "b" * 32})
+        json.dumps(
+            {
+                "auth_mode": "session_login",
+                "access_token": "a" * 32,
+                "email": "api-user@example.com",
+                "password": "secret123",
+            }
+        )
     )
     path.chmod(0o600)
     monkeypatch.setattr(credential_file, "_validate_parent", lambda _path: None)
@@ -226,15 +233,19 @@ def test_service_owned_credential_file_resolves_without_secret_repr(
     )
     credential = run(source.resolve())
     assert isinstance(credential, MosyleCredential)
+    assert credential.auth_mode == "session_login"
     assert credential.access_token == "a" * 32
-    assert credential.bearer_token == "b" * 32
-    assert "a" * 8 not in repr(credential)
-    assert "b" * 8 not in repr(credential)
+    assert credential.email == "api-user@example.com"
+    assert credential.password == "secret123"
+    shown = repr(credential)
+    assert "a" * 8 not in shown
+    assert "api-user@example.com" not in shown
+    assert "secret123" not in shown
 
 
 def test_service_owned_credential_file_refuses_unsafe_mode(tmp_path, monkeypatch):
     path = tmp_path / "mosyle-readonly.json"
-    path.write_text(json.dumps({"access_token": "a" * 32}))
+    path.write_text(json.dumps({"auth_mode": "jwt", "access_token": "a" * 32}))
     path.chmod(0o644)
     monkeypatch.setattr(credential_file, "_validate_parent", lambda _path: None)
     monkeypatch.setattr(
@@ -252,11 +263,27 @@ def test_service_owned_credential_file_refuses_unsafe_mode(tmp_path, monkeypatch
     [
         b"",
         b"not-json",
-        json.dumps({"access_token": "short"}).encode(),
-        json.dumps({"access_token": "a" * 32, "password": "nope"}).encode(),
+        json.dumps({"auth_mode": "jwt", "access_token": "short"}).encode(),
+        json.dumps(
+            {
+                "auth_mode": "jwt",
+                "access_token": "a" * 32,
+                "bearer_token": "b" * 32,
+            }
+        ).encode(),
+        json.dumps(
+            {"auth_mode": "session_login", "access_token": "a" * 32}
+        ).encode(),
+        json.dumps(
+            {
+                "auth_mode": "jwt",
+                "access_token": "a" * 32,
+                "password": "nope",
+            }
+        ).encode(),
     ],
 )
-def test_credential_parser_refuses_invalid_or_extra_secret_shape(value):
+def test_credential_parser_refuses_invalid_or_dynamic_bearer_shape(value):
     with pytest.raises(MosyleCredentialFileError):
         credential_file._parse_credential(value)
 
