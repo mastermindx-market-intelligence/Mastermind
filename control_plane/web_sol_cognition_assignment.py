@@ -28,8 +28,8 @@ from control_plane.web_sol_continuation import (
 
 
 ASSIGNMENT_SCHEMA: Final[str] = "mastermind.web_sol_cognition_assignment/v1"
-MAX_ASSIGNMENT_JSON_BYTES: Final[int] = 36 * 1024
-MAX_RENDERED_ASSIGNMENT_BYTES: Final[int] = 40 * 1024
+MAX_ASSIGNMENT_JSON_BYTES: Final[int] = 22 * 1024
+MAX_RENDERED_ASSIGNMENT_BYTES: Final[int] = 24 * 1024
 RESEARCH_ONLY_AUTHORITIES: Final[frozenset[str]] = frozenset({"READ", "RESEARCH"})
 SUPPORTED_ROLES: Final[frozenset[str]] = frozenset({"work", "review"})
 
