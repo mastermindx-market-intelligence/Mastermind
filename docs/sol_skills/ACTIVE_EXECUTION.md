@@ -74,6 +74,23 @@ without retry or failover. For chunked file/copy work, acknowledged prior chunks
 known effects: preserve the verified prefix and continue only the missing suffix on the same carrier.
 Never overwrite a known-good prefix merely because a later chunk was refused.
 
+**Preserve provider capacity; do not turn a refusal into filter-probing.** The causal threshold for
+provider throttling or temporary restriction may be unknown. Treat repeated safety/refusal events as
+scarce-capacity pressure anyway: do not repeatedly rephrase the same effect, deliberately generate
+blocked calls, or switch accounts/models/providers merely to get a refused action through. After the
+single bounded recovery attempt above, a second equivalent pre-dispatch safety refusal ends further
+classifier probing for that task on that realm; continue only independent permitted work or wait for
+the actual provider restriction/recovery condition. A different account may later receive genuinely
+independent work only through normal capacity/routing law, never as refusal evasion.
+
+Keep model/mode evidence separate from model inference. Record the visible selected model/mode,
+timestamp and exact refusal/error class when those facts are material and observable. A selected mode
+does not prove the actually served model, and degraded response quality, latency or tool availability
+does not prove a downgrade. If the provider visibly changes/reroutes the model or mode, treat that as
+a material surface change and re-evaluate task fit/continuity before further effectful work. When served
+identity cannot be verified, record it as UNKNOWN rather than inferring Astra, Sol, Terra or another
+model from behavior.
+
 **CI is a release dependency.** Pending checks do not stop implementation, test repair, review or
 other independent authorized work. Preserve the exact candidate identity, use one existing cheap
 observer, and consume its result before the gated merge/release; follow `docs/DELIVERY_WORKFLOW.md`.

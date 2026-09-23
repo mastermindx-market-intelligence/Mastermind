@@ -93,6 +93,46 @@ def test_pre_dispatch_platform_refusal_is_recoverable_without_effect_confusion()
         assert phrase in source
 
 
+def test_repeated_refusals_preserve_provider_capacity_and_do_not_become_filter_probing():
+    source = text("docs/sol_skills/ACTIVE_EXECUTION.md")
+    for phrase in (
+        "Preserve provider capacity; do not turn a refusal into filter-probing",
+        "scarce-capacity pressure",
+        "do not repeatedly rephrase the same effect",
+        "second equivalent pre-dispatch safety refusal ends further classifier probing",
+        "never as refusal evasion",
+    ):
+        assert phrase in source
+
+
+def test_project_bootstrap_carries_compact_capacity_and_model_identity_guard():
+    source = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+    for phrase in (
+        "Preserve provider capacity",
+        "Repeated refusals are potential capacity/throttling risk",
+        "never repeatedly rephrase or switch accounts/models/providers",
+        "Keep selected model/mode, actually served model, and observed response quality separate",
+        "Never infer a model downgrade from quality, latency or tool availability",
+        "unverified served identity remains UNKNOWN",
+    ):
+        assert phrase in source
+
+
+def test_provider_pressure_spec_keeps_hypotheses_separate_and_passive():
+    source = text("docs/superpowers/specs/2026-09-22-administrative-friction-relief.md")
+    for phrase in (
+        "H1 BLOCK_RATE_TO_RESTRICTION",
+        "H2 PRO_FILTER_STRICTER_THAN_EXTRA_HIGH",
+        "H3 SAFETY_CAN_REROUTE_MODEL",
+        "H4 QUALITY_DROP_MEANS_MODEL_DOWNGRADE",
+        "causal threshold and confounders remain UNKNOWN",
+        "Plausible but currently UNVERIFIED",
+        "Prefer passive/natural incident evidence",
+        "never move the same refused effect to another account as",
+    ):
+        assert phrase in source
+
+
 def test_blocker_resolution_is_owned_and_not_new_paperwork():
     source = text("docs/sol_skills/ACTIVE_EXECUTION.md")
     for phrase in (

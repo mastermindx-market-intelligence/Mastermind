@@ -77,6 +77,35 @@ These source overlaps require ordinary diff integration, not a redundant Slack p
    producers. The Mastermind root files alone do not prove adoption in Macro, Terminal, installed
    runtime releases or already-open chats. Reconcile those consumers before claiming fleet coverage.
 
+## Provider pressure and model-identity uncertainty
+
+Current Chairman observation adds an account-preservation requirement. Several ChatGPT realms have
+entered multi-day temporary restriction after periods containing many blocked calls. Treat that as an
+important operational correlation, not a proven causal threshold: do not intentionally generate or
+repeat refused calls to discover the provider classifier. Official OpenAI guidance independently
+confirms that safeguards can temporarily restrict usage and that some safety checks can block, slow or
+reroute requests. It does not establish this fleet's exact trigger, duration or per-mode threshold.
+
+Keep these hypotheses separate until measured:
+
+- `H1 BLOCK_RATE_TO_RESTRICTION`: repeated blocked-call bursts materially increase temporary account
+  restriction risk. Observed internally; causal threshold and confounders remain UNKNOWN.
+- `H2 PRO_FILTER_STRICTER_THAN_EXTRA_HIGH`: Pro-mode tool/safety gating is stricter than Extra High.
+  Plausible but currently UNVERIFIED; do not encode it as a routing fact.
+- `H3 SAFETY_CAN_REROUTE_MODEL`: provider safety logic may reroute a selected model/mode. Public
+  OpenAI documentation establishes safety switching/rerouting can occur in some contexts, but does
+  not establish an Astra -> Sol/Terra mapping for these incidents.
+- `H4 QUALITY_DROP_MEANS_MODEL_DOWNGRADE`: degraded reasoning proves a model downgrade. REJECT as an
+  inference rule; quality/latency/tool behavior are not model identity.
+
+Do not create a new telemetry owner. #480 retains exact model/mode selection and persistence semantics;
+#501 retains visible profile-local model/effort observability; #364 retains Web-Sol usage/capacity
+truth. Prefer passive/natural incident evidence: visible selected model/mode, timestamp, surface,
+exact safety/refusal message or typed error, whether the tool carrier saw dispatch, request id when
+available, visible temporary-restriction/reset evidence, and later recovery. Never collect secrets,
+transcripts or private backend traffic, and never move the same refused effect to another account as
+a diagnostic or evasion strategy.
+
 ## Fresh-session acceptance matrix
 
 Use the incumbent fresh-Sol/Agent Evaluation owner, not a new test harness. Execute matched cases
