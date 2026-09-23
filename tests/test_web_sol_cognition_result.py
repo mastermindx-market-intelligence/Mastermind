@@ -133,3 +133,36 @@ def test_refuses_invalid_provider_metadata_without_reclassifying_the_result() ->
         _build(text, provider_turn_artifact_digest="not-a-digest")
 
     assert excinfo.value.code == "RESULT_METADATA_REFUSED"
+
+
+@pytest.mark.parametrize(
+    "secret_text",
+    [
+        "credential sk-ant-abcdefghij",
+        "contact operator@example.com",
+        "MASTERMIND_AUTH_TOKEN is configured",
+        "TOKEN=plainvalue",
+    ],
+)
+def test_native_boundary_rejects_redaction_triggering_result_content(secret_text: str) -> None:
+    value = _value()
+    value["current_state"] = secret_text
+
+    with pytest.raises(WebSolCognitionResultError) as excinfo:
+        _build(_canonical(value))
+
+    assert excinfo.value.code == "RESULT_REFUSED"
+
+
+def test_native_boundary_rejects_exact_environment_secret_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plain_secret = "plainenglishcredential"
+    monkeypatch.setenv("WEB_SOL_TEST_TOKEN", plain_secret)
+    value = _value()
+    value["summary"] = f"provider returned {plain_secret}"
+
+    with pytest.raises(WebSolCognitionResultError) as excinfo:
+        _build(_canonical(value))
+
+    assert excinfo.value.code == "RESULT_REFUSED"
