@@ -89,6 +89,13 @@ it never permits probing a safety or permission denial. Continue only independen
 or wait for the actual provider restriction/recovery condition. A different account may later receive genuinely
 independent work only through normal capacity/routing law, never as refusal evasion.
 
+Do not contaminate provider-refusal evidence with transport loss. A device/host/network offline state or
+connector timeout without explicit provider safety/permission evidence is a transport failure, not a
+provider safety refusal and not a blocked-call datum for throttling analysis. Cause and effect state stay
+separate: if dispatch may have occurred before connectivity was lost, preserve `EFFECT_UNKNOWN`; if
+dispatch is proven absent, apply only the permitted technical-recovery law above. Record provider-safety
+pressure only from an explicit supported refusal/classification, never by inference from connectivity.
+
 Keep model/mode evidence separate from model inference. Record the visible selected model/mode,
 timestamp and exact refusal/error class when those facts are material and observable. A selected mode
 does not prove the actually served model, and degraded response quality, latency or tool availability

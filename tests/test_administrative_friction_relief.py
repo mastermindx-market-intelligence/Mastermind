@@ -118,6 +118,32 @@ def test_project_bootstrap_carries_compact_capacity_and_model_identity_guard():
         assert phrase in source
 
 
+def test_transport_outage_is_not_misclassified_as_provider_safety_pressure():
+    active = text("docs/sol_skills/ACTIVE_EXECUTION.md")
+    bootstrap = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+    spec = text("docs/superpowers/specs/2026-09-22-administrative-friction-relief.md")
+    for phrase in (
+        "Do not contaminate provider-refusal evidence with transport loss",
+        "not a blocked-call datum for throttling analysis",
+        "Cause and effect state stay separate",
+        "explicit supported refusal/classification",
+    ):
+        assert phrase in active
+    for phrase in (
+        "Keep network/host/connector outages separate from provider safety refusals",
+        "do not count an offline state or timeout as a blocked safety call or throttling datum",
+        "connectivity loss can still require same-carrier EFFECT_UNKNOWN reconciliation",
+    ):
+        assert phrase in bootstrap
+    for phrase in (
+        "Treat network/host/connector loss as a negative control",
+        "Do not count those events toward blocked-call or throttling observations",
+        "Network/host/connector goes offline or times out without explicit provider safety evidence",
+        "exclude the incident from safety/throttling counts",
+    ):
+        assert phrase in spec
+
+
 def test_provider_pressure_spec_keeps_hypotheses_separate_and_passive():
     source = text("docs/superpowers/specs/2026-09-22-administrative-friction-relief.md")
     for phrase in (
