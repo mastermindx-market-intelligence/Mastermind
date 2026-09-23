@@ -189,7 +189,7 @@
       "expected_schema_loads": [
         "workbench"
       ],
-      "owner_native_action": "Discover the exact Workbench action for the selected-project effect. If the required repo/build/Git effect is absent before any effect begins, preserve source custody and route the bounded outcome only through an already-authorized native builder or Executive Job/Attempt/Worker; do not substitute Studio Direct start_process or interact_with_process.",
+      "owner_native_action": "Discover the exact selected-project/source action. For Mastermind attended-Web status/commit/push, if currently exposed and owner-native status binds the same canonical mmx-workspace operation/repository/sol-web branch/origin, use studio_git_publish_status, studio_git_commit_current_changes, or studio_git_push_current_branch for exactly that publication effect. If the required edit/build/test effect remains absent before any effect begins, preserve source custody and route the bounded outcome only through an already-authorized native builder or Executive Job/Attempt/Worker; do not substitute Studio Direct start_process or interact_with_process.",
       "does_not_claim_live_before_probe": true,
       "requested_action_class": "WRITE",
       "expected_disposition": "NO_GENERIC_STUDIO_SHELL_FALLBACK"
