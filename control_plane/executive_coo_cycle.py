@@ -32,6 +32,7 @@ from control_plane.executive_runtime import (
     OrchestrationDispatchOutcome,
     Runtime,
     StateConflict,
+    WorkerStatus,
     _current_orchestration_tree_material,
     _current_orchestration_tree_material_for_dispatch,
     _review_attempt_is_independent,
@@ -146,6 +147,7 @@ class CooCycle:
 
     def __init__(self, runtime: Runtime, *, dispatcher: Dispatch | None = None) -> None:
         self.runtime = runtime
+        self._uses_inert_dispatcher = dispatcher is None
         self.dispatcher = dispatcher or self._dispatch_unavailable
 
     @staticmethod
@@ -181,6 +183,143 @@ class CooCycle:
             and after.status == before.status
             and after.attempt_count == before.attempt_count
             and after.current_attempt_id == before.current_attempt_id
+        )
+
+    @staticmethod
+    def _is_read_only_frontier_work(job: Job) -> bool:
+        """Return whether one current work revision is safe for bounded overlap."""
+
+        return bool(
+            job.orchestration_role == "work"
+            and job.requested_authorities == ["READ"]
+            and not job.allowed_write_paths
+            and not job.validation_commands
+            and job.plan_attempt_id
+            and job.plan_digest
+            and job.plan_step_id
+            and int(job.repair_round or 0) == 0
+            and job.supersedes_job_id is None
+        )
+
+    def _active_attempt_is_current_and_live(self, job: Job) -> bool:
+        """Fail closed unless Runtime still owns an exact unexpired active Attempt."""
+
+        if job.attempt_count < 1 or not job.current_attempt_id:
+            return False
+        attempt = self.runtime.attempts.get_attempt(job.current_attempt_id)
+        if attempt is None or attempt.job_id != job.job_id:
+            return False
+        if attempt.attempt_number != job.attempt_count or not attempt.lease_owner:
+            return False
+        expected_job_status = {
+            AttemptStatus.CLAIMED: JobStatus.RUNNING,
+            AttemptStatus.RUNNING: JobStatus.RUNNING,
+            AttemptStatus.CHECKPOINTED: JobStatus.CHECKPOINTED,
+        }.get(attempt.status)
+        if expected_job_status is None or job.status is not expected_job_status:
+            return False
+        if (
+            job.assigned_worker_id != attempt.worker_id
+            or job.assigned_quota_class != attempt.quota_class
+        ):
+            return False
+        quota = self.runtime.workers.get_quota_class(
+            attempt.worker_id, attempt.quota_class
+        )
+        if (
+            quota is None
+            or quota.status is not WorkerStatus.BUSY
+            or quota.active_attempt_id != attempt.attempt_id
+            or quota.active_job_id != job.job_id
+            or quota.fence_generation != attempt.fence_generation
+        ):
+            return False
+        with self.runtime.store.read() as connection:
+            row = connection.execute(
+                "SELECT lease_token,lease_expires_at_ms FROM attempts WHERE attempt_id=?",
+                (attempt.attempt_id,),
+            ).fetchone()
+        return bool(
+            row is not None
+            and row["lease_token"] is not None
+            and int(row["lease_expires_at_ms"]) > self.runtime.store.now_ms()
+        )
+
+    @classmethod
+    def _ready_frontier_open(
+        cls,
+        active: list[Job],
+        queued: list[Job],
+        current_by_step: Mapping[str, Mapping[str, Any]],
+    ) -> bool:
+        if not active or not queued:
+            return False
+        for job in [*active, *queued]:
+            if not cls._is_read_only_frontier_work(job):
+                return False
+            step_id = job.plan_step_id
+            if not isinstance(step_id, str):
+                return False
+            current = current_by_step.get(step_id)
+            if (
+                not isinstance(current, Mapping)
+                or current.get("current_job_id") != job.job_id
+            ):
+                return False
+        return True
+
+    def _ready_frontier_candidate(
+        self, candidate: Job, active: list[Job]
+    ) -> bool:
+        if not active or not self._is_read_only_frontier_work(candidate):
+            return False
+        for current in active:
+            if (
+                not self._is_read_only_frontier_work(current)
+                or current.plan_attempt_id != candidate.plan_attempt_id
+                or current.plan_digest != candidate.plan_digest
+                or current.plan_step_id == candidate.plan_step_id
+                or not self._active_attempt_is_current_and_live(current)
+            ):
+                return False
+        return True
+
+    def _dispatch_queued(
+        self, root_id: str, selected: Job
+    ) -> CooCycleOutcome | None:
+        command = (
+            f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
+            f"{selected.attempt_count + 1}"
+        )
+        try:
+            receipt = self.dispatcher(selected.job_id, command)
+        except Exception:
+            # Preserve the existing Runtime-owned reconciliation barrier when
+            # a dispatch raises after committing its exact claim.
+            if not self._dispatch_none_was_preclaim(selected):
+                self.runtime.jobs.record_cycle_dispatch_effect_unknown(
+                    root_id,
+                    selected_job_id=selected.job_id,
+                    dispatch_command_id=command,
+                )
+            raise
+        if receipt is None:
+            if not self._dispatch_none_was_preclaim(selected):
+                self.runtime.jobs.record_cycle_dispatch_effect_unknown(
+                    root_id,
+                    selected_job_id=selected.job_id,
+                    dispatch_command_id=command,
+                )
+                raise StateConflict(
+                    "exact dispatch return is ambiguous after durable Job transition"
+                )
+            if self._uses_inert_dispatcher:
+                return self._block(
+                    root_id, selected.job_id, "exact_dispatch_unavailable"
+                )
+            return None
+        return self._outcome(
+            root_id, "DISPATCHED", selected.job_id, command, receipt
         )
 
     def _block(
@@ -660,6 +799,27 @@ class CooCycle:
         ):
             return self._block(root_id, root_id, "invalid_root")
 
+        pending_dispatch = (
+            self.runtime.jobs.pending_cycle_dispatch_effect_unknown(root_id)
+        )
+        if pending_dispatch is not None:
+            selected_id = str(pending_dispatch["selected_job_id"])
+            command = str(pending_dispatch["dispatch_command_id"])
+            receipt = self.dispatcher(selected_id, command)
+            if receipt is None:
+                raise StateConflict(
+                    "active exact dispatch returned no reconcilable outcome"
+                )
+            self.runtime.jobs.reconcile_cycle_dispatch_effect(
+                root_id,
+                selected_job_id=selected_id,
+                dispatch_command_id=command,
+                receipt=receipt,
+            )
+            return self._outcome(
+                root_id, "DISPATCHED", selected_id, command, receipt
+            )
+
         all_jobs = [
             job
             for job in self.runtime.jobs.list_jobs()
@@ -965,16 +1125,63 @@ class CooCycle:
                     return self._block(root_id, selected.job_id, _classify_invalid(exc))
                 return self._outcome(root_id, "REPAIR_CREATED", receipt.job_id, command, receipt)
 
-        # 4. Create exactly the sole planner.
+        # 4. Materialize one lowest-ordinal missing dependency-ready V3 work Job.
+        if (
+            admission is not None
+            and plan_body is not None
+            and admission.get("schema_version") == "mastermind.coo_plan_admission/v2"
+            and plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+        ):
+            materialized_steps = {
+                str(job.plan_step_id)
+                for job in children
+                if job.orchestration_role in {"work", "repair"}
+                and job.plan_step_id is not None
+            }
+            for step in plan_body["steps"]:
+                step_id = str(step["step_id"])
+                if (
+                    not step["prerequisite_step_ids"]
+                    or step_id in materialized_steps
+                ):
+                    continue
+                try:
+                    manifest = (
+                        self.runtime.jobs.project_cycle_work_dependency_manifest(
+                            root_id, step_id
+                        )
+                    )
+                except StateConflict:
+                    continue
+                command = (
+                    f"coo-cycle:{root_id}:create-work:{step_id}:"
+                    f"{manifest['dependency_manifest_digest']}"
+                )
+                try:
+                    job = self.runtime.jobs.create_cycle_work(
+                        root_id,
+                        step_id,
+                        dependency_manifest=manifest,
+                        command_id=command,
+                    )
+                except StateConflict as exc:
+                    return self._block(
+                        root_id, root_id, _classify_invalid(exc)
+                    )
+                return self._outcome(
+                    root_id, "WORK_CREATED", job.job_id, command, job
+                )
+
+        # 5. Create exactly the sole planner.
         if not children and not admission_events:
             command = f"coo-cycle:{root_id}:create-planner:0"
             planner = self.runtime.jobs.create_cycle_planner(root_id, command_id=command)
             return self._outcome(root_id, "PLANNER_CREATED", planner.job_id, command, planner)
 
-        # 5. Reconcile an active exact dispatch before considering new work.
-        # A supervisor may have durably claimed/launched the Job and then lost
-        # its return path.  Replaying the original command lets that supervisor
-        # resume or return the same Attempt without a second claim/mutation.
+        # 6. Service one bounded ready sibling only when every active child is
+        # exact, lease-live, read-only work from the same sealed plan.  Any stale
+        # Attempt, review/repair activity, write authority, or source-custody risk
+        # preserves reconciliation-first behavior.
         active = sorted(
             [
                 job
@@ -983,6 +1190,27 @@ class CooCycle:
             ],
             key=lambda job: _job_sort_key(job, ordinals),
         )
+        queued = sorted(
+            [job for job in children if job.status == JobStatus.QUEUED],
+            key=lambda job: _job_sort_key(job, ordinals),
+        )
+        if (
+            active
+            and queued
+            and plan_body is not None
+            and plan_body["schema_version"] == "mastermind.execution_plan/v3"
+            and self._ready_frontier_open(active, queued, current_by_step)
+        ):
+            for candidate in queued:
+                if not self._ready_frontier_candidate(candidate, active):
+                    continue
+                outcome = self._dispatch_queued(root_id, candidate)
+                if outcome is not None:
+                    return outcome
+
+        # 7. Reconcile an active exact dispatch before any coupled/new work.
+        # Replaying the original command resumes or returns the same Attempt;
+        # it never claims a replacement or another Job.
         if active:
             selected = active[0]
             if selected.attempt_count < 1 or not selected.current_attempt_id:
@@ -1004,31 +1232,35 @@ class CooCycle:
                 )
             return self._outcome(root_id, "DISPATCHED", selected.job_id, command, receipt)
 
-        # 6. Dispatch the first queued non-root by the closed total order.
-        queued = sorted(
-            [job for job in children if job.status == JobStatus.QUEUED],
-            key=lambda job: _job_sort_key(job, ordinals),
-        )
+        # 8. With no active child, try queued work in deterministic order.
+        # Explicit dispatcher pre-claim unavailability is temporary capacity
+        # pressure, not a durable root blocker.
         if queued:
-            selected = queued[0]
-            command = (
-                f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
-                f"{selected.attempt_count + 1}"
+            unavailable: list[str] = []
+            for candidate in queued:
+                outcome = self._dispatch_queued(root_id, candidate)
+                if outcome is not None:
+                    return outcome
+                unavailable.append(candidate.job_id)
+                if not (
+                    plan_body is not None
+                    and plan_body["schema_version"] == "mastermind.execution_plan/v3"
+                    and all(self._is_read_only_frontier_work(job) for job in queued)
+                ):
+                    break
+            return self._outcome(
+                root_id,
+                "NO_ACTION",
+                None,
+                None,
+                {
+                    "reason": "exact_dispatch_unavailable",
+                    "unavailable_job_ids": unavailable,
+                    "policy_sha": policy.policy_sha256,
+                },
             )
-            # The dispatcher may have durably claimed the exact Job before its
-            # local return/launch path raises.  Never append a second COO
-            # mutation in that ambiguous state: propagate, then let the same
-            # deterministic command reconcile the existing Attempt on replay.
-            receipt = self.dispatcher(selected.job_id, command)
-            if receipt is None:
-                if not self._dispatch_none_was_preclaim(selected):
-                    raise StateConflict(
-                        "exact dispatch return is ambiguous after durable Job transition"
-                    )
-                return self._block(root_id, selected.job_id, "exact_dispatch_unavailable")
-            return self._outcome(root_id, "DISPATCHED", selected.job_id, command, receipt)
 
-        # 7. Admit the completed plan and its ordered initial work wave.
+        # 9. Admit the completed plan and its ordered initial work wave.
         if not admission_events:
             planners = [job for job in children if job.orchestration_role == "plan"]
             if len(planners) != 1 or len(children) != 1:
@@ -1048,7 +1280,7 @@ class CooCycle:
                     {"work_job_ids": [member.job_id for member in members]},
                 )
 
-        # 8. Create one missing review for the lowest completed current revision.
+        # 10. Create one missing review for the lowest completed current revision.
         if admission is not None:
             missing: list[Job] = []
             for step_id, material in current_by_step.items():
@@ -1068,7 +1300,7 @@ class CooCycle:
                 )
                 return self._outcome(root_id, "REVIEW_CREATED", review.job_id, command, review)
 
-        # 9. Derived approvals flow directly to the immutable handoff mutation.
+        # 11. Derived approvals flow directly to the immutable handoff mutation.
         if admission is not None and not handoff_events:
             living = [
                 job
@@ -1098,7 +1330,7 @@ class CooCycle:
                 except StateConflict as exc:
                     return self._block(root_id, root_id, _classify_invalid(exc))
 
-        # 10. Dispatch/reconcile the exact root only after immutable handoff.
+        # 12. Dispatch/reconcile the exact root only after immutable handoff.
         if handoff_events and root.status in {
             JobStatus.RUNNING,
             JobStatus.CHECKPOINTED,
@@ -1129,10 +1361,29 @@ class CooCycle:
             receipt = self.dispatcher(root_id, command)
             if receipt is None:
                 if not self._dispatch_none_was_preclaim(root):
+                    self.runtime.jobs.record_cycle_dispatch_effect_unknown(
+                        root_id,
+                        selected_job_id=root_id,
+                        dispatch_command_id=command,
+                    )
                     raise StateConflict(
                         "exact root dispatch return is ambiguous after durable Job transition"
                     )
-                return self._block(root_id, root_id, "exact_dispatch_unavailable")
+                if self._uses_inert_dispatcher:
+                    return self._block(
+                        root_id, root_id, "exact_dispatch_unavailable"
+                    )
+                return self._outcome(
+                    root_id,
+                    "NO_ACTION",
+                    None,
+                    None,
+                    {
+                        "reason": "exact_dispatch_unavailable",
+                        "unavailable_job_ids": [root_id],
+                        "policy_sha": policy.policy_sha256,
+                    },
+                )
             return self._outcome(root_id, "DISPATCHED", root_id, command, receipt)
 
         return self._outcome(

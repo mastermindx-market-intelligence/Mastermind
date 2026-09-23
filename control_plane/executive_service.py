@@ -54,7 +54,13 @@ from control_plane.executive_runtime import (
     SCHEMA_VERSION,
     StateConflict,
     ValidatedRoleCompletion,
-    V2_HOST_EXECUTION_BINDING_KEYS,
+    V3_HOST_EXECUTION_BINDING_KEYS,
+    _normalise_constraints,
+    _normalise_work_placement_union,
+    _validated_plan_admission,
+    _project_work_placement,
+    HOST_EXECUTION_BINDING_VERSION_KEY,
+    HOST_EXECUTION_BINDING_V3,
     _attempt_from_row,
     _dialogue_source_from_root_creation,
     _job_from_row,
@@ -2115,8 +2121,13 @@ class ExecutiveControlService:
             "operator_harness_version": self.config.operator_harness_version,
             "operator_harness_armed": self.config.coo_operator_harness_armed,
         }
-        if set(binding) != set(V2_HOST_EXECUTION_BINDING_KEYS):
+        binding["work_placement_union"] = [
+            {"provider_realm": binding["provider"], "quota_class": quota}
+            for quota in binding["eligible_quota_classes"]
+        ]
+        if set(binding) != set(V3_HOST_EXECUTION_BINDING_KEYS):
             raise ValueError("configured COO host binding fields drifted")
+        binding[HOST_EXECUTION_BINDING_VERSION_KEY] = HOST_EXECUTION_BINDING_V3
         return binding
 
     def _require_current_coo_binding(self) -> dict[str, Any]:
@@ -4835,7 +4846,9 @@ class ExecutiveControlService:
         return receipt
 
     def _is_bound_coo_root(self, root: Job) -> bool:
-        binding = self._require_current_coo_binding()
+        raw_binding = self._require_current_coo_binding()
+        binding = _normalise_constraints(raw_binding)
+        binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
         provenance = root.orchestration_provenance
         return bool(
             root.parent_job_id is None
@@ -4919,6 +4932,20 @@ class ExecutiveControlService:
             if job.constraints.get("cost_class") not in {"small", "default"}:
                 raise StateConflict(
                     "COO Job cost class has no reviewed serialized capacity"
+                )
+        if job.orchestration_role == "work":
+            with runtime.store.read() as connection:
+                row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root.job_id,)).fetchone()
+                if row is None:
+                    raise StateConflict("COO root disappeared before placement validation")
+                _admission, plan = _validated_plan_admission(connection, row)
+            step = next((item for item in plan["steps"] if item["step_id"] == job.plan_step_id), None)
+            if step is None or job.plan_attempt_id != plan["plan_attempt_id"]:
+                raise StateConflict("COO work placement is not in its admitted plan")
+            if "placement" in step:
+                expected = _project_work_placement(
+                    expected, root.constraints, step["placement"],
+                    raw_root_constraints=root.constraints,
                 )
         for key, value in expected.items():
             if job.constraints.get(key) != value:
@@ -5089,12 +5116,34 @@ class ExecutiveControlService:
                     for value, task in self._dispatch_tasks.items()
                     if not task.done()
                 }
-                if live and live != {job_id}:
-                    raise StateConflict("the serialized worker already has another active dispatch")
                 job = runtime.jobs.get_job(job_id)
                 if job is None:
                     raise StateConflict(f"job {job_id!r} does not exist")
                 self._require_bound_coo_job(job)
+                if live and live != {job_id}:
+                    live_jobs = [runtime.jobs.get_job(value) for value in live]
+                    if (
+                        any(value is None for value in live_jobs)
+                        or any(
+                            value.root_job_id != job.root_job_id
+                            for value in live_jobs
+                            if value is not None
+                        )
+                        or any(
+                            value.status not in {
+                                JobStatus.RUNNING,
+                                JobStatus.CHECKPOINTED,
+                            }
+                            for value in live_jobs
+                            if value is not None
+                        )
+                    ):
+                        raise StateConflict(
+                            "the serialized worker already has another active dispatch"
+                        )
+                    for value in live_jobs:
+                        assert value is not None
+                        self._require_bound_coo_job(value)
                 if job.status not in {
                     JobStatus.QUEUED,
                     JobStatus.RUNNING,
@@ -5275,6 +5324,42 @@ class ExecutiveControlService:
             return root.job_id
         return None
 
+    def _live_bound_coo_root_id(self) -> str | None:
+        """Return the one bound COO root owning every live service finisher."""
+
+        live = [
+            job_id
+            for job_id, task in self._dispatch_tasks.items()
+            if not task.done()
+        ]
+        if not live:
+            return None
+        runtime = self._require_runtime()
+        jobs = [runtime.jobs.get_job(job_id) for job_id in live]
+        if any(job is None for job in jobs):
+            return None
+        concrete = [job for job in jobs if job is not None]
+        root_ids = {job.root_job_id for job in concrete}
+        if len(root_ids) != 1:
+            return None
+        root_id = next(iter(root_ids))
+        if not isinstance(root_id, str):
+            return None
+        if any(
+            job.status not in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}
+            for job in concrete
+        ):
+            return None
+        root = runtime.jobs.get_job(root_id)
+        try:
+            if root is None or not self._is_bound_coo_root(root):
+                return None
+            for job in concrete:
+                self._require_bound_coo_job(job)
+        except (StateConflict, ServiceError):
+            return None
+        return root_id
+
     def _record_coo_tick_refusal(self, root_job_id: str, exc: Exception) -> None:
         """Persist one idempotent, secret-free autonomous refusal receipt."""
 
@@ -5320,9 +5405,17 @@ class ExecutiveControlService:
                 pass
             if self._coo_shutdown_event.is_set():
                 return
-            if self._service_state != "READY" or any(
+            if self._service_state != "READY":
+                continue
+            has_live_dispatch = any(
                 not task.done() for task in self._dispatch_tasks.values()
-            ):
+            )
+            live_root_id = (
+                self._live_bound_coo_root_id()
+                if has_live_dispatch
+                else None
+            )
+            if has_live_dispatch and live_root_id is None:
                 continue
             root_id: str | None = None
             try:
@@ -5332,11 +5425,13 @@ class ExecutiveControlService:
                 # per-action guard revalidates immediately before useful work.
                 self._require_current_autonomy()
                 prestart_refusals: dict[str, Exception] = {}
-                selected_root_id = self._next_bound_coo_root(
-                    prestart_refusals=prestart_refusals
-                )
-                for refused_root_id, refusal in prestart_refusals.items():
-                    self._record_coo_tick_refusal(refused_root_id, refusal)
+                selected_root_id = live_root_id
+                if selected_root_id is None:
+                    selected_root_id = self._next_bound_coo_root(
+                        prestart_refusals=prestart_refusals
+                    )
+                    for refused_root_id, refusal in prestart_refusals.items():
+                        self._record_coo_tick_refusal(refused_root_id, refusal)
                 # A diagnostic-write failure must not be attributed to a healthy
                 # root that has not yet been selected for any action.
                 root_id = selected_root_id
