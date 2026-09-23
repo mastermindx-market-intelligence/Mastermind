@@ -78,7 +78,19 @@
       "native_mode_owner": "approved native-session context owner",
       "generic_shell_fallback": false,
       "unsupported_effect_route": "Before any effect begins, preserve selected-project source custody and use an already-authorized native builder or Executive Job/Attempt/Worker for a bounded unsupported repo/build effect; do not emulate it through Studio Direct.",
-      "platform_refusal_policy": "SAME_OPERATION_SAME_CARRIER_RECONCILIATION_NO_FAILOVER"
+      "platform_refusal_policy": "SAME_OPERATION_SAME_CARRIER_RECONCILIATION_NO_FAILOVER",
+      "typed_git_publication_route": [
+        "studio_git_publish_status",
+        "studio_git_commit_current_changes",
+        "studio_git_push_current_branch"
+      ],
+      "typed_git_route_conditions": "Use only when those actions are currently exposed and owner-native status binds the same canonical mmx-workspace operation, Mastermind repository, sol/web-* branch and origin; they cover only status, current-change commit and same-branch push.",
+      "typed_git_forbidden_substitutions": [
+        "missing selected-project edit capability",
+        "missing build or test capability",
+        "another repository or branch",
+        "generic shell command transport"
+      ]
     },
     {
       "capability_class": "local_machine_process",
