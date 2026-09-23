@@ -718,16 +718,48 @@ pub async fn read_result(app: AppHandle, selection: ResultSelection) -> Result<V
     }
     Ok(value)
 }
+const WINDOW_SCHEMA_V1: &str = "mastermind.workspace.window_read_candidate.v1";
+const WINDOW_SCHEMA_V2: &str = "mastermind.workspace.window_read_candidate.v2";
+fn allowed_window_schema(schema: &str) -> bool {
+    schema == WINDOW_SCHEMA_V1 || schema == WINDOW_SCHEMA_V2
+}
+async fn read_current_window_document(app: AppHandle) -> Result<Value> {
+    let url = Url::parse(&format!("{ORIGIN}/workspace/window/current")).map_err(|_| "REQUEST_INVALID")?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (
+            inner
+                .token(Resource::Content)
+                .ok_or("AUTHENTICATION_REQUIRED")?
+                .value
+                .clone(),
+            inner.generation,
+        )
+    };
+    let response = state
+        .http
+        .get(url)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send()
+        .await
+        .map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = bounded_json(response, MAX_RESPONSE).await;
+    if !state.lock()?.release_allowed(generation, Resource::Content) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    let schema = value.get("schema").and_then(Value::as_str).unwrap_or("");
+    if !value.is_object() || !allowed_window_schema(schema) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
 #[tauri::command]
 pub async fn read_current_window(app: AppHandle) -> Result<Value> {
-    read(
-        app,
-        Resource::Content,
-        "/workspace/window/current",
-        "mastermind.workspace.window_read_candidate.v1",
-        None,
-    )
-    .await
+    read_current_window_document(app).await
 }
 
 #[cfg(test)]
@@ -883,6 +915,23 @@ mod tests {
         for seconds in [0, -1, 604801] {
             assert!(parse_token(serde_json::json!({"access_token":"secret","token_type":"Bearer","expires_in":seconds}),Resource::Acquisition).is_err());
         }
+    }
+    #[test]
+    fn current_window_allowlist_is_exactly_v1_and_v2() {
+        assert!(allowed_window_schema(
+            "mastermind.workspace.window_read_candidate.v1"
+        ));
+        assert!(allowed_window_schema(
+            "mastermind.workspace.window_read_candidate.v2"
+        ));
+        assert!(!allowed_window_schema(
+            "mastermind.workspace.window_read_candidate.v3"
+        ));
+        assert!(!allowed_window_schema(
+            "mastermind.workspace.recorded_read_candidate.v1"
+        ));
+        assert!(!allowed_window_schema("mastermind.mission_workspace.v3"));
+        assert!(!allowed_window_schema(""));
     }
     #[test]
     fn structured_result_selectors_use_exact_new_contract() {

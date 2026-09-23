@@ -734,6 +734,305 @@ describe("installed authentication and permitted content", () => {
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(screen.queryByText("Permitted fixture response")).toBeNull();
   });
+
+  it("associates a v2 window with a qualifying current plan child and stays unbound for v1", async () => {
+    const att = "ATT-" + "ab".repeat(16);
+    const h = "c".repeat(64);
+    const mission: any = structuredClone(v3Current17);
+    mission.children = {
+      ...mission.children,
+      state: "AVAILABLE",
+      coverage: "COMPLETE",
+      items: [
+        {
+          job_id: "JOB-101",
+          status: "RUNNING",
+          parent_job_id: "JOB-100",
+          depth: 1,
+          orchestration_role: "plan",
+          plan_step_id: null,
+          attempt_count: 1,
+          attempt_limit: 2,
+          current_attempt_id: att,
+          latest_attempt: {
+            attempt_id: att,
+            attempt_number: 1,
+            status: "RUNNING",
+            started_at: "2026-09-20T00:00:00Z",
+            finished_at: null,
+            exit_code: null,
+            has_result: false,
+            error_present: false,
+            error_class: null,
+          },
+          worker_id: null,
+        },
+      ],
+      total_count: 1,
+      overflow_count: 0,
+      unjoined_job_count: 0,
+      unjoined_job_ids: [],
+    };
+    history.replaceState(null, "", "/?work_ref=WS%3AB5&root_job_id=JOB-100");
+    window.MastermindMissionHost = {
+      readPrograms: programsFor("WS:B5", "JOB-100"),
+      readMission: async () => missionFixture("WS:B5", "JOB-100"),
+      readMissionV3: async () => mission,
+      readCurrentWindow: async () => ({
+        schema: "mastermind.workspace.window_read_candidate.v2" as const,
+        selection_ref: "managed-window:observed",
+        mode: "observed-turn-window" as const,
+        observation_binding: { job_id: "JOB-101", attempt_id: att },
+        view: {
+          schema: "mastermind.workspace.visible_window_candidate.v1" as const,
+          source_ref: "managed-window:observed",
+          scope: "one-managed-turn-window" as const,
+          observed_at: "2026-09-21T08:00:00Z",
+          epoch: h,
+          terminal: false,
+          coverage: "OBSERVED_WINDOW" as const,
+          history: "NOT_PROVEN" as const,
+          acceptance: "NOT_PROJECTED" as const,
+          capabilities: {
+            send: false as const,
+            provider_control: false as const,
+            history: false as const,
+          },
+          items: [
+            {
+              id: `visible:${h}`,
+              source_sequence: 0,
+              publication_sequence: 1,
+              state: "completed" as const,
+              kind: "visible-response" as const,
+              text: "Observed permitted response",
+              representation: "VISIBLE_TEXT" as const,
+              display_sha256: h,
+            },
+          ],
+          gaps: [],
+        },
+      }),
+      auth: {
+        getState: () => ({
+          status: "signed_in",
+          reason: null,
+          acquisition: true,
+          content: true,
+        }),
+        subscribe: () => () => {},
+        signIn: async () => {},
+        signOut: async () => {},
+      },
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    expect(
+      await screen.findByRole("heading", {
+        name: "Observed window for this Mission",
+        level: 2,
+      }),
+    ).toBeTruthy();
+    expect(screen.getByText(/JOB-101/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(att))).toBeTruthy();
+    expect(screen.getByText(/Window observed at/)).toBeTruthy();
+    expect(screen.getByText(/Mission document generated at/)).toBeTruthy();
+    expect(screen.queryByText("NOT_LINKED_TO_SELECTED_MISSION")).toBeNull();
+    expect(screen.getByText("Observed permitted response")).toBeTruthy();
+    expect(screen.queryByText(/same principal/i)).toBeNull();
+    expect(screen.queryByText(/atomic/i)).toBeNull();
+  });
+
+  it("does not combine a mission from before logout with a later window", async () => {
+    const att = "ATT-" + "ab".repeat(16);
+    const h = "d".repeat(64);
+    const missionHold = deferred<unknown>();
+    const windowHold = deferred<unknown>();
+    let listener!: (state: AuthState) => void;
+    history.replaceState(null, "", "/?work_ref=WS%3AB5&root_job_id=JOB-100");
+    window.MastermindMissionHost = {
+      readPrograms: programsFor("WS:B5", "JOB-100"),
+      readMission: async () => missionFixture("WS:B5", "JOB-100"),
+      readMissionV3: () => missionHold.promise,
+      readCurrentWindow: () => windowHold.promise as Promise<any>,
+      auth: {
+        getState: () => ({
+          status: "signed_in",
+          reason: null,
+          acquisition: true,
+          content: true,
+        }),
+        subscribe(fn) {
+          listener = fn;
+          return () => {};
+        },
+        signIn: async () => {},
+        signOut: async () => {},
+      },
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    listener({
+      status: "signed_out",
+      reason: null,
+      acquisition: false,
+      content: false,
+    });
+    await act(async () => {
+      missionHold.resolve(structuredClone(v3Current17));
+      windowHold.resolve({
+        schema: "mastermind.workspace.window_read_candidate.v2",
+        selection_ref: "managed-window:late",
+        mode: "observed-turn-window",
+        observation_binding: { job_id: "JOB-101", attempt_id: att },
+        view: {
+          schema: "mastermind.workspace.visible_window_candidate.v1",
+          source_ref: "managed-window:late",
+          scope: "one-managed-turn-window",
+          observed_at: "2026-09-21T08:00:00Z",
+          epoch: h,
+          terminal: false,
+          coverage: "OBSERVED_WINDOW",
+          history: "NOT_PROVEN",
+          acceptance: "NOT_PROJECTED",
+          capabilities: { send: false, provider_control: false, history: false },
+          items: [
+            {
+              id: `visible:${h}`,
+              source_sequence: 0,
+              publication_sequence: 1,
+              state: "completed",
+              kind: "visible-response",
+              text: "Late window after logout",
+              representation: "VISIBLE_TEXT",
+              display_sha256: h,
+            },
+          ],
+          gaps: [],
+        },
+      });
+    });
+    expect(screen.queryByText("Late window after logout")).toBeNull();
+    expect(
+      screen.queryByRole("heading", {
+        name: "Observed window for this Mission",
+      }),
+    ).toBeNull();
+  });
+
+  it("offers explicit refresh from unavailable without autopoll", async () => {
+    const readCurrentWindow = vi.fn(async () => {
+      throw new Error("WINDOW_UNAVAILABLE");
+    });
+    const readMissionV3 = vi.fn(async () => structuredClone(v3Current17));
+    window.MastermindMissionHost = {
+      readPrograms,
+      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+      readMissionV3,
+      readCurrentWindow,
+      auth: {
+        getState: () => ({
+          status: "signed_in",
+          reason: null,
+          acquisition: true,
+          content: true,
+        }),
+        subscribe: () => () => {},
+        signIn: async () => {},
+        signOut: async () => {},
+      },
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    const refresh = await screen.findByRole("button", { name: /Refresh/ });
+    expect((refresh as HTMLButtonElement).disabled).toBe(false);
+    const missionCalls = readMissionV3.mock.calls.length;
+    const windowCalls = readCurrentWindow.mock.calls.length;
+    expect(windowCalls).toBeGreaterThan(0);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(readMissionV3.mock.calls.length).toBe(missionCalls);
+    expect(readCurrentWindow.mock.calls.length).toBe(windowCalls);
+    await user.click(refresh);
+    expect(readCurrentWindow.mock.calls.length).toBeGreaterThan(windowCalls);
+  });
+
+  it("does not associate a window read after selection changed during the mission await", async () => {
+    const att = "ATT-" + "ab".repeat(16);
+    const h = "e".repeat(64);
+    const missionHold = deferred<unknown>();
+    const windowHold = deferred<unknown>();
+    history.replaceState(null, "", "/?work_ref=WS%3AB5&root_job_id=JOB-100");
+    window.MastermindMissionHost = {
+      readPrograms: programsFor("WS:B5", "JOB-100"),
+      readMission: async ({ workRef, rootJobId }) =>
+        missionFixture(workRef, rootJobId),
+      readMissionV3: () => missionHold.promise,
+      readCurrentWindow: () => windowHold.promise as Promise<any>,
+      auth: {
+        getState: () => ({
+          status: "signed_in",
+          reason: null,
+          acquisition: true,
+          content: true,
+        }),
+        subscribe: () => () => {},
+        signIn: async () => {},
+        signOut: async () => {},
+      },
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.click(screen.getByRole("button", { name: "Programs" }));
+    const beta = await screen.findByRole("button", { name: /Beta program/ });
+    await user.click(beta);
+    await act(async () => {
+      missionHold.resolve(structuredClone(v3Current17));
+      windowHold.resolve({
+        schema: "mastermind.workspace.window_read_candidate.v2",
+        selection_ref: "managed-window:stale-pair",
+        mode: "observed-turn-window",
+        observation_binding: { job_id: "JOB-101", attempt_id: att },
+        view: {
+          schema: "mastermind.workspace.visible_window_candidate.v1",
+          source_ref: "managed-window:stale-pair",
+          scope: "one-managed-turn-window",
+          observed_at: "2026-09-21T08:00:00Z",
+          epoch: h,
+          terminal: false,
+          coverage: "OBSERVED_WINDOW",
+          history: "NOT_PROVEN",
+          acceptance: "NOT_PROJECTED",
+          capabilities: { send: false, provider_control: false, history: false },
+          items: [
+            {
+              id: `visible:${h}`,
+              source_sequence: 0,
+              publication_sequence: 1,
+              state: "completed",
+              kind: "visible-response",
+              text: "Stale pair window",
+              representation: "VISIBLE_TEXT",
+              display_sha256: h,
+            },
+          ],
+          gaps: [],
+        },
+      });
+    });
+    expect(screen.queryByText("Stale pair window")).toBeNull();
+    expect(
+      screen.queryByRole("heading", {
+        name: "Observed window for this Mission",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("route focus handoff", () => {

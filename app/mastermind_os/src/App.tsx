@@ -1,5 +1,9 @@
 import type { AuthState, MissionHost } from "./host";
-import type { WindowDocument } from "./workspace-contract";
+import type {
+  ObservedMissionAssociation,
+  WindowDocument,
+} from "./workspace-contract";
+import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   allEvidence,
@@ -674,32 +678,66 @@ function Conversation({
   pending,
   refresh,
   selection,
+  association,
+  contentAvailable,
 }: {
   document?: WindowDocument | null;
   pending?: boolean;
   refresh?: () => void;
   selection?: MissionSelection | null;
+  association?: ObservedMissionAssociation | null;
+  contentAvailable?: boolean;
 }) {
+  const refreshControl = (
+    <button onClick={refresh} disabled={!!pending || !contentAvailable}>
+      Refresh window
+    </button>
+  );
   if (document)
     return (
       <section className="card">
         <div className="section-title">
-          <h2>Unbound current window</h2>
-          <State value="UNBOUND" />
+          <h2>
+            {association
+              ? "Observed window for this Mission"
+              : "Unbound current window"}
+          </h2>
+          <State
+            value={association ? "OBSERVED_MISSION_ASSOCIATION" : "UNBOUND"}
+          />
         </div>
-        <div className="unjoined" role="note">
-          <b>NOT_LINKED_TO_SELECTED_MISSION</b>
-          <p>
-            {selection
-              ? `No relationship is proven between this current window and ${selection.workRef} / ${selection.rootJobId}.`
-              : "No relationship is proven between this current window and any Mission selection."}
-          </p>
-        </div>
+        {association ? (
+          <div className="unjoined" role="note">
+            <b>Observed window for this Mission</b>
+            <p>
+              Job {association.job_id} · Attempt {association.attempt_id}. The
+              content owner observed this Job/Attempt and the separately
+              authorized Mission owner placed that same current Job/Attempt
+              under this selected root. Independent owner observations. This
+              display does not prove shared identity, later liveness, complete
+              history, terminal acceptance, review approval, or action/result
+              correspondence.
+            </p>
+            <p>
+              Window observed at {association.window_observed_at}. Mission
+              document generated at{" "}
+              {association.mission_generated_at ?? "unavailable"}.
+            </p>
+          </div>
+        ) : (
+          <div className="unjoined" role="note">
+            <b>NOT_LINKED_TO_SELECTED_MISSION</b>
+            <p>
+              {selection
+                ? `No relationship is proven between this current window and ${selection.workRef} / ${selection.rootJobId}.`
+                : "No relationship is proven between this current window and any Mission selection."}
+            </p>
+          </div>
+        )}
         <p className="muted">
-          Global current permitted turn · observed {document.view.observed_at} ·
-          coverage {label(document.view.coverage)}. This window does not
-          establish full history, Mission evidence, action or result
-          correlation, review, or product acceptance.
+          {association
+            ? `Coverage ${label(document.view.coverage)}. This window does not establish full history, Mission evidence, action or result correlation, review, or product acceptance.`
+            : `Global current permitted turn · observed ${document.view.observed_at} · coverage ${label(document.view.coverage)}. This window does not establish full history, Mission evidence, action or result correlation, review, or product acceptance.`}
         </p>
         {document.view.items.map((item) => (
           <article key={item.id}>
@@ -719,7 +757,7 @@ function Conversation({
         {document.view.gaps.length ? (
           <p className="muted">The source reported gaps in this window.</p>
         ) : null}
-        <button onClick={refresh}>Refresh window</button>
+        {refreshControl}
       </section>
     );
   return (
@@ -742,6 +780,7 @@ function Conversation({
         <summary>Technical details</summary>
         <code>CONVERSATION_TRANSPORT_UNAVAILABLE</code>
       </details>
+      {refreshControl}
     </section>
   );
 }
@@ -777,6 +816,18 @@ export function App() {
     [windowDocument, setWindowDocument] = useState<WindowDocument | null>(null),
     [windowPending, setWindowPending] = useState(false),
     [windowRevision, setWindowRevision] = useState(0),
+    [association, setAssociation] = useState<ObservedMissionAssociation | null>(
+      null,
+    ),
+    invalidation = useRef(0),
+    pairAbort = useRef<AbortController | null>(null),
+    previousAuth = useRef<string | null>(
+      authState ? JSON.stringify(authState) : null,
+    ),
+    bumpInvalidation = () => {
+      invalidation.current += 1;
+      pairAbort.current?.abort();
+    },
     [missionV3, setMissionV3] = useState<
       Missionv3Document | UnavailableMission | null
     >(null),
@@ -826,9 +877,14 @@ export function App() {
   useEffect(
     () =>
       window.MastermindMissionHost?.auth?.subscribe((state) => {
+        const serialized = JSON.stringify(state);
+        if (serialized === previousAuth.current) return;
+        previousAuth.current = serialized;
+        bumpInvalidation();
         setAuthState(state);
         setAuthRevision((n) => n + 1);
         setWindowDocument(null);
+        setAssociation(null);
         setMissionV3(null);
         setResultState({ kind: "IDLE" });
         if (!state.acquisition)
@@ -853,32 +909,78 @@ export function App() {
     }
   }, [authState?.acquisition, resultState]);
   useEffect(() => {
+    bumpInvalidation();
     const controller = new AbortController();
+    pairAbort.current = controller;
+    const started = invalidation.current;
+    const hostGeneration =
+      window.MastermindMissionHost?.invalidationGeneration?.() ?? 0;
     let attached = true;
     setWindowDocument(null);
+    setAssociation(null);
     setWindowPending(false);
-    const read = window.MastermindMissionHost?.readCurrentWindow;
-    if (active !== "Conversation" || !read || !authState?.content)
+    const host = window.MastermindMissionHost;
+    const readWindow = host?.readCurrentWindow;
+    const readV3 = host?.readMissionV3;
+    const stillCurrent = () =>
+      attached &&
+      !controller.signal.aborted &&
+      started === invalidation.current &&
+      hostGeneration === (host?.invalidationGeneration?.() ?? 0);
+    if (active !== "Conversation")
       return () => {
         attached = false;
         controller.abort();
       };
-    setWindowPending(true);
-    read({ signal: controller.signal })
-      .then((value) => {
-        if (attached && !controller.signal.aborted) setWindowDocument(value);
-      })
-      .catch(() => {
-        if (attached) setWindowDocument(null);
-      })
-      .finally(() => {
-        if (attached) setWindowPending(false);
-      });
+    const run = async () => {
+      setWindowPending(true);
+      let pairMission: Missionv3Document | null = null;
+      if (authState?.acquisition && selection && readV3) {
+        try {
+          const raw = await readV3({ ...selection, signal: controller.signal });
+          if (!stillCurrent()) return;
+          // Same full decoder as the main Mission path: a fresh response that
+          // fails the closed contract can never establish an association, so
+          // the window stays UNBOUND rather than trusting an unknown shape.
+          pairMission = decodeMissionv3(raw, selection);
+        } catch {
+          if (!stillCurrent()) return;
+          pairMission = null;
+        }
+      }
+      if (!stillCurrent()) return;
+      if (!authState?.content || !readWindow) {
+        setWindowPending(false);
+        return;
+      }
+      try {
+        const value = await readWindow({ signal: controller.signal });
+        if (!stillCurrent()) return;
+        setWindowDocument(value);
+        setAssociation(
+          observedMissionAssociation(value, pairMission, selection),
+        );
+      } catch {
+        if (!stillCurrent()) return;
+        setWindowDocument(null);
+        setAssociation(null);
+      } finally {
+        if (stillCurrent()) setWindowPending(false);
+      }
+    };
+    void run();
     return () => {
       attached = false;
       controller.abort();
     };
-  }, [active, selection, authRevision, windowRevision, authState?.content]);
+  }, [
+    active,
+    selection,
+    authRevision,
+    windowRevision,
+    authState?.content,
+    authState?.acquisition,
+  ]);
   useEffect(() => {
     if (!initialLocation.hasIdentity && initial) {
       const location = new URL(window.location.href);
@@ -985,7 +1087,9 @@ export function App() {
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
+      bumpInvalidation();
       setWindowDocument(null);
+      setAssociation(null);
       setWindowPending(false);
       setMissionV3(null);
       setResultState({ kind: "IDLE" });
@@ -1144,16 +1248,20 @@ export function App() {
     conversationActive = active === "Conversation",
     conversationState = windowPending
       ? "SOURCE_READ_PENDING"
-      : windowDocument && authState?.content
-        ? "UNBOUND"
-        : "UNAVAILABLE",
+      : association
+        ? "OBSERVED_MISSION_ASSOCIATION"
+        : windowDocument && authState?.content
+          ? "UNBOUND"
+          : "UNAVAILABLE",
     headerState = conversationActive
       ? conversationState
       : (d?.read_state.state ?? "UNAVAILABLE"),
     headerSummary = conversationActive
-      ? windowDocument && authState?.content
-        ? "A global current permitted window. No relationship to the selected Mission is proven."
-        : "No Mission-linked conversation is currently established."
+      ? association
+        ? "Observed window for this Mission from separately authorized owner observations."
+        : windowDocument && authState?.content
+          ? "A global current permitted window. No relationship to the selected Mission is proven."
+          : "No Mission-linked conversation is currently established."
       : d
         ? d.mission.root_job_id && d.read_state.state === "CURRENT"
           ? "A bounded source-qualified mission, current as of its owner observation."
@@ -1162,15 +1270,19 @@ export function App() {
             : "A qualified reconciliation state; no mission root is established."
         : "No producer document is currently admitted.",
     visibleNotice = conversationActive
-      ? windowDocument && authState?.content
-        ? "This current permitted window is not linked to the selected Mission."
-        : windowPending
-          ? "Reading the unbound current permitted window…"
-          : "No Mission-linked conversation is currently established."
+      ? association
+        ? "Observed window for this Mission. Independent owner observations."
+        : windowDocument && authState?.content
+          ? "This current permitted window is not linked to the selected Mission."
+          : windowPending
+            ? "Reading the current permitted window…"
+            : "No Mission-linked conversation is currently established."
       : notice,
     open = (w: string, r: string | null) => {
       if (r) {
+        bumpInvalidation();
         setWindowDocument(null);
+        setAssociation(null);
         setWindowPending(false);
         const next = { workRef: w, rootJobId: r },
           location = new URL(window.location.href);
@@ -1262,8 +1374,13 @@ export function App() {
       <Conversation
         document={authState?.content ? windowDocument : null}
         pending={windowPending}
-        refresh={() => setWindowRevision((n) => n + 1)}
+        refresh={() => {
+          bumpInvalidation();
+          setWindowRevision((n) => n + 1);
+        }}
         selection={selection}
+        association={association}
+        contentAvailable={!!authState?.content}
       />
     );
   else if (!d)
