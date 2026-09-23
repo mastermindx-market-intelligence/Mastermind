@@ -227,3 +227,32 @@ same-carrier recovery. Unknown refusal causes are not presumed technical failure
 Three source regressions were RED before this clarification and GREEN afterward.
 The complete targeted policy/continuity/recovery run is now 94 passed, 4 skipped and
 1 strict expected failure. The nine-case #870 evidence and test digest above are unchanged.
+
+## September 23 complete repair rehearsal on published 540d source
+
+Published #870 `540d1414714d1d831e66f205ce91a05fa0a022c9` still fails four of the
+expanded ten recovery cases: raised-after-claim V2/V3, unavailable legacy predecessor
+skipping, and live legacy predecessor overlap. The earlier six passing behaviors stand.
+A five-file review proposal closes these cases and the real service integration gaps:
+exception reconciliation uses the existing Runtime marker; only explicit V3 enables
+independent progress; host V3 placement derives only from existing eligible routes;
+root comparison preserves the exact placement union; child comparison consumes the
+sealed admitted plan through the existing Runtime projection helper. Positive overlap
+fixtures now seal explicit prerequisites and placement; negative controls are retained.
+
+The complete proposed diff is durable on #870 comment `5792083068`, not a second Runtime
+branch or writer. Its SHA-256 is
+`a0319f8d5091bbd04e1a2a4611cf2c3764c907aeaf914994a27146d866834d08`.
+GitHub readback reproduced the tested patch bytes exactly. Actual immutable-source
+qualification: 73 focused passes, then 288 passes across recovery, ready-frontier,
+service, Phase-1F-C and bounded-result owners using `--runxfail` on Python 3.14.7.
+No original #870 workspace/index/ref, provider or installed Runtime was modified.
+
+Ordinary pytest then exposed one strict XPASS: the baseline expected-failure marker
+would reject the repaired V3 behavior. The marker now applies only while V3 is absent;
+V3 presence requires a real pass and does not attest that the behavior is correct.
+Standard pytest on the proposal: 10 passed, with no skip/xfail override. Final acceptance
+file SHA-256: `029aace5b024efe03b7eb35b3578d753b55358b021a05de5ee0fe4bfbf77294d`.
+Baseline policy/continuity/recovery: 95 passed, 4 skipped, 1 expected failure.
+The known whole-suite missing-SDK limitation is unchanged. This is a qualified proposal,
+not applied source, independent approval, current-base release or fleet adoption.

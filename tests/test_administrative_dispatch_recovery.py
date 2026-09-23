@@ -16,8 +16,9 @@ from test_executive_os_phase1fc import _admit_v2_plan, _register_placement_union
 
 
 _pending_recovery = pytest.mark.xfail(
+    getattr(role_result, "PLAN_SCHEMA_V3", None) != "mastermind.execution_plan/v3",
     strict=True, raises=AssertionError,
-    reason="#917: persistent PRE_START block; incumbent #870 integration required",
+    reason="#917: baseline recovery absent; V3 source must satisfy this requirement",
 )
 
 
