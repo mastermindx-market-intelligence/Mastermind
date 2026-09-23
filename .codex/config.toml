@@ -1,3 +1,9 @@
+# Project-local Codex defaults. Provider/account placement for Mastermind Fabric
+# work remains owned by Executive OS / Model Router / Capacity.
+model = "gpt-6-astra"
+model_reasoning_effort = "xhigh"
+review_model = "gpt-6-sol"
+
 [shell_environment_policy]
 inherit = "core"
 
@@ -6,8 +12,8 @@ BOT_REASONING_LAYER = "1"
 
 [agents]
 enabled = true
-# Daily portfolio research is read-heavy. Keep fan-out bounded so one nightly run
-# cannot turn a wide Prophet board into an unbounded token tree.
+# Native Codex subagents are bounded pre-effect fallback capacity. Ordinary
+# decomposition should leave the frontier session through the Executive Fabric.
 max_concurrent_threads_per_session = 3
-default_subagent_model = "gpt-5.6-terra"
-default_subagent_reasoning_effort = "medium"
+default_subagent_model = "gpt-6-sol"
+default_subagent_reasoning_effort = "high"
