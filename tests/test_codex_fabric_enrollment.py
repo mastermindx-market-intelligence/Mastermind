@@ -526,6 +526,137 @@ def test_legacy_prefingerprint_pending_marker_stays_readable_but_is_not_reconcil
     assert store.load_state() == state
 
 
+def _legacy_pending_store(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy = _policy(tmp_path)
+    api = BlobApi()
+    api.values[(enroll.KEYCHAIN_SERVICE, enroll.REGISTRATION_ACCOUNT)] = json.dumps({
+        "schema": "mastermind.codex_fabric.executive_mcp_registration_attempt.v1",
+        "attempt_ref": "c" * 64,
+        "redirect_uri": CALLBACK_URL,
+        "policy_digest": policy.policy_digest,
+    }, sort_keys=True, separators=(",", ":")).encode()
+    return policy, api, KeychainRegistrationStore(api=api)
+
+
+def test_legacy_reconciliation_accepts_one_exact_tenant_observation_without_dcr(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    registration, observation_digest = enroll.reconcile_legacy_pending_registration(
+        policy,
+        store=store,
+        observed_client_id="tpc_legacy_exact",
+        observed_attempt_ref="c" * 64,
+        observed_client_name="Mastermind Codex Astra",
+        observed_redirect_uri=CALLBACK_URL,
+        observed_policy_digest=policy.policy_digest,
+        observed_match_count=1,
+        observed_at_epoch=1_790_000_000,
+    )
+    assert registration == ClientRegistration(
+        "tpc_legacy_exact", CALLBACK_URL, policy.policy_digest
+    )
+    assert store.load_state() == registration
+    assert len(observation_digest) == 64
+    assert "tpc_legacy_exact" not in observation_digest
+
+
+@pytest.mark.parametrize("field,value", [
+    ("observed_attempt_ref", "d" * 64),
+    ("observed_client_name", "Mastermind Codex Astra wrong"),
+    ("observed_redirect_uri", "http://127.0.0.1:9999/oauth/callback"),
+    ("observed_policy_digest", "f" * 64),
+    ("observed_client_id", "client_not_tpc"),
+    ("observed_match_count", 0),
+    ("observed_match_count", 2),
+])
+def test_legacy_reconciliation_refuses_mismatched_or_nonunique_tenant_evidence(
+    tmp_path: Path, field: str, value
+):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    before = store.load_state()
+    kwargs = {
+        "observed_client_id": "tpc_legacy_exact",
+        "observed_attempt_ref": "c" * 64,
+        "observed_client_name": "Mastermind Codex Astra",
+        "observed_redirect_uri": CALLBACK_URL,
+        "observed_policy_digest": policy.policy_digest,
+        "observed_match_count": 1,
+        "observed_at_epoch": 1_790_000_000,
+    }
+    kwargs[field] = value
+    with pytest.raises(EnrollmentError):
+        enroll.reconcile_legacy_pending_registration(policy, store=store, **kwargs)
+    assert store.load_state() == before
+
+
+def test_legacy_reconciliation_readback_ambiguity_stays_effect_unknown(tmp_path: Path):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, api, store = _legacy_pending_store(tmp_path)
+    original_read = api.read
+    reads = {"count": 0}
+
+    def ambiguous_read(service, account):
+        reads["count"] += 1
+        if reads["count"] >= 2:
+            raise OSError("ambiguous keychain readback")
+        return original_read(service, account)
+
+    api.read = ambiguous_read
+    with pytest.raises(enroll.EnrollmentEffectUnknown):
+        enroll.reconcile_legacy_pending_registration(
+            policy,
+            store=store,
+            observed_client_id="tpc_legacy_exact",
+            observed_attempt_ref="c" * 64,
+            observed_client_name="Mastermind Codex Astra",
+            observed_redirect_uri=CALLBACK_URL,
+            observed_policy_digest=policy.policy_digest,
+            observed_match_count=1,
+            observed_at_epoch=1_790_000_000,
+        )
+
+
+def test_cli_legacy_reconciliation_emits_digest_only_receipt(tmp_path: Path, capsys):
+    import ops.codex_fabric.enroll_executive_mcp as enroll
+
+    policy, _api, store = _legacy_pending_store(tmp_path)
+    policy_path = tmp_path / "executive-mcp.json"
+    public_id = "tpc_legacy_cli"
+    code = enroll.main(
+        [
+            "--legacy-reconcile",
+            "--reconcile-client-id", public_id,
+            "--reconcile-attempt-ref", "c" * 64,
+            "--reconcile-client-name", "Mastermind Codex Astra",
+            "--reconcile-redirect-uri", CALLBACK_URL,
+            "--reconcile-policy-digest", policy.policy_digest,
+            "--reconcile-match-count", "1",
+            "--reconcile-observed-at-epoch", "1790000000",
+        ],
+        policy_path=policy_path,
+        expected_uid=os.getuid(),
+        registration_store=store,
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    payload = json.loads(captured.out)
+    assert payload["state"] == "reconciled_legacy"
+    assert payload["policy_digest"] == policy.policy_digest
+    assert len(payload["client_id_digest"]) == 64
+    assert len(payload["observation_digest"]) == 64
+    assert public_id not in captured.out
+    assert "client_secret" not in captured.out
+    assert "access_token" not in captured.out
+    assert "refresh_token" not in captured.out
+    assert captured.err == ""
+
+
 def test_reconcile_pending_registration_accepts_exact_public_client_without_new_dcr(tmp_path: Path):
     import ops.codex_fabric.enroll_executive_mcp as enroll
 

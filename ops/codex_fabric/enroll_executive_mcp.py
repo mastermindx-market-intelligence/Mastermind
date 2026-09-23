@@ -382,6 +382,78 @@ def reconcile_pending_registration(
     return registration
 
 
+def reconcile_legacy_pending_registration(
+    policy: ExecutiveAuthPolicy,
+    *,
+    store: KeychainRegistrationStore,
+    observed_client_id: str,
+    observed_attempt_ref: str,
+    observed_client_name: str,
+    observed_redirect_uri: str,
+    observed_policy_digest: str,
+    observed_match_count: int,
+    observed_at_epoch: int,
+) -> tuple[ClientRegistration, str]:
+    """Reconcile the historical pre-fingerprint DCR effect from tenant evidence only.
+
+    This path is intentionally separate from ordinary v2 reconciliation. It performs
+    no Auth0, browser, token, provider, or Executive network effect.
+    """
+
+    state = store.load_state()
+    if not isinstance(state, PendingRegistration) or state.client_name is not None:
+        raise EnrollmentError("legacy Executive public client registration is not pending")
+    if (
+        state.policy_digest != policy.policy_digest
+        or state.redirect_uri != CALLBACK_URL
+        or observed_attempt_ref != state.attempt_ref
+        or observed_client_name != CLIENT_NAME
+        or observed_redirect_uri != CALLBACK_URL
+        or observed_policy_digest != policy.policy_digest
+        or isinstance(observed_match_count, bool)
+        or observed_match_count != 1
+        or isinstance(observed_at_epoch, bool)
+        or not isinstance(observed_at_epoch, int)
+        or observed_at_epoch <= 0
+        or not isinstance(observed_client_id, str)
+        or observed_client_id != observed_client_id.strip()
+        or not observed_client_id.startswith("tpc_")
+        or len(observed_client_id) > 512
+    ):
+        raise EnrollmentError("legacy pending Executive public client registration cannot be reconciled")
+
+    observation = {
+        "schema": "mastermind.codex_fabric.legacy_dcr_tenant_observation/v1",
+        "attempt_ref": state.attempt_ref,
+        "client_id": observed_client_id,
+        "client_name": observed_client_name,
+        "match_count": observed_match_count,
+        "observed_at_epoch": observed_at_epoch,
+        "policy_digest": observed_policy_digest,
+        "redirect_uri": observed_redirect_uri,
+    }
+    observation_digest = hashlib.sha256(
+        json.dumps(observation, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    registration = ClientRegistration(
+        client_id=observed_client_id,
+        redirect_uri=CALLBACK_URL,
+        policy_digest=policy.policy_digest,
+    )
+    try:
+        store.save(registration)
+        readback = store.load_state()
+    except Exception:
+        raise EnrollmentEffectUnknown(
+            "legacy Executive public client registration reconciliation effect is unknown"
+        ) from None
+    if readback != registration:
+        raise EnrollmentEffectUnknown(
+            "legacy Executive public client registration reconciliation effect is unknown"
+        )
+    return registration, observation_digest
+
+
 def pending_registration_status(
     policy: ExecutiveAuthPolicy,
     *,
@@ -720,6 +792,15 @@ def main(
         help="exact attempt-fingerprinted Auth0 client name observed by the tenant admin",
     )
     parser.add_argument(
+        "--legacy-reconcile",
+        action="store_true",
+        help="reconcile the historical pre-fingerprint pending DCR effect from tenant evidence",
+    )
+    parser.add_argument("--reconcile-redirect-uri")
+    parser.add_argument("--reconcile-policy-digest")
+    parser.add_argument("--reconcile-match-count", type=int)
+    parser.add_argument("--reconcile-observed-at-epoch", type=int)
+    parser.add_argument(
         "--pending-status",
         action="store_true",
         help="print non-secret metadata for the exact pending DCR operation",
@@ -731,8 +812,15 @@ def main(
             args.reconcile_attempt_ref,
             args.reconcile_client_name,
         )
-        if args.pending_status and any(
-            value is not None for value in reconciliation_values
+        legacy_values = (
+            args.reconcile_redirect_uri,
+            args.reconcile_policy_digest,
+            args.reconcile_match_count,
+            args.reconcile_observed_at_epoch,
+        )
+        if args.pending_status and (
+            args.legacy_reconcile
+            or any(value is not None for value in reconciliation_values + legacy_values)
         ):
             raise EnrollmentError(
                 "pending status cannot be combined with reconciliation"
@@ -743,6 +831,11 @@ def main(
             raise EnrollmentError(
                 "reconciliation requires client id, attempt ref, and client name together"
             )
+        if args.legacy_reconcile:
+            if any(value is None for value in reconciliation_values + legacy_values):
+                raise EnrollmentError("legacy reconciliation evidence is incomplete")
+        elif any(value is not None for value in legacy_values):
+            raise EnrollmentError("legacy reconciliation evidence requires --legacy-reconcile")
         if args.pending_status:
             registrations = (
                 KeychainRegistrationStore()
@@ -758,20 +851,38 @@ def main(
                 else registration_store
             )
             policy = load_installed_policy(policy_path, expected_uid=expected_uid)
-            registration = reconcile_pending_registration(
-                policy,
-                store=registrations,
-                observed_client_id=args.reconcile_client_id,
-                observed_attempt_ref=args.reconcile_attempt_ref,
-                observed_client_name=args.reconcile_client_name,
-            )
+            if args.legacy_reconcile:
+                registration, observation_digest = reconcile_legacy_pending_registration(
+                    policy,
+                    store=registrations,
+                    observed_client_id=args.reconcile_client_id,
+                    observed_attempt_ref=args.reconcile_attempt_ref,
+                    observed_client_name=args.reconcile_client_name,
+                    observed_redirect_uri=args.reconcile_redirect_uri,
+                    observed_policy_digest=args.reconcile_policy_digest,
+                    observed_match_count=args.reconcile_match_count,
+                    observed_at_epoch=args.reconcile_observed_at_epoch,
+                )
+                state = "reconciled_legacy"
+            else:
+                registration = reconcile_pending_registration(
+                    policy,
+                    store=registrations,
+                    observed_client_id=args.reconcile_client_id,
+                    observed_attempt_ref=args.reconcile_attempt_ref,
+                    observed_client_name=args.reconcile_client_name,
+                )
+                observation_digest = None
+                state = "reconciled"
             payload = {
                 "client_id_digest": hashlib.sha256(
                     registration.client_id.encode("utf-8")
                 ).hexdigest(),
                 "policy_digest": registration.policy_digest,
-                "state": "reconciled",
+                "state": state,
             }
+            if observation_digest is not None:
+                payload["observation_digest"] = observation_digest
         else:
             receipt = enroll_once(
                 policy_path=policy_path,
