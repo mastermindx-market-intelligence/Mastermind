@@ -203,3 +203,23 @@ def test_v3_declared_dependency_is_not_bypassed_by_preclaim_unavailability(tmp_p
         for job in runtime.jobs.list_jobs()
         if job.root_job_id == root.job_id and job.orchestration_role == "work"
     )
+
+
+def test_legacy_live_predecessor_is_reconciled_before_sibling(tmp_path):
+    runtime, root, first, second = _children(tmp_path)
+    command = f"coo-cycle:{root.job_id}:dispatch:{first.job_id}:attempt:1"
+    runtime.attempts.dispatch_cycle_job(
+        first.job_id, command_id=command, worker_id="worker-a",
+    )
+    calls = []
+
+    def dispatch(job_id, command_id):
+        calls.append((job_id, command_id))
+        worker = "worker-a" if job_id == first.job_id else "worker-b"
+        return runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker,
+        )
+
+    CooCycle(runtime, dispatcher=dispatch).run_once(root.job_id)
+    assert runtime.attempts.list_attempts(second.job_id) == []
+    assert calls == [(first.job_id, command)]
