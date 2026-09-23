@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
 import time
 import urllib.error
@@ -153,10 +154,18 @@ def _parse_file_ref(value: str) -> Path:
     if not os.path.isabs(raw):
         raise SystemExit("runtime key ref path must be absolute")
     path = Path(raw)
-    if path.is_symlink():
-        raise SystemExit("runtime key ref must not be a symlink")
-    if not path.is_file():
+    try:
+        info = os.lstat(path)
+    except OSError:
         raise SystemExit("runtime key ref not found")
+    if stat.S_ISLNK(info.st_mode):
+        raise SystemExit("runtime key ref must not be a symlink")
+    if not stat.S_ISREG(info.st_mode):
+        raise SystemExit("runtime key ref must be a regular file")
+    if info.st_uid != os.getuid():
+        raise SystemExit("runtime key ref owner mismatch")
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        raise SystemExit("runtime key ref permissions must deny group/other access")
     return path
 
 

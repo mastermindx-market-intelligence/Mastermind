@@ -125,6 +125,7 @@ def _make_key(home: Path, account: str = C1) -> str:
     path = home / ".config" / "tunnel-client" / "credentials" / f"{account}-runtime-key"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("test-placeholder-not-a-live-key\n", encoding="utf-8")
+    path.chmod(0o600)
     return f"file:{path}"
 
 
@@ -529,6 +530,26 @@ class TestWrongInputs(unittest.TestCase):
                 svc, "_run", CmdRecorder(handler=_stopped_alias_handler())
             ):
                 with self.assertRaisesRegex(SystemExit, "organization id"):
+                    svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
+    def test_group_or_other_readable_runtime_key_refused_before_stage(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(home, tmp)
+            key_path = Path(args.runtime_key_ref[5:])
+            key_path.chmod(0o640)
+            with self.assertRaisesRegex(SystemExit, "deny group/other access"):
+                svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
+    def test_runtime_key_owned_by_other_uid_refused_before_stage(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(home, tmp)
+            key_path = Path(args.runtime_key_ref[5:])
+            info = os.lstat(key_path)
+            foreign = mock.Mock(st_mode=info.st_mode, st_uid=os.getuid() + 1)
+            with mock.patch.object(svc.os, "lstat", return_value=foreign):
+                with self.assertRaisesRegex(SystemExit, "owner mismatch"):
                     svc.cmd_stage(args)
             self.assertFalse(svc._canonical_profile(C1).exists())
 
