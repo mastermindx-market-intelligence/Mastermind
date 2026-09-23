@@ -1303,6 +1303,13 @@ def test_source_work_does_not_fall_through_to_generic_studio_shell() -> None:
     assert project["platform_refusal_policy"] == "SAME_OPERATION_SAME_CARRIER_RECONCILIATION_NO_FAILOVER"
     assert "already-authorized native builder or Executive Job/Attempt/Worker" in project["unsupported_effect_route"]
     assert any("Studio Direct generic shell" in item for item in project["forbidden_substitutions"])
+    assert project["typed_git_publication_route"] == [
+        "studio_git_publish_status",
+        "studio_git_commit_current_changes",
+        "studio_git_push_current_branch",
+    ]
+    assert "same canonical mmx-workspace operation" in project["typed_git_route_conditions"]
+    assert "missing build or test capability" in project["typed_git_forbidden_substitutions"]
 
     assert local["generic_shell_scope"] == "GENUINE_BOUND_HOST_PROCESS_ONLY"
     assert local["selected_project_source_fallback"] is False
@@ -1316,6 +1323,7 @@ def test_source_work_does_not_fall_through_to_generic_studio_shell() -> None:
         "genuine bound host/process operations",
         "freeze that logical operation on its carrier",
         "Never change account, plugin, connector, worker, device, or generic tool",
+        "prefer the gateway-owned `studio_git_publish_status`",
     ):
         assert phrase in skill
 
@@ -1331,6 +1339,9 @@ def test_fresh_session_source_and_safety_refusal_cases_preserve_owner_boundaries
     assert source["requested_action_class"] == "WRITE"
     assert source["expected_disposition"] == "NO_GENERIC_STUDIO_SHELL_FALLBACK"
     assert "do not substitute Studio Direct start_process or interact_with_process" in source["owner_native_action"]
+    assert "studio_git_publish_status" in source["owner_native_action"]
+    assert "studio_git_commit_current_changes" in source["owner_native_action"]
+    assert "studio_git_push_current_branch" in source["owner_native_action"]
 
     refused = cases["platform-safety-refusal-preserves-carrier"]
     assert refused["capability_class"] == "selected_project_action"
