@@ -269,6 +269,9 @@ COO_CYCLE_BLOCK_REASONS = frozenset(
         "state_conflict",
     }
 )
+_COO_DISPATCH_EFFECT_SCHEMA = "mastermind.coo_dispatch_effect/v1"
+_COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE = "COO_DISPATCH_EFFECT_UNKNOWN"
+_COO_DISPATCH_RECONCILED_EVENT_TYPE = "COO_DISPATCH_RECONCILED"
 _ESCALATION_RANK = {"coo": 0, "ceo": 1, "chairman": 2}
 _COST_CLASS_RANK = {"small": 0, "default": 1, "frontier": 2}
 _MAX_JOB_DEPTH = 64
@@ -6351,6 +6354,93 @@ def _validated_coo_cycle_block_event(
     return dict(payload)
 
 
+
+def _validated_coo_dispatch_effect_event(
+    connection: sqlite3.Connection,
+    event_row: sqlite3.Row,
+    *,
+    expected_root_id: str,
+) -> dict[str, Any]:
+    """Validate one immutable COO dispatch ambiguity/reconciliation receipt."""
+
+    event_type = str(event_row["event_type"])
+    phase_by_type = {
+        _COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE: "EFFECT_UNKNOWN",
+        _COO_DISPATCH_RECONCILED_EVENT_TYPE: "RECONCILED",
+    }
+    phase = phase_by_type.get(event_type)
+    if (
+        phase is None
+        or event_row["aggregate_type"] != "job"
+        or event_row["aggregate_id"] != expected_root_id
+        or event_row["job_id"] != expected_root_id
+        or event_row["actor"] != "coo"
+        or not isinstance(event_row["command_id"], str)
+        or _COMMAND_ID_RE.fullmatch(event_row["command_id"]) is None
+        or type(event_row["event_id"]) is not int
+        or event_row["event_id"] <= 0
+    ):
+        raise StateConflict("COO dispatch effect Event identity is malformed")
+
+    payload = _strict_canonical_json_loads(
+        str(event_row["payload_json"]), name=f"{event_type} payload"
+    )
+    expected_keys = {
+        "schema_version",
+        "root_job_id",
+        "selected_job_id",
+        "dispatch_command_id",
+        "attempt_id",
+        "phase",
+        "command_id",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_keys:
+        raise StateConflict("COO dispatch effect payload is not the closed wire")
+
+    selected_id = payload.get("selected_job_id")
+    dispatch_command = payload.get("dispatch_command_id")
+    attempt_id = payload.get("attempt_id")
+    suffix = ":effect-unknown" if phase == "EFFECT_UNKNOWN" else ":reconciled"
+    if (
+        payload.get("schema_version") != _COO_DISPATCH_EFFECT_SCHEMA
+        or payload.get("root_job_id") != expected_root_id
+        or not isinstance(selected_id, str)
+        or not selected_id
+        or not isinstance(dispatch_command, str)
+        or _COMMAND_ID_RE.fullmatch(dispatch_command) is None
+        or not isinstance(attempt_id, str)
+        or not attempt_id
+        or payload.get("phase") != phase
+        or payload.get("command_id") != event_row["command_id"]
+        or event_row["command_id"] != f"{dispatch_command}{suffix}"
+        or event_row["attempt_id"] != attempt_id
+    ):
+        raise StateConflict("COO dispatch effect payload identity drifted")
+
+    root = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (expected_root_id,)
+    ).fetchone()
+    selected = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (selected_id,)
+    ).fetchone()
+    claim = connection.execute(
+        "SELECT * FROM events WHERE command_id=?", (dispatch_command,)
+    ).fetchone()
+    if (
+        root is None
+        or selected is None
+        or root["root_job_id"] != expected_root_id
+        or root["orchestration_role"] != "aggregation"
+        or selected["root_job_id"] != expected_root_id
+        or claim is None
+        or claim["event_type"] != "JOB_CLAIMED"
+        or claim["job_id"] != selected_id
+        or claim["attempt_id"] != attempt_id
+    ):
+        raise StateConflict("COO dispatch effect claim binding drifted")
+    return dict(payload)
+
+
 def _validate_tx9_requeue_event(
     connection: sqlite3.Connection,
     event_row: sqlite3.Row,
@@ -9156,6 +9246,115 @@ def _accepted_current_step_revision(
         "review_required": bool(reservation["review_required"]),
         **qualifying_fields,
     }
+
+
+def _validated_job_dependency_manifest(
+    connection: sqlite3.Connection,
+    *,
+    job_row: sqlite3.Row,
+) -> dict[str, Any] | None:
+    """Load the immutable V3 dependency snapshot for one work Job."""
+
+    role, provenance, _ = _decode_orchestration_job_fields(job_row)
+    if role != "work":
+        return None
+    if (
+        not isinstance(provenance, Mapping)
+        or provenance.get("creator") != "coo_cycle"
+        or provenance.get("job_id") != job_row["job_id"]
+        or provenance.get("root_job_id") != job_row["root_job_id"]
+        or provenance.get("role") != "work"
+        or not isinstance(provenance.get("command_id"), str)
+        or _COMMAND_ID_RE.fullmatch(str(provenance["command_id"])) is None
+    ):
+        raise StateConflict("work dependency creation provenance is invalid")
+
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?",
+        (job_row["root_job_id"],),
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("work dependency root is unavailable")
+    admission, plan_body = _validated_plan_admission(connection, root_row)
+
+    rows = connection.execute(
+        """
+        SELECT * FROM events
+        WHERE event_type='JOB_CREATED' AND job_id=? AND command_id=?
+        ORDER BY event_id
+        """,
+        (job_row["job_id"], provenance["command_id"]),
+    ).fetchall()
+    if len(rows) != 1:
+        raise StateConflict("work dependency creation receipt is not unique")
+    event = rows[0]
+    if (
+        event["actor"] != "coo"
+        or event["aggregate_type"] != "job"
+        or event["aggregate_id"] != job_row["job_id"]
+    ):
+        raise StateConflict("work dependency creation receipt identity is invalid")
+    payload = _strict_canonical_json_loads(
+        str(event["payload_json"]),
+        name="work dependency JOB_CREATED payload",
+    )
+
+    is_v3 = plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+    has_manifest = "dependency_manifest" in payload
+    has_digest = "dependency_manifest_digest" in payload
+    if not is_v3:
+        if has_manifest or has_digest:
+            raise StateConflict("legacy work unexpectedly carries dependency evidence")
+        return None
+    if admission.get("schema_version") != _COO_PLAN_ADMISSION_SCHEMA_V2:
+        raise StateConflict("V3 work dependency admission is not V2")
+    if not has_manifest or not has_digest:
+        raise StateConflict("V3 work is missing immutable dependency evidence")
+
+    manifest = _validate_work_dependency_manifest(
+        payload["dependency_manifest"],
+        root_job_id=str(job_row["root_job_id"]),
+        plan_attempt_id=str(job_row["plan_attempt_id"]),
+        plan_digest=str(job_row["plan_digest"]),
+        plan_step_id=str(job_row["plan_step_id"]),
+    )
+    if payload["dependency_manifest_digest"] != manifest["dependency_manifest_digest"]:
+        raise StateConflict("work dependency manifest digest evidence drifted")
+    return manifest
+
+
+def _assert_dependency_manifest_current(
+    connection: sqlite3.Connection,
+    *,
+    job_row: sqlite3.Row,
+) -> None:
+    """Refuse a V3 work claim when its accepted prerequisite snapshot drifted."""
+
+    persisted = _validated_job_dependency_manifest(connection, job_row=job_row)
+    if persisted is None:
+        return
+
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?",
+        (job_row["root_job_id"],),
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("work dependency manifest is no longer current: root missing")
+    try:
+        admission, plan_body = _validated_plan_admission(connection, root_row)
+        current = _work_dependency_manifest(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=plan_body,
+            plan_step_id=str(job_row["plan_step_id"]),
+        )
+    except StateConflict as exc:
+        raise StateConflict(
+            f"work dependency manifest is no longer current: {exc}"
+        ) from exc
+    if current != persisted:
+        raise StateConflict("work dependency manifest is no longer current")
 
 
 def _current_orchestration_tree_material(
@@ -12713,6 +12912,207 @@ class JobRegistry:
                 action="BLOCKED", command_id=block_command, receipt=payload
             )
 
+    def record_cycle_dispatch_effect_unknown(
+        self,
+        root_job_id: str,
+        *,
+        selected_job_id: str,
+        dispatch_command_id: str,
+    ) -> dict[str, Any]:
+        """Persist one exact lost-return marker after a durable COO claim."""
+
+        root_token = str(root_job_id or "").strip()
+        selected_token = str(selected_job_id or "").strip()
+        dispatch_token = str(dispatch_command_id or "").strip()
+        marker_command = f"{dispatch_token}:effect-unknown"
+        with self.store.transaction() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            selected = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (selected_token,)
+            ).fetchone()
+            claim = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (dispatch_token,)
+            ).fetchone()
+            if (
+                root is None
+                or selected is None
+                or root["root_job_id"] != root_token
+                or root["orchestration_role"] != "aggregation"
+                or selected["root_job_id"] != root_token
+                or claim is None
+                or claim["event_type"] != "JOB_CLAIMED"
+                or claim["job_id"] != selected_token
+                or claim["attempt_id"] is None
+                or selected["current_attempt_id"] != claim["attempt_id"]
+            ):
+                raise StateConflict(
+                    "ambiguous COO dispatch is not bound to the current durable claim"
+                )
+
+            existing = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (marker_command,)
+            ).fetchone()
+            if existing is not None:
+                return _validated_coo_dispatch_effect_event(
+                    connection, existing, expected_root_id=root_token
+                )
+
+            unknown_rows = connection.execute(
+                "SELECT * FROM events WHERE event_type=? AND job_id=? ORDER BY event_id",
+                (_COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE, root_token),
+            ).fetchall()
+            for row in unknown_rows:
+                prior = _validated_coo_dispatch_effect_event(
+                    connection, row, expected_root_id=root_token
+                )
+                resolved = connection.execute(
+                    "SELECT * FROM events WHERE command_id=?",
+                    (f"{prior['dispatch_command_id']}:reconciled",),
+                ).fetchone()
+                if resolved is None:
+                    raise StateConflict(
+                        "another COO dispatch effect remains unresolved"
+                    )
+                _validated_coo_dispatch_effect_event(
+                    connection, resolved, expected_root_id=root_token
+                )
+
+            payload = {
+                "schema_version": _COO_DISPATCH_EFFECT_SCHEMA,
+                "root_job_id": root_token,
+                "selected_job_id": selected_token,
+                "dispatch_command_id": dispatch_token,
+                "attempt_id": str(claim["attempt_id"]),
+                "phase": "EFFECT_UNKNOWN",
+                "command_id": marker_command,
+            }
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=root_token,
+                event_type=_COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE,
+                command_id=marker_command,
+                actor="coo",
+                job_id=root_token,
+                attempt_id=str(claim["attempt_id"]),
+                payload=payload,
+                timestamp_ms=_finite_fresh_effect(
+                    self.store, connection, root_token
+                ),
+            )
+            return payload
+
+    def pending_cycle_dispatch_effect_unknown(
+        self, root_job_id: str
+    ) -> dict[str, Any] | None:
+        """Return the sole unresolved lost-return marker for one COO root."""
+
+        root_token = str(root_job_id or "").strip()
+        with self.store.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM events WHERE event_type=? AND job_id=? ORDER BY event_id",
+                (_COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE, root_token),
+            ).fetchall()
+            unresolved: list[dict[str, Any]] = []
+            for row in rows:
+                payload = _validated_coo_dispatch_effect_event(
+                    connection, row, expected_root_id=root_token
+                )
+                resolved = connection.execute(
+                    "SELECT * FROM events WHERE command_id=?",
+                    (f"{payload['dispatch_command_id']}:reconciled",),
+                ).fetchone()
+                if resolved is None:
+                    unresolved.append(payload)
+                    continue
+                resolution = _validated_coo_dispatch_effect_event(
+                    connection, resolved, expected_root_id=root_token
+                )
+                if (
+                    resolution["selected_job_id"] != payload["selected_job_id"]
+                    or resolution["attempt_id"] != payload["attempt_id"]
+                    or resolution["dispatch_command_id"]
+                    != payload["dispatch_command_id"]
+                ):
+                    raise StateConflict(
+                        "COO dispatch reconciliation does not match ambiguity"
+                    )
+            if len(unresolved) > 1:
+                raise StateConflict(
+                    "COO root has multiple unresolved dispatch effects"
+                )
+            return unresolved[0] if unresolved else None
+
+    def reconcile_cycle_dispatch_effect(
+        self,
+        root_job_id: str,
+        *,
+        selected_job_id: str,
+        dispatch_command_id: str,
+        receipt: OrchestrationDispatchOutcome,
+    ) -> dict[str, Any]:
+        """Close one ambiguity only after exact-command replay returns its claim."""
+
+        root_token = str(root_job_id or "").strip()
+        selected_token = str(selected_job_id or "").strip()
+        dispatch_token = str(dispatch_command_id or "").strip()
+        marker_command = f"{dispatch_token}:effect-unknown"
+        resolution_command = f"{dispatch_token}:reconciled"
+        with self.store.transaction() as connection:
+            marker = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (marker_command,)
+            ).fetchone()
+            if marker is None:
+                raise StateConflict("COO dispatch ambiguity marker is unavailable")
+            pending = _validated_coo_dispatch_effect_event(
+                connection, marker, expected_root_id=root_token
+            )
+            if (
+                pending["selected_job_id"] != selected_token
+                or pending["dispatch_command_id"] != dispatch_token
+                or receipt.job_id != selected_token
+                or receipt.command_id != dispatch_token
+                or receipt.attempt.attempt_id != pending["attempt_id"]
+            ):
+                raise StateConflict(
+                    "COO dispatch reconciliation receipt differs from original claim"
+                )
+
+            existing = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (resolution_command,)
+            ).fetchone()
+            if existing is not None:
+                return _validated_coo_dispatch_effect_event(
+                    connection, existing, expected_root_id=root_token
+                )
+
+            payload = {
+                "schema_version": _COO_DISPATCH_EFFECT_SCHEMA,
+                "root_job_id": root_token,
+                "selected_job_id": selected_token,
+                "dispatch_command_id": dispatch_token,
+                "attempt_id": pending["attempt_id"],
+                "phase": "RECONCILED",
+                "command_id": resolution_command,
+            }
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=root_token,
+                event_type=_COO_DISPATCH_RECONCILED_EVENT_TYPE,
+                command_id=resolution_command,
+                actor="coo",
+                job_id=root_token,
+                attempt_id=pending["attempt_id"],
+                payload=payload,
+                timestamp_ms=_finite_fresh_effect(
+                    self.store, connection, root_token
+                ),
+            )
+            return payload
+
     def validated_cycle_block(
         self, root_job_id: str
     ) -> tuple[str, dict[str, Any]] | None:
@@ -14143,6 +14543,11 @@ class AttemptRegistry:
 
         if exact_target is not None:
             _validate_exact_worker_target_selection(connection, exact_target, job_row, capacity, authority_policy_hash)
+        if orchestration_role == "work":
+            _assert_dependency_manifest_current(
+                connection,
+                job_row=job_row,
+            )
         job_id = str(job_row["job_id"])
         attempt_id = f"ATT-{uuid4().hex}"
         lease_token = secrets.token_urlsafe(32)

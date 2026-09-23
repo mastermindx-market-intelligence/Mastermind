@@ -103,6 +103,7 @@ class CooCycle:
 
     def __init__(self, runtime: Runtime, *, dispatcher: Dispatch | None = None) -> None:
         self.runtime = runtime
+        self._uses_inert_dispatcher = dispatcher is None
         self.dispatcher = dispatcher or self._dispatch_unavailable
 
     @staticmethod
@@ -239,7 +240,9 @@ class CooCycle:
                 return False
         return True
 
-    def _dispatch_queued(self, root_id: str, selected: Job) -> CooCycleOutcome:
+    def _dispatch_queued(
+        self, root_id: str, selected: Job
+    ) -> CooCycleOutcome | None:
         command = (
             f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
             f"{selected.attempt_count + 1}"
@@ -247,12 +250,19 @@ class CooCycle:
         receipt = self.dispatcher(selected.job_id, command)
         if receipt is None:
             if not self._dispatch_none_was_preclaim(selected):
+                self.runtime.jobs.record_cycle_dispatch_effect_unknown(
+                    root_id,
+                    selected_job_id=selected.job_id,
+                    dispatch_command_id=command,
+                )
                 raise StateConflict(
                     "exact dispatch return is ambiguous after durable Job transition"
                 )
-            return self._block(
-                root_id, selected.job_id, "exact_dispatch_unavailable"
-            )
+            if self._uses_inert_dispatcher:
+                return self._block(
+                    root_id, selected.job_id, "exact_dispatch_unavailable"
+                )
+            return None
         return self._outcome(
             root_id, "DISPATCHED", selected.job_id, command, receipt
         )
@@ -322,6 +332,27 @@ class CooCycle:
             or not provenance.get("source_digest")
         ):
             return self._block(root_id, root_id, "invalid_root")
+
+        pending_dispatch = (
+            self.runtime.jobs.pending_cycle_dispatch_effect_unknown(root_id)
+        )
+        if pending_dispatch is not None:
+            selected_id = str(pending_dispatch["selected_job_id"])
+            command = str(pending_dispatch["dispatch_command_id"])
+            receipt = self.dispatcher(selected_id, command)
+            if receipt is None:
+                raise StateConflict(
+                    "active exact dispatch returned no reconcilable outcome"
+                )
+            self.runtime.jobs.reconcile_cycle_dispatch_effect(
+                root_id,
+                selected_job_id=selected_id,
+                dispatch_command_id=command,
+                receipt=receipt,
+            )
+            return self._outcome(
+                root_id, "DISPATCHED", selected_id, command, receipt
+            )
 
         all_jobs = [
             job
@@ -702,16 +733,12 @@ class CooCycle:
             and queued
             and self._ready_frontier_open(active, queued, current_by_step)
         ):
-            ready = next(
-                (
-                    candidate
-                    for candidate in queued
-                    if self._ready_frontier_candidate(candidate, active)
-                ),
-                None,
-            )
-            if ready is not None:
-                return self._dispatch_queued(root_id, ready)
+            for candidate in queued:
+                if not self._ready_frontier_candidate(candidate, active):
+                    continue
+                outcome = self._dispatch_queued(root_id, candidate)
+                if outcome is not None:
+                    return outcome
 
         # 7. Reconcile an active exact dispatch before any coupled/new work.
         # Replaying the original command resumes or returns the same Attempt;
@@ -731,9 +758,27 @@ class CooCycle:
                 )
             return self._outcome(root_id, "DISPATCHED", selected.job_id, command, receipt)
 
-        # 8. With no active child, dispatch the first queued non-root.
+        # 8. With no active child, try queued work in deterministic order.
+        # Explicit dispatcher pre-claim unavailability is temporary capacity
+        # pressure, not a durable root blocker.
         if queued:
-            return self._dispatch_queued(root_id, queued[0])
+            unavailable: list[str] = []
+            for candidate in queued:
+                outcome = self._dispatch_queued(root_id, candidate)
+                if outcome is not None:
+                    return outcome
+                unavailable.append(candidate.job_id)
+            return self._outcome(
+                root_id,
+                "NO_ACTION",
+                None,
+                None,
+                {
+                    "reason": "exact_dispatch_unavailable",
+                    "unavailable_job_ids": unavailable,
+                    "policy_sha": policy.policy_sha256,
+                },
+            )
 
         # 9. Admit the completed plan and its ordered initial work wave.
         if not admission_events:
@@ -830,10 +875,29 @@ class CooCycle:
             receipt = self.dispatcher(root_id, command)
             if receipt is None:
                 if not self._dispatch_none_was_preclaim(root):
+                    self.runtime.jobs.record_cycle_dispatch_effect_unknown(
+                        root_id,
+                        selected_job_id=root_id,
+                        dispatch_command_id=command,
+                    )
                     raise StateConflict(
                         "exact root dispatch return is ambiguous after durable Job transition"
                     )
-                return self._block(root_id, root_id, "exact_dispatch_unavailable")
+                if self._uses_inert_dispatcher:
+                    return self._block(
+                        root_id, root_id, "exact_dispatch_unavailable"
+                    )
+                return self._outcome(
+                    root_id,
+                    "NO_ACTION",
+                    None,
+                    None,
+                    {
+                        "reason": "exact_dispatch_unavailable",
+                        "unavailable_job_ids": [root_id],
+                        "policy_sha": policy.policy_sha256,
+                    },
+                )
             return self._outcome(root_id, "DISPATCHED", root_id, command, receipt)
 
         return self._outcome(

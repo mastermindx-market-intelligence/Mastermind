@@ -722,3 +722,233 @@ def test_deferred_materialization_refuses_review_pending_prerequisite(tmp_path):
             """,
             (root.job_id,),
         ).fetchone()[0] == 0
+
+
+def test_stale_dependency_manifest_refuses_before_claim_mutation(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    root, planner, plan_body, by_step = _admitted_v3_chain(runtime)
+    _complete_v3_prerequisite(
+        runtime,
+        root,
+        planner,
+        plan_body,
+        by_step["step-0"],
+    )
+    manifest = runtime.jobs.project_cycle_work_dependency_manifest(
+        root.job_id,
+        "step-2",
+    )
+    command = (
+        f"coo-cycle:{root.job_id}:create-work:step-2:"
+        f"{manifest['dependency_manifest_digest']}"
+    )
+    dependent = runtime.jobs.create_cycle_work(
+        root.job_id,
+        "step-2",
+        dependency_manifest=manifest,
+        command_id=command,
+    )
+
+    # Leave the immutable dependency snapshot untouched, but make the
+    # prerequisite no longer an accepted current completion.  Current code
+    # wrongly trusts the old creation snapshot during claim.
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE jobs SET status='FAILED' WHERE job_id=?",
+            (by_step["step-0"].job_id,),
+        )
+
+    with pytest.raises(StateConflict, match="dependency"):
+        runtime.attempts.dispatch_cycle_job(
+            dependent.job_id,
+            command_id=(
+                f"coo-cycle:{root.job_id}:dispatch:"
+                f"{dependent.job_id}:attempt:1"
+            ),
+            worker_id="worker-a",
+            quota_class="codex-hf1q-step",
+        )
+
+    current = runtime.jobs.get_job(dependent.job_id)
+    assert current is not None
+    assert current.attempt_count == 0
+    assert current.current_attempt_id is None
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM worker_quota_classes
+            WHERE held_attempt_id IS NOT NULL
+            """
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            """
+            SELECT COUNT(*) FROM events
+            WHERE event_type='JOB_CLAIMED' AND job_id=?
+            """,
+            (dependent.job_id,),
+        ).fetchone()[0] == 0
+
+
+def test_explicit_preclaim_unavailability_can_progress_ready_sibling(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    runtime, root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        placements=[_CODEX, _CLAUDE],
+    )
+    first, second = sorted(admitted, key=lambda job: job.plan_step_id)
+    calls: list[str] = []
+
+    def dispatch(job_id: str, command_id: str):
+        calls.append(job_id)
+        if job_id == first.job_id:
+            return None
+        return runtime.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            worker_id="worker-b",
+            quota_class="claude-hf1q-step",
+        )
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(root.job_id)
+    assert runtime.attempts.list_attempts(first.job_id) == []
+    assert len(runtime.attempts.list_attempts(second.job_id)) == 1
+    assert calls == [first.job_id, second.job_id]
+    assert outcome.selected_job_id == second.job_id
+    assert runtime.jobs.validated_cycle_block(root.job_id) is None
+
+
+def test_explicit_preclaim_unavailability_is_resumable_without_root_block(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    runtime, root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        placements=[_CODEX, _CLAUDE],
+    )
+    first = sorted(admitted, key=lambda job: job.plan_step_id)[0]
+
+    unavailable = CooCycle(runtime, dispatcher=lambda *_: None).run_once(root.job_id)
+    assert unavailable.action == "NO_ACTION"
+    assert runtime.attempts.list_attempts(first.job_id) == []
+    assert runtime.jobs.validated_cycle_block(root.job_id) is None
+
+    calls: list[str] = []
+
+    def restored(job_id: str, command_id: str):
+        calls.append(job_id)
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        worker = "worker-a" if job.plan_step_id == "step-0" else "worker-b"
+        quota = (
+            "codex-hf1q-step" if worker == "worker-a" else "claude-hf1q-step"
+        )
+        return runtime.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            worker_id=worker,
+            quota_class=quota,
+        )
+    outcome = CooCycle(runtime, dispatcher=restored).run_once(root.job_id)
+    assert outcome.action == "DISPATCHED"
+    assert calls == [first.job_id]
+    assert len(runtime.attempts.list_attempts(first.job_id)) == 1
+    assert runtime.jobs.validated_cycle_block(root.job_id) is None
+
+
+def test_lost_dispatch_return_reconciles_exact_command_before_sibling(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    runtime, root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        placements=[_CODEX, _CLAUDE],
+    )
+    first, second = sorted(admitted, key=lambda job: job.plan_step_id)
+    calls: list[tuple[str, str]] = []
+
+    def lost_return(job_id: str, command_id: str):
+        calls.append((job_id, command_id))
+        runtime.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            worker_id="worker-a",
+            quota_class="codex-hf1q-step",
+        )
+        return None
+
+    with pytest.raises(
+        StateConflict, match="ambiguous after durable Job transition"
+    ):
+        CooCycle(runtime, dispatcher=lost_return).run_once(root.job_id)
+    original = calls[0]
+    assert len(runtime.attempts.list_attempts(first.job_id)) == 1
+    assert runtime.attempts.list_attempts(second.job_id) == []
+    assert runtime.jobs.validated_cycle_block(root.job_id) is None
+    pending = runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id)
+    assert pending is not None
+    assert pending["selected_job_id"] == first.job_id
+    assert pending["dispatch_command_id"] == original[1]
+
+    def reconcile(job_id: str, command_id: str):
+        calls.append((job_id, command_id))
+        return runtime.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            worker_id="worker-a",
+            quota_class="codex-hf1q-step",
+        )
+
+    outcome = CooCycle(runtime, dispatcher=reconcile).run_once(root.job_id)
+    assert outcome.action == "DISPATCHED"
+    assert calls == [original, original]
+    assert len(runtime.attempts.list_attempts(first.job_id)) == 1
+    assert runtime.attempts.list_attempts(second.job_id) == []
+    assert runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id) is None
+
+
+def test_lost_dispatch_effect_survives_runtime_reopen(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    runtime, root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        placements=[_CODEX, _CLAUDE],
+    )
+    first, second = sorted(admitted, key=lambda job: job.plan_step_id)
+    observed: list[tuple[str, str]] = []
+
+    def lost_return(job_id: str, command_id: str):
+        observed.append((job_id, command_id))
+        runtime.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            worker_id="worker-a",
+            quota_class="codex-hf1q-step",
+        )
+        return None
+
+    with pytest.raises(
+        StateConflict, match="ambiguous after durable Job transition"
+    ):
+        CooCycle(runtime, dispatcher=lost_return).run_once(root.job_id)
+
+    original = observed[0]
+    reopened = Runtime.at(tmp_path)
+    pending = reopened.jobs.pending_cycle_dispatch_effect_unknown(root.job_id)
+    assert pending is not None
+    assert pending["dispatch_command_id"] == original[1]
+    calls: list[tuple[str, str]] = []
+
+    def reconcile(job_id: str, command_id: str):
+        calls.append((job_id, command_id))
+        return reopened.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            worker_id="worker-a",
+            quota_class="codex-hf1q-step",
+        )
+
+    outcome = CooCycle(reopened, dispatcher=reconcile).run_once(root.job_id)
+    assert outcome.action == "DISPATCHED"
+    assert calls == [original]
+    assert len(reopened.attempts.list_attempts(first.job_id)) == 1
+    assert reopened.attempts.list_attempts(second.job_id) == []
+    assert reopened.jobs.pending_cycle_dispatch_effect_unknown(root.job_id) is None
