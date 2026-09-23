@@ -734,6 +734,12 @@ def validate_reconciliation_pair(
                     "reconciliation evidence namespace metadata is unsafe"
                 )
 
+    terminal_path = receipt_root / expected_name
+    if _read_optional_bounded_json(terminal_path) is not None:
+        raise BrokerTrustError(
+            "request id has both terminal and reconciliation records"
+        )
+
     record = _read_strict_reconciliation_record_file(
         reconciliation_path,
         expected_request_id=expected_request_id,

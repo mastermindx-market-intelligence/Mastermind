@@ -286,6 +286,24 @@ def test_valid_reconciled_marker_allows_revocation_and_preserves_both_records(ho
     assert any(call.startswith("remove ") for call in calls)
 
 
+def test_terminal_receipt_with_reconciled_pair_keeps_revocation_fail_closed(host):
+    marker, reconciliation = _write_reconciled_pair(host)
+    terminal = marker.parent.parent / f"{_TARGET_ID}.json"
+    terminal.write_text("{}\n", encoding="utf-8")
+    marker_before = marker.read_bytes()
+    reconciliation_before = reconciliation.read_bytes()
+    terminal_before = terminal.read_bytes()
+
+    result, calls = run_uninstall(host, "--privileged-only")
+
+    assert result.returncode == 75
+    assert "EFFECT_RECONCILIATION_REQUIRED" in result.stderr
+    assert marker.read_bytes() == marker_before
+    assert reconciliation.read_bytes() == reconciliation_before
+    assert terminal.read_bytes() == terminal_before
+    assert not any(call.startswith("remove ") for call in calls)
+
+
 def test_tampered_reconciliation_keeps_revocation_fail_closed(host):
     marker, reconciliation = _write_reconciled_pair(host)
     document = json.loads(reconciliation.read_text())

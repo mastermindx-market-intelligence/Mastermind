@@ -261,6 +261,14 @@ def test_terminal_receipt_and_reconciliation_can_never_coexist(tmp_path: Path) -
     digest, marker_bytes = _marker(broker)
     broker.reconcile_not_applied(_reconcile_request(digest, marker_bytes), peer_uid=501)
     broker.receipt_path(TARGET_ID).write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(PrivilegedBrokerError, match="both terminal and reconciliation"):
+        validate_reconciliation_pair(
+            broker.inflight_path(TARGET_ID),
+            broker.reconciliation_path(TARGET_ID),
+            expected_request_id=TARGET_ID,
+            require_root_metadata=False,
+        )
     with pytest.raises(PrivilegedBrokerError):
         broker.query_status(_status(), peer_uid=501)
 def test_reconciled_status_requires_original_marker_to_remain_intact(tmp_path: Path) -> None:
