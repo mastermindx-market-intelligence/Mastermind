@@ -30,7 +30,8 @@ from control_plane.web_sol_continuation import (
 ASSIGNMENT_SCHEMA: Final[str] = "mastermind.web_sol_cognition_assignment/v1"
 MAX_ASSIGNMENT_JSON_BYTES: Final[int] = 22 * 1024
 MAX_RENDERED_ASSIGNMENT_BYTES: Final[int] = 24 * 1024
-RESEARCH_ONLY_AUTHORITIES: Final[frozenset[str]] = frozenset({"READ", "RESEARCH"})
+WORK_COGNITION_AUTHORITIES: Final[frozenset[str]] = frozenset({"READ", "RESEARCH"})
+REVIEW_COGNITION_AUTHORITIES: Final[frozenset[str]] = frozenset({"READ"})
 SUPPORTED_ROLES: Final[frozenset[str]] = frozenset({"work", "review"})
 
 _FIXED_DIRECTIVE = "\n".join(
@@ -89,16 +90,22 @@ def _require_exact_runtime_binding(job: Job, attempt: Attempt) -> None:
 
 
 def _require_research_only(job: Job) -> None:
+    role = job.orchestration_role
+    if role not in SUPPORTED_ROLES:
+        raise WebSolCognitionAssignmentError("ROLE_NOT_COGNITION_ASSIGNABLE")
+    expected_authorities = (
+        WORK_COGNITION_AUTHORITIES
+        if role == "work"
+        else REVIEW_COGNITION_AUTHORITIES
+    )
     authorities = list(job.requested_authorities)
     if (
         len(authorities) != len(set(authorities))
-        or frozenset(authorities) != RESEARCH_ONLY_AUTHORITIES
+        or frozenset(authorities) != expected_authorities
         or list(job.allowed_write_paths)
         or list(job.validation_commands)
     ):
         raise WebSolCognitionAssignmentError("JOB_NOT_RESEARCH_ONLY")
-    if job.orchestration_role not in SUPPORTED_ROLES:
-        raise WebSolCognitionAssignmentError("ROLE_NOT_COGNITION_ASSIGNABLE")
     if not isinstance(job.objective, str) or not job.objective.strip():
         raise WebSolCognitionAssignmentError("OBJECTIVE_INVALID")
 
@@ -233,7 +240,8 @@ __all__ = [
     "ASSIGNMENT_SCHEMA",
     "MAX_ASSIGNMENT_JSON_BYTES",
     "MAX_RENDERED_ASSIGNMENT_BYTES",
-    "RESEARCH_ONLY_AUTHORITIES",
+    "REVIEW_COGNITION_AUTHORITIES",
+    "WORK_COGNITION_AUTHORITIES",
     "SUPPORTED_ROLES",
     "WebSolCognitionAssignment",
     "WebSolCognitionAssignmentError",
