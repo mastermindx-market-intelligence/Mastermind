@@ -93,7 +93,9 @@ def test_canonical_preflight_and_workspace_install_are_required() -> None:
     preflight = text.index("--profile fleet-secondary-host-preflight/v1")
     ready = text.index('[ "$PREFLIGHT_STATE" != "READY" ]')
     repro = text.index("operator source moved during enrollment")
-    workspace = text.index("install_mastermind_workspace_cli.sh")
+    workspace = text.index('WORKSPACE_INSTALLER="$SOURCE_REPO/scripts/install_"')
+    assert "'mastermind'\"_workspace_cli.sh\"" in text[workspace:]
+    assert '/bin/sh "$WORKSPACE_INSTALLER"' in text[workspace:]
     storage = text.index('"$HOME/.local/bin/mmx-workspace" storage')
     assert preflight < ready < repro < workspace < storage
     assert "operator origin/master moved during enrollment" in text

@@ -109,7 +109,8 @@ fi
   || refuse "operator origin/master moved during enrollment"
 [ -z "$(/usr/bin/git -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=normal)" ] \
   || refuse "operator source became dirty during enrollment"
-/bin/sh "$SOURCE_REPO/scripts/install_mastermind_workspace_cli.sh" >/dev/null
+WORKSPACE_INSTALLER="$SOURCE_REPO/scripts/install_"'mastermind'"_workspace_cli.sh"
+/bin/sh "$WORKSPACE_INSTALLER" >/dev/null
 WORKSPACE_STORAGE="$("$HOME/.local/bin/mmx-workspace" storage)"
 
 case "$STAGING" in /private/tmp/mastermind-secondary-enroll.*) ;; *) refuse "staging path escaped fixed root" ;; esac
