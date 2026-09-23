@@ -287,3 +287,37 @@ test("accepts the closed existing Executive shape for every orchestration role f
     assert.equal(result.status, "RESULT_READY", item.role_result.schema_version);
   }
 });
+
+
+test("refuses credential-prefixed content before browser export", () => {
+  const value = envelope({summary: "credential sk-ant-abcdefghij"});
+  const result = core.reduceCanonicalResultText(canonical(value), expected);
+  assert.equal(result.status, "RESULT_REFUSED");
+  assert.equal(result.canonical_result_json, null);
+});
+
+test("refuses JWT-shaped content before browser export", () => {
+  const value = envelope({
+    current_state: "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.signature",
+  });
+  const result = core.reduceCanonicalResultText(canonical(value), expected);
+  assert.equal(result.status, "RESULT_REFUSED");
+});
+
+test("refuses email-shaped content before browser export", () => {
+  const value = envelope({next_actions: ["Contact operator@example.com"]});
+  const result = core.reduceCanonicalResultText(canonical(value), expected);
+  assert.equal(result.status, "RESULT_REFUSED");
+});
+
+test("refuses Mastermind environment or secret-marker material before browser export", () => {
+  for (const text of [
+    "MASTERMIND_AUTH_TOKEN is configured",
+    "TOKEN=plainvalue",
+    "PASSWORD=plainvalue",
+  ]) {
+    const value = envelope({current_state: text});
+    const result = core.reduceCanonicalResultText(canonical(value), expected);
+    assert.equal(result.status, "RESULT_REFUSED", text);
+  }
+});
