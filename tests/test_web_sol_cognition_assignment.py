@@ -114,7 +114,7 @@ def _source() -> ExecutiveDialogueSource:
     )
 
 
-def _job(*, role: str = "work") -> Job:
+def _job(*, role: str = "work", authorities: list[str] | None = None) -> Job:
     return Job(
         job_id="JOB-200",
         objective="Research the exact Web-Sol failure and produce an evidence-backed repair brief.",
@@ -131,7 +131,11 @@ def _job(*, role: str = "work") -> Job:
         created_at="2026-09-23T09:00:00Z",
         updated_at="2026-09-23T09:00:00Z",
         current_attempt_id="ATT-200",
-        requested_authorities=["READ", "RESEARCH"],
+        requested_authorities=(
+            list(authorities)
+            if authorities is not None
+            else (["READ"] if role == "review" else ["READ", "RESEARCH"])
+        ),
         authority_policy_hash=DIGEST_A,
         allowed_write_paths=[],
         validation_commands=[],
@@ -288,9 +292,13 @@ def test_refuses_wrong_workstream_or_untrusted_continuation_source() -> None:
 def test_role_surface_is_deliberately_narrow() -> None:
     review = _build(job=_job(role="review"))
     assert review.document["job"]["role"] == "review"
+    assert review.document["effect_contract"]["requested_authorities"] == ["READ"]
     assert review.document["result_contract"]["schema"]["properties"]["role"] == {
         "const": "review"
     }
+
+    with pytest.raises(WebSolCognitionAssignmentError, match="JOB_NOT_RESEARCH_ONLY"):
+        _build(job=_job(role="review", authorities=["READ", "RUN_TESTS"]))
 
     with pytest.raises(WebSolCognitionAssignmentError, match="ROLE_NOT_COGNITION_ASSIGNABLE"):
         _build(job=_job(role="plan"))
