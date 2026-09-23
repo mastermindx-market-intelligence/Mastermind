@@ -29,6 +29,7 @@ from control_plane.executive_privileged_action import (
     ACTION_EFFECT_UNKNOWN_EXIT_CODE,
     PrivilegedActionRequest,
     PrivilegedActionStatusRequest,
+    REQUEST_SCHEMA,
     STATUS_REQUEST_SCHEMA,
     build_argv,
     canonical_request_bytes,
@@ -40,8 +41,13 @@ from control_plane.executive_privileged_action import (
 BROKER_CONFIG_SCHEMA = "mastermind.executive_privileged_broker_config.v1"
 RECEIPT_SCHEMA = "mastermind.executive_privileged_action_receipt.v1"
 INFLIGHT_SCHEMA = "mastermind.executive_privileged_action_inflight.v1"
+RECONCILE_REQUEST_SCHEMA = (
+    "mastermind.executive_privileged_action_reconcile_not_applied_request.v1"
+)
+RECONCILIATION_SCHEMA = "mastermind.executive_privileged_action_reconciliation.v1"
 STATUS_TERMINAL = "TERMINAL"
 STATUS_EFFECT_UNKNOWN = "EFFECT_UNKNOWN"
+STATUS_RECONCILED_NOT_APPLIED = "RECONCILED_NOT_APPLIED"
 STATUS_NOT_FOUND = "NOT_FOUND"
 _RELEASE_PREFIX = Path("/Library/Application Support/MastermindExecutive/releases")
 _RECEIPT_ROOT = Path("/var/db/mastermind-executive/privileged-actions/receipts")
@@ -57,6 +63,61 @@ _CLOSED_ENV = {
 _MAX_RECEIPT_BYTES = 64 * 1024
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
 _UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+_READINESS_RECEIPT_PATH = Path(
+    "/Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json"
+)
+_READINESS_TRANSACTION_LOCK = Path(
+    "/Library/Application Support/MastermindExecutive/config/provider-readiness.transaction.lock"
+)
+_RECONCILE_REQUEST_KEYS = frozenset(
+    {
+        "schema",
+        "target_request_id",
+        "target_request_sha256",
+        "target_marker_sha256",
+        "target_release_sha",
+        "readiness_receipt_sha256",
+        "expected_credential_kind",
+        "workspace_binding_class",
+        "credential_expires_at",
+    }
+)
+_INFLIGHT_RECORD_KEYS = frozenset(
+    {
+        "schema",
+        "request_id",
+        "request_sha256",
+        "action",
+        "effect_class",
+        "started_at",
+        "release_sha",
+    }
+)
+_RECONCILIATION_KEYS = frozenset(
+    {
+        "schema",
+        "classification",
+        "target_request_id",
+        "target_request_sha256",
+        "target_action",
+        "target_effect_class",
+        "target_started_at",
+        "target_release_sha",
+        "target_marker_sha256",
+        "readiness_receipt_sha256",
+        "readiness_observed_at",
+        "expected_credential_kind",
+        "workspace_binding_class",
+        "credential_expires_at",
+        "readiness_transaction_lock_absent",
+        "verify_ready_process_absent",
+        "readiness_identity_current",
+        "target_deadline_absent",
+        "reconciler_release_sha",
+        "reconciled_at",
+        "broker_version",
+    }
+)
 _TRUSTED_EFFECT_PATHS = (
     "ops/executive_os/service-control.sh",
     "ops/executive_os/provision-worker-auth.sh",
@@ -107,6 +168,93 @@ class BrokerTrustError(PrivilegedBrokerError):
 
 class ChildStartError(PrivilegedBrokerError):
     """The reviewed child failed before a process existed."""
+
+
+class ReconciledNotAppliedError(PrivilegedBrokerError):
+    """The original request is durably reconciled as not applied and must not replay."""
+
+
+@dataclasses.dataclass(frozen=True)
+class ReconcileNotAppliedRequest:
+    target_request_id: str
+    target_request_sha256: str
+    target_marker_sha256: str
+    target_release_sha: str
+    readiness_receipt_sha256: str
+    expected_credential_kind: str
+    workspace_binding_class: str
+    credential_expires_at: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "schema": RECONCILE_REQUEST_SCHEMA,
+            "target_request_id": self.target_request_id,
+            "target_request_sha256": self.target_request_sha256,
+            "target_marker_sha256": self.target_marker_sha256,
+            "target_release_sha": self.target_release_sha,
+            "readiness_receipt_sha256": self.readiness_receipt_sha256,
+            "expected_credential_kind": self.expected_credential_kind,
+            "workspace_binding_class": self.workspace_binding_class,
+            "credential_expires_at": self.credential_expires_at,
+        }
+
+
+def validate_reconcile_not_applied_request(
+    raw: Mapping[str, Any],
+) -> ReconcileNotAppliedRequest:
+    if not isinstance(raw, Mapping) or frozenset(raw) != _RECONCILE_REQUEST_KEYS:
+        raise PrivilegedBrokerError("reconciliation request keys are invalid")
+    if raw.get("schema") != RECONCILE_REQUEST_SCHEMA:
+        raise PrivilegedBrokerError("unsupported reconciliation request schema")
+    request_id = raw.get("target_request_id")
+    if not isinstance(request_id, str) or _REQUEST_ID_RE.fullmatch(request_id) is None:
+        raise PrivilegedBrokerError("reconciliation target request_id is invalid")
+    request_sha = raw.get("target_request_sha256")
+    marker_sha = raw.get("target_marker_sha256")
+    readiness_sha = raw.get("readiness_receipt_sha256")
+    for value, label in (
+        (request_sha, "target request"),
+        (marker_sha, "target marker"),
+        (readiness_sha, "readiness receipt"),
+    ):
+        if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
+            raise PrivilegedBrokerError(f"reconciliation {label} digest is invalid")
+    release_sha = raw.get("target_release_sha")
+    if not isinstance(release_sha, str) or _SHA40_RE.fullmatch(release_sha) is None:
+        raise PrivilegedBrokerError("reconciliation target release is invalid")
+
+    target_raw = {
+        "schema": REQUEST_SCHEMA,
+        "request_id": request_id,
+        "action": "executive.worker_auth.verify_ready",
+        "args": {
+            "expected_credential_kind": raw.get("expected_credential_kind"),
+            "workspace_binding_class": raw.get("workspace_binding_class"),
+            "credential_expires_at": raw.get("credential_expires_at"),
+        },
+    }
+    try:
+        target = validate_request(target_raw)
+    except ValueError as exc:
+        raise PrivilegedBrokerError(
+            "reconciliation target verify_ready arguments are invalid"
+        ) from exc
+    canonical_digest = hashlib.sha256(canonical_request_bytes(target)).hexdigest()
+    if canonical_digest != request_sha:
+        raise RequestIdConflictError(
+            "reconciliation target request digest does not match supplied arguments"
+        )
+    args = target.args_dict()
+    return ReconcileNotAppliedRequest(
+        target_request_id=request_id,
+        target_request_sha256=request_sha,
+        target_marker_sha256=marker_sha,
+        target_release_sha=release_sha,
+        readiness_receipt_sha256=readiness_sha,
+        expected_credential_kind=args["expected_credential_kind"],
+        workspace_binding_class=args["workspace_binding_class"],
+        credential_expires_at=args["credential_expires_at"],
+    )
 
 
 class Executor(Protocol):
@@ -258,6 +406,55 @@ def _read_optional_bounded_json(path: Path) -> dict[str, Any] | None:
     return _read_bounded_json(path)
 
 
+def _stable_file_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        info.st_gid,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _read_stable_bounded_bytes(path: Path) -> tuple[bytes, os.stat_result]:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise BrokerTrustError(f"broker evidence is unreadable: {path.name}") from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or before.st_size > _MAX_RECEIPT_BYTES:
+            raise BrokerTrustError(f"broker evidence metadata is invalid: {path.name}")
+        chunks: list[bytes] = []
+        remaining = _MAX_RECEIPT_BYTES + 1
+        while remaining > 0:
+            part = os.read(descriptor, min(4096, remaining))
+            if not part:
+                break
+            chunks.append(part)
+            remaining -= len(part)
+        raw = b"".join(chunks)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        path_after = path.lstat()
+    except OSError as exc:
+        raise BrokerTrustError(f"broker evidence identity changed: {path.name}") from exc
+    if (
+        len(raw) != before.st_size
+        or _stable_file_identity(before) != _stable_file_identity(after)
+        or _stable_file_identity(after) != _stable_file_identity(path_after)
+    ):
+        raise BrokerTrustError(f"broker evidence changed during read: {path.name}")
+    return raw, after
+
+
 def _validate_stored_release_sha(value: Any) -> str:
     if not isinstance(value, str) or _SHA40_RE.fullmatch(value) is None:
         raise BrokerTrustError("stored release_sha is not an exact Git commit")
@@ -345,6 +542,176 @@ def validate_terminal_receipt(
         if expected is not None and observed != expected:
             raise BrokerTrustError(f"terminal receipt {label} does not match the request")
     return receipt
+
+
+def validate_reconciliation_record(
+    value: Mapping[str, Any],
+    *,
+    expected_request_id: str | None = None,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or frozenset(value) != _RECONCILIATION_KEYS:
+        raise BrokerTrustError("reconciliation record keys are invalid")
+    record = dict(value)
+    if record.get("schema") != RECONCILIATION_SCHEMA:
+        raise BrokerTrustError("reconciliation record schema is invalid")
+    if record.get("classification") != "NOT_APPLIED":
+        raise BrokerTrustError("reconciliation classification is invalid")
+    request_id = record.get("target_request_id")
+    if not isinstance(request_id, str) or _REQUEST_ID_RE.fullmatch(request_id) is None:
+        raise BrokerTrustError("reconciliation target request_id is invalid")
+    if expected_request_id is not None and request_id != expected_request_id:
+        raise BrokerTrustError("reconciliation target request_id differs")
+    for field in (
+        "target_request_sha256",
+        "target_marker_sha256",
+        "readiness_receipt_sha256",
+    ):
+        _validate_stored_digest(record.get(field))
+    _validate_stored_release_sha(record.get("target_release_sha"))
+    _validate_stored_release_sha(record.get("reconciler_release_sha"))
+    if record.get("target_action") != "executive.worker_auth.verify_ready":
+        raise BrokerTrustError("reconciliation target action is not verify_ready")
+    if record.get("target_effect_class") != ACTION_EFFECT_CLASS[
+        "executive.worker_auth.verify_ready"
+    ]:
+        raise BrokerTrustError("reconciliation target effect class is invalid")
+    target_raw = {
+        "schema": REQUEST_SCHEMA,
+        "request_id": request_id,
+        "action": "executive.worker_auth.verify_ready",
+        "args": {
+            "expected_credential_kind": record.get("expected_credential_kind"),
+            "workspace_binding_class": record.get("workspace_binding_class"),
+            "credential_expires_at": record.get("credential_expires_at"),
+        },
+    }
+    try:
+        target = validate_request(target_raw)
+    except ValueError as exc:
+        raise BrokerTrustError(
+            "reconciliation target verify_ready arguments are invalid"
+        ) from exc
+    if (
+        hashlib.sha256(canonical_request_bytes(target)).hexdigest()
+        != record["target_request_sha256"]
+    ):
+        raise BrokerTrustError(
+            "reconciliation target digest does not match recorded arguments"
+        )
+    target_started = _validate_receipt_time(
+        record.get("target_started_at"), "target_started_at"
+    )
+    readiness_observed = _validate_receipt_time(
+        record.get("readiness_observed_at"), "readiness_observed_at"
+    )
+    reconciled_at = _validate_receipt_time(
+        record.get("reconciled_at"), "reconciled_at"
+    )
+    if readiness_observed >= target_started or reconciled_at < target_started:
+        raise BrokerTrustError("reconciliation time ordering is invalid")
+    if record.get("readiness_transaction_lock_absent") is not True:
+        raise BrokerTrustError("reconciliation did not prove readiness lock absence")
+    if record.get("verify_ready_process_absent") is not True:
+        raise BrokerTrustError("reconciliation did not prove verify_ready process absence")
+    if record.get("readiness_identity_current") is not True:
+        raise BrokerTrustError("reconciliation did not prove readiness identity continuity")
+    if record.get("target_deadline_absent") is not True:
+        raise BrokerTrustError("reconciliation did not prove target deadline absence")
+    version = record.get("broker_version")
+    if not isinstance(version, str) or re.fullmatch(r"[0-9A-Za-z._-]{1,32}", version) is None:
+        raise BrokerTrustError("reconciliation broker_version is invalid")
+    return record
+
+
+def _default_reconciliation_observer() -> Mapping[str, Any]:
+    raw, info = _read_stable_bounded_bytes(_READINESS_RECEIPT_PATH)
+    if (
+        info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o400
+        or info.st_nlink != 1
+    ):
+        raise BrokerTrustError("provider readiness receipt metadata is unsafe")
+    try:
+        document = json.loads(raw.decode("utf-8", errors="strict"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise BrokerTrustError("provider readiness receipt is invalid JSON") from exc
+    if not isinstance(document, dict):
+        raise BrokerTrustError("provider readiness receipt is not an object")
+
+    try:
+        from control_plane.codex_worker import load_codex_attestation_receipt
+        from ops.executive_os import provider_readiness
+
+        current_auth_identity = provider_readiness.current_auth_identity(
+            provider_readiness.AUTH_PATH,
+            worker_uid=provider_readiness.WORKER_UID,
+            worker_gid=provider_readiness.WORKER_GID,
+        )
+        attestation_receipt_path = (
+            _RELEASE_PREFIX.parent
+            / f"codex-attestation-{provider_readiness.CODEX_VERSION}.json"
+        )
+        binary_attestation = load_codex_attestation_receipt(
+            attestation_receipt_path,
+            expected_binary_path=provider_readiness.CODEX_BINARY,
+            expected_owner_gid=provider_readiness.WORKER_GID,
+        )
+        binary_info = provider_readiness.CODEX_BINARY.lstat()
+        current_binary_identity = {
+            "path": binary_attestation.path,
+            "version": binary_attestation.version,
+            "sha256": binary_attestation.sha256,
+            "team_identifier": binary_attestation.team_identifier,
+            "size": binary_attestation.size,
+            "device": binary_attestation.device,
+            "inode": binary_attestation.inode,
+            "mode": binary_attestation.mode,
+            "uid": binary_attestation.uid,
+            "gid": binary_attestation.gid,
+            "mtime_ns": binary_attestation.mtime_ns,
+            "ctime_ns": binary_info.st_ctime_ns,
+            "nlink": binary_info.st_nlink,
+        }
+    except Exception as exc:
+        raise BrokerTrustError(
+            "current provider readiness identities could not be validated"
+        ) from exc
+
+    try:
+        _READINESS_TRANSACTION_LOCK.lstat()
+    except FileNotFoundError:
+        lock_present = False
+    except OSError as exc:
+        raise BrokerTrustError("provider readiness transaction lock is unreadable") from exc
+    else:
+        lock_present = True
+
+    completed = subprocess.run(
+        ["/bin/ps", "ax", "-o", "command="],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=_CLOSED_ENV,
+        timeout=5,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise BrokerTrustError("could not census provider readiness processes")
+    commands = completed.stdout.decode("utf-8", errors="replace").splitlines()
+    active = tuple(
+        line.strip()
+        for line in commands
+        if "provision-worker-auth.sh" in line and "--verify-ready" in line
+    )
+    return {
+        "readiness_receipt_sha256": hashlib.sha256(raw).hexdigest(),
+        "readiness_document": document,
+        "readiness_transaction_lock_present": lock_present,
+        "verify_ready_processes": active,
+        "current_auth_identity": current_auth_identity,
+        "current_binary_identity": current_binary_identity,
+    }
 
 
 def _default_executor(
@@ -460,20 +827,26 @@ class PrivilegedActionBroker:
         executor: Executor = _default_executor,
         require_root: bool = True,
         trust_validator: Callable[[PrivilegedBrokerConfig], None] = verify_production_trust,
+        reconciliation_observer: Callable[[], Mapping[str, Any]] = _default_reconciliation_observer,
     ) -> None:
         self.config = config
         self.receipt_root = Path(config.receipt_root)
         self.inflight_root = self.receipt_root / "inflight"
+        self.reconciliation_root = self.receipt_root / "reconciled"
         self._executor = executor
+        self._require_root = require_root
+        self._reconciliation_observer = reconciliation_observer
         if require_root and os.geteuid() != 0:
             raise BrokerTrustError("privileged broker must run as root")
         trust_validator(config)
         self.receipt_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.inflight_root.mkdir(exist_ok=True, mode=0o700)
+        self.reconciliation_root.mkdir(exist_ok=True, mode=0o700)
         if require_root:
             for path, label in (
                 (self.receipt_root, "privileged receipt root"),
                 (self.inflight_root, "privileged in-flight root"),
+                (self.reconciliation_root, "privileged reconciliation root"),
             ):
                 info = path.lstat()
                 if info.st_uid != 0 or info.st_gid != 0 or not stat.S_ISDIR(info.st_mode):
@@ -485,6 +858,86 @@ class PrivilegedActionBroker:
 
     def inflight_path(self, request_id: str) -> Path:
         return self.inflight_root / f"{request_id}.json"
+
+    def reconciliation_path(self, request_id: str) -> Path:
+        return self.reconciliation_root / f"{request_id}.json"
+
+    def _read_strict_inflight_marker(
+        self, request_id: str
+    ) -> tuple[dict[str, Any], bytes]:
+        path = self.inflight_path(request_id)
+        raw, info = _read_stable_bounded_bytes(path)
+        if self._require_root and (
+            info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+        ):
+            raise BrokerTrustError("in-flight marker metadata is unsafe")
+        try:
+            marker = json.loads(raw.decode("utf-8", errors="strict"))
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise BrokerTrustError("in-flight marker is invalid JSON") from exc
+        if not isinstance(marker, dict) or frozenset(marker) != _INFLIGHT_RECORD_KEYS:
+            raise BrokerTrustError("in-flight marker fields are invalid")
+        if marker.get("schema") != INFLIGHT_SCHEMA or marker.get("request_id") != request_id:
+            raise BrokerTrustError("in-flight marker identity is invalid")
+        _validate_stored_digest(marker.get("request_sha256"))
+        _validate_stored_release_sha(marker.get("release_sha"))
+        action = marker.get("action")
+        if not isinstance(action, str) or action not in ACTION_EFFECT_CLASS:
+            raise BrokerTrustError("in-flight marker action is invalid")
+        if marker.get("effect_class") != ACTION_EFFECT_CLASS[action]:
+            raise BrokerTrustError("in-flight marker effect class is invalid")
+        _validate_receipt_time(marker.get("started_at"), "started_at")
+        return marker, raw
+
+    def _read_reconciliation_for_status(
+        self, request_id: str
+    ) -> dict[str, Any] | None:
+        value = _read_optional_bounded_json(self.reconciliation_path(request_id))
+        if value is None:
+            return None
+        return validate_reconciliation_record(
+            value, expected_request_id=request_id
+        )
+
+    def _validate_reconciliation_marker(
+        self, record: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        request_id = str(record["target_request_id"])
+        marker, raw = self._read_strict_inflight_marker(request_id)
+        if hashlib.sha256(raw).hexdigest() != record["target_marker_sha256"]:
+            raise BrokerTrustError("reconciled in-flight marker bytes changed")
+        for marker_field, record_field in (
+            ("request_sha256", "target_request_sha256"),
+            ("action", "target_action"),
+            ("effect_class", "target_effect_class"),
+            ("started_at", "target_started_at"),
+            ("release_sha", "target_release_sha"),
+        ):
+            if marker.get(marker_field) != record.get(record_field):
+                raise BrokerTrustError(
+                    f"reconciliation no longer matches marker field {marker_field}"
+                )
+        return marker
+
+    def _existing_reconciliation_for_request(
+        self, request: PrivilegedActionRequest, digest: str
+    ) -> dict[str, Any] | None:
+        record = self._read_reconciliation_for_status(request.request_id)
+        if record is None:
+            return None
+        if record["target_request_sha256"] != digest:
+            raise RequestIdConflictError(
+                "request id already has a different reconciled request"
+            )
+        if record["target_action"] != request.action:
+            raise RequestIdConflictError(
+                "request id already has a different reconciled action"
+            )
+        self._validate_reconciliation_marker(record)
+        return record
 
     @staticmethod
     def _request_digest(request: PrivilegedActionRequest) -> str:
@@ -548,7 +1001,16 @@ class PrivilegedActionBroker:
             raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
         request = validate_request(raw_request)
         digest = self._request_digest(request)
+        reconciled = self._existing_reconciliation_for_request(request, digest)
         existing = self._existing_terminal(request, digest)
+        if reconciled is not None and existing is not None:
+            raise BrokerTrustError(
+                "request id has both terminal and reconciliation records"
+            )
+        if reconciled is not None:
+            raise ReconciledNotAppliedError(
+                "matching request was reconciled as not applied and cannot replay"
+            )
         if existing is not None:
             return existing, True
         self._check_inflight(request, digest)
@@ -621,6 +1083,200 @@ class PrivilegedActionBroker:
         receipt, _replayed = self._handle_outcome(raw_request, peer_uid=peer_uid)
         return receipt
 
+    def reconcile_not_applied(
+        self, raw_request: Mapping[str, Any], *, peer_uid: int
+    ) -> tuple[dict[str, Any], bool]:
+        if (
+            isinstance(peer_uid, bool)
+            or not isinstance(peer_uid, int)
+            or peer_uid not in self.config.allowed_peer_uids
+        ):
+            raise PeerAuthorizationError(
+                "kernel peer uid is not authorized for privileged actions"
+            )
+        request = validate_reconcile_not_applied_request(raw_request)
+        terminal = self._read_terminal_for_status(request.target_request_id)
+        if terminal is not None:
+            raise PrivilegedBrokerError(
+                "target request already has a terminal receipt and cannot be reconciled"
+            )
+
+        existing = self._read_reconciliation_for_status(request.target_request_id)
+        if existing is not None:
+            expected = {
+                "target_request_sha256": request.target_request_sha256,
+                "target_marker_sha256": request.target_marker_sha256,
+                "target_release_sha": request.target_release_sha,
+                "readiness_receipt_sha256": request.readiness_receipt_sha256,
+                "expected_credential_kind": request.expected_credential_kind,
+                "workspace_binding_class": request.workspace_binding_class,
+                "credential_expires_at": request.credential_expires_at,
+            }
+            if any(existing.get(key) != value for key, value in expected.items()):
+                raise RequestIdConflictError(
+                    "target request already has a different reconciliation record"
+                )
+            self._validate_reconciliation_marker(existing)
+            return existing, True
+
+        marker, marker_raw = self._read_strict_inflight_marker(
+            request.target_request_id
+        )
+        if marker["action"] != "executive.worker_auth.verify_ready":
+            raise PrivilegedBrokerError(
+                "only verify_ready in-flight markers may be reconciled as not applied"
+            )
+        if marker["request_sha256"] != request.target_request_sha256:
+            raise RequestIdConflictError(
+                "target request digest differs from the in-flight marker"
+            )
+        if marker["release_sha"] != request.target_release_sha:
+            raise RequestIdConflictError(
+                "target release differs from the in-flight marker"
+            )
+        if hashlib.sha256(marker_raw).hexdigest() != request.target_marker_sha256:
+            raise BrokerTrustError("target in-flight marker bytes differ")
+
+        evidence = self._reconciliation_observer()
+        required_evidence = {
+            "readiness_receipt_sha256",
+            "readiness_document",
+            "readiness_transaction_lock_present",
+            "verify_ready_processes",
+            "current_auth_identity",
+            "current_binary_identity",
+        }
+        if not isinstance(evidence, Mapping) or set(evidence) != required_evidence:
+            raise BrokerTrustError("readiness reconciliation evidence is incomplete")
+        if evidence["readiness_receipt_sha256"] != request.readiness_receipt_sha256:
+            raise BrokerTrustError("provider readiness receipt changed after target request")
+        document = evidence["readiness_document"]
+        if (
+            not isinstance(document, Mapping)
+            or document.get("schema_version")
+            != "mastermind.executive_provider_readiness/v2"
+            or document.get("passed") is not True
+            or document.get("refusal") is not None
+            or document.get("expected_credential_kind")
+            != request.expected_credential_kind
+            or document.get("workspace_binding_class")
+            != request.workspace_binding_class
+        ):
+            raise BrokerTrustError(
+                "current provider readiness receipt is not the prior passing receipt"
+            )
+        prior_credential_expires_at = document.get("credential_expires_at")
+        if (
+            not isinstance(prior_credential_expires_at, str)
+            or _UTC_RE.fullmatch(prior_credential_expires_at) is None
+        ):
+            raise BrokerTrustError(
+                "current provider readiness receipt has an invalid credential expiry"
+            )
+        if prior_credential_expires_at == request.credential_expires_at:
+            raise BrokerTrustError(
+                "current provider readiness receipt already carries the target deadline"
+            )
+
+        current_auth_identity = evidence["current_auth_identity"]
+        current_binary_identity = evidence["current_binary_identity"]
+        receipt_auth_identity = document.get("credential_lstat")
+        receipt_binary_identity = document.get("codex_binary")
+        provider_identity = document.get("provider_identity")
+        if (
+            not isinstance(current_auth_identity, Mapping)
+            or not isinstance(current_binary_identity, Mapping)
+            or not isinstance(receipt_auth_identity, Mapping)
+            or not isinstance(receipt_binary_identity, Mapping)
+            or not isinstance(provider_identity, Mapping)
+            or receipt_auth_identity != dict(current_auth_identity)
+            or receipt_binary_identity != dict(current_binary_identity)
+            or provider_identity.get("credential_lstat") != dict(current_auth_identity)
+            or provider_identity.get("codex_binary") != dict(current_binary_identity)
+        ):
+            raise BrokerTrustError(
+                "current provider auth or installed binary identity differs from the pre-effect readiness receipt"
+            )
+
+        observed_at = document.get("observed_at")
+        observed_time = _validate_receipt_time(
+            observed_at, "readiness_observed_at"
+        )
+        target_started = _validate_receipt_time(
+            marker["started_at"], "target_started_at"
+        )
+        if observed_time >= target_started:
+            raise BrokerTrustError(
+                "provider readiness receipt is not provably older than target request"
+            )
+        if evidence["readiness_transaction_lock_present"] is not False:
+            raise BrokerTrustError(
+                "provider readiness transaction lock is still present"
+            )
+        processes = evidence["verify_ready_processes"]
+        if (
+            not isinstance(processes, (tuple, list))
+            or any(not isinstance(value, str) for value in processes)
+            or len(processes) != 0
+        ):
+            raise BrokerTrustError("a verify_ready process may still be active")
+
+        record: dict[str, Any] = {
+            "schema": RECONCILIATION_SCHEMA,
+            "classification": "NOT_APPLIED",
+            "target_request_id": request.target_request_id,
+            "target_request_sha256": request.target_request_sha256,
+            "target_action": marker["action"],
+            "target_effect_class": marker["effect_class"],
+            "target_started_at": marker["started_at"],
+            "target_release_sha": marker["release_sha"],
+            "target_marker_sha256": request.target_marker_sha256,
+            "readiness_receipt_sha256": request.readiness_receipt_sha256,
+            "readiness_observed_at": observed_at,
+            "expected_credential_kind": request.expected_credential_kind,
+            "workspace_binding_class": request.workspace_binding_class,
+            "credential_expires_at": request.credential_expires_at,
+            "readiness_transaction_lock_absent": True,
+            "verify_ready_process_absent": True,
+            "readiness_identity_current": True,
+            "target_deadline_absent": True,
+            "reconciler_release_sha": self.config.release_root.name,
+            "reconciled_at": _utc_now(),
+            "broker_version": self.config.broker_version,
+        }
+        validate_reconciliation_record(
+            record, expected_request_id=request.target_request_id
+        )
+        try:
+            _write_exclusive_json(
+                self.reconciliation_path(request.target_request_id), record
+            )
+        except FileExistsError:
+            existing = self._read_reconciliation_for_status(
+                request.target_request_id
+            )
+            if existing is None:
+                raise BrokerTrustError(
+                    "reconciliation record appeared without readable state"
+                )
+            expected = {
+                "target_request_sha256": request.target_request_sha256,
+                "target_marker_sha256": request.target_marker_sha256,
+                "target_release_sha": request.target_release_sha,
+                "readiness_receipt_sha256": request.readiness_receipt_sha256,
+                "expected_credential_kind": request.expected_credential_kind,
+                "workspace_binding_class": request.workspace_binding_class,
+                "credential_expires_at": request.credential_expires_at,
+            }
+            if any(existing.get(key) != value for key, value in expected.items()):
+                raise RequestIdConflictError(
+                    "target request acquired a different reconciliation record"
+                )
+            self._validate_reconciliation_marker(existing)
+            return existing, True
+        self._validate_reconciliation_marker(record)
+        return record, False
+
     def _read_terminal_for_status(self, request_id: str) -> dict[str, Any] | None:
         path = self.receipt_path(request_id)
         value = _read_optional_bounded_json(path)
@@ -650,12 +1306,27 @@ class PrivilegedActionBroker:
         installed_release_sha = self.config.release_root.name
 
         terminal = self._read_terminal_for_status(request_id)
+        reconciliation = self._read_reconciliation_for_status(request_id)
+        if terminal is not None and reconciliation is not None:
+            raise BrokerTrustError(
+                "request id has both terminal and reconciliation records"
+            )
         if terminal is not None:
             return {
                 "status": STATUS_TERMINAL,
                 "request_id": request_id,
                 "installed_release_sha": installed_release_sha,
                 "receipt": terminal,
+            }
+
+        if reconciliation is not None:
+            marker = self._validate_reconciliation_marker(reconciliation)
+            return {
+                "status": STATUS_RECONCILED_NOT_APPLIED,
+                "request_id": request_id,
+                "installed_release_sha": installed_release_sha,
+                "marker_release_sha": marker.get("release_sha"),
+                "reconciliation": reconciliation,
             }
 
         marker = self._read_inflight_for_status(request_id)
@@ -776,7 +1447,21 @@ def _wire_status(projection: Mapping[str, Any]) -> dict[str, Any]:
         value["receipt"] = dict(projection["receipt"])
     if "marker_release_sha" in projection:
         value["marker_release_sha"] = projection["marker_release_sha"]
+    if "reconciliation" in projection:
+        value["reconciliation"] = dict(projection["reconciliation"])
     return value
+
+
+def _wire_reconciliation(
+    reconciliation: Mapping[str, Any], *, replayed: bool
+) -> dict[str, Any]:
+    return {
+        "schema": WIRE_RESPONSE_SCHEMA,
+        "ok": True,
+        "reconciled": True,
+        "replayed": replayed,
+        "reconciliation": dict(reconciliation),
+    }
 
 
 def _send_wire(connection: socket.socket, value: Mapping[str, Any]) -> None:
@@ -822,6 +1507,14 @@ def serve_connection(
         if raw.get("schema") == STATUS_REQUEST_SCHEMA:
             projection = broker.query_status(raw, peer_uid=peer_uid)
             _send_wire(connection, _wire_status(projection))
+        elif raw.get("schema") == RECONCILE_REQUEST_SCHEMA:
+            reconciliation, replayed = broker.reconcile_not_applied(
+                raw, peer_uid=peer_uid
+            )
+            _send_wire(
+                connection,
+                _wire_reconciliation(reconciliation, replayed=replayed),
+            )
         else:
             receipt, replayed = broker._handle_outcome(raw, peer_uid=peer_uid)
             _send_wire(connection, _wire_success(receipt, replayed=replayed))
@@ -830,6 +1523,8 @@ def serve_connection(
         _send_wire(connection, _wire_error("PEER_UNAUTHORIZED", "kernel peer uid is not authorized"))
     except EffectUnknownError as exc:
         _send_wire(connection, _wire_error("EFFECT_UNKNOWN", str(exc)))
+    except ReconciledNotAppliedError as exc:
+        _send_wire(connection, _wire_error("RECONCILED_NOT_APPLIED", str(exc)))
     except RequestIdConflictError as exc:
         _send_wire(connection, _wire_error("REQUEST_ID_CONFLICT", str(exc)))
     except (PrivilegedBrokerError, ValueError) as exc:
@@ -867,15 +1562,21 @@ __all__ = [
     "PrivilegedBrokerConfig",
     "PrivilegedBrokerError",
     "RECEIPT_SCHEMA",
+    "RECONCILE_REQUEST_SCHEMA",
+    "RECONCILIATION_SCHEMA",
+    "ReconciledNotAppliedError",
     "RequestIdConflictError",
     "STATUS_EFFECT_UNKNOWN",
     "STATUS_NOT_FOUND",
+    "STATUS_RECONCILED_NOT_APPLIED",
     "STATUS_TERMINAL",
     "WIRE_RESPONSE_SCHEMA",
     "activate_launchd_socket",
     "get_peer_uid",
     "run_broker",
     "serve_connection",
+    "validate_reconcile_not_applied_request",
+    "validate_reconciliation_record",
     "validate_terminal_receipt",
     "verify_production_trust",
 ]
