@@ -701,9 +701,9 @@ def load_control_config(
         raise ServiceError("App binding requires all App and CeoIngress configuration fields")
     if "ceo_ingress_app_boot_python" in keys and app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
         raise ServiceError("App boot interpreter requires the complete App binding")
-    from integrations.executive_mcp.web_ceo import validate_installed_mcp_profile
+    from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
     try:
-        validate_installed_mcp_profile(config.get("executive_mcp_profile", "legacy"))
+        validate_installed_mcp_profile_current(config.get("executive_mcp_profile", "legacy"))
     except ValueError:
         raise ServiceError("installed Executive MCP profile is invalid") from None
     if "executive_mcp_profile" in keys and (
@@ -1580,13 +1580,14 @@ def _service_from_config(
             terminal_return_projector_factory
         )
 
-    from integrations.executive_mcp.web_ceo import (
-        WEB_CEO_V2_PROFILE,
-        validate_installed_mcp_profile,
+    from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_v3 import (
+        WEB_CEO_V3_PROFILE,
+        validate_installed_mcp_profile_current,
     )
 
     try:
-        installed_profile = validate_installed_mcp_profile(
+        installed_profile = validate_installed_mcp_profile_current(
             raw.get("executive_mcp_profile", "legacy")
         )
     except ValueError:
@@ -1625,7 +1626,7 @@ def _service_from_config(
             code_root=Path(__file__).resolve().parents[1],
             expected_source_sha=str(raw["proof_base_sha"]),
         )
-        if installed_profile == WEB_CEO_V2_PROFILE:
+        if installed_profile in {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}:
             from integrations.executive_mcp.web_ceo import (
                 WebCeoV2InstalledExecutiveReaders,
             )

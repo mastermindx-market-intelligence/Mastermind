@@ -397,6 +397,22 @@ def test_exact_v2_profile_selects_accepted_reader_and_inert_bind(monkeypatch, tm
     assert captured["ceo_ingress_armed"] is False
 
 
+def test_exact_v3_profile_reuses_v2_ingress_reader(monkeypatch, tmp_path):
+    from control_plane.executive_service import CEO_WEB_CEO_V2_READ_SCHEMA
+    from integrations.executive_mcp.web_ceo import WebCeoV2InstalledExecutiveReaders
+
+    module = _module()
+    raw = _app_raw(tmp_path)
+    raw["executive_mcp_profile"] = "web_ceo_v3"
+    captured = _capture_service(module, monkeypatch)
+    module._service_from_config(raw)
+    binding = captured["ceo_ingress_app_binding"]
+    assert type(binding.read_provider) is WebCeoV2InstalledExecutiveReaders
+    assert binding.read_schema == CEO_WEB_CEO_V2_READ_SCHEMA
+    assert binding.read_provider._fabric_source_binding is not None
+    assert captured["ceo_ingress_armed"] is False
+
+
 def test_v2_profile_does_not_require_workspace(monkeypatch, tmp_path):
     from integrations.executive_mcp.web_ceo import WebCeoV2InstalledExecutiveReaders
 
