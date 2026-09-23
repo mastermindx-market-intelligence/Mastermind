@@ -108,7 +108,7 @@ import {
 } from './paper-design.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.6';
+export const GATEWAY_VERSION = '0.1.7';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -985,7 +985,7 @@ class GatewaySession {
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
           'studio_ping, studio_output_page, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
           'studio_output_page reads retained output without repeating the original action. ' +
-          'Paper design tools use the host-pinned guarded Paper adapter; Desktop Commander is not on their dispatch path. ' +
+          'Paper design tools use the host-pinned guarded Paper adapter; paper_prepare may focus one exact host-qualified Paper file and Desktop Commander is not on their dispatch path. ' +
           'start_process and interact_with_process represent direct terminal effects rather than work-submission or agent-handoff transport. ' +
           'Nested agent instructions, worker handoffs, and opaque/repackaged payloads are outside their declared scope. ' +
           'A platform safety refusal is a terminal observation for the refused logical call; transformed replay by encoding, splitting, rewording, or rerouting is outside this server\'s supported behavior. ' +
