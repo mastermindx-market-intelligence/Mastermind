@@ -188,3 +188,32 @@ That pin also adds finite COO cutoff ordering; the runtime repair must preserve 
 recovery, #870's actual registered worktree had newer local head `8f46c1561a3bb959fecc7e8433073fe6a7203afa`
 than its published `a745399823a02e35a5f57eb96cdcbc157f7a6398`. Do not repeat its old Task-2 frontier,
 overwrite that local work, or assume this #918 regression run proves the newer candidate's behavior.
+
+## September 23 acceptance correction and exact-candidate proof
+
+The earlier sibling-progress fixture used execution-plan V2. READ-only authority and
+separate placements do not prove semantic independence. Its prior description as two
+independently admitted children was too strong and must not authorize a V2 bypass.
+The corrected positive case seals and admits V3 with explicit empty prerequisites;
+legacy V2 has a negative no-skip control. A declared V3 dependency remains blocked.
+
+The recovery file now has nine cases, including both None and raised exceptions after
+a durable claim, each on V2 and V3. Baseline V3 absence is a visible skip, not acceptance.
+Final test SHA-256: `fafda86ad44c88ddb705eb1c38becc90da0ea0aea7e419c6ced7f7dee2518c26`.
+Baseline policy/continuity/recovery run: 92 passed, 4 skipped, 1 strict expected failure.
+The existing whole-suite missing-SDK limitation is unchanged; it was not rerun.
+
+Incumbent #870 now has local commit `3966fb5a70e1da199157f587b5911140aa3e59db`.
+An immutable temporary source export of that commit, with actual candidate Runtime and
+fixture import origins verified, passed 6 of 9 corrected cases under `--runxfail`.
+Passing: explicit V3 sibling progress, capacity restoration, None-after-claim exact
+reconciliation on V2/V3, invalid-root preservation, and V3 declared-dependency refusal.
+Failing: the exception-after-claim case on V2 and V3, and legacy V2 predecessor skipping.
+All three failures created an unintended sibling Attempt in isolated fixture state.
+No provider, installed runtime, original #870 workspace/index, or Git ref was changed.
+
+Repair stays on #870: preserve the six passing behaviors; keep legacy dependency-unknown
+work ordered; make the existing dispatch/effect owner cover raised/lost-response paths
+before sibling selection. Do not introduce another recovery store or scheduler.
+The original #870 workspace has an unresolved integration conflict; neither its local
+commit nor these source tests prove current-base release, installation, or fleet adoption.
