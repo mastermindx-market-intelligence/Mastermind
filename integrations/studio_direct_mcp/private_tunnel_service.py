@@ -421,6 +421,8 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         return False
     if data.get("maxConcurrentRequests") != MAX_CONCURRENT_REQUESTS:
         return False
+    if data.get("tunnelClient") != PINNED_TUNNEL_CLIENT:
+        return False
     organization_id = data.get("organizationId")
     if organization_id is not None and (
         not isinstance(organization_id, str)

@@ -103,8 +103,11 @@ def IsolatedHome():
         home = tmp / "home"
         home.mkdir()
         (home / "Library" / "LaunchAgents").mkdir(parents=True)
+        pinned = tmp / "pinned-tunnel-client"
+        pinned.write_text("#!/bin/sh\n", encoding="utf-8")
+        pinned.chmod(0o755)
         with mock.patch.dict(os.environ, {"HOME": str(home)}), mock.patch.object(
-            svc, "_resolve_tunnel_client", side_effect=lambda value: Path(value)
+            svc, "PINNED_TUNNEL_CLIENT", str(pinned)
         ):
             yield tmp, home
 
@@ -182,7 +185,7 @@ def _stage_args(
 ):
     _seed_gateway(account, port)
     key_ref = key_ref or _make_key(home, account)
-    binary = binary or _make_bin(tmp)
+    binary = binary or Path(svc.PINNED_TUNNEL_CLIENT)
     profile = profile or str(svc._canonical_profile(account))
     return mock.Mock(
         account=account,
@@ -811,6 +814,36 @@ class TestCollisionsAndTamper(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     svc.cmd_start(mock.Mock(account=C1))
             self.assertIn("exact install", str(ctx.exception))
+
+    def test_non_pinned_manifest_refuses_before_client_execution(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, _, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            foreign = _make_bin(tmp, "foreign-tunnel-client")
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            manifest["tunnelClient"] = str(foreign)
+            roots["manifest"].write_text(
+                json.dumps(manifest, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+
+            rec = CmdRecorder(handler=_stopped_alias_handler(C1))
+            with mock.patch.object(svc, "_run", rec):
+                with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                    svc.cmd_start(mock.Mock(account=C1))
+            self.assertFalse(
+                any(call and call[0] == str(foreign) for call in rec.calls)
+            )
+            self.assertFalse(any(call[:2] == ["launchctl", "bootstrap"] for call in rec.calls))
+
+            rec = CmdRecorder(handler=_stopped_alias_handler(C1))
+            with mock.patch.object(svc, "_run", rec):
+                with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                    svc.cmd_status(mock.Mock(account=C1))
+            self.assertFalse(
+                any(call and call[0] == str(foreign) for call in rec.calls)
+            )
 
     def test_profile_tamper_blocks_start(self):
         with IsolatedHome() as (tmp, home):
