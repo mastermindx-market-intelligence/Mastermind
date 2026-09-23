@@ -58,6 +58,11 @@ PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
 PAPER_BRIDGE_SHA256 = "83e36b0bcd0acabbf5dd6ace5b708e5797a52e7db732e8dbbf848ded781c231d"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
 
+# Optional read-only fleet-status consumer. It delegates to the installed
+# Studio Direct control owner instead of letting a model compose shell probes.
+FLEET_STATUS_LAUNCHER_REL = Path(".local/bin/studio-direct")
+FLEET_STATUS_TIMEOUT_MS = 15_000
+
 # CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
 
@@ -73,6 +78,7 @@ STAGE_FILES = (
     "output-budget.mjs",
     "git-publish.mjs",
     "paper-design.mjs",
+    "fleet-status.mjs",
     "private-tunnel-auth.mjs",
     "private-tunnel-gateway.mjs",
     "package.json",
@@ -80,15 +86,17 @@ STAGE_FILES = (
 )
 
 # Historical installs are admitted only through exact known file sets. The
-# immediately preceding v0.1.5 install has every current file except the new
-# Paper capability module; earlier generations also predate output paging and
-# typed Git.
-LEGACY_STAGE_FILES_V3 = tuple(name for name in STAGE_FILES if name != "paper-design.mjs")
+# immediately preceding v0.1.6 install has every current file except the new
+# read-only fleet-status consumer; earlier generations also predate Paper,
+# output paging, and typed Git.
+LEGACY_STAGE_FILES_V4 = tuple(name for name in STAGE_FILES if name != "fleet-status.mjs")
+LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
 LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V4),
         frozenset(LEGACY_STAGE_FILES_V3),
         frozenset(LEGACY_STAGE_FILES_V2),
         frozenset(LEGACY_STAGE_FILES_V1),
@@ -496,6 +504,20 @@ def _paper_design_config(user_root: Path) -> dict:
     }
 
 
+def _fleet_status_config(user_root: Path) -> dict | None:
+    launcher = user_root / FLEET_STATUS_LAUNCHER_REL
+    if not launcher.exists():
+        return None
+    return {
+        "enabled": True,
+        "launcherPath": str(launcher),
+        "launcherSha256": _stable_regular_file_hash(
+            launcher, label="Studio Direct control launcher"
+        ),
+        "timeoutMs": FLEET_STATUS_TIMEOUT_MS,
+    }
+
+
 def _build_config(
     account: str,
     host: str,
@@ -506,7 +528,7 @@ def _build_config(
     user_root: Path,
 ) -> dict:
     # publicUrl is omitted: the private adapter rejects a public origin.
-    return {
+    config = {
         "accountLabel": account,
         "host": host,
         "testMode": False,
@@ -523,6 +545,10 @@ def _build_config(
         "gitPublish": _typed_git_config(user_root),
         "paperDesign": _paper_design_config(user_root),
     }
+    fleet_status = _fleet_status_config(user_root)
+    if fleet_status is not None:
+        config["fleetStatus"] = fleet_status
+    return config
 
 
 def _build_plist(

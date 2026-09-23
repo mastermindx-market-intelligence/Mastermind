@@ -20,7 +20,8 @@ import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import http from 'node:http';
 import { Readable } from 'node:stream';
@@ -466,7 +467,61 @@ test('tools/list publishes gateway-owned neutral backend metadata and privacy-mi
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     'gateway generation must be an ephemeral random UUID, not a host-derived identifier',
   );
-  assert.equal(payload.gatewayVersion, '0.1.6');
+  assert.equal(payload.gatewayVersion, '0.1.7');
+});
+
+test('configured studio_fleet_status lists and reads the existing owner projection', async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'studio-fleet-gateway-'));
+  cleanup.dirs.push(dir);
+  const launcher = resolve(dir, 'studio-direct');
+  const owner = {
+    schema: 'mastermind.studio_direct_fleet_status.v1',
+    action: 'status',
+    accountCount: 2,
+    readyCount: 1,
+    allReady: false,
+    accounts: [
+      { account: 'chatgpt1', ready: true },
+      { account: 'chatgpt2', ready: false },
+    ],
+  };
+  await writeFile(
+    launcher,
+    "#!/bin/sh\nprintf '%s\\n' '" + JSON.stringify(owner) + "'\n",
+  );
+  await chmod(launcher, 0o700);
+  const launcherHash = createHash('sha256').update(await readFile(launcher)).digest('hex');
+  const { gw } = await bootGateway({
+    fleetStatus: {
+      enabled: true,
+      launcherPath: launcher,
+      launcherSha256: launcherHash,
+      timeoutMs: 5000,
+    },
+  });
+  const a = newClient('tok-alice');
+  await connect(a.client, gw.url, a.transportOpts);
+  const listed = await a.client.listTools();
+  const tool = listed.tools.find((candidate) => candidate.name === 'studio_fleet_status');
+  assert.ok(tool, 'configured fleet status tool must be advertised');
+  assert.deepEqual(
+    [
+      tool.annotations.readOnlyHint,
+      tool.annotations.destructiveHint,
+      tool.annotations.idempotentHint,
+      tool.annotations.openWorldHint,
+    ],
+    [true, false, true, false],
+  );
+  const result = await a.client.callTool(
+    { name: 'studio_fleet_status', arguments: {} },
+    undefined,
+    { timeout: 5000 },
+  );
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v1');
+  assert.equal(result.structuredContent.state, 'DEGRADED');
+  assert.deepEqual(result.structuredContent.owner, owner);
 });
 
 test('shared backend reserves one slot for catalog traffic while typed Git remains advertised', { timeout: 15_000 }, async () => {
