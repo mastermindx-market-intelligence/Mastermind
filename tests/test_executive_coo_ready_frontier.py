@@ -33,6 +33,7 @@ def _admitted_pair(runtime: Runtime):
     _register_placement_union(runtime)
     runtime, root, _plan, admitted = _admit_v2_plan(
         runtime,
+        plan_schema_version="mastermind.execution_plan/v3",
         placements=[_CODEX, _CLAUDE],
     )
     by_step = {job.plan_step_id: job for job in admitted}
@@ -294,6 +295,7 @@ def test_two_live_read_only_children_do_not_starve_third_ready_sibling(tmp_path)
     _register_codex_peer(runtime, "worker-c")
     runtime, root, _plan, admitted = _admit_v2_plan(
         runtime,
+        plan_schema_version="mastermind.execution_plan/v3",
         placements=[_CODEX, _CLAUDE, _CODEX],
     )
     by_step = {job.plan_step_id: job for job in admitted}
@@ -794,6 +796,7 @@ def test_explicit_preclaim_unavailability_can_progress_ready_sibling(tmp_path):
     _register_placement_union(runtime)
     runtime, root, _plan, admitted = _admit_v2_plan(
         runtime,
+        plan_schema_version="mastermind.execution_plan/v3",
         placements=[_CODEX, _CLAUDE],
     )
     first, second = sorted(admitted, key=lambda job: job.plan_step_id)

@@ -210,7 +210,9 @@ def _admit_v2_plan(
     *,
     placements: list[dict[str, str] | None] | None = None,
     admit_claude_union: bool = True,
+    plan_schema_version: str = "mastermind.execution_plan/v2",
 ):
+    assert plan_schema_version in {"mastermind.execution_plan/v2", "mastermind.execution_plan/v3"}
     receipt = submit_intent(
         runtime,
         _v2_intent(
@@ -298,11 +300,13 @@ def _admit_v2_plan(
             "attempt_limit": 1,
             "cost_class": "small",
         }
+        if plan_schema_version == "mastermind.execution_plan/v3":
+            step["prerequisite_step_ids"] = []
         if placement is not None:
             step["placement"] = dict(placement)
         steps.append(step)
     plan_body = {
-        "schema_version": "mastermind.execution_plan/v2",
+        "schema_version": plan_schema_version,
         "root_job_id": root.job_id,
         "plan_attempt_id": dispatch.attempt.attempt_id,
         "steps": steps,

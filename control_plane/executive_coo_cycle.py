@@ -291,7 +291,18 @@ class CooCycle:
             f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
             f"{selected.attempt_count + 1}"
         )
-        receipt = self.dispatcher(selected.job_id, command)
+        try:
+            receipt = self.dispatcher(selected.job_id, command)
+        except Exception:
+            # Preserve the existing Runtime-owned reconciliation barrier when
+            # a dispatch raises after committing its exact claim.
+            if not self._dispatch_none_was_preclaim(selected):
+                self.runtime.jobs.record_cycle_dispatch_effect_unknown(
+                    root_id,
+                    selected_job_id=selected.job_id,
+                    dispatch_command_id=command,
+                )
+            raise
         if receipt is None:
             if not self._dispatch_none_was_preclaim(selected):
                 self.runtime.jobs.record_cycle_dispatch_effect_unknown(
@@ -1186,6 +1197,8 @@ class CooCycle:
         if (
             active
             and queued
+            and plan_body is not None
+            and plan_body["schema_version"] == "mastermind.execution_plan/v3"
             and self._ready_frontier_open(active, queued, current_by_step)
         ):
             for candidate in queued:
@@ -1229,6 +1242,12 @@ class CooCycle:
                 if outcome is not None:
                     return outcome
                 unavailable.append(candidate.job_id)
+                if not (
+                    plan_body is not None
+                    and plan_body["schema_version"] == "mastermind.execution_plan/v3"
+                    and all(self._is_read_only_frontier_work(job) for job in queued)
+                ):
+                    break
             return self._outcome(
                 root_id,
                 "NO_ACTION",

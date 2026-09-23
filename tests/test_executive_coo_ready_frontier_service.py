@@ -77,7 +77,7 @@ def _admit_pair(service, *, name: str):
     )
     assert isinstance(planner_dispatch, OrchestrationDispatchOutcome)
     plan_body = {
-        "schema_version": "mastermind.execution_plan/v1",
+        "schema_version": "mastermind.execution_plan/v3",
         "root_job_id": root.job_id,
         "plan_attempt_id": planner_dispatch.attempt.attempt_id,
         "steps": [
@@ -107,6 +107,10 @@ def _admit_pair(service, *, name: str):
             },
         ],
     }
+    binding = service._require_current_coo_binding()
+    for step in plan_body["steps"]:
+        step["prerequisite_step_ids"] = []
+        step["placement"] = {"provider_realm": str(binding["provider"]), "quota_class": service.config.coo_quota_class}
     _complete_ohf_role(
         runtime,
         planner_dispatch,
@@ -259,4 +263,43 @@ def test_service_tick_revisits_root_that_already_owns_live_coo_work(
             else:
                 await service.close()
 
+    asyncio.run(exercise())
+
+
+def test_host_v3_binding_preserves_exact_reviewed_placement_set(tmp_path, short_socket_root):
+    config = _config(tmp_path, socket_root=short_socket_root)
+    service, _holder = _service(tmp_path, finish_gate=asyncio.Event(), config=config)
+    binding = service._load_coo_execution_binding()
+    provider = ModelRouter.load().model_aliases[config.coo_model_alias].provider_alias
+    assert binding.get("host_execution_binding_version") == "mastermind.host_execution_binding/v3"
+    assert binding["work_placement_union"] == [
+        {"provider_realm": provider, "quota_class": quota}
+        for quota in sorted({config.coo_quota_class, config.coo_default_quota_class})
+    ]
+
+
+def test_v3_bound_service_rejects_root_and_child_placement_drift(tmp_path, short_socket_root):
+    import dataclasses
+    import pytest
+    from control_plane.executive_runtime import StateConflict
+
+    async def exercise():
+        config = _config(tmp_path, socket_root=short_socket_root)
+        service, _holder = _service(tmp_path, finish_gate=asyncio.Event(), config=config)
+        await service.start()
+        try:
+            assert (await _request(service, "register-worker"))["ok"] is True
+            _register_peer(service)
+            root, _first, second = _admit_pair(service, name="v3-placement-drift")
+            assert service._is_bound_coo_root(root)
+            assert service._require_bound_coo_job(second).job_id == root.job_id
+            foreign = [{"provider_realm": "foreign", "quota_class": config.coo_quota_class}]
+            bad_root = dataclasses.replace(root, constraints={**root.constraints, "work_placement_union": foreign})
+            assert not service._is_bound_coo_root(bad_root)
+            for changes in ({"eligible_quota_classes": [config.coo_default_quota_class]}, {"provider": "foreign"}):
+                bad_child = dataclasses.replace(second, constraints={**second.constraints, **changes})
+                with pytest.raises(StateConflict, match="host binding drifted"):
+                    service._require_bound_coo_job(bad_child)
+        finally:
+            await service.close()
     asyncio.run(exercise())

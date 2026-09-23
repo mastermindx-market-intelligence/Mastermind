@@ -54,7 +54,13 @@ from control_plane.executive_runtime import (
     SCHEMA_VERSION,
     StateConflict,
     ValidatedRoleCompletion,
-    V2_HOST_EXECUTION_BINDING_KEYS,
+    V3_HOST_EXECUTION_BINDING_KEYS,
+    _normalise_constraints,
+    _normalise_work_placement_union,
+    _validated_plan_admission,
+    _project_work_placement,
+    HOST_EXECUTION_BINDING_VERSION_KEY,
+    HOST_EXECUTION_BINDING_V3,
     _attempt_from_row,
     _dialogue_source_from_root_creation,
     _job_from_row,
@@ -2115,8 +2121,13 @@ class ExecutiveControlService:
             "operator_harness_version": self.config.operator_harness_version,
             "operator_harness_armed": self.config.coo_operator_harness_armed,
         }
-        if set(binding) != set(V2_HOST_EXECUTION_BINDING_KEYS):
+        binding["work_placement_union"] = [
+            {"provider_realm": binding["provider"], "quota_class": quota}
+            for quota in binding["eligible_quota_classes"]
+        ]
+        if set(binding) != set(V3_HOST_EXECUTION_BINDING_KEYS):
             raise ValueError("configured COO host binding fields drifted")
+        binding[HOST_EXECUTION_BINDING_VERSION_KEY] = HOST_EXECUTION_BINDING_V3
         return binding
 
     def _require_current_coo_binding(self) -> dict[str, Any]:
@@ -4835,7 +4846,9 @@ class ExecutiveControlService:
         return receipt
 
     def _is_bound_coo_root(self, root: Job) -> bool:
-        binding = self._require_current_coo_binding()
+        raw_binding = self._require_current_coo_binding()
+        binding = _normalise_constraints(raw_binding)
+        binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
         provenance = root.orchestration_provenance
         return bool(
             root.parent_job_id is None
@@ -4919,6 +4932,20 @@ class ExecutiveControlService:
             if job.constraints.get("cost_class") not in {"small", "default"}:
                 raise StateConflict(
                     "COO Job cost class has no reviewed serialized capacity"
+                )
+        if job.orchestration_role == "work":
+            with runtime.store.read() as connection:
+                row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root.job_id,)).fetchone()
+                if row is None:
+                    raise StateConflict("COO root disappeared before placement validation")
+                _admission, plan = _validated_plan_admission(connection, row)
+            step = next((item for item in plan["steps"] if item["step_id"] == job.plan_step_id), None)
+            if step is None or job.plan_attempt_id != plan["plan_attempt_id"]:
+                raise StateConflict("COO work placement is not in its admitted plan")
+            if "placement" in step:
+                expected = _project_work_placement(
+                    expected, root.constraints, step["placement"],
+                    raw_root_constraints=root.constraints,
                 )
         for key, value in expected.items():
             if job.constraints.get(key) != value:
