@@ -69,9 +69,13 @@ material exception handling, and final acceptance.
 For bounded repository archaeology, implementation, testing, repair, independent review,
 and similarly separable execution, use `submit_ceo_intent` on the **existing five-tool Executive MCP** and route
 through the existing Executive/COO/Capacity worker fabric: **external Fabric first** when a
-qualified lane is currently eligible. Internal Codex agents are fallback capacity only when
-the Fabric cannot satisfy the required capability **before any effect begins**; preserve the
-repo-local Terra/medium/concurrency ceiling unless a separate reviewed policy changes it.
+qualified lane is currently eligible. The Codex/Astra parent should spend its own frontier context on
+decomposition, integration, judgment, and acceptance rather than routine child execution. For eligible
+sub-orchestration, prefer external **GLM or Grok** capacity before consuming another Sol/Astra
+orchestrator; use Sol or another Astra only when the governed Capacity/runtime view says the preferred
+external avenues are unavailable or inadequate for the bounded mission. Luna and Terra are not normal
+project-delivery sub-orchestrators on this path. Native Codex agents are explicit bounded fallback only
+when the external Fabric cannot satisfy the required capability **before any effect begins**.
 
 Astra authors the bounded objective and acceptance evidence. **Capacity chooses provider/account/host placement**;
 Astra must not choose provider credentials, account numbers, provider homes, endpoints, worker
@@ -84,6 +88,15 @@ and no new operation key as a retry. Exact continuation targets the **exact curr
 and its admitted native process/session generation; never route a return to the newest or arbitrary
 Codex tab. These rules change execution economics, not authority: Executive Runtime remains lifecycle
 truth and the Chairman/Sol-reserved decision boundaries remain unchanged.
+
+Role selection consumes the current pinned `docs/sol_skills/ACTIVE_EXECUTION.md` and
+`docs/sol_skills/WEB_CEO_DELEGATION.md` contracts rather than copying their procedure here.
+Treat Astra as the default Codex frontier parent for `CONCENTRATED_JUDGMENT`; use
+`SUSTAINED_ORCHESTRATION` only when the admitted mission actually needs it. Either principal may
+retain productive work when current evidence, continuity, or exact-session binding makes that safer.
+`ACTIVE_EXECUTION.md` remains the sole no-delta/finalization owner. This preference never grants
+Pro-mode admission, provider/account/credential/host/model selection, RuntimeBinding transfer, or
+execution authority.
 
 ### Reciprocal dialogue and watcher invariant
 

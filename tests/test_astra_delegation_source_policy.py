@@ -19,7 +19,10 @@ def test_astra_is_principal_and_external_fabric_is_default_execution_path():
         "existing five-tool Executive MCP",
         "external Fabric first",
         "final acceptance",
-        "Internal Codex agents are fallback",
+        "Native Codex agents are explicit bounded fallback",
+        "GLM or Grok",
+        "another Sol/Astra",
+        "Luna and Terra are not normal",
     )
     for phrase in required:
         assert phrase in section
@@ -39,11 +42,30 @@ def test_astra_policy_preserves_physical_routing_and_effect_boundaries():
         assert phrase in section
 
 
-def test_internal_codex_fallback_remains_bounded_terra_medium_three_threads():
+def test_native_codex_fanout_is_disabled_by_default_and_frontier_only_when_opted_in():
     config = CODEX_CONFIG.read_text(encoding="utf-8")
-    assert 'max_concurrent_threads_per_session = 3' in config
-    assert 'default_subagent_model = "gpt-5.6-terra"' in config
-    assert 'default_subagent_reasoning_effort = "medium"' in config
+    assert 'enabled = false' in config
+    assert 'max_concurrent_threads_per_session = 1' in config
+    assert 'default_subagent_model = "gpt-5.6-sol"' in config
+    assert 'default_subagent_reasoning_effort = "high"' in config
+    assert 'gpt-5.6-luna' not in config
+    assert 'gpt-5.6-terra' not in config
+
+
+def test_astra_policy_consumes_current_role_adaptive_delegation_contract():
+    section = _astra_section()
+    required = (
+        "docs/sol_skills/ACTIVE_EXECUTION.md",
+        "docs/sol_skills/WEB_CEO_DELEGATION.md",
+        "CONCENTRATED_JUDGMENT",
+        "SUSTAINED_ORCHESTRATION",
+        "Either principal may",
+        "retain productive work",
+        "sole no-delta/finalization owner",
+        "never grants",
+    )
+    for phrase in required:
+        assert phrase in section
 
 RUNBOOK = ROOT / "docs" / "runbooks" / "codex-astra-fabric-delegation.md"
 
