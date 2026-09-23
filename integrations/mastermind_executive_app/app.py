@@ -25,6 +25,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import time
+from functools import partial
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -73,8 +74,16 @@ from integrations.executive_mcp.web_ceo import (
     web_ceo_tool_names,
     web_ceo_v2_tool_names,
 )
+from integrations.executive_mcp.web_ceo_v3 import web_ceo_v3_tool_names
+from integrations.mosyle_mdm.executive import WebCeoV3CeoIngressReadGateway
 
-__all__ = ["AppSettings", "create_app", "create_web_ceo_app", "create_web_ceo_v2_app"]
+__all__ = [
+    "AppSettings",
+    "create_app",
+    "create_web_ceo_app",
+    "create_web_ceo_v2_app",
+    "create_web_ceo_v3_app",
+]
 
 _MAX_BODY_BYTES = 65536
 
@@ -543,6 +552,24 @@ def create_web_ceo_v2_app(settings: AppSettings) -> Any:
         settings,
         read_tool_names=read_names,
         ingress_gateway_type=WebCeoV2CeoIngressReadGateway,
+        read_gateway_builder=build_web_ceo_v2_read_gateway,
+        prereply_reverify=True,
+    )
+
+
+def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any) -> Any:
+    """Installed Web-CEO v3: v2 Executive reads plus local MDM observation."""
+
+    if not settings.read_from_ceo_ingress:
+        raise ValueError("Web CEO v3 is installed-only")
+    read_names = tuple(
+        name for name in web_ceo_v3_tool_names() if name != "submit_ceo_intent"
+    )
+    gateway = partial(WebCeoV3CeoIngressReadGateway, mdm_reader=mdm_reader)
+    return _create_profile_app(
+        settings,
+        read_tool_names=read_names,
+        ingress_gateway_type=gateway,
         read_gateway_builder=build_web_ceo_v2_read_gateway,
         prereply_reverify=True,
     )

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol
 
@@ -35,8 +35,8 @@ class MosyleTelemetryError(RuntimeError):
 
 @dataclass(frozen=True)
 class MosyleCredential:
-    access_token: str
-    bearer_token: str | None = None
+    access_token: str = field(repr=False)
+    bearer_token: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not _secret(self.access_token):
