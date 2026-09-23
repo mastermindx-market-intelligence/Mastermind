@@ -91,6 +91,22 @@ http://127.0.0.1:8011/mastermind-surface-probe/mcp
 
 The approved private HTTPS tunnel is the outer transport. A tunnel is transport, not authentication or Mastermind authority.
 
+Before app registration, observe and pin the tunnel's actual HTTP forwarding behavior. Record whether the local MCP request arrives with the outer tunnel hostname in `Host` or a rewritten loopback host, and whether an `Origin` header is forwarded. Do not infer either value from the public tunnel URL.
+
+If the local request carries the exact tunnel hostname, add only that literal host (and, when required by the tunnel, its `:*` port form):
+
+```bash
+export MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS='example-tunnel-host.example,example-tunnel-host.example:*'
+```
+
+If the tunnel forwards an `Origin`, add only its exact lowercase HTTPS origin:
+
+```bash
+export MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS='https://example-origin.example'
+```
+
+If the tunnel rewrites `Host` to loopback and strips `Origin`, leave both variables unset. The server always retains the loopback baseline, rejects URL/path/userinfo/wildcard host entries and non-HTTPS remote origins, and emits only the allow-list digest plus counts in its secret-free runtime receipt. Re-run `--check-config` after pinning these values and preserve that receipt with the tunnel forwarding observation; a changed digest is a new transport configuration and must be re-reviewed before registration.
+
 The historical `scripts/mastermind_surface_probe.py` path is a compatibility wrapper to the same canonical entrypoint. New setup should use `scripts/run_mastermind_surface_probe.py`.
 
 ## Configure and validate App B

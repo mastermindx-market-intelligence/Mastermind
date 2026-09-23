@@ -10,9 +10,12 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hashlib
 import json
 import os
-from collections.abc import Callable, Mapping
+import re
+from collections.abc import Callable, Mapping, Sequence
+from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -62,6 +65,17 @@ _ENV_KEY = "MASTERMIND_SURFACE_PROBE_HMAC_KEY"
 _ENV_HOST = "MASTERMIND_SURFACE_PROBE_HOST"
 _ENV_PORT = "MASTERMIND_SURFACE_PROBE_PORT"
 _ENV_PATH = "MASTERMIND_SURFACE_PROBE_MCP_PATH"
+_ENV_ALLOWED_HOSTS = "MASTERMIND_SURFACE_PROBE_ALLOWED_HOSTS"
+_ENV_ALLOWED_ORIGINS = "MASTERMIND_SURFACE_PROBE_ALLOWED_ORIGINS"
+
+_LOOPBACK_ALLOWED_HOSTS = ("127.0.0.1:*",)
+_LOOPBACK_ALLOWED_ORIGINS = ("http://127.0.0.1:*",)
+_MAX_TRANSPORT_ALLOWLIST_ITEMS = 8
+_MAX_HOST_CHARS = 253
+_HOST_RE = re.compile(
+    r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?::\*)?$"
+)
 
 
 @dataclass(frozen=True)
@@ -72,6 +86,16 @@ class SurfaceProbeRuntime:
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
     mcp_path: str = MCP_PATH
+    allowed_hosts: tuple[str, ...] = _LOOPBACK_ALLOWED_HOSTS
+    allowed_origins: tuple[str, ...] = _LOOPBACK_ALLOWED_ORIGINS
+
+    @property
+    def transport_allowlist_digest(self) -> str:
+        document = {
+            "allowed_hosts": list(self.allowed_hosts),
+            "allowed_origins": list(self.allowed_origins),
+        }
+        return hashlib.sha256(canonical_json(document)).hexdigest()
 
 
 def _runtime_refusal() -> None:
@@ -98,6 +122,111 @@ def _decode_secret(value: str) -> bytes:
     if not 32 <= len(decoded) <= 256:
         _runtime_refusal()
     return decoded
+
+
+def _split_allowlist(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, str) or value != value.strip() or not value:
+        _runtime_refusal()
+    items = tuple(value.split(","))
+    if (
+        len(items) > _MAX_TRANSPORT_ALLOWLIST_ITEMS
+        or any(not item or item != item.strip() for item in items)
+        or len(set(items)) != len(items)
+    ):
+        _runtime_refusal()
+    return items
+
+
+def _validated_host(value: str) -> str:
+    if (
+        not value.isascii()
+        or value != value.lower()
+        or len(value) > _MAX_HOST_CHARS
+        or _HOST_RE.fullmatch(value) is None
+    ):
+        _runtime_refusal()
+    hostname = value[:-2] if value.endswith(":*") else value
+    if any(len(label) > 63 for label in hostname.split(".")):
+        _runtime_refusal()
+    return value
+
+
+def _validated_origin(value: str) -> str:
+    if (
+        not value.isascii()
+        or value != value.lower()
+        or len(value) > _MAX_HOST_CHARS + len("https://:65535")
+    ):
+        _runtime_refusal()
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        _runtime_refusal()
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.hostname != parsed.hostname.lower()
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        _runtime_refusal()
+    if port is not None and not 1 <= port <= 65535:
+        _runtime_refusal()
+    expected_netloc = parsed.hostname if port is None else f"{parsed.hostname}:{port}"
+    if parsed.netloc != expected_netloc:
+        _runtime_refusal()
+    _validated_host(parsed.hostname)
+    return value
+
+
+def _transport_allowlists(
+    source: Mapping[str, str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    extra_hosts = tuple(
+        _validated_host(item)
+        for item in _split_allowlist(source.get(_ENV_ALLOWED_HOSTS))
+    )
+    extra_origins = tuple(
+        _validated_origin(item)
+        for item in _split_allowlist(source.get(_ENV_ALLOWED_ORIGINS))
+    )
+    hosts = tuple(sorted((*_LOOPBACK_ALLOWED_HOSTS, *extra_hosts)))
+    origins = tuple(sorted((*_LOOPBACK_ALLOWED_ORIGINS, *extra_origins)))
+    if len(set(hosts)) != len(hosts) or len(set(origins)) != len(origins):
+        _runtime_refusal()
+    return hosts, origins
+
+
+def _validated_transport_sequence(
+    values: Sequence[str],
+    *,
+    baseline: tuple[str, ...],
+    validator: Callable[[str], str],
+) -> tuple[str, ...]:
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        _runtime_refusal()
+    normalized = tuple(values)
+    if (
+        not normalized
+        or any(not isinstance(value, str) for value in normalized)
+        or len(normalized) > len(baseline) + _MAX_TRANSPORT_ALLOWLIST_ITEMS
+        or normalized != tuple(sorted(normalized))
+    ):
+        _runtime_refusal()
+    if len(set(normalized)) != len(normalized):
+        _runtime_refusal()
+    if not set(baseline).issubset(normalized):
+        _runtime_refusal()
+    for value in normalized:
+        if value not in baseline:
+            validator(value)
+    return normalized
 
 
 def load_runtime_configuration(
@@ -142,11 +271,14 @@ def load_runtime_configuration(
     except HostContextProbeError:
         _runtime_refusal()
 
+    allowed_hosts, allowed_origins = _transport_allowlists(source)
     return SurfaceProbeRuntime(
         probe_config=config,
         host=host,
         port=port,
         mcp_path=mcp_path,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
     )
 
 
@@ -166,6 +298,9 @@ def describe_runtime(runtime: SurfaceProbeRuntime) -> dict[str, object]:
         "host": runtime.host,
         "port": runtime.port,
         "mcp_path": runtime.mcp_path,
+        "transport_allowlist_digest": runtime.transport_allowlist_digest,
+        "allowed_host_count": len(runtime.allowed_hosts),
+        "allowed_origin_count": len(runtime.allowed_origins),
         "stateless": True,
         "json_response": True,
         "oauth_configured": False,
@@ -319,16 +454,28 @@ def build_streamable_http_app(
     utc_now: Callable[[], datetime] | None = None,
     host: str = DEFAULT_HOST,
     path: str = MCP_PATH,
+    allowed_hosts: Sequence[str] = _LOOPBACK_ALLOWED_HOSTS,
+    allowed_origins: Sequence[str] = _LOOPBACK_ALLOWED_ORIGINS,
 ) -> Starlette:
     """Build the exact stateless JSON loopback ASGI application."""
 
     if host != DEFAULT_HOST or path != MCP_PATH:
         _runtime_refusal()
+    normalized_hosts = _validated_transport_sequence(
+        allowed_hosts,
+        baseline=_LOOPBACK_ALLOWED_HOSTS,
+        validator=_validated_host,
+    )
+    normalized_origins = _validated_transport_sequence(
+        allowed_origins,
+        baseline=_LOOPBACK_ALLOWED_ORIGINS,
+        validator=_validated_origin,
+    )
     server = build_mcp_server(config, utc_now=utc_now)
     security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=["127.0.0.1:*"],
-        allowed_origins=["http://127.0.0.1:*"],
+        allowed_hosts=list(normalized_hosts),
+        allowed_origins=list(normalized_origins),
     )
     manager = StreamableHTTPSessionManager(
         app=server,
@@ -386,7 +533,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(describe_runtime(runtime), sort_keys=True))
         return 0
 
-    app = build_streamable_http_app(runtime.probe_config)
+    app = build_streamable_http_app(
+        runtime.probe_config,
+        allowed_hosts=runtime.allowed_hosts,
+        allowed_origins=runtime.allowed_origins,
+    )
     import uvicorn
 
     uvicorn.run(
