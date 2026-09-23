@@ -114,11 +114,14 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
     fixture = tmp_path / "installer-repo"
     (fixture / "scripts").mkdir(parents=True)
     (fixture / "control_plane").mkdir()
+    (fixture / "common").mkdir()
     for relative in (
         "scripts/install_mastermind_workspace_cli.sh",
         "scripts/mastermind_workspace.py",
         "control_plane/executive_workspace.py",
         "control_plane/__init__.py",
+        "common/commission_ref.py",
+        "common/__init__.py",
     ):
         source = repo_root / relative
         target_file = fixture / relative
@@ -135,7 +138,13 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
     enrolled_policy = fake_home / ".config/mastermind/worktree-storage.json"
     if enrolled:
         enrolled_policy.parent.mkdir(parents=True)
-        enrolled_policy.write_text("pin-only fixture\n")
+        enrolled_policy.write_text(json.dumps({
+            "version": 1,
+            "mount_point": "/",
+            "volume_uuid": "11111111-1111-1111-1111-111111111111",
+            "root": str(fake_home / "pinned-workspaces"),
+            "min_free_bytes": 1024,
+        }))
     launcher = tmp_path / "bin" / "mmx-workspace"
     payload = tmp_path / "payload"
     env = dict(os.environ)
@@ -174,6 +183,8 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
         if observed_external == "/Volumes/Mastermind"
         else str(fake_home / ".mastermind" / "agent-workspaces")
     )
+    if enrolled:
+        expected_root = str(fake_home / "pinned-workspaces")
     assert f"export MASTERMIND_AGENT_WORKSPACE_ROOT='{expected_root}'" in wrapper
     expected_policy = str(enrolled_policy) if enrolled else ""
     assert f"export MASTERMIND_WORKSPACE_STORAGE_POLICY='{expected_policy}'" in wrapper
@@ -484,3 +495,57 @@ def test_read_only_or_unknown_writability_does_not_admit_workspace(storage_cli, 
     code, result = _call_storage_cli(cli, capsys, "storage")
     assert code == 2
     assert "STORAGE_VOLUME_READ_ONLY" in result["error"]
+
+
+def test_installation_profile_consumes_enrolled_root(storage_cli, tmp_path):
+    cli, root, policy, data = storage_cli
+    home = tmp_path / "profile-home"
+    enrolled = home / ".config/mastermind/worktree-storage.json"
+    enrolled.parent.mkdir(parents=True)
+    enrolled.write_bytes(policy.read_bytes())
+    enrolled.chmod(0o600)
+    assert hasattr(cli, "installation_storage_profile")
+    selected = cli.installation_storage_profile(home)
+    assert selected == {"root": str(root.resolve()),
+                        "mount_point": data["mount_point"],
+                        "policy_path": str(enrolled)}
+
+
+@pytest.mark.parametrize("filesystem,external", [("apfs", True), ("hfs", True), ("smbfs", False), ("nfs", False)])
+def test_installation_profile_rejects_network_worktrees(storage_cli, tmp_path, monkeypatch, filesystem, external):
+    cli, root, policy, data = storage_cli
+    home = tmp_path / "unenrolled-home"
+    volume = Path(data["mount_point"])
+    monkeypatch.setattr(cli, "_volume_identity", lambda p: {
+        "FilesystemType": filesystem, "MountPoint": str(volume), "Writable": True})
+    assert hasattr(cli, "installation_storage_profile")
+    selected = cli.installation_storage_profile(home, external_mount=volume)
+    expected = volume / "agent-workspaces" if external else home / ".mastermind/agent-workspaces"
+    assert selected["root"] == str(expected.resolve())
+    assert selected["mount_point"] == (str(volume) if external else "")
+    assert selected["policy_path"] == ""
+
+
+def test_installation_profile_rejects_substituted_policy(storage_cli, tmp_path):
+    cli, root, policy, data = storage_cli
+    home = tmp_path / "substituted-home"
+    enrolled = home / ".config/mastermind/worktree-storage.json"
+    enrolled.parent.mkdir(parents=True)
+    enrolled.symlink_to(policy)
+    assert hasattr(cli, "installation_storage_profile")
+    with pytest.raises(cli.WorkspaceError, match="STORAGE_POLICY_INVALID"):
+        cli.installation_storage_profile(home)
+
+
+def test_installation_profile_keeps_required_mount_without_fallback(storage_cli, tmp_path, monkeypatch):
+    cli, root, policy, data = storage_cli
+    home = tmp_path / "disconnected-home"
+    enrolled = home / ".config/mastermind/worktree-storage.json"
+    enrolled.parent.mkdir(parents=True)
+    enrolled.write_bytes(policy.read_bytes())
+    enrolled.chmod(0o600)
+    monkeypatch.setattr(Path, "is_mount", lambda p: False)
+    assert hasattr(cli, "installation_storage_profile")
+    selected = cli.installation_storage_profile(home)
+    assert selected["root"] == str(root.resolve())
+    assert selected["mount_point"] == data["mount_point"]

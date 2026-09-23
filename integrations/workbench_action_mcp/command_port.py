@@ -1,4 +1,11 @@
-"""Closed, descriptor-bound command canary port for Workbench Action."""
+"""Closed, descriptor-bound command canary port for Workbench Action.
+
+A claim artifact always precedes a spawn, so an action with no artifact never
+ran through this port.  That absence is still reported as ``EFFECT_UNKNOWN``
+unless the entry point's durable pre-dispatch admission ledger proves the run
+was refused before dispatch and never accepted for that exact reference, in
+which case the same rule as the text patch port yields ``NOT_APPLIED``.
+"""
 
 from __future__ import annotations
 
@@ -59,7 +66,7 @@ from .contracts import (
     validate_action_scope,
     validate_relative_path,
 )
-from .patch_port import ProjectActionRefused
+from .patch_port import ADMISSION_REFUSED_ONLY, AdmissionEvidence, ProjectActionRefused
 
 
 MAX_INPUT_BYTES = 65536
@@ -775,11 +782,18 @@ def create_command_port(
     host: CommandHostBinding,
     inspector: ProcessInspector,
     action_ttl_ms: int = MAX_ACTION_TTL_MS,
+    admission_evidence: AdmissionEvidence | None = None,
 ):
-    """Return prepare, run, bounded-read and reconcile callbacks."""
+    """Return prepare, run, bounded-read and reconcile callbacks.
+
+    ``admission_evidence`` is the entry point's durable pre-dispatch admission
+    reader; without it artifact absence stays ``EFFECT_UNKNOWN``.
+    """
 
     if not all(callable(value) for value in (resolve_binding, clock_ms, run_io)):
         raise TypeError("explicit binding, clock and I/O integration required")
+    if admission_evidence is not None and not callable(admission_evidence):
+        raise TypeError("admission evidence must be callable")
     if not isinstance(token_codec, ActionTokenCodec):
         raise TypeError("explicit action token codec required")
     if not callable(getattr(inspector, "boot_session_id", None)) or not callable(
@@ -1183,6 +1197,27 @@ def create_command_port(
     def historical_binding(caller: ActionCaller, prepared: PreparedClosedCommand) -> None:
         binding_for(caller, prepared)
 
+    def unclaimed_receipt(
+        prepared: PreparedClosedCommand, action_ref: object
+    ) -> dict[str, Any]:
+        # No claim artifact exists, so no process was ever spawned for this
+        # reference through this port.  Absence alone still stays unknown: the
+        # run may have been admitted and lost before its claim.  It becomes
+        # NOT_APPLIED only when the durable admission ledger proves the run was
+        # refused before dispatch and never accepted for this exact reference.
+        # The ledger is read last so a run admitted meanwhile is seen.
+        effect = "EFFECT_UNKNOWN"
+        if admission_evidence is not None:
+            try:
+                verdict = admission_evidence(action_ref)
+            except Exception:
+                verdict = None
+            if verdict == ADMISSION_REFUSED_ONLY:
+                effect = "NOT_APPLIED"
+        return _result_receipt(
+            prepared, effect_state=effect, cleanup_uncertain=store.cleanup_uncertain
+        )
+
     async def reconcile_action(
         caller: ActionCaller, action_ref: object
     ) -> Mapping[str, Any]:
@@ -1190,10 +1225,8 @@ def create_command_port(
 
         def operation() -> dict[str, Any]:
             historical_binding(caller, prepared)
-            return _qualified_result(_live_store(store), prepared) or _result_receipt(
-                prepared,
-                effect_state="EFFECT_UNKNOWN",
-                cleanup_uncertain=store.cleanup_uncertain,
+            return _qualified_result(_live_store(store), prepared) or unclaimed_receipt(
+                prepared, action_ref
             )
 
         pending = run_io(operation)
@@ -1241,11 +1274,7 @@ def create_command_port(
             historical_binding(caller, prepared)
             receipt = _qualified_result(_live_store(store), prepared)
             if receipt is None or receipt["effect_state"] != "APPLIED":
-                return receipt or _result_receipt(
-                    prepared,
-                    effect_state="EFFECT_UNKNOWN",
-                    cleanup_uncertain=store.cleanup_uncertain,
-                )
+                return receipt or unclaimed_receipt(prepared, request["action_ref"])
             try:
                 raw = read_action_blob(store, prepared.action_id, stream)
                 if raw is None:

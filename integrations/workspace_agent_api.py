@@ -66,6 +66,16 @@ def _identifier(value: str, pattern: re.Pattern) -> str:
     return value
 
 
+def validate_channel_id(value: str) -> str:
+    """Validate the one published Workspace Agent API-channel identifier grammar.
+
+    Trigger and observation clients share this owner so a future provider grammar
+    change cannot leave the POST and GET paths disagreeing about channel identity.
+    """
+
+    return _identifier(value, _CHANNEL)
+
+
 def _timestamp(value: object) -> int:
     if type(value) is not int or not 0 <= value <= 2**63 - 1:
         raise InvalidObservation("INVALID_TIMESTAMP")
@@ -208,7 +218,7 @@ def read_run_once(*, channel_id: str, run_id: str, token: str,
     Timeout is the connection/socket timeout, not a provider-runtime stop deadline.
     Callers must not treat a fresh observation time as a changed provider artifact.
     """
-    _identifier(channel_id, _CHANNEL)
+    validate_channel_id(channel_id)
     _identifier(run_id, _RUN)
     if expected_conversation_url is not None:
         _conversation(expected_conversation_url)

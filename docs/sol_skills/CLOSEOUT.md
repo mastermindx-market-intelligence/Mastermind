@@ -122,10 +122,13 @@ Common Mastermind examples:
 
 ## Step 7 — Create the continuation handoff
 
-A substantive handoff should let the next session answer immediately:
+A substantive handoff must declare whether the parent mission is complete rather than assuming it.
+Use the current ACTIVE_EXECUTION finalization classification when that procedure applies.
 
 ```text
-mission just completed
+FINALIZATION_CLASSIFICATION: <current permitted class>
+MISSION_COMPLETE: true | false
+mission / bounded outcome at this boundary
 state before
 what changed
 what was verified
@@ -136,7 +139,31 @@ do-not-redo laws
 return point / highest-authority sources
 ```
 
+For `CHECKPOINTED_CONTINUATION`, `MISSION_COMPLETE` must be `false`; the handoff describes the
+verified incomplete boundary and continuation, never "mission just completed". For a truly completed
+parent mission, `MISSION_COMPLETE: true` is allowed only when the declared completion/proof law is
+actually satisfied. A bounded child or research assignment may be complete while its parent mission
+remains false; state both scopes explicitly when material.
+
 Use exact PR/SHA/MAS/WS identities. Do not paste private reasoning or secrets.
+
+## Step 7A — Verify the cumulative continuation boundary
+
+For CHECKPOINTED_CONTINUATION, consume ACTIVE_EXECUTION as the sole finalization owner. Leave one
+current cumulative checkpoint under the existing Agent OS/Runtime/artifact owners with a verified persistence receipt/readback,
+exact committed revision/digest, mission explicitly incomplete, justified boundary, next action and
+intended resume surface. A chat-only or local scratch note is not a durable checkpoint. Preserve
+accepted work, rejected approaches, material hypotheses/falsifiers and all effects through this boundary.
+
+A working snapshot is not an immutable transfer capsule. Existing owner versioning/fencing governs
+updates; a prepared capsule for a target Attempt is not repeatedly overwritten. Do not create a second
+latest-state directory, checkpoint table, lifecycle or authoritative Google Drive mirror.
+
+If persistence is ambiguous, preserve EFFECT_UNKNOWN on the same write carrier and reconcile that
+object/revision before any retry. A surviving older checkpoint does not prove a newer write failed.
+No fresh chat inherits execution custody, and no resume pointer proves an automatic wake. Missing
+persistent access requires an honest emergency note and actual platform/gate classification, not a
+false verified checkpoint or parent completion. Project rollout follows protected source acceptance.
 
 ## Step 8 — Reconcile projections and transport
 
@@ -205,6 +232,8 @@ Skillpack.
 ## Closeout output
 
 ```text
+FINALIZATION_CLASSIFICATION
+MISSION_COMPLETE: true | false
 Capability delta
 Final capability state
 Canonical receipts

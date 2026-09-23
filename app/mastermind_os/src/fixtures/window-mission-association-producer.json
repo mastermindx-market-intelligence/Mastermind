@@ -1,0 +1,319 @@
+{
+  "mission": {
+    "acceptance": {
+      "artifact_revision": null,
+      "evidence": [],
+      "owner": null,
+      "reason_codes": [
+        "ACCEPTANCE_OWNER_NOT_PROJECTED"
+      ],
+      "ruling": null,
+      "state": "NOT_PROJECTED"
+    },
+    "budget": {},
+    "children": {
+      "coverage": "COMPLETE",
+      "items": [
+        {
+          "attempt_count": 1,
+          "attempt_limit": 2,
+          "current_attempt_id": "ATT-50fc6c1983e9493b9b263533266b1478",
+          "depth": 1,
+          "job_id": "JOB-002",
+          "latest_attempt": {
+            "attempt_id": "ATT-50fc6c1983e9493b9b263533266b1478",
+            "attempt_number": 1,
+            "error_class": null,
+            "error_present": false,
+            "exit_code": null,
+            "finished_at": null,
+            "has_result": false,
+            "started_at": "2030-03-17T17:46:40Z",
+            "status": "RUNNING"
+          },
+          "orchestration_role": "plan",
+          "parent_job_id": "JOB-001",
+          "plan_step_id": null,
+          "status": "RUNNING",
+          "worker_id": null
+        }
+      ],
+      "overflow_count": 0,
+      "reason_codes": [],
+      "state": "AVAILABLE",
+      "total_count": 1,
+      "unjoined_job_count": 0,
+      "unjoined_job_ids": []
+    },
+    "conversation": {
+      "coverage": "NOT_PROJECTED",
+      "items": [],
+      "overflow_count": null,
+      "reason_codes": [
+        "MISSION_TREE_SUBSLICE_EXCLUDES_CONTENT"
+      ],
+      "state": "UNAVAILABLE",
+      "total_count": null
+    },
+    "degraded": [],
+    "execution": {
+      "artifacts": [],
+      "errors_present": false,
+      "evidence": [],
+      "next_actions": [],
+      "state": "NOT_STARTED",
+      "summary_present": false
+    },
+    "feature_gates": {
+      "actions": "READ_ONLY",
+      "advanced": "AVAILABLE",
+      "conversation": "UNAVAILABLE"
+    },
+    "generated_at": "2026-09-20T00:00:00Z",
+    "missingness": [
+      {
+        "missingness_class": "EXCLUDED",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "conversation"
+      },
+      {
+        "missingness_class": "EXCLUDED",
+        "producer_owner": "wake",
+        "reason": "source detail withheld",
+        "target_field": "return_path"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": null,
+        "reason": "source detail withheld",
+        "target_field": "acceptance"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": null,
+        "reason": "source detail withheld",
+        "target_field": "acceptance.state"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "children.worker_id"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "mission.title"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "slack",
+        "reason": "source detail withheld",
+        "target_field": "transport.continued"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "slack",
+        "reason": "source detail withheld",
+        "target_field": "transport.stopped"
+      },
+      {
+        "missingness_class": "NULL_BY_DESIGN",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "runtime.identity"
+      }
+    ],
+    "mission": {
+      "armed": {
+        "ceo_ingress_app_armed": null,
+        "ceo_submit_armed": null,
+        "coo_autonomy_armed": null,
+        "dialogue_bridge_armed": null,
+        "source": "absent",
+        "terminal_return_armed": null
+      },
+      "capability": {
+        "detail": "the executive runtime database was read; the requested root job was found",
+        "installed": true,
+        "state": "PROVEN",
+        "version": null
+      },
+      "depth": 0,
+      "evidence": [],
+      "orchestration_role": "aggregation",
+      "plan_step_id": null,
+      "root_job_ambiguous": false,
+      "root_job_candidates": [
+        "JOB-001"
+      ],
+      "root_job_id": "JOB-001",
+      "runtime_root_state": "RESOLVED",
+      "status": "QUEUED",
+      "submission_availability": "UNKNOWN",
+      "title": null
+    },
+    "posture": {
+      "evidence": [],
+      "rule": "F0",
+      "value": "RETURN_EXECUTION_MISMATCH"
+    },
+    "principal": {
+      "accountable_seat": "ceo",
+      "current_sol_target": null,
+      "current_worker": null,
+      "evidence": [],
+      "owed_turn": {
+        "reason": "attention_targets_seat",
+        "seat": "ceo",
+        "source_refs": []
+      }
+    },
+    "program": {
+      "attention_ids": [],
+      "disagreements": [],
+      "evidence": [],
+      "github_prs": [],
+      "next_action": "Read",
+      "state": "active",
+      "title": "One",
+      "work_ref": "WS:FABRIC"
+    },
+    "read_state": {
+      "reason_codes": [],
+      "state": "CURRENT",
+      "usable_sections": [
+        "program",
+        "mission",
+        "review",
+        "execution",
+        "principal",
+        "transport",
+        "children"
+      ]
+    },
+    "result_refs": {
+      "absent_job_ids": [
+        "JOB-001",
+        "JOB-002"
+      ],
+      "availability": "AVAILABLE",
+      "generation": {
+        "after": 2,
+        "before": 2,
+        "schema": "mastermind.runtime_read_observation.v1",
+        "source_identity": "876ec8679480e7d7c9cb4053ed7d9627",
+        "state": "SAME"
+      },
+      "omitted_job_ids": [],
+      "refs": [],
+      "root_job_id": "JOB-001",
+      "schema": "mastermind.fabric_result_reference_index.v1",
+      "snapshot_digest": "ce606706a1606e1492addc49f192da73bc774c3cc99ab09811efc0e864776d67",
+      "truncated": false
+    },
+    "review": {
+      "evidence": [],
+      "required": false,
+      "reviews_job_id": null,
+      "verdict": "NOT_YET"
+    },
+    "schema": "mastermind.mission_workspace.v3",
+    "source": {
+      "control_room_generated_at": "2026-09-20T00:00:00Z",
+      "control_room_schema": "mastermind.chairman_control_room.v1",
+      "fabric_view_generated_at": "2026-09-22T02:26:41Z",
+      "fabric_view_schema": "mastermind.fabric_job_view.v2",
+      "owner_observation": {
+        "control_room": {
+          "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+          "document_digest": "40182e89e6b394f48732d241bf0c529e1e9159f8b75a8aa8bc1dd5e6d4e3e016",
+          "instance_after": "control_fixture_123456",
+          "instance_before": "control_fixture_123456",
+          "publication_after": 1,
+          "publication_before": 1,
+          "source_validity_digest": "10874f2f9acd61f22d29268a585183db8d6461d994348f62374697f3dc7ddb47"
+        },
+        "runtime": {
+          "after": 2,
+          "before": 2,
+          "schema": "mastermind.runtime_read_observation.v1",
+          "snapshot_digest": "ce606706a1606e1492addc49f192da73bc774c3cc99ab09811efc0e864776d67",
+          "source_identity": "876ec8679480e7d7c9cb4053ed7d9627",
+          "state": "SAME"
+        },
+        "schema": "mastermind.workspace_source_observation.v1",
+        "selection": {
+          "root_job_id": "JOB-001",
+          "work_ref": "WS:FABRIC"
+        },
+        "state": "SAME"
+      },
+      "source_coverage": [
+        "control_room",
+        "fabric_view"
+      ],
+      "source_generation": {
+        "generation": null,
+        "state": "UNKNOWN",
+        "version": null
+      }
+    },
+    "transport": {
+      "actionable": true,
+      "carrier": null,
+      "dispatch_state": "RETURNED",
+      "evidence": [],
+      "historical": false,
+      "reason": "fixture",
+      "w3c": null,
+      "watch_proven": true
+    }
+  },
+  "producer": "One actual producer run: strict-v2 submit_intent(workstream=WS:FABRIC) -> Runtime create_cycle_planner -> live RUNNING Attempt -> bounded Fabric v3 companion -> Mission v3 composer -> authenticated installed Reader v2. No hand-shaped rows.",
+  "schema": "mastermind.window_mission_association_producer_export.v1",
+  "selection": {
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:FABRIC"
+  },
+  "window": {
+    "mode": "observed-turn-window",
+    "observation_binding": {
+      "attempt_id": "ATT-50fc6c1983e9493b9b263533266b1478",
+      "job_id": "JOB-002"
+    },
+    "schema": "mastermind.workspace.window_read_candidate.v2",
+    "selection_ref": "managed-window:canary",
+    "view": {
+      "acceptance": "NOT_PROJECTED",
+      "capabilities": {
+        "history": false,
+        "provider_control": false,
+        "send": false
+      },
+      "coverage": "OBSERVED_WINDOW",
+      "epoch": "9a674143b8f1d819074987fbc140cb73b493ea97305236d3359a9cd230bd0e37",
+      "gaps": [],
+      "history": "NOT_PROVEN",
+      "items": [
+        {
+          "display_sha256": "1fce5beaf782b61888581d0972b5305420b243770f96a5dc1f33e80b20e20504",
+          "id": "visible:8f1b78053669c6c55b4e367e4537f1d763b2cb86ae724210e20d94613614b7ba",
+          "kind": "visible-response",
+          "publication_sequence": 1,
+          "representation": "VISIBLE_TEXT",
+          "source_sequence": 0,
+          "state": "partial",
+          "text": "plan child visible"
+        }
+      ],
+      "observed_at": "2030-03-17T17:46:40Z",
+      "schema": "mastermind.workspace.visible_window_candidate.v1",
+      "scope": "one-managed-turn-window",
+      "source_ref": "managed-window:canary",
+      "terminal": false
+    }
+  }
+}

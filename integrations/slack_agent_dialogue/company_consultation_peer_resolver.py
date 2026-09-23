@@ -6,6 +6,10 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from common.agent_dialogue_consultation_contract import (
+    consultation_schema_for_reasoning_surface,
+)
+from common.agent_dialogue_contract import DialogueContractError
 from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import (
     BindingReason,
     BindingState,
@@ -34,6 +38,18 @@ class ConsultationPeer:
     program_ref: str
     actor_ref: Mapping[str, Any]
     binding: Mapping[str, Any]
+
+    @property
+    def consultation_schema(self) -> str:
+        surface = (
+            self.binding.get("reasoning_surface")
+            if isinstance(self.binding, Mapping)
+            else None
+        )
+        try:
+            return consultation_schema_for_reasoning_surface(surface)
+        except DialogueContractError:
+            raise ConsultationPeerRefused("BINDING_UNAVAILABLE") from None
 
     def public_projection(self) -> dict[str, str]:
         return {"peer_ref": self.peer_ref, "display_name": self.display_name}
@@ -100,9 +116,14 @@ class CompanyConsultationPeerResolver:
             or re.fullmatch(r"bind-[A-Za-z0-9][A-Za-z0-9._:-]{7,127}", str(binding.get("binding_id"))) is None
             or type(binding.get("binding_generation")) is not int
             or binding.get("binding_generation") < 1
-            or binding.get("reasoning_surface") not in {"codex", "claude"}
         ):
             raise ConsultationPeerRefused("BINDING_UNAVAILABLE")
+        try:
+            consultation_schema_for_reasoning_surface(
+                binding.get("reasoning_surface")
+            )
+        except DialogueContractError:
+            raise ConsultationPeerRefused("BINDING_UNAVAILABLE") from None
 
 
 @dataclasses.dataclass(frozen=True)
