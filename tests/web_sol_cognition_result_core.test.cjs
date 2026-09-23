@@ -125,3 +125,31 @@ test("refuses over-budget canonical result without returning the content", () =>
   assert.equal(result.canonical_result_json, null);
   assert.equal(result.canonical_result_byte_length, 0);
 });
+
+
+test("refuses unknown nested role-result fields before any content crosses the browser boundary", () => {
+  const value = envelope();
+  value.role_result = {...value.role_result, transcript: "private transcript"};
+  const result = core.reduceCanonicalResultText(canonical(value), expected);
+  assert.equal(result.status, "RESULT_REFUSED");
+  assert.equal(result.canonical_result_json, null);
+});
+
+test("refuses unknown nested artifact fields before export", () => {
+  const value = envelope();
+  value.role_result = {
+    ...value.role_result,
+    artifacts: [{path: "artifact.txt", digest: "c".repeat(64), transcript: "private"}],
+  };
+  const result = core.reduceCanonicalResultText(canonical(value), expected);
+  assert.equal(result.status, "RESULT_REFUSED");
+  assert.equal(result.canonical_result_json, null);
+});
+
+test("refuses non-string next-action payloads before export", () => {
+  const value = envelope();
+  value.next_actions = [{transcript: "private"}];
+  const result = core.reduceCanonicalResultText(canonical(value), expected);
+  assert.equal(result.status, "RESULT_REFUSED");
+  assert.equal(result.canonical_result_json, null);
+});
