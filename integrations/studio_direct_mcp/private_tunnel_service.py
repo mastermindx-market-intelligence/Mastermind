@@ -154,6 +154,7 @@ def _parse_file_ref(value: str) -> Path:
     if not os.path.isabs(raw):
         raise SystemExit("runtime key ref path must be absolute")
     path = Path(raw)
+    _assert_no_symlink_ancestors(path)
     try:
         info = os.lstat(path)
     except OSError:
@@ -166,6 +167,22 @@ def _parse_file_ref(value: str) -> Path:
         raise SystemExit("runtime key ref owner mismatch")
     if stat.S_IMODE(info.st_mode) & 0o077:
         raise SystemExit("runtime key ref permissions must deny group/other access")
+    home = _user_root()
+    parent = path.parent
+    while parent != home:
+        try:
+            parent_info = os.lstat(parent)
+        except OSError:
+            raise SystemExit("runtime key ref parent missing")
+        if not stat.S_ISDIR(parent_info.st_mode):
+            raise SystemExit("runtime key ref parent must be a directory")
+        if parent_info.st_uid != os.getuid():
+            raise SystemExit("runtime key ref parent owner mismatch")
+        if stat.S_IMODE(parent_info.st_mode) & 0o022:
+            raise SystemExit(
+                "runtime key ref parent permissions must deny group/other writes"
+            )
+        parent = parent.parent
     return path
 
 

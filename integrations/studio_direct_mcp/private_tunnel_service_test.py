@@ -542,6 +542,27 @@ class TestWrongInputs(unittest.TestCase):
                 svc.cmd_stage(args)
             self.assertFalse(svc._canonical_profile(C1).exists())
 
+    def test_symlinked_runtime_key_parent_refused(self):
+        with IsolatedHome() as (tmp, home):
+            target = tmp / "credential-target"
+            target.mkdir()
+            key = target / "runtime-key"
+            key.write_text("test-placeholder-not-a-live-key\n", encoding="utf-8")
+            key.chmod(0o600)
+            link = home / "credential-link"
+            link.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(SystemExit, "symlink ancestor"):
+                svc._parse_file_ref(f"file:{link / 'runtime-key'}")
+
+    def test_group_writable_runtime_key_parent_refused_before_stage(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(home, tmp)
+            key_path = Path(args.runtime_key_ref[5:])
+            key_path.parent.chmod(0o770)
+            with self.assertRaisesRegex(SystemExit, "parent permissions"):
+                svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
     def test_runtime_key_owned_by_other_uid_refused_before_stage(self):
         with IsolatedHome() as (tmp, home):
             args, _, _ = _stage_args(home, tmp)
@@ -595,13 +616,29 @@ class TestWrongInputs(unittest.TestCase):
 
     def test_missing_key_file_refused(self):
         with IsolatedHome() as (tmp, home):
-            args, _, _ = _stage_args(
-                home, tmp, key_ref="file:/tmp/does-not-exist-studio-direct-key"
+            missing = (
+                home
+                / ".config"
+                / "tunnel-client"
+                / "credentials"
+                / "does-not-exist-runtime-key"
             )
-            with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler())):
+            args, _, _ = _stage_args(home, tmp, key_ref=f"file:{missing}")
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler())
+            ):
                 with self.assertRaises(SystemExit) as ctx:
                     svc.cmd_stage(args)
             self.assertIn("not found", str(ctx.exception))
+
+    def test_runtime_key_outside_home_refused(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(
+                home, tmp, key_ref="file:/tmp/not-an-owned-studio-key"
+            )
+            with self.assertRaisesRegex(SystemExit, "outside HOME"):
+                svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
 
     def test_wrong_profile_path_refused(self):
         with IsolatedHome() as (tmp, home):
