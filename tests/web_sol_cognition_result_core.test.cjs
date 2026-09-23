@@ -329,3 +329,18 @@ test("reserves worst-case string-framing headroom under the incumbent 64 KiB nat
   assert.equal(core.MAX_CANONICAL_RESULT_BYTES, 24 * 1024);
   assert.ok((2 * core.MAX_CANONICAL_RESULT_BYTES) + reservedFramingBytes <= nativeFrameBytes);
 });
+
+
+test("refuses lone UTF-16 surrogate text that native UTF-8 canonicalization cannot accept", () => {
+  const value = envelope({summary: "\ud800"});
+  const result = core.reduceCanonicalResultText(canonical(value), expected);
+  assert.equal(result.status, "RESULT_REFUSED");
+});
+
+test("preserves valid non-BMP Unicode text", () => {
+  const value = envelope({summary: "bounded research 😀"});
+  const text = canonical(value);
+  const result = core.reduceCanonicalResultText(text, expected);
+  assert.equal(result.status, "RESULT_READY");
+  assert.equal(result.canonical_result_json, text);
+});
