@@ -78,6 +78,21 @@ def test_action_gates_do_not_require_all_future_capabilities_before_first_work()
     assert "No new permission is created by this scoping rule" in source
 
 
+def test_pre_dispatch_platform_refusal_is_recoverable_without_effect_confusion():
+    source = text("docs/sol_skills/ACTIVE_EXECUTION.md")
+    for phrase in (
+        "A platform refusal is action-scoped until evidence proves otherwise",
+        "before tool dispatch",
+        "TOOL_DEGRADED / EFFECT_NONE",
+        "one bounded same-carrier retry may reshape the call",
+        "do not enter an identical third loop",
+        "If dispatch may have occurred or effect cannot be proven absent",
+        "continue only the missing suffix on the same carrier",
+        "Never overwrite a known-good prefix",
+    ):
+        assert phrase in source
+
+
 def test_blocker_resolution_is_owned_and_not_new_paperwork():
     source = text("docs/sol_skills/ACTIVE_EXECUTION.md")
     for phrase in (

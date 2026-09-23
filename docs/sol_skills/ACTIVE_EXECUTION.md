@@ -61,6 +61,19 @@ runtime gate does not block otherwise-permitted source investigation, implementa
 A transport failure still blocks the required transport-dependent effect. A missing watcher prevents
 reliance on unattended return, not safe foreground execution. Never fabricate receipt or persistence.
 
+**A platform refusal is action-scoped until evidence proves otherwise.** Distinguish a refusal that
+occurred before tool dispatch from a lost/ambiguous response after dispatch. Use the incumbent carrier's
+bounded call history/status/readback when available. If the refused call is proven never to have reached
+the tool and the intended mutation never began, record that action as `TOOL_DEGRADED / EFFECT_NONE`;
+do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage. Re-read the exact current target, then
+one bounded same-carrier retry may reshape the call without changing its intended effect (for example a
+smaller typed file chunk rather than a compound operation). If an equivalent pre-dispatch refusal repeats
+with no new evidence, change tactic or lane; do not enter an identical third loop. If dispatch may have
+occurred or effect cannot be proven absent, classify `EFFECT_UNKNOWN` and reconcile on that carrier
+without retry or failover. For chunked file/copy work, acknowledged prior chunks plus exact readback are
+known effects: preserve the verified prefix and continue only the missing suffix on the same carrier.
+Never overwrite a known-good prefix merely because a later chunk was refused.
+
 **CI is a release dependency.** Pending checks do not stop implementation, test repair, review or
 other independent authorized work. Preserve the exact candidate identity, use one existing cheap
 observer, and consume its result before the gated merge/release; follow `docs/DELIVERY_WORKFLOW.md`.
