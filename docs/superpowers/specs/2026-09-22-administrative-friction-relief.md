@@ -217,3 +217,13 @@ work ordered; make the existing dispatch/effect owner cover raised/lost-response
 before sibling selection. Do not introduce another recovery store or scheduler.
 The original #870 workspace has an unresolved integration conflict; neither its local
 commit nor these source tests prove current-base release, installation, or fleet adoption.
+
+### Technical recovery is not denial evasion
+
+The candidate's recovery wording is narrowed: EFFECT_NONE establishes absence of an
+execution effect, not permission to retry. The first explicit safety or permission
+denial ends retry for that action; only permitted technical failures may use bounded
+same-carrier recovery. Unknown refusal causes are not presumed technical failures.
+Three source regressions were RED before this clarification and GREEN afterward.
+The complete targeted policy/continuity/recovery run is now 94 passed, 4 skipped and
+1 strict expected failure. The nine-case #870 evidence and test digest above are unchanged.

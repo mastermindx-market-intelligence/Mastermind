@@ -65,7 +65,13 @@ reliance on unattended return, not safe foreground execution. Never fabricate re
 occurred before tool dispatch from a lost/ambiguous response after dispatch. Use the incumbent carrier's
 bounded call history/status/readback when available. If the refused call is proven never to have reached
 the tool and the intended mutation never began, record that action as `TOOL_DEGRADED / EFFECT_NONE`;
-do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage. Re-read the exact current target, then
+do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage.
+
+EFFECT_NONE is not retry permission. The first explicit safety or permission denial ends retry for
+that action. Do not rephrase it or change tools, carriers, accounts, models or providers to get the
+denied effect through. An unclear refusal reason is not evidence of a technical fault; establish the
+permitted recovery from current platform/permission evidence, not experiments against the refusal.
+For a permitted technical schema, payload or transport failure, re-read the exact current target, then
 one bounded same-carrier retry may reshape the call without changing its intended effect (for example a
 smaller typed file chunk rather than a compound operation). If an equivalent pre-dispatch refusal repeats
 with no new evidence, change tactic or lane; do not enter an identical third loop. If dispatch may have
@@ -78,9 +84,9 @@ Never overwrite a known-good prefix merely because a later chunk was refused.
 provider throttling or temporary restriction may be unknown. Treat repeated safety/refusal events as
 scarce-capacity pressure anyway: do not repeatedly rephrase the same effect, deliberately generate
 blocked calls, or switch accounts/models/providers merely to get a refused action through. After the
-single bounded recovery attempt above, a second equivalent pre-dispatch safety refusal ends further
-classifier probing for that task on that realm; continue only independent permitted work or wait for
-the actual provider restriction/recovery condition. A different account may later receive genuinely
+single permitted technical recovery above, another equivalent refusal ends that recovery loop;
+it never permits probing a safety or permission denial. Continue only independent permitted work
+or wait for the actual provider restriction/recovery condition. A different account may later receive genuinely
 independent work only through normal capacity/routing law, never as refusal evasion.
 
 Keep model/mode evidence separate from model inference. Record the visible selected model/mode,

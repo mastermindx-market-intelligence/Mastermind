@@ -99,7 +99,7 @@ def test_repeated_refusals_preserve_provider_capacity_and_do_not_become_filter_p
         "Preserve provider capacity; do not turn a refusal into filter-probing",
         "scarce-capacity pressure",
         "do not repeatedly rephrase the same effect",
-        "second equivalent pre-dispatch safety refusal ends further classifier probing",
+        "first explicit safety or permission denial ends retry",
         "never as refusal evasion",
     ):
         assert phrase in source
@@ -193,3 +193,14 @@ def test_fable_is_not_a_universal_routing_or_merge_prerequisite(path):
     assert "currently authorized role and operation" in source
     assert "Independent review and source/release protections still apply" in source
     assert "Owns adjudication, routing, and merges" not in source
+
+
+@pytest.mark.parametrize("path", [
+    "docs/sol_skills/ACTIVE_EXECUTION.md",
+    "docs/sol_skills/BOOTSTRAP_KERNEL.md",
+])
+def test_effect_absence_never_grants_permission_to_evade_a_denial(path):
+    source = text(path)
+    assert "EFFECT_NONE is not retry permission" in source
+    assert "first explicit safety or permission denial ends retry" in source
+    assert "permitted technical" in source
