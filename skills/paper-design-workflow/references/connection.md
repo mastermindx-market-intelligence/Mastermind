@@ -6,10 +6,12 @@ and Paper Desktop open on the intended file. The guarded adapter can be read-onl
 or write-capable. Clients control their actual approval prompts and workspace trust.
 
 For ChatGPT Web, the normal path is the existing **Studio Direct** private MCP
-tunnel. When the connected seat advertises `paper_inspect`, `paper_catalog`,
+tunnel. When the connected seat advertises `paper_prepare`, `paper_inspect`, `paper_catalog`,
 `paper_read` and `paper_edit`, call those gateway-owned tools directly. The
-gateway pins the local Python interpreter, bridge path and bridge SHA; the Web
-caller cannot select a host path, Paper endpoint, account or credential.
+gateway pins the local Python interpreter, bridge path and bridge SHA. `paper_prepare`
+uses the host-qualified `~/Applications/Paper.app` and accepts only an exact Paper
+file ID; the Web caller cannot select an application path, arbitrary URL, Paper
+endpoint, account or credential.
 
 Remote Desktop Commander is retained for authorized host diagnosis and installation,
 or for an explicitly assigned legacy session. If that carrier is used, call its
