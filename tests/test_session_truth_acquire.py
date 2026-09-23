@@ -403,3 +403,30 @@ def test_compile_context_rejects_huge_integer_with_global_guard_disabled(
             )
     finally:
         sys.set_int_max_str_digits(previous)
+
+
+def test_collect_agentos_refuses_source_change_between_owner_reads(
+    tmp_path, monkeypatch
+):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path)
+    first = "a" * 40
+    second = "b" * 40
+    observed = []
+
+    def moving_sha(root):
+        observed.append(Path(root))
+        return first if len(observed) == 1 else second
+
+    monkeypatch.setattr(module, "git_sha", moving_sha)
+
+    with pytest.raises(module.AcquisitionError, match="source changed during acquisition"):
+        module.collect_agentos(
+            os.fspath(macro),
+            ["WS:TARGET"],
+            environ={},
+            now="2026-08-27T05:00:00Z",
+            timeout=5,
+        )
+
+    assert observed == [macro, macro]
