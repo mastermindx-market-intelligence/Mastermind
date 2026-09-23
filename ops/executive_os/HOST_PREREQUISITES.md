@@ -775,8 +775,17 @@ CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
 ```
 
 A repeated request with the same id and identical content returns the stored
-receipt without re-executing. The same id with changed content refuses, and a
-stale in-flight marker returns `EFFECT_UNKNOWN` rather than retrying blindly.
+terminal receipt only when that original effect actually reached a terminal
+child result. The same id with changed content refuses. A stale in-flight marker
+returns `EFFECT_UNKNOWN` and is never retried blindly.
+
+For the separately reviewed marker-preserving reconciliation path, the broker may
+record `RECONCILED_NOT_APPLIED` only after it proves the exact original
+`verify_ready` request/marker identity and pre-effect readiness state while
+preserving the marker byte-for-byte. That classification is **not** a synthetic
+FAILED/SUCCEEDED child result. It means the requested business effect was proven
+not applied, and the original request id remains non-replayable. Any later
+readiness attempt requires a separately authorized new request id.
 
 To inspect an earlier request's outcome without resubmitting it, query its id
 over the same socket:
@@ -785,11 +794,15 @@ over the same socket:
 "$MMX_ADMIN" status --request-id "company-ready-$MERGE_SHA"
 ```
 
-This is observation only: it never re-executes the action, never creates or
-repairs a receipt/marker, and never retries. Exit `0` means the terminal
-receipt was retrieved (regardless of that receipt's own recorded outcome),
-`75` means only a stale in-flight marker exists (`EFFECT_UNKNOWN`), and `4`
-means neither exists yet (`NOT_FOUND`, which is not license to resubmit).
+This is a status-query only: it never re-executes the action, creates or repairs
+evidence, removes a marker, or retries. Exit `0` means a valid `TERMINAL`
+projection **or** a valid `RECONCILED_NOT_APPLIED` projection was retrieved;
+for the latter, exit `0` confirms successful status retrieval only and does not
+reinterpret the original privileged effect as success. Exit `75` means
+unresolved marker evidence remains (`EFFECT_UNKNOWN`), and `4` means neither
+terminal nor in-flight/reconciled evidence exists (`NOT_FOUND`, which is not
+license to resubmit). Malformed or mismatched reconciliation evidence is
+refused rather than downgraded to a clean state.
 
 ### Three isolated Personal Pro readiness slots
 

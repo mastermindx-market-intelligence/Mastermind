@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "ops/executive_os/uninstall.sh"
 BROKER_SPEC = ROOT / "docs/superpowers/specs/2026-09-13-executive-privileged-action-broker-design.md"
 PERMANENT_PLAN = ROOT / "docs/superpowers/plans/2026-09-14-permanent-privileged-execution-program.md"
+HOST_PREREQUISITES = ROOT / "ops/executive_os/HOST_PREREQUISITES.md"
 PRIVILEGED = "com.mastermind.executive.privileged"
 CONTROL = "com.mastermind.executive.control"
 WORKER = "com.mastermind.executive.worker.codex"
@@ -314,11 +315,14 @@ def test_orphan_reconciliation_record_keeps_revocation_fail_closed(host):
 def test_governing_contracts_name_reconciled_not_applied_status_and_revocation_semantics():
     spec = BROKER_SPEC.read_text()
     plan = PERMANENT_PLAN.read_text()
+    runbook = HOST_PREREQUISITES.read_text()
 
     assert "RECONCILED_NOT_APPLIED" in spec
     assert "RECONCILED_NOT_APPLIED" in plan
+    assert "RECONCILED_NOT_APPLIED" in runbook
     assert "marker" in plan and "reconciliation" in plan
     assert "preserv" in plan.lower()
+    assert "status-query" in runbook
 
 
 @pytest.mark.parametrize("changes,code", [({"TEST_UID": "501"}, 77), ({"TEST_OS": "Linux"}, 69)])
