@@ -308,9 +308,34 @@ def test_exact_call_and_byte_limit_remains_successful(capsys, monkeypatch):
 def test_budget_constants_are_closed_and_raw_response_cap_is_unchanged():
     module = fx._cli_module()
     assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (450, 1152)
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
     assert module._MAX_HTTP_BODY_BYTES == 5_000_000
+
+
+def test_current_macro_estate_payload_fits_successor_byte_budget(monkeypatch):
+    """Measured current census payload must fit without changing any other ceiling."""
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock())
+    bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
+    bounded._bytes = 104_630_037
+
+    assert bounded._bytes > 96 * 1024 * 1024
+    assert bounded._bytes < 128 * 1024 * 1024
+    bounded.check()
+
+
+def test_normalized_byte_budget_accepts_exact_128_mib_and_refuses_one_over(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock())
+    bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
+
+    bounded._bytes = 128 * 1024 * 1024
+    bounded.check()
+
+    bounded._bytes += 1
+    with pytest.raises(module._ReadBudgetExceeded):
+        bounded.check()
 
 
 def test_single_get_rejects_accounting_overrun_before_return(monkeypatch):
