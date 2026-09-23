@@ -64,8 +64,24 @@
     return typeof value === "string" && DIGEST_RE.test(value);
   }
 
+  function isWellFormedUnicode(value) {
+    for (let index = 0; index < value.length; index += 1) {
+      const code = value.charCodeAt(index);
+      if (code >= 0xd800 && code <= 0xdbff) {
+        if (index + 1 >= value.length) return false;
+        const next = value.charCodeAt(index + 1);
+        if (next < 0xdc00 || next > 0xdfff) return false;
+        index += 1;
+      } else if (code >= 0xdc00 && code <= 0xdfff) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   function validText(value, maximum = 8192, nonempty = false) {
-    return typeof value === "string" && !value.includes("\0") && value.length <= maximum &&
+    return typeof value === "string" && isWellFormedUnicode(value) &&
+      !value.includes("\0") && value.length <= maximum &&
       (!nonempty || (value.length > 0 && value.trim() === value));
   }
 
