@@ -5581,15 +5581,25 @@ def test_close_drains_terminal_flight_created_by_dispatch_shutdown_race(
         service._dispatch_tasks[planner.job_id] = dispatch_task
 
         close_task = asyncio.create_task(service.close())
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        while not service._closing:
+            await asyncio.sleep(0)
         finish_release.set()
         await asyncio.wait_for(projector_entered.wait(), timeout=1)
-        await asyncio.sleep(0.15)
-        assert close_task.done() is False
+        with pytest.raises(
+            ServiceError,
+            match="terminal service work has not drained; custody retained",
+        ):
+            await asyncio.wait_for(close_task, timeout=1)
+        assert len(service._terminal_return_flights) == 1
+        _digest, terminal_flight = next(
+            iter(service._terminal_return_flights.values())
+        )
+        assert terminal_flight.done() is False
+        assert terminal_flight.cancelled() is False
 
         projector_release.set()
-        await asyncio.wait_for(close_task, timeout=1)
+        await asyncio.wait_for(asyncio.shield(terminal_flight), timeout=1)
+        await asyncio.wait_for(service.close(), timeout=1)
         assert service._terminal_return_flights == {}
         assert [
             event.event_type

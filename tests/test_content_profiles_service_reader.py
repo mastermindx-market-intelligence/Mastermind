@@ -139,11 +139,21 @@ def test_signed_concurrent_clients_withdrawal_history_and_restart(tmp_path, shor
                 async def read(bearer):
                     return await _invoke(app, path=WINDOW_PATH, headers=_headers(token=bearer))
                 responses = await asyncio.gather(*(read(bearer) for bearer in tokens))
-                for response in responses:
+                tuples = []
+                for response, expected in zip(responses, (web, mac)):
                     assert response[0] == 200, response[2]
                     assert len(response[2]) > 32768
-                    assert len(json.loads(response[2])['view']['items']) == 4
+                    body = json.loads(response[2])
+                    assert len(body['view']['items']) == 4
+                    assert body['schema'] == 'mastermind.workspace.window_read_candidate.v2'
+                    assert set(body) == {'schema', 'selection_ref', 'mode', 'view', 'observation_binding'}
+                    assert body['observation_binding'] == {
+                        'job_id': expected.job_id, 'attempt_id': expected.attempt_id,
+                    }
+                    tuples.append(body['observation_binding'])
                     assert b'NATIVE-G1' not in response[2] and b'reader_grant' not in response[2]
+                    assert b'observation_binding' in response[2]
+                assert tuples[0] == tuples[1] == {'job_id': web.job_id, 'attempt_id': web.attempt_id}
                 assert {binding for op, binding in operations if op == 'ohf-observe-turn'} == {web.profile_digest, mac.profile_digest}
                 enroll_count = sum(op == 'ohf-observer-enroll' for op, _ in operations)
                 before = len(operations)

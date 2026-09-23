@@ -9,9 +9,13 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from control_plane.executive_authority import (
+    AuthorityPolicyError,
+    ExecutiveAuthorityPolicy,
+)
 from control_plane.executive_coo_policy import (
     CooCyclePolicy,
     CooCyclePolicyError,
@@ -19,7 +23,10 @@ from control_plane.executive_coo_policy import (
 )
 from control_plane.executive_runtime import (
     COO_CYCLE_BLOCK_REASONS,
+    FINITE_CONTROL_STABLE_PIN_KEYS,
     AttemptStatus,
+    FiniteControlContext,
+    FiniteReservationDecision,
     Job,
     JobStatus,
     OrchestrationDispatchOutcome,
@@ -32,7 +39,10 @@ from control_plane.executive_runtime import (
     _validated_aggregation_handoff,
     _validated_plan_admission,
     _validated_role_completion_material,
+    finite_host_binding_digest,
 )
+
+FINITE_CUTOFF_SCHEMA = "mastermind.executive_coo_finite_cutoff/v1"
 
 CYCLE_OUTCOME_SCHEMA = "mastermind.executive_coo_cycle_outcome/v1"
 _ROLE_PRECEDENCE = {"plan": 0, "work": 1, "repair": 2, "review": 3, "aggregation": 4}
@@ -67,6 +77,40 @@ def _job_sort_key(job: Job, ordinals: Mapping[str, int]) -> tuple[int, int, int,
         int(job.repair_round or 0),
         job.job_id,
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class FiniteControlGate:
+    """Advisory finite-control facts established for one root, once per cycle.
+
+    ``None`` from :meth:`CooCycle._finite_control_gate` means the root is
+    outside every finite control composition: no durable arm and no owner
+    context bound to it.  Such a root keeps its exact legacy behaviour.
+
+    ``context_proven`` with an undrifted current policy pin set are the only
+    facts that let ``already_issued`` from ``validate_finite_first_issuance``
+    support an incumbent settlement.  The advisory read reports
+    ``already_issued`` from persisted Attempt evidence alone and returns
+    before it ever re-reads the bound context, the durable arm, or the
+    persisted host pin, so that flag by itself proves only "this Attempt was
+    launched".  It never proves which root, which composition, or which
+    currently governing policies the launch belonged to.
+    """
+
+    root_job_id: str
+    armed: bool
+    bound: bool
+    context_proven: bool
+    halt: bool
+    halt_reason: str | None
+    expired: bool
+    exhausted: bool
+    spent: int
+    remaining: int
+    current_policy_pin_drift: bool
+    refusal_reasons: tuple[str, ...] = ()
+    status: dict[str, Any] | None = None
+    definition: dict[str, Any] | None = None
 
 
 def _classify_invalid(exc: Exception) -> str:
@@ -288,11 +332,422 @@ class CooCycle:
         )
         return self._outcome(root, "BLOCKED", selected, command, receipt)
 
+    def _finite_control_gate(
+        self, root_id: str, root: Job
+    ) -> FiniteControlGate | None:
+        """Establish every finite control fact this cycle relies on, once.
+
+        The advisory read cannot supply these facts: for an already issued
+        Attempt it returns before re-reading the bound context, the durable
+        arm, or the persisted host pin.  They are established here instead,
+        from the existing owner-issued context definition and the existing
+        durable arm, so no later dispatch can lean on ``already_issued``.
+        """
+
+        try:
+            status = self.runtime.jobs.finite_cycle_status(root_id)
+        except StateConflict:
+            # A malformed or duplicated durable arm refuses rather than
+            # silently reading as unarmed, and never reaches a dispatcher.
+            return FiniteControlGate(
+                root_job_id=root_id,
+                armed=False,
+                bound=self._finite_bound_root(root_id) is not None,
+                context_proven=False,
+                halt=True,
+                halt_reason="malformed_arm",
+                expired=False,
+                exhausted=False,
+                spent=0,
+                remaining=0,
+                current_policy_pin_drift=False,
+                refusal_reasons=("malformed_arm",),
+            )
+        context_definition = self._finite_context_definition()
+        definition = self._finite_bound_root(root_id)
+        bound = definition is not None
+        if status is None and context_definition is None:
+            return None
+
+        refusals: list[str] = []
+        if context_definition is None:
+            refusals.append("armed_root_without_bound_context")
+        elif context_definition["phase"] != "bound":
+            # An admission-only context carries no root_job_id at all, so the
+            # phase refusal has to precede any root comparison.
+            refusals.append("admission_only_context")
+        elif not bound:
+            refusals.append("foreign_bound_context")
+
+        context_proven = bound and definition["phase"] == "bound"
+        if status is None:
+            context_proven = False
+            refusals.append("bound_root_without_durable_arm")
+        elif context_proven:
+            # Only a bound context can be compared against the durable arm;
+            # every other shape is already refused by name above.
+            if not self._finite_arm_matches_context(definition, status):
+                context_proven = False
+                refusals.append("arm_context_projection_drift")
+            if not self._finite_host_pin_matches(definition, root):
+                context_proven = False
+                refusals.append("host_binding_pin_drift")
+            if not self._finite_provenance_matches(definition, root):
+                context_proven = False
+                refusals.append("root_provenance_drift")
+
+        expired = bool(status["expired"]) if status is not None else False
+        exhausted = bool(status["exhausted"]) if status is not None else False
+        halt = expired or exhausted or not context_proven
+        if expired:
+            halt_reason = "expired"
+        elif exhausted:
+            halt_reason = "budget_exhausted"
+        elif not context_proven:
+            halt_reason = "unproven_finite_context"
+        else:
+            halt_reason = None
+        return FiniteControlGate(
+            root_job_id=root_id,
+            armed=status is not None,
+            bound=bound,
+            context_proven=context_proven,
+            halt=halt,
+            halt_reason=halt_reason,
+            expired=expired,
+            exhausted=exhausted,
+            spent=int(status["spent"]) if status is not None else 0,
+            remaining=int(status["remaining"]) if status is not None else 0,
+            current_policy_pin_drift=(
+                self._finite_current_policy_pin_drift(definition)
+                if definition is not None
+                else False
+            ),
+            refusal_reasons=tuple(sorted(refusals)),
+            status=status,
+            definition=definition,
+        )
+
+    def _finite_context_definition(self) -> dict[str, Any] | None:
+        """Read the existing owner-issued context definition, if one is bound.
+
+        ``RuntimeStore._finite_control_context`` is the composition seam the
+        control owner already binds in process; its ``definition`` property is
+        the public read over that immutable input.  No new Runtime API is
+        added and no caller-supplied definition is ever accepted.
+        """
+
+        context = self.runtime.store._finite_control_context
+        if context is None:
+            return None
+        try:
+            definition = context.definition
+        except StateConflict:
+            return None
+        return definition if isinstance(definition, dict) else None
+
+    def _finite_bound_root(self, root_id: str) -> dict[str, Any] | None:
+        definition = self._finite_context_definition()
+        if definition is None or definition.get("root_job_id") != root_id:
+            return None
+        return definition
+
+    @staticmethod
+    def _finite_arm_matches_context(
+        definition: dict[str, Any], status: dict[str, Any]
+    ) -> bool:
+        """The durable arm must still be the exact projection of the context."""
+
+        policy = status.get("policy")
+        if not isinstance(policy, dict):
+            return False
+        for key in FINITE_CONTROL_STABLE_PIN_KEYS:
+            if policy.get(key) != str(definition[key]):
+                return False
+        return (
+            int(status["max_total_attempts"]) == int(definition["max_total_attempts"])
+            and int(status["expires_at_ms"]) == int(definition["expires_at_ms"])
+        )
+
+    @staticmethod
+    def _finite_host_pin_matches(definition: dict[str, Any], root: Job) -> bool:
+        """The persisted Job host binding must still pin the context."""
+
+        constraints = root.constraints
+        if not isinstance(constraints, Mapping):
+            return False
+        if constraints.get("operator_harness_armed") is not True:
+            return False
+        try:
+            return (
+                finite_host_binding_digest(constraints)
+                == definition["host_binding_digest_sha256"]
+            )
+        except StateConflict:
+            return False
+
+    @staticmethod
+    def _finite_provenance_matches(definition: dict[str, Any], root: Job) -> bool:
+        """The root's immutable provenance must still name the armed intent."""
+
+        provenance = root.orchestration_provenance
+        if not isinstance(provenance, dict):
+            return False
+        return (
+            provenance.get("source_id") == definition["intent_id"]
+            and provenance.get("source_digest") == definition["intent_fingerprint"]
+        )
+
+    @staticmethod
+    def _finite_current_policy_pin_drift(
+        definition: dict[str, Any] | None,
+    ) -> bool:
+        """Whether the currently loaded policies have drifted from the pins.
+
+        Drifted current policy pins refuse every fresh issuance on their own
+        (the advisory read returns ``authorized_first_launch=False``) and they
+        equally refuse the ``already_issued`` incumbent dispatch: that flag is
+        persisted Attempt evidence and never proves the launch still belongs
+        to the currently pinned composition.  A malformed or unavailable
+        current policy proves nothing either, so it reads as drift — fail
+        closed, never raising out of the finite gate.  Settlement itself is
+        not touched — the Runtime's incumbent owner seams do not consult the
+        current pins, so this cycle's zero-write refusal never strands a
+        lawfully held incumbent.
+        """
+
+        if definition is None:
+            return False
+        try:
+            authority = ExecutiveAuthorityPolicy.load().sha256
+        except AuthorityPolicyError:
+            return True
+        try:
+            coo = CooCyclePolicy.load().policy_sha256
+        except CooCyclePolicyError:
+            return True
+        return (
+            authority != definition["authority_policy_sha256"]
+            or coo != definition["coo_policy_sha256"]
+        )
+
+    def _finite_first_issuance(
+        self, root_id: str, job: Job
+    ) -> FiniteReservationDecision:
+        """Advisory read of one current same-root Attempt, without allocation."""
+
+        attempt_id = str(job.current_attempt_id or "")
+        return self.runtime.jobs.validate_finite_first_issuance(root_id, attempt_id)
+
+    def _finite_incumbent_allowed(
+        self, gate: FiniteControlGate | None, root_id: str, job: Job
+    ) -> tuple[bool, FiniteReservationDecision | None]:
+        """Whether this current same-root Attempt may reach the dispatcher.
+
+        A legacy root has no finite composition at all, so the advisory read
+        is recorded but never gates it.  A finite root requires either the
+        Runtime's own ``authorized_first_launch`` verdict, or a persisted
+        ``already_issued`` incumbent whose bound context, durable arm and
+        persisted pins were just re-proven by the gate and whose composition
+        the currently loaded policies still pin unchanged.
+        """
+
+        if job.root_job_id != root_id:
+            return False, None
+        decision = self._finite_first_issuance(root_id, job)
+        if gate is None:
+            return True, decision
+        if decision.authorized_first_launch:
+            return True, decision
+        if (
+            decision.already_issued
+            and gate.context_proven
+            and not gate.current_policy_pin_drift
+        ):
+            return True, decision
+        return False, decision
+
+    def _finite_outcome(
+        self,
+        root_id: str,
+        policy_sha: str,
+        gate: FiniteControlGate,
+        decisions: Iterable[FiniteReservationDecision] = (),
+        settled: str | None = None,
+    ) -> CooCycleOutcome:
+        """Deterministic zero-write NO_NEW_WORK receipt for a finite root."""
+
+        return self._outcome(
+            root_id,
+            "NO_NEW_WORK",
+            None,
+            None,
+            {
+                "schema_version": FINITE_CUTOFF_SCHEMA,
+                "halt_reason": gate.halt_reason,
+                "expired": gate.expired,
+                "exhausted": gate.exhausted,
+                "spent": gate.spent,
+                "remaining": gate.remaining,
+                "policy_sha": policy_sha,
+                "finite_control": {
+                    "armed": gate.armed,
+                    "bound": gate.bound,
+                    "context_proven": gate.context_proven,
+                    "current_policy_pin_drift": gate.current_policy_pin_drift,
+                    "refusal_reasons": list(gate.refusal_reasons),
+                    "advisory_first_issuance": [
+                        {
+                            "authorized_first_launch": decision.authorized_first_launch,
+                            "already_issued": decision.already_issued,
+                            "halt_reason": decision.halt_reason,
+                        }
+                        for decision in decisions
+                    ],
+                    "settled_incumbent_job_id": settled,
+                },
+            },
+        )
+
+    @staticmethod
+    def _finite_halt_policy_sha(gate: FiniteControlGate) -> str:
+        """Deterministic policy pin for a halt receipt, with no policy load.
+
+        The halt resolves before the current policy is ever loaded, so its
+        receipt reports the pin the composition was bound under when a bound
+        definition carries one, and otherwise the reviewed
+        ``EXPECTED_POLICY_SHA256`` that every policy-pinned receipt in this
+        module already uses.  A malformed or unavailable current policy can
+        change neither the halt nor this pin.
+        """
+
+        if gate.definition is not None:
+            pinned = gate.definition.get("coo_policy_sha256")
+            if isinstance(pinned, str) and pinned:
+                return pinned
+        return EXPECTED_POLICY_SHA256
+
+    def _finite_halt_outcome(
+        self, root_id: str, gate: FiniteControlGate, policy_sha: str
+    ) -> CooCycleOutcome:
+        """Resolve a halted finite root: incumbent settlement, nothing else.
+
+        Every fresh, requeue, block, repair, review, planner, plan, handoff,
+        queued and root-fresh path is closed with zero writes.  The one
+        permitted mutation is the existing exact dispatcher replaying the
+        original command for a same-root current Attempt that either the
+        Runtime authorizes as a first launch, or that already holds its
+        charged issuance under a re-proven bound context.
+        """
+
+        all_jobs = [
+            job for job in self.runtime.jobs.list_jobs() if job.root_job_id == root_id
+        ]
+        children = [job for job in all_jobs if job.job_id != root_id]
+        ordinals = self._finite_plan_ordinals(root_id)
+        decisions: list[FiniteReservationDecision] = []
+
+        active = sorted(
+            [
+                job
+                for job in children
+                if job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}
+            ],
+            key=lambda job: _job_sort_key(job, ordinals),
+        )
+        for selected in active:
+            if not selected.attempt_count or not selected.current_attempt_id:
+                continue
+            allowed, decision = self._finite_incumbent_allowed(
+                gate, root_id, selected
+            )
+            if decision is not None:
+                decisions.append(decision)
+            if not allowed:
+                continue
+            command = (
+                f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
+                f"{selected.attempt_count}"
+            )
+            receipt = self.dispatcher(selected.job_id, command)
+            if receipt is None:
+                raise StateConflict(
+                    "active exact dispatch returned no reconcilable outcome"
+                )
+            return self._outcome(
+                root_id, "DISPATCHED", selected.job_id, command, receipt
+            )
+
+        handoff_events = [
+            event
+            for event in self.runtime.events.list_events(job_id=root_id)
+            if event.event_type == "COO_AGGREGATION_HANDOFF_READY"
+        ]
+        root = self.runtime.jobs.get_job(root_id)
+        if (
+            handoff_events
+            and root is not None
+            and root.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}
+            and root.attempt_count
+            and root.current_attempt_id
+        ):
+            allowed, decision = self._finite_incumbent_allowed(gate, root_id, root)
+            if decision is not None:
+                decisions.append(decision)
+            if allowed:
+                command = (
+                    f"coo-cycle:{root_id}:dispatch:{root_id}:attempt:"
+                    f"{root.attempt_count}"
+                )
+                receipt = self.dispatcher(root_id, command)
+                if receipt is None:
+                    raise StateConflict(
+                        "active exact root dispatch returned no reconcilable outcome"
+                    )
+                return self._outcome(
+                    root_id, "DISPATCHED", root_id, command, receipt
+                )
+
+        return self._finite_outcome(root_id, policy_sha, gate, decisions)
+
+    def _finite_plan_ordinals(self, root_id: str) -> dict[str, int]:
+        """Best-effort step ordinals; halt ordering never needs a valid plan."""
+
+        try:
+            with self.runtime.store.read() as connection:
+                row = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (root_id,)
+                ).fetchone()
+                if row is None:
+                    return {}
+                _admission, plan_body = _validated_plan_admission(connection, row)
+                return {
+                    str(step["step_id"]): index
+                    for index, step in enumerate(plan_body["steps"])
+                }
+        except (StateConflict, CooCyclePolicyError):
+            return {}
+
     def run_once(self, parent_job_id: str) -> CooCycleOutcome:
         root_id = str(parent_job_id or "").strip()
         root = self.runtime.jobs.get_job(root_id)
         if root is None:
             raise StateConflict(f"root job {root_id!r} does not exist")
+
+        # Finite control facts are established immediately after the root
+        # lookup — before the current policy is loaded and before any durable
+        # block is replayed — so a halted root can only ever settle an
+        # incumbent: neither a malformed current policy nor a stale
+        # preexisting block can answer before the deterministic zero-write
+        # NO_NEW_WORK, and every fresh, requeue, block, repair, review,
+        # planner, plan, handoff, queued and root-fresh path below is
+        # unreachable once this gate reports a halt.
+        gate = self._finite_control_gate(root_id, root)
+        if gate is not None and gate.halt:
+            return self._finite_halt_outcome(
+                root_id, gate, self._finite_halt_policy_sha(gate)
+            )
+
         try:
             policy = CooCyclePolicy.load()
         except CooCyclePolicyError as exc:
@@ -747,6 +1202,12 @@ class CooCycle:
             selected = active[0]
             if selected.attempt_count < 1 or not selected.current_attempt_id:
                 return self._block(root_id, selected.job_id, "state_conflict")
+            allowed, decision = self._finite_incumbent_allowed(gate, root_id, selected)
+            if not allowed:
+                assert gate is not None
+                return self._finite_outcome(
+                    root_id, policy.policy_sha256, gate, [decision]
+                )
             command = (
                 f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
                 f"{selected.attempt_count}"
@@ -857,6 +1318,12 @@ class CooCycle:
         }:
             if root.attempt_count < 1 or not root.current_attempt_id:
                 return self._block(root_id, root_id, "state_conflict")
+            allowed, decision = self._finite_incumbent_allowed(gate, root_id, root)
+            if not allowed:
+                assert gate is not None
+                return self._finite_outcome(
+                    root_id, policy.policy_sha256, gate, [decision]
+                )
             command = (
                 f"coo-cycle:{root_id}:dispatch:{root_id}:attempt:"
                 f"{root.attempt_count}"
@@ -909,4 +1376,11 @@ class CooCycle:
         )
 
 
-__all__ = ["CYCLE_OUTCOME_SCHEMA", "CooCycle", "CooCycleOutcome", "Dispatch"]
+__all__ = [
+    "CYCLE_OUTCOME_SCHEMA",
+    "FINITE_CUTOFF_SCHEMA",
+    "CooCycle",
+    "CooCycleOutcome",
+    "Dispatch",
+    "FiniteControlGate",
+]

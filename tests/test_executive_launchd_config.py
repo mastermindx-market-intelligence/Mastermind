@@ -747,6 +747,7 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
     installed_product_keys = {
         "executive_mcp_profile",
         "content_observer",
+        "content_observer_profile_path",
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
@@ -2652,3 +2653,648 @@ def test_hf1b_loaded_source_through_supervisor_returns_consumable_result(tmp_pat
         assert event.payload["exact_worker_target"]["observation"]["source_sha256"] == attestation["config_sha256"]
         assert CooCycle(runtime).run_once(root.job_id).action == "HANDOFF_CREATED"
     asyncio.run(exercise())
+
+
+# Hot content profiles keep the fixed source path in the attested Control config
+# while root may atomically replace only the canonical profile document.
+def _disabled_content_profiles():
+    return {
+        "schema": "mastermind.executive_content_profiles.v1",
+        "profiles": {
+            "web": {"enabled": False, "profile": None},
+            "mac": {"enabled": False, "profile": None},
+        },
+    }
+
+
+def _write_content_profile(path: Path, value) -> None:
+    path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+    path.chmod(0o440)
+
+
+def _install_root_profile_metadata(monkeypatch, cli, profile_path: Path):
+    """Present a temp file as the production UID0:GID 0440 object."""
+
+    target = Path(profile_path)
+    opened = set()
+    flags = []
+    metadata = {
+        "uid": 0,
+        "gid": os.getegid(),
+        "mode": 0o440,
+        "file_type": stat.S_IFREG,
+        "nlink": 1,
+    }
+    real_open = cli.os.open
+    real_fstat = cli.os.fstat
+    real_lstat = cli.Path.lstat
+
+    def secured(info):
+        return SimpleNamespace(
+            st_dev=info.st_dev,
+            st_ino=info.st_ino,
+            st_uid=metadata["uid"],
+            st_gid=metadata["gid"],
+            st_mode=metadata["file_type"] | metadata["mode"],
+            st_nlink=metadata["nlink"],
+            st_size=info.st_size,
+            st_mtime_ns=info.st_mtime_ns,
+            st_ctime_ns=info.st_ctime_ns,
+        )
+
+    def guarded_open(path, open_flags, *args, **kwargs):
+        fd = real_open(path, open_flags, *args, **kwargs)
+        if Path(path) == target:
+            opened.add(fd)
+            flags.append(open_flags)
+        return fd
+
+    def guarded_fstat(fd):
+        info = real_fstat(fd)
+        return secured(info) if fd in opened else info
+
+    def guarded_lstat(path):
+        info = real_lstat(path)
+        return secured(info) if Path(path) == target else info
+
+    monkeypatch.setattr(
+        cli,
+        "_sealed_content_profile_ancestors",
+        lambda _path: (("/", (1, 1, 0, 0, stat.S_IFDIR | 0o755, 1, 0, 1, 1)),),
+    )
+    monkeypatch.setattr(cli.os, "open", guarded_open)
+    monkeypatch.setattr(cli.os, "fstat", guarded_fstat)
+    monkeypatch.setattr(cli.Path, "lstat", guarded_lstat)
+    return metadata, flags
+
+
+def _hot_content_raw(tmp_path: Path, profile_path: Path):
+    from test_c1_ceo_ingress_composition import _raw
+
+    raw = _raw(tmp_path)
+    raw.update(
+        ceo_ingress_app_peer_uid=os.geteuid() + 10,
+        ceo_ingress_app_armed=True,
+        ceo_ingress_app_macro_root=tmp_path / "macro",
+        content_observer_profile_path=profile_path,
+    )
+    return raw
+
+
+def _hot_source(
+    tmp_path, monkeypatch, value=None, *, expected_release_sha="a" * 40
+):
+    import hashlib
+    from scripts import executive_os_phase1c as cli
+
+    profile_path = tmp_path / "content-profiles.json"
+    _write_content_profile(
+        profile_path,
+        _disabled_content_profiles() if value is None else value,
+    )
+    metadata, flags = _install_root_profile_metadata(
+        monkeypatch, cli, profile_path
+    )
+    config_path = tmp_path / "control.json"
+    config_path.write_bytes(b'{"fixed":"startup"}')
+    config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    attestation = {
+        "config_sha256": config_sha256,
+        "process_identity": {
+            "pid": 4242,
+            "start_identity": "startup",
+            "boot_id": "boot",
+        },
+        "release_commit_sha": expected_release_sha,
+        "receipt": "fixed-startup-attestation",
+    }
+    current = {"value": copy.deepcopy(attestation)}
+    source = cli._HotContentProfileSource(
+        profile_path=profile_path,
+        expected_gid=os.getegid(),
+        expected_release_sha=expected_release_sha,
+        config_path=config_path,
+        startup_attestation=attestation,
+        attestation_loader=lambda: copy.deepcopy(current["value"]),
+    )
+    return cli, source, profile_path, config_path, current, metadata, flags
+
+
+def test_hot_content_disabled_file_starts_without_inline_or_runtime_effects(
+    tmp_path, monkeypatch
+):
+    from scripts import executive_os_phase1c as cli
+    from test_c1_ceo_ingress_composition import _write_config
+
+    profile_path = tmp_path / "disabled-content-profiles.json"
+    disabled = _disabled_content_profiles()
+    _write_content_profile(profile_path, disabled)
+    _, flags = _install_root_profile_metadata(monkeypatch, cli, profile_path)
+    raw = _hot_content_raw(tmp_path, profile_path)
+    loaded = cli.load_control_config(_write_config(tmp_path, raw))
+
+    assert loaded["content_observer_profile_path"] == profile_path
+    assert "content_observer" not in loaded
+    assert disabled == json.loads(profile_path.read_text(encoding="utf-8"))
+    assert flags and flags[-1] & os.O_NOFOLLOW
+    assert flags[-1] & os.O_NONBLOCK
+    assert flags[-1] & os.O_CLOEXEC
+
+
+def test_hot_content_requires_app_peer_and_refuses_both_sources(
+    tmp_path, monkeypatch
+):
+    from scripts import executive_os_phase1c as cli
+    from test_c1_ceo_ingress_composition import _raw, _write_config
+
+    profile_path = tmp_path / "content-profiles.json"
+    _write_content_profile(profile_path, _disabled_content_profiles())
+    _install_root_profile_metadata(monkeypatch, cli, profile_path)
+    without_app = _raw(tmp_path)
+    without_app["content_observer_profile_path"] = profile_path
+    with pytest.raises(cli.ServiceError, match="installed App peer"):
+        cli.load_control_config(_write_config(tmp_path, without_app))
+
+    both = _hot_content_raw(tmp_path, profile_path)
+    both["content_observer"] = _disabled_content_profiles()
+    with pytest.raises(cli.ServiceError, match="mutually exclusive"):
+        cli.load_control_config(_write_config(tmp_path, both))
+
+
+def test_legacy_inline_content_profile_parity(tmp_path):
+    from scripts import executive_os_phase1c as cli
+    from test_c1_ceo_ingress_composition import _write_config
+
+    raw = _hot_content_raw(tmp_path, tmp_path / "unused.json")
+    raw.pop("content_observer_profile_path")
+    raw["content_observer"] = _disabled_content_profiles()
+    loaded = cli.load_control_config(_write_config(tmp_path, raw))
+    assert loaded["content_observer"] == _disabled_content_profiles()
+    assert "content_observer_profile_path" not in loaded
+
+
+def test_hot_content_path_composes_the_existing_observer_and_steward_factories(
+    tmp_path, monkeypatch
+):
+    import importlib
+    from scripts import executive_os_phase1c as cli
+
+    raw = _hot_content_raw(tmp_path, tmp_path / "content-profiles.json")
+    captured = {}
+    installed = importlib.import_module("integrations.executive_mcp.installed")
+
+    class FakeReaders:
+        def __init__(self, **_kwargs):
+            pass
+
+        def observe(self):
+            return {}
+
+    class FakeService:
+        def __init__(self, _config, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(installed, "InstalledExecutiveReaders", FakeReaders)
+    monkeypatch.setattr(cli, "ExecutiveControlService", FakeService)
+    monkeypatch.setattr(cli, "activate_launchd_socket", lambda _name: object())
+    monkeypatch.setattr(
+        importlib.import_module("control_plane.executive_worker_broker"),
+        "WorkerBrokerClient",
+        lambda *_args, **_kwargs: object(),
+    )
+    loader = lambda: _disabled_content_profiles()
+    cli._service_from_config(raw, content_profile_loader=loader)
+    binding = captured["ceo_ingress_app_binding"]
+    runtime = object()
+    observer = binding.content_provider_factory(runtime)
+    assert observer.runtime is runtime
+    assert observer.profile_loader is loader
+    assert callable(binding.steward_provider_factory)
+
+    with pytest.raises(cli.ServiceError, match="profile loader"):
+        cli._service_from_config(raw)
+
+
+def _runtime_database_snapshot(runtime):
+    """Exact durable Runtime rows; reads may not create events or Attempts."""
+
+    with runtime.store.read() as connection:
+        tables = [
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
+        return {
+            table: tuple(
+                sorted(
+                    (tuple(row) for row in connection.execute(f'SELECT * FROM "{table}"')),
+                    key=repr,
+                )
+            )
+            for table in tables
+        }
+
+
+def test_hot_content_service_observer_refresh_and_error_have_zero_execution_effects(
+    tmp_path, monkeypatch
+):
+    import asyncio
+    import importlib
+    from test_content_profile_profiles import pair
+    from test_executive_content_observer_reconcile import _DirectBroker
+    from test_steward_content_integration import fixture
+    from integrations.executive_content_contract import ACCESS_SCHEMA, ContentProfileKey
+    from scripts import executive_os_phase1c as cli
+
+    clock, runtime, web, _adapter, broker = fixture(tmp_path)
+    cli, source, path, config_path, _, _, _ = _hot_source(
+        tmp_path,
+        monkeypatch,
+        expected_release_sha=web.release_sha,
+    )
+    raw = _hot_content_raw(tmp_path, path)
+    raw["proof_base_sha"] = web.release_sha
+    captured = {}
+    broker_operations = []
+    client_constructions = []
+    tick_invocations = []
+
+    class CountingBroker(_DirectBroker):
+        async def request(self, operation, payload):
+            broker_operations.append(operation)
+            return await super().request(operation, payload)
+
+    client = CountingBroker(broker)
+
+    class FakeReaders:
+        def __init__(self, **_kwargs):
+            pass
+
+        def observe(self):
+            return {}
+
+    class FakeService:
+        def __init__(self, _config, **kwargs):
+            captured.update(kwargs)
+
+    def forbidden_tick(*_args, **_kwargs):
+        tick_invocations.append(True)
+        raise AssertionError("profile reload invoked CooCycle")
+
+    installed = importlib.import_module("integrations.executive_mcp.installed")
+    worker_broker = importlib.import_module("control_plane.executive_worker_broker")
+    executive_service = importlib.import_module("control_plane.executive_service")
+    monkeypatch.setattr(installed, "InstalledExecutiveReaders", FakeReaders)
+    monkeypatch.setattr(cli, "ExecutiveControlService", FakeService)
+    monkeypatch.setattr(cli, "activate_launchd_socket", lambda _name: object())
+    monkeypatch.setattr(
+        executive_service.CooCycle,
+        "run_once",
+        forbidden_tick,
+    )
+    monkeypatch.setattr(
+        worker_broker,
+        "WorkerBrokerClient",
+        lambda *_args, **_kwargs: client_constructions.append(True) or client,
+    )
+    cli._service_from_config(raw, content_profile_loader=source.load)
+    binding = captured["ceo_ingress_app_binding"]
+    observer = binding.content_provider_factory(runtime)
+
+    before_runtime = _runtime_database_snapshot(runtime)
+    before_config = config_path.read_bytes()
+    before_clock = clock.value
+    _, _, actual = pair(web)
+
+    async def exercise():
+        disabled = await observer.handle_frame(web.frame(ACCESS_SCHEMA))
+        assert disabled == {"ok": False, "error": {"code": "ACCESS_DENIED"}}
+        assert broker_operations == []
+        assert _runtime_database_snapshot(runtime) == before_runtime
+
+        replacement = path.with_suffix(".replacement")
+        _write_content_profile(replacement, actual)
+        replacement.replace(path)
+        unenrolled = await observer.handle_frame(web.frame(ACCESS_SCHEMA))
+        assert unenrolled == {
+            "ok": False,
+            "error": {"code": "GRANT_INVALIDATED"},
+        }
+        assert broker_operations == ["ohf-observer-status"]
+        assert _runtime_database_snapshot(runtime) == before_runtime
+
+        enrollment = await observer.enroll(ContentProfileKey.web)
+        assert enrollment["status"] == "ACTIVE"
+        assert broker_operations == [
+            "ohf-observer-status",
+            "ohf-observer-enroll",
+        ]
+        after_enrollment = _runtime_database_snapshot(runtime)
+        changed_tables = {
+            table
+            for table in before_runtime
+            if before_runtime[table] != after_enrollment[table]
+        }
+        assert changed_tables == {"events"}
+        assert before_runtime["attempts"] == after_enrollment["attempts"]
+
+        allowed = await observer.handle_frame(web.frame(ACCESS_SCHEMA))
+        assert allowed["ok"] is True
+        assert broker_operations == [
+            "ohf-observer-status",
+            "ohf-observer-enroll",
+            "ohf-observer-status",
+        ]
+        assert _runtime_database_snapshot(runtime) == after_enrollment
+
+        malformed = path.with_suffix(".malformed")
+        malformed.write_bytes(b'{"schema":')
+        malformed.chmod(0o440)
+        malformed.replace(path)
+        refused = await observer.handle_frame(web.frame(ACCESS_SCHEMA))
+        assert refused["ok"] is False
+        assert refused["error"]["code"] in {
+            "ACCESS_DENIED",
+            "CONTENT_UNAVAILABLE",
+        }
+        assert broker_operations == [
+            "ohf-observer-status",
+            "ohf-observer-enroll",
+            "ohf-observer-status",
+        ]
+        assert _runtime_database_snapshot(runtime) == after_enrollment
+
+        recovered_file = path.with_suffix(".recovered")
+        _write_content_profile(recovered_file, actual)
+        recovered_file.replace(path)
+        recovered = await observer.handle_frame(web.frame(ACCESS_SCHEMA))
+        assert recovered["ok"] is True
+        assert broker_operations == [
+            "ohf-observer-status",
+            "ohf-observer-enroll",
+            "ohf-observer-status",
+            "ohf-observer-status",
+        ]
+        assert _runtime_database_snapshot(runtime) == after_enrollment
+
+    asyncio.run(exercise())
+    assert config_path.read_bytes() == before_config
+    assert client_constructions == [True]
+    assert tick_invocations == []
+    assert clock.value == before_clock
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "relative/profile.json",
+        "/private/profile/../profile.json",
+        "/private/profile//content.json",
+        "/private/profile/./content.json",
+    ],
+)
+def test_hot_content_refuses_relative_or_non_normalized_paths(value):
+    from scripts import executive_os_phase1c as cli
+
+    with pytest.raises(cli.ServiceError, match="absolute|normalized"):
+        cli._content_profile_path(value)
+
+
+@pytest.mark.parametrize(
+    ("changed", "uid", "mode"),
+    [
+        (None, 0, 0o755),
+        ("/sealed/content", 501, 0o755),
+        ("/sealed/content", 0, 0o775),
+    ],
+    ids=["sealed-positive", "nonroot", "group-writable"],
+)
+def test_hot_content_ancestor_sealing_is_exact(monkeypatch, changed, uid, mode):
+    from scripts import executive_os_phase1c as cli
+
+    path = Path("/sealed/content/profile.json")
+
+    def directory_info(node):
+        node_uid = uid if os.fspath(node) == changed else 0
+        node_mode = mode if os.fspath(node) == changed else 0o755
+        identity = abs(hash(os.fspath(node))) % 100000 + 1
+        return SimpleNamespace(
+            st_dev=1,
+            st_ino=identity,
+            st_uid=node_uid,
+            st_gid=0,
+            st_mode=stat.S_IFDIR | node_mode,
+            st_nlink=1,
+            st_size=0,
+            st_mtime_ns=1,
+            st_ctime_ns=1,
+        )
+
+    monkeypatch.setattr(cli.Path, "lstat", directory_info)
+    if changed is None:
+        observed = cli._sealed_content_profile_ancestors(path)
+        assert tuple(item[0] for item in observed) == tuple(
+            os.fspath(parent) for parent in path.parents
+        )
+    else:
+        with pytest.raises(cli.ServiceError, match="root-owned and sealed"):
+            cli._sealed_content_profile_ancestors(path)
+
+
+def test_hot_content_refuses_disappearance_without_cached_fallback(
+    tmp_path, monkeypatch
+):
+    cli, source, path, _, _, _, _ = _hot_source(tmp_path, monkeypatch)
+    assert source.load() == _disabled_content_profiles()
+    path.unlink()
+    with pytest.raises(cli.ServiceError, match="unavailable"):
+        source.load()
+
+
+def test_hot_content_single_profile_file_preserves_legacy_shape(
+    tmp_path, monkeypatch
+):
+    from dataclasses import asdict
+    from test_executive_content_observer import profile
+
+    single = asdict(profile(client_ref="a" * 64, release_sha="a" * 40))
+    cli, source, _, _, _, _, _ = _hot_source(
+        tmp_path,
+        monkeypatch,
+        value=single,
+    )
+    loaded = source.load()
+    assert loaded == single
+    assert cli._validate_content_profiles(
+        loaded,
+        expected_release_sha="a" * 40,
+    ).profile_digest == single["profile_digest"]
+
+
+def test_hot_content_atomic_complete_replacement_is_fresh_and_config_stable(
+    tmp_path, monkeypatch
+):
+    from dataclasses import asdict
+    from test_content_profile_profiles import pair
+    from test_executive_content_observer import profile
+
+    cli, source, path, config, _, _, _ = _hot_source(tmp_path, monkeypatch)
+    before_config = config.read_bytes()
+    _, _, actual = pair(profile(client_ref="a" * 64, release_sha="a" * 40))
+    replacement = path.with_suffix(".replacement")
+    _write_content_profile(replacement, actual)
+    replacement.replace(path)
+
+    loaded = source.load()
+    assert loaded == actual
+    assert config.read_bytes() == before_config
+    parsed = cli._validate_content_profiles(loaded, expected_release_sha="a" * 40)
+    assert asdict(parsed.web.profile) == actual["profiles"]["web"]["profile"]
+
+
+@pytest.mark.parametrize("mutation", ["config", "attestation", "release"])
+def test_hot_content_refuses_changed_startup_binding_or_release(
+    tmp_path, monkeypatch, mutation
+):
+    from test_content_profile_profiles import pair
+    from test_executive_content_observer import profile
+
+    cli, source, path, config, current, _, _ = _hot_source(tmp_path, monkeypatch)
+    if mutation == "config":
+        config.write_bytes(b'{"fixed":"changed-path-or-bytes"}')
+        match = "config or attestation changed"
+    elif mutation == "attestation":
+        current["value"]["process_identity"]["start_identity"] = "replacement"
+        match = "config or attestation changed"
+    else:
+        _, _, wrong = pair(profile(client_ref="a" * 64, release_sha="b" * 40))
+        replacement = path.with_suffix(".replacement")
+        _write_content_profile(replacement, wrong)
+        replacement.replace(path)
+        match = "release differs"
+    with pytest.raises(cli.ServiceError, match=match):
+        source.load()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("uid", 501),
+        ("gid", 999),
+        ("mode", 0o640),
+        ("nlink", 2),
+        ("file_type", stat.S_IFIFO),
+    ],
+)
+def test_hot_content_refuses_wrong_owner_group_mode_link_or_file_type(
+    tmp_path, monkeypatch, field, value
+):
+    from scripts import executive_os_phase1c as cli
+
+    path = tmp_path / "content-profiles.json"
+    _write_content_profile(path, _disabled_content_profiles())
+    metadata, _ = _install_root_profile_metadata(monkeypatch, cli, path)
+    metadata[field] = value
+    with pytest.raises(cli.ServiceError, match="source identity"):
+        cli._read_content_profile_document(path, expected_gid=os.getegid())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"schema":"one","schema":"two"}',
+        b'{"schema":',
+        b"x" * 65537,
+    ],
+)
+def test_hot_content_refuses_duplicate_malformed_or_oversize_input(
+    tmp_path, monkeypatch, payload
+):
+    from scripts import executive_os_phase1c as cli
+
+    path = tmp_path / "content-profiles.json"
+    path.write_bytes(payload)
+    path.chmod(0o440)
+    _install_root_profile_metadata(monkeypatch, cli, path)
+    with pytest.raises(cli.ServiceError):
+        cli._read_content_profile_document(path, expected_gid=os.getegid())
+
+
+def test_hot_content_refuses_final_and_ancestor_symlinks(tmp_path, monkeypatch):
+    from scripts import executive_os_phase1c as cli
+
+    target = tmp_path / "target.json"
+    _write_content_profile(target, _disabled_content_profiles())
+    link = tmp_path / "profile-link.json"
+    link.symlink_to(target)
+    monkeypatch.setattr(
+        cli,
+        "_sealed_content_profile_ancestors",
+        lambda _path: (("/", (1, 1, 0, 0, stat.S_IFDIR | 0o755, 1, 0, 1, 1)),),
+    )
+    with pytest.raises(cli.ServiceError):
+        cli._read_content_profile_document(link, expected_gid=os.getegid())
+
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    ancestor_link = tmp_path / "linked-parent"
+    ancestor_link.symlink_to(real_dir, target_is_directory=True)
+    monkeypatch.undo()
+    with pytest.raises(cli.ServiceError, match="ancestors"):
+        cli._content_profile_path(os.fspath(ancestor_link / "profile.json"))
+
+
+@pytest.mark.parametrize("mutation", ["replace", "in_place"])
+def test_hot_content_refuses_mid_read_replacement_or_in_place_write(
+    tmp_path, monkeypatch, mutation
+):
+    from scripts import executive_os_phase1c as cli
+
+    path = tmp_path / "content-profiles.json"
+    _write_content_profile(path, _disabled_content_profiles())
+    _install_root_profile_metadata(monkeypatch, cli, path)
+    real_read = cli.os.read
+    changed = False
+
+    def changing_read(fd, size):
+        nonlocal changed
+        result = real_read(fd, size)
+        if result and not changed:
+            changed = True
+            if mutation == "replace":
+                replacement = path.with_suffix(".replacement")
+                _write_content_profile(replacement, _disabled_content_profiles())
+                replacement.replace(path)
+            else:
+                path.write_bytes(path.read_bytes() + b" ")
+        return result
+
+    monkeypatch.setattr(cli.os, "read", changing_read)
+    with pytest.raises(cli.ServiceError, match="content observer profile"):
+        cli._read_content_profile_document(path, expected_gid=os.getegid())
+
+
+def test_hot_content_invalid_snapshot_has_no_cached_fallback(tmp_path, monkeypatch):
+    from test_content_profile_profiles import pair
+    from test_executive_content_observer import profile
+
+    cli, source, path, _, _, _, _ = _hot_source(tmp_path, monkeypatch)
+    _, _, actual = pair(profile(client_ref="a" * 64, release_sha="a" * 40))
+    replacement = path.with_suffix(".replacement")
+    _write_content_profile(replacement, actual)
+    replacement.replace(path)
+    assert source.load() == actual
+
+    malformed = path.with_suffix(".malformed")
+    malformed.write_bytes(b'{"schema":')
+    malformed.chmod(0o440)
+    malformed.replace(path)
+    with pytest.raises(cli.ServiceError):
+        source.load()
+
+    recovered = path.with_suffix(".recovered")
+    _write_content_profile(recovered, _disabled_content_profiles())
+    recovered.replace(path)
+    assert source.load() == _disabled_content_profiles()

@@ -84,6 +84,35 @@ test('descriptions disclose command, access-policy and external-data effects', (
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /usage|statistics/i);
   assert.match(tools.get('give_feedback_to_desktop_commander').description, /identifier/i);
 });
+test('published catalog descriptions remain capability-focused', () => {
+  for (const [name, tool] of tools) {
+    assert.equal(typeof tool.description, 'string', name);
+    assert.doesNotMatch(
+      tool.description,
+      /\b(?:always|never|mandatory|only correct|primary tool|critical rule|prefer)\b/i,
+      name,
+    );
+  }
+});
+
+test('server instructions remain descriptive rather than policy-prescriptive', () => {
+  const instructions = client.getInstructions();
+  assert.equal(typeof instructions, 'string');
+  assert.match(instructions, /direct terminal effects/i);
+  assert.match(instructions, /terminal observation/i);
+  assert.doesNotMatch(instructions, /\b(?:always|never|must|mandatory|only correct|prefer|choose)\b/i);
+});
+
+test('generic terminal tools declare a bounded direct-terminal purpose', () => {
+  for (const name of ['start_process', 'interact_with_process']) {
+    const description = tools.get(name).description;
+    assert.match(description, /not a work-submission or agent-handoff interface/i, name);
+    assert.match(description, /nested agent instructions|worker handoffs/i, name);
+    assert.match(description, /outside (?:its|their) declared (?:purpose|scope)/i, name);
+    assert.doesNotMatch(description, /\b(?:always|never|must|mandatory|only correct|prefer)\b/i, name);
+  }
+});
+
 test('catalog hardening preserves caller schemas and the existing page reader', () => {
   assert.deepEqual(tools.get('start_process').inputSchema,
     {type: 'object', properties: {}, additionalProperties: false});

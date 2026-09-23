@@ -1089,6 +1089,56 @@ def _bounded_provenance(runtime, job, *, creation_event_reader=None):
     return executive_inbox.ceo_intent_provenance(adapter, str(job.job_id))
 
 
+def _bounded_plan_child(job, *, root, root_validated):
+    """Validate the root-ratified narrow COO-cycle planner join from one row.
+
+    The typed creation proof is the existing immutable Runtime Job itself:
+    ``create_cycle_planner`` re-proves the strict-v2 root and inserts through
+    the capability-protected path, so this helper rechecks the closed cycle
+    keyset/schema/digest, canonical numeric Job ids, the plan role, the exact
+    selected root/parent at depth 1, the deterministic
+    ``coo-cycle:ROOT:create-planner:0`` command, creator ``coo_cycle``,
+    ``source_id`` ROOT and a ``source_digest`` equal to the exact
+    already-validated root provenance digest. No child Event is read and no
+    parity is claimed: this is bounded immutable row provenance. Other roles
+    and any foreign, rehashed or unprovable row stay unjoined.
+    """
+    from control_plane.executive_runtime import orchestration_digest
+
+    if not root_validated:
+        return None, "root workstream provenance unavailable"
+    cycle = getattr(job, "orchestration_provenance", None)
+    digest = getattr(job, "orchestration_provenance_digest", None)
+    keys = {"schema_version", "creator", "source_id", "source_digest", "command_id",
+            "job_id", "parent_job_id", "root_job_id", "role"}
+    root_digest = getattr(root, "orchestration_provenance_digest", None)
+    if not isinstance(cycle, Mapping) or set(cycle) != keys:
+        return None, "durable CEO-intent provenance not projected"
+    if not (
+        cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
+        and cycle.get("creator") == "coo_cycle"
+        and cycle.get("source_id") == root.job_id
+        and cycle.get("source_digest") == root_digest
+        and isinstance(root_digest, str)
+        and re.fullmatch(r"[0-9a-f]{64}", root_digest)
+        and cycle.get("command_id") == f"coo-cycle:{root.job_id}:create-planner:0"
+        and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+        and digest == orchestration_digest(cycle)
+        and cycle.get("job_id") == job.job_id
+        and isinstance(job.job_id, str)
+        and re.fullmatch(r"JOB-[0-9]{1,9}", job.job_id)
+        and isinstance(root.job_id, str)
+        and re.fullmatch(r"JOB-[0-9]{1,9}", root.job_id)
+        and job.parent_job_id == root.job_id == cycle.get("parent_job_id")
+        and job.root_job_id == root.job_id == cycle.get("root_job_id")
+        and cycle.get("role") == "plan"
+        and job.orchestration_role == "plan"
+        and getattr(job, "depth", None) == 1
+    ):
+        return None, "durable COO-cycle planner provenance invalid or unsupported"
+    return job, None
+
+
 def _acquisition_receipt(*, kind, root_job_id=None, snapshot=None, unjoined=(), projection=False):
     return {
         "schema": "mastermind.fabric_runtime_acquisition.v1",
@@ -1173,14 +1223,41 @@ def _observe_bounded_root(runtime, root_job_id, *, notes, present):
                     attempts_by_job[attempt.job_id] = attempts_by_job.get(attempt.job_id, []) + [attempt]
                 if any(len(attempts) > 20 for attempts in attempts_by_job.values()):
                     raise ValueError("bounded Runtime Attempt budget invalid")
-                for job in jobs:
-                    provenance, warning = _bounded_provenance(
-                            runtime, job, creation_event_reader=read.get_creation_event_by_command_id)
-                    if isinstance(provenance, Mapping) and provenance.get("workstream"):
-                        joined.add(job.job_id)
-                    else:
-                        unjoined = unjoined + [job.job_id]
-                        notes = notes + [f"provenance not projected: {job.job_id}: {warning or 'workstream unavailable'}"]
+                # The selected root keeps its existing Event-backed workstream
+                # validation on this same bounded observation; its validated
+                # provenance digest is the only anchor the narrow planner join
+                # may chain from.
+                root_job = jobs[0]
+                root_validated = False
+                provenance, warning = _bounded_provenance(
+                    runtime, root_job, creation_event_reader=read.get_creation_event_by_command_id)
+                if isinstance(provenance, Mapping) and provenance.get("workstream"):
+                    joined.add(root_job.job_id)
+                    root_validated = True
+                else:
+                    unjoined = unjoined + [root_job.job_id]
+                    notes = notes + [f"provenance not projected: {root_job.job_id}: {warning or 'workstream unavailable'}"]
+                planner_candidates = []
+                for job in jobs[1:]:
+                    candidate, warning = _bounded_plan_child(
+                        job, root=root_job, root_validated=root_validated)
+                    if candidate is not None:
+                        planner_candidates = planner_candidates + [candidate]
+                        continue
+                    unjoined = unjoined + [job.job_id]
+                    notes = notes + [f"provenance not projected: {job.job_id}: {warning or 'workstream unavailable'}"]
+                # Join only a unique eligible planner; a truncated scope cannot
+                # establish uniqueness, and ambiguity refuses the join while the
+                # unjoined facts stay listed.
+                if len(planner_candidates) == 1 and not snapshot.jobs_truncated:
+                    joined.add(planner_candidates[0].job_id)
+                elif planner_candidates:
+                    reason = ("bounded Runtime Job snapshot truncated: planner uniqueness unavailable"
+                              if snapshot.jobs_truncated else "ambiguous eligible plan children")
+                    for candidate in planner_candidates:
+                        unjoined = unjoined + [candidate.job_id]
+                    notes = notes + ["planner join refused: " + reason + ": "
+                                     + ", ".join(sorted(row.job_id for row in planner_candidates))]
                 if snapshot.jobs_truncated:
                     notes = notes + ["bounded Runtime Job snapshot truncated"]
                 if snapshot.attempts_truncated_job_ids:
