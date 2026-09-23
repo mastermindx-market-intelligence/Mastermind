@@ -258,6 +258,20 @@ def test_canonical_assignment_json_round_trips_exactly() -> None:
     assert encoded == assignment.canonical_json
 
 
+def test_work_accepts_canonical_read_only_or_read_research_authority() -> None:
+    read_only = _build(job=_job(authorities=["READ"]))
+    assert read_only.document["effect_contract"]["requested_authorities"] == ["READ"]
+
+    read_research = _build(job=_job(authorities=["READ", "RESEARCH"]))
+    assert read_research.document["effect_contract"]["requested_authorities"] == [
+        "READ",
+        "RESEARCH",
+    ]
+
+    with pytest.raises(WebSolCognitionAssignmentError, match="JOB_NOT_RESEARCH_ONLY"):
+        _build(job=_job(authorities=["RESEARCH"]))
+
+
 def test_refuses_any_write_or_test_authority_surface() -> None:
     base = _job()
     with pytest.raises(WebSolCognitionAssignmentError, match="JOB_NOT_RESEARCH_ONLY"):
