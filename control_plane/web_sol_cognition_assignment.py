@@ -30,7 +30,10 @@ from control_plane.web_sol_continuation import (
 ASSIGNMENT_SCHEMA: Final[str] = "mastermind.web_sol_cognition_assignment/v1"
 MAX_ASSIGNMENT_JSON_BYTES: Final[int] = 22 * 1024
 MAX_RENDERED_ASSIGNMENT_BYTES: Final[int] = 24 * 1024
-WORK_COGNITION_AUTHORITIES: Final[frozenset[str]] = frozenset({"READ", "RESEARCH"})
+WORK_COGNITION_AUTHORITY_SETS: Final[frozenset[frozenset[str]]] = frozenset({
+    frozenset({"READ"}),
+    frozenset({"READ", "RESEARCH"}),
+})
 REVIEW_COGNITION_AUTHORITIES: Final[frozenset[str]] = frozenset({"READ"})
 SUPPORTED_ROLES: Final[frozenset[str]] = frozenset({"work", "review"})
 
@@ -93,15 +96,16 @@ def _require_research_only(job: Job) -> None:
     role = job.orchestration_role
     if role not in SUPPORTED_ROLES:
         raise WebSolCognitionAssignmentError("ROLE_NOT_COGNITION_ASSIGNABLE")
-    expected_authorities = (
-        WORK_COGNITION_AUTHORITIES
-        if role == "work"
-        else REVIEW_COGNITION_AUTHORITIES
-    )
     authorities = list(job.requested_authorities)
+    authority_set = frozenset(authorities)
+    authority_allowed = (
+        authority_set in WORK_COGNITION_AUTHORITY_SETS
+        if role == "work"
+        else authority_set == REVIEW_COGNITION_AUTHORITIES
+    )
     if (
         len(authorities) != len(set(authorities))
-        or frozenset(authorities) != expected_authorities
+        or not authority_allowed
         or list(job.allowed_write_paths)
         or list(job.validation_commands)
     ):
@@ -241,7 +245,7 @@ __all__ = [
     "MAX_ASSIGNMENT_JSON_BYTES",
     "MAX_RENDERED_ASSIGNMENT_BYTES",
     "REVIEW_COGNITION_AUTHORITIES",
-    "WORK_COGNITION_AUTHORITIES",
+    "WORK_COGNITION_AUTHORITY_SETS",
     "SUPPORTED_ROLES",
     "WebSolCognitionAssignment",
     "WebSolCognitionAssignmentError",
