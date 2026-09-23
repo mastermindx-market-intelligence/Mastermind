@@ -470,7 +470,7 @@ test('tools/list publishes gateway-owned neutral backend metadata and privacy-mi
   assert.equal(payload.gatewayVersion, '0.1.7');
 });
 
-test('configured studio_fleet_status lists and reads the existing owner projection', async () => {
+test('configured studio_fleet_status lists and returns the bounded public projection', async () => {
   const dir = mkdtempSync(resolve(tmpdir(), 'studio-fleet-gateway-'));
   cleanup.dirs.push(dir);
   const launcher = resolve(dir, 'studio-direct');
@@ -481,8 +481,48 @@ test('configured studio_fleet_status lists and reads the existing owner projecti
     readyCount: 1,
     allReady: false,
     accounts: [
-      { account: 'chatgpt1', ready: true },
-      { account: 'chatgpt2', ready: false },
+      {
+        account: 'chatgpt1',
+        action: 'status',
+        steps: [],
+        ready: true,
+        gateway: {
+          account: 'chatgpt1', label: 'gateway-chatgpt1', loaded: true,
+          pid: 11111, port: 45018, running: true,
+        },
+        tunnel: {
+          account: 'chatgpt1', label: 'tunnel-chatgpt1', loaded: true,
+          pid: 22222, running: true, healthy: true, ready: true,
+          tunnelReady: true, controlPlanePollReady: true, gatewayReady: true,
+          transportTTL: '5h', maxConcurrentRequests: 4,
+          gatewayPort: 45018, healthPort: 45019,
+          tunnelId: 'tunnel_0123456789abcdef0123456789abcdef',
+          organizationId: null,
+          managedAlias: 'studio-direct-private-chatgpt1',
+          managedAliasRunning: false,
+        },
+      },
+      {
+        account: 'chatgpt2',
+        action: 'status',
+        steps: [],
+        ready: false,
+        gateway: {
+          account: 'chatgpt2', label: 'gateway-chatgpt2', loaded: true,
+          pid: 33333, port: 45020, running: true,
+        },
+        tunnel: {
+          account: 'chatgpt2', label: 'tunnel-chatgpt2', loaded: false,
+          pid: null, running: false, healthy: false, ready: false,
+          tunnelReady: false, controlPlanePollReady: false, gatewayReady: true,
+          transportTTL: '5h', maxConcurrentRequests: 4,
+          gatewayPort: 45020, healthPort: 45021,
+          tunnelId: 'tunnel_1123456789abcdef0123456789abcdef',
+          organizationId: null,
+          managedAlias: 'studio-direct-private-chatgpt2',
+          managedAliasRunning: false,
+        },
+      },
     ],
   };
   await writeFile(
@@ -521,7 +561,17 @@ test('configured studio_fleet_status lists and reads the existing owner projecti
   assert.equal(result.isError, undefined);
   assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v1');
   assert.equal(result.structuredContent.state, 'DEGRADED');
-  assert.deepEqual(result.structuredContent.owner, owner);
+  assert.equal(result.structuredContent.accountCount, 2);
+  assert.equal(result.structuredContent.readyCount, 1);
+  assert.equal(result.structuredContent.accounts[0].account, 'chatgpt1');
+  assert.equal(result.structuredContent.accounts[0].state, 'READY');
+  assert.equal(result.structuredContent.accounts[1].account, 'chatgpt2');
+  assert.equal(result.structuredContent.accounts[1].state, 'DEGRADED');
+  assert.equal(Object.hasOwn(result.structuredContent, 'owner'), false);
+  const rendered = JSON.stringify(result);
+  assert.equal(rendered.includes('45018'), false);
+  assert.equal(rendered.includes('11111'), false);
+  assert.equal(rendered.includes('tunnel_0123456789abcdef0123456789abcdef'), false);
 });
 
 test('shared backend reserves one slot for catalog traffic while typed Git remains advertised', { timeout: 15_000 }, async () => {

@@ -70,14 +70,199 @@ async function verifyLauncher(cfg) {
   if (digest !== cfg.launcherSha256) throw new Error('FLEET_STATUS_LAUNCHER_DRIFT');
 }
 
-function validateOwnerResult(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('FLEET_STATUS_OWNER_RESULT_INVALID');
+const ACCOUNT = /^[a-z0-9][a-z0-9_-]{0,47}$/;
+const TUNNEL_ID = /^tunnel_[0-9a-f]{32}$/;
+const ORGANIZATION_ID = /^org-[A-Za-z0-9]+$/;
+const MAX_ACCOUNTS = 64;
+const MAX_OWNER_ERROR_CHARS = 4096;
+
+function invalidOwner() {
+  throw new Error('FLEET_STATUS_OWNER_RESULT_INVALID');
+}
+
+function exactKeys(value, required, optional = []) {
+  const allowed = new Set([...required, ...optional]);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalidOwner();
+  for (const key of required) {
+    if (!Object.hasOwn(value, key)) invalidOwner();
   }
-  if (value.schema !== OWNER_SCHEMA || value.action !== 'status' || !Array.isArray(value.accounts)) {
-    throw new Error('FLEET_STATUS_OWNER_RESULT_INVALID');
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) invalidOwner();
   }
+}
+
+function expectBoolean(value) {
+  if (typeof value !== 'boolean') invalidOwner();
   return value;
+}
+
+function expectOptionalBoolean(value) {
+  if (value !== null && typeof value !== 'boolean') invalidOwner();
+  return value;
+}
+
+function expectBoundedInteger(value, min, max) {
+  if (!Number.isInteger(value) || value < min || value > max) invalidOwner();
+  return value;
+}
+
+function expectNullableInteger(value, min, max) {
+  if (value === null) return null;
+  return expectBoundedInteger(value, min, max);
+}
+
+function expectNullableBoundedString(value, maxChars, pattern = null) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || value.length < 1 || value.length > maxChars) invalidOwner();
+  if (pattern && !pattern.test(value)) invalidOwner();
+  return value;
+}
+
+function expectAccount(value) {
+  if (typeof value !== 'string' || !ACCOUNT.test(value)) invalidOwner();
+  return value;
+}
+
+function projectErrorRow(row) {
+  exactKeys(row, ['account', 'ready', 'error']);
+  const account = expectAccount(row.account);
+  if (row.ready !== false) invalidOwner();
+  if (typeof row.error !== 'string' || row.error.length < 1 || row.error.length > MAX_OWNER_ERROR_CHARS) {
+    invalidOwner();
+  }
+  return {
+    account,
+    state: 'DEGRADED',
+    ready: false,
+    gateway: null,
+    tunnel: null,
+    issues: ['OWNER_STATUS_UNAVAILABLE'],
+  };
+}
+
+function projectStatusRow(row) {
+  exactKeys(row, ['account', 'action', 'steps', 'ready', 'gateway', 'tunnel']);
+  const account = expectAccount(row.account);
+  if (row.action !== 'status' || !Array.isArray(row.steps) || row.steps.length !== 0) invalidOwner();
+  const ready = expectBoolean(row.ready);
+
+  exactKeys(row.gateway, ['account', 'label', 'loaded', 'pid', 'port', 'running']);
+  if (row.gateway.account !== account) invalidOwner();
+  expectNullableBoundedString(row.gateway.label, 128);
+  const gatewayLoaded = expectBoolean(row.gateway.loaded);
+  const gatewayRunning = expectBoolean(row.gateway.running);
+  expectNullableInteger(row.gateway.pid, 1, 2 ** 31 - 1);
+  expectNullableInteger(row.gateway.port, 1024, 65535);
+
+  exactKeys(
+    row.tunnel,
+    [
+      'account',
+      'label',
+      'loaded',
+      'pid',
+      'running',
+      'healthy',
+      'ready',
+      'tunnelReady',
+      'gatewayReady',
+      'transportTTL',
+      'maxConcurrentRequests',
+      'gatewayPort',
+      'healthPort',
+      'tunnelId',
+      'managedAlias',
+      'managedAliasRunning',
+    ],
+    ['controlPlanePollReady', 'organizationId'],
+  );
+  if (row.tunnel.account !== account) invalidOwner();
+  expectNullableBoundedString(row.tunnel.label, 128);
+  expectNullableInteger(row.tunnel.pid, 1, 2 ** 31 - 1);
+  expectNullableInteger(row.tunnel.gatewayPort, 1024, 65535);
+  expectNullableInteger(row.tunnel.healthPort, 1024, 65535);
+  expectNullableBoundedString(row.tunnel.tunnelId, 64, TUNNEL_ID);
+  expectNullableBoundedString(row.tunnel.organizationId ?? null, 128, ORGANIZATION_ID);
+  expectNullableBoundedString(row.tunnel.managedAlias, 128);
+  const tunnelLoaded = expectBoolean(row.tunnel.loaded);
+  const tunnelRunning = expectBoolean(row.tunnel.running);
+  const tunnelHealthy = expectBoolean(row.tunnel.healthy);
+  const tunnelReady = expectBoolean(row.tunnel.ready);
+  const transportReady = expectBoolean(row.tunnel.tunnelReady);
+  const gatewayReady = expectBoolean(row.tunnel.gatewayReady);
+  const managedAliasRunning = expectBoolean(row.tunnel.managedAliasRunning);
+  if (managedAliasRunning) invalidOwner();
+  const pollReady = Object.hasOwn(row.tunnel, 'controlPlanePollReady')
+    ? expectBoolean(row.tunnel.controlPlanePollReady)
+    : null;
+  const transportTTL = expectNullableBoundedString(row.tunnel.transportTTL, 32);
+  const maxConcurrentRequests = row.tunnel.maxConcurrentRequests === null
+    ? null
+    : expectBoundedInteger(row.tunnel.maxConcurrentRequests, 1, 64);
+
+  const computedReady = gatewayRunning && tunnelReady;
+  if (ready !== computedReady) invalidOwner();
+
+  const issues = [];
+  if (!gatewayRunning) issues.push('GATEWAY_NOT_RUNNING');
+  if (!tunnelRunning) {
+    issues.push('TUNNEL_NOT_RUNNING');
+  } else {
+    if (!tunnelHealthy) issues.push('TUNNEL_NOT_HEALTHY');
+    if (pollReady === false) issues.push('CONTROL_PLANE_POLL_NOT_READY');
+    if (!transportReady) issues.push('TUNNEL_NOT_READY');
+    if (!gatewayReady) issues.push('GATEWAY_NOT_READY');
+  }
+
+  return {
+    account,
+    state: ready ? 'READY' : 'DEGRADED',
+    ready,
+    gateway: {
+      loaded: gatewayLoaded,
+      running: gatewayRunning,
+    },
+    tunnel: {
+      loaded: tunnelLoaded,
+      running: tunnelRunning,
+      healthy: tunnelHealthy,
+      ready: tunnelReady,
+      controlPlanePollReady: pollReady,
+      gatewayReady,
+      transportTTL,
+      maxConcurrentRequests,
+    },
+    issues,
+  };
+}
+
+function validateAndProjectOwnerResult(value) {
+  exactKeys(value, ['schema', 'action', 'accountCount', 'readyCount', 'allReady', 'accounts']);
+  if (value.schema !== OWNER_SCHEMA || value.action !== 'status' || !Array.isArray(value.accounts)) {
+    invalidOwner();
+  }
+  const accountCount = expectBoundedInteger(value.accountCount, 0, MAX_ACCOUNTS);
+  const readyCount = expectBoundedInteger(value.readyCount, 0, MAX_ACCOUNTS);
+  const allReady = expectBoolean(value.allReady);
+  if (value.accounts.length !== accountCount || readyCount > accountCount) invalidOwner();
+
+  const accounts = value.accounts.map((row) =>
+    Object.hasOwn(row ?? {}, 'error') ? projectErrorRow(row) : projectStatusRow(row));
+  const seen = new Set();
+  for (const row of accounts) {
+    if (seen.has(row.account)) invalidOwner();
+    seen.add(row.account);
+  }
+  const computedReadyCount = accounts.filter((row) => row.ready).length;
+  const computedAllReady = accountCount > 0 && computedReadyCount === accountCount;
+  if (readyCount !== computedReadyCount || allReady !== computedAllReady) invalidOwner();
+
+  return {
+    accountCount,
+    readyCount,
+    allReady,
+    accounts,
+  };
 }
 
 export function createFleetStatus(rawConfig) {
@@ -105,11 +290,11 @@ export function createFleetStatus(rawConfig) {
       } catch {
         throw new Error('FLEET_STATUS_OWNER_RESULT_INVALID');
       }
-      validateOwnerResult(owner);
+      const projection = validateAndProjectOwnerResult(owner);
       return {
         schema: RESULT_SCHEMA,
-        state: owner.allReady === true ? 'READY' : 'DEGRADED',
-        owner,
+        state: projection.allReady ? 'READY' : 'DEGRADED',
+        ...projection,
       };
     },
   });
