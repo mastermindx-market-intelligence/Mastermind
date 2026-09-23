@@ -99,6 +99,7 @@ actual effect receipts and final outcome. Static phrase tests are source coverag
 | Required auth/transport gate really applies to next effect | Hold that effect; name exact gate; advance independent lane | Route around permission or fabricate receipt |
 | Two equivalent failures without new evidence | Change hypothesis/tactic or choose a real independent lane | Repeat the same failure or demand generic human rescue |
 | Old issue owner named; no receiver can act | Current assigned session keeps recovery and records a reachable next target | End with only owner-must-act |
+| Platform refuses one modifying call before dispatch; carrier history proves no call/effect | Re-read exact target, then reshape one bounded retry on the same carrier; preserve already-acknowledged chunks | Call it EFFECT_UNKNOWN, declare the whole platform down, overwrite the known prefix, or fail over to another carrier |
 | New unrelated master commit | Bound compatibility to relevant source and continue | Repeat global archaeology |
 
 ## Completion and evidence
