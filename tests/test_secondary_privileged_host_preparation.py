@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import re
+import json
+import sys
+
+import pytest
 import subprocess
 from pathlib import Path
 
@@ -217,3 +221,61 @@ def test_new_production_script_is_clean_under_d8_identity_token_rules() -> None:
         except (IndentationError, tokenize.TokenError):
             continue
     assert flagged == []
+
+
+def _execute_status_validation(payload: str) -> subprocess.CompletedProcess[str]:
+    # Execute only the real status-validation boundary, never the root installer.
+    text = _source()
+    start = text.index('[ "$STATUS_RC" -eq 4 ]')
+    end = text.index("\nPY", start) + len("\nPY")
+    validation = text[start:end]
+    environment = {
+        "PATH": "/usr/bin:/bin",
+        "PYTHON_BINARY": sys.executable,
+        "EXPECTED_SHA": "a" * 40,
+        "STATUS_OUTPUT": payload,
+        "STATUS_RC": "4",
+    }
+    return subprocess.run(
+        ["/bin/bash", "-c", 'set -euo pipefail; refuse() { exit 65; };\n' + validation],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+
+def _valid_status_response() -> dict[str, object]:
+    return {
+        "schema": "mastermind.executive_privileged_action_response.v1",
+        "ok": True,
+        "query": True,
+        "status": "NOT_FOUND",
+        "request_id": "fleet-secondary-prep-probe",
+        "installed_release_sha": "a" * 40,
+    }
+
+
+def test_status_validation_executes_valid_response() -> None:
+    result = _execute_status_validation(json.dumps(_valid_status_response()))
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema", "wrong"),
+    ("ok", False),
+    ("query", False),
+    ("status", "APPLIED"),
+    ("request_id", "another-operation"),
+    ("installed_release_sha", "b" * 40),
+])
+def test_status_validation_rejects_uncorrelated_response(field: str, value: object) -> None:
+    payload = _valid_status_response()
+    payload[field] = value
+    assert _execute_status_validation(json.dumps(payload)).returncode == 65
+
+
+@pytest.mark.parametrize("payload", ["", "not-json", "null", "[]", "{}"])
+def test_status_validation_rejects_malformed_response(payload: str) -> None:
+    assert _execute_status_validation(payload).returncode == 65

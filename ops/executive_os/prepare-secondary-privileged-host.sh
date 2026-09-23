@@ -295,9 +295,11 @@ STATUS_OUTPUT="$(/usr/bin/sudo -u "$OPERATOR_USER" /usr/bin/env -i   HOME="$OPER
 STATUS_RC=$?
 set -e
 [ "$STATUS_RC" -eq 4 ] || refuse "privileged broker read-only status probe did not return NOT_FOUND"
-/bin/echo "$STATUS_OUTPUT" | "$PYTHON_BINARY" -I -S -B - "$EXPECTED_SHA" <<'PY'   || refuse "privileged broker read-only status response is invalid"
-import json, sys
-value = json.load(sys.stdin)
+"$PYTHON_BINARY" -I -S -B - "$EXPECTED_SHA" 3<<< "$STATUS_OUTPUT" <<'PY'   || refuse "privileged broker read-only status response is invalid"
+import json, os, sys
+# stdin carries this program; descriptor 3 carries the broker response.
+with os.fdopen(3, "r", encoding="utf-8") as response:
+    value = json.load(response)
 expected_sha = sys.argv[1]
 expected = {
     "schema", "ok", "query", "status", "request_id", "installed_release_sha",
