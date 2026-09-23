@@ -35,6 +35,7 @@ OPERATOR_SKILLS = (
     "finish-operation",
 )
 CORTEX_SKILLS = ("orient-mastermind-mission",)
+NAVIGATOR_SKILLS = ("navigate-mastermind-universe",)
 
 
 def _copy_package(destination: Path) -> None:
@@ -118,9 +119,18 @@ def _closed_json_document_paths() -> tuple[str, ...]:
         "plugins/mastermind-sol/.codex-plugin/plugin.json",
         "plugins/mastermind-operator/.codex-plugin/plugin.json",
         "plugins/mastermind-cortex/.codex-plugin/plugin.json",
+        "plugins/mastermind-navigator/.codex-plugin/plugin.json",
         "plugins/mastermind-sol/references/app-bindings.template.json",
         "plugins/mastermind-operator/references/app-bindings.template.json",
         "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+        "plugins/mastermind-navigator/references/boot-sources.json",
+        "plugins/mastermind-navigator/references/capability-health.schema.json",
+        "plugins/mastermind-navigator/references/capability-state-rules.json",
+        "plugins/mastermind-navigator/references/catalog.fragment.json",
+        "plugins/mastermind-navigator/references/owner-routing.json",
+        "plugins/mastermind-navigator/references/role-profiles.json",
+        "plugins/mastermind-navigator/fixtures/capability-health-cases.json",
+        "plugins/mastermind-navigator/fixtures/fresh-session-routing-cases.json",
     )
 
 
@@ -161,6 +171,12 @@ def test_repository_plugin_package_is_valid() -> None:
                 "manifest": "plugins/mastermind-cortex/.codex-plugin/plugin.json",
                 "skills": list(CORTEX_SKILLS),
             },
+            {
+                "name": "mastermind-navigator",
+                "version": "0.1.0",
+                "manifest": "plugins/mastermind-navigator/.codex-plugin/plugin.json",
+                "skills": list(NAVIGATOR_SKILLS),
+            },
         ],
         "errors": [],
     }
@@ -178,6 +194,55 @@ def test_symlinked_repository_root_is_refused_before_package_content_is_opened(
 
     assert result["ok"] is False
     assert "SYMLINK_FORBIDDEN" in {error["code"] for error in result["errors"]}  # type: ignore[index]
+
+
+def test_symlinked_repository_root_ignores_lexical_parent_inventory_churn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rejecting the supplied root must not make its parent package inventory."""
+    target = tmp_path / "target"
+    target.mkdir()
+    redirected_root = tmp_path / "redirected-root"
+    redirected_root.symlink_to(target, target_is_directory=True)
+    parent_info = tmp_path.stat()
+    parent_identity = (parent_info.st_dev, parent_info.st_ino)
+    original_stat = plugin_validator.os.stat
+    injected = False
+
+    def add_parent_entry_after_root_link_stat(
+        name: object, *args: object, **kwargs: object
+    ) -> os.stat_result:
+        nonlocal injected
+        captured = original_stat(name, *args, **kwargs)
+        parent_fd = kwargs.get("dir_fd")
+        if (
+            not injected
+            and name == redirected_root.name
+            and kwargs.get("follow_symlinks") is False
+            and isinstance(parent_fd, int)
+        ):
+            parent = os.fstat(parent_fd)
+            if (parent.st_dev, parent.st_ino) == parent_identity:
+                (tmp_path / "late-parent-entry").write_text("late\n", encoding="utf-8")
+                injected = True
+        return captured
+
+    _preserve_capability_membership(monkeypatch, "stat", add_parent_entry_after_root_link_stat)
+    result = validate_repository(redirected_root)
+    codes = {error["code"] for error in result["errors"]}
+    errors = {
+        (error["path"], error["code"], error["message"])
+        for error in result["errors"]
+    }
+
+    assert injected is True
+    assert result["ok"] is False
+    assert "SYMLINK_FORBIDDEN" in codes
+    assert (
+        ".",
+        "PACKAGE_FILESYSTEM_INVALID",
+        "package directory changed during validation",
+    ) not in errors
 
 
 def test_agents_ancestor_symlink_is_refused_before_its_marketplace_is_read(
@@ -560,6 +625,13 @@ def test_repository_documents_match_the_closed_contract() -> None:
                 "source": {
                     "source": "local",
                     "path": "./plugins/mastermind-cortex",
+                },
+            },
+            {
+                "name": "mastermind-navigator",
+                "source": {
+                    "source": "local",
+                    "path": "./plugins/mastermind-navigator",
                 },
             },
         ],
@@ -956,7 +1028,7 @@ def test_closed_template_required_boolean_rejects_each_numeric_alias(
     assert "INVALID_APP_TEMPLATE" in _codes_without_exception(tmp_path)
 
 
-def test_closed_json_scalar_alias_sweep_refuses_all_120_mutations(tmp_path: Path) -> None:
+def test_closed_json_scalar_alias_sweep_refuses_every_mutation(tmp_path: Path) -> None:
     """Every closed JSON Boolean leaf rejects the three numeric alias spellings."""
     _copy_package(tmp_path)
     mutations: list[tuple[Path, str, int, str]] = []
@@ -971,7 +1043,7 @@ def test_closed_json_scalar_alias_sweep_refuses_all_120_mutations(tmp_path: Path
             )
             for numeric in aliases:
                 mutations.append((path, text, index, numeric))
-    assert len(mutations) == 120
+    assert len(mutations) == 306
 
     for path, original, index, numeric in mutations:
         matches = list(re.finditer(r"\b(?:true|false)\b", original))
@@ -979,7 +1051,12 @@ def test_closed_json_scalar_alias_sweep_refuses_all_120_mutations(tmp_path: Path
         path.write_text(original[:match.start()] + numeric + original[match.end():], encoding="utf-8")
         try:
             result = _validate_repository_twice_without_exception(tmp_path)
-            assert result["ok"] is False
+            assert result["ok"] is False, {
+                "path": path.relative_to(tmp_path).as_posix(),
+                "boolean_index": index,
+                "numeric_alias": numeric,
+                "result": result,
+            }
         finally:
             path.write_text(original, encoding="utf-8")
 
@@ -1028,6 +1105,7 @@ def test_validator_is_stdlib_only_and_has_no_action_surface() -> None:
             "argparse",
             "dataclasses",
             "errno",
+            "hashlib",
             "json",
             "os",
             "re",
@@ -1119,3 +1197,23 @@ def test_validator_rejects_nontrigger_skill_description(tmp_path: Path) -> None:
     path.write_text("\n".join(lines) + "\n")
     result = validate_repository(tmp_path)
     assert "INVALID_SKILL_DESCRIPTION" in {error["code"] for error in result["errors"]}
+
+
+@pytest.mark.parametrize("field", ("description", "shortDescription", "longDescription"))
+def test_navigator_manifest_truth_bearing_descriptions_are_closed(
+    tmp_path: Path, field: str
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-navigator/.codex-plugin/plugin.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if field == "description":
+        manifest[field] = "Changed Navigator package description with no authority claim."
+    else:
+        manifest["interface"][field] = (
+            "Changed Navigator interface description that remains non-empty, intentionally "
+            "longer than eighty characters, and carries no authority claim."
+        )
+    _write_json(path, manifest)
+
+    codes = _codes_without_exception(tmp_path)
+    assert "NAVIGATOR_CONTENT_CONTRACT_MISMATCH" in codes

@@ -1,0 +1,77 @@
+{
+  "availability": "AVAILABLE",
+  "control_room": {
+    "autonomy": {
+      "generated_at": "2026-09-21T00:00:00Z",
+      "responsibilities": [
+        {
+          "responsibility_ref": "WS:ONE",
+          "root_job_ambiguous": false,
+          "root_job_candidates": [
+            "JOB-001"
+          ],
+          "root_job_id": "JOB-001",
+          "runtime_root_state": "RESOLVED",
+          "validity": {
+            "card": {
+              "policy": "mapper-inclusive-48h-future-1h.v1",
+              "proof_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "qualified_at": "2026-09-21T00:00:00Z",
+              "schema": "mastermind.autonomy_validity.v1",
+              "valid_for_ms": 60000
+            },
+            "decision_current": {
+              "policy": "mapper-inclusive-48h-future-1h.v1",
+              "proof_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "qualified_at": "2026-09-21T00:00:00Z",
+              "schema": "mastermind.autonomy_validity.v1",
+              "valid_for_ms": 60000
+            },
+            "dispatch": {
+              "policy": "mapper-inclusive-48h-future-1h.v1",
+              "proof_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "qualified_at": "2026-09-21T00:00:00Z",
+              "schema": "mastermind.autonomy_validity.v1",
+              "valid_for_ms": 60000
+            },
+            "owed_open_age": {
+              "policy": "mapper-inclusive-48h-future-1h.v1",
+              "proof_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "qualified_at": "2026-09-21T00:00:00Z",
+              "schema": "mastermind.autonomy_validity.v1",
+              "valid_for_ms": 60000
+            }
+          }
+        }
+      ]
+    },
+    "degraded": [],
+    "generated_at": "2026-09-21T00:00:00Z",
+    "schema": "mastermind.chairman_control_room.v1",
+    "work": [
+      {
+        "agent_os": {
+          "title": "One"
+        },
+        "work_ref": "WS:ONE"
+      }
+    ]
+  },
+  "reason_codes": [],
+  "schema": "mastermind.workspace_programs.v1",
+  "source_observation": {
+    "control_room": {
+      "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+      "document_digest": "82816a9d697e5cdce1064689281809c920db48df07764b09b789135bccb5388f",
+      "instance_after": "49e897f46a750a68229b37b56e02ac3b107cc8cccd8d242604d74ad1b970ce09",
+      "instance_before": "49e897f46a750a68229b37b56e02ac3b107cc8cccd8d242604d74ad1b970ce09",
+      "publication_after": 1,
+      "publication_before": 1,
+      "source_validity_digest": "c8668c551574029a8f7f2f08cba7fd510e378e9c485173f09aa9772c2d168069"
+    },
+    "runtime": null,
+    "schema": "mastermind.workspace_source_observation.v1",
+    "selection": null,
+    "state": "SAME"
+  }
+}

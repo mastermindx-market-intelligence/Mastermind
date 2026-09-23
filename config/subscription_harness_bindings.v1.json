@@ -75,6 +75,24 @@
         "usage_policy_satisfied"
       ]
     },
+    "minimax-token-plan.codex-responses": {
+      "profile_id": "minimax-token-plan",
+      "provider": "minimax",
+      "harness_id": "codex-cli",
+      "adapter_id": "codex-cli",
+      "protocol": "responses",
+      "endpoint": {"source": "reviewed_override", "base_url": "https://api.minimax.io/v1"},
+      "model_classes": ["routine", "hard", "fast", "subagent"],
+      "implementation_state": "BUILT_NOT_PROVEN",
+      "autonomous_allowed": false,
+      "activation_gates": [
+        "adapter_implemented",
+        "provider_realm_enrolled",
+        "capacity_known",
+        "real_canary_passed",
+        "usage_policy_satisfied"
+      ]
+    },
     "minimax-token-plan.openai-compatible": {
       "profile_id": "minimax-token-plan",
       "provider": "minimax",      "harness_id": "openai-compatible-coding-tool",

@@ -26,6 +26,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from common.redaction import sanitize_external_text
 from control_plane.executive_privileged_action import (
     ACTION_EFFECT_CLASS,
+    ACTION_EFFECT_UNKNOWN_EXIT_CODE,
     PrivilegedActionRequest,
     PrivilegedActionStatusRequest,
     STATUS_REQUEST_SCHEMA,
@@ -56,6 +57,11 @@ _CLOSED_ENV = {
 _MAX_RECEIPT_BYTES = 64 * 1024
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
 _UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+_TRUSTED_EFFECT_PATHS = (
+    "ops/executive_os/service-control.sh",
+    "ops/executive_os/provision-worker-auth.sh",
+    "ops/executive_os/secondary_host_power_policy.py",
+)
 _TERMINAL_RECEIPT_KEYS = frozenset(
     {
         "schema",
@@ -442,10 +448,7 @@ def verify_production_trust(config: PrivilegedBrokerConfig) -> None:
         raise BrokerTrustError("release manifest schema is invalid")
     if manifest.get("commit_sha") != config.release_root.name:
         raise BrokerTrustError("release manifest commit does not match release root")
-    for relative in (
-        "ops/executive_os/service-control.sh",
-        "ops/executive_os/provision-worker-auth.sh",
-    ):
+    for relative in _TRUSTED_EFFECT_PATHS:
         _verify_release_entry(config.release_root, manifest, relative)
 
 
@@ -574,6 +577,12 @@ class PrivilegedActionBroker:
             # An injected executor cannot prove whether its OSError occurred before
             # or after spawn. Preserve the marker and fail closed as effect-unknown.
             raise EffectUnknownError("privileged executor failed after admission; effect is unknown") from exc
+
+        uncertain_exit = ACTION_EFFECT_UNKNOWN_EXIT_CODE.get(request.action)
+        if uncertain_exit is not None and completed.returncode == uncertain_exit:
+            raise EffectUnknownError(
+                "privileged child reported action-level effect uncertainty"
+            )
 
         stdout = bytes(completed.stdout or b"")
         stderr = bytes(completed.stderr or b"")
