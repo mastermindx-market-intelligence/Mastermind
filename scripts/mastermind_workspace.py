@@ -450,3 +450,58 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def installation_storage_profile(
+    home: Path, *, external_mount: Path = Path("/Volumes/Mastermind")
+) -> dict[str, str]:
+    """Choose host-owned launcher inputs, not runtime admission or a reservation."""
+    home = home.expanduser().resolve()
+    policy_path = home / ".config/mastermind/worktree-storage.json"
+    if policy_path.exists() or policy_path.is_symlink():
+        policy, _digest = _read_storage_policy(policy_path)
+        volume = Path(str(policy["mount_point"]))
+        root = Path(str(policy["root"])).resolve()
+        if volume.is_symlink():
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: enrolled volume is indirect")
+        volume = volume.resolve()
+        if root == volume or not root.is_relative_to(volume):
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: enrolled root escapes its volume")
+        # Keep an explicitly required mount pinned even while disconnected.
+        # The installed launcher and existing storage owner refuse use until ready.
+        return {
+            "root": str(root),
+            "mount_point": str(volume),
+            "policy_path": str(policy_path),
+        }
+
+    selected = {
+        "root": str((home / ".mastermind/agent-workspaces").resolve()),
+        "mount_point": "",
+        "policy_path": "",
+    }
+    if (
+        external_mount.is_symlink()
+        or not external_mount.is_dir()
+        or not external_mount.is_mount()
+    ):
+        return selected
+
+    volume = external_mount.resolve()
+    try:
+        observed = _volume_identity(volume)
+    except WorkspaceError:
+        return selected
+    filesystem = observed.get("FilesystemType")
+    if (
+        observed.get("MountPoint") != str(volume)
+        or observed.get("Writable") is not True
+        or not isinstance(filesystem, str)
+        or filesystem.lower() not in {"apfs", "hfs", "hfsx"}
+    ):
+        return selected
+    return {
+        "root": str((volume / "agent-workspaces").resolve()),
+        "mount_point": str(volume),
+        "policy_path": "",
+    }
