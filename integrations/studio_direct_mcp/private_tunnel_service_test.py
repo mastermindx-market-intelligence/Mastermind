@@ -165,7 +165,17 @@ def _seed_gateway(account: str, port: int) -> dict:
     return roots
 
 
-def _stage_args(home, tmp, account=C1, tunnel_id=C1_TUNNEL, port=45018, key_ref=None, profile=None, binary=None):
+def _stage_args(
+    home,
+    tmp,
+    account=C1,
+    tunnel_id=C1_TUNNEL,
+    port=45018,
+    key_ref=None,
+    profile=None,
+    binary=None,
+    organization_id=None,
+):
     _seed_gateway(account, port)
     key_ref = key_ref or _make_key(home, account)
     binary = binary or _make_bin(tmp)
@@ -175,6 +185,7 @@ def _stage_args(home, tmp, account=C1, tunnel_id=C1_TUNNEL, port=45018, key_ref=
         tunnel_id=tunnel_id,
         profile=profile,
         runtime_key_ref=key_ref,
+        organization_id=organization_id,
         tunnel_client=str(binary),
     ), binary, key_ref
 
@@ -240,6 +251,38 @@ class TestIdentity(unittest.TestCase):
         self.assertEqual(argv[argv.index("--health.listen-addr") + 1], "127.0.0.1:45019")
 
 
+class TestStrictTunnelHealth(unittest.TestCase):
+    def test_requires_successful_control_plane_poll(self):
+        payload = {
+            "healthz": {"ok": True},
+            "readyz": {"ok": True},
+            "control_plane_poll": {"ok": False},
+            "result": "fail",
+        }
+        with mock.patch.object(
+            svc, "_run", return_value=FakeResult(1, json.dumps(payload), "")
+        ):
+            self.assertEqual(
+                svc._strict_tunnel_health(Path("/tc"), 45031),
+                (True, False, False),
+            )
+
+    def test_ready_only_when_local_and_poll_are_ready(self):
+        payload = {
+            "healthz": {"ok": True},
+            "readyz": {"ok": True},
+            "control_plane_poll": {"ok": True},
+            "result": "ok",
+        }
+        with mock.patch.object(
+            svc, "_run", return_value=FakeResult(0, json.dumps(payload), "")
+        ):
+            self.assertEqual(
+                svc._strict_tunnel_health(Path("/tc"), 45031),
+                (True, True, True),
+            )
+
+
 class TestStageHappyPath(unittest.TestCase):
     def test_stage_writes_owned_profile_plist_and_hashes(self):
         with IsolatedHome() as (tmp, home):
@@ -289,6 +332,37 @@ class TestStageHappyPath(unittest.TestCase):
             self.assertEqual(roots["plist"].read_bytes(), before[1])
             self.assertEqual(roots["manifest"].read_bytes(), before[2])
 
+    def test_restage_can_add_missing_organization_once_but_not_rebind(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            args.organization_id = "org-ChrisAdmin123"
+            rec = CmdRecorder(handler=_stopped_alias_handler(C1))
+            with mock.patch.object(svc, "_run", rec):
+                rc2, _ = _capture_stdout(lambda: svc.cmd_stage(args))
+            self.assertEqual(rc2, 0)
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            self.assertEqual(
+                profile["control_plane"]["organization_id"], "org-ChrisAdmin123"
+            )
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(manifest["organizationId"], "org-ChrisAdmin123")
+
+            args.organization_id = "org-Different123"
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                with self.assertRaisesRegex(SystemExit, "one-way addition"):
+                    svc.cmd_stage(args)
+
+            args.organization_id = None
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                with self.assertRaisesRegex(SystemExit, "one-way addition"):
+                    svc.cmd_stage(args)
+
     def test_other_account_uses_manifest_port(self):
         with IsolatedHome() as (tmp, home):
             rc, out, _, _, _, _ = _do_stage(
@@ -302,7 +376,51 @@ class TestStageHappyPath(unittest.TestCase):
             self.assertEqual(profile["mcp"]["server_urls"][0]["url"], "http://127.0.0.1:45020/mcp")
 
 
+    def test_stage_persists_optional_organization_context(self):
+        with IsolatedHome() as (tmp, home):
+            args, binary, key_ref = _stage_args(
+                home,
+                tmp,
+                account=OTHER,
+                tunnel_id=OTHER_TUNNEL,
+                port=45020,
+                organization_id="org-ChrisAdmin123",
+            )
+            rec = CmdRecorder(handler=_stopped_alias_handler(OTHER))
+            with mock.patch.object(svc, "_run", rec):
+                rc, out = _capture_stdout(lambda: svc.cmd_stage(args))
+            self.assertEqual(rc, 0)
+            payload = json.loads(out)
+            self.assertEqual(payload["organizationId"], "org-ChrisAdmin123")
+            roots = svc._build_tunnel_roots(OTHER)
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            self.assertEqual(
+                profile["control_plane"]["organization_id"], "org-ChrisAdmin123"
+            )
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(manifest["organizationId"], "org-ChrisAdmin123")
+            self.assertEqual(profile["control_plane"]["api_key"], key_ref)
+            self.assertEqual(
+                plistlib.loads(roots["plist"].read_bytes())["ProgramArguments"],
+                svc._expected_argv(binary, roots["profile"], 45021),
+            )
+
+
 class TestWrongInputs(unittest.TestCase):
+    def test_invalid_organization_id_refused(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(
+                home,
+                tmp,
+                organization_id="workspace-not-an-org",
+            )
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler())
+            ):
+                with self.assertRaisesRegex(SystemExit, "organization id"):
+                    svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
     def test_wrong_tunnel_id_refused_on_restage(self):
         with IsolatedHome() as (tmp, home):
             rc, _, args, _, _, _ = _do_stage(home, tmp)
@@ -334,6 +452,7 @@ class TestWrongInputs(unittest.TestCase):
                 tunnel_id=C1_TUNNEL,
                 profile=str(svc._canonical_profile(C1)),
                 runtime_key_ref="env:CONTROL_PLANE_API_KEY",
+                organization_id=None,
                 tunnel_client=str(binary),
             )
             with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler())):
@@ -371,6 +490,7 @@ class TestWrongInputs(unittest.TestCase):
                 tunnel_id=C1_TUNNEL,
                 profile=str(svc._canonical_profile(C1)),
                 runtime_key_ref="sk-not-a-file-ref",
+                organization_id=None,
                 tunnel_client=str(_make_bin(tmp)),
             )
             with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler())):
@@ -515,15 +635,8 @@ class TestStartStatusStop(unittest.TestCase):
                     return FakeResult(0, _alias_stopped_json(), "")
                 return FakeResult(1, "", "unused")
 
-            def probe(url):
-                if url.endswith("/healthz"):
-                    return {"ok": True, "status": 200}
-                if url.endswith("/readyz"):
-                    return {"ok": False, "status": 503}
-                return {"ok": False, "status": 0}
-
             with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)), mock.patch.object(
-                svc, "_probe_loopback", side_effect=probe
+                svc, "_strict_tunnel_health", return_value=(True, False, False)
             ), mock.patch.object(svc, "_gateway_ready", return_value=True):
                 rc2, out = _capture_stdout(lambda: svc.cmd_status(mock.Mock(account=C1)))
             self.assertEqual(rc2, 0)
@@ -531,6 +644,7 @@ class TestStartStatusStop(unittest.TestCase):
             self.assertTrue(payload["running"])
             self.assertTrue(payload["healthy"])
             self.assertFalse(payload["ready"])
+            self.assertFalse(payload["controlPlanePollReady"])
             self.assertEqual(payload["transportTTL"], "5h")
             self.assertEqual(payload["maxConcurrentRequests"], 4)
             self.assertEqual(payload["pid"], 4321)
@@ -539,7 +653,7 @@ class TestStartStatusStop(unittest.TestCase):
 
             # A green tunnel cannot hide a local gateway that cannot admit work.
             with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)), mock.patch.object(
-                svc, "_probe_loopback", return_value={"ok": True, "status": 200}
+                svc, "_strict_tunnel_health", return_value=(True, True, True)
             ), mock.patch.object(svc, "_gateway_ready", return_value=False):
                 _, out = _capture_stdout(lambda: svc.cmd_status(mock.Mock(account=C1)))
             blocked = json.loads(out)
@@ -551,9 +665,9 @@ class TestStartStatusStop(unittest.TestCase):
         with IsolatedHome() as (tmp, home):
             rc, _, _, _, _, _ = _do_stage(home, tmp)
             self.assertEqual(rc, 0)
-            probes = []
+            strict = mock.Mock(return_value=(True, True, True))
             with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler())), mock.patch.object(
-                svc, "_probe_loopback", side_effect=lambda url: probes.append(url) or {"ok": True}
+                svc, "_strict_tunnel_health", strict
             ):
                 rc2, out = _capture_stdout(lambda: svc.cmd_status(mock.Mock(account=C1)))
             self.assertEqual(rc2, 0)
@@ -562,7 +676,7 @@ class TestStartStatusStop(unittest.TestCase):
             self.assertFalse(payload["healthy"])
             self.assertFalse(payload["ready"])
             self.assertEqual(payload["transportTTL"], "5h")
-            self.assertEqual(probes, [])
+            strict.assert_not_called()
 
     def test_stop_bootout_only_our_label(self):
         with IsolatedHome() as (tmp, home):

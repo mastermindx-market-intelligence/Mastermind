@@ -24,6 +24,7 @@ class ChatGptOpsHealthTests(unittest.TestCase):
                 "chatgpt1",
                 "chatgpt2-personal",
                 "chatgpt2-business",
+                "admin-business",
                 "chatgpt3-w570f6f34",
                 "chatgpt3-wa2a9e6f9",
                 "chatgpt4",
@@ -176,7 +177,7 @@ class ChatGptOpsHealthTests(unittest.TestCase):
                 ],
             )
 
-    def test_build_snapshot_composes_six_isolated_studio_and_two_business_services(self):
+    def test_build_snapshot_composes_seven_isolated_studio_and_two_business_services(self):
         tunnel_ids = {
             account: f"tunnel_{index:032x}"
             for index, account in enumerate(ops.STUDIO_ACCOUNTS, start=1)
@@ -250,8 +251,8 @@ class ChatGptOpsHealthTests(unittest.TestCase):
             ]
             out = ops.build_snapshot(observed_at="2026-09-20T05:30:00Z")
 
-        self.assertEqual(len(out.services), 8)
-        self.assertEqual(len(out.tunnels), 8)
+        self.assertEqual(len(out.services), 9)
+        self.assertEqual(len(out.tunnels), 9)
         self.assertEqual(out.overall_state, OpsState.READY)
         scopes = {row.scope for row in out.services}
         self.assertEqual(

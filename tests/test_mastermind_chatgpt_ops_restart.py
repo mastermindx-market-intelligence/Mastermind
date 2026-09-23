@@ -119,6 +119,7 @@ class OpsRestartTests(unittest.TestCase):
                 "studio-direct.chatgpt1": "chatgpt1",
                 "studio-direct.chatgpt2-personal": "chatgpt2-personal",
                 "studio-direct.chatgpt2-business": "chatgpt2-business",
+                "studio-direct.admin-business": "admin-business",
                 "studio-direct.chatgpt3-w570f6f34": "chatgpt3-w570f6f34",
                 "studio-direct.chatgpt3-wa2a9e6f9": "chatgpt3-wa2a9e6f9",
                 "studio-direct.chatgpt4": "chatgpt4",

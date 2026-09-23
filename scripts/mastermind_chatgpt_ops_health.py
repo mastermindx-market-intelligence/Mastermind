@@ -37,6 +37,7 @@ STUDIO_ACCOUNT_SCOPES = {
     "chatgpt1": "personal_account",
     "chatgpt2-personal": "personal_account",
     "chatgpt2-business": "business_workspace",
+    "admin-business": "business_workspace",
     "chatgpt3-w570f6f34": "workspace_account",
     "chatgpt3-wa2a9e6f9": "workspace_account",
     "chatgpt4": "personal_account",
