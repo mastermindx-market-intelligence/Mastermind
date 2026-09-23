@@ -2,7 +2,7 @@
 
 (() => {
   const RESULT_SCHEMA = "mastermind.executive_orchestration_result/v1";
-  const MAX_CANONICAL_RESULT_BYTES = 49152;
+  const MAX_CANONICAL_RESULT_BYTES = 24 * 1024;
   const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
   const DIGEST_RE = /^[0-9a-f]{64}$/;
   const AUTHORITY_RE = /^[A-Z][A-Z0-9_]{1,31}$/;

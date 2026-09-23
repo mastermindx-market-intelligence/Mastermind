@@ -18,7 +18,7 @@ from control_plane.executive_orchestration_result import (
     parse_and_validate_envelope,
 )
 
-MAX_WEB_SOL_COGNITION_RESULT_BYTES: Final[int] = 49_152
+MAX_WEB_SOL_COGNITION_RESULT_BYTES: Final[int] = 24_576
 
 
 class WebSolCognitionResultError(ValueError):
