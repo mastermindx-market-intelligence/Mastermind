@@ -59,6 +59,41 @@ requires the job's stated acceptance evidence — the tests, artifacts, or live
 verification the job named. "It should work" is not evidence, and neither is a green
 run of a suite that cannot observe the change.
 
+### Codex frontier orchestration economics
+
+This subsection governs **interactive/agentic Codex project delivery**. It does not replace
+the daily portfolio-reasoning provider policy below. Keep the Codex root at the scarce
+frontier layer: the project-local default is **GPT-6 Astra**. Astra owns Chairman-intent
+recovery, architecture, decomposition, consequential cross-return judgment, exception
+adjudication, and final acceptance; it should not spend most of its context or token
+budget doing routine worker labor.
+
+For bounded independent research, repository archaeology, implementation, tests, repair,
+or review, prefer the **existing Executive Fabric** over Codex-native subagents. Use the
+existing Executive/COO/Capacity lifecycle and `submit_ceo_intent` ingress when that
+authenticated path is currently serviceable. A fabric **sub-orchestrator is a duty, not a
+new lifecycle role**: coordination stays inside the existing `plan`, `work`, `review`,
+`repair`, and `aggregation` Job graph rather than creating another queue, scheduler,
+agent tree, retry plane, or state store.
+
+Routing economics are **GLM/Grok first for routine sub-orchestration and fan-out when
+those lanes are already admitted, eligible, and capable**. The existing Model Router and
+Capacity owner chooses the concrete provider/account/host inside the lawful tier; Codex
+must not inject a provider, model, account, credential home, endpoint, host, or worker
+identity into a CEO intent. Use **Sol or an additional Astra** for child coordination only
+when higher judgment, continuity, or task difficulty justifies the extra frontier spend.
+**Luna/Terra are exceptional compatibility/fallback lanes**, not routine Codex project
+defaults, and require a concrete fallback reason. This preference never self-arms a
+disabled or unproven provider lane and never overrides current admission or quota state.
+Fable remains scarce principal capacity rather than routine delegation capacity.
+
+Native Codex subagents are **pre-effect fallback only** when the Fabric is unavailable or
+lacks the required admitted capability. The checked-in fallback defaults to GPT-6 Sol,
+high reasoning, with the existing bounded concurrency ceiling. After a worker START,
+ambiguous modifying effect, or `EFFECT_UNKNOWN`, reconcile the same operation/carrier;
+never silently switch to a native subagent, another provider, or a new operation key.
+Parent consumption is a compact canonical Job/result/review envelope plus exact evidence
+needed for acceptance, not a replay of full worker transcripts.
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
