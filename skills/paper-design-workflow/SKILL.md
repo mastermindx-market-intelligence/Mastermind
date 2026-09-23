@@ -1,6 +1,6 @@
 ---
 name: paper-design-workflow
-description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind local adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. Works with native MCP clients or ChatGPT Web through the existing Studio Direct private MCP tunnel; Remote Desktop Commander remains a diagnostic/local-ops carrier, not a second Paper gateway. Requires Paper Desktop running with the intended file open; setup, login and worker grants remain separate gates.
+description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind local adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. Works with native MCP clients or ChatGPT Web through the existing Studio Direct private MCP tunnel; Remote Desktop Commander remains a diagnostic/local-ops carrier, not a second Paper gateway. Requires a signed-in Paper Desktop; when exposed, `paper_prepare` can open/focus an exact existing file without Desktop Commander. Setup, login and worker grants remain separate gates.
 ---
 
 # Paper design workflow
@@ -13,7 +13,7 @@ The runtime lives in an approved local install; discover its `INSTALLATION.json`
 rather than inventing a path. Read `references/connection.md` for both carriers.
 
 For ChatGPT Web: prefer the existing Studio Direct gateway-owned
-`paper_inspect`, `paper_catalog`, `paper_read` and `paper_edit` tools when
+`paper_prepare`, `paper_inspect`, `paper_catalog`, `paper_read` and `paper_edit` tools when
 they are present. They invoke the same host-pinned guarded adapter and preserve
 native MCP image blocks. Do not public-tunnel Paper's raw loopback endpoint and do
 not create a second Paper gateway. Remote Desktop Commander may be used for
@@ -36,9 +36,11 @@ research or review screenshots without becoming concurrent canvas writers.
 
 ## Inspect, design and verify
 
-1. Inspect the active file and existing artboards. Confirm the intended document.
-   If there is no stable ID or artboard anchor, stop at the typed binding refusal;
-   do not guess a file. Keep the user from switching the active document mid-task.
+1. Confirm the intended document. If its exact Paper file ID is known and `paper_prepare`
+   is exposed, use it to open/focus that exact file through the host-pinned Paper app and consume
+   its readiness result. `PAPER_READY_READ_ONLY` permits inspection but not edits. If prepare is
+   unavailable, inspect the already-active file and treat file-open as a separate local/human gate.
+   If there is no stable ID or artboard anchor, stop at the typed binding refusal; do not guess a file.
 2. Read the live catalog once for exact upstream schemas. Never guess Paper tool
    argument names. Prefer existing tokens and components over arbitrary styles.
 3. Plan small, useful visual changes. Get a fresh snapshot guard before an edit and
