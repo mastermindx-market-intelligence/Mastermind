@@ -6,6 +6,11 @@
   const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
   const DIGEST_RE = /^[0-9a-f]{64}$/;
   const AUTHORITY_RE = /^[A-Z][A-Z0-9_]{1,31}$/;
+  const EMAIL_RE = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/;
+  const MASTERMIND_ENV_RE = /\bMASTERMIND_[A-Z_]+\b/;
+  const JWT_RE = /(^|[^0-9A-Za-z])eyJ[0-9A-Za-z+\/=_-]{4,}\.[0-9A-Za-z+\/=_-]{4,}(?:\.[0-9A-Za-z+\/=_-]*)?/;
+  const PREFIXED_SECRET_RE = /(^|[^0-9A-Za-z])(?:sb_secret_|sb_publishable_|sbp_|sk-ant-|sk-|github_pat_|ghp_|gho_|ghs_)[0-9A-Za-z+\/=_-]{8,}/;
+  const SECRET_MARKERS = ["PASSWORD", "TOKEN", "SECRET", "KEY", "PASS"];
   const ROLES = new Set(["plan", "work", "review", "repair", "aggregation"]);
   const EXPECTED_KEYS = new Set([
     "job_id", "run_id", "worker_id", "role", "root_job_id",
@@ -62,6 +67,22 @@
   function validText(value, maximum = 8192, nonempty = false) {
     return typeof value === "string" && !value.includes("\0") && value.length <= maximum &&
       (!nonempty || (value.length > 0 && value.trim() === value));
+  }
+
+  function stringHasBrowserRedactionTrigger(value) {
+    if (JWT_RE.test(value) || PREFIXED_SECRET_RE.test(value) ||
+        EMAIL_RE.test(value) || MASTERMIND_ENV_RE.test(value)) return true;
+    const upper = value.toUpperCase();
+    const marked = SECRET_MARKERS.some((marker) => upper.includes(marker));
+    return marked && (value.includes("=") || value.startsWith("sk-") || upper.includes("TOKEN"));
+  }
+
+  function containsBrowserRedactionTrigger(value) {
+    if (typeof value === "string") return stringHasBrowserRedactionTrigger(value);
+    if (Array.isArray(value)) return value.some((item) => containsBrowserRedactionTrigger(item));
+    if (!value || typeof value !== "object") return false;
+    return Object.entries(value).some(([key, item]) =>
+      stringHasBrowserRedactionTrigger(key) || containsBrowserRedactionTrigger(item));
   }
 
   function validArray(value, maximum, validator, minimum = 0) {
@@ -226,7 +247,8 @@
         value.status !== "COMPLETED" || !Array.isArray(value.validations) ||
         value.validations.length !== 0 || !validText(value.summary) ||
         !validText(value.current_state) || !validStringArray(value.next_actions, 16) ||
-        !validStringArray(value.errors, 16) || !validRoleResult(value.role_result, expected)) {
+        !validStringArray(value.errors, 16) || !validRoleResult(value.role_result, expected) ||
+        containsBrowserRedactionTrigger(value)) {
       return closed("RESULT_REFUSED");
     }
     return closed("RESULT_READY", text, bytes.byteLength);
