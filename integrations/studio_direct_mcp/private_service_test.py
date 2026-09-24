@@ -223,6 +223,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     """Recreate one exact historical layout; never include newly staged modules."""
     config = json.loads(roots["config"].read_text(encoding="utf-8"))
     config.pop("paperDesign", None)
+    config.pop("fleetStatus", None)
     if not typed_git:
         config.pop("gitPublish", None)
     roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
@@ -230,8 +231,8 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     manifest["version"] = 1
     for key in ("nodeHash", "backendHash", "dependencyTreeHash"):
         manifest.pop(key, None)
-    removed = ("paper-design.mjs", "output-budget.mjs") if typed_git else (
-        "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
+    removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
+        "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
     for name in removed:
         (roots["base"] / name).unlink()
@@ -262,6 +263,7 @@ class TestIdentity(unittest.TestCase):
                 "output-budget.mjs",
                 "git-publish.mjs",
                 "paper-design.mjs",
+                "fleet-status.mjs",
                 "private-tunnel-auth.mjs",
                 "private-tunnel-gateway.mjs",
                 "package.json",
@@ -298,10 +300,13 @@ class TestIdentity(unittest.TestCase):
         legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V1}
         self.assertTrue(svc._valid_manifest({**base, "files": current}, "test-account", _label_for("test-account")))
         self.assertTrue(svc._valid_manifest({**base, "files": legacy}, "test-account", _label_for("test-account")))
+        previous_current = {name: digest for name in svc.LEGACY_STAGE_FILES_V4}
+        self.assertTrue(svc._valid_manifest({**base, "files": previous_current}, "test-account", _label_for("test-account")))
         immediate_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V3}
         self.assertTrue(svc._valid_manifest({**base, "files": immediate_legacy}, "test-account", _label_for("test-account")))
         typed_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V2}
         self.assertTrue(svc._valid_manifest({**base, "files": typed_legacy}, "test-account", _label_for("test-account")))
+        self.assertNotIn("fleet-status.mjs", svc.LEGACY_STAGE_FILES_V4)
         self.assertNotIn("output-budget.mjs", svc.LEGACY_STAGE_FILES_V1)
         self.assertNotIn("git-publish.mjs", svc.LEGACY_STAGE_FILES_V1)
         partial = dict(legacy)
@@ -586,6 +591,31 @@ class TestBuildConfig(unittest.TestCase):
             self.assertNotIn("appPathOverride", config["paperDesign"])
             self.assertNotIn("account", config["paperDesign"])
             self.assertNotIn("token", config["paperDesign"])
+            self.assertNotIn("fleetStatus", config)
+
+    def test_config_enrolls_hash_pinned_existing_fleet_status_owner(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            launcher = home / ".local" / "bin" / "studio-direct"
+            launcher.parent.mkdir(parents=True)
+            launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            launcher.chmod(0o700)
+            node = _make_node(Path(raw))
+            backend = _make_backend(Path(raw))
+            config = svc._build_config(
+                "test-account", "127.0.0.1", 45018,
+                node, backend, home / "state", home,
+            )
+            self.assertEqual(
+                config["fleetStatus"],
+                {
+                    "enabled": True,
+                    "launcherPath": str(launcher),
+                    "launcherSha256": svc._sha256_file(launcher),
+                    "timeoutMs": 15_000,
+                },
+            )
 
 
 class TestBuildPlist(unittest.TestCase):
