@@ -725,16 +725,14 @@ def test_service_schema_is_durably_carried_with_typed_evidence(tmp_path: Path):
         assert predicate["file"] == "control_plane/ceo_intent.py"
         assert predicate["line"].startswith("L") and predicate["line"][1:].isdigit()
 
-    # (f) the anchors this tier deliberately did NOT edit.
-    assert "_JOB_SEATS = frozenset({\"coo\", \"ceo\", \"chairman\"})" in _source_window(
-        "control_plane/executive_runtime.py", 146, 146
-    )
-    assert "def _has_executive_provenance(" in _source_window(
-        "control_plane/executive_runtime.py", 928, 942
-    )
-    assert "if owner_seat != \"coo\" and not _has_executive_provenance(" in _source_window(
-        "control_plane/executive_runtime.py", 10287, 10297
-    )
+    # (f) the Runtime anchors this tier deliberately does NOT edit.
+    # Their semantic spellings are the dependency contract; line numbers are
+    # intentionally not pinned because current protected Runtime may add
+    # unrelated source above them without changing these gates.
+    runtime_source = "\n".join(_source_lines("control_plane/executive_runtime.py"))
+    assert "_JOB_SEATS = frozenset({\"coo\", \"ceo\", \"chairman\"})" in runtime_source
+    assert "def _has_executive_provenance(" in runtime_source
+    assert "if owner_seat != \"coo\" and not _has_executive_provenance(" in runtime_source
 
 
 def test_service_sink_refuses_write_authority_reserved_actors_and_bad_shapes(tmp_path: Path):
