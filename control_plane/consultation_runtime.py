@@ -576,6 +576,108 @@ class ConsultationRuntime:
                 obligation=obligation,
             )
 
+    def assert_requester_answer_attention_current(
+        self,
+        projection: RequesterAnswerAttentionProjection,
+        *,
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Revalidate one projection at the first durable Wake boundary."""
+
+        if not isinstance(projection, RequesterAnswerAttentionProjection):
+            raise TypeError(
+                "projection must be RequesterAnswerAttentionProjection"
+            )
+        if not connection.in_transaction:
+            raise StateConflict(
+                "requester answer currentness requires an active transaction"
+            )
+        identity = projection.identity
+        events = self._events_on_connection(
+            {"consultation_id": identity.consultation_id}, connection
+        )
+        intents = tuple(
+            event for event in events if event.event_type == "INTENT"
+        )
+        if len(intents) != 1:
+            raise StateConflict(
+                "requester answer attention requires one exact Runtime INTENT"
+            )
+        request = self._intent_from_event(intents[0])
+        frozen_binding = request.get("requester_binding")
+        actor = request.get("requester_actor_ref")
+        if (
+            not isinstance(actor, Mapping)
+            or actor.get("job_id") != identity.requester_job_id
+            or actor.get("attempt_id") != identity.requester_attempt_id
+            or not isinstance(frozen_binding, Mapping)
+            or frozen_binding.get("binding_id")
+            != identity.requester_binding_id
+            or frozen_binding.get("binding_generation")
+            != identity.requester_binding_generation
+            or frozen_binding.get("reasoning_surface")
+            != identity.requester_reasoning_surface
+            or self._root_job_id_on_connection(
+                identity.requester_attempt_id, connection
+            )
+            != identity.root_job_id
+        ):
+            raise StateConflict(
+                "requester answer source drifted from its Runtime INTENT"
+            )
+
+        current_answers = tuple(
+            event
+            for event in events
+            if event.event_type == "ANSWER_AVAILABLE"
+            and event.payload.get("historical") is False
+        )
+        exact_answers = tuple(
+            event
+            for event in current_answers
+            if event.payload.get("message_key")
+            == identity.answer_message_key
+            and event.payload.get("answer_fingerprint")
+            == identity.answer_fingerprint
+            and event.payload.get("semantic_answer_digest")
+            == identity.semantic_answer_digest
+        )
+        if len(current_answers) != 1 or len(exact_answers) != 1:
+            raise StateConflict(
+                "requester answer attention source is not the current answer"
+            )
+        consumed = any(
+            event.event_type == "CONSUMED_BY_REQUESTER"
+            and event.payload.get("answer_message_key")
+            == identity.answer_message_key
+            and event.payload.get("answer_fingerprint")
+            == identity.answer_fingerprint
+            and event.payload.get("semantic_answer_digest")
+            == identity.semantic_answer_digest
+            for event in events
+        )
+        if consumed:
+            raise ConsultationConflict(
+                "answer is already consumed by requester",
+                conflict="ANSWER_ALREADY_CONSUMED",
+            )
+
+        target, binding = self._requester_target_and_binding_on_connection(
+            identity.requester_attempt_id, connection
+        )
+        if (
+            target != projection.target
+            or binding != projection.binding
+            or binding.binding_id != identity.requester_binding_id
+            or binding.binding_generation
+            != identity.requester_binding_generation
+            or binding.reasoning_surface
+            != identity.requester_reasoning_surface
+        ):
+            raise StateConflict(
+                "original requester binding is stale"
+            )
+
     def consumed_by_requester(
         self,
         frame: Mapping[str, Any],

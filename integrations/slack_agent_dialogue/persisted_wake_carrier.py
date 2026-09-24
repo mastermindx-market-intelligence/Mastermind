@@ -16,7 +16,10 @@ from control_plane.dialogue_wake_canary_activation import (
     effective_dialogue_wake_canary_route,
 )
 
-from control_plane.consultation_runtime import RequesterAnswerAttentionProjection
+from control_plane.consultation_runtime import (
+    ConsultationRuntime,
+    RequesterAnswerAttentionProjection,
+)
 from control_plane.executive_runtime import StateConflict
 from control_plane.dialogue_source_resolution import (
     ConsultationSourceIdentity,
@@ -620,6 +623,34 @@ class RequesterAnswerWakeExtension:
 
     def obligation(self) -> WakeObligation:
         return self.projection.obligation
+
+    def persist_requested_if_current(
+        self, consultations: ConsultationRuntime
+    ) -> PersistedWakeEvent:
+        """Atomically fence source currentness and the first Wake request."""
+
+        if not isinstance(consultations, ConsultationRuntime):
+            raise TypeError("consultations must be ConsultationRuntime")
+        if consultations.runtime is not self.repository.runtime:
+            raise StateConflict(
+                "requester answer source and Wake repository Runtime disagree"
+            )
+        obligation = self.obligation()
+        record = requested_record(obligation)
+        with self.repository.store.transaction() as connection:
+            existing = self.repository.list_ledger_records_on_connection(
+                connection, obligation.obligation_id
+            )
+            requested_exists = any(
+                item.phase is LedgerPhase.WAKE_REQUESTED for item in existing
+            )
+            if not requested_exists:
+                consultations.assert_requester_answer_attention_current(
+                    self.projection, connection=connection
+                )
+            return self.repository.append_records_on_connection(
+                connection, ((record, obligation),)
+            )[0]
 
     def current_binding_matches(self) -> bool:
         obligation = self.obligation()

@@ -2117,3 +2117,130 @@ def test_requester_answer_attention_refuses_unreserved_answer_identity(
             foreign,
             requester_attempt_id=workers[0][1],
         )
+
+
+def test_requester_answer_first_wake_request_refuses_consumed_projection(
+    tmp_path: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "consumed-before-first-request", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    projection = consultations.requester_answer_attention(
+        answer,
+        requester_attempt_id=workers[0][1],
+    )
+    consultations.consumed_by_requester(
+        answer,
+        requester_attempt_id=workers[0][1],
+        observed_at="2026-09-14T00:05:00Z",
+    )
+    repository = WakeLedgerRepository(runtime)
+    extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=projection,
+    )
+
+    with pytest.raises(ConsultationConflict, match="already consumed"):
+        extension.persist_requested_if_current(consultations)
+    assert not repository.list_records(projection.obligation.obligation_id)
+
+
+def test_requester_answer_first_wake_request_refuses_post_projection_rotation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    projection = _requester_answer_projection(runtime, consultations, tmp_path)
+    repository = WakeLedgerRepository(runtime)
+    extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=projection,
+    )
+    original = Runtime.current_harness_binding_source
+
+    def rotated(self, attempt_id, *, connection=None):
+        facts = original(self, attempt_id, connection=connection)
+        return replace(
+            facts,
+            generation_number=facts.generation_number + 1,
+        )
+
+    monkeypatch.setattr(Runtime, "current_harness_binding_source", rotated)
+
+    with pytest.raises(StateConflict, match="original requester binding is stale"):
+        extension.persist_requested_if_current(consultations)
+    assert not repository.list_records(projection.obligation.obligation_id)
+
+
+def test_requester_answer_first_wake_request_stays_sticky_after_consumption(
+    tmp_path: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "request-before-consumption", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    projection = consultations.requester_answer_attention(
+        answer,
+        requester_attempt_id=workers[0][1],
+    )
+    repository = WakeLedgerRepository(runtime)
+    extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=projection,
+    )
+
+    first = extension.persist_requested_if_current(consultations)
+    assert first.inserted is True
+    consultations.consumed_by_requester(
+        answer,
+        requester_attempt_id=workers[0][1],
+        observed_at="2026-09-14T00:05:00Z",
+    )
+    replay = extension.persist_requested_if_current(consultations)
+
+    assert replay.inserted is False
+    assert replay.event.event_id == first.event.event_id
+    records = repository.list_records(projection.obligation.obligation_id)
+    assert len(records) == 1
