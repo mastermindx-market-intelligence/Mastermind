@@ -3800,6 +3800,15 @@ def test_replay_with_changed_artifact_revisions_conflicts(
     other_repo, other_revision = _fixture_repo(
         tmp_path / "artifact-conflict-other-repo"
     )
+    # The two fixture repos commit the same source, so we rewrite
+    # ``other_revision`` with a different ``content_sha256`` and a
+    # synthetic commit hash so the two artifact revisions are
+    # genuinely distinguishable in the request body.
+    other_revision = dict(other_revision)
+    other_revision["content_sha256"] = "f" * 64
+    other_revision["commit"] = "f" * 40
+    assert fixture_revision != other_revision
+
     shared_carrier = InMemoryConsultationPacketCarrier()
 
     invocation_id = "iac1-r4c1-artifact-conflict"

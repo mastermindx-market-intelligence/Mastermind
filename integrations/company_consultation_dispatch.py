@@ -793,46 +793,100 @@ class RuntimeConsultationDispatcher:
             response_budget=response_budget,
         )
 
-        # If an INTENT for this consultation_id already exists, reconcile the
-        # semantic fingerprint against the persisted intent. Same fingerprint
-        # → rebuild the frame from the carrier question + persisted INTENT
-        # metadata and replay ``intent()`` (returns inserted=False).
-        # Different fingerprint → CONFLICT with zero append.
+        # If an INTENT for this consultation_id already exists, reconcile
+        # the entire normalized semantic request against the persisted
+        # INTENT. Rebuild a CANDIDATE frame under the persisted identity
+        # and scope (message_key, consultation_id, requester/recipient
+        # refs, recipient_binding, peer, correlation, artifact handling,
+        # valid_until, deadline_ms, response_budget) but with the NEW
+        # request's ``question``, ``evidence_refs``, and
+        # ``artifact_revisions``. The candidate's contract fingerprint
+        # must equal the persisted semantic fingerprint and its
+        # recipient peer_ref must equal the persisted recipient peer
+        # ref; when the carrier holds the original QUESTION packet, the
+        # body parts (``question``, ``evidence_refs``,
+        # ``artifact_revisions``) must also be exactly equal to the
+        # carrier frame. Any mismatch → CONFLICT with zero ``intent()``
+        # and zero ``put_question``. On full equality, replay
+        # ``intent()`` (returns ``inserted=False``) and call
+        # ``put_question`` only if the carrier doesn't already hold it.
         existing_intent = _find_consultation_event(
             self.runtime, consultation_id, "INTENT"
         )
         carrier_question_frame = self.packets.get_question(consultation_id)
+        carrier_holds_packet = carrier_question_frame is not None
         if existing_intent is not None:
-            persisted_question_digest = str(
-                existing_intent.payload.get("question_digest", "")
+            persisted_payload = existing_intent.payload
+            candidate = _build_question_frame(
+                caller=self.caller,
+                requester_actor_ref=dict(
+                    persisted_payload.get("requester_actor_ref")
+                    or requester_actor_ref
+                ),
+                recipient_actor_ref=dict(
+                    persisted_payload.get("recipient_actor_ref")
+                    or recipient_actor_ref
+                ),
+                recipient_peer_ref=str(
+                    persisted_payload.get(
+                        "recipient_peer_ref", peer_ref
+                    )
+                ),
+                recipient_binding=dict(
+                    persisted_payload.get("recipient_binding")
+                    or normalized_recipient_binding
+                ),
+                correlation=dict(
+                    persisted_payload.get("correlation") or correlation
+                ),
+                question_text=str(semantic["question"]),
+                evidence_refs=list(semantic.get("evidence_refs", [])),
+                artifact_revisions=list(
+                    semantic.get("artifact_revisions", [])
+                ),
+                message_key=str(persisted_payload.get("message_key")),
+                consultation_id=str(
+                    persisted_payload.get("consultation_id")
+                ),
+                valid_until=str(persisted_payload.get("valid_until")),
+                deadline_ms=int(persisted_payload.get("deadline_ms")),
+                response_budget=dict(
+                    persisted_payload.get("response_budget")
+                    or response_budget
+                ),
             )
-            persisted_artifact_digest = str(
-                existing_intent.payload.get("artifact_revision_digest", "")
+            persisted_fingerprint = str(
+                persisted_payload.get("semantic_fingerprint", "")
             )
-            new_question_digest = hashlib.sha256(
-                str(question_frame.get("question", "")).encode("utf-8")
-            ).hexdigest()
-            new_artifact_digest = hashlib.sha256(
-                canonical_consultation_json(
-                    question_frame.get("artifact_revisions", [])
-                ).encode("utf-8")
-            ).hexdigest()
-            if (
-                persisted_question_digest != new_question_digest
-                or persisted_artifact_digest != new_artifact_digest
-            ):
+            persisted_peer_ref = str(
+                persisted_payload.get("recipient_peer_ref", "")
+            )
+            candidate_fingerprint = str(candidate.get("fingerprint", ""))
+            fingerprint_agrees = (
+                candidate_fingerprint == persisted_fingerprint
+            )
+            peer_ref_agrees = (
+                str(candidate.get("recipient_peer_ref", ""))
+                == persisted_peer_ref
+            )
+            body_agrees = True
+            if carrier_holds_packet:
+                body_agrees = (
+                    str(candidate.get("question", ""))
+                    == str(carrier_question_frame.get("question", ""))
+                    and list(candidate.get("evidence_refs", []))
+                    == list(carrier_question_frame.get("evidence_refs", []))
+                    and list(candidate.get("artifact_revisions", []))
+                    == list(
+                        carrier_question_frame.get("artifact_revisions", [])
+                    )
+                )
+            if not (fingerprint_agrees and peer_ref_agrees and body_agrees):
                 raise ConsultationRefusal(
                     "CONFLICT",
                     detail="consultation_id reused with changed semantic payload",
                 )
-            if carrier_question_frame is None:
-                raise ConsultationRefusal(
-                    "CARRIER_UNAVAILABLE",
-                    detail="existing INTENT but no carrier QUESTION frame",
-                )
-            question_frame = _rebuild_question_frame_from_intent(
-                existing_intent.payload, carrier_question_frame
-            )
+            question_frame = candidate
 
         carrier_ref = f"company-mcp://{consultation_id}"
 
@@ -853,11 +907,13 @@ class RuntimeConsultationDispatcher:
                 "CONFLICT", detail=type(exc).__name__
             ) from exc
 
-        # Carrier put happens only after ``intent()`` returned (inserted or
-        # replayed). For a replay path, the carrier already holds the
-        # frame — skip the put so we don't clobber the original question
-        # text the original caller put on the carrier.
-        if existing_intent is None:
+        # Carrier put happens only after ``intent()`` returned (inserted
+        # or replayed). For a replay path, the carrier already holds
+        # the frame — skip the put so we don't clobber the original
+        # question text the original caller put on the carrier. The
+        # whole-semantic replay above already proved the carrier packet
+        # agrees with the rebuilt candidate frame.
+        if existing_intent is None or not carrier_holds_packet:
             self.packets.put_question(consultation_id, question_frame)
 
         try:
