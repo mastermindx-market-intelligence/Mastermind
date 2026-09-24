@@ -488,11 +488,19 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
 
         if _SDK:
             try:
+                _sdk_kwargs = {
+                    "run_id": _run_id,
+                    "env_name": _env_name,
+                    "thinking_out": _think_box,
+                }
+                if _private_ephemeral:
+                    # Preserve the ordinary _via_sdk call contract byte-for-byte for
+                    # existing callers/tests; the new flag exists only on the private path.
+                    _sdk_kwargs["private_ephemeral"] = True
                 result = await _via_sdk(
                     prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
                     rc.get("permission_mode", "default"), mcp_servers, resume, arm,
-                    run_id=_run_id, env_name=_env_name, thinking_out=_think_box,
-                    private_ephemeral=_private_ephemeral,
+                    **_sdk_kwargs,
                 )
                 # THE CRUX: classify the result TEXT — org-disabled banners arrive as
                 # ok-looking results whose text contains the subscription-disabled message.
