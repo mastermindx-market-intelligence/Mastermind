@@ -69,6 +69,8 @@ REFUSAL_CODES = frozenset(
         "NOT_A_PARTY",
         "STALE_BINDING",
         "CARRIER_UNAVAILABLE",
+        "CARRIER_INTEGRITY",
+        "CARRIER_RECONCILIATION_REQUIRED",
         "INVOCATION_CONTEXT_UNAVAILABLE",
         "CONFLICT",
         "WAKE_NOT_ACKNOWLEDGED",
@@ -399,6 +401,124 @@ def _intent_matches_frame(
         if frame.get(key) != value:
             return False
     return True
+
+
+def _validated_question_frame(
+    intent_payload: Mapping[str, Any], frame: Mapping[str, Any] | None
+) -> Mapping[str, Any] | None:
+    """Return the frame if it fully matches the persisted INTENT, else ``None``.
+
+    Every persisted identity and scope field must agree with the carrier
+    frame, the frame must pass ``validate_consultation``, the persisted
+    fingerprint and the persisted question digest must equal the
+    corresponding frame fields, and the frame's ``consultation_id`` must
+    equal the requested ``consultation_ref`` (already encoded in
+    ``intent_payload['consultation_id']``).
+    """
+    if not isinstance(frame, Mapping):
+        return None
+    try:
+        validate_consultation(dict(frame))
+    except Exception:
+        return None
+    if not _intent_matches_frame(intent_payload, frame):
+        return None
+    if frame.get("fingerprint") != intent_payload.get("semantic_fingerprint"):
+        return None
+    if _question_digest(str(frame.get("question", ""))) != intent_payload.get(
+        "question_digest"
+    ):
+        return None
+    if frame.get("consultation_id") != intent_payload.get("consultation_id"):
+        return None
+    return frame
+
+
+def _validated_answer_frame(
+    intent_payload: Mapping[str, Any],
+    answer_event: Any | None,
+    frame: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    """Return the ANSWER frame iff every persisted field agrees.
+
+    ``answer_event`` is the admitted non-historical ``ANSWER_AVAILABLE``
+    event; ``frame`` is the carrier's ``get_answer`` result. The frame
+    must pass ``validate_consultation``, be ``purpose == 'ANSWER'``,
+    match the INTENT's ``consultation_id`` / ``message_key`` /
+    ``correlation`` (with ``request_message_key`` set to the INTENT's
+    message_key), agree with the INTENT on actors / binding / peer /
+    artifact_revisions / valid_until / deadline_ms / response_budget,
+    and agree with the admitted ``ANSWER_AVAILABLE`` payload on
+    ``message_key``, ``fingerprint``, semantic answer digest and
+    evidence revision digest.
+    """
+    if not isinstance(frame, Mapping):
+        return None
+    try:
+        validate_consultation(dict(frame))
+    except Exception:
+        return None
+    if frame.get("purpose") != "ANSWER":
+        return None
+    if frame.get("consultation_id") != intent_payload.get("consultation_id"):
+        return None
+    if frame.get("question_message_key") != intent_payload.get("message_key"):
+        return None
+    expected_correlation = dict(intent_payload.get("correlation") or {})
+    expected_correlation["request_message_key"] = intent_payload.get(
+        "message_key"
+    )
+    if dict(frame.get("correlation") or {}) != expected_correlation:
+        return None
+    if dict(frame.get("requester_actor_ref") or {}) != dict(
+        intent_payload.get("requester_actor_ref") or {}
+    ):
+        return None
+    if dict(frame.get("recipient_actor_ref") or {}) != dict(
+        intent_payload.get("recipient_actor_ref") or {}
+    ):
+        return None
+    if dict(frame.get("recipient_binding") or {}) != dict(
+        intent_payload.get("recipient_binding") or {}
+    ):
+        return None
+    if frame.get("recipient_peer_ref") != intent_payload.get(
+        "recipient_peer_ref"
+    ):
+        return None
+    if list(frame.get("artifact_revisions") or []) != list(
+        intent_payload.get("artifact_revisions") or []
+    ):
+        return None
+    if frame.get("valid_until") != intent_payload.get("valid_until"):
+        return None
+    if frame.get("deadline_ms") != intent_payload.get("deadline_ms"):
+        return None
+    if dict(frame.get("response_budget") or {}) != dict(
+        intent_payload.get("response_budget") or {}
+    ):
+        return None
+    if answer_event is None:
+        return None
+    admitted_payload = answer_event.payload
+    if frame.get("message_key") != admitted_payload.get("message_key"):
+        return None
+    if frame.get("fingerprint") != admitted_payload.get("answer_fingerprint"):
+        return None
+    if _semantic_answer_digest(frame) != admitted_payload.get(
+        "semantic_answer_digest"
+    ):
+        return None
+    admitted_evidence_digest = admitted_payload.get("evidence_revision_digest")
+    if admitted_evidence_digest:
+        frame_artifact_digest = hashlib.sha256(
+            canonical_consultation_json(
+                frame.get("artifact_revisions", [])
+            ).encode("utf-8")
+        ).hexdigest()
+        if frame_artifact_digest != admitted_evidence_digest:
+            return None
+    return frame
 
 
 def _find_consultation_event(
@@ -1023,13 +1143,31 @@ class RuntimeConsultationDispatcher:
         question_frame = self.packets.get_question(consultation_ref)
         answer_frame = self.packets.get_answer(consultation_ref)
 
-        question_body = _build_question_body(question_frame)
+        # Validate every carrier frame against the persisted INTENT and
+        # (for answers) the admitted non-historical ANSWER_AVAILABLE
+        # event. Reject the body entirely on any mismatch; the row's
+        # blocker becomes ``CARRIER_INTEGRITY`` and no part of the
+        # rejected frame reaches the read result, blocker, log, or
+        # exception.
+        reserved_answer = _non_historical_answer_event(
+            self.runtime, consultation_ref
+        )
+        validated_question = _validated_question_frame(
+            intent.payload, question_frame
+        )
+        validated_answer = _validated_answer_frame(
+            intent.payload, reserved_answer, answer_frame
+        )
+
+        question_body, question_blocker = _build_question_body(
+            question_frame, validated_question is not None
+        )
         answer_body, answer_blocker = _build_answer_body(
-            self.runtime, consultation_ref, answer_frame
+            answer_frame, reserved_answer, validated_answer is not None
         )
 
         body_status, body_blocker = _body_status_for(
-            question_body, answer_body, answer_blocker
+            question_body, answer_body, question_blocker, answer_blocker
         )
 
         result = dict(row)
@@ -1242,58 +1380,81 @@ def _build_answer_frame(
 
 def _build_question_body(
     question_frame: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
+    is_validated: bool,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Return ``(body, blocker)``.
+
+    ``is_validated`` is the result of ``_validated_question_frame`` against
+    the persisted INTENT. Three cases:
+
+    * Validated frame with a string ``question`` → body + no blocker.
+    * Frame present but fails any validation check → body withheld,
+      blocker ``CARRIER_INTEGRITY`` (the frame is corrupted relative to
+      the persisted INTENT).
+    * No frame on the carrier → body withheld, blocker
+      ``CARRIER_UNAVAILABLE`` (the carrier never received the question).
+    """
     if question_frame is None:
-        return None
+        return (None, "CARRIER_UNAVAILABLE")
+    if not is_validated:
+        return (None, "CARRIER_INTEGRITY")
     question = question_frame.get("question")
     if not isinstance(question, str):
-        return None
-    return {
-        "text": question,
-        "evidence_refs": list(question_frame.get("evidence_refs", [])),
-    }
+        return (None, "CARRIER_INTEGRITY")
+    return (
+        {
+            "text": question,
+            "evidence_refs": list(question_frame.get("evidence_refs", [])),
+        },
+        None,
+    )
 
 
 def _build_answer_body(
-    runtime: Runtime,
-    consultation_ref: str,
     answer_frame: Mapping[str, Any] | None,
+    reserved_event: Any | None,
+    is_validated: bool,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    reserved = _non_historical_answer_event(runtime, consultation_ref)
-    if reserved is None:
+    """Return ``(body, blocker)``.
+
+    Four cases:
+
+    * No admitted non-historical ``ANSWER_AVAILABLE`` → body not yet
+      available, blocker ``CARRIER_UNAVAILABLE``.
+    * Admitted ``ANSWER_AVAILABLE`` but the carrier has no ANSWER frame
+      → body withheld, blocker ``CARRIER_UNAVAILABLE`` (the carrier
+      never received the answer; the lost-write barrier on the reply
+      path is the recovery seam).
+    * Frame present but fails ``_validated_answer_frame`` (or the frame
+      has no parseable answer text) → body withheld, blocker
+      ``CARRIER_INTEGRITY`` (the frame is corrupted relative to the
+      admitted ``ANSWER_AVAILABLE``).
+    * Validated frame → body with the recipient's original text +
+      evidence_refs.
+    """
+    if reserved_event is None and answer_frame is None:
+        return (None, "CARRIER_UNAVAILABLE")
+    if reserved_event is None:
         return (None, "CARRIER_UNAVAILABLE")
     if answer_frame is None:
         return (None, "CARRIER_UNAVAILABLE")
-    reserved_message_key = str(reserved.payload.get("message_key", ""))
-    reserved_answer_fingerprint = str(
-        reserved.payload.get("answer_fingerprint", "")
-    )
-    reserved_semantic = str(
-        reserved.payload.get("semantic_answer_digest", "")
-    )
-    if (
-        answer_frame.get("message_key") != reserved_message_key
-        or answer_frame.get("fingerprint") != reserved_answer_fingerprint
-        or _semantic_answer_digest(answer_frame) != reserved_semantic
-    ):
-        return (None, "CARRIER_UNAVAILABLE")
-    # Unwrap the dispatcher's ``{"text","evidence_refs"}`` wrapper to return
-    # the recipient's original text body.
+    if not is_validated:
+        return (None, "CARRIER_INTEGRITY")
     raw_answer = answer_frame.get("answer")
     if not isinstance(raw_answer, Mapping):
-        return (None, "CARRIER_UNAVAILABLE")
+        return (None, "CARRIER_INTEGRITY")
     raw_text = raw_answer.get("text")
     if not isinstance(raw_text, str):
-        return (None, "CARRIER_UNAVAILABLE")
+        return (None, "CARRIER_INTEGRITY")
     try:
         parsed = json.loads(raw_text)
     except (TypeError, json.JSONDecodeError):
-        return (None, "CARRIER_UNAVAILABLE")
+        return (None, "CARRIER_INTEGRITY")
     if not isinstance(parsed, Mapping):
-        return (None, "CARRIER_UNAVAILABLE")
+        return (None, "CARRIER_INTEGRITY")
     text = parsed.get("text")
     if not isinstance(text, str):
-        return (None, "CARRIER_UNAVAILABLE")
+        return (None, "CARRIER_INTEGRITY")
     evidence_refs = parsed.get("evidence_refs", [])
     if not isinstance(evidence_refs, list):
         evidence_refs = []
@@ -1303,13 +1464,15 @@ def _build_answer_body(
 def _body_status_for(
     question_body: dict[str, Any] | None,
     answer_body: dict[str, Any] | None,
+    question_blocker: str | None,
     answer_blocker: str | None,
 ) -> tuple[str, str | None]:
     if question_body is not None and answer_body is not None:
         return ("AVAILABLE", None)
+    blocker = question_blocker or answer_blocker
     if question_body is None and answer_body is None:
-        return ("UNAVAILABLE", answer_blocker or "CARRIER_UNAVAILABLE")
-    return ("PARTIAL", answer_blocker or "CARRIER_UNAVAILABLE")
+        return ("UNAVAILABLE", blocker or "CARRIER_UNAVAILABLE")
+    return ("PARTIAL", blocker or "CARRIER_UNAVAILABLE")
 
 
 __all__ = [

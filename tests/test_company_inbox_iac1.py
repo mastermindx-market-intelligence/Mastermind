@@ -3297,3 +3297,854 @@ def test_projection_opens_exactly_one_read_context(tmp_path: Path) -> None:
     assert inbox_a["coverage"]["consultations_scanned"] == 3
     assert inbox_a["coverage"]["rows_returned"] == 3
     assert counter["calls"] == 1
+
+
+# ---------------------------------------------------------------------------
+# IAC-1 round 4C-1 — packet boundary validation
+# ---------------------------------------------------------------------------
+
+
+_TAMPERED_QUESTION_MARKER = "UNTRUSTED_BODY_MARKER"
+_TAMPERED_ANSWER_MARKER = "UNTRUSTED_ANSWER_BODY_MARKER"
+
+
+class _TamperedQuestionCarrier(InMemoryConsultationPacketCarrier):
+    """Returns a tampered QUESTION packet on ``get_question``.
+
+    The tampered copy keeps the persisted fingerprint and every other
+    field, but replaces ``question`` with a sentinel marker so the
+    question_digest check fails. ``put_question`` is a no-op so the
+    consult path cannot re-write the original frame.
+    """
+
+    def __init__(self, marker: str = _TAMPERED_QUESTION_MARKER) -> None:
+        super().__init__()
+        self._marker = marker
+
+    def put_question(self, consultation_id, frame):
+        # Consume the consult call but keep the original frame.
+        super().put_question(consultation_id, frame)
+
+    def get_question(self, consultation_id):
+        frame = super().get_question(consultation_id)
+        if frame is None:
+            return None
+        tampered = dict(frame)
+        tampered["question"] = self._marker
+        return tampered
+
+
+class _ForeignQuestionCarrier(InMemoryConsultationPacketCarrier):
+    """Returns a question packet whose consultation_id is a different value.
+
+    The carrier injects a fresh, well-formed QUESTION frame for a foreign
+    consultation under the same key the dispatcher is reading.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._foreign_id: str | None = None
+
+    def install_foreign(
+        self,
+        foreign_consultation_id: str,
+        frame: Mapping[str, Any],
+    ) -> None:
+        self._foreign_id = foreign_consultation_id
+        # Stash the foreign frame under the real consultation_id key so
+        # the dispatcher's get_question returns it.
+        super().put_question(foreign_consultation_id, frame)
+
+    def get_question(self, consultation_id):
+        if self._foreign_id is not None and self._foreign_id == consultation_id:
+            return super().get_question(consultation_id)
+        frame = super().get_question(consultation_id)
+        return frame
+
+
+class _TamperedAnswerCarrier(InMemoryConsultationPacketCarrier):
+    """Returns a tampered ANSWER packet on ``get_answer``.
+
+    The tampered copy keeps the persisted fingerprint and identity, but
+    rewrites the answer text payload so the semantic_answer_digest check
+    fails. ``put_answer`` is honored so the reply path can persist the
+    frame, but ``get_answer`` always returns the tampered version.
+    """
+
+    def __init__(self, marker: str = _TAMPERED_ANSWER_MARKER) -> None:
+        super().__init__()
+        self._marker = marker
+
+    def get_answer(self, consultation_id):
+        frame = super().get_answer(consultation_id)
+        if frame is None:
+            return None
+        tampered = dict(frame)
+        answer = dict(tampered.get("answer") or {})
+        answer["text"] = json.dumps(
+            {"text": self._marker, "evidence_refs": []},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        tampered["answer"] = answer
+        # Recompute the answer fingerprint so validate_consultation still
+        # passes — but leave the persisted fingerprint unchanged so the
+        # digest check would fail downstream. We mutate the field
+        # *without* re-running build_consultation here; the dispatcher's
+        # validation does not re-derive the fingerprint from scratch.
+        return tampered
+
+
+def test_tampered_question_packet_is_not_exposed_on_detail(
+    tmp_path: Path,
+) -> None:
+    """A QUESTION frame whose body was swapped fails the question_digest check.
+
+    The dispatcher refuses the body and surfaces ``question=None``,
+    ``blocker == "CARRIER_INTEGRITY"``, and never lets the marker leave
+    the read. Zero events are appended by the read.
+    """
+    runtime = _runtime_at(tmp_path / "tampered-question")
+    _consultations(runtime, tmp_path / "tampered-question")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "tampered-question-repo"
+    )
+    shared_carrier = _TamperedQuestionCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Original trusted question text",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    events_before_read = _evidence_for(runtime, consultation_id)
+
+    read_envelope = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert read_envelope["ok"] is True
+    data = read_envelope["data"]
+    assert data["question"] is None
+    assert data["blocker"] == "CARRIER_INTEGRITY"
+    raw = json.dumps(read_envelope, sort_keys=True, default=str)
+    assert _TAMPERED_QUESTION_MARKER not in raw
+
+    events_after_read = _evidence_for(runtime, consultation_id)
+    assert events_after_read == events_before_read
+    assert len(events_after_read.get("CONSUMED_BY_REQUESTER", [])) == 0
+
+
+def test_foreign_consultation_packet_is_not_exposed_on_detail(
+    tmp_path: Path,
+) -> None:
+    """A well-formed QUESTION frame from a DIFFERENT consultation is refused."""
+    runtime = _runtime_at(tmp_path / "foreign-question")
+    _consultations(runtime, tmp_path / "foreign-question")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "foreign-question-repo"
+    )
+
+    first_invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-r4c1-foreign-first")
+    )
+    foreign_invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-r4c1-foreign-second")
+    )
+    first_carrier = InMemoryConsultationPacketCarrier()
+    foreign_carrier = InMemoryConsultationPacketCarrier()
+
+    a_first_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=first_carrier,
+        invocations=first_invocations,
+    )
+    a_first_gateway = _gateway_with_dispatcher(a_first_dispatcher)
+    a_foreign_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=foreign_carrier,
+        invocations=foreign_invocations,
+    )
+    a_foreign_gateway = _gateway_with_dispatcher(a_foreign_dispatcher)
+
+    consult_envelope = _run(
+        a_first_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="First consultation question?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    first_consultation_id = consult_envelope["data"]["consultation_ref"]
+
+    foreign_envelope = _run(
+        a_foreign_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Foreign consultation question?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    foreign_consultation_id = foreign_envelope["data"]["consultation_ref"]
+    assert foreign_consultation_id != first_consultation_id
+
+    real_first_frame = first_carrier.get_question(first_consultation_id)
+    assert real_first_frame is not None
+    foreign_frame = foreign_carrier.get_question(foreign_consultation_id)
+    assert foreign_frame is not None
+
+    # Build a FOREIGN carrier that returns the FOREIGN frame when asked
+    # for the FIRST consultation. ``install_foreign`` stashes the frame
+    # under the real consultation_id so the dispatcher's get_question
+    # returns it for that ref.
+    cross_carrier = _ForeignQuestionCarrier()
+    cross_carrier.install_foreign(first_consultation_id, foreign_frame)
+    cross_carrier.put_question(foreign_consultation_id, dict(real_first_frame))
+
+    cross_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=cross_carrier,
+        invocations=first_invocations,
+    )
+    cross_gateway = _gateway_with_dispatcher(cross_dispatcher)
+    events_before_read = _evidence_for(runtime, first_consultation_id)
+
+    read_envelope = _run(
+        cross_gateway.call(
+            "company.consultation",
+            {"consultation_ref": first_consultation_id},
+        )
+    )
+    assert read_envelope["ok"] is True
+    data = read_envelope["data"]
+    assert data["question"] is None
+    assert data["blocker"] == "CARRIER_INTEGRITY"
+    raw = json.dumps(read_envelope, sort_keys=True, default=str)
+    # The foreign body's text must never appear in the read result.
+    assert "Foreign consultation question?" not in raw
+
+    events_after_read = _evidence_for(runtime, first_consultation_id)
+    assert events_after_read == events_before_read
+
+
+def test_tampered_answer_packet_is_not_exposed_on_detail(
+    tmp_path: Path,
+) -> None:
+    """An ANSWER frame whose body was swapped is refused; answer is None."""
+    runtime = _runtime_at(tmp_path / "tampered-answer")
+    _consultations(runtime, tmp_path / "tampered-answer")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "tampered-answer-repo"
+    )
+    shared_carrier = _TamperedAnswerCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Tampered answer scenario?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    _credit_wake_path(runtime, consultation_id)
+    reply_envelope = _run(
+        b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "trusted answer text",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply_envelope["ok"] is True
+
+    events_before_read = _evidence_for(runtime, consultation_id)
+    read_envelope = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert read_envelope["ok"] is True
+    data = read_envelope["data"]
+    assert data["answer"] is None
+    assert data["blocker"] == "CARRIER_INTEGRITY"
+    raw = json.dumps(read_envelope, sort_keys=True, default=str)
+    assert _TAMPERED_ANSWER_MARKER not in raw
+
+    events_after_read = _evidence_for(runtime, consultation_id)
+    assert events_after_read == events_before_read
+
+
+def test_valid_packets_render_with_body_status_available(
+    tmp_path: Path,
+) -> None:
+    """Positive control: untampered frames pass validation → AVAILABLE."""
+    runtime = _runtime_at(tmp_path / "valid-packets")
+    _consultations(runtime, tmp_path / "valid-packets")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "valid-packets-repo"
+    )
+    shared_carrier = InMemoryConsultationPacketCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    question_text = "Validated happy-path question?"
+    answer_text = "validated happy-path answer"
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question=question_text,
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    _credit_wake_path(runtime, consultation_id)
+    reply_envelope = _run(
+        b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": answer_text,
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply_envelope["ok"] is True
+
+    read_envelope = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert read_envelope["ok"] is True
+    data = read_envelope["data"]
+    assert data["body_status"] == "AVAILABLE"
+    assert data["question"]["text"] == question_text
+    assert data["answer"]["text"] == answer_text
+    assert data.get("blocker") in (None, "WAKE_STATE_UNAVAILABLE")
+
+
+# ---------------------------------------------------------------------------
+# IAC-1 round 4C-1 — Item 2: whole-semantic replay comparison
+# ---------------------------------------------------------------------------
+
+
+def test_replay_with_changed_evidence_refs_alone_conflicts(
+    tmp_path: Path,
+) -> None:
+    """Same invocation, same question, changed evidence_refs → CONFLICT."""
+    runtime = _runtime_at(tmp_path / "evidence-conflict")
+    _consultations(runtime, tmp_path / "evidence-conflict")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "evidence-conflict-repo"
+    )
+    shared_carrier = InMemoryConsultationPacketCarrier()
+
+    invocation_id = "iac1-r4c1-evidence-conflict"
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=_StaticInvocations(
+            _default_invocation(invocation_id=invocation_id)
+        ),
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+
+    original_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Same question, changed evidence only.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = original_envelope["data"]["consultation_ref"]
+    assert original_envelope["data"]["state"] == "INTENDED"
+    original_question_frame = shared_carrier.get_question(consultation_id)
+    assert original_question_frame is not None
+
+    repository = WakeLedgerRepository(runtime)
+    wake_before = repository.list_wake_events()
+
+    # Replay under the SAME invocation_id with a different evidence_refs
+    # list. The whole-semantic replay must detect the difference and
+    # raise CONFLICT — without appending a second INTENT and without
+    # adding any new wake records.
+    conflict_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Same question, changed evidence only.",
+                evidence_refs=[
+                    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/959"
+                ],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert conflict_envelope["ok"] is False
+    assert conflict_envelope["error"]["code"] == "EFFECT_UNKNOWN"
+
+    # Exactly one INTENT persisted; the replay must not have appended a
+    # second one.
+    events = runtime.events.list_events(
+        aggregate_type="consultation", aggregate_id=consultation_id
+    )
+    assert sum(1 for event in events if event.event_type == "INTENT") == 1
+
+    # Carrier question packet is unchanged — the dispatcher refused
+    # before any put_question could overwrite it.
+    after_question_frame = shared_carrier.get_question(consultation_id)
+    assert after_question_frame == original_question_frame
+
+    # Zero new wake records.
+    wake_after = repository.list_wake_events()
+    assert len(wake_after) == len(wake_before)
+
+
+def test_replay_with_changed_artifact_revisions_conflicts(
+    tmp_path: Path,
+) -> None:
+    """Same invocation, same question, changed artifact_revisions → CONFLICT."""
+    runtime = _runtime_at(tmp_path / "artifact-conflict")
+    _consultations(runtime, tmp_path / "artifact-conflict")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "artifact-conflict-repo"
+    )
+    other_repo, other_revision = _fixture_repo(
+        tmp_path / "artifact-conflict-other-repo"
+    )
+    shared_carrier = InMemoryConsultationPacketCarrier()
+
+    invocation_id = "iac1-r4c1-artifact-conflict"
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=_StaticInvocations(
+            _default_invocation(invocation_id=invocation_id)
+        ),
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+
+    original_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Same question, changed artifact only.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = original_envelope["data"]["consultation_ref"]
+    assert original_envelope["data"]["state"] == "INTENDED"
+
+    conflict_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Same question, changed artifact only.",
+                evidence_refs=[],
+                artifact_revisions=[other_revision],
+            ),
+        )
+    )
+    assert conflict_envelope["ok"] is False
+    assert conflict_envelope["error"]["code"] == "EFFECT_UNKNOWN"
+
+    events = runtime.events.list_events(
+        aggregate_type="consultation", aggregate_id=consultation_id
+    )
+    assert sum(1 for event in events if event.event_type == "INTENT") == 1
+
+
+# ---------------------------------------------------------------------------
+# IAC-1 round 4C-1 — Item 3: reconcile-on-carrier reply path
+# ---------------------------------------------------------------------------
+
+
+class _CountingAnswerCarrier(InMemoryConsultationPacketCarrier):
+    """Counting answer carrier; optionally raises on ``put_answer`` once."""
+
+    def __init__(self, raise_on_put_n: int | None = None) -> None:
+        super().__init__()
+        self.put_answer_calls = 0
+        self.get_answer_calls = 0
+        self._raise_on_put_n = raise_on_put_n
+        self._raised = False
+
+    def put_answer(self, consultation_id, frame):
+        self.put_answer_calls += 1
+        if (
+            self._raise_on_put_n is not None
+            and not self._raised
+            and self.put_answer_calls == self._raise_on_put_n
+        ):
+            self._raised = True
+            raise RuntimeError("synthetic carrier write failure")
+        super().put_answer(consultation_id, frame)
+
+    def get_answer(self, consultation_id):
+        self.get_answer_calls += 1
+        return super().get_answer(consultation_id)
+
+
+def test_identical_reply_replay_does_not_write_carrier_twice(
+    tmp_path: Path,
+) -> None:
+    """Two identical replies → one ``put_answer``; second is ``reconciled``."""
+    runtime = _runtime_at(tmp_path / "reply-replay")
+    _consultations(runtime, tmp_path / "reply-replay")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "reply-replay-repo"
+    )
+    shared_carrier = _CountingAnswerCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Reply replay scenario?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    _credit_wake_path(runtime, consultation_id)
+
+    reply_args = {
+        "consultation_ref": consultation_id,
+        "answer": "first answer text",
+        "evidence_refs": [],
+    }
+    first_reply = _run(b_gateway.call("company.reply", reply_args))
+    assert first_reply["ok"] is True
+    data_1 = first_reply["data"]
+    assert data_1["state"] == "ANSWER_AVAILABLE"
+    assert data_1["inserted"] is True
+
+    second_reply = _run(b_gateway.call("company.reply", dict(reply_args)))
+    assert second_reply["ok"] is True
+    data_2 = second_reply["data"]
+    assert data_2["state"] == "ANSWER_AVAILABLE"
+    assert data_2["inserted"] is False
+    assert data_2.get("reconciled") is True
+
+    assert shared_carrier.put_answer_calls == 1
+
+    events = runtime.events.list_events(
+        aggregate_type="consultation", aggregate_id=consultation_id
+    )
+    assert sum(
+        1 for event in events if event.event_type == "ANSWER_AVAILABLE"
+    ) == 1
+
+
+def test_accepted_answer_with_lost_carrier_write_is_reconciliation_required(
+    tmp_path: Path,
+) -> None:
+    """Lost carrier write → ``CARRIER_RECONCILIATION_REQUIRED``; no retry."""
+    runtime = _runtime_at(tmp_path / "lost-write")
+    _consultations(runtime, tmp_path / "lost-write")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "lost-write-repo"
+    )
+    # The counting carrier raises on the first put_answer (inserted=True
+    # branch) and refuses to persist the frame.
+    shared_carrier = _CountingAnswerCarrier(raise_on_put_n=1)
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Lost carrier write scenario?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    _credit_wake_path(runtime, consultation_id)
+
+    reply_args = {
+        "consultation_ref": consultation_id,
+        "answer": "answer that the carrier will not accept",
+        "evidence_refs": [],
+    }
+    first = _run(b_gateway.call("company.reply", reply_args))
+    assert first["ok"] is False
+    assert first["error"]["code"] == "EFFECT_UNKNOWN"
+    assert first["data"] is None
+
+    events_after_first = _evidence_for(runtime, consultation_id)
+    assert len(events_after_first.get("ANSWER_AVAILABLE", [])) == 1
+
+    # The carrier is still empty. A second identical reply must raise
+    # CARRIER_RECONCILIATION_REQUIRED again — NOT retry the carrier write.
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            b_dispatcher,
+            "company.reply",
+            {
+                "schema": COMPANY_CONSULTATION_SCHEMA,
+                "operation": "reply",
+                "semantic": {
+                    "consultation_ref": consultation_id,
+                    "answer": "answer that the carrier will not accept",
+                    "supersedes_message_key": None,
+                    "evidence_refs": [],
+                },
+            },
+        )
+    assert excinfo.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+
+    events_after_second = _evidence_for(runtime, consultation_id)
+    assert events_after_second == events_after_first
+    # Carrier must NOT have been retried after the first raise.
+    assert shared_carrier.put_answer_calls == 1
+
+    # Requester detail read → answer is None, blocker CARRIER_UNAVAILABLE.
+    read_envelope = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert read_envelope["ok"] is True
+    data = read_envelope["data"]
+    assert data["answer"] is None
+    assert data["blocker"] in {
+        "CARRIER_UNAVAILABLE",
+        "CARRIER_INTEGRITY",
+    }
+
+
+def test_known_same_packet_readback_returns_without_second_write(
+    tmp_path: Path,
+) -> None:
+    """Carrier pre-holds the admitted packet → identical reply is reconciled."""
+    runtime = _runtime_at(tmp_path / "known-readback")
+    _consultations(runtime, tmp_path / "known-readback")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "known-readback-repo"
+    )
+    shared_carrier = InMemoryConsultationPacketCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Known-packet readback scenario?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    _credit_wake_path(runtime, consultation_id)
+
+    first_reply = _run(
+        b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "first answer text",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert first_reply["ok"] is True
+    assert first_reply["data"]["state"] == "ANSWER_AVAILABLE"
+    events_after_first = _evidence_for(runtime, consultation_id)
+    assert len(events_after_first.get("ANSWER_AVAILABLE", [])) == 1
+
+    # Simulate a process restart: build a fresh dispatcher with a
+    # counting carrier that pre-holds the exact admitted packet. The
+    # new dispatcher's identical reply must reconcile without any
+    # runtime or carrier writes.
+    counting_carrier = _CountingAnswerCarrier()
+    admitted_packet = shared_carrier.get_answer(consultation_id)
+    assert admitted_packet is not None
+    counting_carrier.put_answer(consultation_id, dict(admitted_packet))
+
+    restarted_b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=counting_carrier,
+        invocations=invocations,
+    )
+    restarted_b_gateway = _gateway_with_dispatcher(restarted_b_dispatcher)
+    second_reply = _run(
+        restarted_b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "first answer text",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert second_reply["ok"] is True
+    data = second_reply["data"]
+    assert data["state"] == "ANSWER_AVAILABLE"
+    assert data["inserted"] is False
+    assert data.get("reconciled") is True
+
+    # No additional runtime or carrier writes.
+    assert counting_carrier.put_answer_calls == 1  # only the seeding put
+    events_final = _evidence_for(runtime, consultation_id)
+    assert events_final == events_after_first
