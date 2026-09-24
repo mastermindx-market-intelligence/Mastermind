@@ -274,6 +274,48 @@ One Chairman/Sol assignment occurs once. Fable must then:
 
 Acceptance fails if routine preference questions or manual prompt carriage are required.
 
+## 14. Claude packaging boundary
+
+The first production packaging target is one private **Mastermind Executive** Claude plugin/desktop extension, not a public Internet-facing replacement for Executive OS.
+
+Current provider behavior supports this composition:
+
+- Claude plugins may bundle skills, connectors/MCP servers, sub-agents and hooks.
+- A plugin enabled for the same Claude account loads into Claude Code on supported current versions; local plugin MCP servers execute on the user's computer.
+- Desktop extensions are the provider-supported mechanism for local/private MCP resources and support Node.js, Python and binary servers.
+- Remote custom connectors originate from Anthropic's cloud and require a publicly reachable MCP endpoint; do not make the private Executive loopback service public merely for connector parity.
+- #955 observed Claude Code 2.1.275, above Anthropic's documented 2.1.273 minimum for Claude-account plugin sync at the time of this spec.
+
+Therefore the intended client composition is:
+
+```text
+private Mastermind Executive Claude plugin
+  + rich principal skill/method package
+  + exact reviewed MCP/tool projection
+  + optional hooks whose authority effect is separately proven
+        |
+        v
+local authenticated Executive edge (#955)
+        |
+        v
+existing Executive / Workspace / Fabric owners
+```
+
+Plugin installation is capability availability, not mission authority. A Required/default-installed organization plugin must still pass the same exact tool/profile/mandate checks before any modifying effect.
+
+### Provider evidence for the session-binding falsifier
+
+The current MCP 2026-07-28 specification is intentionally stateless: the protocol-level session ID and initialize handshake are removed; client information is request metadata and is not a security identity. Claude Code's official plugin hook-development material documents a `session_id` field on hook input and a `SessionStart` hook that can persist session-local environment/context through `CLAUDE_ENV_FILE`.
+
+These facts establish a viable investigation seam, not the final security design. The implementation must still prove how hook-origin session identity reaches each modifying Executive request without becoming model-controlled or a second session registry.
+
+Provider references (fresh at spec authoring time):
+- https://blog.modelcontextprotocol.io/posts/2026-07-28/
+- https://github.com/anthropics/claude-code/blob/main/plugins/plugin-dev/skills/hook-development/SKILL.md
+- https://support.claude.com/en/articles/13837440-use-plugins-in-claude
+- https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop
+- https://support.claude.com/en/articles/11725091-when-to-use-desktop-and-web-connectors
+
 ## 14. Non-goals
 
 This wave does not:
@@ -289,7 +331,7 @@ This wave does not:
 - merge #676 or replace its portable-principal/profile work;
 - create another scheduler, session registry, identity store, queue, retry engine, memory plane or authority database.
 
-## 15. Dependency relationship
+## 16. Dependency relationship
 
 - #955 owns the authenticated Claude client edge.
 - #676 is accepted SPEC_ONLY evidence for native Claude parity and the sealed-worker vs rich-principal split.
