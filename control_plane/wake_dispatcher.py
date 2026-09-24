@@ -366,6 +366,22 @@ class WakeTransportCompletion:
                 )
 
 
+@runtime_checkable
+class SupportsDeliveredAckReconciliation(Protocol):
+    """Explicit read-only late-ACK observation contract.
+
+    Web-Sol must never discover a generic provider reconcile method because
+    that legacy operation may be effectful. Implementing this protocol is the
+    transport positive statement that the exact delivered nudge can be
+    observed without resubmitting or mutating provider work.
+    """
+
+    transport_id: str
+
+    async def reconcile_delivered_ack(
+        self, wake: WakeNudge
+    ) -> TransportReceipt | WakeTransportCompletion: ...
+
 def normalize_transport_completion(
     value: TransportReceipt | WakeTransportCompletion,
 ) -> tuple[TransportReceipt, WakeAckCompletionProjection | None]:
@@ -1197,6 +1213,19 @@ async def reconcile_persisted_delivered_ack(
         or not isinstance(binding, RuntimeBinding)
     ):
         return hold("ACK_RECONCILIATION_REFUSED")
+    first_route = pairs[0][1]
+    if any(
+        route.wake_transport != first_route.wake_transport
+        for _obligation, route in pairs
+    ):
+        return hold("ACK_ROUTE_REFUSED")
+    is_web_sol = first_route.wake_transport == WEB_SOL_WAKE_TRANSPORT
+    if not is_web_sol and (target_registry is None or len(pairs) != 1):
+        # Preserve the incumbent worker contract: canonical target identity and
+        # the historically reviewed single-pair shape must be proven before any
+        # late provider observation is attempted.
+        return hold("ACK_RECONCILIATION_REFUSED")
+
     obligation_ids = tuple(
         obligation.obligation_id for obligation, _route in pairs
     )
@@ -1207,15 +1236,19 @@ async def reconcile_persisted_delivered_ack(
     delivered_records: list[WakeLedgerRecord] = []
     ack_records: list[WakeLedgerRecord | None] = []
     already_recorded: list[bool] = []
+    web_sol_source_resolved_without_ack = False
     for obligation, route in pairs:
         if route.obligation_id != obligation.obligation_id:
             return hold("ACK_ROUTE_REFUSED")
-        records = tuple(
-            item.record for item in repo.list_records(obligation.obligation_id)
-        )
         try:
+            records = tuple(
+                item.record for item in repo.list_records(obligation.obligation_id)
+            )
             assert_causal(records)
         except Exception:
+            # Rehydration is an untrusted durable boundary. Malformed/tampered
+            # semantic provenance must fail closed instead of escaping as an
+            # exception or triggering provider reconciliation.
             return hold("ACK_HISTORY_REFUSED")
         attempts = tuple(
             record
@@ -1243,10 +1276,18 @@ async def reconcile_persisted_delivered_ack(
         attempt_records.append(attempts[0])
         delivered_records.append(deliveries[0])
         ack_records.append(acknowledgements[0] if acknowledgements else None)
+        has_ack = LedgerPhase.TARGET_ACKNOWLEDGED in phases
+        has_source_resolution = LedgerPhase.SOURCE_RESOLVED in phases
         already_recorded.append(
-            LedgerPhase.TARGET_ACKNOWLEDGED in phases
-            or LedgerPhase.SOURCE_RESOLVED in phases
+            has_ack if is_web_sol else (has_ack or has_source_resolution)
         )
+        if is_web_sol and has_source_resolution and not has_ack:
+            web_sol_source_resolved_without_ack = True
+
+    if web_sol_source_resolved_without_ack:
+        # Source closure is not target-origin semantic proof. Never let this
+        # state silently become ACK_ALREADY_RECORDED or provoke provider re-entry.
+        return hold("SEMANTIC_ACK_SOURCE_RESOLVED_WITHOUT_ACK")
 
     try:
         nudge_attempt = _load_persisted_nudge(repo, attempt_records[0])
@@ -1264,7 +1305,6 @@ async def reconcile_persisted_delivered_ack(
             for obligation, _route in pairs
         )
         nudge_attempt = _nudge_attempt_from(ordered_attempts)
-        first_route = pairs[0][1]
         coalesce_nudge([route for _obligation, route in pairs])
         if all(already_recorded):
             if first_route.wake_transport != WEB_SOL_WAKE_TRANSPORT:
@@ -1328,11 +1368,16 @@ async def reconcile_persisted_delivered_ack(
             binding=binding,
             first_route=first_route,
         )
-        reconcile = getattr(dispatcher, "reconcile_delivered_ack", None)
-        if not callable(reconcile):
-            reconcile = getattr(dispatcher, "reconcile", None)
-        if not callable(reconcile):
-            return hold("ACK_PROVIDER_UNAVAILABLE")
+        if is_web_sol:
+            if not isinstance(dispatcher, SupportsDeliveredAckReconciliation):
+                return hold("ACK_PROVIDER_UNAVAILABLE")
+            reconcile = dispatcher.reconcile_delivered_ack
+        else:
+            reconcile = getattr(dispatcher, "reconcile_delivered_ack", None)
+            if not callable(reconcile):
+                reconcile = getattr(dispatcher, "reconcile", None)
+            if not callable(reconcile):
+                return hold("ACK_PROVIDER_UNAVAILABLE")
         raw = await reconcile(wake)
         raw_receipt, projection = normalize_transport_completion(raw)
         receipt = authenticate_transport_receipt(
