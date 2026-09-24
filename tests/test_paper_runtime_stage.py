@@ -79,7 +79,7 @@ class RuntimeStageTests(unittest.TestCase):
 
     def test_valid_but_unreviewed_generation_refuses(self):
         with self.assertRaisesRegex(stage.Refusal, "GENERATION_UNSUPPORTED"):
-            stage.stage("v3", root=self.root, _source_dir=self.source)
+            stage.stage("v4", root=self.root, _source_dir=self.source)
 
     def test_source_hash_must_match_reviewed_generation(self):
         with mock.patch.object(
