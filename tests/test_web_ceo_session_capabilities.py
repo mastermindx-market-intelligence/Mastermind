@@ -258,10 +258,19 @@ def _receipt(
     observed_at_ms: int = OBSERVED_AT_MS,
     expires_at_ms: int = EXPIRES_AT_MS,
     schema_complete: bool = True,
+    action_surface: wcap.CurrentActionSurfaceFacts | None = None,
 ) -> wcap.WebCeoSessionCapabilityReceipt:
     bound_contracts = contracts or _contracts()
     bound_tools = effective_tools if effective_tools is not None else _all_actions(
         bound_contracts
+    )
+    surface = action_surface or _action_surface(
+        session_ref=session_ref,
+        binding_ref=binding_ref,
+        binding_generation=binding_generation,
+        action_scope_ref=action_scope_ref,
+        observed_at_ms=observed_at_ms,
+        expires_at_ms=expires_at_ms,
     )
     probes = (
         serviceability
@@ -289,7 +298,7 @@ def _receipt(
         session_ref=session_ref,
         binding_ref=binding_ref,
         binding_generation=binding_generation,
-        action_scope_ref=action_scope_ref,
+        action_surface=surface,
         observed_at_ms=observed_at_ms,
         expires_at_ms=expires_at_ms,
         action_serviceability=probes,
@@ -319,12 +328,24 @@ def _action_surface(
     binding_ref: str = "runtimebinding-websol-c3-17",
     binding_generation: int = 7,
     action_scope_ref: str = ACTION_SCOPE_REF,
+    observed_at_ms: int = OBSERVED_AT_MS,
+    expires_at_ms: int = EXPIRES_AT_MS,
+    source: SourceRef | None = None,
 ) -> wcap.CurrentActionSurfaceFacts:
     return wcap.CurrentActionSurfaceFacts(
         session_ref=session_ref,
         binding_ref=binding_ref,
         binding_generation=binding_generation,
         action_scope_ref=action_scope_ref,
+        observed_at_ms=observed_at_ms,
+        expires_at_ms=expires_at_ms,
+        source=(
+            source
+            or _source(
+                SourceOwner.SURFACE_BINDINGS,
+                "surface-bindings-web-message-scope-current",
+            )
+        ),
     )
 
 
@@ -362,6 +383,7 @@ def _assess(
         expected_binding_ref=current.binding_ref,
         expected_binding_generation=current.binding_generation,
         expected_action_scope_ref=current_surface.action_scope_ref,
+        expected_action_surface_evidence_digest=current_surface.evidence_digest,
         expected_capability_contract_digest=(
             expected_contract_digest or receipt.capability_contract_digest
         ),
@@ -448,8 +470,8 @@ def _observations(
     return {item.name: item for item in receipt.observations}
 
 
-def test_v2_schema_and_guard_signature_are_pinned() -> None:
-    assert wcap.RECEIPT_SCHEMA.endswith(".v2")
+def test_v3_receipt_v2_preflight_schema_and_guard_signature_are_pinned() -> None:
+    assert wcap.RECEIPT_SCHEMA.endswith(".v3")
     assert wcap.PREFLIGHT_SCHEMA.endswith(".v2")
     assert "capability_preflight" not in inspect.signature(
         wcap.build_guarded_commitment_plan_from_selection_decision
@@ -1189,13 +1211,14 @@ def test_complete_schema_receipt_requires_full_closed_vocabulary() -> None:
             session_ref="websol-c3-session-17",
             binding_ref="runtimebinding-websol-c3-17",
             binding_generation=7,
-            action_scope_ref=ACTION_SCOPE_REF,
+            action_surface=_action_surface(),
             observed_at_ms=OBSERVED_AT_MS,
             expires_at_ms=EXPIRES_AT_MS,
             schema_complete=True,
             tool_schema_digest="a" * 64,
             capability_contract_digest="b" * 64,
             observer_evidence_digest="c" * 64,
+            action_surface_evidence_digest="e" * 64,
             serviceability_evidence_digest="d" * 64,
             observations=(
                 wcap.CapabilityObservation(
@@ -1225,6 +1248,7 @@ def test_incomplete_schema_cannot_claim_absence() -> None:
             tool_schema_digest="a" * 64,
             capability_contract_digest="b" * 64,
             observer_evidence_digest="c" * 64,
+            action_surface_evidence_digest="e" * 64,
             serviceability_evidence_digest="d" * 64,
             observations=(
                 wcap.CapabilityObservation(
@@ -1671,6 +1695,7 @@ def test_observer_evidence_digest_is_bound_into_receipt_digest() -> None:
         tool_schema_digest=receipt.tool_schema_digest,
         capability_contract_digest=receipt.capability_contract_digest,
         observer_evidence_digest="f" * 64,
+        action_surface_evidence_digest=receipt.action_surface_evidence_digest,
         serviceability_evidence_digest=receipt.serviceability_evidence_digest,
         observations=receipt.observations,
     )
@@ -1749,3 +1774,124 @@ def test_guard_refuses_action_scope_rollover_before_c2(monkeypatch) -> None:
             ),
         )
     assert called["count"] == 0
+
+
+def test_action_surface_requires_surface_bindings_owner() -> None:
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="ACTION_SURFACE_OWNER_INVALID",
+    ):
+        _action_surface(
+            source=_source(SourceOwner.CAPACITY, "forged-capacity-surface"),
+        )
+
+
+def test_action_surface_requires_current_owner_source() -> None:
+    stale = SourceRef(
+        owner=SourceOwner.SURFACE_BINDINGS,
+        ref="surface-bindings-stale",
+        observed_at="2026-09-19T00:00:00Z",
+        freshness=Freshness.STALE,
+    )
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="ACTION_SURFACE_SOURCE_NOT_CURRENT",
+    ):
+        _action_surface(source=stale)
+
+
+def test_same_scope_but_changed_surface_evidence_cannot_reach_c2(monkeypatch) -> None:
+    receipt = _receipt()
+    changed_surface = _action_surface(
+        source=_source(
+            SourceOwner.SURFACE_BINDINGS,
+            "surface-bindings-web-message-scope-generation-2",
+        )
+    )
+    assert changed_surface.action_scope_ref == receipt.action_scope_ref
+    assert (
+        changed_surface.evidence_digest
+        != receipt.action_surface_evidence_digest
+    )
+    called = {"count": 0}
+
+    def _unexpected_c2(**kwargs):
+        called["count"] += 1
+        raise AssertionError("unguarded C2 call")
+
+    monkeypatch.setattr(
+        c2,
+        "build_commitment_plan_from_selection_decision",
+        _unexpected_c2,
+    )
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="CAPABILITY_PREFLIGHT_NOT_READY",
+    ):
+        _guard(
+            receipt,
+            selection=_selection(
+                required_capabilities=frozenset({"executive_submit"})
+            ),
+            action_surface=changed_surface,
+        )
+    assert called["count"] == 0
+
+
+def test_expired_action_surface_refuses_before_c2(monkeypatch) -> None:
+    receipt = _receipt()
+    expired = _action_surface(
+        observed_at_ms=NOW_MS - 10_000,
+        expires_at_ms=NOW_MS - 1,
+    )
+    called = {"count": 0}
+
+    def _unexpected_c2(**kwargs):
+        called["count"] += 1
+        raise AssertionError("unguarded C2 call")
+
+    monkeypatch.setattr(
+        c2,
+        "build_commitment_plan_from_selection_decision",
+        _unexpected_c2,
+    )
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="ACTION_SURFACE_NOT_CURRENT",
+    ):
+        _guard(
+            receipt,
+            selection=_selection(
+                required_capabilities=frozenset({"executive_submit"})
+            ),
+            action_surface=expired,
+        )
+    assert called["count"] == 0
+
+
+def test_receipt_digest_binds_owner_issued_action_surface_evidence() -> None:
+    first_surface = _action_surface()
+    second_surface = _action_surface(
+        source=_source(
+            SourceOwner.SURFACE_BINDINGS,
+            "surface-bindings-web-message-scope-generation-2",
+        )
+    )
+    first = _receipt(action_surface=first_surface)
+    second = _receipt(action_surface=second_surface)
+
+    assert first.action_scope_ref == second.action_scope_ref
+    assert first.action_surface_evidence_digest != second.action_surface_evidence_digest
+    assert first.evidence_digest != second.evidence_digest
+
+
+def test_current_owner_surface_allows_existing_guard_and_stays_private() -> None:
+    surface = _action_surface()
+    receipt = _receipt(action_surface=surface)
+    plan = _guard(receipt, action_surface=surface)
+    rendered = str(plan.to_dict())
+
+    assert isinstance(plan, c2.PlacementCommitmentPlan)
+    assert surface.action_scope_ref not in rendered
+    assert surface.evidence_digest not in rendered
+    assert surface.source.ref not in rendered
