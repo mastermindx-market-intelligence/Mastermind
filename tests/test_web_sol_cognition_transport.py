@@ -71,13 +71,43 @@ def _result_schema() -> dict:
 def _assignment() -> dict:
     schema = _result_schema()
     continuation = {
-        "schema_version": "mastermind.web_sol_continuation/v1",
+        "schema": "mastermind.web_sol_continuation/v1",
         "workstream": "WS:TARGET",
+        "generated_at": "2026-09-24T07:00:00Z",
         "agentos_source_sha": "2" * 40,
-        "next_action": "Analyze the bounded evidence and return the exact result envelope.",
-        "blockers": [],
+        "source_records_digest": None,
+        "state": {
+            "status": "active",
+            "program": "program-a",
+            "owner": "ceo-sol",
+            "p0": "EXECUTIVE_OS",
+            "next_action": {
+                "text": "Analyze the bounded evidence and return the exact result envelope.",
+                "truncated": False,
+                "original_bytes": 66,
+            },
+            "blocked_by": [],
+            "blocked_by_total": 0,
+            "blocked_by_truncated": False,
+            "wait": None,
+            "needs_ceo": None,
+            "claim": None,
+            "collisions": None,
+            "source": "agentos/workstreams/WS-TARGET.md",
+        },
+        "active_waves": [],
         "do_not_redo": ["DONE-1"],
-        "evidence": [],
+        "evidence_refs": [],
+        "evidence_ref_total": 0,
+        "evidence_ref_unique_total": 0,
+        "evidence_refs_truncated": False,
+        "warnings": [],
+        "warnings_total": 0,
+        "warnings_truncated": False,
+        "authority_note": (
+            "Projection only: Agent OS owns organizational continuity; "
+            "Executive OS owns runtime/effect truth. Refresh canonical owners before modifying work."
+        ),
     }
     return {
         "continuation": continuation,
@@ -236,6 +266,26 @@ def test_submit_payload_rejects_generic_caller_content(field: str) -> None:
 
     with pytest.raises(WebSolCognitionTransportError, match="unknown keys"):
         validate_assignment_submit_payload(payload)
+
+
+def test_submit_payload_binds_real_continuation_schema_workstream_and_budget() -> None:
+    assignment = _assignment()
+    assignment["continuation"]["schema"] = "mastermind.web_sol_continuation/v0"
+    assignment["continuation_digest"] = _digest(assignment["continuation"])
+    with pytest.raises(WebSolCognitionTransportError, match="continuation.schema"):
+        _submit(assignment=assignment)
+
+    assignment = _assignment()
+    assignment["continuation"]["workstream"] = "WS:OTHER"
+    assignment["continuation_digest"] = _digest(assignment["continuation"])
+    with pytest.raises(WebSolCognitionTransportError, match="workstream"):
+        _submit(assignment=assignment)
+
+    assignment = _assignment()
+    assignment["continuation"]["authority_note"] = "x" * (9 * 1024)
+    assignment["continuation_digest"] = _digest(assignment["continuation"])
+    with pytest.raises(WebSolCognitionTransportError, match="continuation exceeds"):
+        _submit(assignment=assignment)
 
 
 def test_submit_payload_rejects_assignment_identity_or_effect_drift() -> None:
