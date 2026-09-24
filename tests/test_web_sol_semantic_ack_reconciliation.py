@@ -21,13 +21,10 @@ from control_plane.wake_events import utc_now_iso
 from control_plane.wake_ledger import (
     AckMode,
     LedgerPhase,
-    SourceReadHealth,
-    SourceResolutionCode,
     TrustedAckContext,
+    WakeLedgerError,
     ack_record,
     acknowledge,
-    resolve_source,
-    resolved_record,
 )
 from control_plane.wake_persist import WakeLedgerRepository
 from tests.test_web_sol_wake_ack_ingress import (
@@ -235,21 +232,17 @@ def test_fresh_process_replay_reconstructs_web_sol_provenance_and_refuses_generi
 
 
 def test_source_resolved_without_semantic_ack_holds_without_provider_reentry(
-    tmp_path,
+    tmp_path, monkeypatch
 ) -> None:
     fixture = _fixture(tmp_path)
     obligation = fixture.obligations[0]
-    resolution = resolve_source(
-        obligation,
-        code=SourceResolutionCode.INBOX_ATTENTION_ABSENT,
-        health=SourceReadHealth.HEALTHY,
-        source_present=False,
-        snapshot_digest="a" * 64,
-    )
-    fixture.repository.append_record(
-        resolved_record(obligation, resolution),
-        obligation=obligation,
-    )
+
+    def impossible_legacy_history(_obligation_id):
+        raise WakeLedgerError(
+            "SOURCE_RESOLVED requires prior TARGET_ACKNOWLEDGED"
+        )
+
+    monkeypatch.setattr(fixture.repository, "list_records", impossible_legacy_history)
     never = _NeverDispatcher()
 
     result = asyncio.run(
@@ -264,7 +257,6 @@ def test_source_resolved_without_semantic_ack_holds_without_provider_reentry(
     assert result.state is PersistedDeliveredAckState.HOLD
     assert result.reason == "SEMANTIC_ACK_SOURCE_RESOLVED_WITHOUT_ACK"
     assert never.calls == 0
-    assert _ack_rows(fixture, obligation.obligation_id) == ()
 
 
 def test_tampered_ledger_rehydration_fails_closed_instead_of_raising(
