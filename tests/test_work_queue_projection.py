@@ -2275,6 +2275,15 @@ def _round3_non_effect_card(*, responsibility_ref="WS:FIRST", root_job_id="JOB-1
     and ``valid_for_ms=60000`` so the full content gate passes for
     non-EFFECT_UNKNOWN cards.  Used to build mixed-effects test cards
     where this card sits alongside an EFFECT_UNKNOWN card.
+
+    WQ-PROD-1 round 4: the card carries ``validity.card.proof_ref ==
+    "a" * 64`` and a source ``observed_at == "2026-09-23T00:00:00Z"`` —
+    these are the NON-effect card's evidence marks, distinguishable from
+    the EFFECT_UNKNOWN card's distinct ``proof_ref == "b" * 64`` and
+    source ``observed_at == "2026-09-23T00:00:01Z"`` (1 second later)
+    so the mixed-effects tests can prove the row's
+    ``evidence_ref``/``observed_at`` come from the card that carries
+    the value.
     """
     return _autonomy_card(root_job_id=root_job_id, responsibility_ref=responsibility_ref,
                           seat=seat, owed_reason=owed_reason,
@@ -2295,6 +2304,14 @@ def _round3_exempt_effect_card(*, responsibility_ref="WS:SECOND",
     but ``accountability`` and ``placement`` are forced to None with
     the explanatory ``exempt_card_not_actionable`` or
     ``exempt_card_unqualified_validity`` skip reason.
+
+    WQ-PROD-1 round 4: the card carries DISTINCT
+    ``validity.card.proof_ref == "b" * 64`` (NOT ``"a" * 64``) and a
+    DISTINCT source ``observed_at == "2026-09-23T00:00:01Z"`` (1 second
+    after the NON-effect card's ``2026-09-23T00:00:00Z``) so the
+    mixed-effects tests can prove the effects row's
+    ``evidence_ref``/``observed_at`` are sourced from THIS card (the
+    carrier-bearing card) rather than from the non-effect card.
     """
     card = _autonomy_card(root_job_id=root_job_id, responsibility_ref=responsibility_ref,
                           seat=seat, owed_reason=owed_reason,
@@ -2305,7 +2322,31 @@ def _round3_exempt_effect_card(*, responsibility_ref="WS:SECOND",
         card["validity"]["card"]["valid_for_ms"] = valid_for_ms
     else:
         card["validity"]["card"]["valid_for_ms"] = None
+    # WQ-PROD-1 round 4: distinct proof_ref + distinct source observed_at
+    # so the mixed-effects tests can attribute the effects row's evidence
+    # to THIS card and not the NON-effect card.
+    card["validity"]["card"]["proof_ref"] = "b" * 64
+    card["validity"]["card"]["sources"] = [
+        {"observed_at": "2026-09-23T00:00:01Z", "freshness": "current"},
+    ]
     return card
+
+
+def test_wqp1_r3_resolve_root_empty_views_returns_clean_envelope():
+    """WQ-PROD-1 round 4 (item A2): an empty ``views`` list must return
+    ``(None, None, None, [])`` without raising.  The placement branch's
+    ``elif all(placement_present)`` would otherwise call
+    ``next(v for v in [] if ...)`` and raise ``StopIteration`` /
+    ``RuntimeError`` — the guard ``elif views and all(placement_present)``
+    short-circuits on empty input.
+
+    Direct callers (tests, future use) MUST be able to call
+    ``_resolve_root("R", [])`` and receive the closed 4-tuple — the
+    placement branch cannot leak.
+    """
+    from control_plane.work_queue_projection import _resolve_root
+    result = _resolve_root("R", [])
+    assert result == (None, None, None, [])
 
 
 @pytest.mark.parametrize("effect_first", [False, True],
@@ -2323,6 +2364,17 @@ def test_wqp1_r3_mixed_effects_resolves_effects_from_card_that_carries_them(effe
     from the EFFECT_UNKNOWN card, accountability row SOL from the
     gate-passing card, no conflict tokens, only ``duplicate_card``
     marking the agreeing duplicates.
+
+    WQ-PROD-1 round 4: the round-3 fixtures give the EFFECT card
+    a DISTINCT ``validity.card.proof_ref == "b" * 64`` and source
+    ``observed_at == "2026-09-23T00:00:01Z"`` (vs the NON-effect
+    card's ``"a" * 64`` / ``"2026-09-23T00:00:00Z"``).  The test
+    pins that the effects row's ``evidence_ref``/``observed_at``
+    carry the EFFECT card's values (proves effects is sourced from
+    the carrier-bearing card) AND the accountability row's
+    ``evidence_ref``/``observed_at`` carry the NON-effect card's
+    values (proves accountability is sourced from the owed-turn
+    card).
     """
     if effect_first:
         cards = [
@@ -2337,19 +2389,22 @@ def test_wqp1_r3_mixed_effects_resolves_effects_from_card_that_carries_them(effe
     autonomy = _autonomy(cards)
     # No ValueError — the previous crash case is now reachable.
     result = derive_work_producers_v1(autonomy)
-    # Accountability row: SOL from the non-effect card.
+    # Accountability row: SOL from the NON-effect card; its
+    # evidence_ref/observed_at carry the NON-effect card's marks.
     assert result["accountability"] == {
         "JOB-1": {"next_actor": "SOL", "evidence_ref": "a" * 64,
                   "observed_at": "2026-09-23T00:00:00Z"},
     }
     # Effects row: carrier + evidence from the EFFECT_UNKNOWN card
     # (which is the FIRST view that carries effects regardless of
-    # sort order).
+    # sort order).  Distinct proof_ref and distinct source
+    # observed_at prove effects is NOT sourced from the non-effect
+    # card (which has a different proof_ref and earlier observed_at).
     assert result["effects"] == {
         "JOB-1": {"state": "EFFECT_UNKNOWN",
                   "carrier": "ATT-" + "ab" * 16,
-                  "evidence_ref": "a" * 64,
-                  "observed_at": "2026-09-23T00:00:00Z"},
+                  "evidence_ref": "b" * 64,
+                  "observed_at": "2026-09-23T00:00:01Z"},
     }
     # No placement row — neither card carries WAITING_CAPACITY.
     assert result["placement"] is None
@@ -2384,29 +2439,42 @@ def test_wqp1_r3_exempt_card_alone_emits_effects_only_with_skip_reason():
     gate (``is_actionable=False``, ``valid_for_ms=None``) keeps the
     card for effects ONLY — accountability and placement are
     forced to None with the explanatory
-    ``exempt_card_not_actionable`` skip reason."""
+    ``exempt_card_not_actionable`` skip reason.
+
+    WQ-PROD-1 round 4: the owed-turn claim is PRESERVED in the
+    skip trail — the card WOULD have produced a row if the gate
+    had passed, so the trail records BOTH tokens, exempt first
+    then ``owed_<seat>_<reason>``.  The effects row's
+    ``evidence_ref``/``observed_at`` carry the EFFECT card's
+    DISTINCT marks (``"b" * 64`` / ``"2026-09-23T00:00:01Z"``),
+    not the shared ``_VALIDITY_META`` defaults.
+    """
     card = _round3_exempt_effect_card(is_actionable=False, valid_for_ms=None)
     autonomy = _autonomy([card])
     result = derive_work_producers_v1(autonomy)
     # Effects row present (carrier = attempt_id, evidence from
-    # the EFFECT card).
+    # the EFFECT card — the DISTINCT marks prove effects is sourced
+    # from this card, not from any sibling).
     assert result["effects"] == {
         "JOB-1": {"state": "EFFECT_UNKNOWN",
                   "carrier": "ATT-" + "ab" * 16,
-                  "evidence_ref": "a" * 64,
-                  "observed_at": "2026-09-23T00:00:00Z"},
+                  "evidence_ref": "b" * 64,
+                  "observed_at": "2026-09-23T00:00:01Z"},
     }
     # NO accountability row, NO placement row — the full gate
     # failed; the EFFECT_UNKNOWN exemption is effects-only.
     assert result["accountability"] is None
     assert result["placement"] is None
-    # Skip trail surfaces the real cause.
+    # Skip trail surfaces the real cause (exempt first).
     assert "JOB-1:exempt_card_not_actionable" in result["skipped"]
+    # WQ-PROD-1 round 4: the owed-turn claim is ALSO recorded
+    # (deterministic order: exempt first, then owed_<seat>_<reason>).
+    # The card would have produced a WORKER row if the gate had
+    # passed — the skip trail preserves that claim for audit.
+    owed_token_index = result["skipped"].index("JOB-1:owed_worker_blocker_targets_seat")
+    exempt_token_index = result["skipped"].index("JOB-1:exempt_card_not_actionable")
+    assert exempt_token_index < owed_token_index
     assert "JOB-1:duplicate_card" not in result["skipped"]  # single card
-    # The owed_turn skip token is suppressed: the exempt reason
-    # takes precedence over ``owed_<seat>_<reason>`` because the
-    # exemption is effects-only, not accountability-active.
-    assert not any(":owed_" in t for t in result["skipped"])
 
 
 def test_wqp1_r3_exempt_card_with_unqualified_validity_emits_effects_only():
@@ -2415,7 +2483,11 @@ def test_wqp1_r3_exempt_card_with_unqualified_validity_emits_effects_only():
     ``exempt_card_not_actionable``; ``valid_for_ms`` not an int
     produces ``exempt_card_unqualified_validity``.  The
     ``is_actionable=True`` + ``valid_for_ms=None`` case still
-    keeps the card for effects."""
+    keeps the card for effects.
+
+    WQ-PROD-1 round 4: the owed-turn claim is PRESERVED in the
+    skip trail — exempt first (``exempt_card_unqualified_validity``)
+    then ``owed_<seat>_<reason>``."""
     card = _round3_exempt_effect_card(is_actionable=True, valid_for_ms=None)
     autonomy = _autonomy([card])
     result = derive_work_producers_v1(autonomy)
@@ -2424,6 +2496,11 @@ def test_wqp1_r3_exempt_card_with_unqualified_validity_emits_effects_only():
     assert result["placement"] is None
     assert "JOB-1:exempt_card_unqualified_validity" in result["skipped"]
     assert "JOB-1:exempt_card_not_actionable" not in result["skipped"]
+    # WQ-PROD-1 round 4: the owed-turn claim is preserved.
+    assert "JOB-1:owed_worker_blocker_targets_seat" in result["skipped"]
+    owed_index = result["skipped"].index("JOB-1:owed_worker_blocker_targets_seat")
+    exempt_index = result["skipped"].index("JOB-1:exempt_card_unqualified_validity")
+    assert exempt_index < owed_index
 
 
 def test_wqp1_r3_exempt_card_with_full_gate_passes_emits_accountability_normally():
@@ -2432,30 +2509,44 @@ def test_wqp1_r3_exempt_card_with_full_gate_passes_emits_accountability_normally
     normally (placement stays None here because the card carries
     EFFECT_UNKNOWN, not WAITING_CAPACITY).  Pin this so the fix
     doesn't tighten eligibility for EFFECT_UNKNOWN cards whose
-    gate passes."""
+    gate passes.
+
+    WQ-PROD-1 round 4: with the gate passing, the owed-turn claim
+    is honored (no exempt token), and the effects row carries the
+    EFFECT card's DISTINCT marks (``"b" * 64`` /
+    ``"2026-09-23T00:00:01Z"``)."""
     card = _round3_exempt_effect_card(is_actionable=True, valid_for_ms=60000)
     autonomy = _autonomy([card])
     result = derive_work_producers_v1(autonomy)
     # Accountability = WORKER (seat=worker, valid reason).
     assert result["accountability"] == {
-        "JOB-1": {"next_actor": "WORKER", "evidence_ref": "a" * 64,
-                  "observed_at": "2026-09-23T00:00:00Z"},
+        "JOB-1": {"next_actor": "WORKER", "evidence_ref": "b" * 64,
+                  "observed_at": "2026-09-23T00:00:01Z"},
     }
-    # Effects row preserved (attempt_id carrier).
+    # Effects row preserved (attempt_id carrier) with the EFFECT
+    # card's DISTINCT evidence marks.
     assert result["effects"] == {
         "JOB-1": {"state": "EFFECT_UNKNOWN",
                   "carrier": "ATT-" + "ab" * 16,
-                  "evidence_ref": "a" * 64,
-                  "observed_at": "2026-09-23T00:00:00Z"},
+                  "evidence_ref": "b" * 64,
+                  "observed_at": "2026-09-23T00:00:01Z"},
     }
-    # No exempt skip reason — the gate passed.
+    # No exempt skip reason — the gate passed; no owed_<seat>_
+    # token either, because the owed_turn claim is honored.
     assert not any("exempt_card_" in t for t in result["skipped"])
+    assert not any(":owed_" in t for t in result["skipped"])
 
 
 def test_wqp1_r3_mixed_effects_real_composer_renders_effect_exception():
     """R3 end-to-end through :func:`compose_work_queue_v1`: the
     derived effects row drives the row into ``EFFECT_EXCEPTION``
-    group with the EFFECT_UNKNOWN card's carrier and evidence."""
+    group with the EFFECT_UNKNOWN card's carrier and evidence.
+
+    WQ-PROD-1 round 4: the EFFECT card carries DISTINCT
+    ``proof_ref == "b" * 64`` and ``observed_at ==
+    "2026-09-23T00:00:01Z"`` — the effect column on the rendered
+    row carries those EFFECT-card marks, not the NON-effect
+    card's marks."""
     cards = [_round3_non_effect_card(),
              _round3_exempt_effect_card()]
     result = derive_work_producers_v1(_autonomy(cards))
@@ -2470,9 +2561,11 @@ def test_wqp1_r3_mixed_effects_real_composer_renders_effect_exception():
     row = composed["groups"]["EFFECT_EXCEPTION"][0]
     assert row["effect"]["value"] == "EFFECT_UNKNOWN"
     assert row["effect"]["source"] == "EFFECT_PRODUCER"
-    # The effect column carries the EFFECT_UNKNOWN card's evidence.
-    assert row["effect"]["evidence_ref"] == "a" * 64
-    assert row["effect"]["observed_at"] == "2026-09-23T00:00:00Z"
+    # The effect column carries the EFFECT_UNKNOWN card's
+    # DISTINCT evidence marks (round-4 distinct proof_ref +
+    # distinct source observed_at pin attribution).
+    assert row["effect"]["evidence_ref"] == "b" * 64
+    assert row["effect"]["observed_at"] == "2026-09-23T00:00:01Z"
     # The row is in EFFECT_EXCEPTION because the EFFECT_UNKNOWN effect
     # is sticky (R4) — the next_actor value is preserved on the row
     # for audit but the row itself never reaches NEEDS_SOL when the
