@@ -399,16 +399,35 @@ def _validate_assignment(
             )
     if not isinstance(job["objective"], str) or not job["objective"].strip():
         raise _error("$.assignment.job.objective", "must be non-empty text")
-    _optional_entity(job["plan_attempt_id"], "$.assignment.job.plan_attempt_id")
-    if job["plan_digest"] is not None:
-        _hex64(job["plan_digest"], "$.assignment.job.plan_digest")
-    _optional_entity(job["plan_step_id"], "$.assignment.job.plan_step_id")
+    _entity_id(job["plan_attempt_id"], "$.assignment.job.plan_attempt_id")
+    _hex64(job["plan_digest"], "$.assignment.job.plan_digest")
+    _entity_id(job["plan_step_id"], "$.assignment.job.plan_step_id")
     _bounded_token(job["quota_class"], "$.assignment.job.quota_class")
-    if type(job["repair_round"]) is not int or job["repair_round"] < 0:
-        raise _error("$.assignment.job.repair_round", "must be a non-negative integer")
+    if type(job["repair_round"]) is not int or not 0 <= job["repair_round"] <= 2:
+        raise _error(
+            "$.assignment.job.repair_round",
+            "must be an orchestration repair round in 0..2",
+        )
     if type(job["review_required"]) is not bool:
         raise _error("$.assignment.job.review_required", "must be boolean")
-    _optional_entity(job["reviews_job_id"], "$.assignment.job.reviews_job_id")
+    if role == "work":
+        if job["repair_round"] != 0:
+            raise _error(
+                "$.assignment.job.repair_round",
+                "work cognition assignment must use repair_round 0",
+            )
+        if job["reviews_job_id"] is not None:
+            raise _error(
+                "$.assignment.job.reviews_job_id",
+                "work cognition assignment cannot review another Job",
+            )
+    else:
+        if job["review_required"] is not False:
+            raise _error(
+                "$.assignment.job.review_required",
+                "review cognition assignment cannot recursively require review",
+            )
+        _entity_id(job["reviews_job_id"], "$.assignment.job.reviews_job_id")
 
     result_contract = _exact(
         value["result_contract"],
