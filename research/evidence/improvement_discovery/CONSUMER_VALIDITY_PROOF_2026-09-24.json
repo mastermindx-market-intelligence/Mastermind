@@ -12,13 +12,13 @@
   "code_hashes": {
     "brain/improvement_agenda.py": "22f9e0d264f31d73c7fed92b78abaf307dce9911ff57936e9741f09616e81c87",
     "brain/improvement_discovery.py": "aae158a56005ce29f0e39fea5f7c7c1572cb750e15042b32fa374b553005575d",
-    "brain/improvement_discovery_nw.py": "f3b3cef8d20da33caabf4f23bc3abb19791c20456cbfa995482d339f997f3e02",
+    "brain/improvement_discovery_nw.py": "db0670bb243ccfdeabc3772d81c3012c09872ed75302ded0a187e8f38352efe9",
     "brain/mastermind_ai.py": "bff839f437b4cbe7632314724134314c7346f19fa5bec474ab42ca71b7bbc6c5",
     "brain/neural_web_context.py": "4455ace359b016dc55039d68c8f9d77cc86b18abcb61dec2c2dce5eb7f5d5d11",
-    "brain/nw_reflection.py": "0a8121aa8a18f79a6ab4616a1f8dfbd6103af6d1d129158ddabedc15e1a4f97e",
+    "brain/nw_reflection.py": "3920d9373f6371d88426153e2176b6f8b4eee36653bffbad2dfdd8e8c7f259fd",
     "bridge/nw_feedback.py": "b998499afed1f74315ee6aeb1989a3ffff49e25a01684d08768f88660ad3b54b",
     "tests/test_ceo_submit_armed_composition.py": "b936dfbda26b813f9735d57c17bec3877e9c74d5d0df8d3045680a459315c5be",
-    "tests/test_improvement_discovery_owner.py": "2082b414fb64d8883727db39a2ae7ca6557905ae14e08bcc26ae91b96f04515d",
+    "tests/test_improvement_discovery_owner.py": "fef152d925f3f0dec80c9ef5e91237197459773bc834777b1daa0bbfd12b6c55",
     "tests/test_nw_reflection.py": "8f162698ff30c01af03a4a6bd72fabe82c1b4f807e9d2497a0885f543b405f2b"
   },
   "combined_test_suite": {
@@ -30,7 +30,8 @@
   "command": "python3 -m pytest -q tests/test_improvement_discovery_owner.py tests/test_improvement_discovery.py tests/test_improvement_discovery_agenda.py tests/test_agentos_readiness_agenda.py tests/test_nw_reflection.py tests/test_nw_feedback.py tests/test_mastermind_ai.py tests/test_ceo_submit_armed_composition.py",
   "findings": [
     4090804388,
-    4090804396
+    4090804396,
+    4090920998
   ],
   "focused": {
     "errors": 0,
@@ -38,11 +39,24 @@
     "skipped": 0,
     "tests": 308
   },
+  "historical_asof_repair": {
+    "behavior": "historical Agenda eligibility requires both owner asof and generated_at UTC date at or before requested Agenda date",
+    "finding": 4090920998,
+    "red_commit": "3128e1a8",
+    "repair_commit": "4021885a",
+    "timezone_cases": [
+      "future UTC same declared asof rejected",
+      "offset timestamp crossing into next UTC day rejected",
+      "prior UTC day accepted",
+      "positive offset mapping to prior UTC day accepted"
+    ]
+  },
   "hosted_ci_for_final_published_head": "NOT_YET_STARTED",
   "independent_final_head_review": "NOT_YET_REQUESTED",
   "independent_ideation_proven": false,
   "independent_review": 5300894640,
   "jobs_created": 0,
+  "local_exact_head": "4021885ad2bc7673a8e51b1d72564eb21263218b",
   "observed_at": "2026-09-24T07:11:41.811945+00:00",
   "procedure_material_invalidators": [],
   "procedure_pin": "4fe4d25e3ee268e24162f33c35d176ebf9ab02e6",
