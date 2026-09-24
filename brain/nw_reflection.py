@@ -506,6 +506,20 @@ def _coverage_nudge_evaluable(cov: dict) -> bool:
             and 0 <= rate <= 1 and abs(rate - covered / total) <= 0.000501)
 
 
+def snapshot_available_by_asof(snapshot: dict, asof: date) -> bool:
+    """Owner and creation dates must both precede a requested UTC Agenda day.
+
+    A declared observation date cannot backdate the bytes that carry it. Invalid
+    clocks raise to the existing caller's unavailable/refusal handling. This is a
+    date-granularity cutoff, not proof of a point-in-time historical source store.
+    """
+    generated = datetime.fromisoformat(snapshot["generated_at"].replace("Z", "+00:00"))
+    if generated.tzinfo is None:
+        raise ValueError("owner_generation_timezone_required")
+    return (date.fromisoformat(snapshot["asof"]) <= asof
+            and generated.astimezone(timezone.utc).date() <= asof)
+
+
 def nudge_is_evaluable(report: dict, nudge: dict, *, asof: date | None = None) -> bool:
     """Revalidate the existing coverage wire at every influence consumer.
 
@@ -535,7 +549,7 @@ def nudge_is_evaluable(report: dict, nudge: dict, *, asof: date | None = None) -
                 and source_asof <= generated.date() <= now.date() and generated <= now
                 and (now - generated).total_seconds() <= _STALE_DAYS * 86400
                 and (now.date() - source_asof).days <= _STALE_DAYS
-                and (asof is None or source_asof <= asof))
+                and (asof is None or snapshot_available_by_asof(report, asof)))
     except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
         return False
 

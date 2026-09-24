@@ -21,7 +21,7 @@
     "tests/test_improvement_discovery_owner.py": "2082b414fb64d8883727db39a2ae7ca6557905ae14e08bcc26ae91b96f04515d",
     "tests/test_nw_reflection.py": "8f162698ff30c01af03a4a6bd72fabe82c1b4f807e9d2497a0885f543b405f2b"
   },
-  "combined_with_identity": {
+  "combined_test_suite": {
     "errors": 0,
     "failures": 0,
     "skipped": 0,

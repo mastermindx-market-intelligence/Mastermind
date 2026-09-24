@@ -231,7 +231,7 @@ def latest_agenda_projection(*, root: Path, asof: date, now: str | None = None) 
         snapshot = nw_reflection.latest()
         if not snapshot:
             return unavailable
-        if date.fromisoformat(snapshot["asof"]) > asof:
+        if not nw_reflection.snapshot_available_by_asof(snapshot, asof):
             return {**unavailable, "reason_code": "POST_ASOF_OWNER_SNAPSHOT"}
         revision, digest = _source_identity(root)
         report = evaluate_owner_snapshot(snapshot, source_revision=revision,
