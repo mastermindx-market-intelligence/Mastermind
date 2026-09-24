@@ -141,6 +141,36 @@
       "class": "acceptance",
       "scenario": "An accepted principal intent is reconciled after unrelated current mission/runtime state advances while immutable principal binding and mission authority identity remain the same.",
       "expected": "REPLAY_PRESERVES_ACCEPTED_EFFECT"
+    },
+    {
+      "id": "M24",
+      "class": "refuse",
+      "scenario": "The model supplies a raw session_id or session assertion field without trusted hook evidence.",
+      "expected": "REFUSE_MODEL_SESSION_ASSERTION"
+    },
+    {
+      "id": "M25",
+      "class": "acceptance",
+      "scenario": "A deterministic PreToolUse hook overwrites model session fields with the hook-observed session identity and the server compares it to the current COO mission receiver while still enforcing OAuth and mission gates.",
+      "expected": "PROVIDER_SESSION_BINDING_CANDIDATE"
+    },
+    {
+      "id": "M26",
+      "class": "refuse",
+      "scenario": "A resumed Claude session exposes an MCP subprocess session environment value that differs from the hook session_id and the caller attempts to use the MCP value as authority.",
+      "expected": "REFUSE_MCP_SESSION_ENV_AUTHORITY"
+    },
+    {
+      "id": "M27",
+      "class": "refuse",
+      "scenario": "The expected Claude Desktop or CLI plugin/hook/MCP package is not loaded on the exact deployed surface.",
+      "expected": "CAPABILITY_UNAVAILABLE_NO_AUTHORITY_FALLBACK"
+    },
+    {
+      "id": "M28",
+      "class": "refuse",
+      "scenario": "Hook evidence is missing, conflicting, or rewritten by an unsupported chain and the modifying tool would otherwise be authorized.",
+      "expected": "REFUSE_SESSION_HARDENING_UNPROVEN"
     }
   ]
 }
