@@ -4,16 +4,20 @@ Run with::
 
     python3 -B tests/fixtures/workspace_work_queue_v1/_regenerate.py
 
-Three fixtures are produced:
+Four fixtures are produced:
 
 * ``available.json`` — a healthy ``AVAILABLE`` projection over four
   representative rows (QUEUED, RUNNING, COMPLETED, FAILED) with no
   producer evidence supplied.
 * ``unavailable.json`` — the composer's ``UNAVAILABLE`` branch over a
   degraded bounded acquisition (B2: ``coverage.completeness = "PARTIAL"``).
-* ``effect_exception.json`` — an ``AVAILABLE`` projection whose queue-level
-  ``effect_exception`` reads ``EFFECT_UNKNOWN`` AND one row carries an
-  EFFECT_UNKNOWN producer effect (R4 sticky).
+* ``effect_exception.json`` — the REAL route path: queue-level
+  ``effect_exception.value == "EFFECT_UNKNOWN"`` from control_room
+  autonomy, but NO ``effects`` map is supplied.  The fixture therefore
+  carries ``reason_codes == ["effect_not_row_attributed"]`` (B3).
+* ``effect_exception_row_attributed.json`` — composer-only case where an
+  ``effects`` map is supplied; the row-attributed exception removes the
+  reason code so the byte-identity test distinguishes the two paths.
 
 The fixtures are byte-stable inputs the product integrator consumes. The
 matching tests
@@ -123,11 +127,11 @@ UNAVAILABLE_ROOT_LIST = {
     "degraded": ["bounded acquisition unavailable: read failed"],
 }
 
-# effect_exception fixture: control_room autonomy reports EFFECT_UNKNOWN on one
-# row, AND the same row carries a producer-level EFFECT_UNKNOWN effect
-# (evidence_ref/observed_at supplied).  The queue-level effect_exception
-# is EFFECT_UNKNOWN; the producer's evidence sticks regardless of any
-# later staleness (R4).
+# effect_exception fixture (B3 real path): control_room autonomy reports
+# EFFECT_UNKNOWN on one row but NO ``effects`` producer map is supplied.
+# The queue-level exception is EFFECT_UNKNOWN; the document carries
+# reason_codes=["effect_not_row_attributed"] because no per-row effect
+# attestation exists.
 EFFECT_CONTROL_ROOM = {
     "schema": "mastermind.chairman_control_room.v1",
     "generated_at": GENERATED_AT,
@@ -177,12 +181,20 @@ def main():
     unavailable = compose_work_queue_v1(UNAVAILABLE_ROOT_LIST,
                                          generated_at=GENERATED_AT)
     _dump("unavailable.json", unavailable)
+    # B3: real route path — no effects map supplied, queue-level
+    # EFFECT_UNKNOWN surfaces as reason_codes=["effect_not_row_attributed"].
     effect_exception = compose_work_queue_v1(EFFECT_EXCEPTION_ROOT_LIST,
                                               control_room=EFFECT_CONTROL_ROOM,
-                                              effects=EFFECTS_INPUT,
-                                              evidence_as_of=EVIDENCE_AS_OF,
                                               generated_at=GENERATED_AT)
     _dump("effect_exception.json", effect_exception)
+    # Composer-only case: the producer supplies an effects map; the
+    # exception is row-attributed and the reason code is absent.
+    effect_exception_row = compose_work_queue_v1(EFFECT_EXCEPTION_ROOT_LIST,
+                                                  control_room=EFFECT_CONTROL_ROOM,
+                                                  effects=EFFECTS_INPUT,
+                                                  evidence_as_of=EVIDENCE_AS_OF,
+                                                  generated_at=GENERATED_AT)
+    _dump("effect_exception_row_attributed.json", effect_exception_row)
 
 
 if __name__ == "__main__":

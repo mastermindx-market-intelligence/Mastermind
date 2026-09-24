@@ -191,7 +191,7 @@ def test_r3_capacity_not_applicable_post_start():
     result = compose_work_queue_v1(root_list, placement=placement,
                                    evidence_as_of="2026-09-23T00:01:00Z")
     cap = result["groups"]["RUNNING"][0]["capacity"]
-    assert cap == {"value": "NOT_APPLICABLE", "source": "AUTONOMY",
+    assert cap == {"value": "NOT_APPLICABLE", "source": "EXECUTIVE_RUNTIME",
                    "reason": "post_start_lifecycle",
                    "evidence_ref": None, "observed_at": None}
 
@@ -246,8 +246,38 @@ def test_r4_queue_level_effect_exception_from_control_room_autonomy():
     }
     result = compose_work_queue_v1(root_list, control_room=control_room)
     assert result["effect_exception"] == {
-        "value": "EFFECT_UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER", "observable": True,
+        "value": "EFFECT_UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+        "observable": True, "reason": "exception_observed",
     }
+    # B3: with no effects map, the queue-level exception is unattributed;
+    # the document must surface that as a reason code.
+    assert result["reason_codes"] == ["effect_not_row_attributed"]
+
+
+def test_r4_effect_not_row_attributed_reason_absent_when_effects_map_present():
+    """B3: when a per-row effects map is supplied, the queue-level
+    EFFECT_UNKNOWN IS attributed — the reason code is NOT appended."""
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    control_room = {
+        "schema": "mastermind.chairman_control_room.v1",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "autonomy": {
+            "schema": "mastermind.autonomy_control_room.v1",
+            "generated_at": "2026-09-23T00:00:00Z",
+            "responsibilities": [
+                {"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1",
+                 "placement_state": {"value": "EFFECT_UNKNOWN",
+                                     "observable": True, "reason": "x"}},
+            ],
+        },
+    }
+    effects = {"JOB-1": {"state": "EFFECT_UNKNOWN", "carrier": "agent-os:effect",
+                         "evidence_ref": "agent-os:effect",
+                         "observed_at": "2026-09-23T00:00:00Z"}}
+    result = compose_work_queue_v1(root_list, control_room=control_room,
+                                   effects=effects,
+                                   evidence_as_of="2026-09-23T00:01:00Z")
+    assert "effect_not_row_attributed" not in result["reason_codes"]
 
 
 def test_r4_queue_level_effect_exception_none_when_no_placement_match():
@@ -267,7 +297,8 @@ def test_r4_queue_level_effect_exception_none_when_no_placement_match():
     }
     result = compose_work_queue_v1(root_list, control_room=control_room)
     assert result["effect_exception"] == {
-        "value": "NONE", "scope": "RUNTIME_CURRENT_WORKER", "observable": False,
+        "value": "NONE", "scope": "RUNTIME_CURRENT_WORKER",
+        "observable": False, "reason": "no_exception_observed",
     }
 
 
@@ -275,7 +306,8 @@ def test_r4_queue_level_effect_exception_unknown_when_control_room_none():
     root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
     result = compose_work_queue_v1(root_list, control_room=None)
     assert result["effect_exception"] == {
-        "value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER", "observable": False,
+        "value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+        "observable": False, "reason": "control_room_missing",
     }
 
 
@@ -285,6 +317,7 @@ def test_r4_queue_level_effect_exception_unknown_when_autonomy_missing():
                     "generated_at": "2026-09-23T00:00:00Z"}
     result = compose_work_queue_v1(root_list, control_room=control_room)
     assert result["effect_exception"]["value"] == "UNKNOWN"
+    assert result["effect_exception"]["reason"] == "autonomy_missing"
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +443,7 @@ def test_r8_every_jobstatus_member_is_mapped_explicitly():
 
 
 def test_r8_unknown_status_raises_value_error():
-    """Anything outside the table is a closed-validator refusal (N2).
+    """Anything outside the table is a closed-validator refusal (R8).
 
     A new enum member must NOT silently land in ``UNKNOWN`` — the
     validator raises ``ValueError`` so the route can map it to
@@ -536,7 +569,7 @@ def test_b1_post_start_capacity_not_applicable_without_placement(status):
     root_list = _root_list(roots=[_row("JOB-1", status)])
     result = compose_work_queue_v1(root_list)
     cap = result["groups"][_JOB_STATUS_GROUPS[status]][0]["capacity"]
-    assert cap == {"value": "NOT_APPLICABLE", "source": "AUTONOMY",
+    assert cap == {"value": "NOT_APPLICABLE", "source": "EXECUTIVE_RUNTIME",
                    "reason": "post_start_lifecycle",
                    "evidence_ref": None, "observed_at": None}
 
@@ -580,34 +613,27 @@ def test_b2_unavailable_truncated_root_list_reflects_truncated_in_coverage():
 
 
 def test_b2_composer_unavailable_body_is_key_stable():
-    """B2: the composer UNAVAILABLE body shape is closed; it matches the
-    read-service fallback in every key except those legitimately divergent.
-
-    Excluded keys and reasons:
-    - ``generated_at`` — composer takes caller-supplied or wall-clock;
-      read-service fallback uses its own wall-clock.
-    - ``source_observation`` — composer passes the caller-supplied receipt
-      through; read-service fallback builds its own minimal receipt.
-    - ``reason_codes`` — composer uses ``LIFECYCLE_UNAVAILABLE``; the
-      read-service fallback uses ``source_unavailable`` (the cache bracket
-      refused before a root list ever existed).
-    - ``lifecycle_source`` — composer echoes ``root_list.runtime`` identity;
-      the read-service fallback has no root list to echo from so the field
-      is ``None``.  The keys are identical; only the value legitimately
-      differs.
+    """B2: the composer's UNAVAILABLE body is a closed document; every
+    top-level key equals the closed :data:`OUTPUT_KEYS` set, and the
+    coverage envelope matches the B2 PARTIAL claim.  Round-1 finding
+    ``test_b2_composer_unavailable_body_is_key_stable is vacuous`` is
+    addressed by asserting both the closed key set and the coverage
+    envelope (not just that one of them happens to contain "coverage").
     """
+    from control_plane.work_queue_projection import OUTPUT_KEYS
     root_list = _root_list(roots=[], count=0, total=None, truncated=False,
                            degraded=["bounded acquisition unavailable: read failed"])
-    composer_body = compose_work_queue_v1(root_list, generated_at="FROZEN")["result"] \
-        if False else compose_work_queue_v1(root_list, generated_at="FROZEN")
-    composer_body = composer_body  # the document itself; rename for clarity
-    from control_plane.workspace_read_service import WorkspaceReadService
-    EXCLUDED = {"generated_at", "source_observation", "reason_codes", "lifecycle_source"}
-    composer_keys = set(composer_body) - EXCLUDED
-    # Sanity: every other key carries the same value in both bodies.
-    assert "coverage" in composer_keys
+    composer_body = compose_work_queue_v1(root_list, generated_at="FROZEN")
+    assert set(composer_body) == OUTPUT_KEYS
+    assert composer_body["availability"] == "UNAVAILABLE"
+    assert composer_body["reason_codes"] == ["LIFECYCLE_UNAVAILABLE"]
     assert composer_body["coverage"] == {"count": 0, "total": None,
                                          "truncated": False, "completeness": "PARTIAL"}
+    # Every group is an empty list (not absent) — the closed group list
+    # is observed even on the UNAVAILABLE branch.
+    from control_plane.work_queue_projection import _GROUP_ORDER
+    assert set(composer_body["groups"]) == set(_GROUP_ORDER)
+    assert all(composer_body["groups"][key] == [] for key in _GROUP_ORDER)
 
 
 # ---------------------------------------------------------------------------
@@ -629,16 +655,34 @@ def test_b3_missing_evidence_as_of_with_non_none_producer_raises():
 @pytest.mark.parametrize("observed_at", ["yesterday", "2026-09-24T04:00:00", "",
                                           "2026-09-23T00:00:00+00:00",
                                           "2026-09-23T00:00:00.1234567Z",
-                                          "2026-09-23T00:00:00Z extra"])
+                                          "2026-09-23T00:00:00Z extra",
+                                          "2026-02-30T00:00:00Z",
+                                          "2026-01-01T23:59:60Z"])
 def test_b3_unparseable_observed_at_raises(observed_at):
-    """B3: every ``observed_at`` must parse as strict RFC3339 UTC.  Anything
-    else is a producer refusal — the composer never silently downgrades."""
+    """B3/N9: every ``observed_at`` must parse as strict RFC3339 UTC.  Anything
+    else is a producer refusal — the composer never silently downgrades.
+    Calendar-invalid but pattern-valid values raise the module's own message
+    (not strptime's text)."""
     root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
     accountability = {"JOB-1": {"next_actor": "SOL", "evidence_ref": "x",
                                 "observed_at": observed_at}}
     with pytest.raises(ValueError, match="observed_at invalid"):
         compose_work_queue_v1(root_list, accountability=accountability,
                               evidence_as_of="2026-09-23T00:01:00Z")
+
+
+@pytest.mark.parametrize("evidence_as_of", ["2026-02-30T00:00:00Z",
+                                            "2026-01-01T23:59:60Z",
+                                            "yesterday", "2026-09-23T00:00:00+00:00"])
+def test_n9_unparseable_evidence_as_of_raises(evidence_as_of):
+    """N9: an unparseable ``evidence_as_of`` raises the module's own
+    ``evidence_as_of invalid`` message, never ``strptime``'s text."""
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    with pytest.raises(ValueError, match="evidence_as_of invalid"):
+        compose_work_queue_v1(root_list, accountability={"JOB-1": {
+            "next_actor": "SOL", "evidence_ref": "x",
+            "observed_at": "2026-09-23T00:00:00Z"}},
+            evidence_as_of=evidence_as_of)
 
 
 def test_b3_stale_observed_at_falls_back_to_unknown_for_next_actor():
@@ -786,7 +830,7 @@ def test_b4_no_accountability_uses_lifecycle_group(status):
 
 
 # ---------------------------------------------------------------------------
-# N2 — duplicate job_id rejection
+# N6 — duplicate job_id rejection
 # ---------------------------------------------------------------------------
 
 
@@ -796,6 +840,44 @@ def test_n6_duplicate_job_id_raises_value_error():
                                   _row("JOB-1", "QUEUED")])
     with pytest.raises(ValueError, match="duplicate job_id"):
         compose_work_queue_v1(root_list)
+
+
+# ---------------------------------------------------------------------------
+# N3 — lifecycle_source echoes degraded; reason code on AVAILABLE when non-empty
+# ---------------------------------------------------------------------------
+
+
+def test_n3_lifecycle_source_echoes_degraded_verbatim():
+    """N3: the root list's degraded list is echoed verbatim in lifecycle_source."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
+                           degraded=["producer warning A", "producer warning B"])
+    result = compose_work_queue_v1(root_list)
+    assert result["lifecycle_source"]["degraded"] == ["producer warning A",
+                                                     "producer warning B"]
+
+
+def test_n3_lifecycle_source_degraded_default_is_empty_list():
+    """N3: a root list without degraded notes yields an empty list, not None."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")])
+    result = compose_work_queue_v1(root_list)
+    assert result["lifecycle_source"]["degraded"] == []
+
+
+def test_n3_available_document_appends_lifecycle_degraded_reason_when_degraded():
+    """N3: a non-empty degraded list on an AVAILABLE document adds the
+    ``lifecycle_degraded`` reason code, sorted and deterministic."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
+                           degraded=["producer warning A"])
+    result = compose_work_queue_v1(root_list)
+    assert result["availability"] == "AVAILABLE"
+    assert "lifecycle_degraded" in result["reason_codes"]
+
+
+def test_n3_no_lifecycle_degraded_reason_when_degraded_empty():
+    """N3: a healthy AVAILABLE document keeps reason_codes=[]."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")])
+    result = compose_work_queue_v1(root_list)
+    assert "lifecycle_degraded" not in result["reason_codes"]
 
 
 # ---------------------------------------------------------------------------
@@ -848,8 +930,69 @@ def test_r6_unavailable_fixture_bytes_match_deterministic_recompose():
 
 
 def test_r6_effect_exception_fixture_bytes_match_deterministic_recompose():
-    """N4: effect_exception.json stays byte-identical under recompose."""
+    """B3/N4: effect_exception.json (the real route path — no effects map)
+    stays byte-identical under recompose, and carries the
+    ``effect_not_row_attributed`` reason code."""
     fixture = _read_fixture("effect_exception.json")
+    generated_at = fixture["generated_at"]
+    root_list = {
+        "schema": "mastermind.fabric_job_root_list.v2",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "runtime": {"root": "/tmp/fake", "db_present": True, "identity": None,
+                    "acquisition": {
+                        "schema": "mastermind.fabric_runtime_acquisition.v1",
+                        "query": {"kind": "root_discovery"},
+                        "owner": "executive_runtime",
+                        "snapshot_digest": "a" * 64,
+                        "budgets": {"roots": 64, "jobs": 17, "attempts_per_job": 20,
+                                    "attempts_total": 340, "creation_events_per_job": 1},
+                        "truncation": {"jobs": False, "attempt_job_ids": [],
+                                       "roots": True, "projection": False},
+                        "provenance": {"state": "PARTIAL", "unjoined_job_ids": ["JOB-7"]},
+                        "generation": {"schema": "mastermind.runtime_read_observation.v1",
+                                       "state": "SAME",
+                                       "source_identity": "b" * 64,
+                                       "before": 1, "after": 1}}},
+        "roots": [
+            {"job_id": "JOB-1", "status": "RUNNING", "depth": 0,
+             "parent_job_id": None, "orchestration_role": "aggregation"},
+            {"job_id": "JOB-7", "status": "QUEUED", "depth": 0,
+             "parent_job_id": None, "orchestration_role": "aggregation"},
+        ],
+        "count": 2,
+        "total": None,
+        "truncated": True,
+        "degraded": [],
+    }
+    control_room = {
+        "schema": "mastermind.chairman_control_room.v1",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "autonomy": {
+            "schema": "mastermind.autonomy_control_room.v1",
+            "generated_at": "2026-09-23T00:00:00Z",
+            "responsibilities": [
+                {"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1",
+                 "placement_state": {"value": "EFFECT_UNKNOWN", "observable": True,
+                                     "reason": "worker_effect_unknown"}},
+            ],
+        },
+    }
+    recomposed = compose_work_queue_v1(root_list, control_room=control_room,
+                                       generated_at=generated_at)
+    assert canonical(fixture) == canonical(recomposed)
+    # B3: the row-attribution reason code is on the document because no
+    # per-row effects map was supplied.
+    assert fixture["reason_codes"] == ["effect_not_row_attributed"]
+    # No row-level EFFECT_EXCEPTION — the queue-level exception has no
+    # per-row attribution when the producer doesn't supply one.
+    assert len(fixture["groups"]["EFFECT_EXCEPTION"]) == 0
+
+
+def test_r6_effect_exception_row_attributed_fixture_bytes_match_deterministic_recompose():
+    """B3/N4: the composer-only effect_exception_row_attributed.json fixture
+    stays byte-identical under recompose, and has NO reason code because
+    the per-row effects map attributes the exception."""
+    fixture = _read_fixture("effect_exception_row_attributed.json")
     generated_at = fixture["generated_at"]
     root_list = {
         "schema": "mastermind.fabric_job_root_list.v2",
@@ -901,6 +1044,7 @@ def test_r6_effect_exception_fixture_bytes_match_deterministic_recompose():
                                        evidence_as_of="2026-09-23T00:01:00Z",
                                        generated_at=generated_at)
     assert canonical(fixture) == canonical(recomposed)
+    assert "effect_not_row_attributed" not in fixture["reason_codes"]
     assert len(fixture["groups"]["EFFECT_EXCEPTION"]) == 1
 
 
@@ -909,10 +1053,10 @@ def test_r6_effect_exception_fixture_bytes_match_deterministic_recompose():
 # ---------------------------------------------------------------------------
 
 
-def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence():
-    """B2: composer's UNAVAILABLE body (with degraded root list) and the
-    read-service fallback body share the same key-for-key shape, except
-    for keys that legitimately differ:
+def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence(tmp_path):
+    """B2/N1: composer's UNAVAILABLE body (with degraded root list) and the
+    read-service typed refusal body share the same key-for-key shape,
+    except for keys that legitimately differ:
 
     Excluded keys and reasons:
     - ``generated_at``: composer accepts caller-supplied or wall-clock;
@@ -926,24 +1070,41 @@ def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence():
       the read-service fallback has no root list to echo from so this
       field is ``None`` (the read service is the route's typed refusal
       pathway, not a partial composer projection).
+    - ``coverage``: the read-service fallback fires BEFORE any root list is
+      acquired, so its ``truncated`` cannot honestly mirror a producer flag
+      it has never seen — it remains ``False`` while the composer's body
+      carries the producer's value.  Both bodies agree on the other keys.
     """
+    import asyncio
     from control_plane.workspace_read_service import WorkspaceReadService
-    # The composer body, with generated_at frozen for diff parity.
-    root_list = _root_list(roots=[], count=0, total=None, truncated=False,
-                           degraded=["bounded acquisition unavailable: read failed"])
-    composer_doc = compose_work_queue_v1(root_list, generated_at="FROZEN")
-    # The read-service fallback body — invoke the actual exception path.
-    service = WorkspaceReadService(
-        cache=type("C", (), {"snapshot": staticmethod(lambda: (_ for _ in ()).throw(
-            ValueError("source_unavailable")))})(),
-        runtime=object(), authorize=lambda p: True,
-        armed={}, runtime_identity={},
+    from tests.test_workspace_read_service import (
+        cache_fixture, _work_frame, _root_list_payload,
     )
-    fallback = asyncio.run(service.handle_frame(_work_frame_for_b2())).get("result")
+    owners, _, cache = cache_fixture(tmp_path)
+    # Strip autonomy so the second _qualified check fails AFTER snapshot
+    # succeeds — exercises the read-service typed refusal path.
+    del owners[0].state_cache["doc"]["autonomy"]
+    def work_acquire(*args, **kwargs):
+        return _root_list_payload(rows=[])
+    def work_compose(root_list_arg, **kwargs):
+        from control_plane.work_queue_projection import compose_work_queue_v1
+        return compose_work_queue_v1(root_list_arg,
+                                      control_room=kwargs.get("control_room"))
+    service = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    fallback = asyncio.run(service.handle_frame(_work_frame())).get("result")
+    # The composer body, with generated_at frozen for diff parity.
+    composer_root = _root_list(roots=[], count=0, total=None, truncated=False,
+                                degraded=["bounded acquisition unavailable: read failed"])
+    composer_doc = compose_work_queue_v1(composer_root, generated_at="FROZEN")
     # Every key in the composer body must exist in the fallback body.
     assert set(composer_doc) == set(fallback)
     # Legitimate differences, value-for-value.
-    EXCLUDED = {"generated_at", "source_observation", "reason_codes", "lifecycle_source"}
+    EXCLUDED = {"generated_at", "source_observation", "reason_codes",
+                "lifecycle_source", "coverage"}
     for key in composer_doc:
         if key in EXCLUDED:
             continue
@@ -951,6 +1112,51 @@ def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence():
             f"key {key!r} differs: composer={composer_doc[key]!r} "
             f"fallback={fallback[key]!r}"
         )
+    # coverage.truncated: composer mirrors root_list.truncated (False
+    # here); fallback is hard-coded False.  They agree on this case but
+    # the fallback cannot honestly report the producer flag.
+    assert composer_doc["coverage"]["truncated"] is False
+    assert fallback["coverage"]["truncated"] is False
+
+
+def test_n1_composer_truncated_true_root_list_reflects_in_coverage():
+    """N1: a truncated=True root list (even with zero rows) renders with
+    ``coverage.truncated = True`` and ``completeness = "PARTIAL"``.  This
+    is the legitimate divergence from the read-service fallback's hard-
+    coded ``truncated = False``."""
+    root_list = _root_list(roots=[], count=0, total=None, truncated=True,
+                           degraded=["bounded acquisition unavailable: read failed"])
+    result = compose_work_queue_v1(root_list)
+    assert result["availability"] == "UNAVAILABLE"
+    assert result["coverage"]["truncated"] is True
+    assert result["coverage"]["total"] is None
+    assert result["coverage"]["completeness"] == "PARTIAL"
+
+
+def test_n1_fallback_coverage_truncated_false_when_no_root_list_admitted(tmp_path):
+    """N1: the read-service fallback fires BEFORE acquisition, so it cannot
+    know whether the root list is truncated.  ``coverage.truncated`` stays
+    ``False`` — it is a documented honest lie, not a bug."""
+    import asyncio
+    from control_plane.workspace_read_service import WorkspaceReadService
+    from tests.test_workspace_read_service import cache_fixture, _work_frame, _root_list_payload
+    owners, _, cache = cache_fixture(tmp_path)
+    del owners[0].state_cache["doc"]["autonomy"]
+    def work_acquire(*args, **kwargs):
+        return _root_list_payload(rows=[])
+    def work_compose(root_list_arg, **kwargs):
+        from control_plane.work_queue_projection import compose_work_queue_v1
+        return compose_work_queue_v1(root_list_arg,
+                                      control_room=kwargs.get("control_room"))
+    service = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    fallback = asyncio.run(service.handle_frame(_work_frame())).get("result")
+    assert fallback["availability"] == "UNAVAILABLE"
+    assert fallback["reason_codes"] == ["source_unavailable"]
+    assert fallback["coverage"]["truncated"] is False
 
 
 def _work_frame_for_b2():

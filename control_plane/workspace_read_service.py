@@ -28,6 +28,7 @@ from common.executive_workspace_contract import (
     PROJECTION_SCHEMA,
     RESULT_BODY_SCHEMA,
     RESULT_OBSERVATION_SCHEMA,
+    WORK_REFUSAL_REASON_CODES,
     WORK_SCHEMA,
     canonical,
     digest,
@@ -397,13 +398,21 @@ class WorkspaceReadService:
         observation.  The pure :func:`compose_work_queue_v1` compositor
         owns all per-row grouping and the queue-level effect_exception
         read; this method never re-derives them.
+
+        B2: failures split into two typed refusal classes via
+        :class:`_WorkRefusal`.  CCR bracket / runtime-receipt /
+        observation-state refusals raise ``_WorkRefusal("source_unavailable")``
+        or ``_WorkRefusal("runtime_observation_not_same")``.  A ``ValueError``
+        raised by the acquire or compose call (validator/projection
+        refusal) becomes ``_WorkRefusal("projection_refused")``.  Anything
+        else is a real error envelope — never a typed UNAVAILABLE body.
         """
         # Work carries no selection (mirrors programs); the selection field
         # is None by the closed-frame validator.  Anything else is a frame
         # contract violation that should refuse 400 before reaching here.
         before = self.cache.snapshot()
         if not _qualified(before, None):
-            raise ValueError("source_unavailable")
+            raise _WorkRefusal("source_unavailable")
         acquire = self._work_acquire
         if acquire is None:
             from control_plane.fabric_job_view import list_roots_v2_from_runtime
@@ -416,11 +425,14 @@ class WorkspaceReadService:
             self._bounded_runtime(self.runtime)
             if self._bounded_runtime else self.runtime
         )
-        root_list = acquire(
-            observed_runtime,
-            armed=self.armed,
-            runtime_identity=self.runtime_identity,
-        )
+        try:
+            root_list = acquire(
+                observed_runtime,
+                armed=self.armed,
+                runtime_identity=self.runtime_identity,
+            )
+        except ValueError:
+            raise _WorkRefusal("projection_refused") from None
         acquisition = root_list.get("runtime", {}).get("acquisition", {})
         generation = acquisition.get("generation")
         runtime_receipt = (
@@ -431,15 +443,24 @@ class WorkspaceReadService:
         # before the second CCR sample.  SAME remains an as-of read fact.
         after = self.cache.snapshot()
         if not _qualified(after, None):
-            raise ValueError("source_unavailable")
+            raise _WorkRefusal("source_unavailable")
         receipt = _observation(before, after, None, runtime_receipt)
+        # B1: runtime observation gates the work read.  The runtime half
+        # of the receipt must finalize SAME; missing/UNKNOWN/CONFLICT all
+        # refuse as ``runtime_observation_not_same`` so the route cannot
+        # silently claim a same-as-of read over a degraded runtime.
+        if not isinstance(runtime_receipt, dict) or runtime_receipt.get("state") != "SAME":
+            raise _WorkRefusal("runtime_observation_not_same")
         if receipt["state"] != "SAME":
-            raise ValueError("source_unavailable")
-        result = compose(
-            root_list,
-            control_room=before.document,
-            source_observation=receipt,
-        )
+            raise _WorkRefusal("source_unavailable")
+        try:
+            result = compose(
+                root_list,
+                control_room=before.document,
+                source_observation=receipt,
+            )
+        except ValueError:
+            raise _WorkRefusal("projection_refused") from None
         response = {"ok": True, "result": result}
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
@@ -750,6 +771,35 @@ class WorkspaceReadService:
             return result
         except LookupError:
             return error("selection_not_found", 404)
+        except _WorkRefusal as refusal:
+            # B2: typed refusal from ``_read_work`` — emits a typed UNAVAILABLE
+            # body with the closed reason_code.  This branch fires BEFORE the
+            # generic ``except Exception`` so a projection/validator fault is
+            # never laundered into ``source_unavailable``.
+            if frame["operation"] != "work":
+                return error("source_unavailable", 503)
+            from control_plane.work_queue_projection import (
+                _GROUP_ORDER as _WQ_GROUPS, _utc_now as _wq_utc_now,
+                WORK_QUEUE_SCHEMA,
+            )
+            receipt = {"schema": OBSERVATION_SCHEMA, "state": "UNKNOWN", "selection": None,
+                       "control_room": None, "runtime": None}
+            # Key-for-key shape parity with the composer's UNAVAILABLE branch
+            # (only generated_at / source_observation / reason_codes /
+            # lifecycle_source legitimately differ; the typed refusal carries
+            # the read-service's own reason code, not the composer's
+            # LIFECYCLE_UNAVAILABLE flag).
+            return {"ok": True, "result": {"schema": WORK_QUEUE_SCHEMA,
+                "availability": "UNAVAILABLE",
+                "generated_at": _wq_utc_now(),
+                "lifecycle_source": None,
+                "effect_exception": {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                                     "observable": False, "reason": "control_room_missing"},
+                "coverage": {"count": 0, "total": None, "truncated": False,
+                             "completeness": "PARTIAL"},
+                "groups": {key: [] for key in _WQ_GROUPS},
+                "source_observation": receipt,
+                "reason_codes": [refusal.reason_code]}}
         except Exception:
             if frame["operation"] == "programs":
                 receipt = {"schema": OBSERVATION_SCHEMA, "state": "UNKNOWN", "selection": None,
@@ -757,26 +807,13 @@ class WorkspaceReadService:
                 return {"ok": True, "result": {"schema": PROGRAMS_SCHEMA, "availability": "UNAVAILABLE",
                     "control_room": None, "source_observation": receipt, "reason_codes": ["source_unavailable"]}}
             if frame["operation"] == "work":
-                from control_plane.work_queue_projection import (
-                    _GROUP_ORDER as _WQ_GROUPS, _utc_now as _wq_utc_now,
-                    WORK_QUEUE_SCHEMA,
-                )
-                receipt = {"schema": OBSERVATION_SCHEMA, "state": "UNKNOWN", "selection": None,
-                           "control_room": None, "runtime": None}
-                # B2: key-for-key shape parity with the composer's UNAVAILABLE
-                # branch — only ``generated_at`` (wall-clock), ``source_observation``
-                # (route-built receipt vs composer-supplied) and ``reason_codes``
-                # (route refusal reason vs composer's lifecycle-unavailable flag)
-                # legitimately differ.  ``lifecycle_source`` is ``None`` here
-                # because the read-service fallback fires BEFORE any root list
-                # is admitted, so the runtime identity cannot be echoed.
-                return {"ok": True, "result": {"schema": WORK_QUEUE_SCHEMA, "availability": "UNAVAILABLE",
-                    "generated_at": _wq_utc_now(),
-                    "lifecycle_source": None,
-                    "effect_exception": {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER", "observable": False},
-                    "coverage": {"count": 0, "total": None, "truncated": False, "completeness": "PARTIAL"},
-                    "groups": {key: [] for key in _WQ_GROUPS},
-                    "source_observation": receipt, "reason_codes": ["source_unavailable"]}}
+                # B2: a non-_WorkRefusal exception on the work path is a REAL
+                # error envelope — a 503 with the closed error shape.  A
+                # projection/validator fault would have come through as a
+                # _WorkRefusal above; reaching this branch means something
+                # unexpected happened and the route must NOT silently manufacture
+                # a typed UNAVAILABLE document.
+                return error("source_unavailable", 503)
             return error("source_unavailable", 503)
 
     async def _handle_v2_frame(self, frame):
@@ -836,6 +873,26 @@ class _ResultSourceUnavailable(Exception):
 
 class _ResultResponseOverBudget(Exception):
     """Typed refusal when neither shared document fits the 16384 ceiling."""
+
+
+class _WorkRefusal(Exception):
+    """Typed refusal for a work-queue read failure (B2).
+
+    ``reason_code`` must be a member of
+    :data:`common.executive_workspace_contract.WORK_REFUSAL_REASON_CODES`.
+    Anything else on this exception is a contract violation.  The catch
+    block in :meth:`WorkspaceReadService.handle_frame` translates this
+    into a typed UNAVAILABLE body — never into a 503 error envelope.
+    """
+
+    def __init__(self, reason_code):
+        if reason_code not in WORK_REFUSAL_REASON_CODES:
+            raise ValueError(
+                f"_WorkRefusal reason_code {reason_code!r} not in "
+                f"WORK_REFUSAL_REASON_CODES={sorted(WORK_REFUSAL_REASON_CODES)}"
+            )
+        super().__init__(reason_code)
+        self.reason_code = reason_code
 
 
 def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None):

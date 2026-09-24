@@ -22,6 +22,14 @@ PROJECTION_SCHEMA = "mastermind.fabric_role_result_view.v1"
 FABRIC_VIEW_SCHEMA_V2 = "mastermind.fabric_job_view.v2"
 FABRIC_VIEW_SCHEMA_V3 = "mastermind.fabric_job_view.v3"
 WORK_SCHEMA = "mastermind.workspace_work_queue.v1"
+#: Closed set of work-queue refusal reason codes the read service may emit
+#: on a typed UNAVAILABLE body.  Anything outside this set is a contract
+#: violation — the closed-key-set guard in the read service refuses it.
+WORK_REFUSAL_REASON_CODES = frozenset({
+    "source_unavailable",
+    "runtime_observation_not_same",
+    "projection_refused",
+})
 MAX_REQUEST_BYTES = 8192
 MAX_RESPONSE_BYTES = 2_000_000
 #: Result response ceiling — the entire canonical UTF-8 socket

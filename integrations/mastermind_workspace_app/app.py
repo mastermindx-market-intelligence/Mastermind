@@ -45,7 +45,6 @@ from integrations.business_mcp_auth.contracts import VerifiedPrincipal
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.mastermind_executive_app.app import _authenticate
 from integrations.mastermind_workspace_app import contract
-from common.executive_workspace_contract import WORK_SCHEMA
 
 __all__ = ["WorkspaceAppConfig", "create_workspace_app"]
 
@@ -91,7 +90,7 @@ def _envelope_response(envelope: Mapping[str, Any]) -> JSONResponse:
             body = contract.bounded_canonical(dict(result))
         except (TypeError, ValueError):
             return _refuse_json(503, "source_unavailable")
-        status = 503 if (result.get("schema") in (contract.PROGRAMS_SCHEMA, WORK_SCHEMA)
+        status = 503 if (result.get("schema") in (contract.PROGRAMS_SCHEMA, contract.WORK_SCHEMA)
                          and result.get("availability") == "UNAVAILABLE") else 200
         return Response(body, status_code=status, media_type="application/json", headers={"Cache-Control": "no-store"})
     if ok is False:
