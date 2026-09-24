@@ -2051,3 +2051,69 @@ def test_requester_answer_attention_refuses_generation_change_after_intent(
             answer,
             requester_attempt_id=workers[0][1],
         )
+
+
+def test_requester_answer_attention_refuses_already_consumed_answer(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "already-consumed", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    consultations.consumed_by_requester(
+        answer,
+        requester_attempt_id=workers[0][1],
+        observed_at="2026-09-14T00:05:00Z",
+    )
+
+    with pytest.raises(ConsultationConflict, match="already consumed"):
+        consultations.requester_answer_attention(
+            answer,
+            requester_attempt_id=workers[0][1],
+        )
+
+
+def test_requester_answer_attention_refuses_unreserved_answer_identity(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    admitted = _answer_frame(frame, "admitted-answer", semantic_bundle[0])
+    consultations.answer_available(
+        admitted, observed_at="2026-09-14T00:04:00Z"
+    )
+    foreign = _answer_frame(frame, "foreign-answer", semantic_bundle[0])
+
+    with pytest.raises(StateConflict, match="one exact admitted answer"):
+        consultations.requester_answer_attention(
+            foreign,
+            requester_attempt_id=workers[0][1],
+        )

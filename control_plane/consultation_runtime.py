@@ -509,6 +509,23 @@ class ConsultationRuntime:
                     "historical answer cannot request current attention",
                     conflict="HISTORICAL_ANSWER",
                 )
+            consumed = any(
+                event.event_type == "CONSUMED_BY_REQUESTER"
+                and event.payload.get("answer_message_key")
+                == item["message_key"]
+                and event.payload.get("answer_fingerprint")
+                == item["fingerprint"]
+                and event.payload.get("semantic_answer_digest")
+                == semantic_digest
+                and event.payload.get("evidence_revision_digest")
+                == evidence_digest
+                for event in self._events_on_connection(item, connection)
+            )
+            if consumed:
+                raise ConsultationConflict(
+                    "answer is already consumed by requester",
+                    conflict="ANSWER_ALREADY_CONSUMED",
+                )
 
             target, binding = self._requester_target_and_binding_on_connection(
                 requester_attempt_id, connection
