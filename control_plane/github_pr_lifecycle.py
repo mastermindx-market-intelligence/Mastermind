@@ -19,11 +19,11 @@ STALE_RECONCILE_DAYS = 14
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 _SECRET_PATTERNS = (
     re.compile(r"github_pat_", re.IGNORECASE),
-    re.compile(r"\\bgh[pousr]_[A-Za-z0-9]", re.IGNORECASE),
-    re.compile(r"\\bxox[baprs]-", re.IGNORECASE),
-    re.compile(r"\\bsk-[A-Za-z0-9]", re.IGNORECASE),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]", re.IGNORECASE),
+    re.compile(r"\bxox[baprs]-", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9]", re.IGNORECASE),
     re.compile(
-        r"\\b(?:authorization|bearer|password|token|secret|credential)\\s*[:=]\\s*\\S+",
+        r"\b(?:authorization|bearer|password|token|secret|credential)\s*[:=]\s*\S+",
         re.IGNORECASE,
     ),
     re.compile(r"-----BEGIN", re.IGNORECASE),
