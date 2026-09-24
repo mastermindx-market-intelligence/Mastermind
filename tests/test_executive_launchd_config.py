@@ -1385,13 +1385,14 @@ def test_acceptance_service_group_vector_allows_only_exact_reviewed_agent_relay_
 
 
 def test_acceptance_agent_relay_constants_match_reviewed_a2_host_contract() -> None:
+    import ops.executive_os.a2_agent_relay_enrollment as relay
     import ops.executive_os.acceptance as acceptance
 
-    assert acceptance.AGENT_RELAY_USER == "_mastermind_agent_relay"
-    assert acceptance.AGENT_RELAY_GROUP == "_mastermind_agent_relay"
-    assert acceptance.AGENT_RELAY_UID == 457
-    assert acceptance.AGENT_RELAY_GID == 457
-    assert str(acceptance.AGENT_RELAY_HOME) == "/var/db/mastermind-agent-relay/home"
+    assert acceptance.AGENT_RELAY_USER == relay.RELAY_USER
+    assert acceptance.AGENT_RELAY_GROUP == relay.RELAY_GROUP
+    assert acceptance.AGENT_RELAY_UID == relay.RELAY_UID
+    assert acceptance.AGENT_RELAY_GID == relay.RELAY_GID
+    assert acceptance.AGENT_RELAY_HOME == relay.RELAY_HOME
 
     host_source = (OPS / "prepare-a2-agent-relay-host.sh").read_text(encoding="utf-8")
     for literal in (

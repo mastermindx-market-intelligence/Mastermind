@@ -32,6 +32,13 @@ if os.fspath(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+from ops.executive_os.a2_agent_relay_enrollment import (
+    RELAY_GID as AGENT_RELAY_GID,
+    RELAY_GROUP as AGENT_RELAY_GROUP,
+    RELAY_HOME as AGENT_RELAY_HOME,
+    RELAY_UID as AGENT_RELAY_UID,
+    RELAY_USER as AGENT_RELAY_USER,
+)
 
 
 SCHEMA_VERSION = "mastermind.executive_host_acceptance/v1"
@@ -42,11 +49,6 @@ CONTROL_GROUP = "_mastermind_exec"
 WORKER_USER = "_mastermind_worker"
 WORKER_GROUP = "_mastermind_worker"
 OPS_GROUP = "_mastermind_ops"
-AGENT_RELAY_USER = "_mastermind_agent_relay"
-AGENT_RELAY_GROUP = "_mastermind_agent_relay"
-AGENT_RELAY_UID = 457
-AGENT_RELAY_GID = 457
-AGENT_RELAY_HOME = Path("/var/db/mastermind-agent-relay/home")
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 RUNTIME_ROOT = Path("/var/db/mastermind-executive")
 CONTROL_CONFIG = SYSTEM_ROOT / "config" / "control.json"
