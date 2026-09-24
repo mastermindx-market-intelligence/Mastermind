@@ -171,6 +171,24 @@
       "class": "refuse",
       "scenario": "Hook evidence is missing, conflicting, or rewritten by an unsupported chain and the modifying tool would otherwise be authorized.",
       "expected": "REFUSE_SESSION_HARDENING_UNPROVEN"
+    },
+    {
+      "id": "M29",
+      "class": "acceptance",
+      "scenario": "A modifying COO mandate consumes the exact selected Mission Workspace v3 document with CURRENT read state, qualified SAME owner observation, matching work_ref and no effect/source-generation conflict.",
+      "expected": "MISSION_V3_IS_PRIMARY_ORGANIZATIONAL_INPUT"
+    },
+    {
+      "id": "M30",
+      "class": "refuse",
+      "scenario": "Mission Workspace is PARTIAL, HISTORICAL, UNAVAILABLE, owner observation is unqualified, or the selected root/source generation conflicts and Fable attempts a modifying principal action.",
+      "expected": "REFUSE_UNQUALIFIED_MISSION_STATE"
+    },
+    {
+      "id": "M31",
+      "class": "acceptance",
+      "scenario": "Mission authority is current but Mission Workspace has no dedicated current_coo_target RuntimeBinding; Fable remains principal+mission bound and exact Claude session binding is not fabricated.",
+      "expected": "MISSION_BOUND_WITH_SESSION_HARDENING_DEFERRED"
     }
   ]
 }
