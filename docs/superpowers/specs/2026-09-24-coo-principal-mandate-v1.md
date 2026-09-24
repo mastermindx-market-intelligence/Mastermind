@@ -332,6 +332,117 @@ One Chairman/Sol assignment occurs once. Fable must then:
 
 Acceptance fails if routine preference questions or manual prompt carriage are required.
 
+## 14. Implementation packet — preserve one mutation sink and one installed service
+
+The first implementation must be additive around the existing Executive owners. Do not fork the CEO request normalizer, clone CeoIngress, or create a second installed Executive MCP daemon.
+
+### P2-A — pure mandate projection
+
+Add a pure `control_plane/coo_principal_mandate.py`-class owner (exact file name may change in implementation review) that reduces already-owner-qualified inputs into `mastermind.coo_principal_mandate.v1`.
+
+It performs no I/O, persistence, OAuth verification, Runtime mutation, placement, GitHub action or provider call.
+
+The projection must distinguish:
+
+- immutable mission/authority identity used for admission;
+- current dynamic mission/runtime/effect/capability state used to decide whether an action is safe now.
+
+Dynamic state is **not** a durable grant and must not be copied into a new authority store.
+
+### P2-B — additive principal admission through the existing sink
+
+The existing high-level request normalization and worker execution-profile derivation remain unchanged. `submit_principal_intent` originates bounded Executive work; it does not grant the principal's separate GitHub/source-release powers to worker Jobs.
+
+The current CEO envelope/schemas remain frozen. Do not submit a COO action as a `mastermind.ceo_intent.*` with a misleading CEO actor.
+
+Instead, extend the **existing `ceo_intent.submit_intent` mutation sink** additively with a distinct principal-intent schema/receipt branch, while preserving v1/v2 behavior byte-for-byte. The historical module/sink may retain its name; there is still exactly one Job-creation mutation path and one Executive event store.
+
+The server-derived principal provenance for the COO branch should contain only immutable admission identity, conceptually:
+
+```text
+seat = coo
+actor = coo-principal
+work_ref
+principal_binding_digest
+mission_authority_ref
+authority_generation_digest
+```
+
+No raw OAuth subject/client, account label, credential, provider session or model-authored role enters the durable envelope.
+
+**Do not fingerprint current dynamic mandate/runtime state.** A legitimate state change after an accepted submit must not make same-operation reconciliation conflict. Fresh dynamic state is checked before a new effect; immutable authority/binding identity is what belongs in the durable request fingerprint.
+
+Require `workstream` for a COO root/successor-root submission and require exact equality with the current mission authority before effect.
+
+A COO request identity should be separately namespaced from CEO/MCP/Slack identities and bind the logical operation to its mission, e.g. a trusted derivation over `work_ref + operation_key`. It must not depend on token lifetime, OAuth JTI, Claude transcript, provider session, clock or model output.
+
+### P2-C — role-correct ingress on the existing CeoIngress/service
+
+Add a separately versioned principal submit/status frame to the existing CeoIngress contract. Public model input still contains only the normalized high-level request fields. The authenticated App derives the COO seat/principal/mission authority context server-side and carries only the closed trusted projection into the local ingress.
+
+The fresh path order remains:
+
+```text
+authenticate exact COO policy/binding
+-> normalize caller semantic request
+-> resolve immutable mission authority
+-> read current effect/source-custody safety
+-> observe exact grounding
+-> build trusted principal envelope
+-> final admission recheck
+-> one existing submit_intent sink call
+```
+
+If transport becomes ambiguous after send, return EFFECT_UNKNOWN and reconcile the same request identity through the same ingress. Never resubmit through CEO ingress or another carrier.
+
+Durable replay/status resolves the accepted immutable request. It must not be invalidated merely because current dynamic mandate state advanced after the original effect.
+
+### P2-D — one installed process, two static role surfaces
+
+Do not replace the current CEO MCP profile and do not run a second Executive daemon.
+
+Keep the existing CEO `/mcp` contract frozen. Add a separate static COO MCP surface **inside the same installed Executive MCP process/listener** (exact route name may be finalized by implementation review, conceptually `/mcp/coo`).
+
+The COO profile:
+
+- shares the same Executive resource/issuer/JWKS authority;
+- authenticates `read + coo.act`, never CEO submit;
+- advertises only the COO principal tool set;
+- routes reads to the existing Executive/Workspace/Fabric owners;
+- routes its one bounded principal admission to the same CeoIngress/Runtime sink;
+- has no Runtime, token, retry, session, queue or result store of its own.
+
+The #955 localhost adapter may keep Claude's local resource at its stable `/mcp` URL while translating upstream to the static COO profile. That transport translation does not create authority.
+
+### P2-E — initial COO tool set
+
+First implementation target:
+
+```text
+executive_mandate            READ
+executive_state              READ
+executive_inbox              READ
+executive_fabric             READ roots/root/result
+submit_principal_intent      MODIFY bounded in-mission/successor work
+principal_intent_status      READ/reconcile exact prior request
+```
+
+Mission details may be composed from the existing Workspace Mission owner rather than copied into another datastore/tool family.
+
+Do **not** add `submit_coo_ruling` until its exact canonical effect owner is identified. Current repository search shows owed-turn/ruling semantics are projected across Mission/Control Room/dialogue/continuation owners; inventing a generic write now would create a competing dialogue/lifecycle path. The first vertical can still prove broad autonomy through planning, successor work, direct mission-granted source tools, review/repair and gated source release.
+
+### P2-F — direct source/release authority stays outside worker Job authority
+
+The principal mandate may authorize direct mission-scoped GitHub/Workbench effects under their own exact grants. Do not add `OPEN_PR`, `PUSH_BRANCH` or `MERGE` to `executive_worker_policy` merely so Fable can complete projects.
+
+The Executive root records organizational work and evidence. Source owners retain source custody and branch/review/merge protections.
+
+### P2-G — exact-session isolation is a separate falsifier
+
+Do not block broad authenticated principal + mission autonomy on an unproven exact-conversation mechanism.
+
+Ship/accept the principal/mission binding first at its honest ceiling. In parallel, run the hook/session falsifier. Only after it proves a non-model-controlled binding to every modifying request may the mandate add exact Claude-conversation isolation as a required gate.
+
 ## 14. Claude packaging boundary
 
 The first production packaging target is one private **Mastermind Executive** Claude plugin/desktop extension, not a public Internet-facing replacement for Executive OS.
