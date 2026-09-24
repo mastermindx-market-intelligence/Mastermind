@@ -18,18 +18,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("input", type=Path)
     parser.add_argument("--now", required=True, help="Explicit timezone-aware observation clock")
     parser.add_argument("--format", choices=("json", "markdown", "public-summary"), default="json")
+    parser.add_argument("--input-kind", choices=("observations", "nw-reflection"), default="observations")
+    parser.add_argument("--source-revision", help="Exact observer contract revision for an owner snapshot")
+    parser.add_argument("--contract-sha256", help="SHA-256 of that exact NW reflection contract file")
     args = parser.parse_args(argv)
     try:
         with args.input.open("rb") as stream:
             raw = stream.read(MAX_INPUT_BYTES + 1)
         if len(raw) > MAX_INPUT_BYTES:
             raise ValueError("input_too_large")
-        report = discovery.evaluate(json.loads(raw), now=args.now)
-    except (OSError, ValueError, TypeError, KeyError, OverflowError):
+        if args.input_kind == "nw-reflection":
+            from brain import improvement_discovery_nw
+            report = improvement_discovery_nw.evaluate_owner_snapshot(json.loads(raw),
+                source_revision=args.source_revision, contract_sha256=args.contract_sha256,
+                observed_at=args.now)
+        else:
+            if args.source_revision is not None or args.contract_sha256 is not None:
+                raise ValueError("owner_identity_requires_owner_input")
+            report = discovery.evaluate(json.loads(raw), now=args.now)
+    except (OSError, ValueError, TypeError, KeyError, OverflowError, RecursionError):
         print("improvement_discovery: invalid or unavailable input", file=sys.stderr)
         return 2
     if args.format == "markdown":
-        print(discovery.render_markdown(report))
+        if args.input_kind == "nw-reflection":
+            print(improvement_discovery_nw.render_owner_brief(report))
+        else:
+            print(discovery.render_markdown(report))
     else:
         value = discovery.agenda_projection(report) if args.format == "public-summary" else report
         print(json.dumps(value, indent=2, sort_keys=True))

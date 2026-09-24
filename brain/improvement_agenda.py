@@ -1279,8 +1279,9 @@ def build(asof: date | None = None, *, cio_rep: dict | None = None,
     are dropped (charter P3 — no evidence, no item). `cio_rep` may be injected (tests / to avoid a
     second cio.review); when None it is computed once here. Agent OS readiness is read through the
     existing CEO-brief bridge and attached only after rank, score, and age are final.
-    Optional discovery is a public-safe unranked count projection; explicit observations
-    and clock are required, with unavailable evidence never represented as zero gaps."""
+    Optional discovery is a public-safe unranked count projection. Without an injected
+    bundle it reads the existing NW reflection owner; explicit bundles require a clock.
+    Unavailable evidence is never represented as zero gaps."""
     asof = asof or date.today()
 
     if cio_rep is None:
@@ -1411,7 +1412,7 @@ def build(asof: date | None = None, *, cio_rep: dict | None = None,
     else:
         items = annotated_items
 
-    discovery = _discovery_projection(discovery_bundle, discovery_now)
+    discovery = _discovery_projection(discovery_bundle, discovery_now, asof=asof)
     from brain.improvement_discovery import public_note
 
     counts: dict[str, int] = {}
@@ -1434,10 +1435,13 @@ def build(asof: date | None = None, *, cio_rep: dict | None = None,
     }
 
 
-def _discovery_projection(bundle: object, now: str | None) -> dict:
+def _discovery_projection(bundle: object, now: str | None, *, asof: date | None = None) -> dict:
     # This join is deliberately AFTER frozen ranking/readiness. It cannot create
     # ranked items, self-tune actions, or Executive jobs. Private prose stays out.
     from brain.improvement_discovery import optional_agenda_projection
+    if bundle is None:
+        from brain.improvement_discovery_nw import latest_agenda_projection
+        return latest_agenda_projection(root=_ROOT, asof=asof or date.today(), now=now)
     return optional_agenda_projection(bundle, now=now)
 
 
