@@ -495,10 +495,34 @@ class WorkspaceReadService:
         if receipt["state"] != "SAME":
             raise _WorkRefusal("source_unavailable")
         try:
+            # WQ-PROD-1: derive the typed accountability / placement /
+            # effects producer inputs from the autonomy control room
+            # so every row carries per-row evidence instead of
+            # ``no_producer``.  A derivation ``ValueError`` is treated
+            # exactly like a compose ``ValueError`` — the existing
+            # closed-key-set and freshness validators pass through
+            # :func:`derive_work_producers_v1`, so any malformed
+            # derivation surfaces as the typed ``projection_refused``
+            # refusal.  ``producer_skips`` is exposed only via the
+            # module-level pure function return (the closed
+            # :data:`OUTPUT_KEYS` set in
+            # :mod:`control_plane.work_queue_projection` does not admit
+            # a new top-level key); tests assert against the pure
+            # function's return, not against the response body.
+            from control_plane.work_queue_projection import (
+                derive_work_producers_v1,
+            )
+            producers = derive_work_producers_v1(before.document)
+            # NB: injected composers (test fakes) MUST accept the four
+            # producer kwargs below — all in-repo fakes take ``**kwargs``.
             result = compose(
                 root_list,
                 control_room=before.document,
                 source_observation=receipt,
+                accountability=producers["accountability"],
+                placement=producers["placement"],
+                effects=producers["effects"],
+                evidence_as_of=producers["evidence_as_of"],
             )
         except ValueError:
             raise _WorkRefusal("projection_refused") from None
