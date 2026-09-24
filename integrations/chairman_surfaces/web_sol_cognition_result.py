@@ -70,7 +70,7 @@ def build_raw_role_result_observation(
         raise WebSolCognitionResultError("RESULT_METADATA_REFUSED")
 
     try:
-        parse_and_validate_envelope(
+        validated = parse_and_validate_envelope(
             assistant_result_text,
             expected_job_id=expected_job_id,
             expected_run_id=expected_run_id,
@@ -78,6 +78,12 @@ def build_raw_role_result_observation(
             expected_role=expected_role,
             expected_root_job_id=expected_root_job_id,
         )
+        role_result = validated.get("role_result")
+        if (
+            not isinstance(role_result, dict)
+            or role_result.get("root_job_id") != expected_root_job_id
+        ):
+            raise OrchestrationResultError("role result root_job_id mismatch")
     except OrchestrationResultError as exc:
         raise WebSolCognitionResultError("RESULT_REFUSED") from exc
 
