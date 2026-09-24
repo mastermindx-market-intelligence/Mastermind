@@ -173,6 +173,28 @@ def test_evaluation_packet_exposes_ids_and_digest_not_private_prose(monkeypatch)
     assert "Which current owner" not in encoded
 
 
+def test_evaluation_packet_refuses_prose_smuggled_as_proposal_id(monkeypatch):
+    def reasoner(prompt, **kwargs):
+        return {"ok": True, "text": json.dumps(response()), "tools_used": []}
+
+    patch_reasoner(monkeypatch, reasoner)
+    draft = C.draft_proposals(report())
+    draft["proposals"][0]["proposal_id"] = "private prose must never cross this boundary"
+    with pytest.raises(ValueError, match="invalid_proposal_id"):
+        C.evaluation_packet(draft)
+
+
+def test_evaluation_packet_refuses_authority_flag_tampering(monkeypatch):
+    def reasoner(prompt, **kwargs):
+        return {"ok": True, "text": json.dumps(response()), "tools_used": []}
+
+    patch_reasoner(monkeypatch, reasoner)
+    draft = C.draft_proposals(report())
+    draft["execution_authority_granted"] = True
+    with pytest.raises(ValueError, match="invalid_draft_authority"):
+        C.evaluation_packet(draft)
+
+
 @pytest.mark.parametrize("field,value", [
     ("execution_authority_granted", True),
     ("jobs_created", 1),
