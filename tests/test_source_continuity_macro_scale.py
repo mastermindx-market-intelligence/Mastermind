@@ -13,9 +13,9 @@ import test_source_continuity_census_budget as budget
 
 
 def _apply_frozen_profile(module) -> None:
-    module._MAX_COLLISION_PRS = 400
+    module._MAX_COLLISION_PRS = 475
     module._MAX_HTTP_CALLS = 1152
-    module._MAX_HTTP_NORMALIZED_BYTES = 96 * 1024 * 1024
+    module._MAX_HTTP_NORMALIZED_BYTES = 128 * 1024 * 1024
     module._HTTP_READ_BUDGET_SECONDS = 300.0
 
 
@@ -59,16 +59,16 @@ def test_cli_bootstrap_does_not_write_repository_bytecode(tmp_path) -> None:
     assert created == []
 
 
-def test_macro_400_profile_is_exact() -> None:
+def test_macro_475_profile_is_exact() -> None:
     module = fx._cli_module()
-    assert module._MAX_COLLISION_PRS == 400
+    assert module._MAX_COLLISION_PRS == 475
     assert module._MAX_HTTP_CALLS == 1152
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
     assert module._MAX_HTTP_BODY_BYTES == 5_000_000
 
 
-@pytest.mark.parametrize("count", [274, 299, 300, 350, 384, 400])
+@pytest.mark.parametrize("count", [274, 299, 300, 350, 384, 400, 409, 410, 419, 425, 450, 451, 457, 458, 465, 470, 475])
 def test_macro_scale_estate_completes(count, capsys, monkeypatch) -> None:
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", budget.Clock(), raising=False)
@@ -83,24 +83,24 @@ def test_macro_scale_estate_completes(count, capsys, monkeypatch) -> None:
     assert len(http.calls) <= 1152
 
 
-def test_macro_401_refuses_before_foreign_file_enumeration(
+def test_macro_476_refuses_before_foreign_file_enumeration(
     capsys, monkeypatch
 ) -> None:
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", budget.Clock(), raising=False)
-    http = budget.EstateHTTP(401)
+    http = budget.EstateHTTP(476)
     rc, payload = budget.run_cli(module, capsys, http)
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
     assert _foreign_file_calls(http) == []
 
 
-def test_macro_400_call_budget_exact_and_one_under(
+def test_macro_475_call_budget_exact_and_one_under(
     capsys, monkeypatch
 ) -> None:
     control_module = fx._cli_module()
     _apply_frozen_profile(control_module)
     monkeypatch.setattr(control_module, "monotonic", budget.Clock())
-    control = budget.EstateHTTP(400)
+    control = budget.EstateHTTP(475)
     assert budget.run_cli(control_module, capsys, control)[0] == 0
     required_calls = len(control.calls)
     assert required_calls < 1152
@@ -109,24 +109,24 @@ def test_macro_400_call_budget_exact_and_one_under(
     _apply_frozen_profile(exact_module)
     exact_module._MAX_HTTP_CALLS = required_calls
     monkeypatch.setattr(exact_module, "monotonic", budget.Clock())
-    assert budget.run_cli(exact_module, capsys, budget.EstateHTTP(400))[0] == 0
+    assert budget.run_cli(exact_module, capsys, budget.EstateHTTP(475))[0] == 0
 
     under_module = fx._cli_module()
     _apply_frozen_profile(under_module)
     under_module._MAX_HTTP_CALLS = required_calls - 1
     monkeypatch.setattr(under_module, "monotonic", budget.Clock())
-    rc, payload = budget.run_cli(under_module, capsys, budget.EstateHTTP(400))
+    rc, payload = budget.run_cli(under_module, capsys, budget.EstateHTTP(475))
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
 
 
-def test_macro_400_byte_budget_exact_and_one_under(
+def test_macro_475_byte_budget_exact_and_one_under(
     capsys, monkeypatch
 ) -> None:
     control_module = fx._cli_module()
     _apply_frozen_profile(control_module)
     monkeypatch.setattr(control_module, "monotonic", budget.Clock())
     sizes: list[int] = []
-    control = budget.EstateHTTP(400)
+    control = budget.EstateHTTP(475)
     control.after_read = lambda _url, result: sizes.append(
         len(control_module.canonical_json(result).encode("utf-8", "backslashreplace"))
     )
@@ -138,14 +138,43 @@ def test_macro_400_byte_budget_exact_and_one_under(
     _apply_frozen_profile(exact_module)
     exact_module._MAX_HTTP_NORMALIZED_BYTES = required_bytes
     monkeypatch.setattr(exact_module, "monotonic", budget.Clock())
-    assert budget.run_cli(exact_module, capsys, budget.EstateHTTP(400))[0] == 0
+    assert budget.run_cli(exact_module, capsys, budget.EstateHTTP(475))[0] == 0
 
     under_module = fx._cli_module()
     _apply_frozen_profile(under_module)
     under_module._MAX_HTTP_NORMALIZED_BYTES = required_bytes - 1
     monkeypatch.setattr(under_module, "monotonic", budget.Clock())
-    rc, payload = budget.run_cli(under_module, capsys, budget.EstateHTTP(400))
+    rc, payload = budget.run_cli(under_module, capsys, budget.EstateHTTP(475))
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+
+
+def test_macro_475_observed_fanout_shape_preserves_call_headroom(
+    capsys, monkeypatch
+) -> None:
+    """Model live +54 ordinary pages plus 17 saturation sentinels per observation."""
+
+    file_counts = {
+        1000: 2240,  # 23 pages => +22 beyond the one-page baseline
+        1001: 1221,  # 13 pages => +12
+        **{number: 201 for number in range(1002, 1007)},  # 5 * +2
+        **{number: 101 for number in range(1007, 1017)},  # 10 * +1
+    }
+    assert len(file_counts) == 17
+
+    baseline_module = fx._cli_module()
+    monkeypatch.setattr(baseline_module, "monotonic", budget.Clock())
+    baseline = budget.EstateHTTP(475)
+    assert budget.run_cli(baseline_module, capsys, baseline)[0] == 0
+
+    observed_module = fx._cli_module()
+    monkeypatch.setattr(observed_module, "monotonic", budget.Clock())
+    observed = budget.EstateHTTP(475, file_counts=file_counts)
+    rc, payload = budget.run_cli(observed_module, capsys, observed)
+
+    assert rc == 0, payload
+    assert len(observed.calls) == len(baseline.calls) + (2 * (54 + 17))
+    assert len(observed.calls) == 1110
+    assert 1152 - len(observed.calls) == 42
 
 
 def test_time_budget_accepts_last_finite_instant_and_refuses_deadline(

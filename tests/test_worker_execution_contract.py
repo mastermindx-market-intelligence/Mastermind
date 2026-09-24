@@ -424,6 +424,11 @@ def test_common_artifact_limit_source_mutation_reaches_defaults_and_adapter_vali
         mutated_root / "control_plane",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    shutil.copytree(
+        _ROOT / "common",
+        mutated_root / "common",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     contract_path = mutated_root / "control_plane" / "worker_execution_contract.py"
     tree = ast.parse(contract_path.read_text(encoding="utf-8"))
     replacements = {
@@ -906,3 +911,133 @@ def test_constructor_source_law_preserves_alias_qualified_opaque_and_foreign_con
     assert foreign.violations == ()
     observed.append("foreign-adapter-home")
     assert len(observed) == 5
+
+def test_worker_recovery_binding_round_trips_exact_launch_spec(tmp_path: Path) -> None:
+    prompt_path = tmp_path / "run" / "input" / "worker-prompt.txt"
+    prompt_path.parent.mkdir(parents=True)
+    prompt_path.write_text("bounded recovery prompt", encoding="utf-8")
+    prompt_path.chmod(0o600)
+    spec = _spec(
+        tmp_path,
+        run_dir=tmp_path / "run",
+        prompt="bounded recovery prompt",
+        authorities=("READ", "RUN_TESTS"),
+        allowed_artifact_paths=("research/proof.md",),
+        isolation_manifest={"schema_version": "fixture", "entries": []},
+        isolation_manifest_sha256="1" * 64,
+        secret_canary_verdict={"schema_version": "fixture", "passed": True},
+    )
+    process = WorkerProcessRef(
+        run_id=spec.run_id,
+        pid=41,
+        pgid=41,
+        process_start_identity="start-41",
+        boot_session_id="boot-fixture",
+        launch_nonce="nonce-fixture",
+        provider_session_id=None,
+        stdout_path=str(tmp_path / "run" / "logs" / "stdout.jsonl"),
+        stderr_path=str(tmp_path / "run" / "logs" / "stderr.log"),
+        result_path=str(tmp_path / "run" / "output" / "result.json"),
+        started_at="2026-09-18T00:00:00+00:00",
+        binary=_binary(),
+        base_sha="c" * 40,
+        session_id=41,
+        effective_uid=501,
+        effective_gid=20,
+        real_uid=501,
+        real_gid=20,
+    )
+    binding = worker_execution_contract.WorkerRecoveryBinding.bind(
+        adapter_id="codex-cli",
+        spec=spec,
+        process_ref=process,
+        prompt_path=prompt_path,
+    )
+    restored = worker_execution_contract.WorkerRecoveryBinding.from_dict(
+        binding.to_dict()
+    )
+    assert restored.process_ref == process
+    assert restored.recover_launch_spec() == spec
+    assert restored.launch_spec_sha256 == (
+        worker_execution_contract.worker_launch_spec_sha256(spec)
+    )
+    assert restored.collection_contract_version == (
+        worker_execution_contract.DURABLE_COLLECTION_CONTRACT_VERSION
+    )
+    assert "bounded recovery prompt" not in repr(restored)
+
+
+def test_worker_recovery_binding_refuses_prompt_or_identity_drift(tmp_path: Path) -> None:
+    prompt_path = tmp_path / "run" / "input" / "worker-prompt.txt"
+    prompt_path.parent.mkdir(parents=True)
+    prompt_path.write_text("original prompt", encoding="utf-8")
+    prompt_path.chmod(0o600)
+    spec = _spec(tmp_path, run_dir=tmp_path / "run", prompt="original prompt")
+    process = WorkerProcessRef(
+        run_id=spec.run_id,
+        pid=52,
+        pgid=52,
+        process_start_identity="start-52",
+        boot_session_id="boot-fixture",
+        launch_nonce="nonce-fixture",
+        provider_session_id=None,
+        stdout_path=str(tmp_path / "run" / "logs" / "stdout.jsonl"),
+        stderr_path=str(tmp_path / "run" / "logs" / "stderr.log"),
+        result_path=str(tmp_path / "run" / "output" / "result.json"),
+        started_at="2026-09-18T00:00:00+00:00",
+        binary=_binary(),
+        base_sha="c" * 40,
+    )
+    binding = worker_execution_contract.WorkerRecoveryBinding.bind(
+        adapter_id="codex-cli",
+        spec=spec,
+        process_ref=process,
+        prompt_path=prompt_path,
+    )
+    prompt_path.write_text("changed prompt", encoding="utf-8")
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="prompt digest",
+    ):
+        binding.recover_launch_spec()
+    changed = binding.to_dict()
+    changed["process_ref"]["run_id"] = "different-run"
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="run identity",
+    ):
+        worker_execution_contract.WorkerRecoveryBinding.from_dict(changed)
+
+
+def test_worker_adapter_v1_keeps_recovery_as_an_optional_capability() -> None:
+    class MissingReattach:
+        adapter_id = "fixture"
+        inspector = _SyntheticInspector()
+
+        async def start(self, spec):
+            raise NotImplementedError
+
+        async def status(self, ref):
+            raise NotImplementedError
+
+        async def collect_result(self, ref):
+            raise NotImplementedError
+
+        async def cancel(self, ref, reason):
+            raise NotImplementedError
+
+        async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
+            raise NotImplementedError
+
+    class Complete(MissingReattach):
+        def reattach(self, spec, binding):
+            return binding.process_ref
+
+    assert isinstance(MissingReattach(), worker_adapter.WorkerExecutionAdapter)
+    assert not isinstance(
+        MissingReattach(), worker_adapter.RecoverableWorkerExecutionAdapter
+    )
+    assert isinstance(Complete(), worker_adapter.WorkerExecutionAdapter)
+    assert isinstance(
+        Complete(), worker_adapter.RecoverableWorkerExecutionAdapter
+    )

@@ -93,6 +93,8 @@ def test_phase1c_host_composes_web_commission_source_without_acquisition(
     source_mod = importlib.import_module(
         "integrations.mastermind_executive_app.web_commission_source"
     )
+    # Load profile subclasses before replacing their concrete reader base in this test.
+    importlib.import_module("integrations.executive_mcp.web_ceo_v3")
     installed = importlib.import_module("integrations.executive_mcp.installed")
     broker = importlib.import_module("control_plane.executive_worker_broker")
     from tests.test_ceo_submit_armed_composition import _off_host, _raw, _write

@@ -925,6 +925,32 @@ def test_install_sh_prunes_unreachable_objects_after_repack_and_before_final_cho
     assert "not company state" in comment_block
 
 
+def test_install_sh_normalizes_safe_promisor_markers_after_prune_before_final_trust():
+    install_text = _INSTALL_SH.read_text(encoding="utf-8")
+
+    prune_marker = '/usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now'
+    normalize_marker = '"$RELEASE_ROOT/ops/executive_os/admin_checkout.py" normalize'
+    final_chown = '/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"'
+    loose_assertion = "administrative checkout still holds loose objects after repack"
+
+    prune_index = install_text.index(prune_marker)
+    normalize_index = install_text.index(normalize_marker, prune_index)
+    chown_index = install_text.index(final_chown, normalize_index)
+    assertion_index = install_text.index(loose_assertion, chown_index)
+    assert prune_index < normalize_index < chown_index < assertion_index
+
+    invocation_start = install_text.rindex('/usr/bin/sudo -u "$CONTROL_USER"', prune_index, normalize_index)
+    invocation = install_text[invocation_start:normalize_index + len(normalize_marker) + 320]
+    assert 'GIT_NO_LAZY_FETCH=1' in invocation
+    assert 'GIT_NO_REPLACE_OBJECTS=1' in invocation
+    assert 'GIT_TERMINAL_PROMPT=0' in invocation
+    assert '--checkout "$ADMIN_CHECKOUT"' in invocation
+    assert '--expected-commit "$EXPECTED_SHA"' in invocation
+    refusal = install_text[normalize_index:chown_index]
+    assert "administrative checkout promisor normalization refused" in refusal
+    assert "exit 65" in refusal
+
+
 def test_prune_after_repack_reaches_zero_loose_objects_and_stays_clonable(tmp_path: Path):
     """The full fix, proved end to end without root.
 
