@@ -461,8 +461,39 @@ class ConsultationRuntime:
         *,
         requester_attempt_id: str,
     ) -> RequesterAnswerAttentionProjection:
-        """Project one requester-directed answer obligation without writing state."""
+        """Project one current, unconsumed requester answer obligation."""
 
+        return self._requester_answer_attention_projection(
+            frame,
+            requester_attempt_id=requester_attempt_id,
+            allow_consumed_replay=False,
+        )
+
+    def requester_answer_attention_replay(
+        self,
+        frame: Mapping[str, Any],
+        *,
+        requester_attempt_id: str,
+    ) -> RequesterAnswerAttentionProjection:
+        """Reconstruct exact identity for replay of an existing request.
+
+        This may project after requester consumption, but the existing
+        first-request fence still refuses to originate a new request then.
+        """
+
+        return self._requester_answer_attention_projection(
+            frame,
+            requester_attempt_id=requester_attempt_id,
+            allow_consumed_replay=True,
+        )
+
+    def _requester_answer_attention_projection(
+        self,
+        frame: Mapping[str, Any],
+        *,
+        requester_attempt_id: str,
+        allow_consumed_replay: bool,
+    ) -> RequesterAnswerAttentionProjection:
         item = validate_consultation(frame)
         if item["purpose"] not in {"ANSWER", "CORRECTION"}:
             raise StateConflict(
@@ -521,7 +552,7 @@ class ConsultationRuntime:
                 == evidence_digest
                 for event in self._events_on_connection(item, connection)
             )
-            if consumed:
+            if consumed and not allow_consumed_replay:
                 raise ConsultationConflict(
                     "answer is already consumed by requester",
                     conflict="ANSWER_ALREADY_CONSUMED",
