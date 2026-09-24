@@ -958,12 +958,20 @@ def _persist_superseded_receipt(
         if existing == original_bytes:
             return
         raise ReadinessError("superseded_receipt_conflict")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(superseded_path, flags, expected_mode)
+    # Crash-safe write: stage to a sibling-local temp file, then atomically
+    # rename over the digest-named path.  A SIGINT/power loss before the
+    # rename leaves no partial file at the digest name, so the next retry
+    # can simply re-create it cleanly.  Because the destination name is a
+    # digest of the bytes being written, ``os.replace`` is idempotent and
+    # cannot clobber divergent evidence (a divergent file at that name was
+    # already refused by the exists-branch above).
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{superseded_path.name}.tmp-", dir=os.fspath(superseded_path.parent)
+    )
+    temporary = Path(temporary_name)
     try:
-        os.fchown(descriptor, expected_uid, expected_gid)
         os.fchmod(descriptor, expected_mode)
+        os.fchown(descriptor, expected_uid, expected_gid)
         view = memoryview(original_bytes)
         while view:
             written = os.write(descriptor, view)
@@ -971,10 +979,16 @@ def _persist_superseded_receipt(
                 raise ReadinessError("readiness_receipt_short_write")
             view = view[written:]
         os.fsync(descriptor)
-    finally:
         os.close(descriptor)
-    _assert_no_macos_acl(superseded_path)
-    _fsync_directory(superseded_path.parent)
+        descriptor = -1
+        _assert_no_macos_acl(temporary)
+        os.replace(temporary, superseded_path)
+        _fsync_directory(superseded_path.parent)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
 
 
 def refresh_expired_receipt(

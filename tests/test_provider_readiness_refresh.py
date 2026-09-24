@@ -1176,6 +1176,36 @@ def test_t11_real_protected_read_refuses_symlink_and_wrong_mode(
     )
     assert rc == 4, "(iii) mode-0o400 receipt reuse must succeed (4); got %d" % rc
 
+    # --- Case (iv) [NB3 positive control]: under the REAL protected read,
+    # ``reserve --refresh-expired`` on the same mode-0o400 receipt must
+    # succeed and the live path must now hold a ``canary_reserved`` reservation.
+    rc_refresh, _, stderr_refresh = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(loose_receipt),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", receipt["credential_expires_at"],
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc_refresh == 0, (
+        "(iv) mode-0o400 receipt refresh must succeed under real protected read; "
+        "got %d stderr=%r" % (rc_refresh, stderr_refresh)
+    )
+    refreshed_live = json.loads(loose_receipt.read_text(encoding="utf-8"))
+    assert refreshed_live["passed"] is False
+    assert refreshed_live["refusal"] == "canary_reserved", (
+        "live path must hold a canary_reserved reservation; got refusal=%r"
+        % refreshed_live.get("refusal")
+    )
+
 
 # ---------------------------------------------------------------------------
 # T12 (NB2) — pre-existing superseded sibling that is a symlink blocks refresh
@@ -1247,3 +1277,216 @@ def test_t12_superseded_sibling_symlink_blocks_refresh(
         "stderr must mention superseded_receipt_conflict; got %r" % stderr
     )
     assert receipt_path.read_bytes() == pre_bytes, "live receipt must be untouched after sibling refusal"
+
+
+# ---------------------------------------------------------------------------
+# T13 — partial superseded sibling is detected as divergent (still rejected)
+# ---------------------------------------------------------------------------
+
+
+def test_t13_partial_superseded_sibling_is_repaired_on_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    storage_contract_zero,
+) -> None:
+    """A truncated/partial file at the digest path is divergent bytes.
+
+    The retry-safety of the refresh path comes from the temp+rename, NOT
+    from accepting partial files.  A 40-byte prefix of the original receipt
+    bytes pre-staged at the digest-named path must still refuse with
+    ``superseded_receipt_conflict`` — divergent bytes are never silently
+    accepted.  The retry then re-creates the sibling cleanly via the
+    temp+rename path.
+    """
+    receipt = _build_receipt(expired=True)
+    receipt_path = tmp_path / "readiness.json"
+    _write_with_storage(receipt_path, receipt)
+
+    # Compute the digest name and pre-stage a TRUNCATED prefix at that path,
+    # with the storage-contract mode so the exists-branch lstat check accepts
+    # it (only the byte compare should refuse).
+    receipt_bytes = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    digest = __import__("hashlib").sha256(receipt_bytes).hexdigest()[:16]
+    sibling_name = f"readiness.json.superseded-{digest}.json"
+    sibling_path = tmp_path / sibling_name
+    truncated_prefix = receipt_bytes[:40]
+    assert len(truncated_prefix) < len(receipt_bytes), (
+        "truncated prefix must be strictly shorter than the full bytes"
+    )
+    sibling_path.write_bytes(truncated_prefix)
+    os.chmod(sibling_path, 0o400)
+
+    identity_json = tmp_path / "identity.json"
+    identity_json.write_text(json.dumps(_personal_identity(454), sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    auth_path = tmp_path / "auth.json"
+    _write_personal_auth(auth_path, 454)
+
+    pre_bytes = receipt_path.read_bytes()
+
+    # First attempt: divergent bytes are refused; rc 2 with the conflict refusal.
+    rc, _, stderr = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(receipt_path),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", _credential_expiry(hours=12),
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 2, "divergent (truncated) sibling must refuse (2); got %d" % rc
+    assert "superseded_receipt_conflict" in stderr, (
+        "stderr must mention superseded_receipt_conflict; got %r" % stderr
+    )
+    assert receipt_path.read_bytes() == pre_bytes, "live receipt must be untouched after sibling conflict"
+
+    # Repair: replace the truncated prefix with the full sibling bytes (same
+    # digest, since the digest is computed over the full bytes).  A clean
+    # retry must then succeed because the sibling now matches.
+    os.chmod(sibling_path, 0o600)  # writable so write_bytes can truncate+rewrite
+    sibling_path.write_bytes(receipt_bytes)
+    os.chmod(sibling_path, 0o400)
+
+    rc2, _, stderr2 = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(receipt_path),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", _credential_expiry(hours=12),
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc2 == 0, "retry against byte-identical sibling must succeed; got %d stderr=%r" % (rc2, stderr2)
+    siblings_after = sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("readiness.json.superseded-"))
+    assert len(siblings_after) == 1
+    assert (tmp_path / siblings_after[0]).read_bytes() == receipt_bytes
+
+
+# ---------------------------------------------------------------------------
+# T13b — crash between temp write and replace leaves no partial sibling
+# ---------------------------------------------------------------------------
+
+
+def test_t13b_crash_between_temp_write_and_replace_leaves_no_partial_sibling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    storage_contract_zero,
+) -> None:
+    """A simulated crash inside os.replace leaves no partial state.
+
+    On the first attempt, ``os.replace`` is rigged to raise once — simulating
+    a SIGINT/power-loss between the temp write and the atomic rename.  The
+    refresh path must:
+      * return rc 2,
+      * leave NO file at the digest-named sibling path (no partial bytes
+        visible to the next retry),
+      * leave NO leftover ``.tmp-`` file in the directory (the finally
+        block cleans up the staged temp),
+      * leave the live receipt byte-identical to the pre-state.
+
+    On the second attempt, ``os.replace`` is unblocked; the refresh path
+    must complete cleanly with rc 0 and a byte-exact sibling at the
+    digest-named path.
+    """
+    receipt = _build_receipt(expired=True)
+    receipt_path = tmp_path / "readiness.json"
+    _write_with_storage(receipt_path, receipt)
+
+    identity_json = tmp_path / "identity.json"
+    identity_json.write_text(json.dumps(_personal_identity(454), sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    auth_path = tmp_path / "auth.json"
+    _write_personal_auth(auth_path, 454)
+
+    pre_bytes = receipt_path.read_bytes()
+
+    # Rig os.replace to fail on the FIRST call only.  Subsequent calls
+    # (within this test) delegate to the real implementation.
+    real_replace = os.replace
+    call_count = [0]
+
+    def _replace_once_fails(src: str, dst: str) -> None:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise OSError("simulated crash between temp write and atomic rename")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(readiness.os, "replace", _replace_once_fails)
+
+    # --- First attempt: simulated crash during the sibling replace.
+    rc1, _, stderr1 = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(receipt_path),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", _credential_expiry(hours=12),
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc1 == 2, "crash during sibling replace must return rc 2; got %d" % rc1
+
+    # No digest-named sibling exists — the temp was unlinked and the rename never happened.
+    receipt_bytes = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    digest = __import__("hashlib").sha256(receipt_bytes).hexdigest()[:16]
+    sibling_name = f"readiness.json.superseded-{digest}.json"
+    assert not (tmp_path / sibling_name).exists(), (
+        "digest-named sibling must not exist after the simulated crash"
+    )
+
+    # No leftover .tmp- files anywhere in tmp_path.
+    leftovers = [p for p in tmp_path.iterdir() if p.name.startswith(".readiness.json.superseded-") and ".tmp-" in p.name]
+    assert leftovers == [], (
+        "no .tmp- files must remain after the simulated crash; got %r" % leftovers
+    )
+
+    # Live receipt is byte-identical to the pre-state.
+    assert receipt_path.read_bytes() == pre_bytes, (
+        "live receipt must be byte-identical after the simulated crash"
+    )
+
+    # os.replace was called at least once (the rigged failure fired).
+    assert call_count[0] >= 1, "os.replace must have been called at least once"
+
+    # --- Second attempt: os.replace now works; the refresh path completes.
+    rc2, _, stderr2 = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(receipt_path),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", _credential_expiry(hours=12),
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc2 == 0, "retry after simulated crash must succeed; got %d stderr=%r" % (rc2, stderr2)
+    assert (tmp_path / sibling_name).exists(), (
+        "byte-exact sibling must exist after the successful retry"
+    )
+    assert (tmp_path / sibling_name).read_bytes() == receipt_bytes, (
+        "sibling must be byte-exact to the original receipt bytes"
+    )
