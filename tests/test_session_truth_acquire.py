@@ -296,6 +296,117 @@ def test_collect_agentos_refuses_mixed_source_when_macro_moves_during_full_read(
     }
 
 
+def test_collect_agentos_allows_unrelated_worktree_dirt(tmp_path):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path)
+    unrelated = macro / "notes" / "scratch.txt"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_text("unrelated local work\n", encoding="utf-8")
+
+    got = module.collect_agentos(
+        os.fspath(macro),
+        ["WS:TARGET"],
+        environ={},
+        now="2026-08-27T05:00:00Z",
+        timeout=5,
+    )
+
+    assert got["available"] is True
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "contents"),
+    [
+        ("agentos/workstreams/WS-DIRTY.md", "---\nkey: DIRTY\n---\n"),
+        ("scripts/agentos.py", "# locally modified canonical Agent OS compiler\n"),
+        ("scripts/audit_stranded_work.py", "# locally modified status helper\n"),
+        ("config/mastermind_programs.yml", "schema: mastermind_programs.v1\n"),
+    ],
+)
+def test_collect_agentos_refuses_dirty_canonical_source_paths(
+    tmp_path, relative_path, contents
+):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path)
+    target = macro / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.write_text(target.read_text(encoding="utf-8") + contents, encoding="utf-8")
+    else:
+        target.write_text(contents, encoding="utf-8")
+
+    got = module.collect_agentos(
+        os.fspath(macro),
+        ["WS:TARGET"],
+        environ={},
+        now=None,
+        timeout=5,
+    )
+
+    assert got == {
+        "available": False,
+        "reason": "AGENTOS_SOURCE_WORKTREE_DIRTY",
+        "contexts": [],
+    }
+
+
+def test_collect_agentos_refuses_relevant_dirt_created_during_read(
+    tmp_path, monkeypatch
+):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path)
+    original = module._run_agentos
+    calls = 0
+
+    def mutate_after_first_read(macro_root, args, *, timeout):
+        nonlocal calls
+        result = original(macro_root, args, timeout=timeout)
+        calls += 1
+        if calls == 1:
+            record = macro / "agentos" / "workstreams" / "WS-RACE.md"
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text("---\nkey: RACE\n---\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(module, "_run_agentos", mutate_after_first_read)
+
+    got = module.collect_agentos(
+        os.fspath(macro),
+        ["WS:TARGET"],
+        environ={},
+        now=None,
+        timeout=5,
+    )
+
+    assert got == {
+        "available": False,
+        "reason": "AGENTOS_SOURCE_WORKTREE_DIRTY",
+        "contexts": [],
+    }
+
+
+def test_collect_agentos_refuses_when_canonical_source_status_is_unavailable(
+    tmp_path, monkeypatch
+):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path)
+    monkeypatch.setattr(module, "_canonical_agentos_worktree_clean", lambda _root: None)
+
+    got = module.collect_agentos(
+        os.fspath(macro),
+        ["WS:TARGET"],
+        environ={},
+        now=None,
+        timeout=5,
+    )
+
+    assert got == {
+        "available": False,
+        "reason": "AGENTOS_SOURCE_WORKTREE_STATUS_UNAVAILABLE",
+        "contexts": [],
+    }
+
+
 def test_collect_agentos_status_timeout_is_typed_and_bounded(tmp_path):
     module = _acquire()
     macro = _macro_fixture(tmp_path, status_delay=5.0)
