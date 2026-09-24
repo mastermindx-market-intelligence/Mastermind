@@ -15,9 +15,10 @@ is already resolved, so the fixture in
 """
 from control_plane import executive_runtime as er
 from control_plane.workspace_read_service import WorkspaceReadService
-from tests.test_workspace_source_join import intent, actual
+from tests.test_workspace_source_join import intent, actual  # noqa: F401  (pytest fixture, resolved from module globals)
 from tests.test_workspace_read_service import cache_fixture, frame, run
 import pytest
+import re  # noqa: E402  (kept here so the events-guard regex stays near its use site)
 
 
 def _service(cache, writer, bound, *, armed=None, runtime_identity=None):
@@ -33,7 +34,8 @@ def _service(cache, writer, bound, *, armed=None, runtime_identity=None):
                                                 "source": "control.json"},
         runtime_identity=runtime_identity if runtime_identity is not None else {
             "root": None, "db_present": True, "identity": None},
-        bounded_runtime=lambda r: bound(),
+        bounded_runtime=lambda r: bound() if r is writer else pytest.fail(
+            "bounded_runtime received the wrong runtime"),
     )
 
 
@@ -67,7 +69,8 @@ def test_work_read_over_actual_bound_runtime_is_available(actual, tmp_path):
     # Source observation: SAME on both halves of the receipt.
     assert body["source_observation"]["state"] == "SAME"
     assert body["source_observation"]["runtime"]["state"] == "SAME"
-    # Lifecycle source: degraded list is the producer's notes, in order.
+    # Lifecycle source: degraded list is sorted by the producer
+    # (``sorted(set(notes))`` in ``_root_list_v2_document``).
     assert body["lifecycle_source"]["degraded"] == [_UNARMED_ENTRY_V2,
                                                     _ROOT_ENUMERATION_NOTE]
     # Acquisition provenance: PARTIAL with the submitted job unjoined.
@@ -123,10 +126,12 @@ def test_work_read_is_bounded_and_never_reads_creation_events(actual, tmp_path,
     assert response["ok"] is True
     assert body["availability"] == "AVAILABLE"
     # No unbounded Event/creation reads (the enumeration path excludes them
-    # by design — see ``list_roots_v2_from_runtime`` docstring).
-    assert not any("FROM events" in s for s in traces)
-    # The bounded read DID read from the jobs registry.
-    assert any("FROM jobs" in s for s in traces)
+    # by design — see ``list_roots_v2_from_runtime`` docstring). Match
+    # case-insensitively and on a word boundary so an ``ORDER BY`` or
+    # column-alias leak doesn't slip through the substring check.
+    assert not any(re.search(r"\bevents\b", s, re.IGNORECASE) for s in traces)
+    # The bounded read DID read from the jobs registry (case-insensitive).
+    assert any(re.search(r"\bFROM jobs\b", s, re.IGNORECASE) for s in traces)
 
 
 def test_work_read_refuses_when_binding_invalidated(tmp_path, monkeypatch):
@@ -194,7 +199,7 @@ def test_work_read_two_roots_are_sorted_and_counted(actual, tmp_path):
     from control_plane.work_queue_projection import WORK_QUEUE_SCHEMA
     writer, bound, namespace, first = actual
     from control_plane.ceo_intent import submit_intent
-    second = submit_intent(writer, intent(2))["job_id"]
+    second = submit_intent(writer, intent(2, workstream="WS:TWO"))["job_id"]
     _, _, cache = cache_fixture(tmp_path / "cache")
     service = _service(cache, writer, bound)
     response = run(service, frame("work"))
@@ -212,11 +217,12 @@ def test_work_read_two_roots_are_sorted_and_counted(actual, tmp_path):
     ids = [row["root_job_id"] for row in queued]
     assert ids == sorted(ids)
     assert set(ids) == {first, second}
-    # Unjoined_job_ids lists BOTH jobs (producer surfaces them in
-    # insertion order; we assert membership to tolerate reorder).
+    # Unjoined_job_ids sorted by the producer (``sorted(included)`` in
+    # ``_root_list_v2_document``); the workstream on the second intent
+    # differs but does not affect the root enumeration path.
     provenance = body["lifecycle_source"]["runtime"]["acquisition"]["provenance"]
     assert provenance["state"] == "PARTIAL"
-    assert set(provenance["unjoined_job_ids"]) == {first, second}
+    assert provenance["unjoined_job_ids"] == sorted([first, second])
     # Namespace custody closed.
     assert namespace.entries == namespace.exits == 1
     assert namespace.active is False
