@@ -266,3 +266,39 @@ past the first source slice, preserve exact commits, test/browser scope and curr
 blockers in the PR and existing Agent OS. Continue from the latest verified effect,
 not this session's transcript. Do not self-expand the execution envelope or treat
 this engineering delegation as an unlimited autonomous spend/deploy mandate.
+
+## Coverage-nudge repair continuation (2026-09-24)
+
+Current protected procedure: `4fe4d25e3ee268e24162f33c35d176ebf9ab02e6`.
+Review 5300666596 on `8d439a1fb8b95c967817e4e4588b2ced3ac12ffb` found
+4090627665: incomplete owner coverage could still become a ranked nudge through
+the legacy detector. This is a real release blocker, accepted and repaired on the
+same carrier. The read-only review child was terminally stopped in comment
+5809212772 and its one temporary observer disabled. No successor is implied.
+
+Eight defect-specific cases failed before the fix (plus one passing complete-input
+control). One predicate now requires an exact true completeness flag for BOTH
+nudge emission and registry resolution. An incomplete low/high rate cannot raise,
+refresh or resolve a coverage nudge. Existing registry history and unrelated
+staleness diagnostics remain intact. Source repair:
+`c9879aadd61b52f042effce3d84d1e7a5b264da9`.
+
+The actual failed hosted run 35964567379 had two additional CI causes. Its missing
+input fixture inherited a real persisted report; the fixture now explicitly
+supplies an empty owner without weakening the production read. Its proof command
+was misread as an identity literal in a generic JSON path; the unchanged proof was
+moved to the ALREADY SUPPORTED structural evidence namespace:
+`research/evidence/improvement_discovery/OWNER_INPUT_PROOF_2026-09-24.json`.
+No identity guard, allowlist or proof command was weakened or obfuscated.
+
+Current proof is `research/evidence/improvement_discovery/NUDGE_REPAIR_PROOF_2026-09-24.json`:
+276 focused tests, six isolated Agenda tests (a subset, not extra distinct coverage),
+and 142 existing composition/identity tests pass. All are local; hosted qualification
+and independent review bind the final published head separately. Previous browser
+proof is not relabelled as a new browser or deployed result.
+
+Next: publish the same clean candidate, obtain exact-head independent review and
+hosted CI, then qualify current-base release through the existing owner. Actual
+model-generated alternatives, prospective evaluation, a bounded admitted evidence
+sprint, production-path usefulness and outcome learning remain the parent mission.
+Do not apply the older chat-local GMI patch over this newer default owner-feed code.
