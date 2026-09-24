@@ -353,6 +353,20 @@ def collect_agentos(
         _validate_context(context, workstream)
         contexts.append(context)
 
+    final_source_sha = git_sha(macro_root)
+    if final_source_sha is None:
+        return {
+            "available": False,
+            "reason": "AGENTOS_SOURCE_SHA_UNAVAILABLE",
+            "contexts": [],
+        }
+    if final_source_sha != source_sha:
+        return {
+            "available": False,
+            "reason": "AGENTOS_SOURCE_MOVED_DURING_READ",
+            "contexts": [],
+        }
+
     return {
         "available": True,
         "source_sha": source_sha,

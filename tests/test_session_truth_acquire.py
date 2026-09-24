@@ -235,6 +235,67 @@ def test_collect_agentos_allows_slow_status_within_explicit_test_budget(tmp_path
     assert got["contexts"][0]["target"]["workstream"] == "WS:TARGET"
 
 
+def test_collect_agentos_refuses_mixed_source_when_macro_moves_during_full_read(
+    tmp_path, monkeypatch
+):
+    module = _acquire()
+    macro = _macro_fixture(tmp_path)
+    before_sha = "a" * 40
+    after_sha = "b" * 40
+    sha_reads = []
+    agentos_calls = []
+
+    def fake_git_sha(root):
+        assert root == macro
+        sha_reads.append(root)
+        return before_sha if len(sha_reads) == 1 else after_sha
+
+    def fake_run_agentos(macro_root, args, *, timeout):
+        assert macro_root == macro
+        assert timeout == 5
+        agentos_calls.append(list(args))
+        if args[0] == "status":
+            return json.dumps(
+                {
+                    "schema": "agent_os_state.v1",
+                    "workstreams": [
+                        {"key": "TARGET"},
+                        {"key": "SECOND"},
+                    ],
+                }
+            )
+        workstream = args[args.index("--workstream") + 1]
+        return json.dumps(
+            {
+                "schema": "context_bundle.v1",
+                "target": {"workstream": "WS:" + workstream},
+            }
+        )
+
+    monkeypatch.setattr(module, "git_sha", fake_git_sha)
+    monkeypatch.setattr(module, "_run_agentos", fake_run_agentos)
+
+    got = module.collect_agentos(
+        os.fspath(macro),
+        ["WS:TARGET", "WS:SECOND"],
+        environ={},
+        now=None,
+        timeout=5,
+    )
+
+    assert agentos_calls == [
+        ["status", "--dry-run"],
+        ["compile-context", "--workstream", "TARGET"],
+        ["compile-context", "--workstream", "SECOND"],
+    ]
+    assert len(sha_reads) == 2
+    assert got == {
+        "available": False,
+        "reason": "AGENTOS_SOURCE_MOVED_DURING_READ",
+        "contexts": [],
+    }
+
+
 def test_collect_agentos_status_timeout_is_typed_and_bounded(tmp_path):
     module = _acquire()
     macro = _macro_fixture(tmp_path, status_delay=5.0)
