@@ -37,6 +37,11 @@ def report():
     }
 
 
+def patch_reasoner(monkeypatch, reasoner):
+    from brain import cli_bridge
+    monkeypatch.setattr(cli_bridge, "reason_sync", reasoner)
+
+
 def response(*, action="READ_ONLY_RESEARCH", evidence=None):
     return {
         "schema": C.DRAFT_SCHEMA,
@@ -55,7 +60,7 @@ def response(*, action="READ_ONLY_RESEARCH", evidence=None):
     }
 
 
-def test_draft_uses_one_no_tools_no_log_turn_and_keeps_advisory_boundary():
+def test_draft_uses_one_no_tools_no_log_turn_and_keeps_advisory_boundary(monkeypatch):
     calls = []
 
     def reasoner(prompt, **kwargs):
@@ -69,7 +74,7 @@ def test_draft_uses_one_no_tools_no_log_turn_and_keeps_advisory_boundary():
             "model": "fake-model",
         }
 
-    draft = C._draft_with_reasoner(report(), reasoner=reasoner)
+    patch_reasoner(monkeypatch, reasoner)\n    draft = C.draft_proposals(report())
 
     assert len(calls) == 1
     prompt, kwargs = calls[0]
@@ -91,15 +96,15 @@ def test_draft_uses_one_no_tools_no_log_turn_and_keeps_advisory_boundary():
     "PRODUCTION_DEPLOY",
     "LIVE_CAPITAL_EXECUTION",
 ])
-def test_effectful_next_action_is_refused(action):
+def test_effectful_next_action_is_refused(monkeypatch, action):
     def reasoner(prompt, **kwargs):
         return {"ok": True, "text": json.dumps(response(action=action)), "tools_used": []}
 
-    with pytest.raises(ValueError, match="effectful_next_action_refused"):
-        C._draft_with_reasoner(report(), reasoner=reasoner)
+    patch_reasoner(monkeypatch, reasoner)\n    with pytest.raises(ValueError, match="effectful_next_action_refused"):
+        C.draft_proposals(report())
 
 
-def test_unknown_evidence_reference_is_refused():
+def test_unknown_evidence_reference_is_refused(monkeypatch):
     def reasoner(prompt, **kwargs):
         return {
             "ok": True,
@@ -107,11 +112,11 @@ def test_unknown_evidence_reference_is_refused():
             "tools_used": [],
         }
 
-    with pytest.raises(ValueError, match="uncited_or_unknown_evidence"):
-        C._draft_with_reasoner(report(), reasoner=reasoner)
+    patch_reasoner(monkeypatch, reasoner)\n    with pytest.raises(ValueError, match="uncited_or_unknown_evidence"):
+        C.draft_proposals(report())
 
 
-def test_provider_tool_use_is_refused_even_when_json_is_valid():
+def test_provider_tool_use_is_refused_even_when_json_is_valid(monkeypatch):
     def reasoner(prompt, **kwargs):
         return {
             "ok": True,
@@ -119,11 +124,11 @@ def test_provider_tool_use_is_refused_even_when_json_is_valid():
             "tools_used": ["Read"],
         }
 
-    with pytest.raises(ValueError, match="proposal_provider_tool_proof_required"):
-        C._draft_with_reasoner(report(), reasoner=reasoner)
+    patch_reasoner(monkeypatch, reasoner)\n    with pytest.raises(ValueError, match="proposal_provider_tool_proof_required"):
+        C.draft_proposals(report())
 
 
-def test_output_must_be_plain_json_not_wrapped_text():
+def test_output_must_be_plain_json_not_wrapped_text(monkeypatch):
     def reasoner(prompt, **kwargs):
         return {
             "ok": True,
@@ -131,8 +136,8 @@ def test_output_must_be_plain_json_not_wrapped_text():
             "tools_used": [],
         }
 
-    with pytest.raises(ValueError, match="provider_json_required"):
-        C._draft_with_reasoner(report(), reasoner=reasoner)
+    patch_reasoner(monkeypatch, reasoner)\n    with pytest.raises(ValueError, match="provider_json_required"):
+        C.draft_proposals(report())
 
 
 def test_empty_grounded_report_does_not_call_provider():
@@ -140,19 +145,16 @@ def test_empty_grounded_report_does_not_call_provider():
     item["opportunities"] = []
     item["hypotheses"] = []
 
-    def forbidden(*args, **kwargs):
-        raise AssertionError("provider must not be called")
-
     draft = C.draft_proposals(item)
     assert draft["proposals"] == []
     assert draft["provider"] is None
 
 
-def test_evaluation_packet_exposes_ids_and_digest_not_private_prose():
+def test_evaluation_packet_exposes_ids_and_digest_not_private_prose(monkeypatch):
     def reasoner(prompt, **kwargs):
         return {"ok": True, "text": json.dumps(response()), "tools_used": []}
 
-    draft = C._draft_with_reasoner(report(), reasoner=reasoner)
+    patch_reasoner(monkeypatch, reasoner)\n    draft = C.draft_proposals(report())
     packet = C.evaluation_packet(draft)
     encoded = json.dumps(packet, sort_keys=True)
     assert packet["proposal_ids"] == ["PROP.REUSE.001"]
