@@ -62,6 +62,18 @@ def _evidence_packet(report: Any) -> dict:
     digest = report.get("digest")
     if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
         raise ValueError("discovery_digest_required")
+    try:
+        digest_payload = json.dumps(
+            {key: value for key, value in report.items() if key != "digest"},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid_discovery_report") from exc
+    computed_digest = "sha256:" + hashlib.sha256(digest_payload.encode()).hexdigest()
+    if digest != computed_digest:
+        raise ValueError("discovery_digest_mismatch")
     if report.get("execution_authority_granted") is not False or report.get("jobs_created") != 0:
         raise ValueError("effectful_discovery_report_refused")
     if report.get("independent_discovery_proven") is not False:
@@ -220,15 +232,11 @@ def draft_proposals(report: Any) -> dict:
     # Use an empty ephemeral cwd so this turn is bound to the frozen packet rather than
     # repository CLAUDE.md/skills. Codex's prompt-only path independently re-isolates cwd.
     with tempfile.TemporaryDirectory(prefix="mastermind-improvement-cognition-") as isolated_cwd:
-        result = cli_bridge.reason_sync(
+        result = cli_bridge.reason_private_ephemeral_sync(
             _prompt(packet),
             role="deep",
-            arm=False,
-            allowed_tools=[],
-            add_dirs=[],
             max_turns=1,
             cwd=isolated_cwd,
-            log_run=False,
         )
     if not isinstance(result, dict) or not result.get("ok") or not result.get("text"):
         raise ValueError("proposal_provider_unavailable")
