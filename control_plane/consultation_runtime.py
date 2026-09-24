@@ -26,9 +26,14 @@ from control_plane.executive_runtime import (
 )
 from control_plane.dialogue_source_resolution import (
     ConsultationSourceIdentity,
+    RequesterAnswerAvailableSourceIdentity,
     peer_attention_source_ref,
+    requester_answer_attention_source_ref,
 )
-from control_plane.runtime_binding_projection import project_runtime_binding
+from control_plane.runtime_binding_projection import (
+    project_runtime_binding,
+    reasoning_surface_for_provider,
+)
 from control_plane.session_targets import RuntimeBinding, SessionTarget
 from control_plane.wake_ledger import (
     LedgerPhase,
@@ -39,13 +44,14 @@ from control_plane.wake_ledger import (
 from control_plane.wake_events import (
     SourceKind,
     WakeKind,
+    WakeObligation,
     mint_obligation,
     utc_now_iso,
 )
 from control_plane.wake_persist import WakeLedgerRepository
 
 
-CONSULTATION_INTENT_SCHEMA = "mastermind.consultation_intent/v1"
+CONSULTATION_INTENT_SCHEMA = "mastermind.consultation_intent/v2"
 CONSULTATION_RECEIPT_SCHEMA = "mastermind.consultation_receipt/v1"
 CONSULTATION_RECEIPT_EVENTS = (
     "INTENT",
@@ -67,6 +73,14 @@ class ConsultationConflict(StateConflict):
 class ConsultationEventResult:
     event: Event
     inserted: bool
+
+
+@dataclass(frozen=True)
+class RequesterAnswerAttentionProjection:
+    identity: RequesterAnswerAvailableSourceIdentity
+    target: SessionTarget
+    binding: RuntimeBinding
+    obligation: WakeObligation
 
 
 @dataclass(frozen=True)
@@ -132,6 +146,7 @@ def _question_message_key(item: Mapping[str, Any]) -> str:
 def _consultation_intent_payload(
     item: Mapping[str, Any],
     *,
+    requester_binding: Mapping[str, Any],
     carrier_ref: str,
     trusted_observed_at: str,
 ) -> dict[str, Any]:
@@ -143,6 +158,7 @@ def _consultation_intent_payload(
         "semantic_fingerprint": item["fingerprint"],
         "carrier_ref": str(carrier_ref),
         "requester_actor_ref": copy.deepcopy(item["requester_actor_ref"]),
+        "requester_binding": copy.deepcopy(dict(requester_binding)),
         "recipient_actor_ref": copy.deepcopy(item["recipient_actor_ref"]),
         "recipient_peer_ref": copy.deepcopy(item["recipient_peer_ref"]),
         "recipient_binding": copy.deepcopy(item["recipient_binding"]),
@@ -236,19 +252,33 @@ class ConsultationRuntime:
             self._context, consultation_id=item["consultation_id"]
         )
         self._validate_artifact_revisions(item, repository_root)
-        self._require_requester(item, requester_attempt_id)
-        self._require_current_recipient(item)
-        payload = _consultation_intent_payload(
-            item,
-            carrier_ref=carrier_ref,
-            trusted_observed_at=trusted_observed_at,
-        )
-        return self._append(
-            item,
-            "INTENT",
-            payload,
-            actor="requester-runtime",
-        )
+        with self.runtime.store.transaction() as connection:
+            self._require_requester_on_connection(
+                item, requester_attempt_id, connection
+            )
+            _requester_target, requester_binding = (
+                self._requester_target_and_binding_on_connection(
+                    requester_attempt_id, connection
+                )
+            )
+            self._require_current_recipient(item, connection=connection)
+            payload = _consultation_intent_payload(
+                item,
+                requester_binding={
+                    "binding_id": requester_binding.binding_id,
+                    "binding_generation": requester_binding.binding_generation,
+                    "reasoning_surface": requester_binding.reasoning_surface,
+                },
+                carrier_ref=carrier_ref,
+                trusted_observed_at=trusted_observed_at,
+            )
+            return self._append_on_connection(
+                item,
+                "INTENT",
+                payload,
+                actor="requester-runtime",
+                connection=connection,
+            )
 
 
     def answer_available(
@@ -424,6 +454,110 @@ class ConsultationRuntime:
             "supersedes_message_key": item["supersedes_message_key"],
             "observed_at": _utc(observed_at),
         }
+
+    def requester_answer_attention(
+        self,
+        frame: Mapping[str, Any],
+        *,
+        requester_attempt_id: str,
+    ) -> RequesterAnswerAttentionProjection:
+        """Project one requester-directed answer obligation without writing state."""
+
+        item = validate_consultation(frame)
+        if item["purpose"] not in {"ANSWER", "CORRECTION"}:
+            raise StateConflict(
+                "requester answer attention requires an ANSWER frame"
+            )
+        _require_normalized(item)
+        with self.runtime.store.read() as connection:
+            request = self._request_for_answer_on_connection(item, connection)
+            if item["requester_actor_ref"] != request["requester_actor_ref"]:
+                raise StateConflict("answer requester actor drifted")
+            if item["recipient_actor_ref"] != request["recipient_actor_ref"]:
+                raise StateConflict("answer recipient actor drifted")
+            if item["recipient_binding"] != request["recipient_binding"]:
+                raise StateConflict("answer recipient binding drifted")
+            if item["recipient_peer_ref"] != request["recipient_peer_ref"]:
+                raise StateConflict("answer recipient peer drifted")
+            if item["correlation"] != request["correlation"]:
+                raise StateConflict("answer correlation drifted")
+            if _question_message_key(item) != request["message_key"]:
+                raise StateConflict("answer request identity drifted")
+            if self._artifact_digest(item) != self._artifact_digest(request):
+                raise StateConflict("answer evidence revisions drifted")
+            self._require_requester_on_connection(
+                request, requester_attempt_id, connection
+            )
+            semantic_digest = _semantic_answer_digest(item)
+            evidence_digest = self._artifact_digest(item)
+            answers = tuple(
+                event
+                for event in self._events_on_connection(item, connection)
+                if event.event_type == "ANSWER_AVAILABLE"
+                and event.payload.get("message_key") == item["message_key"]
+                and event.payload.get("answer_fingerprint") == item["fingerprint"]
+                and event.payload.get("semantic_answer_digest") == semantic_digest
+                and event.payload.get("evidence_revision_digest") == evidence_digest
+            )
+            if len(answers) != 1:
+                raise StateConflict(
+                    "requester answer attention requires one exact admitted answer"
+                )
+            answer = answers[0]
+            if answer.payload.get("historical") is True:
+                raise ConsultationConflict(
+                    "historical answer cannot request current attention",
+                    conflict="HISTORICAL_ANSWER",
+                )
+
+            target, binding = self._requester_target_and_binding_on_connection(
+                requester_attempt_id, connection
+            )
+            frozen_binding = request.get("requester_binding")
+            if (
+                not isinstance(frozen_binding, Mapping)
+                or set(frozen_binding)
+                != {"binding_id", "binding_generation", "reasoning_surface"}
+                or frozen_binding["binding_id"] != binding.binding_id
+                or frozen_binding["binding_generation"]
+                != binding.binding_generation
+                or frozen_binding["reasoning_surface"]
+                != binding.reasoning_surface
+            ):
+                raise StateConflict("original requester binding is stale")
+            surface = str(frozen_binding["reasoning_surface"])
+            root_job_id = self._root_job_id_on_connection(
+                requester_attempt_id, connection
+            )
+            identity = RequesterAnswerAvailableSourceIdentity.create(
+                consultation_id=item["consultation_id"],
+                answer_message_key=item["message_key"],
+                answer_fingerprint=item["fingerprint"],
+                semantic_answer_digest=semantic_digest,
+                root_job_id=root_job_id,
+                requester_job_id=request["requester_actor_ref"]["job_id"],
+                requester_attempt_id=requester_attempt_id,
+                requester_binding_id=str(frozen_binding["binding_id"]),
+                requester_binding_generation=int(
+                    frozen_binding["binding_generation"]
+                ),
+                requester_reasoning_surface=surface,
+            )
+            obligation = mint_obligation(
+                wake_kind=WakeKind.CONSULTATION_ANSWER_AVAILABLE,
+                source_kind=SourceKind.CONSULTATION_ANSWER_ATTENTION,
+                source_ref=requester_answer_attention_source_ref(identity),
+                declared_target_seat=target.target_seat,
+                job_id=identity.requester_job_id,
+                attempt_id=identity.requester_attempt_id,
+                root_job_id=identity.root_job_id,
+            )
+            return RequesterAnswerAttentionProjection(
+                identity=identity,
+                target=target,
+                binding=binding,
+                obligation=obligation,
+            )
 
     def consumed_by_requester(
         self,
@@ -695,6 +829,35 @@ class ConsultationRuntime:
         ):
             raise StateConflict("requester actor is not Runtime-bound")
 
+    def _requester_target_and_binding_on_connection(
+        self,
+        requester_attempt_id: str,
+        connection: sqlite3.Connection,
+    ) -> tuple[SessionTarget, RuntimeBinding]:
+        facts = self.runtime.current_harness_binding_source(
+            requester_attempt_id, connection=connection
+        )
+        surface = reasoning_surface_for_provider(facts.provider)
+        if surface != "codex":
+            raise StateConflict(
+                "requester answer attention transport is unavailable"
+            )
+        target = SessionTarget(
+            session_alias="CONSULTATION-REQUESTER",
+            target_seat=facts.owner_seat,
+            reasoning_surface=surface,
+            wake_transport="codex-app-server",
+            allowed_transports=("codex-app-server",),
+            workstream=None,
+            target_enabled=True,
+        )
+        return target, project_runtime_binding(
+            self.runtime,
+            requester_attempt_id,
+            target,
+            connection=connection,
+        )
+
     def _require_current_recipient(
         self,
         item: Mapping[str, Any],
@@ -913,11 +1076,22 @@ class ConsultationRuntime:
 
     def _intent_from_event(self, event: Event) -> Mapping[str, Any]:
         payload = event.payload
+        requester_binding = payload.get("requester_binding")
+        if (
+            payload.get("schema_version") != CONSULTATION_INTENT_SCHEMA
+            or not isinstance(requester_binding, Mapping)
+            or set(requester_binding)
+            != {"binding_id", "binding_generation", "reasoning_surface"}
+        ):
+            raise StateConflict(
+                "consultation INTENT lacks immutable requester binding"
+            )
         return {
             "message_key": payload["message_key"],
             "consultation_id": payload["consultation_id"],
             "fingerprint": payload["semantic_fingerprint"],
             "requester_actor_ref": payload["requester_actor_ref"],
+            "requester_binding": copy.deepcopy(requester_binding),
             "recipient_actor_ref": payload["recipient_actor_ref"],
             "recipient_binding": payload["recipient_binding"],
             "recipient_peer_ref": payload["recipient_peer_ref"],

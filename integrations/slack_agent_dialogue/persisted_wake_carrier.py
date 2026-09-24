@@ -16,12 +16,14 @@ from control_plane.dialogue_wake_canary_activation import (
     effective_dialogue_wake_canary_route,
 )
 
+from control_plane.consultation_runtime import RequesterAnswerAttentionProjection
 from control_plane.executive_runtime import StateConflict
 from control_plane.dialogue_source_resolution import (
     ConsultationSourceIdentity,
     DialogueSourceObservation,
     PhysicalDialogueSourceIdentity,
     peer_attention_source_ref,
+    requester_answer_attention_source_ref,
 )
 from control_plane.session_targets import (
     RuntimeBinding,
@@ -569,6 +571,71 @@ def _canary_effective_route(
 
 
 @dataclasses.dataclass(frozen=True)
+class RequesterAnswerWakeExtension:
+    """Bind one Runtime-derived requester answer projection to Wake."""
+
+    repository: WakeLedgerRepository
+    projection: RequesterAnswerAttentionProjection
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.repository, WakeLedgerRepository):
+            raise TypeError("repository must be WakeLedgerRepository")
+        if not isinstance(self.projection, RequesterAnswerAttentionProjection):
+            raise TypeError("projection must be RequesterAnswerAttentionProjection")
+        identity = self.projection.identity
+        binding = self.projection.binding
+        target = self.projection.target
+        if (
+            binding.binding_id != identity.requester_binding_id
+            or binding.binding_generation != identity.requester_binding_generation
+            or binding.reasoning_surface != identity.requester_reasoning_surface
+        ):
+            raise StateConflict("requester answer binding identity drifted")
+        expected_transport = {"codex": "codex-app-server"}.get(
+            identity.requester_reasoning_surface
+        )
+        if (
+            expected_transport is None
+            or target.session_alias != "CONSULTATION-REQUESTER"
+            or binding.session_alias != target.session_alias
+            or target.reasoning_surface != identity.requester_reasoning_surface
+            or target.wake_transport != expected_transport
+            or target.allowed_transports != (expected_transport,)
+            or not target.target_enabled
+        ):
+            raise StateConflict("requester answer target route drifted")
+        from control_plane.wake_events import SourceKind, WakeKind, mint_obligation
+
+        expected = mint_obligation(
+            wake_kind=WakeKind.CONSULTATION_ANSWER_AVAILABLE,
+            source_kind=SourceKind.CONSULTATION_ANSWER_ATTENTION,
+            source_ref=requester_answer_attention_source_ref(identity),
+            declared_target_seat=target.target_seat,
+            job_id=identity.requester_job_id,
+            attempt_id=identity.requester_attempt_id,
+            root_job_id=identity.root_job_id,
+        )
+        if self.projection.obligation != expected:
+            raise StateConflict("requester answer obligation identity drifted")
+
+    def obligation(self) -> WakeObligation:
+        return self.projection.obligation
+
+    def current_binding_matches(self) -> bool:
+        obligation = self.obligation()
+        persisted = self.repository.list_records(obligation.obligation_id)
+        if not persisted:
+            raise StateConflict("requester answer Wake request is not persisted")
+        _assert_requested_replay(obligation, persisted, None)
+        expected_source = requester_answer_attention_source_ref(
+            self.projection.identity
+        )
+        if persisted[0].event.payload.get("source_ref") == expected_source:
+            return True
+        raise StateConflict("requester answer source identity drifted")
+
+
+@dataclasses.dataclass(frozen=True)
 class ConsultationWakeExtension:
     """Mint one peer consultation obligation through the existing Wake ledger."""
 
@@ -681,6 +748,7 @@ def _assert_current_binding(
 __all__ = [
     "CanaryWakeHistoryError",
     "ConsultationWakeExtension",
+    "RequesterAnswerWakeExtension",
     "HistoricalWakeContext",
     "PersistedWakeCarrier",
 ]
