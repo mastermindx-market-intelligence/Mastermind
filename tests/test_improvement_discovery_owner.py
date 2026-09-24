@@ -547,3 +547,26 @@ def test_zero_demand_cannot_falsely_resolve_prior_coverage_nudge(nudge_store):
     cov.update(subjects_n=0, open_theses_n=0, with_context_row_n=0, coverage_rate=None)
     assert N.derive_nudges([], cov, {}, "2026-09-24") == []
     assert json.loads(N._NUDGE_STATE.read_text())["codes"]["coverage_below_half"] == before
+
+
+@pytest.mark.parametrize("generated,expected", [
+    ("2026-09-24T07:00:00Z", False),
+    ("2026-09-23T23:30:00-02:00", False),
+    ("2026-09-23T23:59:59Z", True),
+    ("2026-09-24T01:30:00+02:00", True),
+])
+def test_historical_agenda_requires_generation_by_cutoff(
+        persisted_coverage_report, monkeypatch, tmp_path, generated, expected):
+    from brain import improvement_agenda as A
+    from brain import improvement_discovery_nw as D
+    rep = persisted_coverage_report
+    rep.update(asof="2026-09-23", generated_at=generated)
+    N._LATEST.write_text(json.dumps(rep))
+    monkeypatch.setattr(D, "_source_identity", lambda root: (SHA, "sha256:" + "b" * 64))
+    ids = {x["id"] for x in A._from_nw_reflection(date(2026, 9, 23))}
+    assert ("nw:coverage_below_half" in ids) is expected
+    projection = D.latest_agenda_projection(root=tmp_path, asof=date(2026, 9, 23), now=NOW)
+    assert (projection["state"] == "AVAILABLE") is expected
+    if not expected:
+        assert projection["reason_code"] == "POST_ASOF_OWNER_SNAPSHOT"
+    assert "nw:graph_conflicts_absent" in ids
