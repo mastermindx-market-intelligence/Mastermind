@@ -5377,3 +5377,166 @@ def test_wake_commit_with_unreadable_ledger_reports_unknown(tmp_path: Path) -> N
     assert replay["data"]["attention_requested"] is True
     assert replay["data"]["blocker"] is None
     assert _requested_count(runtime, consultation_id) == 1
+
+
+# --- N3 residual (Sol 5816592950): concurrent visible-packet / lost-response,
+# and the unavailable-derivation state ---
+
+
+class _VisibleThenLostPutCarrier(_CountingQuestionCarrier):
+    """TEST-ONLY carrier: the first ``put_question`` makes the packet
+    visible, runs a hook (a concurrent identical call), then raises as
+    if its own response were lost."""
+
+    def __init__(self, hook) -> None:
+        super().__init__()
+        self._hook = hook
+        self._hooked = False
+
+    def put_question(self, consultation_id, frame):
+        self.put_question_calls += 1
+        self._questions[consultation_id] = dict(frame)
+        if not self._hooked:
+            self._hooked = True
+            self._hook()
+            raise RuntimeError("synthetic lost put_question response")
+
+
+class _HookAfterPutCarrier(_CountingQuestionCarrier):
+    """TEST-ONLY carrier: a successful ``put_question`` then runs a hook
+    that changes Runtime state before the Wake recipe."""
+
+    def __init__(self, hook) -> None:
+        super().__init__()
+        self._hook = hook
+
+    def put_question(self, consultation_id, frame):
+        super().put_question(consultation_id, frame)
+        self._hook()
+
+
+def _release_writer_for_attempt(runtime: Runtime, attempt_id: str) -> None:
+    """Release the executive writer of the attempt's current process
+    generation so the Runtime no longer projects a current binding."""
+    with runtime.store.transaction() as connection:
+        row = connection.execute(
+            "SELECT g.process_generation_id FROM process_generations g "
+            "JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id "
+            "WHERE e.attempt_id=? ORDER BY g.generation_number DESC LIMIT 1",
+            (attempt_id,),
+        ).fetchone()
+        assert row is not None
+        connection.execute(
+            "UPDATE process_generations SET executive_writer_held=0 "
+            "WHERE process_generation_id=?",
+            (row["process_generation_id"],),
+        )
+
+
+def test_lost_put_response_after_concurrent_wake_reports_existing_request(
+    tmp_path: Path,
+) -> None:
+    """The initial put makes the exact QUESTION visible; before its
+    response returns, an identical concurrent call reads that packet and
+    records the single WAKE_REQUESTED; the initial put then raises. The
+    first caller must see ``attention_requested`` True (same-ledger
+    readback), not a hardcoded False; exactly one put, one INTENT, one
+    WAKE_REQUESTED; no resend."""
+    runtime = _runtime_at(tmp_path / "n3-lost-response")
+    _consultations(runtime, tmp_path / "n3-lost-response")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-n3-lost")
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-r4d-n3-lost-response")
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Lost response?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    results: dict[str, Any] = {}
+
+    def _concurrent_identical_call() -> None:
+        other = _make_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            packets=carrier,
+            invocations=invocations,
+        )
+        results["other"] = _drive_sync(other.__call__("company.consult", envelope))
+
+    carrier = _VisibleThenLostPutCarrier(_concurrent_identical_call)
+    first_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    first = _run_dispatcher(first_dispatcher, "company.consult", envelope)["result"]
+    other = results["other"]["result"]
+    consultation_id = first["consultation_ref"]
+
+    assert other["consultation_ref"] == consultation_id
+    assert other["state"] == "ALREADY_INTENDED"
+    assert other["attention_requested"] is True
+    assert other["blocker"] is None
+
+    assert first["state"] == "INTENDED"
+    assert first["intended"] is True
+    assert first["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert first["attention_requested"] is True, (
+        "the same canonical ledger already holds the exact WAKE_REQUESTED; "
+        "the lost-response caller must report it, not a hardcoded False"
+    )
+    assert carrier.put_question_calls == 1
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+
+
+def test_unavailable_wake_derivation_reports_unknown(tmp_path: Path) -> None:
+    """When the obligation cannot be derived after this call inserted
+    the INTENT (the Runtime no longer projects a current recipient
+    binding), ``attention_requested`` is None — unknown — never a False
+    inferred from ``intent_result.inserted``."""
+    runtime = _runtime_at(tmp_path / "n3-unavailable")
+    _consultations(runtime, tmp_path / "n3-unavailable")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-n3-unavail")
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-r4d-n3-unavailable")
+    )
+    carrier = _HookAfterPutCarrier(
+        lambda: _release_writer_for_attempt(runtime, recipient[1])
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Derivation unavailable?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["state"] == "INTENDED"
+    assert data["attention_requested"] is None
+    assert data["wake_state"] == "RECONCILIATION_REQUIRED"
+    assert data["blocker"] == "WAKE_REQUEST_UNRESOLVED"
+    assert carrier.put_question_calls == 1
+    assert _intent_count(runtime, consultation_id) == 1
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()

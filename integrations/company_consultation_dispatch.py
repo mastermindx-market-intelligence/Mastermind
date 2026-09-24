@@ -999,10 +999,14 @@ class RuntimeConsultationDispatcher:
             try:
                 self.packets.put_question(consultation_id, question_frame)
             except Exception:
-                # INTENT is durable but the body never (provably) reached
-                # the carrier. This call inserted the INTENT, so no Wake
-                # request can exist yet: ``attention_requested`` False is
-                # proven, not assumed.
+                # INTENT is durable but this caller's carrier response is
+                # lost. Unique INTENT insertion granted the initial
+                # publication only — not exclusive ownership of what
+                # follows: an identical concurrent call may already have
+                # read the visible packet and recorded the single Wake.
+                # ``attention_requested`` therefore comes from the same
+                # ledger readback (True / proven-absent False / unknown
+                # None), never a hardcoded False. No resend.
                 return {
                     "ok": True,
                     "result": _committed_consult_result(
@@ -1010,7 +1014,9 @@ class RuntimeConsultationDispatcher:
                         valid_until=valid_until,
                         carrier_ref=carrier_ref,
                         intent_inserted=True,
-                        attention_requested=False,
+                        attention_requested=self._existing_wake_request(
+                            intent_event
+                        ),
                         wake_state=None,
                         blocker="CARRIER_RECONCILIATION_REQUIRED",
                     ),
@@ -1047,10 +1053,10 @@ class RuntimeConsultationDispatcher:
         try:
             obligation = self._wake_obligation(intent_event)
         except Exception:
-            # The obligation could not even be derived, so no ledger
-            # readback is possible. Absence is proven only when THIS
-            # call inserted the INTENT (nothing could have requested a
-            # Wake before it); otherwise the state is unknown.
+            # The obligation could not be derived, so no same-ledger
+            # readback is possible: the state is unknown (None). It is
+            # never inferred from ``intent_result.inserted`` — insertion
+            # granted publication, not exclusive ownership of the Wake.
             return {
                 "ok": True,
                 "result": _committed_consult_result(
@@ -1058,9 +1064,7 @@ class RuntimeConsultationDispatcher:
                     valid_until=valid_until,
                     carrier_ref=carrier_ref,
                     intent_inserted=intent_result.inserted,
-                    attention_requested=(
-                        False if intent_result.inserted else None
-                    ),
+                    attention_requested=None,
                     wake_state="RECONCILIATION_REQUIRED",
                     blocker="WAKE_REQUEST_UNRESOLVED",
                 ),
