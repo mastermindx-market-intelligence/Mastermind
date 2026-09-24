@@ -5540,3 +5540,184 @@ def test_unavailable_wake_derivation_reports_unknown(tmp_path: Path) -> None:
     assert carrier.put_question_calls == 1
     assert _intent_count(runtime, consultation_id) == 1
     assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+# ---------------------------------------------------------------------------
+# IAC-1 A2 composition — requester answer attention
+# ---------------------------------------------------------------------------
+
+
+def _answer_attention_requested_records(runtime: Runtime):
+    return tuple(
+        item
+        for item in WakeLedgerRepository(runtime).list_wake_events()
+        if item.obligation is not None
+        and item.obligation.source_kind.value == "consultation_answer_attention"
+        and item.record.phase is LedgerPhase.WAKE_REQUESTED
+    )
+
+
+def test_reply_creates_one_requester_answer_attention_and_replay_is_sticky(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "answer-attention")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "answer-attention-repo"
+    )
+    carrier = _CountingAnswerCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    consult = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Wake requester when ready?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    args = {
+        "consultation_ref": consultation_id,
+        "answer": "ready",
+        "evidence_refs": [],
+    }
+
+    first = _run(b_gateway.call("company.reply", args))
+    assert first["ok"] is True
+    assert first["data"]["attention_requested"] is True
+    assert first["data"]["wake_state"] == "PENDING_RETRYABLE"
+    assert first["data"]["blocker"] is None
+    first_records = _answer_attention_requested_records(runtime)
+    assert len(first_records) == 1
+
+    restarted_b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    restarted_b_gateway = _gateway_with_dispatcher(restarted_b_dispatcher)
+    replay = _run(restarted_b_gateway.call("company.reply", dict(args)))
+    assert replay["ok"] is True
+    assert replay["data"]["inserted"] is False
+    assert replay["data"]["reconciled"] is True
+    assert replay["data"]["attention_requested"] is True
+    assert replay["data"]["wake_state"] == "PENDING_RETRYABLE"
+    assert replay["data"]["blocker"] is None
+    assert len(_answer_attention_requested_records(runtime)) == 1
+
+    consumed = a_dispatcher.consume_answer(consultation_id)
+    assert consumed["inserted"] is True
+    post_consume_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    post_consume_gateway = _gateway_with_dispatcher(post_consume_dispatcher)
+    post_consume_replay = _run(
+        post_consume_gateway.call("company.reply", dict(args))
+    )
+    assert post_consume_replay["ok"] is True
+    assert post_consume_replay["data"]["attention_requested"] is True
+    assert len(_answer_attention_requested_records(runtime)) == 1
+
+
+class _ConsumeDuringAnswerPutCarrier(_CountingAnswerCarrier):
+    def __init__(self) -> None:
+        super().__init__()
+        self.after_put = None
+
+    def put_answer(self, consultation_id, frame):
+        super().put_answer(consultation_id, frame)
+        callback = self.after_put
+        if callback is not None:
+            callback(consultation_id)
+
+
+def test_consumed_between_carrier_write_and_first_answer_wake_creates_no_request(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "answer-consume-race")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "answer-consume-race-repo"
+    )
+    carrier = _ConsumeDuringAnswerPutCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    consult = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Consume before answer attention?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    carrier.after_put = a_dispatcher.consume_answer
+
+    reply = _run(
+        b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "already consumed",
+                "evidence_refs": [],
+            },
+        )
+    )
+
+    assert reply["ok"] is True
+    assert reply["data"]["state"] == "ANSWER_AVAILABLE"
+    assert reply["data"]["attention_requested"] is False
+    assert reply["data"]["wake_state"] is None
+    assert reply["data"]["blocker"] == "ANSWER_ALREADY_CONSUMED"
+    assert _answer_attention_requested_records(runtime) == ()

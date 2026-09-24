@@ -44,13 +44,18 @@ from control_plane.consultation_runtime import (
 )
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.wake_events import utc_now_iso
-from control_plane.wake_ledger import LedgerPhase, requested_record
+from control_plane.wake_ledger import (
+    LedgerPhase,
+    reconstruct_status,
+    requested_record,
+)
 from control_plane.wake_persist import WakeLedgerRepository
 from integrations.mastermind_company_mcp.consultation import (
     validate_company_consult_dispatch_request,
 )
 from integrations.slack_agent_dialogue.persisted_wake_carrier import (
     ConsultationWakeExtension,
+    RequesterAnswerWakeExtension,
 )
 
 
@@ -330,6 +335,19 @@ def _wake_request_readback(
     if requested == 0:
         return False
     return None
+
+
+def _wake_state_readback(
+    repository: WakeLedgerRepository, obligation_id: str
+) -> str | None:
+    try:
+        records = repository.list_records(obligation_id)
+        state = reconstruct_status(
+            obligation_id, tuple(item.record for item in records)
+        )
+    except Exception:
+        return None
+    return state.value
 
 
 def _consultation_schema_for(surface: str) -> str:
@@ -1303,8 +1321,11 @@ class RuntimeConsultationDispatcher:
             )
 
         def _reconciled_envelope(
-            reserved_event: Any,
+            reserved_event: Any, validated_frame: Mapping[str, Any]
         ) -> dict[str, Any]:
+            attention_requested, wake_state, blocker = (
+                self._request_answer_attention(validated_frame, intent)
+            )
             return {
                 "ok": True,
                 "result": {
@@ -1320,6 +1341,9 @@ class RuntimeConsultationDispatcher:
                     "historical": False,
                     "inserted": False,
                     "reconciled": True,
+                    "attention_requested": attention_requested,
+                    "wake_state": wake_state,
+                    "blocker": blocker,
                 },
             }
 
@@ -1353,7 +1377,7 @@ class RuntimeConsultationDispatcher:
                     "CARRIER_RECONCILIATION_REQUIRED",
                     detail="admitted ANSWER_AVAILABLE but carrier frame is missing or fails validation",
                 )
-            return _reconciled_envelope(reserved)
+            return _reconciled_envelope(reserved, validated)
 
         try:
             answer = self._consultations.answer_available(
@@ -1402,6 +1426,9 @@ class RuntimeConsultationDispatcher:
                     ),
                     "historical": True,
                     "inserted": bool(answer.inserted),
+                    "attention_requested": False,
+                    "wake_state": None,
+                    "blocker": None,
                 },
             }
 
@@ -1422,7 +1449,7 @@ class RuntimeConsultationDispatcher:
                     "CARRIER_RECONCILIATION_REQUIRED",
                     detail="replay ANSWER_AVAILABLE admitted but carrier frame is missing or fails validation",
                 )
-            return _reconciled_envelope(current_reserved)
+            return _reconciled_envelope(current_reserved, validated)
 
         # Admitted only: cache the exact admitted frame for the
         # requester dispatcher to drive ``consume_answer``. The runtime
@@ -1442,6 +1469,9 @@ class RuntimeConsultationDispatcher:
                     detail="runtime event admitted but carrier write failed",
                 ) from exc
 
+        attention_requested, wake_state, blocker = (
+            self._request_answer_attention(answer_frame, intent)
+        )
         return {
             "ok": True,
             "result": {
@@ -1456,8 +1486,75 @@ class RuntimeConsultationDispatcher:
                 ),
                 "historical": False,
                 "inserted": bool(answer.inserted),
+                "attention_requested": attention_requested,
+                "wake_state": wake_state,
+                "blocker": blocker,
             },
         }
+
+    def _request_answer_attention(
+        self, answer_frame: Mapping[str, Any], intent_event: Any
+    ) -> tuple[bool | None, str | None, str | None]:
+        """Create/reconcile the one requester-directed answer Wake request."""
+
+        requester = intent_event.payload.get("requester_actor_ref") or {}
+        requester_attempt_id = requester.get("attempt_id")
+        if not isinstance(requester_attempt_id, str) or not requester_attempt_id:
+            return None, "RECONCILIATION_REQUIRED", "ANSWER_ATTENTION_UNRESOLVED"
+        try:
+            projection = self._consultations.requester_answer_attention_replay(
+                answer_frame, requester_attempt_id=requester_attempt_id
+            )
+            extension = RequesterAnswerWakeExtension(
+                repository=self._wake_repository, projection=projection
+            )
+        except ConsultationConflict as exc:
+            if exc.conflict == "ANSWER_ALREADY_CONSUMED":
+                return False, None, "ANSWER_ALREADY_CONSUMED"
+            return None, "RECONCILIATION_REQUIRED", "ANSWER_ATTENTION_UNRESOLVED"
+        except StateConflict:
+            return None, "RECONCILIATION_REQUIRED", "ANSWER_ATTENTION_UNRESOLVED"
+
+        obligation_id = projection.obligation.obligation_id
+        try:
+            extension.persist_requested_if_current(self._consultations)
+        except ConsultationConflict as exc:
+            present = _wake_request_readback(
+                self._wake_repository, obligation_id
+            )
+            if present is True:
+                return (
+                    True,
+                    _wake_state_readback(self._wake_repository, obligation_id),
+                    None,
+                )
+            if exc.conflict == "ANSWER_ALREADY_CONSUMED" and present is False:
+                return False, None, "ANSWER_ALREADY_CONSUMED"
+            return (
+                present,
+                "RECONCILIATION_REQUIRED",
+                "ANSWER_ATTENTION_UNRESOLVED",
+            )
+        except Exception:
+            present = _wake_request_readback(
+                self._wake_repository, obligation_id
+            )
+            if present is True:
+                return (
+                    True,
+                    _wake_state_readback(self._wake_repository, obligation_id),
+                    None,
+                )
+            return (
+                present,
+                "RECONCILIATION_REQUIRED",
+                "ANSWER_ATTENTION_UNRESOLVED",
+            )
+        return (
+            True,
+            _wake_state_readback(self._wake_repository, obligation_id),
+            None,
+        )
 
     # -- company.consultation --
 

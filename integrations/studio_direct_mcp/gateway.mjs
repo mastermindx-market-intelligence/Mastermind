@@ -106,9 +106,16 @@ import {
   paperToolResult,
   resolvePaperDesignConfig,
 } from './paper-design.mjs';
+import {
+  STUDIO_FLEET_STATUS_TOOL,
+  createFleetStatus,
+  fleetStatusErrorResult,
+  fleetStatusToolResult,
+  resolveFleetStatusConfig,
+} from './fleet-status.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.6';
+export const GATEWAY_VERSION = '0.1.7';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -195,6 +202,7 @@ const KNOWN_READONLY_TOOL_NAMES = new Set([
   'paper_inspect',
   'paper_catalog',
   'paper_read',
+  'studio_fleet_status',
 ]);
 
 /**
@@ -361,6 +369,7 @@ export function resolveConfig(partial = {}) {
 
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
+  cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
 
   return cfg;
 }
@@ -882,6 +891,9 @@ class GatewaySession {
     this.server = null;
     this.gitPublisher = cfg.gitPublish ? createGitPublisher(cfg.gitPublish) : null;
     this.paperDesigner = cfg.paperDesign ? createPaperDesigner(cfg.paperDesign) : null;
+    this.fleetStatus = cfg.fleetStatus
+      ? createFleetStatus({ enabled: true, ...cfg.fleetStatus })
+      : null;
     this.owner?.sessions.add(this);
   }
 
@@ -983,7 +995,7 @@ class GatewaySession {
         capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
-          'studio_ping, studio_output_page, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
+          'studio_ping, studio_output_page, configured studio_fleet_status, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
           'studio_output_page reads retained output without repeating the original action. ' +
           'Paper design tools use the host-pinned guarded Paper adapter; Desktop Commander is not on their dispatch path. ' +
           'start_process and interact_with_process represent direct terminal effects rather than work-submission or agent-handoff transport. ' +
@@ -1002,6 +1014,9 @@ class GatewaySession {
         });
         const tools = sanitizeToolList(result.tools);
         const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
+        if (session.fleetStatus) {
+          localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
+        }
         if (session.gitPublisher) {
           localTools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
         }
@@ -1078,6 +1093,24 @@ class GatewaySession {
         classification: CLASSIFICATION.OK,
       });
       return result;
+    }
+
+    if (this.fleetStatus && name === STUDIO_FLEET_STATUS_TOOL.name) {
+      this.bumpTool(name);
+      try {
+        const data = await this.fleetStatus.status();
+        log('info', 'tool_call', {
+          sid: this.tag, tool: name, durationMs: Date.now() - started,
+          classification: CLASSIFICATION.OK,
+        });
+        return fleetStatusToolResult(data, false);
+      } catch (error) {
+        log('info', 'tool_call', {
+          sid: this.tag, tool: name, durationMs: Date.now() - started,
+          classification: CLASSIFICATION.TOOL_ERROR,
+        });
+        return fleetStatusErrorResult(error);
+      }
     }
 
     if (this.paperDesigner && PAPER_DESIGN_TOOL_NAMES.has(name)) {
