@@ -1,8 +1,10 @@
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENTS = ROOT / "AGENTS.md"
 CODEX_CONFIG = ROOT / ".codex" / "config.toml"
+ASTRA_PROFILE = ROOT / "ops" / "codex_fabric" / "mastermind-astra.config.toml"
 
 
 def _astra_section() -> str:
@@ -42,14 +44,27 @@ def test_astra_policy_preserves_physical_routing_and_effect_boundaries():
         assert phrase in section
 
 
-def test_native_codex_fanout_is_disabled_by_default_and_frontier_only_when_opted_in():
+def test_named_astra_parent_profile_is_frontier_and_native_fanout_is_disabled():
+    profile = tomllib.loads(ASTRA_PROFILE.read_text(encoding="utf-8"))
+    assert profile["model"] == "gpt-6-astra"
+    assert profile["model_reasoning_effort"] == "high"
+    agents = profile["agents"]
+    assert agents["enabled"] is False
+    assert agents["max_concurrent_threads_per_session"] == 1
+    assert agents["default_subagent_model"] == "gpt-5.6-sol"
+    assert agents["default_subagent_reasoning_effort"] == "high"
+    serialized = ASTRA_PROFILE.read_text(encoding="utf-8")
+    assert "gpt-5.6-luna" not in serialized
+    assert "gpt-5.6-terra" not in serialized
+
+
+def test_repository_codex_config_remains_separate_worker_attestation_layer():
     config = CODEX_CONFIG.read_text(encoding="utf-8")
-    assert 'enabled = false' in config
-    assert 'max_concurrent_threads_per_session = 1' in config
-    assert 'default_subagent_model = "gpt-5.6-sol"' in config
-    assert 'default_subagent_reasoning_effort = "high"' in config
-    assert 'gpt-5.6-luna' not in config
-    assert 'gpt-5.6-terra' not in config
+    assert "enabled = true" in config
+    assert "max_concurrent_threads_per_session = 3" in config
+    assert 'default_subagent_model = "gpt-5.6-terra"' in config
+    assert 'default_subagent_reasoning_effort = "medium"' in config
+    assert "gpt-6-astra" not in config
 
 
 def test_astra_policy_consumes_current_role_adaptive_delegation_contract():

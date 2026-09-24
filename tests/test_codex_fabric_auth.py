@@ -5,6 +5,7 @@ import dataclasses
 import hashlib
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -166,6 +167,7 @@ def test_headers_refresh_once_near_expiry_and_persist_rotation(tmp_path: Path):
     headers = headers_for_codex(
         policy_path=policy_path, store=store, now_epoch=1_900_000_100,
         expected_uid=os.getuid(), refresh_fn=refresh,
+        refresh_lock=lambda: nullcontext(),
     )
 
     assert headers == {"Authorization": f"Bearer {refreshed}"}
@@ -187,6 +189,7 @@ def test_refresh_with_invalid_replacement_quarantines_same_credential(tmp_path: 
             policy_path=policy_path, store=store, now_epoch=1_900_000_100,
             expected_uid=os.getuid(),
             refresh_fn=lambda *_args: {"access_token": _token(audience="https://wrong.example.com/")},
+            refresh_lock=lambda: nullcontext(),
         )
 
     assert store.bundle == dataclasses.replace(original, refresh_state="pending")

@@ -20,6 +20,10 @@ frozen token-economics comparison.
 1. Pin protected Mastermind `master`, load the compatible Sol Skillpack from that same SHA, and compare
    any protected movement against this client surface and its Executive/auth dependencies.
 2. Require **Codex CLI 0.154.0 or newer** for this installed path. This host was qualified on 0.154.0.
+   Install the reviewed `ops/codex_fabric/mastermind-astra.config.toml` as
+   `$CODEX_HOME/mastermind-astra.config.toml` and launch attended project-delivery parents with
+   `codex -p mastermind-astra`. The profile selects `gpt-6-astra`, keeps native agents disabled by
+   default, and leaves the repository worker-attested `.codex/config.toml` unchanged.
 3. Read the installed non-secret Executive MCP installation coordinate. The current qualified client
    registration name is `mastermind-executive`, using the installed loopback `/mcp` endpoint.
 4. Run the repository registration helper and require an enabled Streamable HTTP registration with the
@@ -165,9 +169,12 @@ worker effect is `effect_unknown`, reconcile the **same request_ref** / same can
 Do not mint a new operation, switch provider, switch to an internal agent, or re-submit because a client
 request timed out.
 
-Internal Codex remains pre-effect fallback only when current Fabric serviceability/capability cannot
-meet the job, using the repository's Terra/medium/maximum-three-thread ceiling and a recorded fallback
-reason.
+The reviewed `mastermind-astra` client profile keeps native Codex agents disabled by default.
+If current Fabric serviceability/capability cannot meet the job **before any effect begins** and a native
+fallback is explicitly admitted, enable it only for that bounded invocation, with a ceiling of one
+Sol/high child and a recorded fallback reason. Luna and Terra are not normal project-delivery
+sub-orchestrators. The repository `.codex/config.toml` remains the independently audited
+worker/portfolio configuration; it is not the attended Astra parent profile.
 
 ## 8. Production-proof sequence
 

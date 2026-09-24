@@ -88,6 +88,15 @@ external avenues are unavailable or inadequate for the bounded mission. Luna and
 project-delivery sub-orchestrators on this path. Native Codex agents are explicit bounded fallback only
 when the external Fabric cannot satisfy the required capability **before any effect begins**.
 
+The reviewed attended-parent profile is `mastermind-astra`: install
+`ops/codex_fabric/mastermind-astra.config.toml` as
+`$CODEX_HOME/mastermind-astra.config.toml` and launch with
+`codex -p mastermind-astra`. It selects `gpt-6-astra` at high reasoning effort and
+keeps native agents disabled by default. The repository `.codex/config.toml` remains the
+separate audited worker/portfolio configuration and does not select the attended project-delivery
+parent. If a pre-effect native fallback is explicitly admitted, the named parent profile caps it
+at one Sol/high child; Luna and Terra remain outside normal project-delivery sub-orchestration.
+
 Astra authors the bounded objective and acceptance evidence. **Capacity chooses provider/account/host placement**;
 Astra must not choose provider credentials, account numbers, provider homes, endpoints, worker
 identities, or unmanaged workspaces. Normal parent consumption uses bounded canonical Job/result/
