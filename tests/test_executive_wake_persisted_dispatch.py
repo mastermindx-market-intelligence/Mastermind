@@ -667,6 +667,100 @@ def test_concrete_codex_dispatcher_composes_through_generic_fabric():
     assert client.calls == 1
 
 
+def test_non_web_missing_target_registry_holds_before_provider_contact(
+    tmp_path,
+):
+    runtime, sealed, generation = _admitted_runtime(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    registry = _codex_registry("PROPHET-COO-A")
+    binding = project_runtime_binding(
+        runtime, sealed.attempt_id, registry.targets["PROPHET-COO-A"]
+    )
+    obligation = mint_obligation(
+        wake_kind="job_failed",
+        source_kind="executive_inbox_attention",
+        source_ref="eia-0000000000ac",
+        declared_target_seat="coo",
+        root_job_id="JOB-001",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    _seed_requested(repo, (obligation, route))
+    delivered = _Dispatcher()
+    first = _dispatch_persisted(
+        repo,
+        [(obligation, route)],
+        dispatcher=delivered,
+        binding=binding,
+        retry_policy=_POLICY,
+    )
+    assert first.state is wake_dispatcher.PersistedNudgeState.DELIVERED
+
+    client = _LateCodexClient(
+        target_attempt_id=sealed.attempt_id,
+        process_generation_id=generation.process_generation_id,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+    )
+    dispatcher = CodexAppServerWakeDispatcher(client)
+    result = asyncio.run(
+        reconcile_persisted_delivered_ack(
+            repo,
+            [(obligation, route)],
+            dispatcher=dispatcher,
+            binding=binding,
+            target_registry=None,
+        )
+    )
+
+    assert result.state is wake_dispatcher.PersistedDeliveredAckState.HOLD
+    assert result.reason == "ACK_RECONCILIATION_REFUSED"
+    assert client.reconcile_calls == 0
+
+
+def test_non_web_reconciliation_preserves_single_pair_guard_before_provider(
+    tmp_path,
+):
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    one, route_one, binding = _pair(ordinal=31)
+    two, route_two, _ = _pair(ordinal=32, binding=binding)
+    _seed_requested(repo, (one, route_one), (two, route_two))
+    delivered = _Dispatcher()
+    first = _dispatch_persisted(
+        repo,
+        [(one, route_one), (two, route_two)],
+        dispatcher=delivered,
+        binding=binding,
+        retry_policy=_POLICY,
+    )
+    assert first.state is wake_dispatcher.PersistedNudgeState.DELIVERED
+
+    class _NeverAckReconcile:
+        transport_id = "codex-app-server"
+
+        def __init__(self):
+            self.calls = 0
+
+        async def reconcile_delivered_ack(self, _wake):
+            self.calls += 1
+            raise AssertionError("non-Web coalesced ACK reconciliation is not reviewed")
+
+    dispatcher = _NeverAckReconcile()
+    result = asyncio.run(
+        reconcile_persisted_delivered_ack(
+            repo,
+            [(one, route_one), (two, route_two)],
+            dispatcher=dispatcher,
+            binding=binding,
+            target_registry=_codex_registry(),
+        )
+    )
+
+    assert result.state is wake_dispatcher.PersistedDeliveredAckState.HOLD
+    assert result.reason == "ACK_RECONCILIATION_REFUSED"
+    assert dispatcher.calls == 0
+
+
 def test_delivered_ack_reconciliation_never_resends_and_canonical_ingress_writes_ack(
     tmp_path,
 ):
