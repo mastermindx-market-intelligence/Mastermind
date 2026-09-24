@@ -1236,7 +1236,6 @@ async def reconcile_persisted_delivered_ack(
     delivered_records: list[WakeLedgerRecord] = []
     ack_records: list[WakeLedgerRecord | None] = []
     already_recorded: list[bool] = []
-    web_sol_source_resolved_without_ack = False
     for obligation, route in pairs:
         if route.obligation_id != obligation.obligation_id:
             return hold("ACK_ROUTE_REFUSED")
@@ -1245,6 +1244,17 @@ async def reconcile_persisted_delivered_ack(
                 item.record for item in repo.list_records(obligation.obligation_id)
             )
             assert_causal(records)
+        except WakeLedgerError as exc:
+            if (
+                is_web_sol
+                and str(exc)
+                == "SOURCE_RESOLVED requires prior TARGET_ACKNOWLEDGED"
+            ):
+                # Canonical writes cannot produce this sequence. If a legacy or
+                # tampered event stream rehydrates into it, classify the exact
+                # semantic defect without contacting the provider.
+                return hold("SEMANTIC_ACK_SOURCE_RESOLVED_WITHOUT_ACK")
+            return hold("ACK_HISTORY_REFUSED")
         except Exception:
             # Rehydration is an untrusted durable boundary. Malformed/tampered
             # semantic provenance must fail closed instead of escaping as an
@@ -1281,13 +1291,6 @@ async def reconcile_persisted_delivered_ack(
         already_recorded.append(
             has_ack if is_web_sol else (has_ack or has_source_resolution)
         )
-        if is_web_sol and has_source_resolution and not has_ack:
-            web_sol_source_resolved_without_ack = True
-
-    if web_sol_source_resolved_without_ack:
-        # Source closure is not target-origin semantic proof. Never let this
-        # state silently become ACK_ALREADY_RECORDED or provoke provider re-entry.
-        return hold("SEMANTIC_ACK_SOURCE_RESOLVED_WITHOUT_ACK")
 
     try:
         nudge_attempt = _load_persisted_nudge(repo, attempt_records[0])
