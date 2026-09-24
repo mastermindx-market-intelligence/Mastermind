@@ -250,9 +250,11 @@ def coverage() -> dict:
         from brain import neural_web_context as nwc
         c = nwc.context()
         cc = c.get("candidate_context") if isinstance(c, dict) else None
-        if isinstance(cc, dict) and all(isinstance(k, str) and k.strip() for k in cc):
-            statuses["context"] = "COMPLETE"
-            context_keys = {k.upper() for k in cc}
+        if isinstance(cc, dict):
+            usable = {k: row for k, row in cc.items()
+                      if isinstance(k, str) and k.strip() and isinstance(row, dict)}
+            statuses["context"] = "COMPLETE" if len(usable) == len(cc) else "MALFORMED"
+            context_keys = {k.upper() for k in usable}
         else:
             statuses["context"] = "UNAVAILABLE" if not c else "MALFORMED"
             context_keys = set()

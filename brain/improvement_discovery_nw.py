@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,9 @@ _INPUTS = {"context", "theses", "outcomes"}
 _STATES = {"COMPLETE", "MISSING", "UNREADABLE", "MALFORMED", "UNAVAILABLE", "CHANGED_DURING_READ"}
 _CODE_PATH = "brain/nw_reflection.py"
 _REPO = "mastermindx-market-intelligence/Mastermind"
+# Consume the existing deployer/health artifact, never a discovery-owned marker.
+# A source-contract test binds this name to app.main's existing owner contract.
+_DEPLOY_MARKER = ".deployed_git_sha"
 
 
 def _now() -> str:
@@ -183,15 +187,40 @@ def render_owner_brief(report: dict) -> str:
 
 
 def _source_identity(root: Path) -> tuple[str, str]:
-    # Reuse the existing bounded local Git bridge. No network or new root resolver.
+    """Reuse health's release owner for archives; Git blobs for source checkouts.
+
+    An archive marker names the installed release but is not a cryptographic file
+    manifest. Record observed bytes separately and never promote this read into
+    authenticated producer identity or execution authority. A valid deployed marker
+    precedes retained stale Git metadata, exactly as the established health owner.
+    """
     from control_plane import ceo_boot_packet
-    revision = ceo_boot_packet.git_sha(root)
     path = root / _CODE_PATH
-    expected = ceo_boot_packet._git(root, "rev-parse", f"{revision}:{_CODE_PATH}")
-    actual = ceo_boot_packet._git(root, "hash-object", str(path))
-    if not revision or not expected or actual != expected:
-        raise ValueError("source_revision_unavailable")
-    return revision, "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    marker = root / _DEPLOY_MARKER
+    try:
+        raw = path.read_bytes()
+        if marker.is_file():
+            marker_before = marker.read_bytes()
+            declared = marker_before.decode("utf-8").strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{40}", declared):
+                raise ValueError("source_revision_unavailable")
+            # Do not import app.main: it boots the application's dependency graph.
+            # This is a read consumer of its existing validated marker contract.
+            revision = declared
+            if marker.read_bytes() != marker_before or path.read_bytes() != raw:
+                raise ValueError("source_revision_unavailable")
+        else:
+            revision = ceo_boot_packet.git_sha(root)
+            expected = ceo_boot_packet._git(root, "rev-parse", f"{revision}:{_CODE_PATH}")
+            # Git's ordinary blob identity over these exact observed bytes. SHA-1
+            # is used only for Git object comparison, never as an authority token.
+            blob = b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
+            actual = hashlib.sha1(blob, usedforsecurity=False).hexdigest()
+            if not revision or not expected or actual != expected or ceo_boot_packet.git_sha(root) != revision:
+                raise ValueError("source_revision_unavailable")
+        return revision, "sha256:" + hashlib.sha256(raw).hexdigest()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("source_revision_unavailable") from exc
 
 
 def latest_agenda_projection(*, root: Path, asof: date, now: str | None = None) -> dict:

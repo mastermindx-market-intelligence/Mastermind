@@ -292,3 +292,65 @@ def test_projection_read_never_runs_or_persists_the_domain_owner(snapshot, monke
     assert r["diagnosis_counts"] == {"EVIDENCED_GAP": 1}
     after = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     assert after == before
+
+
+@pytest.mark.parametrize("bad_value", [None, [], "unusable", True])
+def test_review_null_or_list_candidate_cannot_certify_coverage(owner, monkeypatch, bad_value):
+    monkeypatch.setattr(C, "context", lambda: {"candidate_context": {"AAA": bad_value}})
+    r = N.coverage()
+    assert r["input_status"]["context"] == "MALFORMED"
+    assert r["inputs_complete"] is False
+    assert r["with_context_row_n"] == 0
+
+
+def test_review_archive_source_identity_uses_existing_deployer_marker(tmp_path):
+    from brain.improvement_discovery_nw import _source_identity
+    root = tmp_path / "release"; root.mkdir()
+    path = root / "brain/nw_reflection.py"; path.parent.mkdir(); path.write_text("# archive code\n")
+    (root / ".deployed_git_sha").write_text(SHA + "\n")
+    revision, digest = _source_identity(root)
+    assert revision == SHA and digest.startswith("sha256:")
+    assert not (root / ".git").exists()
+
+
+@pytest.mark.parametrize("marker", ["", "short", "x" * 40, "a" * 41])
+def test_review_malformed_archive_marker_is_not_release_identity(tmp_path, marker):
+    from brain.improvement_discovery_nw import _source_identity
+    root = tmp_path / "release"; root.mkdir()
+    path = root / "brain/nw_reflection.py"; path.parent.mkdir(); path.write_text("# code\n")
+    (root / ".deployed_git_sha").write_text(marker)
+    with pytest.raises(ValueError, match="source_revision_unavailable"):
+        _source_identity(root)
+
+
+def test_review_release_marker_precedes_retained_stale_git_metadata(tmp_path, monkeypatch):
+    from brain.improvement_discovery_nw import _source_identity
+    from control_plane import ceo_boot_packet
+    root = tmp_path / "release"; root.mkdir()
+    path = root / "brain/nw_reflection.py"; path.parent.mkdir(); path.write_text("# code\n")
+    (root / ".deployed_git_sha").write_text(SHA + "\n")
+    monkeypatch.setattr(ceo_boot_packet, "git_sha", lambda root: "c" * 40)
+    monkeypatch.setattr(ceo_boot_packet, "_git", lambda *args: "old metadata")
+    assert _source_identity(root)[0] == SHA
+
+
+def test_review_archive_default_agenda_projection_reads_without_git(snapshot, tmp_path, monkeypatch):
+    from brain import improvement_discovery_nw as O
+    root = tmp_path / "release"; root.mkdir()
+    path = root / "brain/nw_reflection.py"; path.parent.mkdir(); path.write_text("# exact archive bytes\n")
+    (root / ".deployed_git_sha").write_text(SHA + "\n")
+    monkeypatch.setattr(N, "latest", lambda: deepcopy(snapshot))
+    r = O.latest_agenda_projection(root=root, asof=date(2026, 9, 24), now=NOW)
+    assert r["state"] == "AVAILABLE"
+    assert r["diagnosis_counts"] == {"EVIDENCED_GAP": 1}
+
+
+def test_deployed_marker_name_stays_with_existing_health_owner():
+    import ast
+    from brain import improvement_discovery_nw as O
+    path = Path(__file__).resolve().parents[1] / "app/main.py"
+    tree = ast.parse(path.read_text())
+    names = {node.targets[0].id: ast.literal_eval(node.value) for node in tree.body
+             if isinstance(node, ast.Assign) and len(node.targets) == 1
+             and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "_DEPLOY_MARKER"}
+    assert O._DEPLOY_MARKER == names["_DEPLOY_MARKER"]
