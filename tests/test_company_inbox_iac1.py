@@ -4160,6 +4160,7 @@ def test_accepted_answer_with_lost_carrier_write_is_reconciliation_required(
 
     events_after_first = _evidence_for(runtime, consultation_id)
     assert len(events_after_first.get("ANSWER_AVAILABLE", [])) == 1
+    assert _answer_attention_requested_records(runtime) == ()
 
     # The carrier is still empty. A second identical reply must raise
     # CARRIER_RECONCILIATION_REQUIRED again — NOT retry the carrier write.
@@ -4182,6 +4183,7 @@ def test_accepted_answer_with_lost_carrier_write_is_reconciliation_required(
 
     events_after_second = _evidence_for(runtime, consultation_id)
     assert events_after_second == events_after_first
+    assert _answer_attention_requested_records(runtime) == ()
     # Carrier must NOT have been retried after the first raise.
     assert shared_carrier.put_answer_calls == 1
 
