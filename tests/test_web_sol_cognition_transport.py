@@ -305,6 +305,53 @@ def test_submit_payload_rejects_assignment_identity_or_effect_drift() -> None:
         _submit(assignment=assignment)
 
 
+def test_submit_payload_binds_canonical_work_and_review_lineage_relations() -> None:
+    work = _assignment()
+    work["job"]["reviews_job_id"] = "JOB-REVIEWED"
+    with pytest.raises(WebSolCognitionTransportError, match="reviews_job_id"):
+        _submit(assignment=work)
+
+    work = _assignment()
+    work["job"]["repair_round"] = 1
+    with pytest.raises(WebSolCognitionTransportError, match="repair_round"):
+        _submit(assignment=work)
+
+    review = _assignment()
+    review["job"].update(
+        {
+            "role": "review",
+            "review_required": False,
+            "reviews_job_id": "JOB-REVIEWED",
+            "repair_round": 0,
+        }
+    )
+    review["effect_contract"]["requested_authorities"] = ["READ"]
+    review["result_contract"]["schema"]["properties"]["role"] = {"const": "review"}
+    review["result_contract"]["schema_digest"] = _digest(
+        review["result_contract"]["schema"]
+    )
+    accepted = _submit(assignment=review, role="review")
+    assert accepted["assignment"]["job"]["reviews_job_id"] == "JOB-REVIEWED"
+
+    missing_review_target = copy.deepcopy(review)
+    missing_review_target["job"]["reviews_job_id"] = None
+    with pytest.raises(WebSolCognitionTransportError, match="reviews_job_id"):
+        _submit(assignment=missing_review_target, role="review")
+
+    recursive_review = copy.deepcopy(review)
+    recursive_review["job"]["review_required"] = True
+    with pytest.raises(WebSolCognitionTransportError, match="review_required"):
+        _submit(assignment=recursive_review, role="review")
+
+
+def test_submit_payload_requires_complete_plan_lineage_for_cognition_roles() -> None:
+    for field in ("plan_attempt_id", "plan_digest", "plan_step_id"):
+        assignment = _assignment()
+        assignment["job"][field] = None
+        with pytest.raises(WebSolCognitionTransportError, match=field):
+            _submit(assignment=assignment)
+
+
 def test_submit_payload_rejects_result_schema_identity_drift() -> None:
     assignment = _assignment()
     assignment["result_contract"]["schema"]["properties"]["run_id"] = {"const": "ATT-OTHER"}
