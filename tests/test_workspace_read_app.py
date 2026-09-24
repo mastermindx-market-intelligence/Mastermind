@@ -900,6 +900,68 @@ def test_work_current_available_body_maps_to_200_with_no_store(rsa_key):
     assert response.json() == available_body
 
 
+def test_work_current_projection_refused_typed_unavailable_maps_to_503_with_no_store(rsa_key):
+    """B2: a typed UNAVAILABLE body carrying
+    ``reason_codes == ["projection_refused"]`` maps to HTTP 503 with
+    ``Cache-Control: no-store`` — same wire shape as the existing
+    LIFECYCLE_UNAVAILABLE typed refusal."""
+    from common.executive_workspace_contract import WORK_SCHEMA
+    unavailable_body = {
+        "schema": WORK_SCHEMA,
+        "availability": "UNAVAILABLE",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "lifecycle_source": None,
+        "effect_exception": {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                             "observable": False, "reason": "control_room_missing"},
+        "coverage": {"count": 0, "total": None, "truncated": False,
+                     "completeness": "PARTIAL"},
+        "groups": {"EFFECT_EXCEPTION": [], "NEEDS_SOL": [], "NEEDS_WORKER": [],
+                   "WAITING_CAPACITY": [], "RUNNING": [], "QUEUED": [],
+                   "COMPLETED_NOT_ACCEPTED": [], "TERMINAL": [], "UNKNOWN": []},
+        "source_observation": {"schema": "mastermind.workspace_source_observation.v1",
+                                "state": "UNKNOWN", "selection": None,
+                                "control_room": None, "runtime": None},
+        "reason_codes": ["projection_refused"],
+    }
+    envelope = {"ok": True, "result": unavailable_body}
+    fake = _FakeWorkspaceClient(envelope=envelope)
+    test_client, _ = _make_app(rsa_key, client=fake)
+    token = _workspace_token(rsa_key)
+    response = test_client.get(
+        "/workspace/work/current",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 503
+    assert response.headers["Content-Type"] == "application/json"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json() == unavailable_body
+    assert len(fake.calls) == 1
+
+
+def test_work_current_runtime_error_in_composer_maps_to_503_error_envelope(rsa_key):
+    """B2: a non-ValueError composer exception is a real error envelope
+    (not a typed UNAVAILABLE body) and the App maps it to HTTP 503 with
+    ``Cache-Control: no-store``.  The body is the closed ``ok:false``
+    error envelope — the route never manufactures a typed document for
+    an unexpected exception class."""
+    envelope = {"ok": False, "status": 503,
+                "error": {"code": "source_unavailable",
+                          "message": "workspace read refused"}}
+    fake = _FakeWorkspaceClient(envelope=envelope)
+    test_client, _ = _make_app(rsa_key, client=fake)
+    token = _workspace_token(rsa_key)
+    response = test_client.get(
+        "/workspace/work/current",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 503
+    assert response.headers["Cache-Control"] == "no-store"
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "source_unavailable"
+    assert body["error"]["message"] == "workspace read refused"
+
+
 def test_work_current_post_refuses_405(rsa_key):
     test_client, fake = _make_app(rsa_key)
     token = _workspace_token(rsa_key)

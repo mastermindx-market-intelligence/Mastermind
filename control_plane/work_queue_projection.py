@@ -104,8 +104,14 @@ _EFFECT_KEYS: frozenset[str] = frozenset({"value", "source", "reason", "evidence
 #: Closed acceptance column keys (mirrors fabric_job_view._acceptance_v2).
 ACCEPTANCE_KEYS: frozenset[str] = frozenset({"state", "producer_owner", "reason"})
 
-#: Closed queue-level effect_exception keys.
-QUEUE_EFFECT_EXCEPTION_KEYS: frozenset[str] = frozenset({"value", "scope", "observable"})
+#: Closed queue-level effect_exception keys (N7: ``reason`` added).
+QUEUE_EFFECT_EXCEPTION_KEYS: frozenset[str] = frozenset({"value", "scope", "observable", "reason"})
+
+#: Closed queue-level effect_exception reason vocabulary.
+_QUEUE_EFFECT_EXCEPTION_REASON_CONTROL_ROOM_MISSING = "control_room_missing"
+_QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING = "autonomy_missing"
+_QUEUE_EFFECT_EXCEPTION_REASON_NO_EXCEPTION_OBSERVED = "no_exception_observed"
+_QUEUE_EFFECT_EXCEPTION_REASON_EXCEPTION_OBSERVED = "exception_observed"
 
 #: Root-list shape mirrors ``fabric_job_view.ROOT_LIST_KEYS``.
 _ROOT_LIST_KEYS: frozenset[str] = frozenset({
@@ -161,6 +167,10 @@ _JOB_STATUS_GROUPS: dict[str, str] = {
 }
 
 _REASON_LIFECYCLE_UNAVAILABLE = "LIFECYCLE_UNAVAILABLE"
+#: B3: queue-level EFFECT_UNKNOWN but no per-row effect attribution.
+_REASON_EFFECT_NOT_ROW_ATTRIBUTED = "effect_not_row_attributed"
+#: N3: root-list degraded notes present on an AVAILABLE document.
+_REASON_LIFECYCLE_DEGRADED = "lifecycle_degraded"
 _BOUNDED_UNAVAILABLE_PHRASE = "bounded acquisition unavailable"
 
 
@@ -179,18 +189,41 @@ def _parse_observed_at(observed_at: str) -> datetime:
     A trailing ``Z`` is mandatory; an optional 1–6-digit microsecond fraction
     is permitted.  Naive values, ``+00:00`` offsets, leap-second markers and
     non-UTC locales never admit — anything else surfaces as ``ValueError``.
+
+    Calendar-invalid but pattern-valid values (e.g. ``2026-02-30T00:00:00Z``,
+    ``2026-01-01T23:59:60Z``) are wrapped to the module's own message so the
+    caller never sees ``strptime``'s text or leaks the day/month names.
     """
     if not isinstance(observed_at, str) or _OBSERVED_AT_PATTERN.fullmatch(observed_at) is None:
         raise ValueError(
             f"observed_at invalid: must match RFC3339 UTC like 2026-09-23T00:00:00Z, got {observed_at!r}"
         )
-    return datetime.strptime(observed_at, "%Y-%m-%dT%H:%M:%S.%fZ" if "." in observed_at
-                              else "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    try:
+        return datetime.strptime(observed_at, "%Y-%m-%dT%H:%M:%S.%fZ" if "." in observed_at
+                                  else "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise ValueError(
+            f"observed_at invalid: must match RFC3339 UTC like 2026-09-23T00:00:00Z, got {observed_at!r}"
+        ) from exc
 
 
 def _parse_evidence_as_of(evidence_as_of: str) -> datetime:
-    """Strict RFC3339 UTC parse for the evidence anchor."""
-    return _parse_observed_at(evidence_as_of)
+    """Strict RFC3339 UTC parse for the evidence anchor.
+
+    N9: error message reads ``evidence_as_of invalid`` so callers can
+    distinguish evidence anchor from a per-row observed_at rejection.
+    """
+    if not isinstance(evidence_as_of, str) or _OBSERVED_AT_PATTERN.fullmatch(evidence_as_of) is None:
+        raise ValueError(
+            f"evidence_as_of invalid: must match RFC3339 UTC like 2026-09-23T00:00:00Z, got {evidence_as_of!r}"
+        )
+    try:
+        return datetime.strptime(evidence_as_of, "%Y-%m-%dT%H:%M:%S.%fZ" if "." in evidence_as_of
+                                  else "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise ValueError(
+            f"evidence_as_of invalid: must match RFC3339 UTC like 2026-09-23T00:00:00Z, got {evidence_as_of!r}"
+        ) from exc
 
 
 def _evidence_freshness(
@@ -370,7 +403,12 @@ def _lifecycle_unavailable(root_list: Mapping[str, Any]) -> bool:
 
 
 def _lifecycle_source(root_list: Mapping[str, Any]) -> dict[str, Any]:
-    """Echo the root list's schema + runtime identity + acquisition receipt."""
+    """Echo the root list's schema + runtime identity + acquisition receipt.
+
+    N3: ``degraded`` is echoed verbatim — the producer's degradation list
+    is not silently dropped.  The downstream caller decides whether a
+    non-empty list warrants a ``lifecycle_degraded`` reason code.
+    """
     runtime = root_list["runtime"]
     return {
         "schema": root_list["schema"],
@@ -380,6 +418,7 @@ def _lifecycle_source(root_list: Mapping[str, Any]) -> dict[str, Any]:
             "identity": runtime.get("identity"),
             "acquisition": dict(runtime["acquisition"]),
         },
+        "degraded": list(root_list.get("degraded") or []),
     }
 
 
@@ -394,7 +433,12 @@ def _coverage_for_unavailable(root_list: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _coverage(root_list: Mapping[str, Any]) -> dict[str, Any]:
-    """R7: explicit count/total/truncated/completeness copy from the root list."""
+    """R7/N4: explicit count/total/truncated/completeness copy from the root list.
+
+    ``completeness`` is PARTIAL when the source is known to be incomplete —
+    the root list reports ``truncated: True``, ``provenance.state == "PARTIAL"``,
+    or ``total is None`` (the producer could not enumerate the universe).
+    """
     count = int(root_list["count"])
     truncated = bool(root_list["truncated"])
     total: int | None = root_list["total"] if not truncated else None
@@ -402,7 +446,8 @@ def _coverage(root_list: Mapping[str, Any]) -> dict[str, Any]:
     provenance_state = acquisition.get("provenance", {}).get("state") if isinstance(
         acquisition.get("provenance"), Mapping
     ) else None
-    completeness = "PARTIAL" if truncated or provenance_state == "PARTIAL" else "COMPLETE"
+    completeness = ("PARTIAL" if truncated or total is None
+                    or provenance_state == "PARTIAL" else "COMPLETE")
     return {
         "count": count,
         "total": total,
@@ -412,15 +457,23 @@ def _coverage(root_list: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _queue_effect_exception(control_room: Any) -> dict[str, Any]:
-    """R4: queue-level effect_exception from control_room.autonomy."""
+    """R4/N7: queue-level effect_exception from control_room.autonomy.
+
+    ``reason`` distinguishes "could not look" (control_room or autonomy
+    absent) from "looked, found no exception" so the queue-level EFFECT_UNKNOWN
+    state is never confused with a healthy empty read.
+    """
     if not isinstance(control_room, Mapping):
-        return {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER", "observable": False}
+        return {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_CONTROL_ROOM_MISSING}
     autonomy = control_room.get("autonomy")
     if not isinstance(autonomy, Mapping) or autonomy.get("schema") != _AUTONOMY_SCHEMA:
-        return {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER", "observable": False}
+        return {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING}
     responsibilities = autonomy.get("responsibilities")
     if not isinstance(responsibilities, list):
-        return {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER", "observable": False}
+        return {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING}
     for row in responsibilities:
         if not isinstance(row, Mapping):
             continue
@@ -430,8 +483,10 @@ def _queue_effect_exception(control_room: Any) -> dict[str, Any]:
                 "value": "EFFECT_UNKNOWN",
                 "scope": "RUNTIME_CURRENT_WORKER",
                 "observable": True,
+                "reason": _QUEUE_EFFECT_EXCEPTION_REASON_EXCEPTION_OBSERVED,
             }
-    return {"value": "NONE", "scope": "RUNTIME_CURRENT_WORKER", "observable": False}
+    return {"value": "NONE", "scope": "RUNTIME_CURRENT_WORKER",
+            "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_NO_EXCEPTION_OBSERVED}
 
 
 def _acceptance() -> dict[str, Any]:
@@ -513,8 +568,11 @@ def _capacity(
     cannot be promoted to ``WAITING_CAPACITY``).
     """
     if status not in _PRE_START_STATUSES:
+        # B4: provenance is the Executive Runtime lifecycle (the row's
+        # status, not placement evidence) — no Capacity producer was
+        # consulted; "AUTONOMY" mislabels who actually emitted this column.
         return {
-            "value": "NOT_APPLICABLE", "source": "AUTONOMY",
+            "value": "NOT_APPLICABLE", "source": "EXECUTIVE_RUNTIME",
             "reason": "post_start_lifecycle",
             "evidence_ref": None, "observed_at": None,
         }
@@ -737,6 +795,20 @@ def compose_work_queue_v1(
     for key in _GROUP_ORDER:
         groups[key] = sorted(groups[key], key=lambda item: item["root_job_id"])
 
+    # B3/N3: build the deterministic reason_codes list for the AVAILABLE
+    # branch.  ``effect_not_row_attributed`` fires when the queue-level
+    # EFFECT_UNKNOWN came from control_room.autonomy but no per-row
+    # effects producer carried one.  ``lifecycle_degraded`` fires when
+    # the root list's degraded list is non-empty (the producer flagged
+    # the universe even though the read succeeded).
+    reason_codes: list[str] = []
+    if (effect_exception.get("value") == "EFFECT_UNKNOWN"
+            and validated_effects is None):
+        reason_codes.append(_REASON_EFFECT_NOT_ROW_ATTRIBUTED)
+    if validated_root.get("degraded"):
+        reason_codes.append(_REASON_LIFECYCLE_DEGRADED)
+    reason_codes.sort()
+
     document = {
         "schema": WORK_QUEUE_SCHEMA,
         "generated_at": document_generated_at,
@@ -746,7 +818,7 @@ def compose_work_queue_v1(
         "coverage": _coverage(validated_root),
         "groups": groups,
         "source_observation": dict(source_observation) if isinstance(source_observation, Mapping) else None,
-        "reason_codes": [],
+        "reason_codes": reason_codes,
     }
     _ensure_key_set(document, OUTPUT_KEYS, label="document")
     _ensure_key_set(document["groups"], frozenset(_GROUP_ORDER), label="groups keys")
