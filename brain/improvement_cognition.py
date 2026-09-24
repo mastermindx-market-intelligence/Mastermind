@@ -197,12 +197,12 @@ def validate_draft(value: Any, *, packet: dict) -> dict:
     }
 
 
-def draft_proposals(
+def _draft_with_reasoner(
     report: Any,
     *,
-    reasoner: Callable[..., dict] | None = None,
+    reasoner: Callable[..., dict] | None,
 ) -> dict:
-    """Generate one private advisory draft; no proposal/run/thinking state is persisted or dispatched."""
+    """Private test seam around the exact public provider path."""
     packet = _evidence_packet(report)
     if not packet["opportunities"]:
         return {
@@ -234,8 +234,8 @@ def draft_proposals(
         )
     if not isinstance(result, dict) or not result.get("ok") or not result.get("text"):
         raise ValueError("proposal_provider_unavailable")
-    if result.get("tools_used") not in (None, []):
-        raise ValueError("proposal_provider_used_tools")
+    if result.get("tools_used") != []:
+        raise ValueError("proposal_provider_tool_proof_required")
     draft = validate_draft(_parse_text_json(result["text"]), packet=packet)
     draft["provider"] = {
         "backend": result.get("backend"),
@@ -244,6 +244,10 @@ def draft_proposals(
     }
     return draft
 
+
+def draft_proposals(report: Any) -> dict:
+    """Generate one private advisory draft through the incumbent audited provider bridge only."""
+    return _draft_with_reasoner(report, reasoner=None)
 
 def evaluation_packet(draft: Any) -> dict:
     """Public-safe evaluation seam; keeps full hypothesis prose out of public stores."""
