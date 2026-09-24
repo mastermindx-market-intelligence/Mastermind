@@ -25,8 +25,8 @@ def test_acceptance_corpus_is_closed_and_explicitly_inert():
     assert doc["is_production_authority"] is False
 
     cases = doc["cases"]
-    assert len(cases) == 23
-    assert [row["id"] for row in cases] == [f"M{i:02d}" for i in range(1, 24)]
+    assert len(cases) == 28
+    assert [row["id"] for row in cases] == [f"M{i:02d}" for i in range(1, 29)]
     assert len({row["id"] for row in cases}) == len(cases)
     assert all(set(row) == {"id", "class", "scenario", "expected"} for row in cases)
     assert {row["class"] for row in cases} == {
@@ -168,3 +168,22 @@ def test_implementation_packet_preserves_one_sink_one_service_and_replay_identit
     assert by_id["M21"]["expected"] == "REFUSE_CROSS_SEAT_SCOPE"
     assert by_id["M22"]["expected"] == "ONE_SERVICE_DISTINCT_ROLE_SURFACES"
     assert by_id["M23"]["expected"] == "REPLAY_PRESERVES_ACCEPTED_EFFECT"
+
+
+def test_session_falsifier_is_optional_and_never_trusts_model_or_mcp_environment():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "Exact-session falsifier — optional hardening, not the V1 autonomy gate" in text
+    assert "PreToolUse" in text and "updatedInput" in text
+    assert "never `permissionDecision=allow` as an authority grant" in text
+    assert "must **not** be silently reused for COO session assertions" in text
+    assert "COO_PRINCIPAL_MISSION_BOUND" in text
+    assert "COO_PRINCIPAL_PROVIDER_SESSION_BOUND" in text
+    assert "COO_PRINCIPAL_CRYPTOGRAPHIC_SESSION_BOUND" in text
+    assert "differed from the identifier delivered to hooks/Bash" in text
+
+    by_id = {row["id"]: row for row in _fixture()["cases"]}
+    assert by_id["M24"]["expected"] == "REFUSE_MODEL_SESSION_ASSERTION"
+    assert by_id["M25"]["expected"] == "PROVIDER_SESSION_BINDING_CANDIDATE"
+    assert by_id["M26"]["expected"] == "REFUSE_MCP_SESSION_ENV_AUTHORITY"
+    assert by_id["M27"]["expected"] == "CAPABILITY_UNAVAILABLE_NO_AUTHORITY_FALLBACK"
+    assert by_id["M28"]["expected"] == "REFUSE_SESSION_HARDENING_UNPROVEN"
