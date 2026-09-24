@@ -300,3 +300,12 @@ test('canonical result reducer refusal or failure stays closed', async () => {
     assert.equal(result.status,'COGNITION_RESULT_REFUSED');assert.equal(result.result,null);assert.equal(result.provider_native_turn_id,null);
   }
 });
+
+
+test('invalid observe identity or document epoch produces no fabricated observation', async () => {
+  const ctx=context(); const submit=submitPayload(); const prompt=await rendered(ctx,submit); const snap=snapshot(prompt);
+  const invalidRequest=observePayload(submit,{runtime_binding_generation:0});
+  assert.equal(await ctx.MMXWebSolCognitionTransport.reduceConversation(snap,invalidRequest,EPOCH),null);
+  const request=observePayload(submit);
+  assert.equal(await ctx.MMXWebSolCognitionTransport.reduceConversation(snap,request,'not-an-epoch'),null);
+});
