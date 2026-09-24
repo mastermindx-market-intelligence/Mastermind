@@ -115,3 +115,21 @@ def test_end_to_end_acceptance_requires_independent_judgment_not_tool_demo():
     assert "The decisive canary is a meaningful project, not a tool demo." in text
     assert "make at least one nontrivial reversible architecture/product judgment without asking" in text
     assert "Acceptance fails if routine preference questions or manual prompt carriage are required." in text
+
+
+def test_spec_freezes_local_plugin_packaging_without_public_executive_exposure():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "Claude packaging boundary" in text
+    assert "private **Mastermind Executive** Claude plugin/desktop extension" in text
+    assert "do not make the private Executive loopback service public" in text
+    assert "Claude Code 2.1.275" in text
+    assert "2.1.273 minimum" in text
+    assert "Plugin installation is capability availability, not mission authority." in text
+
+
+def test_spec_keeps_hook_session_id_as_falsifier_not_grant():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "current MCP 2026-07-28 specification is intentionally stateless" in text
+    assert "session_id" in text
+    assert "CLAUDE_ENV_FILE" in text
+    assert "viable investigation seam, not the final security design" in text
