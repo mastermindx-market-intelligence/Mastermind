@@ -33,6 +33,7 @@ if __package__ in {None, ""} and str(_SCRIPT_DIRECTORY) not in sys.path:
 try:
     from ops.executive_os.provider_identity_policy import (
         COMPANY_WORKSPACE_BINDING_CLASS,
+        PERSONAL_PRO_WORKER_BINDING_CLASS,
         EXPECTED_AUTH_MODE,
         WORKSPACE_BINDING_CLASSES,
         evaluate_identity_policy,
@@ -40,10 +41,16 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
     from provider_identity_policy import (  # type: ignore[no-redef]
         COMPANY_WORKSPACE_BINDING_CLASS,
+        PERSONAL_PRO_WORKER_BINDING_CLASS,
         EXPECTED_AUTH_MODE,
         WORKSPACE_BINDING_CLASSES,
         evaluate_identity_policy,
     )
+
+try:
+    from ops.executive_os import provider_worker_slots
+except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
+    import provider_worker_slots  # type: ignore[no-redef]
 
 
 SCHEMA_VERSION = "mastermind.executive_provider_readiness/v2"
@@ -481,6 +488,34 @@ def validate_receipt_document(
         raise ReadinessError("readiness_identity_credential_conflict")
 
 
+
+def receipt_storage_contract(
+    *, workspace_binding_class: str | None, worker_gid: int
+) -> tuple[int, int, int]:
+    """Return the immutable authority-owned readability contract for one receipt."""
+
+    binding = (
+        WORKSPACE_BINDING_CLASS
+        if workspace_binding_class is None
+        else workspace_binding_class
+    )
+    if binding == COMPANY_WORKSPACE_BINDING_CLASS:
+        return 0, 0, 0o400
+    if binding == PERSONAL_PRO_WORKER_BINDING_CLASS:
+        if isinstance(worker_gid, bool) or not isinstance(worker_gid, int):
+            raise ReadinessError("readiness_receipt_reader_invalid")
+        try:
+            personal_slot_gids = {
+                slot.worker_gid
+                for slot in provider_worker_slots.all_slots()
+                if slot.workspace_binding_class == PERSONAL_PRO_WORKER_BINDING_CLASS
+            }
+        except (AttributeError, provider_worker_slots.SlotCatalogError) as exc:
+            raise ReadinessError("readiness_receipt_reader_invalid") from exc
+        if worker_gid in personal_slot_gids:
+            return 0, worker_gid, 0o440
+    raise ReadinessError("readiness_receipt_reader_invalid")
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -491,15 +526,24 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _read_protected_receipt(path: Path) -> dict[str, Any]:
+def _read_protected_receipt(
+    path: Path,
+    *,
+    workspace_binding_class: str | None = None,
+    worker_gid: int = WORKER_GID,
+) -> dict[str, Any]:
     _validate_receipt_directory(path)
+    expected_uid, expected_gid, expected_mode = receipt_storage_contract(
+        workspace_binding_class=workspace_binding_class,
+        worker_gid=worker_gid,
+    )
     info = path.lstat()
     if (
         stat.S_ISLNK(info.st_mode)
         or not stat.S_ISREG(info.st_mode)
-        or info.st_uid != 0
-        or info.st_gid != 0
-        or stat.S_IMODE(info.st_mode) != 0o400
+        or info.st_uid != expected_uid
+        or info.st_gid != expected_gid
+        or stat.S_IMODE(info.st_mode) != expected_mode
         or info.st_nlink != 1
     ):
         raise ReadinessError("readiness_receipt_metadata_unsafe")
@@ -518,7 +562,11 @@ def validate_receipt_file(
     worker_uid: int = WORKER_UID,
     worker_gid: int = WORKER_GID,
 ) -> dict[str, Any]:
-    value = _read_protected_receipt(path)
+    value = _read_protected_receipt(
+        path,
+        workspace_binding_class=workspace_binding_class,
+        worker_gid=worker_gid,
+    )
     auth_identity = current_auth_identity(
         auth_path, worker_uid=worker_uid, worker_gid=worker_gid
     )
@@ -708,15 +756,25 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def persist_receipt(path: Path, value: Mapping[str, Any]) -> None:
+def persist_receipt(
+    path: Path,
+    value: Mapping[str, Any],
+    *,
+    workspace_binding_class: str | None = None,
+    worker_gid: int = WORKER_GID,
+) -> None:
     _validate_receipt_directory(path)
+    expected_uid, expected_gid, expected_mode = receipt_storage_contract(
+        workspace_binding_class=workspace_binding_class,
+        worker_gid=worker_gid,
+    )
     payload = (json.dumps(dict(value), sort_keys=True, indent=2) + "\n").encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags, 0o400)
+    descriptor = os.open(path, flags, expected_mode)
     try:
-        os.fchown(descriptor, 0, 0)
-        os.fchmod(descriptor, 0o400)
+        os.fchown(descriptor, expected_uid, expected_gid)
+        os.fchmod(descriptor, expected_mode)
         view = memoryview(payload)
         while view:
             written = os.write(descriptor, view)
@@ -735,18 +793,24 @@ def replace_reserved_receipt(
     value: Mapping[str, Any],
     *,
     expected_reservation_identity: Mapping[str, Any],
+    workspace_binding_class: str | None = None,
+    worker_gid: int = WORKER_GID,
 ) -> None:
     """Atomically replace an existing reservation with its final receipt."""
 
     _validate_receipt_directory(path)
+    expected_uid, expected_gid, expected_mode = receipt_storage_contract(
+        workspace_binding_class=workspace_binding_class,
+        worker_gid=worker_gid,
+    )
     payload = (json.dumps(dict(value), sort_keys=True, indent=2) + "\n").encode("utf-8")
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.final-", dir=os.fspath(path.parent)
     )
     temporary = Path(temporary_name)
     try:
-        os.fchmod(descriptor, 0o400)
-        os.fchown(descriptor, 0, 0)
+        os.fchmod(descriptor, expected_mode)
+        os.fchown(descriptor, expected_uid, expected_gid)
         view = memoryview(payload)
         while view:
             written = os.write(descriptor, view)
@@ -758,7 +822,10 @@ def replace_reserved_receipt(
         descriptor = -1
         _assert_no_macos_acl(temporary)
         if lstat_identity(
-            path, expected_uid=0, expected_gid=0, expected_mode=0o400
+            path,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+            expected_mode=expected_mode,
         ) != dict(expected_reservation_identity):
             raise ReadinessError("reservation_changed_before_finalization")
         os.replace(temporary, path)
@@ -815,10 +882,21 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _finalize(args: argparse.Namespace) -> int:
-    reservation_identity = lstat_identity(
-        args.receipt, expected_uid=0, expected_gid=0, expected_mode=0o400
+    expected_uid, expected_gid, expected_mode = receipt_storage_contract(
+        workspace_binding_class=args.workspace_binding_class,
+        worker_gid=args.worker_gid,
     )
-    reservation = _read_protected_receipt(args.receipt)
+    reservation_identity = lstat_identity(
+        args.receipt,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+        expected_mode=expected_mode,
+    )
+    reservation = _read_protected_receipt(
+        args.receipt,
+        workspace_binding_class=args.workspace_binding_class,
+        worker_gid=args.worker_gid,
+    )
     pre_identity = validate_reservation_document(
         reservation,
         expected_kind=args.expected_kind,
@@ -876,6 +954,8 @@ def _finalize(args: argparse.Namespace) -> int:
         args.receipt,
         receipt,
         expected_reservation_identity=reservation_identity,
+        workspace_binding_class=args.workspace_binding_class,
+        worker_gid=args.worker_gid,
     )
     if receipt.get("passed") is not True:
         return 2
@@ -933,7 +1013,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 worker_uid=args.worker_uid,
                 worker_gid=args.worker_gid,
             )
-            persist_receipt(args.receipt, receipt)
+            persist_receipt(
+                args.receipt,
+                receipt,
+                workspace_binding_class=args.workspace_binding_class,
+                worker_gid=args.worker_gid,
+            )
             return 0
         return _finalize(args)
     except (ReadinessError, OSError) as exc:
