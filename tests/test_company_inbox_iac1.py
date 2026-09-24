@@ -720,14 +720,77 @@ def _evidence_for(runtime, consultation_id):
     return by_type
 
 
-def _deliver_and_ack_wake_path(runtime, consultation_id):
-    """TEST-ONLY delivery adapter — derives the obligation from the
-    persisted INTENT, asserts the production dispatcher already wrote
-    exactly one WAKE_REQUESTED, and appends only the delivery / ack
-    trail so the obligation reaches TARGET_ACKNOWLEDGED. This helper
-    does NOT manufacture the wake under test; that capability lives
-    only in ``RuntimeConsultationDispatcher._dispatch_consult``.
+def _obligation_id_for_intent(runtime: Runtime, consultation_id: str) -> str:
+    """Derive the canonical obligation_id from the persisted INTENT.
+
+    Used by tests that need to assert ledger contents without going
+    through the delivery adapter. Builds the same identity and binding
+    the production dispatcher uses.
     """
+    from control_plane.session_targets import RuntimeBinding
+    from control_plane.dialogue_source_resolution import (
+        ConsultationSourceIdentity,
+    )
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        ConsultationWakeExtension,
+    )
+
+    with runtime.store.read() as connection:
+        row = connection.execute(
+            "SELECT * FROM events WHERE aggregate_type='consultation' "
+            "AND aggregate_id=? AND event_type='INTENT' "
+            "ORDER BY event_id LIMIT 1",
+            (consultation_id,),
+        ).fetchone()
+    if row is None:
+        raise RuntimeError("intent event missing")
+    payload = json.loads(row["payload_json"])
+    with runtime.store.read() as connection:
+        attempt_row = connection.execute(
+            "SELECT j.root_job_id FROM attempts a JOIN jobs j ON j.job_id=a.job_id "
+            "WHERE a.attempt_id=?",
+            (payload["recipient_actor_ref"]["attempt_id"],),
+        ).fetchone()
+    if attempt_row is None:
+        raise RuntimeError("recipient attempt row missing")
+    root_job_id = attempt_row["root_job_id"]
+    identity = ConsultationSourceIdentity.create(
+        consultation_id=payload["consultation_id"],
+        message_key=payload["message_key"],
+        semantic_fingerprint=payload["semantic_fingerprint"],
+        root_job_id=root_job_id,
+        requester_job_id=payload["requester_actor_ref"]["job_id"],
+        requester_attempt_id=payload["requester_actor_ref"]["attempt_id"],
+        recipient_job_id=payload["recipient_actor_ref"]["job_id"],
+        recipient_attempt_id=payload["recipient_actor_ref"]["attempt_id"],
+        binding_id=str(payload["recipient_binding"]["binding_id"]),
+        binding_generation=int(payload["recipient_binding"]["binding_generation"]),
+    )
+    extension = ConsultationWakeExtension(
+        repository=WakeLedgerRepository(runtime),
+        requester_job_id=identity.requester_job_id,
+        requester_attempt_id=identity.requester_attempt_id,
+        root_job_id=identity.root_job_id,
+        recipient_job_id=identity.recipient_job_id,
+        recipient_attempt_id=identity.recipient_attempt_id,
+        consultation_id=identity.consultation_id,
+        message_key=identity.message_key,
+        semantic_fingerprint=identity.semantic_fingerprint,
+        current_binding=RuntimeBinding(
+            session_alias="CONSULTATION-RECIPIENT",
+            binding_id=str(payload["recipient_binding"]["binding_id"]),
+            binding_generation=int(payload["recipient_binding"]["binding_generation"]),
+            native_handle="thread-recipient-1",
+            reasoning_surface="codex",
+        ),
+    )
+    return extension.obligation().obligation_id
+
+
+def _append_delivery_trail(
+    runtime: Runtime, obligation_id: str, consultation_id: str
+) -> None:
+    """Append DELIVERY_ATTEMPT / DELIVERED / ACK bound to the obligation."""
     from control_plane.session_targets import RuntimeBinding
     from control_plane.dialogue_source_resolution import (
         ConsultationSourceIdentity,
@@ -873,6 +936,18 @@ def _deliver_and_ack_wake_path(runtime, consultation_id):
     )
 
 
+def _deliver_and_ack_wake_path(runtime, consultation_id):
+    """TEST-ONLY delivery adapter — derives the obligation from the
+    persisted INTENT, asserts the production dispatcher already wrote
+    exactly one WAKE_REQUESTED, and appends only the delivery / ack
+    trail so the obligation reaches TARGET_ACKNOWLEDGED. This helper
+    does NOT manufacture the wake under test; that capability lives
+    only in ``RuntimeConsultationDispatcher._dispatch_consult``.
+    """
+    obligation_id = _obligation_id_for_intent(runtime, consultation_id)
+    return _append_delivery_trail(runtime, obligation_id, consultation_id)
+
+
 def _canonical_event_digest(runtime: Runtime, consultation_id: str) -> str:
     """SHA256 of the canonical JSON of every consultation event."""
     events = runtime.events.list_events(
@@ -968,8 +1043,36 @@ def test_a_b_a_journey_with_full_credit_and_consumption(tmp_path: Path) -> None:
         ))
     )
     assert consult_envelope["ok"] is True
+    consult_data = consult_envelope["data"]
     consultation_id = consult_envelope["data"]["consultation_ref"]
     assert consultation_id.startswith("consult-")
+    # IAC-1 r4c2: the production dispatcher reports the wake it wrote.
+    assert consult_data["attention_requested"] is True
+    assert consult_data["wake_state"] == "PENDING_RETRYABLE"
+
+    # The production dispatcher must have written exactly one
+    # WAKE_REQUESTED for this obligation BEFORE the delivery adapter
+    # runs. Derive the obligation the same way the adapter does and
+    # assert the count.
+    obligation_id = _obligation_id_for_intent(runtime, consultation_id)
+    pre_adapter_records = WakeLedgerRepository(runtime).list_records(
+        obligation_id
+    )
+    pre_adapter_requested = tuple(
+        item
+        for item in pre_adapter_records
+        if item.record.phase is LedgerPhase.WAKE_REQUESTED
+    )
+    assert len(pre_adapter_requested) == 1, (
+        "production dispatcher must create exactly one WAKE_REQUESTED "
+        "before the delivery adapter runs"
+    )
+    assert all(
+        item.record.phase is not LedgerPhase.DELIVERY_ATTEMPT
+        and item.record.phase is not LedgerPhase.DELIVERED
+        and item.record.phase is not LedgerPhase.TARGET_ACKNOWLEDGED
+        for item in pre_adapter_records
+    ), "no DELIVERY / DELIVERED / TARGET_ACKNOWLEDGED records exist before it runs"
 
     _deliver_and_ack_wake_path(runtime, consultation_id)
 
@@ -4196,3 +4299,440 @@ def test_known_same_packet_readback_returns_without_second_write(
     assert counting_carrier.put_answer_calls == puts_before
     events_final = _evidence_for(runtime, consultation_id)
     assert events_final == events_after_first
+
+
+# ---------------------------------------------------------------------------
+# IAC-1 r4c2-4c discriminators
+# ---------------------------------------------------------------------------
+
+
+class _MissingInvocations:
+    """InvocationContextSource whose ``current()`` returns None.
+
+    The production dispatcher must refuse with zero effect and must
+    NOT touch the wake ledger.
+    """
+
+    def current(self) -> None:
+        return None
+
+
+class _RaisingPacketCarrier(InMemoryConsultationPacketCarrier):
+    """In-memory carrier whose ``put_question`` always raises."""
+
+    def __init__(self, exc_type: type[Exception] = RuntimeError) -> None:
+        super().__init__()
+        self._exc_type = exc_type
+        self.put_question_calls = 0
+
+    def put_question(
+        self, consultation_id: str, frame: Mapping[str, Any]
+    ) -> None:
+        self.put_question_calls += 1
+        raise self._exc_type("simulated carrier write failure")
+
+
+def _wake_records(
+    runtime: Runtime, obligation_id: str
+) -> tuple[Any, ...]:
+    records = WakeLedgerRepository(runtime).list_records(obligation_id)
+    return tuple(
+        item.record for item in records
+    )
+
+
+def test_consult_creates_exactly_one_durable_wake_request(
+    tmp_path: Path,
+) -> None:
+    """After ``company.consult``: ``attention_requested`` is True,
+    ``wake_state`` is ``PENDING_RETRYABLE``, the ledger holds exactly
+    one ``WAKE_REQUESTED`` and zero ``DELIVERY`` / ``DELIVERED`` /
+    ``TARGET_ACKNOWLEDGED`` records. An identical replay leaves
+    exactly one record and reports ``is_already_intended`` True.
+    """
+    runtime = _runtime_at(tmp_path / "wake-once")
+    consultations = _consultations(runtime, tmp_path / "wake-once")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-wake-once")
+    carrier = InMemoryConsultationPacketCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+
+    first = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Wake request?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert first["ok"] is True
+    data = first["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["attention_requested"] is True
+    assert data["wake_state"] == "PENDING_RETRYABLE"
+    assert data["is_already_intended"] is False
+    assert data["state"] == "INTENDED"
+    assert data["blocker"] is None
+    assert data["carrier_ref"] == f"company-mcp://{consultation_id}"
+
+    obligation_id = _obligation_id_for_intent(runtime, consultation_id)
+    records = _wake_records(runtime, obligation_id)
+    requested = tuple(
+        item for item in records if item.phase is LedgerPhase.WAKE_REQUESTED
+    )
+    delivery = tuple(
+        item for item in records
+        if item.phase is LedgerPhase.DELIVERY_ATTEMPT
+    )
+    delivered = tuple(
+        item for item in records if item.phase is LedgerPhase.DELIVERED
+    )
+    acked = tuple(
+        item for item in records
+        if item.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+    )
+    assert len(requested) == 1
+    assert len(delivery) == 0
+    assert len(delivered) == 0
+    assert len(acked) == 0
+
+    # Identical replay: another dispatcher sharing the same runtime
+    # and carrier replays the same consult. The production recipe is
+    # idempotent — exactly one WAKE_REQUESTED remains.
+    replay_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    replay_gateway = _gateway_with_dispatcher(replay_dispatcher)
+    second = _run(
+        replay_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Wake request?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert second["ok"] is True
+    assert second["data"]["is_already_intended"] is True
+    assert second["data"]["state"] == "ALREADY_INTENDED"
+    assert second["data"]["attention_requested"] is True
+
+    records_after = _wake_records(runtime, obligation_id)
+    requested_after = tuple(
+        item for item in records_after
+        if item.phase is LedgerPhase.WAKE_REQUESTED
+    )
+    assert len(requested_after) == 1, "replay must leave exactly one WAKE_REQUESTED"
+
+
+def test_no_wake_request_without_admitted_intent(tmp_path: Path) -> None:
+    """Three failure modes that must produce zero ledger records:
+
+    (a) the InvocationContext source returns None,
+    (b) a replay with changed evidence raises CONFLICT (no intent, no
+        wake),
+    (c) a carrier whose ``put_question`` raises — the INTENT is
+        durable but no WAKE_REQUESTED is written; the result carries
+        ``attention_requested=False`` and blocker
+        ``CARRIER_RECONCILIATION_REQUIRED``.
+    """
+    runtime = _runtime_at(tmp_path / "no-wake")
+    consultations = _consultations(runtime, tmp_path / "no-wake")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-no-wake")
+
+    # --- (a) Missing invocation context ---
+    carrier_a = InMemoryConsultationPacketCarrier()
+    dispatcher_a = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier_a,
+        invocations=_MissingInvocations(),
+    )
+    gateway_a = _gateway_with_dispatcher(dispatcher_a)
+    a_env = _run(
+        gateway_a.call(
+            "company.consult",
+            _consult_args(
+                question="Wake request?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert a_env["ok"] is False
+    assert a_env["error"]["code"] == "EFFECT_UNKNOWN"
+    a_records = WakeLedgerRepository(runtime).list_wake_events()
+    assert a_records == (), "missing invocation context must produce zero ledger records"
+
+    # --- (b) Replay with changed evidence ---
+    carrier_b = InMemoryConsultationPacketCarrier()
+    invocations_b = _StaticInvocations(_default_invocation())
+    dispatcher_b = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier_b,
+        invocations=invocations_b,
+    )
+    gateway_b = _gateway_with_dispatcher(dispatcher_b)
+    b_first = _run(
+        gateway_b.call(
+            "company.consult",
+            _consult_args(
+                question="Wake request?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert b_first["ok"] is True
+    b_consultation_id = b_first["data"]["consultation_ref"]
+    b_obligation_id = _obligation_id_for_intent(runtime, b_consultation_id)
+    b_records_before = WakeLedgerRepository(runtime).list_records(
+        b_obligation_id
+    )
+    b_requested_before = tuple(
+        item for item in b_records_before
+        if item.record.phase is LedgerPhase.WAKE_REQUESTED
+    )
+    assert len(b_requested_before) == 1
+    b_second = _run(
+        gateway_b.call(
+            "company.consult",
+            _consult_args(
+                question="Wake request?",
+                evidence_refs=["https://github.com/example-org/repo/pull/42"],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert b_second["ok"] is False
+    assert b_second["error"]["code"] == "EFFECT_UNKNOWN"
+    b_records_after = WakeLedgerRepository(runtime).list_records(
+        b_obligation_id
+    )
+    b_requested_after = tuple(
+        item for item in b_records_after
+        if item.record.phase is LedgerPhase.WAKE_REQUESTED
+    )
+    assert len(b_requested_after) == 1, (
+        "conflicting replay must not add a second WAKE_REQUESTED"
+    )
+
+    # --- (c) Carrier put_question raises ---
+    carrier_c = _RaisingPacketCarrier()
+    invocations_c = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-r4c2-carrier-raise")
+    )
+    dispatcher_c = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier_c,
+        invocations=invocations_c,
+    )
+    gateway_c = _gateway_with_dispatcher(dispatcher_c)
+    c_env = _run(
+        gateway_c.call(
+            "company.consult",
+            _consult_args(
+                question="Carrier raise?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert c_env["ok"] is True
+    c_data = c_env["data"]
+    c_consultation_id = c_data["consultation_ref"]
+    assert c_data["attention_requested"] is False
+    assert c_data["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    # INTENT must be durable (committed effect, not hidden) but
+    # WAKE_REQUESTED must be absent for this consultation_id.
+    c_obligation_id = _obligation_id_for_intent(runtime, c_consultation_id)
+    c_records = WakeLedgerRepository(runtime).list_records(c_obligation_id)
+    assert c_records == (), (
+        "carrier write failure must not create a WAKE_REQUESTED; the "
+        "INTENT itself stays durable but the wake is suppressed"
+    )
+    # And the runtime still holds the admitted INTENT event.
+    intent_event = _find_consultation_event(runtime, c_consultation_id, "INTENT")
+    assert intent_event is not None
+
+
+def _find_consultation_event(runtime: Runtime, consultation_id: str, event_type: str):
+    for event in runtime.events.list_events(
+        aggregate_type="consultation", aggregate_id=consultation_id
+    ):
+        if event.event_type == event_type:
+            return event
+    return None
+
+
+def test_stale_recipient_binding_creates_no_request(tmp_path: Path) -> None:
+    """The recipient resolver returns a binding whose generation is
+    one above what the Runtime projects. ``intent()`` refuses per
+    ``control_plane/consultation_runtime.py`` "consultation recipient
+    is not the current Runtime binding" — typed refusal, zero INTENT,
+    zero ledger records.
+    """
+    runtime = _runtime_at(tmp_path / "stale-binding")
+    consultations = _consultations(runtime, tmp_path / "stale-binding")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "fixture-stale-binding"
+    )
+
+    # Build a resolver that returns the recipient binding with its
+    # generation advanced by 1 — this cannot match what the Runtime
+    # projects, so _require_current_recipient raises.
+    stale_recipient = (
+        recipient[0],
+        recipient[1],
+        recipient[2],
+        {
+            **dict(recipient[3]),
+            "binding_generation": int(recipient[3]["binding_generation"]) + 1,
+        },
+    )
+
+    carrier = InMemoryConsultationPacketCarrier()
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-r4c2-stale-binding")
+    )
+    caller = CallerIdentity(
+        job_id=requester[0],
+        worker_id=requester[2],
+        attempt_id=requester[1],
+        reasoning_surface="codex",
+        binding=requester[3],
+    )
+    dispatcher = RuntimeConsultationDispatcher(
+        runtime=runtime,
+        repository_root=fixture_repo,
+        caller=caller,
+        recipients=_recipient_resolver(stale_recipient),
+        packets=carrier,
+        invocations=invocations,
+    )
+    gateway = _gateway_with_dispatcher(dispatcher)
+    envelope = _run(
+        gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Stale binding?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "EFFECT_UNKNOWN"
+
+    # Zero INTENT events, zero ledger records.
+    intent_events = tuple(
+        event
+        for event in runtime.events.list_events(
+            aggregate_type="consultation"
+        )
+        if event.event_type == "INTENT"
+    )
+    assert intent_events == ()
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_wake_request_survives_dispatcher_restart(tmp_path: Path) -> None:
+    """A second ``RuntimeConsultationDispatcher`` instance sharing
+    the same Runtime and packet carrier replays the identical consult
+    call. The production recipe is idempotent — exactly one
+    WAKE_REQUESTED remains; ``attention_requested`` stays True.
+    """
+    runtime = _runtime_at(tmp_path / "wake-restart")
+    consultations = _consultations(runtime, tmp_path / "wake-restart")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "fixture-wake-restart"
+    )
+    shared_carrier = InMemoryConsultationPacketCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+
+    first_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    first_gateway = _gateway_with_dispatcher(first_dispatcher)
+    first_env = _run(
+        first_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Restart?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert first_env["ok"] is True
+    consultation_id = first_env["data"]["consultation_ref"]
+    obligation_id = _obligation_id_for_intent(runtime, consultation_id)
+
+    # Fresh dispatcher instance sharing the same runtime / carrier /
+    # invocation context. Replays the identical consult.
+    restarted_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    restarted_gateway = _gateway_with_dispatcher(restarted_dispatcher)
+    second_env = _run(
+        restarted_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Restart?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert second_env["ok"] is True
+    assert second_env["data"]["attention_requested"] is True
+    assert second_env["data"]["is_already_intended"] is True
+    assert second_env["data"]["state"] == "ALREADY_INTENDED"
+
+    records = WakeLedgerRepository(runtime).list_records(obligation_id)
+    requested = tuple(
+        item for item in records if item.record.phase is LedgerPhase.WAKE_REQUESTED
+    )
+    assert len(requested) == 1, (
+        "fresh dispatcher replaying the identical consult must leave "
+        "exactly one WAKE_REQUESTED"
+    )
