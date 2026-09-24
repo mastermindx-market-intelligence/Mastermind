@@ -158,6 +158,7 @@ def test_empty_grounded_report_does_not_call_provider():
     item = report()
     item["opportunities"] = []
     item["hypotheses"] = []
+    item["digest"] = _digest({key: value for key, value in item.items() if key != "digest"})
 
     draft = C.draft_proposals(item)
     assert draft["proposals"] == []
@@ -314,13 +315,14 @@ def test_private_ephemeral_sdk_failure_never_falls_through_to_subprocess(monkeyp
     assert "sdk private failure" in result["error"]
 
 
-@pytest.mark.parametrize("field,value", [
-    ("execution_authority_granted", True),
-    ("jobs_created", 1),
-    ("independent_discovery_proven", True),
+@pytest.mark.parametrize("field,value,expected", [
+    ("execution_authority_granted", True, "effectful_discovery_report_refused"),
+    ("jobs_created", 1, "effectful_discovery_report_refused"),
+    ("independent_discovery_proven", True, "unexpected_discovery_claim"),
 ])
-def test_effectful_or_overclaimed_discovery_report_is_refused(field, value):
+def test_effectful_or_overclaimed_discovery_report_is_refused(field, value, expected):
     item = report()
     item[field] = value
-    with pytest.raises(ValueError):
+    item["digest"] = _digest({key: val for key, val in item.items() if key != "digest"})
+    with pytest.raises(ValueError, match=expected):
         C.draft_proposals(item)
