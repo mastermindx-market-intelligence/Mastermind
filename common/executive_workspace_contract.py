@@ -37,6 +37,22 @@ MAX_RESPONSE_BYTES = 2_000_000
 #: ``{ok:true,result:BODY}`` serialization including the trailing LF must fit
 #: in this many bytes, and the public BODY serialization must also fit alone.
 MAX_RESULT_RESPONSE_BYTES = 16_384
+#: Closed vocabulary for ``effect_exception.reason`` in
+#: ``mastermind.workspace_work_queue.v1``.  The composer emits the first
+#: four (its own vocabulary for the control room / autonomy input it was
+#: handed); the read service emits the fifth (its own vocabulary for
+#: ``source_unavailable`` / ``projection_refused`` / etc. — see
+#: :data:`WORK_REFUSAL_REASON_CODES`).  Anything outside this set on
+#: ``effect_exception.reason`` is a contract violation.  Both producer
+#: sites assert membership; the workspace-app contract facade re-exports
+#: the constant so the facade-parity test exercises it.
+QUEUE_EFFECT_EXCEPTION_REASONS = frozenset({
+    "control_room_missing",
+    "autonomy_missing",
+    "no_exception_observed",
+    "exception_observed",
+    "read_refused",
+})
 _WORK_REF = re.compile(r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}")
 #: Frozen v2 C public shape JOB-[0-9]{1,9} with the existing max16-character
 #: guard.  Differs from the legacy ``wake_events.JOB_ID_RE`` (3+ digits) only
