@@ -239,13 +239,75 @@ def draft_proposals(report: Any) -> dict:
     }
     return draft
 
+def _public_safe_draft(draft: Any) -> dict:
+    """Revalidate the public seam so proposal IDs cannot become a prose exfiltration channel."""
+    draft = _closed(draft, {
+        "schema", "evidence_digest", "proposals", "execution_authority_granted",
+        "ranking_authority_granted", "self_evaluation_accepted", "provider",
+    })
+    if draft["schema"] != DRAFT_SCHEMA:
+        raise ValueError("invalid_draft")
+    digest = draft["evidence_digest"]
+    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise ValueError("invalid_draft")
+    if (
+        draft["execution_authority_granted"] is not False
+        or draft["ranking_authority_granted"] is not False
+        or draft["self_evaluation_accepted"] is not False
+    ):
+        raise ValueError("invalid_draft_authority")
+    proposals = draft["proposals"]
+    if not isinstance(proposals, list) or len(proposals) > MAX_PROPOSALS:
+        raise ValueError("invalid_draft")
+    seen: set[str] = set()
+    clean: list[dict] = []
+    for raw in proposals:
+        row = _closed(raw, {
+            "proposal_id", "problem", "mechanism", "delta", "evidence_ids",
+            "unknowns", "falsifiers", "investigation_questions", "next_action",
+        })
+        pid = _text(row["proposal_id"], limit=128)
+        if _ID_RE.fullmatch(pid) is None or pid in seen:
+            raise ValueError("invalid_proposal_id")
+        seen.add(pid)
+        refs = [_text(ref, limit=160) for ref in _list(row["evidence_ids"])]
+        if len(set(refs)) != len(refs):
+            raise ValueError("duplicate_evidence_id")
+        action = row["next_action"]
+        if action not in ALLOWED_NEXT_ACTIONS:
+            raise ValueError("effectful_next_action_refused")
+        clean.append({
+            "proposal_id": pid,
+            "problem": _text(row["problem"]),
+            "mechanism": _text(row["mechanism"]),
+            "delta": _text(row["delta"]),
+            "evidence_ids": sorted(refs),
+            "unknowns": [_text(x) for x in _list(row["unknowns"])],
+            "falsifiers": [_text(x) for x in _list(row["falsifiers"])],
+            "investigation_questions": [_text(x) for x in _list(row["investigation_questions"])],
+            "next_action": action,
+        })
+    provider = draft["provider"]
+    if provider is not None:
+        provider = _closed(provider, {"backend", "provider", "model"})
+        for value in provider.values():
+            if value is not None:
+                _text(value, limit=160)
+    return {
+        "schema": DRAFT_SCHEMA,
+        "evidence_digest": digest,
+        "proposals": clean,
+        "execution_authority_granted": False,
+        "ranking_authority_granted": False,
+        "self_evaluation_accepted": False,
+        "provider": provider,
+    }
+
+
 def evaluation_packet(draft: Any) -> dict:
     """Public-safe evaluation seam; keeps full hypothesis prose out of public stores."""
-    if not isinstance(draft, dict) or draft.get("schema") != DRAFT_SCHEMA:
-        raise ValueError("invalid_draft")
-    proposals = draft.get("proposals")
-    if not isinstance(proposals, list):
-        raise ValueError("invalid_draft")
+    draft = _public_safe_draft(draft)
+    proposals = draft["proposals"]
     return {
         "schema": "mastermind.improvement_proposal_evaluation_packet.v1",
         "evidence_digest": draft.get("evidence_digest"),
