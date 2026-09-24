@@ -20,6 +20,9 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(A, "_OUT", tmp_path / "agenda")
     monkeypatch.setattr(A, "_ROOT", tmp_path)
     monkeypatch.setattr(A, "_VALIDATION_DIR", tmp_path / "validation")
+    # A missing-input test must not inherit another module's live owner snapshot.
+    from brain import nw_reflection
+    monkeypatch.setattr(nw_reflection, "latest", lambda: {})
     for name in ("_from_calibration", "_from_journal", "_from_shadow", "_from_benchmark",
                  "_from_book_lifecycle", "_from_validation", "_from_cost_guard",
                  "_from_deploy_lag", "_from_model_drift", "_from_nw_reflection",

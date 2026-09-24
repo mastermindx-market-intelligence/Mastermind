@@ -478,6 +478,17 @@ def _update_nudge_registry(candidates: list[dict], asof: str, ran_kinds: set[str
     return codes
 
 
+def _coverage_nudge_evaluable(cov: dict) -> bool:
+    """Creation and resolution require the same complete owner observation.
+
+    Legacy state describes context availability, not input integrity. Unknown,
+    missing, malformed or concurrently changed inputs can neither raise a ranked
+    coverage request nor resolve/refresh a previously observed coverage request.
+    Descriptive counts remain available; the existing registry is preserved.
+    """
+    return cov.get("state") == "ok" and cov.get("inputs_complete") is True
+
+
 def _nudge_candidates(drift: list[dict], cov: dict, quality: dict) -> list[dict]:
     """The FULL pre-cap candidate list {code, kind, severity, detail} — the registry update and
     the resolution judgement both run against this set, never the capped emission."""
@@ -496,7 +507,7 @@ def _nudge_candidates(drift: list[dict], cov: dict, quality: dict) -> list[dict]
     # only honest when the context was actually PRESENT — a stale/absent artifact is a
     # staleness story, not a coverage ask (review finding, 2026-07-13).
     rate = cov.get("coverage_rate")
-    if (cov.get("state") == "ok" and isinstance(rate, (int, float))
+    if (_coverage_nudge_evaluable(cov) and isinstance(rate, (int, float))
             and cov.get("open_theses_n", 0) + cov.get("resolved_recent_n", 0) >= 5):
         # hysteresis: an already-open nudge keeps firing until the rate CLEARS the band —
         # the live rate sat at exactly 0.5 and flapped the nudge on alternating builds
@@ -534,7 +545,7 @@ def _derive_nudges_state(drift: list[dict], cov: dict, quality: dict, asof: str,
     ran_kinds: set[str] = set()
     if drift_ran:
         ran_kinds.add("contract_drift")
-    if cov.get("state") == "ok":
+    if _coverage_nudge_evaluable(cov):
         ran_kinds.add("coverage_gap")
     if quality.get("state") == "ok":
         ran_kinds.add("staleness")

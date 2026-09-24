@@ -373,7 +373,7 @@ def test_derive_nudges_only_dead_or_partial_drift_emits(tmp_path):
 
 
 def test_derive_nudges_coverage_and_staleness_folds(tmp_path):
-    cov = {"state": "ok", "coverage_rate": 0.25, "open_theses_n": 4, "resolved_recent_n": 3,
+    cov = {"state": "ok", "inputs_complete": True, "coverage_rate": 0.25, "open_theses_n": 4, "resolved_recent_n": 3,
            "with_context_row_n": 2}
     quality = {"state": "ok", "current_streak": {"status": "stale", "runs": 5},
                "gap_notes_latest": 4}
@@ -513,7 +513,7 @@ def test_same_asof_rerun_does_not_double_increment(monkeypatch):
 
 
 def _cov(rate: float) -> dict:
-    return {"state": "ok", "coverage_rate": rate, "open_theses_n": 4, "resolved_recent_n": 3,
+    return {"state": "ok", "inputs_complete": True, "coverage_rate": rate, "open_theses_n": 4, "resolved_recent_n": 3,
             "with_context_row_n": 2}
 
 

@@ -189,7 +189,7 @@ hint only, never execution, acceptance, live custody or a complete duplicate cen
 
 ### Slice 2 proof and limits
 
-- `OWNER_INPUT_PROOF_2026-09-24.json`: 255 focused owner/discovery/Agenda/readiness/
+- `research/evidence/improvement_discovery/OWNER_INPUT_PROOF_2026-09-24.json`: 255 focused owner/discovery/Agenda/readiness/
   nudge-feedback/Mastermind-AI tests, zero failures/errors/skips, with code hashes.
 - The actual local archived report dated 2026-07-21 was read without modification;
   the new adapter returned HELD_SOURCE/STALE and zero hypotheses. This is a real
