@@ -156,6 +156,13 @@ _SERVICE_TASK_KINDS = frozenset({"research"})
 _SERVICE_PRINCIPAL_RE = re.compile(r"^svc-[a-z0-9-]{3,63}$")
 _SERVICE_INTENT_ID_PREFIX = "svc-"
 _SERVICE_ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH"})
+#: Canonical sink-owned enrollment contract for the current non-CEO service
+#: principal tier. A syntactically valid svc-* identifier is not enrollment.
+#: Future principals require a reviewed source change here; upstream emitters
+#: must prove their registry remains identical to this closed set.
+SERVICE_PRINCIPAL_BINDINGS = frozenset(
+    {("svc-site-maintenance", "svc-site-maintenance")}
+)
 #: The READ level of the A0-A7 effect ladder is its weakest rung, ``A0`` — the
 #: same default v1 already rides (``create_job(authority_level="A0")`` and
 #: ``ceo_request.AUTHORITY_LEVEL``).  Not an invented value.
@@ -703,6 +710,21 @@ def validate_intent(payload: Any) -> dict[str, Any]:
                 f"service intent.actor {intent['actor']!r} claims a reserved "
                 "identity; the CEO stamp, the chairman/chris seats, and the "
                 "unattributed 'operator' default are outside any service principal"
+            )
+        matching_actors = sorted(
+            actor
+            for enrolled_principal_id, actor in SERVICE_PRINCIPAL_BINDINGS
+            if enrolled_principal_id == principal_id
+        )
+        if len(matching_actors) != 1:
+            raise CeoIntentError(
+                f"service intent.principal_id {principal_id!r} is not a reviewed "
+                "service principal"
+            )
+        if intent["actor"] != matching_actors[0]:
+            raise CeoIntentError(
+                f"service intent.actor {intent['actor']!r} does not match the "
+                f"reviewed principal {principal_id!r}"
             )
         _require_service_ceiling(intent["execution_contract"])
         intent["principal_id"] = principal_id
