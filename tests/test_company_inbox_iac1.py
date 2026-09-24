@@ -948,7 +948,13 @@ def test_a_b_a_journey_with_full_credit_and_consumption(tmp_path: Path) -> None:
     _credit_wake_path(runtime, consultation_id)
 
     a_inbox = project_company_inbox(
-        runtime, actor_worker_id=requester[2], now="2026-09-14T00:00:30Z"
+        runtime,
+        actor={
+            "job_id": requester[0],
+            "attempt_id": requester[1],
+            "worker_id": requester[2],
+        },
+        now="2026-09-14T00:00:30Z",
     )
     a_row = a_inbox["items"][0]
     assert a_row["state"] == "QUESTION_DELIVERED"
@@ -957,7 +963,13 @@ def test_a_b_a_journey_with_full_credit_and_consumption(tmp_path: Path) -> None:
     assert a_row["schema"] == COMPANY_INBOX_SCHEMA
 
     b_inbox = project_company_inbox(
-        runtime, actor_worker_id=recipient[2], now="2026-09-14T00:00:30Z"
+        runtime,
+        actor={
+            "job_id": recipient[0],
+            "attempt_id": recipient[1],
+            "worker_id": recipient[2],
+        },
+        now="2026-09-14T00:00:30Z",
     )
     b_row = b_inbox["items"][0]
     assert b_row["role"] == "RECIPIENT"
@@ -978,7 +990,13 @@ def test_a_b_a_journey_with_full_credit_and_consumption(tmp_path: Path) -> None:
     assert reply_envelope["data"]["state"] == "ANSWER_AVAILABLE"
 
     a_inbox = project_company_inbox(
-        runtime, actor_worker_id=requester[2], now="2026-09-14T00:01:00Z"
+        runtime,
+        actor={
+            "job_id": requester[0],
+            "attempt_id": requester[1],
+            "worker_id": requester[2],
+        },
+        now="2026-09-14T00:01:00Z",
     )
     assert a_inbox["items"][0]["state"] == "ANSWER_AVAILABLE"
     assert a_inbox["items"][0]["owed_turn"] == "REQUESTER"
@@ -1210,7 +1228,13 @@ def test_non_party_worker_c_reads_returns_not_a_party(tmp_path: Path) -> None:
     assert excinfo.value.code == "NOT_A_PARTY"
 
     c_inbox = project_company_inbox(
-        runtime, actor_worker_id=third[2], now="2026-09-14T00:01:00Z"
+        runtime,
+        actor={
+            "job_id": third[0],
+            "attempt_id": third[1],
+            "worker_id": third[2],
+        },
+        now="2026-09-14T00:01:00Z",
     )
     assert c_inbox["items"] == []
 
@@ -1463,7 +1487,14 @@ def test_corrupt_wake_ledger_path_surfaces_reconciliation_required(
     )
 
     row = company_inbox_row(
-        runtime, consultation_id, requester[2], "2026-09-14T00:01:00Z"
+        runtime,
+        consultation_id,
+        {
+            "job_id": requester[0],
+            "attempt_id": requester[1],
+            "worker_id": requester[2],
+        },
+        "2026-09-14T00:01:00Z",
     )
     assert row["state"] == "RECONCILIATION_REQUIRED"
     assert row["blocker"] == "WAKE_STATE_UNAVAILABLE"
@@ -1496,7 +1527,13 @@ def test_inbox_rows_carry_only_digests_never_text(tmp_path: Path) -> None:
     consultation_id = consult_envelope["data"]["consultation_ref"]
 
     inbox = project_company_inbox(
-        runtime, actor_worker_id=requester[2], now="2026-09-14T00:01:00Z"
+        runtime,
+        actor={
+            "job_id": requester[0],
+            "attempt_id": requester[1],
+            "worker_id": requester[2],
+        },
+        now="2026-09-14T00:01:00Z",
     )
     raw = json.dumps(inbox, sort_keys=True)
     assert body_text not in raw
@@ -1504,7 +1541,14 @@ def test_inbox_rows_carry_only_digests_never_text(tmp_path: Path) -> None:
     assert recipient[1] not in raw  # no clear attempt_id
 
     row = company_inbox_row(
-        runtime, consultation_id, recipient[2], "2026-09-14T00:01:00Z"
+        runtime,
+        consultation_id,
+        {
+            "job_id": recipient[0],
+            "attempt_id": recipient[1],
+            "worker_id": recipient[2],
+        },
+        "2026-09-14T00:01:00Z",
     )
     raw_row = json.dumps(row, sort_keys=True)
     assert body_text not in raw_row
@@ -2734,3 +2778,522 @@ def test_historical_answer_is_not_labelled_current(tmp_path: Path) -> None:
     # `historical` short-circuit that returns ``ANSWER_HISTORICAL`` and
     # never calls ``packets.put_answer``.
     pass
+
+
+# ---------------------------------------------------------------------------
+# Item 5 — projection never hides lost, unknown, or historical work
+# ---------------------------------------------------------------------------
+
+
+def _make_actor(job: str, attempt: str, worker: str) -> dict[str, str]:
+    return {
+        "job_id": job,
+        "attempt_id": attempt,
+        "worker_id": worker,
+    }
+
+
+def _append_synthetic_intent(
+    runtime: Runtime,
+    *,
+    consultation_id: str,
+    payload: dict[str, Any],
+) -> None:
+    """Append one synthetic INTENT to the runtime event store via the
+    ``store.append_event`` seam on the same Runtime. The projection only
+    reads ``requester_actor_ref`` / ``recipient_actor_ref`` / ``valid_until``
+    / etc. from the payload, so we exercise it without going through
+    ``ConsultationRuntime.intent``.
+    """
+    with runtime.store.transaction() as connection:
+        runtime.store.append_event(
+            connection,
+            aggregate_type="consultation",
+            aggregate_id=consultation_id,
+            event_type="INTENT",
+            payload=payload,
+            command_id=f"synthetic-intent:{consultation_id}",
+        )
+
+
+def test_inbox_owed_turn_requires_exact_actor(tmp_path: Path) -> None:
+    """Rotated attempt of the same worker sees the row with ``owed_turn None``
+    + ``ACTOR_ROTATED``; the exact actor sees the owed turn.
+    """
+    runtime = _runtime_at(tmp_path / "actor-rotation")
+    _consultations(runtime, tmp_path / "actor-rotation")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "actor-rotation-repo")
+    shared_carrier = InMemoryConsultationPacketCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=shared_carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Exact actor question?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    _credit_wake_path(runtime, consultation_id)
+
+    rotated_attempt = (
+        "ATT-ROTATED-" + hashlib.sha256(b"iac1-r4b-actor-rotated").hexdigest()[:16]
+    )
+    rotated_actor = _make_actor(requester[0], rotated_attempt, requester[2])
+
+    inbox_rotated = project_company_inbox(
+        runtime, actor=rotated_actor, now="2026-09-14T00:01:00Z"
+    )
+    coverage_rotated = inbox_rotated["coverage"]
+    assert coverage_rotated["status"] == "COMPLETE"
+    assert coverage_rotated["rows_returned"] == 1
+    assert inbox_rotated["items"], "row visible to worker-only match"
+    row_rotated = inbox_rotated["items"][0]
+    assert row_rotated["role"] == "REQUESTER"
+    assert row_rotated["owed_turn"] is None
+    assert row_rotated["blocker"] == "ACTOR_ROTATED"
+    assert inbox_rotated["actor_digest"] != ""
+
+    exact_actor = _make_actor(requester[0], requester[1], requester[2])
+    inbox_exact = project_company_inbox(
+        runtime, actor=exact_actor, now="2026-09-14T00:01:00Z"
+    )
+    row_exact = inbox_exact["items"][0]
+    assert row_exact["role"] == "REQUESTER"
+    assert row_exact["owed_turn"] == "RECIPIENT"
+    assert row_exact["blocker"] is None
+    assert row_exact["actor_digest"] != inbox_rotated["actor_digest"]
+
+
+def test_malformed_authorized_consultation_surfaces_degraded_row(
+    tmp_path: Path,
+) -> None:
+    """Recipient ``actor_ref`` is a string → row visible to requester with
+    ``ROW_DEGRADED`` and ``coverage.rows_degraded == 1``. Non-party C sees
+    nothing and stays ``COMPLETE``.
+    """
+    runtime = _runtime_at(tmp_path / "malformed-row")
+    _consultations(runtime, tmp_path / "malformed-row")
+    requester, recipient, third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "malformed-row-repo")
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=InMemoryConsultationPacketCarrier(),
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Will append one synthetic malformed INTENT.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    _credit_wake_path(runtime, consultation_id)
+
+    # Second consultation: synthetic INTENT with a string ``recipient_actor_ref``.
+    synthetic_id = (
+        "consult-" + hashlib.sha256(b"iac1-r4b-malformed").hexdigest()[:32]
+    )
+    _append_synthetic_intent(
+        runtime,
+        consultation_id=synthetic_id,
+        payload={
+            "consultation_id": synthetic_id,
+            "message_key": "asd-consultation-malformed-row",
+            "requester_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": requester[0],
+                "attempt_id": requester[1],
+                "worker_id": requester[2],
+            },
+            "recipient_actor_ref": "this-is-a-string-not-a-mapping",
+            "recipient_peer_ref": "peer-malformed",
+            "valid_until": "2026-09-15T00:00:00Z",
+            "question_digest": "deadbeef" * 8,
+            "artifact_revision_digest": "feedface" * 8,
+        },
+    )
+
+    actor_a = _make_actor(requester[0], requester[1], requester[2])
+    inbox_a = project_company_inbox(
+        runtime, actor=actor_a, now="2026-09-14T00:01:00Z"
+    )
+    coverage_a = inbox_a["coverage"]
+    assert coverage_a["consultations_scanned"] == 2
+    assert coverage_a["rows_returned"] == 1
+    assert coverage_a["rows_degraded"] == 1
+    assert coverage_a["rows_unattributable"] == 0
+    assert coverage_a["status"] == "DEGRADED"
+    rows_a = [
+        row for row in inbox_a["items"] if row["consultation_ref"] == synthetic_id
+    ]
+    assert len(rows_a) == 1
+    degraded_row = rows_a[0]
+    assert degraded_row["state"] == "RECONCILIATION_REQUIRED"
+    assert degraded_row["blocker"] == "ROW_DEGRADED"
+    assert degraded_row["role"] == "REQUESTER"
+    raw = json.dumps(degraded_row, sort_keys=True)
+    assert "this-is-a-string-not-a-mapping" not in raw
+    assert requester[2] not in raw
+
+    actor_c = _make_actor(third[0], third[1], third[2])
+    inbox_c = project_company_inbox(
+        runtime, actor=actor_c, now="2026-09-14T00:01:00Z"
+    )
+    coverage_c = inbox_c["coverage"]
+    assert coverage_c["consultations_scanned"] == 2
+    assert coverage_c["rows_returned"] == 0
+    assert coverage_c["rows_degraded"] == 0
+    assert coverage_c["rows_unattributable"] == 0
+    assert coverage_c["status"] == "COMPLETE"
+    assert inbox_c["items"] == []
+
+
+def test_unattributable_intent_is_counted_not_leaked(tmp_path: Path) -> None:
+    """INTENT with both actor refs missing → no row, ``rows_unattributable ==
+    1``, status ``DEGRADED``."""
+    runtime = _runtime_at(tmp_path / "unattributable")
+    _consultations(runtime, tmp_path / "unattributable")
+    requester, _recipient, _third, _root = _workers(runtime)
+
+    synthetic_id = (
+        "consult-" + hashlib.sha256(b"iac1-r4b-unattributable").hexdigest()[:32]
+    )
+    _append_synthetic_intent(
+        runtime,
+        consultation_id=synthetic_id,
+        payload={
+            "consultation_id": synthetic_id,
+            "message_key": "asd-consultation-unattributable",
+            # Both refs intentionally missing.
+            "valid_until": "2026-09-15T00:00:00Z",
+        },
+    )
+
+    actor_a = _make_actor(requester[0], requester[1], requester[2])
+    inbox_a = project_company_inbox(
+        runtime, actor=actor_a, now="2026-09-14T00:01:00Z"
+    )
+    coverage_a = inbox_a["coverage"]
+    assert coverage_a["consultations_scanned"] == 1
+    assert coverage_a["rows_returned"] == 0
+    assert coverage_a["rows_degraded"] == 0
+    assert coverage_a["rows_unattributable"] == 1
+    assert coverage_a["status"] == "DEGRADED"
+    assert inbox_a["items"] == []
+
+
+def test_store_failure_is_inbox_unavailable_not_empty(tmp_path: Path) -> None:
+    """``runtime.store.read`` raising → ``coverage.status == "UNAVAILABLE"``
+    with envelope ``blocker == "INBOX_UNAVAILABLE"``; never a silent empty
+    list."""
+    runtime = _runtime_at(tmp_path / "store-failure")
+    _consultations(runtime, tmp_path / "store-failure")
+    requester, _recipient, _third, _root = _workers(runtime)
+    fixture_repo, _fixture_revision = _fixture_repo(
+        tmp_path / "store-failure-repo"
+    )
+    invocations = _StaticInvocations(_default_invocation())
+    _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=requester,
+        packets=InMemoryConsultationPacketCarrier(),
+        invocations=invocations,
+    )
+
+    original_read = runtime.store.read
+
+    class _RaisingRead:
+        def __enter__(self):
+            raise RuntimeError("synthetic store failure")
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    runtime.store.read = lambda: _RaisingRead()  # type: ignore[assignment]
+    try:
+        actor_a = _make_actor(requester[0], requester[1], requester[2])
+        inbox_a = project_company_inbox(
+            runtime, actor=actor_a, now="2026-09-14T00:01:00Z"
+        )
+    finally:
+        runtime.store.read = original_read  # type: ignore[assignment]
+    assert inbox_a["items"] == []
+    assert inbox_a["coverage"]["status"] == "UNAVAILABLE"
+    assert inbox_a["coverage"]["rows_returned"] == 0
+    assert inbox_a["coverage"]["rows_degraded"] == 0
+    assert inbox_a["coverage"]["rows_unattributable"] == 0
+    assert inbox_a["coverage"]["consultations_scanned"] == 0
+    assert inbox_a["blocker"] == "INBOX_UNAVAILABLE"
+
+
+def test_historical_only_answer_is_not_current(tmp_path: Path) -> None:
+    """``ANSWER_AVAILABLE`` with ``historical: True`` → state !=
+    ``ANSWER_AVAILABLE``, blocker ``HISTORICAL_ANSWER_ONLY``."""
+    runtime = _runtime_at(tmp_path / "historical-only")
+    _consultations(runtime, tmp_path / "historical-only")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "historical-only-repo")
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=InMemoryConsultationPacketCarrier(),
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Historical-only answer scenario?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    _credit_wake_path(runtime, consultation_id)
+
+    with runtime.store.transaction() as connection:
+        runtime.store.append_event(
+            connection,
+            aggregate_type="consultation",
+            aggregate_id=consultation_id,
+            event_type="ANSWER_AVAILABLE",
+            payload={
+                "answer_fingerprint": "f" * 64,
+                "semantic_answer_digest": "a" * 64,
+                "message_key": "asd-consultation-historical-only",
+                "historical": True,
+                "answer_replay_only": True,
+            },
+            command_id="synthetic-historical-answer",
+        )
+
+    actor_a = _make_actor(requester[0], requester[1], requester[2])
+    inbox_a = project_company_inbox(
+        runtime, actor=actor_a, now="2026-09-14T00:01:00Z"
+    )
+    row = inbox_a["items"][0]
+    assert row["state"] != "ANSWER_AVAILABLE"
+    assert row["blocker"] == "HISTORICAL_ANSWER_ONLY"
+    assert row["owed_turn"] != "REQUESTER"
+    historical_kinds = [
+        ref["kind"]
+        for ref in row["evidence_refs"]
+        if ref.get("kind") == "ANSWER_AVAILABLE_HISTORICAL"
+    ]
+    assert len(historical_kinds) == 1
+
+
+def test_unparseable_deadline_is_reconciliation_required(tmp_path: Path) -> None:
+    """Unparseable ``valid_until`` → ``RECONCILIATION_REQUIRED`` +
+    ``INVALID_DEADLINE``; ``wake_state`` still reported."""
+    runtime = _runtime_at(tmp_path / "invalid-deadline")
+    _consultations(runtime, tmp_path / "invalid-deadline")
+    requester, recipient, _third, _root = _workers(runtime)
+
+    synthetic_id = (
+        "consult-" + hashlib.sha256(b"iac1-r4b-invalid-deadline").hexdigest()[:32]
+    )
+    _append_synthetic_intent(
+        runtime,
+        consultation_id=synthetic_id,
+        payload={
+            "consultation_id": synthetic_id,
+            "message_key": "asd-consultation-invalid-deadline",
+            "requester_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": requester[0],
+                "attempt_id": requester[1],
+                "worker_id": requester[2],
+            },
+            "recipient_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": recipient[0],
+                "attempt_id": recipient[1],
+                "worker_id": recipient[2],
+            },
+            "recipient_peer_ref": "peer-invalid-deadline",
+            "recipient_binding": dict(recipient[3]),
+            "valid_until": "garbage-time",
+            "question_digest": "deadbeef" * 8,
+            "artifact_revision_digest": "feedface" * 8,
+        },
+    )
+
+    actor_a = _make_actor(requester[0], requester[1], requester[2])
+    inbox_a = project_company_inbox(
+        runtime, actor=actor_a, now="2026-09-14T00:01:00Z"
+    )
+    row = inbox_a["items"][0]
+    assert row["state"] == "RECONCILIATION_REQUIRED"
+    assert row["blocker"] == "INVALID_DEADLINE"
+    # wake_state may be None when the ledger path raises (no wake records);
+    # what matters is that the projection still reads it instead of skipping.
+    assert "wake_state" in row
+
+
+def test_source_resolved_wake_state_is_not_consumption(tmp_path: Path) -> None:
+    """SOURCE_RESOLVED wake → ``state != QUESTION_DELIVERED``, ``blocker ==
+    SOURCE_RESOLVED_NOT_CONSUMED``."""
+    runtime = _runtime_at(tmp_path / "source-resolved")
+    _consultations(runtime, tmp_path / "source-resolved")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "source-resolved-repo"
+    )
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=InMemoryConsultationPacketCarrier(),
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Source-resolved wake state?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+
+    # Drive the ledger into TARGET_ACKNOWLEDGED, then SOURCE_RESOLVED.
+    _credit_wake_path(runtime, consultation_id)
+
+    from control_plane.wake_ledger import (
+        SourceReadHealth,
+        SourceResolutionCode,
+        resolve_source,
+        resolved_record,
+    )
+    from control_plane.wake_persist import WakeLedgerRepository
+
+    repository = WakeLedgerRepository(runtime)
+    # Recover the persisted obligation from the WAKE_REQUESTED record.
+    persisted_wake_events = repository.list_wake_events()
+    obligation = None
+    for persisted in persisted_wake_events:
+        if persisted.obligation is not None:
+            obligation = persisted.obligation
+            break
+    assert obligation is not None, "credit_wake_path did not persist a WAKE_REQUESTED"
+    resolution = resolve_source(
+        obligation,
+        code=SourceResolutionCode.DIALOGUE_ATTENTION_ABSENT,
+        health=SourceReadHealth.HEALTHY,
+        source_present=False,
+        snapshot_digest="f" * 64,
+        resolved_at="2026-09-14T00:06:00Z",
+    )
+    repository.append_records_atomic(
+        [(resolved_record(obligation, resolution), obligation)]
+    )
+
+    actor_a = _make_actor(requester[0], requester[1], requester[2])
+    inbox_a = project_company_inbox(
+        runtime, actor=actor_a, now="2026-09-14T00:01:00Z"
+    )
+    row = inbox_a["items"][0]
+    assert row["state"] != "QUESTION_DELIVERED"
+    assert row["state"] != "ANSWER_AVAILABLE"
+    assert row["state"] != "CONSUMED"
+    assert row["blocker"] == "SOURCE_RESOLVED_NOT_CONSUMED"
+    assert row["wake_state"] == "SOURCE_RESOLVED"
+    assert row["owed_turn"] is None
+
+
+def test_projection_opens_exactly_one_read_context(tmp_path: Path) -> None:
+    """Three consultations → exactly one ``runtime.store.read()`` per
+    projection call (the balanced read context invariant)."""
+    runtime = _runtime_at(tmp_path / "read-context")
+    _consultations(runtime, tmp_path / "read-context")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "read-context-repo")
+
+    consult_ids: list[str] = []
+    for index in range(3):
+        invocations = _StaticInvocations(
+            _default_invocation(f"iac1-r4b-read-context-{index}")
+        )
+        dispatcher = _make_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            packets=InMemoryConsultationPacketCarrier(),
+            invocations=invocations,
+        )
+        gateway = _gateway_with_dispatcher(dispatcher)
+        envelope = _run(
+            gateway.call(
+                "company.consult",
+                _consult_args(
+                    question=f"Three-consultation inbox {index}?",
+                    evidence_refs=[],
+                    artifact_revisions=[fixture_revision],
+                ),
+            )
+        )
+        assert envelope["ok"] is True
+        consult_ids.append(envelope["data"]["consultation_ref"])
+    assert len(set(consult_ids)) == 3
+
+    original_read = runtime.store.read
+    counter = {"calls": 0}
+
+    def _wrap_read():
+        counter["calls"] += 1
+        return original_read()
+
+    runtime.store.read = _wrap_read  # type: ignore[assignment]
+    try:
+        actor_a = _make_actor(requester[0], requester[1], requester[2])
+        inbox_a = project_company_inbox(
+            runtime, actor=actor_a, now="2026-09-14T00:01:00Z"
+        )
+    finally:
+        runtime.store.read = original_read  # type: ignore[assignment]
+
+    assert inbox_a["coverage"]["consultations_scanned"] == 3
+    assert inbox_a["coverage"]["rows_returned"] == 3
+    assert counter["calls"] == 1

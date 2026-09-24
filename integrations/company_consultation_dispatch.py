@@ -1012,7 +1012,11 @@ class RuntimeConsultationDispatcher:
         row = company_inbox_row(
             self.runtime,
             consultation_ref,
-            self.caller.worker_id,
+            {
+                "job_id": self.caller.job_id,
+                "attempt_id": self.caller.attempt_id,
+                "worker_id": self.caller.worker_id,
+            },
             self._clock(),
         )
 
@@ -1050,7 +1054,13 @@ class RuntimeConsultationDispatcher:
     def inbox_projection(self) -> dict[str, Any]:
         """Return the full inbox projection for the caller. Read-only."""
         return project_company_inbox(
-            self.runtime, actor_worker_id=self.caller.worker_id, now=self._clock()
+            self.runtime,
+            actor={
+                "job_id": self.caller.job_id,
+                "attempt_id": self.caller.attempt_id,
+                "worker_id": self.caller.worker_id,
+            },
+            now=self._clock(),
         )
 
 
