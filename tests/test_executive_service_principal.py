@@ -224,6 +224,13 @@ def test_closed_schema_refuses_drift_unknown_ids_and_reserved_actors():
             ServicePrincipal(principal_id="svc-x", actor=actor, purpose="reserved probe")
 
 
+def test_emitter_registry_is_exactly_the_canonical_sink_enrollment_contract():
+    assert ceo_intent.SERVICE_PRINCIPAL_BINDINGS == frozenset(
+        (principal.principal_id, principal.actor)
+        for principal in REGISTRY.values()
+    )
+
+
 # ---------------------------------------------------------------------------
 # 2. READ/RESEARCH only
 # ---------------------------------------------------------------------------
