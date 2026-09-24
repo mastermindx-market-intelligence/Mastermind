@@ -917,6 +917,7 @@ class TestStartStatusStop(unittest.TestCase):
             self.assertEqual(rc2, 0)
             payload = json.loads(out)
             self.assertTrue(payload["running"])
+            self.assertFalse(payload["configurationDrift"])
             self.assertTrue(payload["healthy"])
             self.assertFalse(payload["ready"])
             self.assertFalse(payload["controlPlanePollReady"])
@@ -935,6 +936,87 @@ class TestStartStatusStop(unittest.TestCase):
             self.assertTrue(blocked["tunnelReady"])
             self.assertFalse(blocked["gatewayReady"])
             self.assertFalse(blocked["ready"])
+
+    def test_status_reports_profile_drift_without_executing_untrusted_tunnel(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, _, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            label = svc._tunnel_label(C1)
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            profile["control_plane"]["organization_id"] = "org-UnmanifestedDrift123"
+            roots["profile"].write_text(
+                json.dumps(profile, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            def handler(cmd):
+                if cmd[:2] == ["launchctl", "print"]:
+                    return FakeResult(
+                        0, _print_running(str(roots["plist"]), label), ""
+                    )
+                return FakeResult(1, "", "untrusted tunnel client must not run")
+
+            strict = mock.Mock(return_value=(True, True, True))
+            alias = mock.Mock(return_value=True)
+            gateway = mock.Mock(return_value=True)
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=handler)
+            ), mock.patch.object(
+                svc, "_strict_tunnel_health", strict
+            ), mock.patch.object(
+                svc, "_managed_alias_running", alias
+            ), mock.patch.object(
+                svc, "_gateway_ready", gateway
+            ):
+                rc2, out = _capture_stdout(
+                    lambda: svc.cmd_status(mock.Mock(account=C1))
+                )
+            self.assertEqual(rc2, 0)
+            payload = json.loads(out)
+            self.assertTrue(payload["loaded"])
+            self.assertTrue(payload["running"])
+            self.assertTrue(payload["configurationDrift"])
+            self.assertFalse(payload["healthy"])
+            self.assertFalse(payload["ready"])
+            self.assertFalse(payload["controlPlanePollReady"])
+            self.assertFalse(payload["gatewayReady"])
+            self.assertFalse(payload["managedAliasRunning"])
+            strict.assert_not_called()
+            alias.assert_not_called()
+            gateway.assert_not_called()
+
+    def test_status_reports_running_service_without_manifest_as_drift(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, _, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            label = svc._tunnel_label(C1)
+            roots["manifest"].unlink()
+
+            def handler(cmd):
+                if cmd[:2] == ["launchctl", "print"]:
+                    return FakeResult(
+                        0, _print_running(str(roots["plist"]), label), ""
+                    )
+                return FakeResult(1, "", "untrusted tunnel client must not run")
+
+            strict = mock.Mock(return_value=(True, True, True))
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=handler)
+            ), mock.patch.object(
+                svc, "_strict_tunnel_health", strict
+            ):
+                rc2, out = _capture_stdout(
+                    lambda: svc.cmd_status(mock.Mock(account=C1))
+                )
+            self.assertEqual(rc2, 0)
+            payload = json.loads(out)
+            self.assertTrue(payload["running"])
+            self.assertTrue(payload["configurationDrift"])
+            self.assertFalse(payload["ready"])
+            self.assertIsNone(payload["tunnelId"])
+            strict.assert_not_called()
 
     def test_status_without_process_does_not_claim_health(self):
         with IsolatedHome() as (tmp, home):

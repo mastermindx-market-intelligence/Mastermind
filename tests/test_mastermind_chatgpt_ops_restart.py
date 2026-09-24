@@ -169,6 +169,48 @@ class OpsRestartTests(unittest.TestCase):
         two = ops._instance_identity("chatgpt1", status)
         self.assertNotEqual(one, two)
 
+    def test_tunnel_configuration_drift_blocks_semantic_restart(self):
+        manifest = {
+            "version": 2,
+            "account": "chatgpt1",
+            "label": "com.mastermind.studio-direct-private.chatgpt1",
+            "configHash": "a" * 64,
+            "nodeHash": "b" * 64,
+            "backendHash": "c" * 64,
+            "dependencyTreeHash": "d" * 64,
+            "plistHash": "e" * 64,
+            "files": {"gateway.mjs": "f" * 64},
+        }
+        status = {
+            "ready": False,
+            "gateway": {
+                "pid": 11,
+                "runtimeVersion": "0.1.6",
+                "configurationDrift": False,
+            },
+            "tunnel": {
+                "pid": 22,
+                "tunnelId": "tunnel_" + "a" * 32,
+                "configurationDrift": True,
+            },
+        }
+        observed = ops.observe_exact_service(
+            "studio-direct.chatgpt1",
+            status_reader=lambda _: status,
+            manifest_reader=lambda _: manifest,
+        )
+        self.assertEqual(observed.issues, ("CONFIGURATION_DRIFT",))
+        request = RestartRequest(
+            service_ref=observed.service_ref,
+            expected_instance_identity=observed.instance_identity,
+            expected_build_identity=observed.build_identity,
+            reason_code="health_recovery",
+        )
+        refused = ops.preflight_restart(request, observed)
+        self.assertIsNotNone(refused)
+        self.assertEqual(refused.state, RestartState.NOT_APPLIED)
+        self.assertEqual(refused.code, "CONFIGURATION_DRIFT")
+
     def test_success_restarts_once_and_duplicate_old_identity_refuses(self):
         before = self.observation()
         after = self.observation(instance="3" * 64)

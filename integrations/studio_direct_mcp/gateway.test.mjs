@@ -493,6 +493,7 @@ test('configured studio_fleet_status lists and returns the bounded public projec
         tunnel: {
           account: 'chatgpt1', label: 'tunnel-chatgpt1', loaded: true,
           pid: 22222, running: true, healthy: true, ready: true,
+          configurationDrift: false,
           tunnelReady: true, controlPlanePollReady: true, gatewayReady: true,
           transportTTL: '5h', maxConcurrentRequests: 4,
           gatewayPort: 45018, healthPort: 45019,
@@ -514,6 +515,7 @@ test('configured studio_fleet_status lists and returns the bounded public projec
         tunnel: {
           account: 'chatgpt2', label: 'tunnel-chatgpt2', loaded: false,
           pid: null, running: false, healthy: false, ready: false,
+          configurationDrift: false,
           tunnelReady: false, controlPlanePollReady: false, gatewayReady: true,
           transportTTL: '5h', maxConcurrentRequests: 4,
           gatewayPort: 45020, healthPort: 45021,

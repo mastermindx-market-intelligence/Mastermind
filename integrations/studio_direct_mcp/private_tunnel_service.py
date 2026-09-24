@@ -797,6 +797,15 @@ def cmd_status(args) -> int:
     pid = info.get("pid") if info and running else None
 
     manifest = _read_manifest(roots["manifest"], account, label)
+    configuration_drift = info is not None and manifest is None
+    if manifest is not None:
+        try:
+            _verify_staged_install(account, label, roots)
+        except SystemExit:
+            configuration_drift = True
+    if info is not None and info.get("path") not in (None, str(roots["plist"])):
+        configuration_drift = True
+
     plist = _load_plist(roots["plist"])
     argv = list((plist or {}).get("ProgramArguments") or [])
     transport_ttl = _argv_transport_ttl(argv)
@@ -806,7 +815,7 @@ def cmd_status(args) -> int:
     tunnel_ready = False
     control_plane_poll_ready = False
     gateway_ready = False
-    if running and isinstance(health_port, int) and manifest:
+    if running and isinstance(health_port, int) and manifest and not configuration_drift:
         tunnel_client = Path(manifest["tunnelClient"])
         healthy, tunnel_ready, control_plane_poll_ready = _strict_tunnel_health(
             tunnel_client, health_port
@@ -816,7 +825,7 @@ def cmd_status(args) -> int:
             gateway_ready = _gateway_ready(gateway_port)
 
     alias_running = False
-    if manifest and manifest.get("tunnelClient"):
+    if manifest and manifest.get("tunnelClient") and not configuration_drift:
         alias_running = _managed_alias_running(
             Path(manifest["tunnelClient"]), account
         )
@@ -829,6 +838,7 @@ def cmd_status(args) -> int:
                 "loaded": loaded,
                 "running": running,
                 "pid": pid,
+                "configurationDrift": configuration_drift,
                 "healthy": healthy,
                 "ready": tunnel_ready and gateway_ready,
                 "tunnelReady": tunnel_ready,

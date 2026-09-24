@@ -126,6 +126,30 @@ class ChatGptOpsHealthTests(unittest.TestCase):
         service, _ = ops.personal_facts("chatgpt2-personal", status, "2026-09-20T05:30:00Z")
         self.assertIn("CONFIGURATION_DRIFT", service.issues)
 
+    def test_tunnel_configuration_drift_is_explicit_issue(self):
+        status = {
+            "account": "chatgpt2-personal",
+            "ready": False,
+            "gateway": {
+                "running": True,
+                "runtimeReady": True,
+                "runtimeVersion": "0.1.6",
+                "configurationDrift": False,
+            },
+            "tunnel": {
+                "healthy": False,
+                "ready": False,
+                "configurationDrift": True,
+                "tunnelId": "tunnel_2123456789abcdef0123456789abcdef",
+            },
+        }
+        service, tunnel = ops.personal_facts(
+            "chatgpt2-personal", status, "2026-09-20T05:30:00Z"
+        )
+        self.assertIn("CONFIGURATION_DRIFT", service.issues)
+        self.assertIsNotNone(tunnel)
+        self.assertIn("CONFIGURATION_DRIFT", tunnel.issues)
+
     def test_business_profile_extracts_only_tunnel_identity(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "profile.json"

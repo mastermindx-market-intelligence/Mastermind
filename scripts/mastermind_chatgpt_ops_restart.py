@@ -194,14 +194,20 @@ def observe_exact_service(
         raise ValueError("owner status must be an object")
     manifest = manifest_reader(account)
     gateway = status.get("gateway")
+    tunnel = status.get("tunnel")
     if not isinstance(gateway, dict):
         raise ValueError("owner status gateway is unavailable")
+    if not isinstance(tunnel, dict):
+        raise ValueError("owner status tunnel is unavailable")
     runtime_version = gateway.get("runtimeVersion")
     if runtime_version is not None and not isinstance(runtime_version, str):
         raise ValueError("owner runtime version is invalid")
     issues: tuple[str, ...] = (
         ("CONFIGURATION_DRIFT",)
-        if gateway.get("configurationDrift") is True
+        if (
+            gateway.get("configurationDrift") is True
+            or tunnel.get("configurationDrift") is True
+        )
         else ()
     )
     return RestartObservation(

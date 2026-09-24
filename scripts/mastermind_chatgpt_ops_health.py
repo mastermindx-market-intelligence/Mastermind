@@ -140,7 +140,8 @@ def personal_facts(
     gateway = status.get("gateway") if isinstance(status.get("gateway"), dict) else {}
     tunnel = status.get("tunnel") if isinstance(status.get("tunnel"), dict) else {}
     issues: list[str] = []
-    if gateway.get("configurationDrift") is True:
+    tunnel_configuration_drift = tunnel.get("configurationDrift") is True
+    if gateway.get("configurationDrift") is True or tunnel_configuration_drift:
         issues.append("CONFIGURATION_DRIFT")
 
     runtime_version = gateway.get("runtimeVersion")
@@ -171,6 +172,8 @@ def personal_facts(
     if not isinstance(tunnel_id, str) or TUNNEL_RE.fullmatch(tunnel_id) is None:
         return service, None
     tunnel_issues: list[str] = []
+    if tunnel_configuration_drift:
+        tunnel_issues.append("CONFIGURATION_DRIFT")
     if tunnel.get("managedAliasRunning") is True:
         tunnel_issues.append("FOREIGN_MANAGED_ALIAS_RUNNING")
     tunnel_fact = TunnelFact(

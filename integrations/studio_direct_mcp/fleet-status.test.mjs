@@ -49,6 +49,7 @@ function statusRow(account, ready = true) {
       running: ready,
       healthy: ready,
       ready,
+      configurationDrift: false,
       tunnelReady: ready,
       controlPlanePollReady: ready,
       gatewayReady: true,
@@ -200,6 +201,26 @@ test('running tunnel exposes closed poll and readiness issue codes', async t => 
     'TUNNEL_NOT_READY',
     'GATEWAY_NOT_READY',
   ]);
+});
+
+test('configuration drift is projected as one closed issue without raw internals', async t => {
+  const row = statusRow('admin-business', true);
+  row.ready = false;
+  row.tunnel.configurationDrift = true;
+  row.tunnel.healthy = false;
+  row.tunnel.ready = false;
+  row.tunnel.tunnelReady = false;
+  row.tunnel.controlPlanePollReady = false;
+  row.tunnel.gatewayReady = false;
+  const owner = ownerFor([row]);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.state, 'DEGRADED');
+  assert.deepEqual(result.accounts[0].issues, ['CONFIGURATION_DRIFT']);
+  const rendered = JSON.stringify(fleetStatusToolResult(result));
+  assert.equal(rendered.includes('configurationDrift'), false);
+  assert.equal(rendered.includes('tunnel_0123456789abcdef0123456789abcdef'), false);
 });
 
 test('owner counts, readiness, duplicates, types, and future fields fail closed', async t => {

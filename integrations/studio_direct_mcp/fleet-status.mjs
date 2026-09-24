@@ -175,6 +175,7 @@ function projectStatusRow(row) {
       'running',
       'healthy',
       'ready',
+      'configurationDrift',
       'tunnelReady',
       'controlPlanePollReady',
       'gatewayReady',
@@ -200,6 +201,7 @@ function projectStatusRow(row) {
   const tunnelRunning = expectBoolean(row.tunnel.running);
   const tunnelHealthy = expectBoolean(row.tunnel.healthy);
   const tunnelReady = expectBoolean(row.tunnel.ready);
+  const configurationDrift = expectBoolean(row.tunnel.configurationDrift);
   const transportReady = expectBoolean(row.tunnel.tunnelReady);
   const gatewayReady = expectBoolean(row.tunnel.gatewayReady);
   const managedAliasRunning = expectBoolean(row.tunnel.managedAliasRunning);
@@ -221,6 +223,7 @@ function projectStatusRow(row) {
     && tunnelRunning
     && tunnelHealthy
     && tunnelReady
+    && !configurationDrift
     && transportReady
     && pollReady
     && gatewayReady
@@ -228,12 +231,13 @@ function projectStatusRow(row) {
   if (ready !== computedReady) invalidOwner();
 
   const issues = [];
+  if (configurationDrift) issues.push('CONFIGURATION_DRIFT');
   if (!gatewayLoaded) issues.push('GATEWAY_NOT_LOADED');
   if (!gatewayRunning) issues.push('GATEWAY_NOT_RUNNING');
   if (!tunnelLoaded) issues.push('TUNNEL_NOT_LOADED');
   if (!tunnelRunning) {
     issues.push('TUNNEL_NOT_RUNNING');
-  } else {
+  } else if (!configurationDrift) {
     if (!tunnelHealthy) issues.push('TUNNEL_NOT_HEALTHY');
     if (pollReady === false) issues.push('CONTROL_PLANE_POLL_NOT_READY');
     if (!transportReady) issues.push('TUNNEL_NOT_READY');
