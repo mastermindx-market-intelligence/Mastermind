@@ -1572,7 +1572,7 @@ def test_capability_contracts_must_cover_entire_closed_vocabulary() -> None:
             session_ref="websol-c3-session-17",
             binding_ref="runtimebinding-websol-c3-17",
             binding_generation=7,
-            action_scope_ref=ACTION_SCOPE_REF,
+            action_surface=_action_surface(),
             observed_at_ms=OBSERVED_AT_MS,
             expires_at_ms=EXPIRES_AT_MS,
             action_serviceability=(),
