@@ -20,6 +20,8 @@ import json
 import re
 from typing import Any, Final
 
+from common.commission_ref import CommissionRefError, normalize_commission_ref
+
 
 ASSIGNMENT_SCHEMA: Final[str] = "mastermind.web_sol_cognition_assignment/v1"
 ORCHESTRATION_RESULT_SCHEMA: Final[str] = (
@@ -78,9 +80,6 @@ _EFFECT_KEYS = frozenset(
 _RESULT_CONTRACT_KEYS = frozenset({"schema", "schema_digest"})
 _SOURCE_KEYS = frozenset(
     {"work_ref", "commission_ref", "dialogue_source_digest"}
-)
-_COMMISSION_REF_KEYS = frozenset(
-    {"repository", "commit", "path", "content_sha256"}
 )
 _IDENTITY_KEYS = frozenset(
     {
@@ -153,7 +152,9 @@ _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 _HEX32_RE = re.compile(r"^[0-9a-f]{32}$")
 _RUNTIME_BINDING_ID_RE = re.compile(r"^bind-wsx-[0-9a-f]{48}$")
-_OPAQUE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
+_ENTITY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_TURN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
+_BOUNDED_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
 
 class WebSolCognitionTransportError(ValueError):
@@ -214,9 +215,21 @@ def _hex64(value: Any, path: str) -> str:
     return value
 
 
-def _opaque_id(value: Any, path: str) -> str:
-    if not isinstance(value, str) or _OPAQUE_ID_RE.fullmatch(value) is None:
-        raise _error(path, "must be a bounded opaque identity")
+def _entity_id(value: Any, path: str) -> str:
+    if not isinstance(value, str) or _ENTITY_ID_RE.fullmatch(value) is None:
+        raise _error(path, "must be a canonical bounded entity identity")
+    return value
+
+
+def _turn_id(value: Any, path: str) -> str:
+    if not isinstance(value, str) or _TURN_ID_RE.fullmatch(value) is None:
+        raise _error(path, "must be a bounded provider/turn identity")
+    return value
+
+
+def _bounded_token(value: Any, path: str) -> str:
+    if not isinstance(value, str) or _BOUNDED_TOKEN_RE.fullmatch(value) is None:
+        raise _error(path, "must be a bounded token")
     return value
 
 
@@ -238,9 +251,9 @@ def _role(value: Any, path: str) -> str:
     return str(value)
 
 
-def _optional_opaque(value: Any, path: str) -> None:
+def _optional_entity(value: Any, path: str) -> None:
     if value is not None:
-        _opaque_id(value, path)
+        _entity_id(value, path)
 
 
 def _validate_result_schema_identity(
@@ -361,16 +374,16 @@ def _validate_assignment(
             )
     if not isinstance(job["objective"], str) or not job["objective"].strip():
         raise _error("$.assignment.job.objective", "must be non-empty text")
-    _optional_opaque(job["plan_attempt_id"], "$.assignment.job.plan_attempt_id")
+    _optional_entity(job["plan_attempt_id"], "$.assignment.job.plan_attempt_id")
     if job["plan_digest"] is not None:
         _hex64(job["plan_digest"], "$.assignment.job.plan_digest")
-    _optional_opaque(job["plan_step_id"], "$.assignment.job.plan_step_id")
-    _opaque_id(job["quota_class"], "$.assignment.job.quota_class")
+    _optional_entity(job["plan_step_id"], "$.assignment.job.plan_step_id")
+    _bounded_token(job["quota_class"], "$.assignment.job.quota_class")
     if type(job["repair_round"]) is not int or job["repair_round"] < 0:
         raise _error("$.assignment.job.repair_round", "must be a non-negative integer")
     if type(job["review_required"]) is not bool:
         raise _error("$.assignment.job.review_required", "must be boolean")
-    _optional_opaque(job["reviews_job_id"], "$.assignment.job.reviews_job_id")
+    _optional_entity(job["reviews_job_id"], "$.assignment.job.reviews_job_id")
 
     result_contract = _exact(
         value["result_contract"],
@@ -396,34 +409,18 @@ def _validate_assignment(
     )
 
     source = _exact(value["source"], _SOURCE_KEYS, "$.assignment.source")
-    _opaque_id(source["work_ref"], "$.assignment.source.work_ref")
+    _bounded_token(source["work_ref"], "$.assignment.source.work_ref")
     _hex64(
         source["dialogue_source_digest"],
         "$.assignment.source.dialogue_source_digest",
     )
-    commission = _exact(
-        source["commission_ref"],
-        _COMMISSION_REF_KEYS,
-        "$.assignment.source.commission_ref",
-    )
-    if not isinstance(commission["repository"], str) or not commission["repository"]:
+    try:
+        normalize_commission_ref(source["commission_ref"])
+    except CommissionRefError as exc:
         raise _error(
-            "$.assignment.source.commission_ref.repository",
-            "must be non-empty",
-        )
-    if not isinstance(commission["commit"], str) or _HEX40_RE.fullmatch(
-        commission["commit"]
-    ) is None:
-        raise _error(
-            "$.assignment.source.commission_ref.commit",
-            "must be an exact Git commit",
-        )
-    if not isinstance(commission["path"], str) or not commission["path"]:
-        raise _error("$.assignment.source.commission_ref.path", "must be non-empty")
-    _hex64(
-        commission["content_sha256"],
-        "$.assignment.source.commission_ref.content_sha256",
-    )
+            "$.assignment.source.commission_ref",
+            "commission_ref is invalid",
+        ) from exc
 
     size = len(_canonical_bytes(value))
     if size > MAX_ASSIGNMENT_BYTES:
@@ -435,7 +432,7 @@ def _validate_assignment(
 
 
 def _validate_identity(value: dict[str, Any], *, path: str = "$") -> None:
-    _opaque_id(value["turn_id"], f"{path}.turn_id")
+    _turn_id(value["turn_id"], f"{path}.turn_id")
     _hex64(value["assignment_digest"], f"{path}.assignment_digest")
     _hex64(value["result_schema_digest"], f"{path}.result_schema_digest")
     _binding_id(value["runtime_binding_id"], f"{path}.runtime_binding_id")
@@ -448,7 +445,7 @@ def _validate_identity(value: dict[str, Any], *, path: str = "$") -> None:
         f"{path}.runtime_binding_fingerprint",
     )
     for field in ("job_id", "attempt_id", "worker_id", "root_job_id"):
-        _opaque_id(value[field], f"{path}.{field}")
+        _entity_id(value[field], f"{path}.{field}")
     _role(value["role"], f"{path}.role")
 
 
@@ -647,7 +644,7 @@ def validate_result_observation(value: Any) -> dict[str, Any]:
         _ensure_transport_budget(observation)
         return copy.deepcopy(observation)
 
-    _opaque_id(
+    _turn_id(
         observation["provider_native_turn_id"],
         "$.provider_native_turn_id",
     )
