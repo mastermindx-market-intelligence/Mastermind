@@ -60,6 +60,21 @@ For source development, load this directory with Claude Code's supported local p
 
 The plugin manifest contains no credential, endpoint secret, client ID, OAuth token, provider account, host identity, or mission authority.
 
+## Surface parity boundary
+
+The plugin package is intended for both Claude Code CLI and Claude Desktop's Code/plugin surface, but the current connector proof is narrower.
+
+#955 has qualified the `mastermind-executive` **Claude Code user-scope registration path**. P1 does not assume that this local registration automatically appears inside Claude Desktop.
+
+Therefore:
+
+- Claude Code plugin/package loading is a source-level target in P1;
+- Claude Desktop plugin loading remains a separate exact-version proof;
+- Claude Desktop Executive connector availability remains **UNPROVEN** until the real macOS app exposes the expected connector and exact read tool schema;
+- if Desktop does not consume the incumbent user-scope registration, do not add an ad-hoc second connector. Qualify the accepted bundled-MCP/Desktop-extension route after the COO OAuth profile exists.
+
+The eventual parity test must prove the same principal policy, tool schema, and authority ceiling on both surfaces; one surface's success is not inherited by the other.
+
 ## Current capability
 
 P1 adds:
