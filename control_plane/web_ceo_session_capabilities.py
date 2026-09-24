@@ -216,6 +216,7 @@ class ActionServiceabilityFact:
     binding_ref: str
     binding_generation: int
     action_scope_ref: str
+    action_surface_evidence_digest: str
     observed_at_ms: int
     expires_at_ms: int
     serviceable: bool
@@ -234,6 +235,13 @@ class ActionServiceabilityFact:
             self.action_scope_ref,
             code="SERVICEABILITY_ACTION_SCOPE_REF_INVALID",
         )
+        if (
+            not isinstance(self.action_surface_evidence_digest, str)
+            or _DIGEST_RE.fullmatch(self.action_surface_evidence_digest) is None
+        ):
+            raise WebCeoSessionCapabilityError(
+                "SERVICEABILITY_ACTION_SURFACE_EVIDENCE_DIGEST_INVALID"
+            )
         observed = _positive_int(
             self.observed_at_ms,
             code="SERVICEABILITY_OBSERVED_AT_INVALID",
@@ -259,6 +267,7 @@ class ActionServiceabilityFact:
             "binding_ref": self.binding_ref,
             "binding_generation": self.binding_generation,
             "action_scope_ref": self.action_scope_ref,
+            "action_surface_evidence_digest": self.action_surface_evidence_digest,
             "observed_at_ms": self.observed_at_ms,
             "expires_at_ms": self.expires_at_ms,
             "serviceable": self.serviceable,
@@ -683,6 +692,13 @@ def build_receipt_from_effective_tool_schema(
         ):
             raise WebCeoSessionCapabilityError(
                 "SERVICEABILITY_FACT_BINDING_MISMATCH"
+            )
+        if (
+            fact.action_surface_evidence_digest
+            != action_surface.evidence_digest
+        ):
+            raise WebCeoSessionCapabilityError(
+                "SERVICEABILITY_FACT_SURFACE_EVIDENCE_MISMATCH"
             )
         if (
             fact.observed_at_ms > observed_at_ms
