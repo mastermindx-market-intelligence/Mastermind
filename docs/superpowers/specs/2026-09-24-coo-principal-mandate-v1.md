@@ -500,6 +500,72 @@ This wave does not:
 - merge #676 or replace its portable-principal/profile work;
 - create another scheduler, session registry, identity store, queue, retry engine, memory plane or authority database.
 
+## 16. Exact-session falsifier — optional hardening, not the V1 autonomy gate
+
+Fresh provider evidence makes the possible Claude-session hardening path more concrete, while also showing why it must stay separate from the first production mandate.
+
+Claude Code's official hook contract supplies every hook a real `session_id`. `PreToolUse` runs before a tool call and may return `hookSpecificOutput.updatedInput` to replace fields in the tool request. This is the only current provider-native surface inspected in this design that can both observe the provider's session identity outside the model-authored tool input and modify the exact call before execution.
+
+### F0 candidate
+
+For **modifying COO tools only**, a deterministic plugin `PreToolUse` command hook may:
+
+1. receive the provider hook `session_id`, `tool_name` and `tool_input` on stdin;
+2. refuse any unexpected tool/schema shape;
+3. remove/overwrite any model-authored session-binding field;
+4. inject the hook-observed session identity, or preferably a purpose-bound assertion over it when an already-qualified signing owner exists;
+5. return only the updated tool input, never `permissionDecision=allow` as an authority grant.
+
+The Executive server must still perform all normal OAuth, principal-binding, mission-authority, effect/custody and scope checks. Hook output is additional evidence, never a substitute for those owners.
+
+### No suitable signing owner is assumed
+
+Current Mastermind source has stateless HMAC/action-token precedents, notably Workbench Action's `ActionTokenCodec` and its owner-provisioned stable generation key. That key belongs to Workbench Action and must **not** be silently reused for COO session assertions.
+
+The current Executive source audit did not identify an already-approved, purpose-correct principal-session assertion key owner. Therefore this spec does not create a new signing key, key file, credential service or token registry merely to make the session claim look stronger.
+
+If a later hardening wave requires cryptographic session assertions, it must either:
+- compose a purpose-separated assertion from an existing owner whose accepted threat model actually covers this use; or
+- explicitly review the smallest new local attestation-key custody as its own security boundary.
+
+Neither is required for the first authenticated COO-principal + mission vertical.
+
+### Why MCP environment/session metadata is not enough
+
+Do not use MCP `clientInfo`, Mastermind navigation bindings, or the MCP subprocess environment as the authorization source.
+
+Provider issue evidence has documented a resume case where the stdio MCP subprocess received a `CLAUDE_CODE_SESSION_ID` different from the identifier delivered to hooks/Bash. A resumed-session binding that trusts the MCP environment can therefore bind the wrong conversation even when both values are stable.
+
+The F0 test must use the hook input as the provider-session observation and exercise:
+- fresh session;
+- `--resume` / resumed session;
+- context compaction;
+- sibling conversation under the same authenticated human/client;
+- plugin reload/restart.
+
+Any mismatch, missing hook evidence, multiple conflicting hook rewrites or unsupported provider behavior refuses the optional session-bound mutation. It never falls back to accepting a model-supplied session id.
+
+### Honest acceptance levels
+
+`COO_PRINCIPAL_MISSION_BOUND`
+: OAuth principal + installed COO binding + current mission authority is proven. This is sufficient for the first production autonomy vertical.
+
+`COO_PRINCIPAL_PROVIDER_SESSION_BOUND`
+: additionally, the exact installed Claude version proves the deterministic hook path and sibling/resume falsifiers. This is defense-in-depth against the Claude model/session choosing another mission binding.
+
+`COO_PRINCIPAL_CRYPTOGRAPHIC_SESSION_BOUND`
+: reserved for a future accepted purpose-bound signer/attestor. Do not use this label merely because a hook supplied a session id.
+
+### Desktop parity remains a real proof obligation
+
+A source-level plugin manifest is not proof that Claude Desktop's Code surface loaded the plugin, hooks and MCP tools. Provider issue history includes version-specific plugin-loading and MCP-registration defects. Production acceptance therefore separately proves the exact installed Claude Code CLI and macOS Desktop Code surfaces, on the versions actually deployed, rather than inheriting one surface's result into the other.
+
+Provider evidence inspected for this section:
+- Anthropic Claude Code plugin hook-development contract: `session_id` input and `PreToolUse.updatedInput`;
+- Anthropic Claude Code plugin structure: plugin hooks + local MCP auto-start;
+- Anthropic issue #64412: resumed stdio MCP `CLAUDE_CODE_SESSION_ID` differed from hook/Bash session identity on the reported version;
+- Claude Help: local MCP Desktop Extensions are installed and executed locally.
+
 ## 16. Dependency relationship
 
 - #955 owns the authenticated Claude client edge.
