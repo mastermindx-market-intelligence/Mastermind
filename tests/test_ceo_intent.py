@@ -798,15 +798,25 @@ def test_service_schema_conflicting_retry_under_the_same_intent_id_fails_closed(
     assert len(runtime.jobs.list_jobs()) == 1
 
 
-def test_service_actor_confers_no_privilege(tmp_path: Path):
-    """The service actor is provenance, not privilege: MERGE is still refused."""
+def test_service_actor_is_enrollment_bound_and_never_confers_write_privilege(tmp_path: Path):
+    """Exact actor identity is required; the enrolled actor still gains no write power."""
 
     runtime = Runtime.at(tmp_path / "runtime")
-    for actor in ("svc-site-maintenance", "svc-other-actor"):
-        intent = _service_intent(tmp_path, actor=actor, intent_id=f"svc-{actor}")
-        intent["execution_contract"] = {"requested_authorities": ["MERGE"]}
-        with pytest.raises(CeoIntentError, match="READ/RESEARCH only"):
-            _submit(runtime, intent, tmp_path)
+
+    exact = _service_intent(
+        tmp_path, actor="svc-site-maintenance", intent_id="svc-enrolled-actor"
+    )
+    exact["execution_contract"] = {"requested_authorities": ["MERGE"]}
+    with pytest.raises(CeoIntentError, match="READ/RESEARCH only"):
+        _submit(runtime, exact, tmp_path)
+
+    mismatched = _service_intent(
+        tmp_path, actor="svc-other-actor", intent_id="svc-mismatched-actor-write"
+    )
+    mismatched["execution_contract"] = {"requested_authorities": ["MERGE"]}
+    with pytest.raises(CeoIntentError, match="does not match the reviewed principal"):
+        _submit(runtime, mismatched, tmp_path)
+
     assert runtime.jobs.list_jobs() == []
 
 
