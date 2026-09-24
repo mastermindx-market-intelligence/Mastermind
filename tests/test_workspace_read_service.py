@@ -768,25 +768,42 @@ def test_work_route_with_producer_shaped_root_list_renders_available_no_lifecycl
 
 
 def test_work_effect_not_row_attributed_via_real_composer_through_read_work(tmp_path):
-    """B2: ``effect_not_row_attributed`` is proven through ``_read_work``
-    with the REAL composer (``work_compose=None`` → ``compose_work_queue_v1``).
+    """B2 / WQ-PROD-1: the read service derives the per-row effects map
+    from the autonomy control room and attributes the queue-level
+    EFFECT_UNKNOWN exception to the rendered row.
+
     The injected ``work_acquire`` returns a valid root list (generation
-    SAME) and the CCR cache document's autonomy responsibilities carry
+    SAME).  The CCR cache document's autonomy responsibilities carry
     ``placement_state: {"value": "EFFECT_UNKNOWN", ...}`` — the exact
-    shape ``_queue_effect_exception`` reads.  Asserts AVAILABLE,
-    ``effect_exception.value == "EFFECT_UNKNOWN"`` with ``reason ==
-    "exception_observed"``, ``groups.EFFECT_EXCEPTION == []`` (no per-row
-    attribution when no ``effects`` map is supplied), and
-    ``"effect_not_row_attributed" in reason_codes``."""
+    shape ``_queue_effect_exception`` reads.  The card is extended with
+    ``root_job_id`` matching the submitted root so the derived effects
+    map covers the rendered row.
+
+    Asserts AVAILABLE, ``effect_exception.value == "EFFECT_UNKNOWN"``
+    with ``reason == "exception_observed"``, the rendered row in
+    ``groups.EFFECT_EXCEPTION`` (per-row attribution), and the queue-
+    level ``effect_not_row_attributed`` reason code is ABSENT (because
+    effects were supplied — the composer's existing contract for
+    ``validated_effects is not None``).
+    """
     from control_plane.work_queue_projection import compose_work_queue_v1  # noqa: F401  sanity import
     owners, _, cache = cache_fixture(tmp_path)
-    # Attach the autonomy EFFECT_UNKNOWN responsibility — same shape
-    # ``_queue_effect_exception`` reads (placement_state.value == "EFFECT_UNKNOWN").
     doc = owners[0].state_cache["doc"]
+    submitted_job_id = "JOB-1"
+    # Point the responsibility at the submitted root so the deriver's
+    # per-row effects map covers the rendered row.
+    doc["autonomy"]["responsibilities"][0]["root_job_id"] = submitted_job_id
     doc["autonomy"]["responsibilities"][0]["placement_state"] = {
         "value": "EFFECT_UNKNOWN", "observable": True, "reason": "worker_effect_unknown",
     }
-    submitted_job_id = "JOB-1"
+    # The validity bounds were published against ``(WS:ONE, JOB-001)``;
+    # re-publish against the new ``(WS:ONE, JOB-1)`` tuple so the
+    # bracket accepts the responsibility after the test edits it.
+    from scripts import chairman_control_room as ccr_mod
+    with owners[0].state_lock:
+        ccr_mod._publish_source_validity(owners[0], doc,
+                                         tuple(owners[0].validity_sample_fn()),
+                                         tuple(owners[0].validity_sample_fn()))
     root_list = _root_list_payload(rows=[
         {"job_id": submitted_job_id, "status": "QUEUED", "depth": 0,
          "parent_job_id": None, "orchestration_role": "aggregation"},
@@ -807,10 +824,16 @@ def test_work_effect_not_row_attributed_via_real_composer_through_read_work(tmp_
     assert doc["effect_exception"]["reason"] == "exception_observed"
     assert doc["effect_exception"]["scope"] == "RUNTIME_CURRENT_WORKER"
     assert doc["effect_exception"]["observable"] is True
-    # No per-row effects map was supplied — no row lands in EFFECT_EXCEPTION.
-    assert doc["groups"]["EFFECT_EXCEPTION"] == []
-    # And the queue-level reason code surfaces the unattributed exception.
-    assert "effect_not_row_attributed" in doc["reason_codes"]
+    # WQ-PROD-1: the deriver's per-row effects map covered the rendered
+    # root_job_id, so the row lands in EFFECT_EXCEPTION.
+    assert len(doc["groups"]["EFFECT_EXCEPTION"]) == 1
+    attributed_row = doc["groups"]["EFFECT_EXCEPTION"][0]
+    assert attributed_row["root_job_id"] == submitted_job_id
+    assert attributed_row["effect"]["value"] == "EFFECT_UNKNOWN"
+    assert attributed_row["effect"]["source"] == "EFFECT_PRODUCER"
+    # And the queue-level reason code does NOT surface the unattributed
+    # exception — the per-row attribution removed the gap.
+    assert "effect_not_row_attributed" not in doc["reason_codes"]
 
 
 def test_work_default_acquire_against_real_runtime_renders_closed_body(tmp_path):
@@ -879,3 +902,262 @@ def test_work_default_acquire_against_real_runtime_renders_closed_body(tmp_path)
     # be proven SAME without a read binding.
     assert receipt["job_id"] not in [row["root_job_id"] for group in doc["groups"].values()
                                      for row in group]
+
+
+# ---------------------------------------------------------------------------
+# WQ-PROD-1 — route-level integration of ``derive_work_producers_v1``
+# through ``_read_work``.  These tests prove (h): an injected
+# ``work_acquire`` plus a control room extended with one autonomy card
+# renders the row via the derived producer inputs; a derivation
+# ``ValueError`` (monkeypatched to raise) is caught by the existing
+# try/except and refused as ``projection_refused``.
+# ---------------------------------------------------------------------------
+
+
+def _extend_cache_with_card(tmp_path, *, root_job_id="JOB-1",
+                            responsibility_ref="WS:PROD",
+                            seat="ceo", placement_value=None,
+                            attempt_id=None, qualified_at=STAMP,
+                            runtime_root_state="RESOLVED",
+                            root_job_ambiguous=False,
+                            validity_publish=True):
+    """Build a cache_fixture and extend its autonomy with one card.
+
+    Re-publishes source validity after the extension so the
+    ``_qualified`` bracket accepts the new responsibility tuple.
+    Returns ``(owners, clock, cache)``.
+    """
+    owners, clock, cache = cache_fixture(tmp_path)
+    doc = owners[0].state_cache["doc"]
+    card = {
+        "responsibility_ref": responsibility_ref,
+        "root_job_id": root_job_id,
+        "root_job_ambiguous": root_job_ambiguous,
+        "runtime_root_state": runtime_root_state,
+        "freshness": "current",
+        "root_job_candidates": [root_job_id],
+        "owed_turn": {"seat": seat},
+        "validity": {"card": {"schema": "mastermind.autonomy_validity.v1",
+                              "policy": "mapper-inclusive-48h-future-1h.v1",
+                              "qualified_at": qualified_at,
+                              "proof_ref": "b" * 64,
+                              "valid_for_ms": 60000},
+                     "decision_current": {"schema": "mastermind.autonomy_validity.v1",
+                                         "policy": "mapper-inclusive-48h-future-1h.v1",
+                                         "qualified_at": qualified_at,
+                                         "proof_ref": "b" * 64,
+                                         "valid_for_ms": 60000},
+                     "dispatch": {"schema": "mastermind.autonomy_validity.v1",
+                                  "policy": "mapper-inclusive-48h-future-1h.v1",
+                                  "qualified_at": qualified_at,
+                                  "proof_ref": "b" * 64,
+                                  "valid_for_ms": 60000},
+                     "owed_open_age": {"schema": "mastermind.autonomy_validity.v1",
+                                       "policy": "mapper-inclusive-48h-future-1h.v1",
+                                       "qualified_at": qualified_at,
+                                       "proof_ref": "b" * 64,
+                                       "valid_for_ms": 60000}},
+    }
+    if placement_value is not None:
+        card["placement_state"] = {"value": placement_value, "observable": True,
+                                   "reason": "test"}
+    if attempt_id is not None:
+        card["current_worker"] = {
+            "worker_id": "wrk-1", "attempt_id": attempt_id, "status": "active",
+            "session_alias": None, "runtime_binding_id": None,
+            "binding_generation": 1, "continuation_state": "active",
+            "effect_state": "active", "capacity_state": "ready",
+            "previous_attempt_id": None, "movement_reason_code": None,
+        }
+    doc["autonomy"]["responsibilities"].append(card)
+    doc["work"].append({"work_ref": responsibility_ref,
+                        "agent_os": {"title": "Producer"}})
+    if validity_publish:
+        from scripts import chairman_control_room as ccr_mod
+        with owners[0].state_lock:
+            ccr_mod._publish_source_validity(owners[0], doc,
+                                             tuple(owners[0].validity_sample_fn()),
+                                             tuple(owners[0].validity_sample_fn()))
+    return owners, clock, cache
+
+
+def test_wqp1_h_route_with_ceo_card_renders_need_sol(tmp_path):
+    """(h) An injected ``work_acquire`` plus the cache_fixture extended
+    with one CEO card yields ``NEEDS_SOL`` with the per-row evidence
+    surfaced in the row's column dict."""
+    owners, _, cache = _extend_cache_with_card(tmp_path, seat="ceo")
+    submitted_job_id = "JOB-1"
+    root_list = _root_list_payload(rows=[
+        {"job_id": submitted_job_id, "status": "QUEUED", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+        work_acquire=work_acquire, work_compose=None,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    assert result["ok"] is True
+    doc = result["result"]
+    assert doc["availability"] == "AVAILABLE"
+    assert len(doc["groups"]["NEEDS_SOL"]) == 1
+    row = doc["groups"]["NEEDS_SOL"][0]
+    assert row["root_job_id"] == submitted_job_id
+    assert row["next_actor"]["value"] == "NEEDS_SOL"
+    assert row["next_actor"]["source"] == "AGENT_OS"
+    assert row["next_actor"]["reason"] == "evidence_supplied"
+    assert row["next_actor"]["evidence_ref"] == "WS:PROD"
+    assert row["next_actor"]["observed_at"] == STAMP
+
+
+def test_wqp1_h_route_with_worker_card_renders_need_worker(tmp_path):
+    """(h) A worker seat card drives ``NEEDS_WORKER`` via the read
+    service.  Post-START status is preserved on the lifecycle column."""
+    owners, _, cache = _extend_cache_with_card(tmp_path, seat="worker")
+    submitted_job_id = "JOB-1"
+    root_list = _root_list_payload(rows=[
+        {"job_id": submitted_job_id, "status": "RUNNING", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+        work_acquire=work_acquire, work_compose=None,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    doc = result["result"]
+    assert len(doc["groups"]["NEEDS_WORKER"]) == 1
+    row = doc["groups"]["NEEDS_WORKER"][0]
+    assert row["root_job_id"] == submitted_job_id
+    assert row["next_actor"]["value"] == "NEEDS_WORKER"
+    assert row["next_actor"]["evidence_ref"] == "WS:PROD"
+
+
+def test_wqp1_h_route_with_waiting_capacity_card_renders_waiting_capacity(tmp_path):
+    """(h) A ``WAITING_CAPACITY`` placement card drives the
+    ``WAITING_CAPACITY`` group on a pre-START row, with the capacity
+    column populated from the derived placement evidence."""
+    owners, _, cache = _extend_cache_with_card(tmp_path, seat="chairman",
+                                                placement_value="WAITING_CAPACITY")
+    submitted_job_id = "JOB-1"
+    root_list = _root_list_payload(rows=[
+        {"job_id": submitted_job_id, "status": "QUEUED", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+        work_acquire=work_acquire, work_compose=None,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    doc = result["result"]
+    assert len(doc["groups"]["WAITING_CAPACITY"]) == 1
+    row = doc["groups"]["WAITING_CAPACITY"][0]
+    assert row["capacity"]["value"] == "WAITING_CAPACITY"
+    assert row["capacity"]["source"] == "AUTONOMY"
+    assert row["capacity"]["reason"] == "pre_start_placement_evidence"
+
+
+def test_wqp1_h_route_with_effect_unknown_card_renders_effect_exception(tmp_path):
+    """(h) An ``EFFECT_UNKNOWN`` placement card drives the
+    ``EFFECT_EXCEPTION`` group.  The carrier is consumed by the
+    composer's effect column derivation but is NOT echoed in the row
+    (the closed effect column key set carries ``value``/``source``/
+    ``reason``/``evidence_ref``/``observed_at`` only — the producer's
+    carrier is an input, not an output).  The attempt_id is verified
+    at the deriver level in the composer-suite tests.
+    """
+    owners, _, cache = _extend_cache_with_card(
+        tmp_path, seat="worker", placement_value="EFFECT_UNKNOWN",
+        attempt_id="ATT-" + "ab" * 16)
+    submitted_job_id = "JOB-1"
+    root_list = _root_list_payload(rows=[
+        {"job_id": submitted_job_id, "status": "RUNNING", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+        work_acquire=work_acquire, work_compose=None,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    doc = result["result"]
+    assert len(doc["groups"]["EFFECT_EXCEPTION"]) == 1
+    row = doc["groups"]["EFFECT_EXCEPTION"][0]
+    assert row["effect"]["value"] == "EFFECT_UNKNOWN"
+    assert row["effect"]["source"] == "EFFECT_PRODUCER"
+    assert row["effect"]["reason"] == "evidence_supplied"
+    assert row["effect"]["evidence_ref"] == "WS:PROD"
+
+
+def test_wqp1_h_route_derivation_value_error_refuses_as_projection_refused(tmp_path, monkeypatch):
+    """(h) A ``ValueError`` raised inside ``derive_work_producers_v1`` is
+    caught by the read-service's existing try/except and refused as
+    ``projection_refused`` — exactly like a compose-raised ``ValueError``."""
+    owners, _, cache = _extend_cache_with_card(tmp_path, seat="ceo")
+    submitted_job_id = "JOB-1"
+    root_list = _root_list_payload(rows=[
+        {"job_id": submitted_job_id, "status": "QUEUED", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def raising_derive(control_room):
+        raise ValueError("malformed derivation — fake error")
+    monkeypatch.setattr(
+        "control_plane.work_queue_projection.derive_work_producers_v1",
+        raising_derive)
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+        work_acquire=work_acquire, work_compose=None,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    assert body["availability"] == "UNAVAILABLE"
+    assert body["reason_codes"] == ["projection_refused"]
+    # The read-service typed refusal uses ``read_refused`` for its
+    # effect_exception reason — the closed vocabulary contract.
+    assert body["effect_exception"]["reason"] == "read_refused"
+
+
+def test_wqp1_h_route_without_card_renders_no_producer_columns(tmp_path):
+    """(h) No autonomy card added → every row falls back to
+    ``no_producer`` (no deriver input, every column UNKNOWN).  The
+    existing fixtures behave exactly as before — this proves the
+    deriver is opt-in via the control room, not always-on."""
+    owners, _, cache = cache_fixture(tmp_path)
+    submitted_job_id = "JOB-1"
+    root_list = _root_list_payload(rows=[
+        {"job_id": submitted_job_id, "status": "QUEUED", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+        work_acquire=work_acquire, work_compose=None,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    doc = result["result"]
+    assert doc["availability"] == "AVAILABLE"
+    # cache_fixture's responsibility targets JOB-001 (not the submitted
+    # JOB-1) and seat is unknown — nothing the deriver emits matches
+    # the rendered row.
+    queued = doc["groups"]["QUEUED"][0]
+    assert queued["root_job_id"] == submitted_job_id
+    assert queued["next_actor"] == {"value": "UNKNOWN", "source": None,
+                                    "reason": "no_producer",
+                                    "evidence_ref": None, "observed_at": None}
+    assert queued["capacity"] == {"value": "UNKNOWN", "source": None,
+                                  "reason": "no_producer",
+                                  "evidence_ref": None, "observed_at": None}

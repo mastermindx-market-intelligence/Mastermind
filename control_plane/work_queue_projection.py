@@ -811,6 +811,192 @@ def _empty_groups() -> dict[str, list[dict[str, Any]]]:
 
 
 # ---------------------------------------------------------------------------
+# derive per-row producers from the autonomy control room
+# ---------------------------------------------------------------------------
+
+
+def derive_work_producers_v1(control_room: Any) -> dict[str, Any]:
+    """Derive typed per-row producer inputs from the autonomy control room.
+
+    Returns ``{"accountability": mapping|None, "placement": mapping|None,
+    "effects": mapping|None, "evidence_as_of": str|None,
+    "skipped": list[str]}`` ready for :func:`compose_work_queue_v1`.
+
+    The producer inputs are typed dictionaries keyed by ``root_job_id`` —
+    exactly the shape the existing :func:`_validate_accountability`,
+    :func:`_validate_placement`, :func:`_validate_effects` validators accept.
+    Each row's ``evidence_ref`` is the card's ``responsibility_ref`` and
+    each row's ``observed_at`` is the card's
+    ``validity.card.qualified_at`` (falling back to the autonomy
+    ``generated_at`` when the qualified_at is absent or unparseable).
+
+    When the control room is missing the autonomy section, the autonomy
+    schema is wrong, ``responsibilities`` is not a list, or
+    ``autonomy.generated_at`` is not a parseable RFC3339 UTC timestamp,
+    all three producers are ``None`` and ``evidence_as_of`` is ``None`` —
+    exactly today's behaviour (every row ``UNKNOWN/no_producer``).
+
+    Any per-card skip is recorded under ``skipped`` (deterministic order,
+    no duplicates) so the read service can surface the reason over a
+    module-level pure function return without widening the closed
+    top-level key set.  A returned producer mapping that ended with
+    zero rows is replaced by ``None`` (never an empty mapping) so the
+    composer's ``evidence_as_of required when any producer supplied``
+    invariant is preserved.
+
+    A malformed derivation raises ``ValueError`` from the existing
+    validators — never a silent leak.
+    """
+    skipped: list[str] = []
+    # Default: empty / missing / malformed autonomy → no producer.
+    if not isinstance(control_room, Mapping):
+        return {"accountability": None, "placement": None, "effects": None,
+                "evidence_as_of": None, "skipped": []}
+    autonomy = control_room.get("autonomy")
+    if not isinstance(autonomy, Mapping) or autonomy.get("schema") != _AUTONOMY_SCHEMA:
+        return {"accountability": None, "placement": None, "effects": None,
+                "evidence_as_of": None, "skipped": []}
+    responsibilities = autonomy.get("responsibilities")
+    if not isinstance(responsibilities, list):
+        return {"accountability": None, "placement": None, "effects": None,
+                "evidence_as_of": None, "skipped": []}
+    generated_at = autonomy.get("generated_at")
+    # N9: malformed ``generated_at`` is the same refusal shape as
+    # ``_parse_evidence_as_of`` would raise — the whole derivation
+    # aborts cleanly without per-row fallout.
+    try:
+        if not isinstance(generated_at, str):
+            raise ValueError
+        _parse_evidence_as_of(generated_at)
+    except ValueError:
+        return {"accountability": None, "placement": None, "effects": None,
+                "evidence_as_of": None, "skipped": []}
+
+    accountability: dict[str, dict[str, Any]] = {}
+    placement: dict[str, dict[str, Any]] = {}
+    effects: dict[str, dict[str, Any]] = {}
+    seen_root_ids: set[str] = set()
+    for raw in responsibilities:
+        if not isinstance(raw, Mapping):
+            continue
+        root_job_id = raw.get("root_job_id")
+        if not isinstance(root_job_id, str) or not root_job_id:
+            continue
+        # Gate: the card must positively identify the root job AND the
+        # root join must be unambiguous AND the runtime join must be
+        # RESOLVED.  Anything else is silently dropped — a row whose
+        # ``runtime_root_state`` is not RESOLVED cannot carry a
+        # per-row producer that targets it.
+        if raw.get("runtime_root_state") != "RESOLVED":
+            continue
+        if raw.get("root_job_ambiguous") is not False:
+            continue
+        responsibility_ref = raw.get("responsibility_ref")
+        if not isinstance(responsibility_ref, str) or not responsibility_ref:
+            skipped.append(f"{root_job_id}:missing_responsibility_ref")
+            continue
+        # Two cards with the same root_job_id: keep the first, record
+        # the duplicate.  The projection's own order (autonomy section
+        # sort key — chairman_decision_required/is_actionable/seat_rank/
+        # responsibility_ref) governs which one is first.
+        if root_job_id in seen_root_ids:
+            skipped.append(f"{root_job_id}:duplicate_card")
+            continue
+        seen_root_ids.add(root_job_id)
+
+        # ``observed_at`` is the card's own qualified_at when parseable,
+        # else the autonomy ``generated_at``.  A qualified_at older than
+        # the freshness window is the composer's staleness gate, not
+        # the deriver's; the deriver never truncates the timestamp.
+        observed_at: str | None = None
+        validity = raw.get("validity")
+        if isinstance(validity, Mapping):
+            card_validity = validity.get("card")
+            if isinstance(card_validity, Mapping):
+                qualified_at = card_validity.get("qualified_at")
+                if isinstance(qualified_at, str):
+                    try:
+                        _parse_observed_at(qualified_at)
+                        observed_at = qualified_at
+                    except ValueError:
+                        observed_at = None
+        if observed_at is None:
+            observed_at = generated_at
+
+        # accountability: owed_turn.seat → next_actor row.
+        owed_turn = raw.get("owed_turn")
+        seat: Any = None
+        if isinstance(owed_turn, Mapping):
+            seat = owed_turn.get("seat")
+        if seat == "ceo":
+            accountability[root_job_id] = {
+                "next_actor": "SOL",
+                "evidence_ref": responsibility_ref,
+                "observed_at": observed_at,
+            }
+        elif seat in ("coo", "worker"):
+            accountability[root_job_id] = {
+                "next_actor": "WORKER",
+                "evidence_ref": responsibility_ref,
+                "observed_at": observed_at,
+            }
+        else:
+            # chairman / unknown / missing / unrecognized.
+            skipped.append(f"{root_job_id}:owed_seat_{seat if isinstance(seat, str) else 'missing'}")
+
+        # placement: WAITING_CAPACITY → placement WAITING row.
+        placement_state = raw.get("placement_state")
+        placement_value = (placement_state.get("value")
+                           if isinstance(placement_state, Mapping) else None)
+        if placement_value == "WAITING_CAPACITY":
+            placement[root_job_id] = {
+                "state": "WAITING",
+                "evidence_ref": responsibility_ref,
+                "observed_at": observed_at,
+            }
+
+        # effects: EFFECT_UNKNOWN → effects EFFECT_UNKNOWN row.  The
+        # carrier is the current worker attempt_id when a non-empty
+        # string, else the responsibility_ref.  Absence of
+        # EFFECT_UNKNOWN emits NO effects row — the producer's absence
+        # is the queue-level ``no_producer`` semantics, NEVER a NONE
+        # row (which would over-claim operator-visible evidence).
+        if placement_value == "EFFECT_UNKNOWN":
+            carrier: str
+            current_worker = raw.get("current_worker")
+            attempt_id = (current_worker.get("attempt_id")
+                          if isinstance(current_worker, Mapping) else None)
+            if isinstance(attempt_id, str) and attempt_id:
+                carrier = attempt_id
+            else:
+                carrier = responsibility_ref
+            effects[root_job_id] = {
+                "state": "EFFECT_UNKNOWN",
+                "carrier": carrier,
+                "evidence_ref": responsibility_ref,
+                "observed_at": observed_at,
+            }
+
+    result = {
+        "accountability": accountability if accountability else None,
+        "placement": placement if placement else None,
+        "effects": effects if effects else None,
+        "evidence_as_of": generated_at,
+        "skipped": skipped,
+    }
+    # Run the existing validators so a derivation bug surfaces as a
+    # ``ValueError`` rather than a leaked malformed mapping.  The
+    # validators reject bad row shapes that the deriver might miss
+    # (e.g. an empty ``carrier``); the read service's existing
+    # try/except translates that into the typed ``projection_refused``
+    # refusal exactly like a composer-raised ``ValueError``.
+    _validate_accountability(result["accountability"])
+    _validate_placement(result["placement"])
+    _validate_effects(result["effects"])
+    return result
+
+
+# ---------------------------------------------------------------------------
 # public composer
 # ---------------------------------------------------------------------------
 
@@ -931,6 +1117,7 @@ __all__ = [
     "COVERAGE_KEYS",
     "EVIDENCE_MAX_AGE_S",
     "compose_work_queue_v1",
+    "derive_work_producers_v1",
     "_DEGRADATION_NOTES",
     "_is_degradation_note",
     "_BOUNDED_UNAVAILABLE_NOTE",

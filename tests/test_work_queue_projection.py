@@ -28,6 +28,7 @@ from control_plane.work_queue_projection import (
     _is_degradation_note,
     _JOB_STATUS_GROUPS,
     compose_work_queue_v1,
+    derive_work_producers_v1,
 )
 from common.executive_workspace_contract import canonical, digest
 
@@ -1441,3 +1442,369 @@ def test_n1_fallback_coverage_truncated_false_when_no_root_list_admitted(tmp_pat
     assert fallback["availability"] == "UNAVAILABLE"
     assert fallback["reason_codes"] == ["source_unavailable"]
     assert fallback["coverage"]["truncated"] is False
+
+
+# ---------------------------------------------------------------------------
+# WQ-PROD-1 — derive_work_producers_v1: pure function that maps the
+# autonomy control room's per-card facts into the typed
+# accountability / placement / effects producer inputs the composer
+# expects, plus a deterministic skipped-entry audit list.
+# ---------------------------------------------------------------------------
+
+
+#: Convenience builder for one autonomy control-room card; tests parametrize
+#: over the seats / placements / effects they exercise.
+_VALIDITY_META = {
+    "schema": "mastermind.autonomy_validity.v1",
+    "policy": "mapper-inclusive-48h-future-1h.v1",
+    "qualified_at": "2026-09-23T00:00:00Z",
+    "proof_ref": "a" * 64,
+    "valid_for_ms": 60000,
+}
+
+
+def _autonomy_card(*, responsibility_ref="WS:ONE", root_job_id="JOB-1",
+                   runtime_root_state="RESOLVED", root_job_ambiguous=False,
+                   seat="ceo", placement_value=None, attempt_id=None,
+                   qualified_at="2026-09-23T00:00:00Z",
+                   omit_validity=False, omit_owed_turn=False):
+    card = {
+        "responsibility_ref": responsibility_ref,
+        "root_job_id": root_job_id,
+        "root_job_ambiguous": root_job_ambiguous,
+        "runtime_root_state": runtime_root_state,
+    }
+    if not omit_owed_turn:
+        card["owed_turn"] = {"seat": seat}
+    if placement_value is not None:
+        card["placement_state"] = {"value": placement_value, "observable": True,
+                                   "reason": "test"}
+    if attempt_id is not None:
+        card["current_worker"] = {
+            "worker_id": "wrk-1", "attempt_id": attempt_id, "status": "active",
+            "session_alias": None, "runtime_binding_id": None,
+            "binding_generation": 1, "continuation_state": "active",
+            "effect_state": "active", "capacity_state": "ready",
+            "previous_attempt_id": None, "movement_reason_code": None,
+        }
+    if not omit_validity:
+        card["validity"] = {"card": {**_VALIDITY_META, "qualified_at": qualified_at}}
+    return card
+
+
+def _autonomy(cards, *, generated_at="2026-09-23T00:00:00Z"):
+    return {
+        "schema": "mastermind.chairman_control_room.v1",
+        "generated_at": generated_at,
+        "autonomy": {
+            "schema": "mastermind.autonomy_control_room.v1",
+            "generated_at": generated_at,
+            "responsibilities": cards,
+        },
+    }
+
+
+def test_wqp1_a_no_autonomy_returns_all_none():
+    """(a) no autonomy section → all producers None, ``skipped == []``."""
+    assert derive_work_producers_v1(None) == {
+        "accountability": None, "placement": None, "effects": None,
+        "evidence_as_of": None, "skipped": [],
+    }
+    # Wrong schema also yields all None.
+    assert derive_work_producers_v1({"autonomy": {"schema": "wrong"}}) == {
+        "accountability": None, "placement": None, "effects": None,
+        "evidence_as_of": None, "skipped": [],
+    }
+    # responsibilities not a list also yields all None.
+    assert derive_work_producers_v1({"autonomy": {
+        "schema": "mastermind.autonomy_control_room.v1",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "responsibilities": "not-a-list",
+    }}) == {
+        "accountability": None, "placement": None, "effects": None,
+        "evidence_as_of": None, "skipped": [],
+    }
+    # A non-mapping control_room also yields all None.
+    assert derive_work_producers_v1("not-a-mapping") == {
+        "accountability": None, "placement": None, "effects": None,
+        "evidence_as_of": None, "skipped": [],
+    }
+
+
+def test_wqp1_b_ceo_seat_emits_sol_accountability():
+    """(b) seat ``ceo`` → accountability ``next_actor == "SOL"``."""
+    autonomy = _autonomy([_autonomy_card(seat="ceo")])
+    result = derive_work_producers_v1(autonomy)
+    assert result["accountability"] == {
+        "JOB-1": {"next_actor": "SOL", "evidence_ref": "WS:ONE",
+                  "observed_at": "2026-09-23T00:00:00Z"},
+    }
+    assert result["placement"] is None
+    assert result["effects"] is None
+    assert result["evidence_as_of"] == "2026-09-23T00:00:00Z"
+    assert result["skipped"] == []
+
+
+def test_wqp1_b_worker_seat_emits_worker_accountability():
+    """(b) seat ``worker`` → accountability ``next_actor == "WORKER"``."""
+    autonomy = _autonomy([_autonomy_card(seat="worker")])
+    result = derive_work_producers_v1(autonomy)
+    assert result["accountability"] == {
+        "JOB-1": {"next_actor": "WORKER", "evidence_ref": "WS:ONE",
+                  "observed_at": "2026-09-23T00:00:00Z"},
+    }
+    assert result["skipped"] == []
+
+
+def test_wqp1_b_coo_seat_also_emits_worker_accountability():
+    """(b) seat ``coo`` also maps to ``WORKER`` per the deliverable table."""
+    autonomy = _autonomy([_autonomy_card(seat="coo")])
+    result = derive_work_producers_v1(autonomy)
+    assert result["accountability"] == {
+        "JOB-1": {"next_actor": "WORKER", "evidence_ref": "WS:ONE",
+                  "observed_at": "2026-09-23T00:00:00Z"},
+    }
+
+
+@pytest.mark.parametrize("seat", ["chairman", "unknown"])
+def test_wqp1_f_unactionable_seats_skip_accountability_with_owed_seat_record(seat):
+    """(f) chairman/unknown seats produce NO accountability row and
+    append ``<root>:owed_seat_<seat>`` to ``skipped``."""
+    autonomy = _autonomy([_autonomy_card(seat=seat)])
+    result = derive_work_producers_v1(autonomy)
+    assert result["accountability"] is None
+    assert result["skipped"] == [f"JOB-1:owed_seat_{seat}"]
+
+
+def test_wqp1_f_missing_owed_turn_skip_records_owed_seat_missing():
+    """(f) missing owed_turn → ``<root>:owed_seat_missing`` skip; no row."""
+    autonomy = _autonomy([_autonomy_card(omit_owed_turn=True)])
+    result = derive_work_producers_v1(autonomy)
+    assert result["accountability"] is None
+    assert result["skipped"] == ["JOB-1:owed_seat_missing"]
+
+
+def test_wqp1_c_waiting_capacity_emits_placement_for_prestart_only():
+    """(c) ``WAITING_CAPACITY`` placement yields a placement row.  The
+    composer's own lifecycle gate (B1) decides whether the row reaches
+    ``WAITING_CAPACITY`` group; this deriver emits the typed input."""
+    autonomy = _autonomy([_autonomy_card(seat="worker",
+                                         placement_value="WAITING_CAPACITY")])
+    result = derive_work_producers_v1(autonomy)
+    assert result["placement"] == {
+        "JOB-1": {"state": "WAITING", "evidence_ref": "WS:ONE",
+                  "observed_at": "2026-09-23T00:00:00Z"},
+    }
+    # Pre-START: WAITING_CAPACITY group fires (lifecycle pre-START +
+    # placement evidence).  The seat also drives a NEEDS_WORKER
+    # override; the row lands in NEEDS_WORKER (overriding QUEUED) with
+    # the WAITING_CAPACITY capacity column.
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    composed = compose_work_queue_v1(root_list,
+                                     accountability=result["accountability"],
+                                     placement=result["placement"],
+                                     effects=result["effects"],
+                                     evidence_as_of=result["evidence_as_of"])
+    assert len(composed["groups"]["NEEDS_WORKER"]) == 1
+    assert composed["groups"]["NEEDS_WORKER"][0]["capacity"]["value"] == "WAITING_CAPACITY"
+    assert len(composed["groups"]["WAITING_CAPACITY"]) == 0  # B4: NEEDS_WORKER wins
+    # Post-START: capacity is NOT_APPLICABLE regardless of placement evidence.
+    root_list_post = _root_list(roots=[_row("JOB-1", "RUNNING")])
+    composed_post = compose_work_queue_v1(root_list_post,
+                                          accountability=result["accountability"],
+                                          placement=result["placement"],
+                                          effects=result["effects"],
+                                          evidence_as_of=result["evidence_as_of"])
+    assert len(composed_post["groups"]["WAITING_CAPACITY"]) == 0
+    assert composed_post["groups"]["NEEDS_WORKER"][0]["capacity"]["value"] == "NOT_APPLICABLE"
+
+
+def test_wqp1_d_effect_unknown_emits_effects_with_attempt_carrier():
+    """(d) ``EFFECT_UNKNOWN`` placement yields an effects row keyed by
+    ``current_worker.attempt_id`` when present and non-empty, with the
+    responsibility_ref as fallback carrier."""
+    autonomy = _autonomy([_autonomy_card(seat="worker",
+                                         placement_value="EFFECT_UNKNOWN",
+                                         attempt_id="ATT-" + "ab" * 16)])
+    result = derive_work_producers_v1(autonomy)
+    assert result["effects"] == {
+        "JOB-1": {"state": "EFFECT_UNKNOWN",
+                  "carrier": "ATT-" + "ab" * 16,
+                  "evidence_ref": "WS:ONE",
+                  "observed_at": "2026-09-23T00:00:00Z"},
+    }
+    # Compose: row lands in EFFECT_EXCEPTION group with the per-row effect.
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")])
+    composed = compose_work_queue_v1(root_list,
+                                     accountability=result["accountability"],
+                                     placement=result["placement"],
+                                     effects=result["effects"],
+                                     evidence_as_of=result["evidence_as_of"])
+    assert len(composed["groups"]["EFFECT_EXCEPTION"]) == 1
+    row = composed["groups"]["EFFECT_EXCEPTION"][0]
+    assert row["effect"]["value"] == "EFFECT_UNKNOWN"
+    assert row["effect"]["source"] == "EFFECT_PRODUCER"
+    # The queue-level reason code does NOT fire — effects were supplied.
+    assert "effect_not_row_attributed" not in composed["reason_codes"]
+
+
+def test_wqp1_d_effect_unknown_without_current_worker_falls_back_to_ref_carrier():
+    """(d) ``EFFECT_UNKNOWN`` with no ``current_worker`` carrier falls
+    back to ``responsibility_ref``."""
+    autonomy = _autonomy([_autonomy_card(seat="worker",
+                                         placement_value="EFFECT_UNKNOWN")])
+    result = derive_work_producers_v1(autonomy)
+    assert result["effects"]["JOB-1"]["carrier"] == "WS:ONE"
+
+
+def test_wqp1_d_no_effects_row_when_placement_unknown():
+    """(d) absence of ``EFFECT_UNKNOWN`` → NO effects row (never ``NONE``).
+
+    The queue-level effect_exception read still classifies the document
+    correctly (NONE) — the read service fills only what the autonomy card
+    positively names.
+    """
+    autonomy = _autonomy([_autonomy_card(seat="worker",
+                                         placement_value="WAITING_CAPACITY")])
+    result = derive_work_producers_v1(autonomy)
+    assert result["effects"] is None
+
+
+def test_wqp1_e_stale_qualified_at_falls_back_to_unknown_via_composer():
+    """(e) a ``qualified_at`` older than ``EVIDENCE_MAX_AGE_S`` before
+    ``generated_at`` lets the composer's freshness gate fire.  The
+    deriver does NOT pre-truncate — it forwards ``qualified_at`` as
+    ``observed_at`` and lets the composer decide staleness."""
+    # Use a ``qualified_at`` exactly ``EVIDENCE_MAX_AGE_S + 1`` seconds
+    # before ``generated_at`` so the freshness gate refuses (older than
+    # the inclusive boundary).
+    stale_qualified = "2026-09-23T00:00:00Z"
+    fresh_generated = "2026-09-23T00:15:01Z"  # 15m1s later
+    autonomy = _autonomy([_autonomy_card(seat="ceo",
+                                         qualified_at=stale_qualified)],
+                         generated_at=fresh_generated)
+    result = derive_work_producers_v1(autonomy)
+    # Deriver forwards the qualified_at as observed_at.
+    assert result["accountability"]["JOB-1"]["observed_at"] == stale_qualified
+    assert result["evidence_as_of"] == fresh_generated
+    # The composer's freshness gate then falls back to no_producer.
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    composed = compose_work_queue_v1(root_list,
+                                     accountability=result["accountability"],
+                                     placement=result["placement"],
+                                     effects=result["effects"],
+                                     evidence_as_of=result["evidence_as_of"])
+    assert composed["groups"]["QUEUED"][0]["next_actor"]["value"] == "UNKNOWN"
+    assert composed["groups"]["QUEUED"][0]["next_actor"]["reason"] == "evidence_stale"
+    # Effects are sticky: a stale EFFECT_UNKNOWN STILL sticks (R4).
+    autonomy_eff = _autonomy(
+        [_autonomy_card(seat="worker", placement_value="EFFECT_UNKNOWN",
+                        qualified_at=stale_qualified)],
+        generated_at=fresh_generated)
+    eff = derive_work_producers_v1(autonomy_eff)
+    root_list_eff = _root_list(roots=[_row("JOB-1", "RUNNING")])
+    composed_eff = compose_work_queue_v1(
+        root_list_eff,
+        accountability=eff["accountability"],
+        placement=eff["placement"],
+        effects=eff["effects"],
+        evidence_as_of=eff["evidence_as_of"])
+    assert composed_eff["groups"]["EFFECT_EXCEPTION"][0]["effect"]["value"] == "EFFECT_UNKNOWN"
+    assert composed_eff["groups"]["EFFECT_EXCEPTION"][0]["effect"]["reason"] == "evidence_supplied_stale"
+
+
+def test_wqp1_f_ambiguous_root_silently_dropped():
+    """(f) ambiguous root_job (more than one candidate) is silently
+    dropped — the deriver cannot attribute evidence to a non-unique
+    root join."""
+    autonomy = _autonomy([_autonomy_card(root_job_ambiguous=True)])
+    result = derive_work_producers_v1(autonomy)
+    assert result["accountability"] is None
+    assert result["placement"] is None
+    assert result["effects"] is None
+    assert result["skipped"] == []  # silent drop, no skip entry
+
+
+def test_wqp1_f_unresolved_root_silently_dropped():
+    """(f) ``runtime_root_state != "RESOLVED"`` → silent drop."""
+    autonomy = _autonomy([_autonomy_card(runtime_root_state="CONFLICT")])
+    result = derive_work_producers_v1(autonomy)
+    assert result["accountability"] is None
+    assert result["skipped"] == []
+
+
+def test_wqp1_f_missing_responsibility_ref_skip_record():
+    """(f) missing responsibility_ref → skip entry, no producer row."""
+    autonomy = _autonomy([_autonomy_card(responsibility_ref="")])
+    result = derive_work_producers_v1(autonomy)
+    assert result["accountability"] is None
+    assert result["skipped"] == ["JOB-1:missing_responsibility_ref"]
+
+
+def test_wqp1_f_duplicate_card_keep_first_record_second():
+    """(f) two cards sharing the same root_job_id: keep the first (in the
+    projection's own order), record ``<root>:duplicate_card`` for the
+    second."""
+    cards = [
+        _autonomy_card(responsibility_ref="WS:FIRST", seat="ceo"),
+        _autonomy_card(responsibility_ref="WS:SECOND", seat="worker"),
+    ]
+    autonomy = _autonomy(cards)
+    result = derive_work_producers_v1(autonomy)
+    # First card wins (CEO → SOL).
+    assert result["accountability"]["JOB-1"]["next_actor"] == "SOL"
+    assert result["accountability"]["JOB-1"]["evidence_ref"] == "WS:FIRST"
+    assert result["skipped"] == ["JOB-1:duplicate_card"]
+
+
+def test_wqp1_g_malformed_generated_at_returns_all_none():
+    """(g) malformed ``autonomy.generated_at`` → all producers None."""
+    autonomy = {
+        "schema": "mastermind.chairman_control_room.v1",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "autonomy": {
+            "schema": "mastermind.autonomy_control_room.v1",
+            "generated_at": "yesterday",
+            "responsibilities": [_autonomy_card()],
+        },
+    }
+    result = derive_work_producers_v1(autonomy)
+    assert result == {"accountability": None, "placement": None, "effects": None,
+                      "evidence_as_of": None, "skipped": []}
+
+
+def test_wqp1_calendar_invalid_qualified_at_falls_back_to_generated_at():
+    """A pattern-valid but calendar-invalid ``qualified_at`` (e.g.
+    ``2026-02-30T00:00:00Z``) silently falls back to the autonomy
+    ``generated_at`` — the deriver never emits an unparseable
+    ``observed_at`` so the composer can't be poisoned by a malformed
+    card timestamp."""
+    autonomy = _autonomy([_autonomy_card(seat="ceo",
+                                         qualified_at="2026-02-30T00:00:00Z")])
+    result = derive_work_producers_v1(autonomy)
+    assert result["accountability"]["JOB-1"]["observed_at"] == "2026-09-23T00:00:00Z"
+
+
+def test_wqp1_d_skip_records_deduplicated_and_ordered_by_projection_order():
+    """Skipped-entry order is deterministic and matches the projection's
+    own iteration order; duplicates are NOT collapsed (the projection
+    appends each skip in turn, in order)."""
+    cards = [
+        _autonomy_card(root_job_id="JOB-1", seat="chairman"),
+        _autonomy_card(root_job_id="JOB-1", seat="chairman"),  # duplicate
+        _autonomy_card(root_job_id="JOB-2", responsibility_ref=""),  # missing ref
+    ]
+    result = derive_work_producers_v1(_autonomy(cards))
+    assert result["skipped"] == [
+        "JOB-1:owed_seat_chairman",
+        "JOB-1:duplicate_card",
+        "JOB-2:missing_responsibility_ref",
+    ]
+
+
+def test_wqp1_no_top_level_keys_in_result_dict():
+    """The returned mapping is exactly the closed five-key envelope —
+    no surface for the composer's closed top-level key set."""
+    result = derive_work_producers_v1(None)
+    assert set(result) == {"accountability", "placement", "effects",
+                           "evidence_as_of", "skipped"}
