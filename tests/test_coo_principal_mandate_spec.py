@@ -144,3 +144,11 @@ def test_spec_uses_broad_mission_authority_with_fail_closed_tool_capabilities():
     assert "MAY Fable make this decision?" in text
     assert "CAN this surface execute it now?" in text
     assert "A technical absence does not shrink Fable's organizational mandate" in text
+
+
+def test_spec_separates_fable_coo_oauth_scope_from_ceo_submit_scope():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "OAuth scope separation from the CEO seat" in text
+    assert "must not inherit `mastermind.executive.intent.submit`" in text
+    assert "mastermind.executive.coo.act" in text
+    assert "a token carrying the COO action scope must not pass the CEO submit route or vice versa" in text
