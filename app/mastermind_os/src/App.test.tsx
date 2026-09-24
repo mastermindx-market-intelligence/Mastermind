@@ -366,6 +366,75 @@ describe("React read lifecycle fences", () => {
   });
 });
 
+describe("Executive OS convergence surfaces", () => {
+  it("keeps global Work and Fleet unavailable without their canonical feeds", async () => {
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      readPrograms,
+      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+    };
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    expect(
+      screen.getByRole("heading", { name: "Work", level: 1 }),
+    ).toBeTruthy();
+    expect(screen.getByText("WORK_QUEUE_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expect(screen.queryByText("Missingness and source state")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Fleet & Capacity" }));
+    expect(
+      screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 }),
+    ).toBeTruthy();
+    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expect(screen.queryByText("Missingness and source state")).toBeNull();
+  });
+
+  it("renders Activity from the admitted Mission without another source read", async () => {
+    const readMission = vi.fn(async () => missionFixture("WS:ALPHA", "JOB-A"));
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      readPrograms,
+      readMission,
+    };
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Mission Workspace" }));
+    expect(await screen.findByText("JOB-A")).toBeTruthy();
+    const readsBeforeActivity = readMission.mock.calls.length;
+
+    await user.click(screen.getByRole("button", { name: "Activity" }));
+    expect(
+      screen.getByRole("heading", { name: "Activity", level: 1 }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Live work", level: 2 }),
+    ).toBeTruthy();
+    expect(screen.getByText("JOB-A-CHILD")).toBeTruthy();
+    expect(readMission).toHaveBeenCalledTimes(readsBeforeActivity);
+  });
+
+  it("does not turn the absent Chairman-decision feed into an all-clear", () => {
+    render(<App />);
+    const attention = screen
+      .getByRole("heading", {
+        name: "Chairman attention",
+        level: 2,
+      })
+      .closest("section");
+    expect(attention).toBeTruthy();
+    expect(
+      within(attention!).getByText(
+        "Absence here is not evidence that zero decisions exist.",
+        { exact: false },
+      ),
+    ).toBeTruthy();
+    expect(within(attention!).getByText("NOT PROJECTED")).toBeTruthy();
+  });
+});
+
 describe("native and interaction contracts", () => {
   it("native mode invokes readiness only and never fetches", async () => {
     const fetchSpy = vi
@@ -897,7 +966,11 @@ describe("installed authentication and permitted content", () => {
           coverage: "OBSERVED_WINDOW",
           history: "NOT_PROVEN",
           acceptance: "NOT_PROJECTED",
-          capabilities: { send: false, provider_control: false, history: false },
+          capabilities: {
+            send: false,
+            provider_control: false,
+            history: false,
+          },
           items: [
             {
               id: `visible:${h}`,
@@ -1009,7 +1082,11 @@ describe("installed authentication and permitted content", () => {
           coverage: "OBSERVED_WINDOW",
           history: "NOT_PROVEN",
           acceptance: "NOT_PROJECTED",
-          capabilities: { send: false, provider_control: false, history: false },
+          capabilities: {
+            send: false,
+            provider_control: false,
+            history: false,
+          },
           items: [
             {
               id: `visible:${h}`,
