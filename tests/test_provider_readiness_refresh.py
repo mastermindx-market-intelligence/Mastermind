@@ -46,6 +46,12 @@ def _load(name: str, filename: str):
 readiness = _load("provider_readiness_refresh_test", "provider_readiness.py")
 identity = _load("provider_identity_probe_refresh_test", "provider_identity_probe.py")
 
+# Captures of the real implementations that the autouse fixture bypasses. Tests
+# that need the genuine code paths (e.g. T11 exercising the storage-contract
+# claim) re-bind these to the originals via monkeypatch.setattr.
+ORIGINAL_READ_PROTECTED_RECEIPT = readiness._read_protected_receipt
+ORIGINAL_LSTAT_IDENTITY = readiness.lstat_identity
+
 
 # ---------------------------------------------------------------------------
 # Reused fixtures (minimal copy from tests/test_provider_identity_readiness.py)
@@ -471,6 +477,11 @@ def test_t2_refresh_expired_creates_new_reservation_and_supersedes_sibling(
     sibling_bytes = siblings[0].read_bytes()
     original_bytes = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8")
     assert sibling_bytes == original_bytes
+    # NB7: the superseded sibling must be persisted under the storage contract,
+    # i.e. root-owned mode 0o400 (the contract returned by storage_contract_zero).
+    assert stat.S_IMODE((tmp_path / siblings[0]).stat().st_mode) == 0o400, (
+        "superseded sibling must be persisted at the storage-contract mode 0o400"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -750,6 +761,17 @@ def test_t6_reserve_without_refresh_expired_still_refuses_existing_receipt(
 
     pre_bytes = receipt_path.read_bytes()
 
+    # Spy: confirm the call actually reaches `persist_receipt` (the O_EXCL
+    # check is the thing under test, not an earlier worker_identity_mismatch).
+    persist_calls: list[tuple] = []
+    real_persist = readiness.persist_receipt
+
+    def _persist_spy(*args, **kwargs):
+        persist_calls.append((args, kwargs))
+        return real_persist(*args, **kwargs)
+
+    monkeypatch.setattr(readiness, "persist_receipt", _persist_spy)
+
     rc, _, _ = _run_cli(
         [
             "reserve",
@@ -760,12 +782,15 @@ def test_t6_reserve_without_refresh_expired_still_refuses_existing_receipt(
             "--expected-kind", "device-auth",
             "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
             "--credential-expires-at", _credential_expiry(hours=12),
+            "--worker-uid", "454",
+            "--worker-gid", "454",
         ],
         monkeypatch,
         tmp_path,
     )
     assert rc == 2, "reserve without --refresh-expired on existing receipt must refuse (2), got %d" % rc
     assert receipt_path.read_bytes() == pre_bytes, "live receipt must be untouched after refused reserve"
+    assert persist_calls, "persist_receipt must be reached (so O_EXCL is what fires)"
 
 
 # ---------------------------------------------------------------------------
@@ -886,17 +911,339 @@ def test_t9_provision_worker_auth_accepts_reuse_status_four_for_refresh() -> Non
            '[ "$reuse_status" -eq 4 ] || [ "$reuse_status" -eq 3 ]' in verify_block, (
         "VERIFY_READY gate must accept reuse_status 4 in addition to 3"
     )
-    # And only the 4 branch must pass --refresh-expired to `reserve`.
-    assert '--refresh-expired' in verify_block, (
-        "VERIFY_READY block must pass --refresh-expired to reserve"
+    # And only the 4 branch must pass --refresh-expired to `reserve`, now via
+    # an array (refresh_args=()) so the unset case under `set -u` in bash 3.2
+    # does not error.
+    assert 'refresh_args=()' in verify_block, (
+        "VERIFY_READY block must initialize refresh_args as an array"
     )
-    # The 3 branch (absent) must NOT pass --refresh-expired — confirm by
-    # gating the flag behind an explicit reuse_status check.
-    assert '[ "$reuse_status" -eq 4 ] && refresh_expired="true"' in verify_block or \
-           'reuse_status" -eq 4 ]' in verify_block, (
-        "VERIFY_READY block must gate --refresh-expired on reuse_status == 4"
+    assert '[ "$reuse_status" -eq 4 ]' in verify_block and \
+           'refresh_args=(--refresh-expired)' in verify_block, (
+        "VERIFY_READY block must gate refresh_args on reuse_status == 4"
+    )
+    # The bash-3.2-safe expansion (empty array must not error under set -u).
+    assert '${refresh_args[@]+"${refresh_args[@]}"}' in verify_block, (
+        "VERIFY_READY block must expand refresh_args in a bash-3.2-safe form"
+    )
+    assert 'refresh_flag=' not in verify_block, (
+        "VERIFY_READY block must not retain the legacy refresh_flag string"
     )
     # And every existing exit-65 message must remain untouched.
     assert "existing provider readiness receipt is stale or invalid; fail closed" in script
     assert "provider canary reservation failed; no canary spent" in script
     assert "provider readiness failed closed after one inference canary" in script
+
+
+# ---------------------------------------------------------------------------
+# T10a — receipt credential_expires_at in the past blocks refresh
+# ---------------------------------------------------------------------------
+
+
+def test_t10a_credential_expires_at_in_past_blocks_refresh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    storage_contract_zero,
+) -> None:
+    """The receipt's own credential deadline must still be valid at refresh time.
+
+    Only the readiness deadline may be expired; the credential deadline is
+    locally non-extendable.  With credential_expires_at in the past (and
+    readiness also past), both `reuse` and `reserve --refresh-expired` must
+    refuse with rc 2 and leave the live receipt untouched.
+    """
+    receipt = _build_receipt()  # build a passing receipt first
+    # Force observed, credential, and readiness all into the past so step (a)
+    # of classify_refresh_eligibility still passes (observed < credential,
+    # readiness within bounds) but the new B1(i) refusal fires on
+    # credential_expires_at <= now + MIN_ACCEPTANCE_MARGIN.
+    past_observed = (datetime.now(UTC) - timedelta(hours=2)).isoformat(timespec="seconds").replace("+00:00", "Z")
+    past_credential = (datetime.now(UTC) - timedelta(hours=1)).isoformat(timespec="seconds").replace("+00:00", "Z")
+    past_readiness = (datetime.now(UTC) - timedelta(hours=2) + timedelta(seconds=10)).isoformat(timespec="seconds").replace("+00:00", "Z")
+    receipt["observed_at"] = past_observed
+    receipt["provider_identity"]["observed_at"] = past_observed
+    receipt["inference_canary"]["observed_at"] = past_observed
+    receipt["credential_expires_at"] = past_credential
+    receipt["readiness_expires_at"] = past_readiness
+
+    receipt_path = tmp_path / "readiness.json"
+    _write_with_storage(receipt_path, receipt)
+    auth_path = tmp_path / "auth.json"
+    _write_personal_auth(auth_path, 454)
+
+    pre_bytes = receipt_path.read_bytes()
+
+    rc, _, _ = _run_cli(
+        _personal_pro_reuse_args(receipt_path, auth_path, receipt["credential_expires_at"]),
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 2, "receipt with credential_expires_at in the past must refuse reuse (2); got %d" % rc
+
+    identity_json = tmp_path / "identity.json"
+    identity_json.write_text(json.dumps(_personal_identity(454), sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    rc2, _, _ = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(receipt_path),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", receipt["credential_expires_at"],
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc2 == 2, "receipt with credential_expires_at in the past must refuse refresh (2); got %d" % rc2
+    assert receipt_path.read_bytes() == pre_bytes, "live receipt must be untouched after refused refresh"
+
+
+# ---------------------------------------------------------------------------
+# T10b — CLI --credential-expires-at LATER than receipt blocks refresh
+# ---------------------------------------------------------------------------
+
+
+def test_t10b_new_credential_later_than_receipt_blocks_refresh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    storage_contract_zero,
+) -> None:
+    """Same auth identity cannot extend its own credential window.
+
+    With receipt credential valid but CLI --credential-expires-at LATER than
+    the receipt's, both `reuse` and `reserve --refresh-expired` must refuse
+    with rc 2.  EQUAL or EARIER must remain eligible (rc 4 / rc 0).
+    """
+    receipt = _build_receipt(expired=True)
+    receipt_path = tmp_path / "readiness.json"
+    _write_with_storage(receipt_path, receipt)
+    auth_path = tmp_path / "auth.json"
+    _write_personal_auth(auth_path, 454)
+    identity_json = tmp_path / "identity.json"
+    identity_json.write_text(json.dumps(_personal_identity(454), sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    receipt_credential = receipt["credential_expires_at"]
+    receipt_credential_dt = datetime.strptime(receipt_credential, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    later_credential = (receipt_credential_dt + timedelta(hours=1)).isoformat(timespec="seconds").replace("+00:00", "Z")
+    earlier_credential = (receipt_credential_dt - timedelta(hours=1)).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    # CLI LATER than receipt -> rc 2 for reuse and refresh
+    rc, _, _ = _run_cli(
+        _personal_pro_reuse_args(receipt_path, auth_path, later_credential),
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 2, "CLI --credential-expires-at LATER than receipt must refuse reuse (2); got %d" % rc
+
+    rc, _, _ = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(receipt_path),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", later_credential,
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 2, "CLI --credential-expires-at LATER than receipt must refuse refresh (2); got %d" % rc
+
+    # CLI EQUAL to receipt -> reuse rc 4 (still eligible)
+    rc, _, _ = _run_cli(
+        _personal_pro_reuse_args(receipt_path, auth_path, receipt_credential),
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 4, "CLI --credential-expires-at EQUAL to receipt must remain eligible (4); got %d" % rc
+
+    # CLI EARLIER than receipt -> reuse rc 4 (still eligible; cannot extend)
+    rc, _, _ = _run_cli(
+        _personal_pro_reuse_args(receipt_path, auth_path, earlier_credential),
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 4, "CLI --credential-expires-at EARLIER than receipt must remain eligible (4); got %d" % rc
+
+
+# ---------------------------------------------------------------------------
+# T11 — real protected read refuses symlink and wrong-mode
+# ---------------------------------------------------------------------------
+
+
+def test_t11_real_protected_read_refuses_symlink_and_wrong_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The storage-contract claim must be exercised through the real read.
+
+    We patch ONLY `receipt_storage_contract` (returning the test runner's
+    identity and mode 0o400) and `os.fchown` (no-op); the real
+    `_read_protected_receipt` and real `lstat_identity` must run so the
+    symlink / wrong-mode refusal is what gates the receipt.
+    """
+    monkeypatch.setattr(
+        readiness, "receipt_storage_contract",
+        lambda *, workspace_binding_class=None, worker_gid=readiness.WORKER_GID:
+        (os.getuid(), os.getgid(), 0o400),
+    )
+    # Restore the real implementations that the autouse fixture bypasses.
+    monkeypatch.setattr(readiness, "_read_protected_receipt", ORIGINAL_READ_PROTECTED_RECEIPT)
+    monkeypatch.setattr(readiness, "lstat_identity", ORIGINAL_LSTAT_IDENTITY)
+
+    receipt = _build_receipt(expired=True)
+    auth_path = tmp_path / "auth.json"
+    _write_personal_auth(auth_path, 454)
+    identity_json = tmp_path / "identity.json"
+    identity_json.write_text(json.dumps(_personal_identity(454), sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    # --- Case (i): symlink at the receipt path pointing to a valid expired receipt
+    target = tmp_path / "real.json"
+    _write_with_storage(target, receipt)
+    symlink_receipt = tmp_path / "symlinked-readiness.json"
+    try:
+        symlink_receipt.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this filesystem")
+
+    rc, _, _ = _run_cli(
+        _personal_pro_reuse_args(symlink_receipt, auth_path, receipt["credential_expires_at"]),
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 2, "(i) symlinked receipt reuse must refuse (2); got %d" % rc
+
+    rc, _, _ = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(symlink_receipt),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", receipt["credential_expires_at"],
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 2, "(i) symlinked receipt refresh must refuse (2); got %d" % rc
+
+    # --- Case (ii): regular receipt with mode 0o644 (must be refused)
+    loose_receipt = tmp_path / "loose-readiness.json"
+    _write_receipt(loose_receipt, receipt)
+    os.chmod(loose_receipt, 0o644)
+
+    rc, _, _ = _run_cli(
+        _personal_pro_reuse_args(loose_receipt, auth_path, receipt["credential_expires_at"]),
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 2, "(ii) mode-0o644 receipt reuse must refuse (2); got %d" % rc
+
+    rc, _, _ = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(loose_receipt),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", receipt["credential_expires_at"],
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 2, "(ii) mode-0o644 receipt refresh must refuse (2); got %d" % rc
+
+    # --- Case (iii): same receipt chmod 0o400 -> reuse rc 4 (contract is what gates it)
+    os.chmod(loose_receipt, 0o400)
+    rc, _, _ = _run_cli(
+        _personal_pro_reuse_args(loose_receipt, auth_path, receipt["credential_expires_at"]),
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 4, "(iii) mode-0o400 receipt reuse must succeed (4); got %d" % rc
+
+
+# ---------------------------------------------------------------------------
+# T12 (NB2) — pre-existing superseded sibling that is a symlink blocks refresh
+# ---------------------------------------------------------------------------
+
+
+def test_t12_superseded_sibling_symlink_blocks_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A symlinked superseded sibling must be refused under the storage contract.
+
+    The refresh path lstat-verifies any pre-existing sibling before comparing
+    bytes; a symlink or wrong-mode sibling raises `superseded_receipt_conflict`
+    and leaves the live receipt untouched.
+    """
+    # Use the real lstat_identity + the test-runner identity as the storage contract
+    # so the receipt itself passes lstat, but the symlinked sibling fails.
+    monkeypatch.setattr(
+        readiness, "receipt_storage_contract",
+        lambda *, workspace_binding_class=None, worker_gid=readiness.WORKER_GID:
+        (os.getuid(), os.getgid(), 0o400),
+    )
+    monkeypatch.setattr(readiness, "_read_protected_receipt", ORIGINAL_READ_PROTECTED_RECEIPT)
+    monkeypatch.setattr(readiness, "lstat_identity", ORIGINAL_LSTAT_IDENTITY)
+
+    receipt = _build_receipt(expired=True)
+    receipt_path = tmp_path / "readiness.json"
+    _write_with_storage(receipt_path, receipt)
+
+    # Pre-stage a sibling at the would-be superseded path, as a symlink to an
+    # unrelated target.  The bytes match nothing, but NB2 catches the symlink
+    # via lstat_identity before the byte compare is even attempted.
+    receipt_bytes = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    digest = __import__("hashlib").sha256(receipt_bytes).hexdigest()[:16]
+    sibling_name = f"readiness.json.superseded-{digest}.json"
+    sibling_target = tmp_path / "sibling-target.json"
+    sibling_target.write_text("unrelated bytes", encoding="utf-8")
+    sibling_path = tmp_path / sibling_name
+    try:
+        sibling_path.symlink_to(sibling_target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this filesystem")
+
+    auth_path = tmp_path / "auth.json"
+    _write_personal_auth(auth_path, 454)
+    identity_json = tmp_path / "identity.json"
+    identity_json.write_text(json.dumps(_personal_identity(454), sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    pre_bytes = receipt_path.read_bytes()
+
+    rc, _, stderr = _run_cli(
+        [
+            "reserve", "--refresh-expired",
+            "--receipt", str(receipt_path),
+            "--auth", str(auth_path),
+            "--binary", str(readiness.CODEX_BINARY),
+            "--identity-json", str(identity_json),
+            "--expected-kind", "device-auth",
+            "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            "--credential-expires-at", receipt["credential_expires_at"],
+            "--worker-uid", "454",
+            "--worker-gid", "454",
+        ],
+        monkeypatch,
+        tmp_path,
+    )
+    assert rc == 2, "symlinked superseded sibling must refuse (2); got %d" % rc
+    assert "superseded_receipt_conflict" in stderr, (
+        "stderr must mention superseded_receipt_conflict; got %r" % stderr
+    )
+    assert receipt_path.read_bytes() == pre_bytes, "live receipt must be untouched after sibling refusal"

@@ -503,6 +503,7 @@ def classify_refresh_eligibility(
     workspace_binding_class: str,
     worker_uid: int = WORKER_UID,
     worker_gid: int = WORKER_GID,
+    new_credential_expires_at: str | None = None,
 ) -> None:
     """Return None if the document is refresh-eligible, else raise ReadinessError.
 
@@ -518,6 +519,15 @@ def classify_refresh_eligibility(
          If the strict call passes, the receipt is still live and must NOT be
          refreshed.  If it raises anything else, the document is tampered or
          otherwise ineligible.
+
+    Between (a) and (c) two further refusals fire so the credential deadline
+    can never be locally extended:
+      (i) the receipt's own credential_expires_at must still be valid at
+          refresh time with margin — only the readiness deadline may be
+          expired, never the credential deadline.
+      (ii) when a new credential deadline is provided, it must not be later
+           than the receipt's credential_expires_at — the same auth identity
+           cannot extend its own credential window.
     """
 
     if value.get("expected_credential_kind") != "device-auth" or expected_kind != "device-auth":
@@ -532,6 +542,17 @@ def classify_refresh_eligibility(
         worker_gid=worker_gid,
         allow_expired_readiness=True,
     )
+    receipt_credential_expiry = _timestamp(
+        value["credential_expires_at"], code="credential_expiry_malformed"
+    )
+    if receipt_credential_expiry <= datetime.now(UTC) + MIN_ACCEPTANCE_MARGIN:
+        raise ReadinessError("refresh_requires_credential_rotation")
+    if new_credential_expires_at is not None:
+        new_credential_expiry = _timestamp(
+            new_credential_expires_at, code="credential_expiry_malformed"
+        )
+        if new_credential_expiry > receipt_credential_expiry:
+            raise ReadinessError("refresh_requires_credential_rotation")
     try:
         validate_receipt_document(
             value,
@@ -924,6 +945,15 @@ def _persist_superseded_receipt(
         worker_gid=worker_gid,
     )
     if superseded_path.exists() or superseded_path.is_symlink():
+        try:
+            lstat_identity(
+                superseded_path,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+                expected_mode=expected_mode,
+            )
+        except ReadinessError as exc:
+            raise ReadinessError("superseded_receipt_conflict") from exc
         existing = superseded_path.read_bytes()
         if existing == original_bytes:
             return
@@ -967,6 +997,13 @@ def refresh_expired_receipt(
         workspace_binding_class=workspace_binding_class,
         worker_gid=worker_gid,
     )
+    if lstat_identity(
+        path,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+        expected_mode=expected_mode,
+    ) != dict(expected_identity):
+        raise ReadinessError("receipt_changed_before_refresh")
     original_bytes = path.read_bytes()
     superseded_path = _superseded_sibling_path(path, original_bytes)
     _persist_superseded_receipt(
@@ -1198,6 +1235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     workspace_binding_class=args.workspace_binding_class,
                     worker_uid=args.worker_uid,
                     worker_gid=args.worker_gid,
+                    new_credential_expires_at=args.credential_expires_at,
                 )
                 return 4
         if args.command == "reserve":
@@ -1234,6 +1272,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     workspace_binding_class=args.workspace_binding_class,
                     worker_uid=args.worker_uid,
                     worker_gid=args.worker_gid,
+                    new_credential_expires_at=args.credential_expires_at,
                 )
                 receipt = compose_reservation(
                     identity=identity_payload,
