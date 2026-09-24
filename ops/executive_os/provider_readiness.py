@@ -839,6 +839,29 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def invalidate_readiness_receipt(
+    path: Path = RECEIPT_PATH,
+    *,
+    workspace_binding_class: str | None = None,
+    worker_gid: int = WORKER_GID,
+) -> None:
+    """Remove one metadata-safe readiness receipt and durably fsync its parent."""
+
+    _validate_receipt_directory(path)
+    expected_uid, expected_gid, expected_mode = receipt_storage_contract(
+        workspace_binding_class=workspace_binding_class,
+        worker_gid=worker_gid,
+    )
+    lstat_identity(
+        path,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+        expected_mode=expected_mode,
+    )
+    path.unlink()
+    _fsync_directory(path.parent)
+
+
 def persist_receipt(
     path: Path,
     value: Mapping[str, Any],
@@ -1093,6 +1116,10 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Replace an expired passing device-auth receipt (must already exist).",
     )
+    invalidate = sub.add_parser("invalidate")
+    invalidate.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
+    invalidate.add_argument("--workspace-binding-class", required=True)
+    invalidate.add_argument("--worker-gid", type=int, default=WORKER_GID)
     finalize = sub.add_parser("finalize")
     finalize.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
     finalize.add_argument("--auth", type=Path, default=AUTH_PATH)
@@ -1252,6 +1279,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     new_credential_expires_at=args.credential_expires_at,
                 )
                 return 4
+        if args.command == "invalidate":
+            invalidate_readiness_receipt(
+                args.receipt,
+                workspace_binding_class=args.workspace_binding_class,
+                worker_gid=args.worker_gid,
+            )
+            return 0
         if args.command == "reserve":
             identity_payload = _read_json(args.identity_json)
             auth_identity = current_auth_identity(
