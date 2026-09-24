@@ -87,6 +87,9 @@ def test_draft_uses_one_no_tools_no_log_turn_and_keeps_advisory_boundary(monkeyp
     assert len(calls) == 1
     prompt, kwargs = calls[0]
     assert "target_answer_disclosed" in prompt
+    assert "Does useful context already exist behind another accepted owner?" not in prompt
+    assert "Compare reuse with a bounded coverage investigation." not in prompt
+    assert "deterministic_scaffolds" not in prompt
     assert kwargs["role"] == "deep"
     assert kwargs["max_turns"] == 1
     assert kwargs["cwd"]
