@@ -218,15 +218,20 @@ def draft_proposals(
         from brain import cli_bridge
         reasoner = cli_bridge.reason_sync
 
-    result = reasoner(
-        _prompt(packet),
-        role="deep",
-        arm=False,
-        allowed_tools=[],
-        add_dirs=[],
-        max_turns=1,
-        log_run=False,
-    )
+    # Claude's SDK loads project settings relative to cwd even with an empty tool list.
+    # Use an empty ephemeral cwd so this turn is bound to the frozen packet rather than
+    # repository CLAUDE.md/skills. Codex's prompt-only path independently re-isolates cwd.
+    with tempfile.TemporaryDirectory(prefix="mastermind-improvement-cognition-") as isolated_cwd:
+        result = reasoner(
+            _prompt(packet),
+            role="deep",
+            arm=False,
+            allowed_tools=[],
+            add_dirs=[],
+            max_turns=1,
+            cwd=isolated_cwd,
+            log_run=False,
+        )
     if not isinstance(result, dict) or not result.get("ok") or not result.get("text"):
         raise ValueError("proposal_provider_unavailable")
     if result.get("tools_used") not in (None, []):
