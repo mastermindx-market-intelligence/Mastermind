@@ -119,7 +119,7 @@ def test_provider_tool_use_is_refused_even_when_json_is_valid():
             "tools_used": ["Read"],
         }
 
-    with pytest.raises(ValueError, match="proposal_provider_used_tools"):
+    with pytest.raises(ValueError, match="proposal_provider_tool_proof_required"):
         C.draft_proposals(report(), reasoner=reasoner)
 
 
