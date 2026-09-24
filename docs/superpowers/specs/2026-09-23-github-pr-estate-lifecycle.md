@@ -13,11 +13,15 @@ The pure implementation is:
 - `control_plane/github_pr_lifecycle.py`
 - `tests/test_github_pr_lifecycle.py`
 
-Protected procedure pin for this first slice:
+Original authoring procedure pin:
 
 `mastermindx-market-intelligence/Mastermind@a7d2b3049e5cdc523e91e61a6e9d70a1cb911157`
 
-Skillpack: `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap major 1.
+Current release-compatibility review pin:
+
+`mastermindx-market-intelligence/Mastermind@1a7d400294b0d37c460b963b8865b40a23173b58`
+
+Both provide compatible `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap major 1. The authoring pin is historical provenance, not release authority; action-time release must always re-pin current protected procedure and material-source compatibility.
 
 ## Estate invariant
 
@@ -44,6 +48,8 @@ The classifier never closes, merges, deletes a branch, arms auto-merge, changes 
 7. **Explicit disposable/never-merge carriers may become close candidates only after current work is terminal/nonexistent and preservation is proven or legitimately not required.**
 8. **Integrated/superseded terminal carriers may become close candidates only when the displaced truth is preserved.**
 9. **CLOSE_CANDIDATE is evidence, not authority.** GitHub mutation still requires present action authority, current-source revalidation, one effect attempt, and readback reconciliation.
+10. **KEEP_OPEN is evidence, not authority.** It may reinforce an independently established `ACTIVE` state or a fully identified `GATED` state. It cannot convert `UNKNOWN`, `TERMINAL`, or `NONE` work into active work; those contradictions require reconciliation.
+11. **Free-text gate facts are bounded and secret-safe.** Owner, gate, and release-condition strings are bounded and refuse common credential/token material. A future gatherer should prefer typed identities/digests over copying arbitrary PR prose.
 
 ## Why this is required
 
@@ -87,7 +93,7 @@ This distinction is load-bearing: the word "disposable" does not itself authoriz
 
 ## Follow-on composition
 
-A later bounded Sol Capability Fabric GitHub composition may gather live facts and feed this pure classifier. That gatherer must reuse existing GitHub/native connector and release-assessment ownership.
+A later bounded Sol Capability Fabric GitHub composition may gather live facts and feed this pure classifier. That gatherer must reuse existing GitHub/native connector and release-assessment ownership. It must bind observations to current source identity/freshness, fail closed on contradictory source views, and pass only bounded secret-free facts into this classifier; the classifier deliberately does not become a gatherer.
 
 Any close action must remain a separate, prepared, current-source-revalidated mutation with readback. No autonomous stale-PR sweeper is authorized by this contract.
 
