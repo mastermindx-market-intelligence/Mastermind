@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import re
+import math
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,7 @@ _NUDGES_MAX = 10
 # the live rate flapped at exactly 0.5, and a knife-edge nudge is noise, not a signal
 _COVERAGE_NUDGE_FLOOR = 0.5
 _COVERAGE_NUDGE_CLEAR = 0.55
+_COVERAGE_SAMPLE_SCOPE = "open_theses_and_last_200_outcome_rows"
 
 _CODE_RE = re.compile(r"^[a-z0-9_]{1,60}$")
 
@@ -240,7 +242,7 @@ def coverage() -> dict:
     only inputs_complete certifies that the declared inputs were read successfully.
     A candidate row establishes context availability, not research quality or alpha.
     """
-    scope = "open_theses_and_last_200_outcome_rows"
+    scope = _COVERAGE_SAMPLE_SCOPE
     statuses = {"context": "UNAVAILABLE", "theses": "UNREADABLE", "outcomes": "UNREADABLE"}
     empty = {"state": "absent", "open_theses_n": 0, "resolved_recent_n": 0,
              "with_context_row_n": 0, "coverage_rate": None, "context_rows_n": 0,
@@ -252,9 +254,10 @@ def coverage() -> dict:
         cc = c.get("candidate_context") if isinstance(c, dict) else None
         if isinstance(cc, dict):
             usable = {k: row for k, row in cc.items()
-                      if isinstance(k, str) and k.strip() and isinstance(row, dict)}
+                      if isinstance(k, str) and k and k == k.strip().upper()
+                      and isinstance(row, dict)}
             statuses["context"] = "COMPLETE" if len(usable) == len(cc) else "MALFORMED"
-            context_keys = {k.upper() for k in usable}
+            context_keys = set(usable)  # same exact uppercase keys candidate() actually reads
         else:
             statuses["context"] = "UNAVAILABLE" if not c else "MALFORMED"
             context_keys = set()
@@ -486,7 +489,55 @@ def _coverage_nudge_evaluable(cov: dict) -> bool:
     coverage request nor resolve/refresh a previously observed coverage request.
     Descriptive counts remain available; the existing registry is preserved.
     """
-    return cov.get("state") == "ok" and cov.get("inputs_complete") is True
+    if not isinstance(cov, dict) or cov.get("state") != "ok" or cov.get("inputs_complete") is not True:
+        return False
+    statuses = cov.get("input_status")
+    if (not isinstance(statuses, dict) or set(statuses) != {"context", "theses", "outcomes"}
+            or any(value != "COMPLETE" for value in statuses.values())
+            or cov.get("sample_scope") != _COVERAGE_SAMPLE_SCOPE):
+        return False
+    fields = ("subjects_n", "with_context_row_n", "context_rows_n", "open_theses_n", "resolved_recent_n")
+    if any(type(cov.get(key)) is not int or not 0 <= cov[key] <= 10_000_000 for key in fields):
+        return False
+    total, covered, rows, opened, resolved = (cov[key] for key in fields)
+    rate = cov.get("coverage_rate")
+    return (total > 0 and covered <= min(total, rows) and total <= opened + resolved
+            and resolved <= 200 and type(rate) in (int, float) and math.isfinite(rate)
+            and 0 <= rate <= 1 and abs(rate - covered / total) <= 0.000501)
+
+
+def nudge_is_evaluable(report: dict, nudge: dict, *, asof: date | None = None) -> bool:
+    """Revalidate the existing coverage wire at every influence consumer.
+
+    This reads only supplied bytes; it neither refreshes the owner nor edits nudge
+    state. Old/malformed snapshots cannot bypass the producer fix by persisting a
+    coverage nudge. Unrelated nudge families keep their existing eligibility.
+    """
+    if not isinstance(nudge, dict):
+        return False
+    if nudge.get("code") != "coverage_below_half" and nudge.get("kind") != "coverage_gap":
+        return True
+    if not isinstance(report, dict) or report.get("schema") != SCHEMA:
+        return False
+    cov = report.get("coverage")
+    if not _coverage_nudge_evaluable(cov):
+        return False
+    # A persisted nudge cannot outlive its own reason.  The clear threshold is
+    # the widest legitimate hysteresis bound; no registry read/refresh is needed.
+    if cov["coverage_rate"] >= _COVERAGE_NUDGE_CLEAR or cov["open_theses_n"] + cov["resolved_recent_n"] < 5:
+        return False
+    try:
+        from brain.neural_web_context import _STALE_DAYS
+        now = datetime.fromisoformat(_now_iso().replace("Z", "+00:00"))
+        generated = datetime.fromisoformat(report["generated_at"].replace("Z", "+00:00"))
+        source_asof = date.fromisoformat(report["asof"])
+        return (now.tzinfo is not None and generated.tzinfo is not None
+                and source_asof <= generated.date() <= now.date() and generated <= now
+                and (now - generated).total_seconds() <= _STALE_DAYS * 86400
+                and (now.date() - source_asof).days <= _STALE_DAYS
+                and (asof is None or source_asof <= asof))
+    except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
+        return False
 
 
 def _nudge_candidates(drift: list[dict], cov: dict, quality: dict) -> list[dict]:

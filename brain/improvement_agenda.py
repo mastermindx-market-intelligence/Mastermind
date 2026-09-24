@@ -903,6 +903,8 @@ def _from_nw_reflection(asof: date) -> list[dict]:
         for n in (rep.get("nudges") or []):
             if not isinstance(n, dict) or n.get("severity") not in ("high", "medium"):
                 continue
+            if not nw_reflection.nudge_is_evaluable(rep, n, asof=asof):
+                continue
             code = str(n.get("code", "other"))
             kind = str(n.get("kind", "other"))
             sev = 0.8 if n.get("severity") == "high" else 0.4

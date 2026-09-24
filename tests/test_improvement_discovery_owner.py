@@ -391,7 +391,9 @@ def test_review_unattested_coverage_cannot_create_nudge(nudge_store, complete):
 @pytest.mark.parametrize("rate", [0.1, 1.0])
 def test_review_incomplete_coverage_neither_refreshes_nor_resolves(nudge_store, rate):
     cov = {"state": "ok", "coverage_rate": 0.2, "open_theses_n": 5,
-           "resolved_recent_n": 0, "with_context_row_n": 1, "inputs_complete": True}
+           "resolved_recent_n": 0, "with_context_row_n": 1, "inputs_complete": True,
+           "subjects_n": 5, "context_rows_n": 5, "sample_scope": N._COVERAGE_SAMPLE_SCOPE,
+           "input_status": {"context": "COMPLETE", "theses": "COMPLETE", "outcomes": "COMPLETE"}}
     assert N.derive_nudges([], cov, {}, "2026-09-23")[0]["code"] == "coverage_below_half"
     before = json.loads(N._NUDGE_STATE.read_text())["codes"]["coverage_below_half"]
     cov.update(inputs_complete=False, coverage_rate=rate)
@@ -405,7 +407,9 @@ def test_review_incomplete_coverage_neither_refreshes_nor_resolves(nudge_store, 
 
 def test_review_complete_coverage_can_still_emit_and_resolve(nudge_store):
     cov = {"state": "ok", "coverage_rate": 0.2, "open_theses_n": 5,
-           "resolved_recent_n": 0, "with_context_row_n": 1, "inputs_complete": True}
+           "resolved_recent_n": 0, "with_context_row_n": 1, "inputs_complete": True,
+           "subjects_n": 5, "context_rows_n": 5, "sample_scope": N._COVERAGE_SAMPLE_SCOPE,
+           "input_status": {"context": "COMPLETE", "theses": "COMPLETE", "outcomes": "COMPLETE"}}
     assert N.derive_nudges([], cov, {}, "2026-09-23")[0]["code"] == "coverage_below_half"
     cov.update(coverage_rate=1.0, with_context_row_n=5)
     assert N.derive_nudges([], cov, {}, "2026-09-24") == []
@@ -434,7 +438,8 @@ def test_review_canonical_key_preserves_real_consumer_coverage(owner, monkeypatc
 def persisted_coverage_report(nudge_store, monkeypatch):
     monkeypatch.setattr(C, "context", lambda: {"candidate_context": {"AAA": {"marker": "available"}}})
     cov = N.coverage()
-    return {"schema": N.SCHEMA, "asof": "2026-09-24", "coverage": cov, "nudges": [
+    monkeypatch.setattr(N, "_now_iso", lambda: NOW)
+    return {"schema": N.SCHEMA, "asof": "2026-09-24", "generated_at": "2026-09-24T07:00:00Z", "coverage": cov, "nudges": [
         {"code": "coverage_below_half", "kind": "coverage_gap", "severity": "medium",
          "detail": "one of three subjects covered", "first_seen": "2026-09-23", "builds_seen": 1},
         {"code": "graph_conflicts_absent", "kind": "contract_drift", "severity": "high",
@@ -493,3 +498,52 @@ def test_review_invalid_persisted_coverage_not_republished(persisted_coverage_re
     codes = {row["code"] for row in F._nudges_block()}
     assert "coverage_below_half" not in codes
     assert "graph_conflicts_absent" in codes
+
+
+@pytest.mark.parametrize("change", [
+    {"generated_at": "2026-09-01T07:00:00Z"},
+    {"generated_at": "2026-09-24T09:00:00Z"},
+    {"generated_at": "2026-09-24T07:00:00"},
+    {"generated_at": None}, {"asof": "2026-09-01"},
+    {"asof": "2026-09-25"}, {"schema": "unknown"},
+])
+def test_persisted_coverage_clocks_cannot_be_refreshed_by_consumption(persisted_coverage_report, change):
+    from brain import improvement_agenda as A
+    persisted_coverage_report.update(change)
+    N._LATEST.write_text(json.dumps(persisted_coverage_report))
+    ids = {r["id"] for r in A._from_nw_reflection(date(2026, 9, 24))}
+    assert "nw:coverage_below_half" not in ids
+    assert "nw:graph_conflicts_absent" in ids
+
+
+def test_persisted_owner_cannot_cross_agenda_asof(persisted_coverage_report):
+    from brain import improvement_agenda as A
+    N._LATEST.write_text(json.dumps(persisted_coverage_report))
+    assert "nw:coverage_below_half" not in {r["id"] for r in A._from_nw_reflection(date(2026, 9, 23))}
+
+
+def test_persisted_coverage_above_clear_cannot_still_ask_for_repair(persisted_coverage_report):
+    from brain import improvement_agenda as A
+    persisted_coverage_report["coverage"].update(with_context_row_n=3, context_rows_n=3, coverage_rate=1.0)
+    N._LATEST.write_text(json.dumps(persisted_coverage_report))
+    assert "nw:coverage_below_half" not in {r["id"] for r in A._from_nw_reflection(date(2026, 9, 24))}
+
+
+@pytest.mark.parametrize("field,value", [("coverage_rate", float("nan")), ("subjects_n", True),
+    ("with_context_row_n", 9), ("resolved_recent_n", 201), ("sample_scope", "whole-market")])
+def test_persisted_coverage_wire_is_not_trusted_by_flag_alone(persisted_coverage_report, field, value):
+    cov = persisted_coverage_report["coverage"]
+    cov[field] = value
+    assert N._coverage_nudge_evaluable(cov) is False
+
+
+def test_zero_demand_cannot_falsely_resolve_prior_coverage_nudge(nudge_store):
+    cov = {"state": "ok", "coverage_rate": 0.2, "open_theses_n": 5,
+           "resolved_recent_n": 0, "with_context_row_n": 1, "inputs_complete": True,
+           "subjects_n": 5, "context_rows_n": 5, "sample_scope": N._COVERAGE_SAMPLE_SCOPE,
+           "input_status": {"context": "COMPLETE", "theses": "COMPLETE", "outcomes": "COMPLETE"}}
+    assert N.derive_nudges([], cov, {}, "2026-09-23")
+    before = json.loads(N._NUDGE_STATE.read_text())["codes"]["coverage_below_half"]
+    cov.update(subjects_n=0, open_theses_n=0, with_context_row_n=0, coverage_rate=None)
+    assert N.derive_nudges([], cov, {}, "2026-09-24") == []
+    assert json.loads(N._NUDGE_STATE.read_text())["codes"]["coverage_below_half"] == before
