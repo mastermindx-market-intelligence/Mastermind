@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -331,9 +333,65 @@ def test_remote_ref_observation_is_fixed_noninteractive_and_bounded(
     ]
     kwargs = observed["kwargs"]
     assert kwargs["timeout"] == 10.0
+    assert kwargs["cwd"] == "/"
     assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
     assert kwargs["env"]["GIT_ASKPASS"] == "/usr/bin/false"
     assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == "/dev/null"
+
+
+def test_remote_ref_observation_ignores_repository_local_git_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import integrations.mastermind_executive_app.web_commission_source as source_mod
+
+    git_env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Mastermind test",
+        "GIT_AUTHOR_EMAIL": "mastermind-test@example.invalid",
+        "GIT_COMMITTER_NAME": "Mastermind test",
+        "GIT_COMMITTER_EMAIL": "mastermind-test@example.invalid",
+    }
+
+    def git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["/usr/bin/git", *args],
+            cwd=cwd,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=git_env,
+        )
+
+    def make_remote(name: str) -> tuple[Path, str, str]:
+        work = tmp_path / f"{name}-work"
+        bare = tmp_path / f"{name}.git"
+        git("init", "-q", str(work), cwd=tmp_path)
+        (work / "payload.txt").write_text(f"{name}\n")
+        git("add", "payload.txt", cwd=work)
+        git("commit", "-q", "-m", name, cwd=work)
+        commit = git("rev-parse", "HEAD", cwd=work).stdout.strip()
+        git("clone", "-q", "--bare", str(work), str(bare), cwd=tmp_path)
+        ref = f"refs/heads/sol/web-{name}"
+        git("--git-dir", str(bare), "update-ref", ref, commit, cwd=tmp_path)
+        return bare, commit, ref
+
+    intended, intended_commit, intended_ref = make_remote("intended")
+    attacker, _attacker_commit, _attacker_ref = make_remote("attacker")
+    caller = tmp_path / "caller"
+    git("init", "-q", str(caller), cwd=tmp_path)
+    intended_url = intended.as_uri()
+    git(
+        "config",
+        f"url.{attacker.as_uri()}.insteadOf",
+        intended_url,
+        cwd=caller,
+    )
+    monkeypatch.setattr(source_mod, "CANONICAL_REMOTE_URL", intended_url)
+    monkeypatch.chdir(caller)
+
+    assert source_mod.list_web_branch_refs() == ((intended_commit, intended_ref),)
 
 
 def test_fixed_blob_fetch_cannot_escape_canonical_raw_host(

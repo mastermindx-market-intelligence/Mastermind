@@ -75,6 +75,7 @@ def list_web_branch_refs() -> tuple[tuple[str, str], ...]:
             stderr=subprocess.PIPE,
             timeout=_NETWORK_TIMEOUT_SECONDS,
             env=_git_env(),
+            cwd="/",
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise WebCommissionSourceError("canonical Web branch observation is unavailable") from exc

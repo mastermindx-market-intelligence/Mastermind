@@ -61,9 +61,12 @@ the only eligible source branch. `work_ref` never selects a branch. Invalid oper
 suffixes are ignored; zero exact matches means source absent; more than one exact match
 is a hard ambiguity refusal.
 
-The provider snapshots that branch's exact 40-hex head, fetches only the fixed commission
-path at that immutable commit over credential-free HTTPS from the fixed GitHub raw host,
-enforces the 512 KiB/UTF-8/NUL bounds, computes SHA-256, and returns the existing
+The provider snapshots that branch's exact 40-hex head. Its Git census runs from a
+repository-neutral filesystem root with system/global Git configuration disabled, so an
+attended workspace's local Git configuration cannot rewrite the canonical remote. It then
+fetches only the fixed commission path at that immutable commit over credential-free HTTPS
+from the fixed GitHub raw host, enforces the 512 KiB/UTF-8/NUL bounds, computes SHA-256,
+and returns the existing
 `mastermind.executive_dialogue_source/v1` shape. CeoIngress already observes and then
 re-observes the provider immediately before first root mutation, so a moving branch is a
 zero-Job conflict rather than a mutable commission.
