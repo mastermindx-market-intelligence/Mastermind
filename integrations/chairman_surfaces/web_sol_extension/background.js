@@ -2,7 +2,9 @@
 
 importScripts("instance_config.js");
 importScripts("census_core.js");
+importScripts("continuation_core.js");
 
+const K = globalThis.MMXWebSolContinuation;
 const PROBE_KIND = "MMX_WEB_SOL_PROBE";
 const REPROBE_KIND = "MMX_WEB_SOL_REPROBE";
 const ACTION_SCHEMA = "mastermind.web_sol_surface_action.v1";
@@ -12,8 +14,8 @@ const HELLO_SCHEMA = "mastermind.web_sol_transport_hello.v1";
 const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
-const PACKAGE_VERSION = "0.2.0";
-const EXPECTED_CAPABILITY_DIGEST = "89a0dcb05a6c1c31000f841671e6cbf6c29a69dd73ed9726c8b5b99535485e50";
+const PACKAGE_VERSION = "0.5.0";
+const EXPECTED_CAPABILITY_DIGEST = "f82f3a7d3e6b85771348df5f422dc5a0c0a8a9fd19835415516fc66e03c51a5f";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
@@ -24,6 +26,8 @@ const RECONNECT_ALARM_PREFIX = "mmx-web-sol-native-reconnect-v1-";
 const HANDSHAKE_ALARM_PREFIX = "mmx-web-sol-native-handshake-v1-";
 const RECONNECT_DELAYS_MINUTES = Object.freeze([1, 5, 15]);
 const HANDSHAKE_TIMEOUT_MINUTES = 0.5;
+const CONTINUATION_ACK_RESULT_SCHEMA = "mastermind.web_sol_continuation_ack_result.v1";
+const CONTINUATION_ACK_OBSERVE_KIND = "MMX_WEB_SOL_OBSERVE_CONTINUATION_ACK";
 
 const OBSERVATION_KEYS = new Set([
   "schema", "target_present", "exact_conversation_loaded", "page_responsive",
@@ -35,6 +39,14 @@ const ACTION_KEYS = new Set([
   "action", "operation_key", "issued_at", "expires_at", "nonce",
 ]);
 const TYPED_REENTRY_KEYS = new Set([...ACTION_KEYS, "operation_id", "result_digest", "obligation_digest"]);
+const SEMANTIC_CONTENT_RESULT_KEYS = new Set([
+  "schema", "conversation_fingerprint", "turn_id", "directive_digest",
+  "session_alias", "runtime_binding_id", "runtime_binding_generation",
+  "runtime_binding_fingerprint", "wake_obligation_ids",
+  "wake_obligation_digest", "provider_native_turn_id",
+  "acknowledged_obligation_ids", "terminal_ack_trailer",
+  "document_epoch", "status",
+]);
 const INSTANCE_CONFIG_KEYS = new Set([
   "schema", "instanceId", "nativeHost", "protocolMajor",
   "clientPackageVersion", "nativePackageVersion", "extensionPackageVersion",
@@ -75,6 +87,14 @@ function isNonce(value) {
   return typeof value === "string" && value.length >= 16 && value.length <= 128 && !/\s/.test(value);
 }
 
+function validTurnId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$/.test(value);
+}
+
+function validDocumentEpoch(value) {
+  return typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
+}
+
 function validInstanceConfig(value) {
   if (!exactKeys(value, INSTANCE_CONFIG_KEYS)) return false;
   if (value.schema !== INSTANCE_CONFIG_SCHEMA || value.protocolMajor !== TRANSPORT_PROTOCOL_MAJOR) return false;
@@ -110,13 +130,13 @@ function validProbeEvent(event) {
   if (!event || typeof event !== "object" || Array.isArray(event)) return false;
   if (event.kind !== PROBE_KIND) return false;
   if (event.conversation_fingerprint !== null && !isHex64(event.conversation_fingerprint)) return false;
+  if (event.document_epoch !== undefined && !validDocumentEpoch(event.document_epoch)) return false;
   return validProbeObservation(event.observation);
 }
 
 function validActionRequest(request) {
   if (!exactKeys(request, ACTION_KEYS) || request.schema !== ACTION_SCHEMA) return false;
   if (request.action !== "INSPECT" && request.action !== "FOREGROUND") return false;
-  if (request.action === "TYPED_REENTRY") return false;
   if (!isHex64(request.conversation_fingerprint) || !isHex64(request.binding_fingerprint)) return false;
   if (typeof request.binding_id !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.binding_id)) return false;
@@ -152,14 +172,45 @@ function requestWindowStatus(request, nowMs = Date.now()) {
   return null;
 }
 
-function removeTabMapping(tabId) {
+function removeTabMapping(tabId, dropState = true) {
   const previous = tabFingerprints.get(tabId);
   if (!previous) return;
-  tabFingerprints.delete(tabId);
-  const entries = targets.get(previous);
-  if (!entries) return;
-  entries.delete(tabId);
-  if (entries.size === 0) targets.delete(previous);
+  if (previous.fingerprint) {
+    const entries = targets.get(previous.fingerprint);
+    if (entries) {
+      entries.delete(tabId);
+      if (entries.size === 0) targets.delete(previous.fingerprint);
+    }
+  }
+  if (dropState) {
+    tabFingerprints.delete(tabId);
+  } else {
+    tabFingerprints.set(tabId, {
+      fingerprint: null,
+      navigationGeneration: previous.navigationGeneration,
+      documentEpoch: null,
+      window: null,
+    });
+  }
+}
+
+function advanceTabNavigationGeneration(tabId) {
+  if (!Number.isInteger(tabId)) return null;
+  const previous = tabFingerprints.get(tabId) || {
+    fingerprint: null,
+    navigationGeneration: 0,
+    documentEpoch: null,
+    window: null,
+  };
+  removeTabMapping(tabId, false);
+  const navigationGeneration = previous.navigationGeneration + 1;
+  tabFingerprints.set(tabId, {
+    fingerprint: null,
+    navigationGeneration,
+    documentEpoch: null,
+    window: null,
+  });
+  return navigationGeneration;
 }
 
 function recordProbe(event, sender) {
@@ -169,15 +220,34 @@ function recordProbe(event, sender) {
   const tabId = sender.tab.id;
   const windowId = sender.tab.windowId;
   if (!Number.isInteger(tabId) || !Number.isInteger(windowId)) return false;
-  removeTabMapping(tabId);
-  if (!event.conversation_fingerprint || !event.observation.target_present) return true;
+  const previous = tabFingerprints.get(tabId) || {
+    fingerprint: null,
+    navigationGeneration: 0,
+    documentEpoch: null,
+    window: null,
+  };
+  removeTabMapping(tabId, false);
+  const documentEpoch = validDocumentEpoch(event.document_epoch)
+    ? event.document_epoch
+    : null;
+  const state = {
+    fingerprint: null,
+    navigationGeneration: previous.navigationGeneration,
+    documentEpoch,
+    window: windowId,
+  };
+  if (!event.conversation_fingerprint || !event.observation.target_present) {
+    tabFingerprints.set(tabId, state);
+    return true;
+  }
+  state.fingerprint = event.conversation_fingerprint;
   let entries = targets.get(event.conversation_fingerprint);
   if (!entries) {
     entries = new Map();
     targets.set(event.conversation_fingerprint, entries);
   }
   entries.set(tabId, windowId);
-  tabFingerprints.set(tabId, event.conversation_fingerprint);
+  tabFingerprints.set(tabId, state);
   return true;
 }
 
@@ -190,7 +260,7 @@ function unknownObservation() {
   };
 }
 
-function receipt(request, status, observation) {
+function receipt(request, status, observation, semantic = null) {
   const result = {
     schema: RECEIPT_SCHEMA, binding_id: request.binding_id,
     conversation_fingerprint: request.conversation_fingerprint,
@@ -202,6 +272,17 @@ function receipt(request, status, observation) {
     result.operation_id = request.operation_id;
     result.result_digest = request.result_digest;
     result.obligation_digest = request.obligation_digest;
+  }
+  if (["SUBMIT_CONTINUATION", "OBSERVE_CONTINUATION_ACK"].includes(request.action)) {
+    for (const key of K.correlationKeys) {
+      result[key] = key === "wake_obligation_ids" ? [...request[key]] : request[key];
+    }
+  }
+  if (request.action === "OBSERVE_CONTINUATION_ACK") {
+    result.provider_native_turn_id = semantic?.provider_native_turn_id ?? null;
+    result.acknowledged_obligation_ids = semantic?.acknowledged_obligation_ids
+      ? [...semantic.acknowledged_obligation_ids] : [];
+    result.terminal_ack_trailer = semantic?.terminal_ack_trailer === true;
   }
   return result;
 }
@@ -216,7 +297,14 @@ function resolveExactTarget(conversationFingerprint) {
   if (entries.size !== 1) return {status: "AMBIGUOUS_TARGET"};
   const [entry] = entries.entries();
   const [tabId, windowId] = entry;
-  return {status: null, tabId, windowId};
+  const state = tabFingerprints.get(tabId);
+  if (!Number.isInteger(windowId) || !state ||
+      state.fingerprint !== conversationFingerprint || state.window !== windowId ||
+      !Number.isSafeInteger(state.navigationGeneration) ||
+      state.navigationGeneration < 0) return {status: "TARGET_NOT_FOUND"};
+  const navigationGeneration = state.navigationGeneration;
+  const documentEpoch = state.documentEpoch;
+  return {status: null, tabId, windowId, navigationGeneration, documentEpoch};
 }
 
 async function freshProbe(tabId, expectedConversationFingerprint) {
@@ -230,7 +318,7 @@ async function freshProbe(tabId, expectedConversationFingerprint) {
     const tab = await chrome.tabs.get(tabId);
     if (!recordProbe(event, {tab})) return null;
   } catch (_error) {
-    removeTabMapping(tabId);
+    removeTabMapping(tabId, false);
     return null;
   }
   return event;
@@ -238,7 +326,7 @@ async function freshProbe(tabId, expectedConversationFingerprint) {
 
 async function refreshTabMapping(tabId) {
   if (!Number.isInteger(tabId)) return;
-  removeTabMapping(tabId);
+  removeTabMapping(tabId, false);
   await freshProbe(tabId, null);
 }
 
@@ -360,6 +448,125 @@ async function handleTypedReentry(request) {
   return receipt(request, "CONSUMED", result.observation);
 }
 
+function validSubmitContinuationRequest(request) {
+  return request?.action === "SUBMIT_CONTINUATION" && K?.validRequest(request) === true;
+}
+function validObserveContinuationAckRequest(request) {
+  return request?.action === "OBSERVE_CONTINUATION_ACK" && K?.validRequest(request) === true;
+}
+async function handleSubmitContinuation(request) {
+  const outcome = await K.handle(request, {resolveExactTarget, freshProbe,
+    requestWindowStatus, unknownObservation, sendMessage: (i, v) => chrome.tabs.sendMessage(i, v, {frameId: 0})});
+  return receipt(request, outcome.status, outcome.observation || unknownObservation());
+}
+
+function semanticContentRequest(request) {
+  return {
+    kind: CONTINUATION_ACK_OBSERVE_KIND,
+    expected_conversation_fingerprint: request.conversation_fingerprint,
+    turn_id: request.turn_id,
+    directive_digest: request.directive_digest,
+    session_alias: request.session_alias,
+    runtime_binding_id: request.runtime_binding_id,
+    runtime_binding_generation: request.runtime_binding_generation,
+    runtime_binding_fingerprint: request.runtime_binding_fingerprint,
+    wake_obligation_ids: [...request.wake_obligation_ids],
+    wake_obligation_digest: request.wake_obligation_digest,
+  };
+}
+
+
+function sameStringArray(left, right) {
+  return Array.isArray(left) && Array.isArray(right) &&
+    left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function validSemanticContentResult(value, request) {
+  if (!exactKeys(value, SEMANTIC_CONTENT_RESULT_KEYS) ||
+      value.schema !== CONTINUATION_ACK_RESULT_SCHEMA ||
+      !["CONTINUATION_ACKNOWLEDGED", "CONTINUATION_ACK_PENDING",
+        "CONTINUATION_ACK_REFUSED"].includes(value.status)) return false;
+  for (const key of [
+    "conversation_fingerprint", "turn_id", "directive_digest", "session_alias",
+    "runtime_binding_id", "runtime_binding_generation", "runtime_binding_fingerprint",
+    "wake_obligation_digest",
+  ]) {
+    if (value[key] !== request[key]) return false;
+  }
+  if (!sameStringArray(value.wake_obligation_ids, request.wake_obligation_ids) ||
+      typeof value.document_epoch !== "string" || !/^[0-9a-f]{32}$/.test(value.document_epoch) ||
+      typeof value.terminal_ack_trailer !== "boolean") return false;
+  if (value.status === "CONTINUATION_ACKNOWLEDGED") {
+    return validTurnId(value.provider_native_turn_id) &&
+      sameStringArray(value.acknowledged_obligation_ids, request.wake_obligation_ids) &&
+      value.terminal_ack_trailer === true;
+  }
+  return value.provider_native_turn_id === null &&
+    sameStringArray(value.acknowledged_obligation_ids, []) &&
+    value.terminal_ack_trailer === false;
+}
+
+function semanticProbeEligible(event, request) {
+  return event && event.conversation_fingerprint === request.conversation_fingerprint &&
+    validDocumentEpoch(event.document_epoch) &&
+    event.observation.target_present && event.observation.exact_conversation_loaded &&
+    event.observation.auth_required !== true &&
+    event.observation.provider_error_present !== true;
+}
+
+function sameSemanticTarget(left, right) {
+  return left && right && !left.status && !right.status &&
+    left.tabId === right.tabId &&
+    left.navigationGeneration === right.navigationGeneration &&
+    left.documentEpoch === right.documentEpoch;
+}
+
+async function handleObserveContinuationAck(request) {
+  const resolved = resolveExactTarget(request.conversation_fingerprint);
+  if (resolved.status) return receipt(request, resolved.status, unknownObservation());
+  const before = await freshProbe(resolved.tabId, request.conversation_fingerprint);
+  const bound = resolveExactTarget(request.conversation_fingerprint);
+  if (!semanticProbeEligible(before, request) ||
+      bound.status || bound.tabId !== resolved.tabId ||
+      bound.documentEpoch !== before.document_epoch) {
+    return receipt(
+      request,
+      "CONTINUATION_ACK_REFUSED",
+      before ? before.observation : unknownObservation(),
+    );
+  }
+  let semantic;
+  try {
+    semantic = await chrome.tabs.sendMessage(
+      bound.tabId,
+      semanticContentRequest(request),
+      {frameId: 0},
+    );
+  } catch (_error) {
+    return receipt(request, "CONTINUATION_ACK_REFUSED", before.observation);
+  }
+  if (!validSemanticContentResult(semantic, request) ||
+      semantic.document_epoch !== bound.documentEpoch) {
+    return receipt(request, "CONTINUATION_ACK_REFUSED", before.observation);
+  }
+  const current = resolveExactTarget(request.conversation_fingerprint);
+  if (!sameSemanticTarget(current, bound) || requestWindowStatus(request)) {
+    return receipt(request, "CONTINUATION_ACK_REFUSED", before.observation);
+  }
+  const after = await freshProbe(bound.tabId, request.conversation_fingerprint);
+  const finalTarget = resolveExactTarget(request.conversation_fingerprint);
+  if (!semanticProbeEligible(after, request) ||
+      after.document_epoch !== bound.documentEpoch ||
+      !sameSemanticTarget(finalTarget, bound)) {
+    return receipt(
+      request,
+      "CONTINUATION_ACK_REFUSED",
+      after ? after.observation : unknownObservation(),
+    );
+  }
+  return receipt(request, semantic.status, after.observation, semantic);
+}
+
 const CENSUS_REQUEST_SCHEMA = "mastermind.web_sol_census_request.v1";
 const CENSUS_RECEIPT_SCHEMA = "mastermind.web_sol_census_receipt.v1";
 const CENSUS_HEADERS = Object.freeze(["schema", "scope", "adapter_instance_id", "started_at", "completed_at",
@@ -438,7 +645,10 @@ function validCensusPopup(event, sender) {
 async function handleNativeRequest(request, port) {
   if (request && request.schema === CENSUS_REQUEST_SCHEMA) return handleCensusRequest(request, port);
   const typedReentry = validTypedReentryRequest(request);
-  if (!typedReentry && !validActionRequest(request)) return;
+  const submitContinuation = validSubmitContinuationRequest(request);
+  const observeContinuationAck = validObserveContinuationAckRequest(request);
+  if (!typedReentry && !submitContinuation && !observeContinuationAck &&
+      !validActionRequest(request)) return;
   const accepted = Object.freeze({...request});
   const windowStatus = requestWindowStatus(accepted);
   if (windowStatus) {
@@ -448,7 +658,9 @@ async function handleNativeRequest(request, port) {
   const result = accepted.action === "INSPECT"
     ? await handleInspect(accepted)
     : accepted.action === "FOREGROUND" ? await handleForeground(accepted)
-    : typedReentry ? await handleTypedReentry(accepted) : null;
+    : typedReentry ? await handleTypedReentry(accepted)
+    : submitContinuation ? await handleSubmitContinuation(accepted)
+    : observeContinuationAck ? await handleObserveContinuationAck(accepted) : null;
   if (result) port.postMessage(result);
   return result;
 }
@@ -686,13 +898,17 @@ chrome.runtime.onMessage.addListener((event, sender, sendResponse) => {
 });
 
 function refreshFromTabEvent(tabId) {
-  refreshTabMapping(tabId).catch(() => removeTabMapping(tabId));
+  refreshTabMapping(tabId).catch(() => removeTabMapping(tabId, false));
 }
 
 if (chrome.tabs) {
   if (chrome.tabs.onUpdated) {
     chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-      if (changeInfo && (typeof changeInfo.url === "string" || changeInfo.status === "complete")) {
+      if (!changeInfo) return;
+      if (typeof changeInfo.url === "string") {
+        advanceTabNavigationGeneration(tabId);
+        refreshFromTabEvent(tabId);
+      } else if (changeInfo.status === "complete") {
         refreshFromTabEvent(tabId);
       }
     });
@@ -704,7 +920,7 @@ if (chrome.tabs) {
     chrome.tabs.onAttached.addListener((tabId) => refreshFromTabEvent(tabId));
   }
   if (chrome.tabs.onDetached) {
-    chrome.tabs.onDetached.addListener((tabId) => removeTabMapping(tabId));
+    chrome.tabs.onDetached.addListener((tabId) => advanceTabNavigationGeneration(tabId));
   }
   if (chrome.tabs.onReplaced) {
     chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {

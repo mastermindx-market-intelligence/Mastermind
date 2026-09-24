@@ -70,6 +70,8 @@ def test_schema_pins_and_action_surface_are_closed():
         "INSPECT",
         "FOREGROUND",
         "TYPED_REENTRY",
+        "SUBMIT_CONTINUATION",
+        "OBSERVE_CONTINUATION_ACK",
     }
 
 

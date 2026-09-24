@@ -1149,7 +1149,7 @@ def test_one_transport_implementation_authority():
         for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
         if descriptor.transport_implemented
     }
-    assert implemented == {"codex-app-server"}
+    assert implemented == {"codex-app-server", "chatgpt-gui"}
     assert WAKE_TRANSPORT_DESCRIPTORS["claude-code-session"].transport_implemented is False
     sources = []
     for path in _WAKE_MODULES:
@@ -1268,4 +1268,4 @@ def test_grok_bot_vocabulary_adds_no_target_or_transport_implementation() -> Non
         transport_id
         for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
         if descriptor.transport_implemented
-    } == {"codex-app-server"}
+    } == {"codex-app-server", "chatgpt-gui"}

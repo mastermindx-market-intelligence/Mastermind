@@ -18,7 +18,10 @@ def test_manifest_exposes_the_reader_without_permission_widening():
         "https://chat.openai.com/*", "https://chatgpt.com/*"
     }
     assert manifest["background"] == {"service_worker": "background.js"}
-    assert manifest["content_scripts"][0]["js"] == ["content.js"]
+    assert manifest["content_scripts"][0]["js"] == [
+        "semantic_ack_core.js",
+        "content.js",
+    ]
     assert "externally_connectable" not in manifest
     assert "web_accessible_resources" not in manifest
 
