@@ -448,6 +448,9 @@ def test_ready_result_observation_refuses_identity_digest_or_private_field_drift
 
     bad = _ready_observation()
     bad["result"]["summary"] = "changed after digest"
+    # Keep the declared byte length truthful so this discriminator reaches the
+    # stale digest check instead of correctly failing earlier on size drift.
+    bad["result_byte_length"] = len(_canonical(bad["result"]))
     with pytest.raises(WebSolCognitionTransportError, match="result_digest"):
         validate_result_observation(bad)
 
