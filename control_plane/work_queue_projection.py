@@ -881,14 +881,16 @@ def derive_work_producers_v1(control_room: Any) -> dict[str, Any]:
       ``placement`` are forced to ``None`` with skip reason
       ``exempt_card_not_actionable`` or
       ``exempt_card_unqualified_validity`` — the card stays
-      for effects but cannot leak accountability/placement
-      values from evidence it declared not actionable.  Stale
-      effects still stick in the composer — R4 carrier rule
-      unchanged.
+      for effects.  Stale effects still stick in the composer —
+      R4 carrier rule unchanged.
     - Placement (``WAITING_CAPACITY``) follows the same
       eligibility as accountability minus the owed-turn
-      condition.  WQ-PROD-1 round 3: a gate-failing
-      EFFECT_UNKNOWN card is forbidden from emitting placement.
+      condition.  WQ-PROD-1 round 3: placement cannot co-occur
+      with EFFECT_UNKNOWN on one card (``placement_state.value``
+      carries one token), so the placement guard on exempt cards
+      is defense-in-depth, not a reachable path.  When the gate
+      passes the EFFECT_UNKNOWN exemption is a no-op and the
+      WAITING_CAPACITY row emits as before.
     - ``evidence_ref`` is ``validity.card.proof_ref`` when a
       non-empty string, else ``responsibility_ref`` (proof_ref is
       content-addressed over the card's sources; see
@@ -1026,8 +1028,11 @@ def _evaluate_card(
 
     - ``accountability``: ``"SOL"`` / ``"WORKER"`` / ``None`` when the
       card's owed_turn seat/reason don't qualify.
-    - ``accountability_skip_reason``: per-card skip token recorded
-      when the seat/reason don't produce a row; ``None`` otherwise.
+    - ``accountability_skip_reason``: per-card skip tokens recorded
+      when the seat/reason don't produce a row; ``[]`` otherwise.
+      The list carries the exempt reason first (when the gate failed
+      on an EFFECT_UNKNOWN card) AND the owed-turn claim second
+      (``owed_<seat>_<reason>``), so the skip trail preserves both.
     - ``placement``: ``"WAITING"`` / ``None``.
     - ``effects``: carrier string (the current worker ``attempt_id``
       when present and non-empty, else the ``responsibility_ref``) /
@@ -1041,7 +1046,9 @@ def _evaluate_card(
     Returns ``(None, skip_token)`` when the card is not eligible —
     the token is one of: ``unresolved_root``, ``ambiguous_root``,
     ``freshness_<value>``, ``not_actionable``, ``unqualified_validity``,
-    ``no_source_observations``, ``effect_unknown_without_source``.
+    ``no_source_observations``, ``effect_unknown_without_source``,
+    ``exempt_card_not_actionable``, ``exempt_card_unqualified_validity``,
+    ``missing_responsibility_ref``.
     """
     if raw.get("runtime_root_state") != "RESOLVED":
         return None, "unresolved_root"
@@ -1117,30 +1124,36 @@ def _evaluate_card(
     oldest_observed = min(parsed_observed)
     evidence_ref = proof_ref if isinstance(proof_ref, str) and proof_ref else responsibility_ref
 
-    # Owed turn → accountability.  WQ-PROD-1 round 3: when an
+    # Owed turn → accountability.  WQ-PROD-1 round 3 + round 4: when an
     # EFFECT_UNKNOWN card failed the full gate (``exempt_skip_reason``
     # set above), accountability is FORCED to ``None`` regardless of
     # the owed_turn seat/reason — the projection itself declared the
     # card not actionable (or its validity unqualified), so the
     # accountability row would otherwise leak a value from evidence
     # the projection refuses to act on.  The exempt skip reason takes
-    # precedence over the ``owed_<seat>_<reason>`` token so the skip
-    # trail surfaces the real cause.
+    # precedence over the ``owed_<seat>_<reason>`` token IN POSITION
+    # (exempt first) but BOTH are recorded: the card WOULD have
+    # produced a row if the gate had passed, and the skip trail
+    # preserves that owed-turn claim for audit.
     owed_turn = raw.get("owed_turn")
     seat = owed_turn.get("seat") if isinstance(owed_turn, Mapping) else None
     reason = owed_turn.get("reason") if isinstance(owed_turn, Mapping) else None
     accountability_value: str | None = None
-    accountability_skip_reason: str | None = None
+    accountability_skip_reason: list[str] = []
+    seat_token = seat if isinstance(seat, str) else "missing"
+    reason_token = reason if isinstance(reason, str) else "missing"
+    owed_token = f"owed_{seat_token}_{reason_token}"
     if exempt_skip_reason is not None:
-        accountability_skip_reason = exempt_skip_reason
+        # Preserve the owed-turn claim too — the card would have
+        # produced a row if the gate had passed; the skip trail
+        # records BOTH reasons, exempt first (deterministic order).
+        accountability_skip_reason = [exempt_skip_reason, owed_token]
     elif seat == "ceo" and reason in _VALID_OWED_TURN_REASONS:
         accountability_value = "SOL"
     elif seat == "worker" and reason in _VALID_OWED_TURN_REASONS:
         accountability_value = "WORKER"
     else:
-        seat_token = seat if isinstance(seat, str) else "missing"
-        reason_token = reason if isinstance(reason, str) else "missing"
-        accountability_skip_reason = f"owed_{seat_token}_{reason_token}"
+        accountability_skip_reason = [owed_token]
 
     # Placement (``WAITING_CAPACITY``).  WQ-PROD-1 round 3: a
     # gate-failing EFFECT_UNKNOWN card is forbidden from emitting
@@ -1184,23 +1197,31 @@ def _resolve_root(
     (``accountability``/``placement``/``effects`` fields of the
     first view).  If any disagreement on a producer, that producer
     emits NO row and a ``<root>:conflict_<producer>`` token is
-    recorded.  Per-card accountability skip tokens (the
-    ``accountability_skip_reason`` of each view) are recorded
-    regardless of conflict state.
+    recorded.  Per-card accountability skip tokens (each entry of
+    each view's ``accountability_skip_reason`` list — exempt
+    cards record both ``exempt_card_...`` AND ``owed_<seat>_<reason>``,
+    exempt first) are recorded regardless of conflict state.
 
     When 2+ cards agree (no conflict tokens), record the
     ``<root>:duplicate_card`` token once.  Conflict roots do NOT
     record ``duplicate_card`` — the cards are not "agreeing
     duplicates".
+
+    An empty ``views`` list returns ``(None, None, None, [])``
+    cleanly — the placement branch's ``next(...)`` cannot reach
+    ``[]`` because the ``elif views and all(placement_present)``
+    guard short-circuits when no view is present.
     """
     skip_tokens: list[str] = []
 
     # Per-card accountability skip tokens are recorded regardless of
     # conflict state — they are the auditable reason each card did
-    # or didn't produce a row.
+    # or didn't produce a row.  ``accountability_skip_reason`` is a
+    # list because exempt cards carry BOTH the exemption reason and
+    # the owed-turn claim, deterministic order (exempt first).
     for view in views:
-        if view["accountability_skip_reason"]:
-            skip_tokens.append(f"{root_job_id}:{view['accountability_skip_reason']}")
+        for token in view["accountability_skip_reason"]:
+            skip_tokens.append(f"{root_job_id}:{token}")
 
     # Accountability conflict.  WQ-PROD-1 round 3: when distinct
     # non-None values agree, source the row's ``next_actor``,
@@ -1231,11 +1252,14 @@ def _resolve_root(
     # placement (semantically the all-or-conflict branch already keeps
     # ``views[0]`` in the agreeing case — but the rule is "first view
     # that carries the value" for symmetry with accountability/effects).
+    # Guard: ``elif views and all(placement_present)`` so an empty
+    # ``views`` list cannot reach ``next(v for v in [] if ...)``
+    # (which would raise ``StopIteration`` / ``RuntimeError``).
     placement_present = [v["placement"] is not None for v in views]
     pl_row: dict[str, Any] | None = None
     if any(placement_present) and not all(placement_present):
         skip_tokens.append(f"{root_job_id}:conflict_placement")
-    elif all(placement_present):
+    elif views and all(placement_present):
         pl_view = next(v for v in views if v["placement"] is not None)
         pl_row = {
             "state": pl_view["placement"],
