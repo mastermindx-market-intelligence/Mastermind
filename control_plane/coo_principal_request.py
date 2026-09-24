@@ -36,21 +36,40 @@ _OPTIONAL = ceo_request.OPTIONAL_FIELDS - frozenset({"workstream"})
 
 
 class CooPrincipalRequestError(ValueError):
-    """The high-level COO request or its mission binding was refused."""
+    """Base typed refusal for COO request normalization/derivation."""
+
+    def __init__(self, message: str, *, caller_fault: bool) -> None:
+        super().__init__(message)
+        self.message = message
+        self.caller_fault = caller_fault
+
+
+class CooPrincipalRequestInvalid(CooPrincipalRequestError):
+    """Caller-authored business fields or mission binding are invalid."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, caller_fault=True)
+
+
+class CooPrincipalRequestInternalError(CooPrincipalRequestError):
+    """Trusted derivation/policy is inconsistent; never a caller mistake."""
+
+    def __init__(self, message: str = "COO request policy is internally inconsistent") -> None:
+        super().__init__(message, caller_fault=False)
 
 
 def _exact_public_keys(payload: object) -> Mapping[str, Any]:
     if not isinstance(payload, Mapping):
-        raise CooPrincipalRequestError("request must be an object")
+        raise CooPrincipalRequestInvalid("request must be an object")
     keys = set(payload)
     missing = sorted(_REQUIRED - keys)
     unexpected = sorted(keys - _REQUIRED - _OPTIONAL)
     if missing:
-        raise CooPrincipalRequestError(
+        raise CooPrincipalRequestInvalid(
             f"request is missing required field(s): {missing}"
         )
     if unexpected:
-        raise CooPrincipalRequestError(
+        raise CooPrincipalRequestInvalid(
             f"request has unexpected field(s): {unexpected}"
         )
     return payload
@@ -72,22 +91,24 @@ def normalize_principal_request(
 
     raw = _exact_public_keys(payload)
     if not isinstance(expected_work_ref, str) or not expected_work_ref:
-        raise CooPrincipalRequestError("expected_work_ref is invalid")
+        raise CooPrincipalRequestInvalid("expected_work_ref is invalid")
 
     try:
         normalized = ceo_request.normalize_high_level_request(dict(raw))
-    except ceo_request.CeoRequestError as exc:
-        raise CooPrincipalRequestError(exc.message) from exc
+    except ceo_request.CeoRequestInvalid as exc:
+        raise CooPrincipalRequestInvalid(exc.message) from exc
+    except ceo_request.CeoRequestInternalError as exc:
+        raise CooPrincipalRequestInternalError() from exc
 
     work_ref = normalized.get("workstream")
     if work_ref != expected_work_ref:
-        raise CooPrincipalRequestError(
+        raise CooPrincipalRequestInvalid(
             "workstream must equal the exact selected Mission Workspace work_ref"
         )
 
     attempt_limit = normalized.get("attempt_limit", DEFAULT_ATTEMPT_LIMIT)
     if type(attempt_limit) is not int or not 1 <= attempt_limit <= MAX_ATTEMPT_LIMIT:
-        raise CooPrincipalRequestError(
+        raise CooPrincipalRequestInvalid(
             "attempt_limit must be between 1 and 2 for a COO principal root"
         )
     normalized["attempt_limit"] = attempt_limit
@@ -98,18 +119,18 @@ def principal_request_ref(normalized_request: Mapping[str, Any]) -> str:
     """Return the stable COO request identity for work_ref + operation_key."""
 
     if not isinstance(normalized_request, Mapping):
-        raise CooPrincipalRequestError("normalized request must be an object")
+        raise CooPrincipalRequestInvalid("normalized request must be an object")
     work_ref = normalized_request.get("workstream")
     operation_key = normalized_request.get("operation_key")
     if not isinstance(work_ref, str) or not isinstance(operation_key, str):
-        raise CooPrincipalRequestError(
+        raise CooPrincipalRequestInvalid(
             "normalized request requires workstream and operation_key"
         )
     canonical = normalize_principal_request(
         dict(normalized_request), expected_work_ref=work_ref
     )
     if canonical != dict(normalized_request):
-        raise CooPrincipalRequestError(
+        raise CooPrincipalRequestInvalid(
             "normalized request differs from the canonical COO request"
         )
     material = (work_ref + "\n" + operation_key).encode("utf-8")
@@ -119,7 +140,7 @@ def principal_request_ref(normalized_request: Mapping[str, Any]) -> str:
         REQUEST_REF_RE.fullmatch(request_ref) is None
         or ceo_request.AUTOMATED_REQUEST_REF_RE.fullmatch(request_ref) is None
     ):
-        raise RuntimeError("derived COO request_ref is not CeoIngress-compatible")
+        raise CooPrincipalRequestInternalError()
     return request_ref
 
 
@@ -127,7 +148,7 @@ def principal_intent_id(request_ref: str) -> str:
     """Return the sink-compatible, separately namespaced COO intent id."""
 
     if not isinstance(request_ref, str) or REQUEST_REF_RE.fullmatch(request_ref) is None:
-        raise CooPrincipalRequestError("request_ref is invalid")
+        raise CooPrincipalRequestInvalid("request_ref is invalid")
     digest = hashlib.sha256(
         _INTENT_ID_DOMAIN + request_ref.encode("ascii")
     ).hexdigest()
@@ -136,7 +157,7 @@ def principal_intent_id(request_ref: str) -> str:
         INTENT_ID_RE.fullmatch(intent_id) is None
         or ceo_intent.INTENT_ID_RE.fullmatch(intent_id) is None
     ):
-        raise RuntimeError("derived COO intent_id is not sink-compatible")
+        raise CooPrincipalRequestInternalError()
     return intent_id
 
 
@@ -148,6 +169,8 @@ __all__ = [
     "REQUEST_REF_PREFIX",
     "REQUEST_REF_RE",
     "CooPrincipalRequestError",
+    "CooPrincipalRequestInvalid",
+    "CooPrincipalRequestInternalError",
     "normalize_principal_request",
     "principal_intent_id",
     "principal_request_ref",
