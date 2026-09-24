@@ -44,8 +44,13 @@ from control_plane.consultation_runtime import (
 )
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.wake_events import utc_now_iso
+from control_plane.wake_ledger import requested_record
+from control_plane.wake_persist import WakeLedgerRepository
 from integrations.mastermind_company_mcp.consultation import (
     validate_company_consult_dispatch_request,
+)
+from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+    ConsultationWakeExtension,
 )
 
 
@@ -914,47 +919,118 @@ class RuntimeConsultationDispatcher:
         # whole-semantic replay above already proved the carrier packet
         # agrees with the rebuilt candidate frame.
         if existing_intent is None or not carrier_holds_packet:
-            self.packets.put_question(consultation_id, question_frame)
+            try:
+                self.packets.put_question(consultation_id, question_frame)
+            except Exception as exc:
+                # INTENT is durable (inserted or replayed) but the body
+                # never reached the carrier. Per IAC-1 r4c2 the
+                # committed facts stand; the caller sees a
+                # CARRIER_RECONCILIATION_REQUIRED barrier and
+                # ``attention_requested=False`` so they never claim a
+                # wake exists when the body is lost.
+                return {
+                    "ok": True,
+                    "result": _committed_consult_result(
+                        consultation_id=consultation_id,
+                        valid_until=valid_until,
+                        carrier_ref=carrier_ref,
+                        intent_inserted=intent_result.inserted,
+                        attention_requested=False,
+                        wake_state=None,
+                        blocker="CARRIER_RECONCILIATION_REQUIRED",
+                    ),
+                }
+
+        # IAC-1 r4c2: the production dispatcher creates exactly one
+        # durable WAKE_REQUESTED per admitted consult. The recipe
+        # derives the RuntimeBinding from the persisted INTENT via the
+        # existing runtime owner and writes the record through the
+        # existing WakeLedgerRepository. Any exception leaves the
+        # committed INTENT durable and the caller sees a typed blocker
+        # (no silent failure, no hidden retry).
+        attention_requested = False
+        try:
+            intent_event = _find_consultation_event(
+                self.runtime, consultation_id, "INTENT"
+            )
+            if intent_event is None:
+                raise StateConflict(
+                    "INTENT missing after intent() returned"
+                )
+            question_item = self._consultations._intent_from_event(
+                intent_event
+            )
+            with self.runtime.store.read() as connection:
+                binding = self._consultations._require_current_recipient(
+                    question_item, connection=connection
+                )
+                identity = (
+                    self._consultations
+                    ._consultation_source_identity_on_connection(
+                        question_item, connection
+                    )
+                )
+            obligation = ConsultationWakeExtension(
+                repository=WakeLedgerRepository(self.runtime),
+                requester_job_id=identity.requester_job_id,
+                requester_attempt_id=identity.requester_attempt_id,
+                root_job_id=identity.root_job_id,
+                recipient_job_id=identity.recipient_job_id,
+                recipient_attempt_id=identity.recipient_attempt_id,
+                consultation_id=identity.consultation_id,
+                message_key=identity.message_key,
+                semantic_fingerprint=identity.semantic_fingerprint,
+                current_binding=binding,
+            ).obligation()
+            record = requested_record(obligation)
+            WakeLedgerRepository(self.runtime).append_record(
+                record, obligation=obligation
+            )
+            attention_requested = True
+        except Exception:
+            # INTENT is durable but the wake could not be created.
+            # Never raise: the INTENT append is a known effect that
+            # must not be hidden. Return the committed facts with
+            # attention_requested=False and blocker WAKE_REQUEST_UNRESOLVED.
+            return {
+                "ok": True,
+                "result": _committed_consult_result(
+                    consultation_id=consultation_id,
+                    valid_until=valid_until,
+                    carrier_ref=carrier_ref,
+                    intent_inserted=intent_result.inserted,
+                    attention_requested=False,
+                    wake_state="RECONCILIATION_REQUIRED",
+                    blocker="WAKE_REQUEST_UNRESOLVED",
+                ),
+            }
 
         try:
             wake_state = self._consultations.resolve_restart(question_frame)
         except StateConflict:
             return {
                 "ok": True,
-                "result": {
-                    "schema": _INBOX_SCHEMA,
-                    "consultation_ref": consultation_id,
-                    "consultation_id": consultation_id,
-                    "wake_state": "RECONCILIATION_REQUIRED",
-                    "deadline": valid_until,
-                    "intended": intent_result.inserted,
-                    "is_already_intended": not intent_result.inserted,
-                    "state": (
-                        "ALREADY_INTENDED"
-                        if not intent_result.inserted
-                        else "INTENDED"
-                    ),
-                    "carrier_ref": carrier_ref,
-                    "blocker": "WAKE_STATE_UNAVAILABLE",
-                },
+                "result": _committed_consult_result(
+                    consultation_id=consultation_id,
+                    valid_until=valid_until,
+                    carrier_ref=carrier_ref,
+                    intent_inserted=intent_result.inserted,
+                    attention_requested=attention_requested,
+                    wake_state="RECONCILIATION_REQUIRED",
+                    blocker="WAKE_STATE_UNAVAILABLE",
+                ),
             }
         return {
             "ok": True,
-            "result": {
-                "schema": _INBOX_SCHEMA,
-                "consultation_ref": consultation_id,
-                "consultation_id": consultation_id,
-                "wake_state": wake_state,
-                "deadline": valid_until,
-                "intended": intent_result.inserted,
-                "is_already_intended": not intent_result.inserted,
-                "state": (
-                    "ALREADY_INTENDED"
-                    if not intent_result.inserted
-                    else "INTENDED"
-                ),
-                "carrier_ref": carrier_ref,
-            },
+            "result": _committed_consult_result(
+                consultation_id=consultation_id,
+                valid_until=valid_until,
+                carrier_ref=carrier_ref,
+                intent_inserted=intent_result.inserted,
+                attention_requested=attention_requested,
+                wake_state=wake_state,
+                blocker=None,
+            ),
         }
 
     # -- company.reply --
@@ -1343,6 +1419,38 @@ class RuntimeConsultationDispatcher:
 # ---------------------------------------------------------------------------
 # Helpers (module-private)
 # ---------------------------------------------------------------------------
+
+
+def _committed_consult_result(
+    *,
+    consultation_id: str,
+    valid_until: str,
+    carrier_ref: str,
+    intent_inserted: bool,
+    attention_requested: bool,
+    wake_state: str | None,
+    blocker: str | None,
+) -> dict[str, Any]:
+    """Build the closed-shape ``company.consult`` result envelope.
+
+    Committed INTENT facts are never dropped because a downstream step
+    (carrier write, wake creation, wake state read) failed. The
+    ``blocker`` is the closed-set recovery label a caller or operator
+    reads to understand which seam needs reconciliation.
+    """
+    return {
+        "schema": _INBOX_SCHEMA,
+        "consultation_ref": consultation_id,
+        "consultation_id": consultation_id,
+        "state": "ALREADY_INTENDED" if not intent_inserted else "INTENDED",
+        "intended": intent_inserted,
+        "is_already_intended": not intent_inserted,
+        "attention_requested": attention_requested,
+        "wake_state": wake_state,
+        "deadline": valid_until,
+        "carrier_ref": carrier_ref,
+        "blocker": blocker,
+    }
 
 
 def _semantic_answer_digest(frame: Mapping[str, Any]) -> str:
