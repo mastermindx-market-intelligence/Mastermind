@@ -25,8 +25,8 @@ def test_acceptance_corpus_is_closed_and_explicitly_inert():
     assert doc["is_production_authority"] is False
 
     cases = doc["cases"]
-    assert len(cases) == 31
-    assert [row["id"] for row in cases] == [f"M{i:02d}" for i in range(1, 32)]
+    assert len(cases) == 36
+    assert [row["id"] for row in cases] == [f"M{i:02d}" for i in range(1, 37)]
     assert len({row["id"] for row in cases}) == len(cases)
     assert all(set(row) == {"id", "class", "scenario", "expected"} for row in cases)
     assert {row["class"] for row in cases} == {
@@ -202,3 +202,21 @@ def test_mandate_projection_reuses_mission_workspace_v3_without_faking_claude_ru
     assert by_id["M29"]["expected"] == "MISSION_V3_IS_PRIMARY_ORGANIZATIONAL_INPUT"
     assert by_id["M30"]["expected"] == "REFUSE_UNQUALIFIED_MISSION_STATE"
     assert by_id["M31"]["expected"] == "MISSION_BOUND_WITH_SESSION_HARDENING_DEFERRED"
+
+
+def test_principal_submit_contract_stays_high_level_and_role_correct():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "P2-B.1 — `submit_principal_intent` public request and receipt" in text
+    assert "`workstream` is required" in text
+    assert "`research_only | bounded_code_change`" in text
+    assert "strict-v2 COO root ceiling (1..2, default 2)" in text
+    assert "does **not** narrow Fable's organizational autonomy" in text
+    assert "`dispatched=false` remains load-bearing" in text
+    assert "CEO request identities and COO principal request identities never collide" in text
+
+    by_id = {row["id"]: row for row in _fixture()["cases"]}
+    assert by_id["M32"]["expected"] == "ACCEPT_HIGH_LEVEL_PRINCIPAL_REQUEST"
+    assert by_id["M33"]["expected"] == "REFUSE_PRIVILEGED_CALLER_FIELDS"
+    assert by_id["M34"]["expected"] == "REFUSE_MISSION_IDENTITY_MISMATCH"
+    assert by_id["M35"]["expected"] == "RECONCILE_ONE_ACCEPTED_JOB"
+    assert by_id["M36"]["expected"] == "REFUSE_PRINCIPAL_REQUEST_CONFLICT"
