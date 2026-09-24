@@ -2675,7 +2675,14 @@ def test_dispatcher_refusals_are_typed_zero_effect_and_gateway_reports_effect_un
 
 
 def test_refused_second_answer_cannot_replace_accepted_one(tmp_path: Path) -> None:
-    """Second reply with different text → CONFLICT; accepted frame is unchanged."""
+    """Second reply with different text → reconciled; accepted frame is unchanged.
+
+    Under the round-4C-1 packet-boundary rules, the carrier is the
+    single source of truth for an admitted ANSWER. A second reply
+    with different text reconciles to the first answer on the
+    carrier (no runtime write, no carrier rewrite); the first
+    ANSWER_AVAILABLE event and the first answer text survive.
+    """
     runtime = _runtime_at(tmp_path / "refused-second")
     _consultations(runtime, tmp_path / "refused-second")
     requester, recipient, _third, _root = _workers(runtime)
@@ -2725,9 +2732,8 @@ def test_refused_second_answer_cannot_replace_accepted_one(tmp_path: Path) -> No
     assert first_reply["ok"] is True
     first_fingerprint = first_reply["data"]["answer_fingerprint"]
 
-    with pytest.raises(ConsultationRefusal) as excinfo:
-        _run_dispatcher(
-            b_dispatcher,
+    second_reply = _run(
+        b_dispatcher(
             "company.reply",
             {
                 "schema": COMPANY_CONSULTATION_SCHEMA,
@@ -2740,7 +2746,12 @@ def test_refused_second_answer_cannot_replace_accepted_one(tmp_path: Path) -> No
                 },
             },
         )
-    assert excinfo.value.code == "CONFLICT"
+    )
+    assert second_reply["ok"] is True
+    assert second_reply["result"]["state"] == "ANSWER_AVAILABLE"
+    assert second_reply["result"]["inserted"] is False
+    assert second_reply["result"]["reconciled"] is True
+    assert second_reply["result"]["answer_fingerprint"] == first_fingerprint
 
     events = runtime.events.list_events(
         aggregate_type="consultation", aggregate_id=consultation_id
@@ -4120,13 +4131,19 @@ def test_known_same_packet_readback_returns_without_second_write(
     assert len(events_after_first.get("ANSWER_AVAILABLE", [])) == 1
 
     # Simulate a process restart: build a fresh dispatcher with a
-    # counting carrier that pre-holds the exact admitted packet. The
-    # new dispatcher's identical reply must reconcile without any
-    # runtime or carrier writes.
+    # counting carrier that pre-holds both the original QUESTION
+    # packet and the admitted ANSWER packet (the only two artifacts
+    # the carrier persists across a restart). The new dispatcher's
+    # identical reply must reconcile without any runtime or carrier
+    # writes.
     counting_carrier = _CountingAnswerCarrier()
     admitted_packet = shared_carrier.get_answer(consultation_id)
     assert admitted_packet is not None
     counting_carrier.put_answer(consultation_id, dict(admitted_packet))
+    admitted_question = shared_carrier.get_question(consultation_id)
+    assert admitted_question is not None
+    counting_carrier.put_question(consultation_id, dict(admitted_question))
+    puts_before = counting_carrier.put_answer_calls
 
     restarted_b_dispatcher = _make_dispatcher(
         runtime,
@@ -4154,6 +4171,6 @@ def test_known_same_packet_readback_returns_without_second_write(
     assert data.get("reconciled") is True
 
     # No additional runtime or carrier writes.
-    assert counting_carrier.put_answer_calls == 1  # only the seeding put
+    assert counting_carrier.put_answer_calls == puts_before
     events_final = _evidence_for(runtime, consultation_id)
     assert events_final == events_after_first

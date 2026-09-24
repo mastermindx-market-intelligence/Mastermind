@@ -1076,6 +1076,50 @@ class RuntimeConsultationDispatcher:
                 detail="answer requires canonical TARGET_ACKNOWLEDGED Wake evidence",
             )
 
+        def _reconciled_envelope(
+            reserved_event: Any,
+        ) -> dict[str, Any]:
+            return {
+                "ok": True,
+                "result": {
+                    "schema": _INBOX_SCHEMA,
+                    "consultation_ref": consultation_ref,
+                    "state": "ANSWER_AVAILABLE",
+                    "answer_fingerprint": reserved_event.payload.get(
+                        "answer_fingerprint", ""
+                    ),
+                    "semantic_answer_digest": reserved_event.payload.get(
+                        "semantic_answer_digest", ""
+                    ),
+                    "historical": False,
+                    "inserted": False,
+                    "reconciled": True,
+                },
+            }
+
+        # Reconcile on the carrier FIRST. If the runtime already admitted
+        # a non-historical ANSWER_AVAILABLE, the carrier is the
+        # single source of truth for the admitted packet: validate it
+        # with ``_validated_answer_frame`` and reconcile without
+        # touching the runtime or the carrier again. A missing or
+        # mismatched carrier frame is the same-carrier recovery
+        # barrier (CARRIER_RECONCILIATION_REQUIRED); we never rewrite
+        # and never resend.
+        reserved = _non_historical_answer_event(
+            self.runtime, consultation_ref
+        )
+        if reserved is not None:
+            packet = self.packets.get_answer(consultation_ref)
+            validated = _validated_answer_frame(
+                intent.payload, reserved, packet
+            )
+            if validated is None:
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="admitted ANSWER_AVAILABLE but carrier frame is missing or fails validation",
+                )
+            return _reconciled_envelope(reserved)
+
         try:
             answer = self._consultations.answer_available(
                 answer_frame, observed_at=self._clock()
@@ -1126,13 +1170,42 @@ class RuntimeConsultationDispatcher:
                 },
             }
 
-        # Admitted only: cache the exact admitted frame for the requester
-        # dispatcher to drive ``consume_answer``.
+        # Race path: the runtime did not append a new event because it
+        # returned the already-reserved event (``inserted=False``). Take
+        # the same readback path as the early reserved check — no
+        # ``put_answer``.
+        if not answer.inserted:
+            current_reserved = _non_historical_answer_event(
+                self.runtime, consultation_ref
+            )
+            packet = self.packets.get_answer(consultation_ref)
+            validated = _validated_answer_frame(
+                intent.payload, current_reserved, packet
+            )
+            if validated is None:
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="replay ANSWER_AVAILABLE admitted but carrier frame is missing or fails validation",
+                )
+            return _reconciled_envelope(current_reserved)
+
+        # Admitted only: cache the exact admitted frame for the
+        # requester dispatcher to drive ``consume_answer``. The runtime
+        # event is the durable source of truth; a lost carrier write
+        # here is the lost-write barrier — we raise
+        # CARRIER_RECONCILIATION_REQUIRED and never retry inside this
+        # call.
         if (
             event_type == "ANSWER_AVAILABLE"
             and payload_fact == "ANSWER_AVAILABLE"
         ):
-            self.packets.put_answer(consultation_ref, answer_frame)
+            try:
+                self.packets.put_answer(consultation_ref, answer_frame)
+            except Exception as exc:
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="runtime event admitted but carrier write failed",
+                ) from exc
 
         return {
             "ok": True,
