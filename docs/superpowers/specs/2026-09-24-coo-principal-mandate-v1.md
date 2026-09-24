@@ -121,6 +121,22 @@ AND current mission authority
 AND current effect/source-custody safety
 ```
 
+### OAuth scope separation from the CEO seat
+
+The initial #955 Claude carrier predates this Chairman clarification and currently documents the existing CEO submit scope. That transport evidence remains useful, but the Fable production enrollment must not inherit `mastermind.executive.intent.submit`.
+
+The final Fable client/profile requires a distinct COO action policy on the same Executive OAuth resource/issuer, conceptually:
+
+```text
+mastermind.executive.read
++ mastermind.executive.coo.act
+(+ offline_access only as non-authorizing session capability)
+```
+
+The exact scope name is frozen only when the role-correct admission implementation is accepted. Do not create an Auth0 scope/client from this SPEC_ONLY document.
+
+CEO and COO clients may share one issuer/resource and signing-key authority. They must remain distinct policy/client bindings, and a token carrying the COO action scope must not pass the CEO submit route or vice versa.
+
 ### Exact Claude conversation binding is NOT assumed
 
 Current MCP protocol identity is insufficient for exact conversation authority. Modern MCP is stateless and client information is implementation metadata, not a security credential. Surface bindings are also explicitly navigation-only in Mastermind.
