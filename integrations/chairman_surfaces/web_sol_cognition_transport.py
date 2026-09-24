@@ -24,6 +24,7 @@ from common.commission_ref import CommissionRefError, normalize_commission_ref
 
 
 ASSIGNMENT_SCHEMA: Final[str] = "mastermind.web_sol_cognition_assignment/v1"
+CONTINUATION_SCHEMA: Final[str] = "mastermind.web_sol_continuation/v1"
 ORCHESTRATION_RESULT_SCHEMA: Final[str] = (
     "mastermind.executive_orchestration_result/v1"
 )
@@ -37,6 +38,7 @@ RESULT_OBSERVATION_SCHEMA: Final[str] = (
     "mastermind.web_sol_cognition_result_observation/v1"
 )
 
+MAX_CONTINUATION_BYTES: Final[int] = 8 * 1024
 MAX_ASSIGNMENT_BYTES: Final[int] = 22 * 1024
 MAX_RESULT_BYTES: Final[int] = 24 * 1024
 MAX_TRANSPORT_PAYLOAD_BYTES: Final[int] = 48 * 1024
@@ -325,6 +327,29 @@ def _validate_assignment(
     continuation = value["continuation"]
     if not isinstance(continuation, dict):
         raise _error("$.assignment.continuation", "must be an object")
+    if continuation.get("schema") != CONTINUATION_SCHEMA:
+        raise _error(
+            "$.assignment.continuation.schema",
+            f"must equal {CONTINUATION_SCHEMA!r}",
+        )
+    workstream = continuation.get("workstream")
+    if not isinstance(workstream, str) or not workstream:
+        raise _error(
+            "$.assignment.continuation.workstream",
+            "must be a non-empty workstream identity",
+        )
+    source_sha = continuation.get("agentos_source_sha")
+    if not isinstance(source_sha, str) or _HEX40_RE.fullmatch(source_sha) is None:
+        raise _error(
+            "$.assignment.continuation.agentos_source_sha",
+            "must be an exact source revision",
+        )
+    continuation_size = len(_canonical_bytes(continuation))
+    if continuation_size > MAX_CONTINUATION_BYTES:
+        raise _error(
+            "$.assignment.continuation",
+            f"continuation exceeds {MAX_CONTINUATION_BYTES} UTF-8 bytes",
+        )
     _hex64(value["continuation_digest"], "$.assignment.continuation_digest")
     if value["continuation_digest"] != _digest(continuation):
         raise _error(
@@ -410,6 +435,11 @@ def _validate_assignment(
 
     source = _exact(value["source"], _SOURCE_KEYS, "$.assignment.source")
     _bounded_token(source["work_ref"], "$.assignment.source.work_ref")
+    if source["work_ref"] != workstream:
+        raise _error(
+            "$.assignment.continuation.workstream",
+            "must equal the immutable dialogue source work_ref",
+        )
     _hex64(
         source["dialogue_source_digest"],
         "$.assignment.source.dialogue_source_digest",
@@ -690,6 +720,8 @@ def validate_result_observation(value: Any) -> dict[str, Any]:
 
 __all__ = [
     "ASSIGNMENT_SCHEMA",
+    "CONTINUATION_SCHEMA",
+    "MAX_CONTINUATION_BYTES",
     "MAX_ASSIGNMENT_BYTES",
     "MAX_RESULT_BYTES",
     "MAX_TRANSPORT_PAYLOAD_BYTES",
