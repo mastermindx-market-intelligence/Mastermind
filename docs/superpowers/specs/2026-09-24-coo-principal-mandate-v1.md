@@ -206,6 +206,48 @@ MISSING_REQUIRED_PROOF_WITH_NO_IN_SCOPE_RECOVERY
 
 A blocker freezes its lane first. Fable continues every path-disjoint action still inside the mandate.
 
+## 9. Authorization semantics — broad mission law, explicit technical capabilities
+
+The principal contract separates **organizational permission** from **technical capability exposure**.
+
+### Organizational decision law
+
+Inside an accepted mission, do not enumerate every ordinary action Fable is allowed to take. That would recreate micromanagement as a permissions schema.
+
+Instead, the organizational rule is:
+
+```text
+action preserves accepted mission outcome
+AND action is reversible or already covered by the mission's release class
+AND action does not cross a closed reserved boundary
+AND no current effect/custody conflict makes it unsafe
+=> COO may decide and continue
+```
+
+This is a broad mission delegation constrained by a small closed reserved-boundary vocabulary. Adding a new reversible implementation technique does not require adding another COO permission token.
+
+### Technical capability law
+
+Concrete execution remains fail-closed:
+
+```text
+organizationally permitted action
+AND exact reviewed tool/MCP/plugin/source capability is present
+AND target owner accepts the current scope/effect
+=> executable
+```
+
+A rich principal profile therefore uses explicit tool/package grants even though its organizational mission authority is broad. This prevents ambient Claude plugins from becoming authority while avoiding a giant micro-action allowlist.
+
+### The two questions remain separate
+
+```text
+MAY Fable make this decision?     -> mission mandate + reserved boundaries
+CAN this surface execute it now?  -> capability profile + target owner + current effect state
+```
+
+A technical absence does not shrink Fable's organizational mandate; it creates a capability/blocker to solve. Conversely, an available GitHub/Figma/browser/Slack tool never grants a mission action that crosses a reserved boundary.
+
 ## 9. Executive plugin surface
 
 Prefer a small semantic surface that composes existing owners rather than exposing Runtime internals.
