@@ -33,10 +33,15 @@ from typing import Any
 
 from control_plane import executive_placement_commitment as c2
 from control_plane import executive_placement_selection as c1
-from control_plane.executive_steward import EffectState
+from control_plane.executive_steward import (
+    EffectState,
+    Freshness,
+    SourceOwner,
+    SourceRef,
+)
 
 
-RECEIPT_SCHEMA = "mastermind.web_ceo_session_capability_receipt.v2"
+RECEIPT_SCHEMA = "mastermind.web_ceo_session_capability_receipt.v3"
 PREFLIGHT_SCHEMA = "mastermind.web_ceo_session_capability_preflight.v2"
 MAX_RECEIPT_TTL_MS = 300_000
 
@@ -59,6 +64,7 @@ _RECEIPT_KEYS = frozenset(
         "tool_schema_digest",
         "capability_contract_digest",
         "observer_evidence_digest",
+        "action_surface_evidence_digest",
         "serviceability_evidence_digest",
         "observations",
         "evidence_digest",
@@ -261,6 +267,71 @@ class ActionServiceabilityFact:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class CurrentActionSurfaceFacts:
+    """Current message-scoped action surface from the existing surface owner.
+
+    This is transient source-attributed evidence, not a registry or durable
+    RuntimeBinding. SURFACE_BINDINGS owns the current surface identity; the
+    live producer must rotate action_scope_ref or the source evidence whenever
+    the effective action set can change. No producer is created here.
+    """
+
+    session_ref: str
+    binding_ref: str
+    binding_generation: int
+    action_scope_ref: str
+    observed_at_ms: int
+    expires_at_ms: int
+    source: SourceRef
+
+    def __post_init__(self) -> None:
+        _token(self.session_ref, code="ACTION_SURFACE_SESSION_REF_INVALID")
+        _token(self.binding_ref, code="ACTION_SURFACE_BINDING_REF_INVALID")
+        _positive_int(
+            self.binding_generation,
+            code="ACTION_SURFACE_BINDING_GENERATION_INVALID",
+        )
+        _token(self.action_scope_ref, code="ACTION_SURFACE_REF_INVALID")
+        observed = _positive_int(
+            self.observed_at_ms,
+            code="ACTION_SURFACE_OBSERVED_AT_INVALID",
+        )
+        expires = _positive_int(
+            self.expires_at_ms,
+            code="ACTION_SURFACE_EXPIRES_AT_INVALID",
+        )
+        if expires < observed or expires - observed > MAX_RECEIPT_TTL_MS:
+            raise WebCeoSessionCapabilityError("ACTION_SURFACE_TTL_INVALID")
+        if not isinstance(self.source, SourceRef):
+            raise WebCeoSessionCapabilityError("ACTION_SURFACE_SOURCE_INVALID")
+        if self.source.owner is not SourceOwner.SURFACE_BINDINGS:
+            raise WebCeoSessionCapabilityError("ACTION_SURFACE_OWNER_INVALID")
+        if self.source.freshness is not Freshness.CURRENT:
+            raise WebCeoSessionCapabilityError(
+                "ACTION_SURFACE_SOURCE_NOT_CURRENT"
+            )
+
+    def _evidence_body(self) -> dict[str, Any]:
+        return {
+            "session_ref": self.session_ref,
+            "binding_ref": self.binding_ref,
+            "binding_generation": self.binding_generation,
+            "action_scope_ref": self.action_scope_ref,
+            "observed_at_ms": self.observed_at_ms,
+            "expires_at_ms": self.expires_at_ms,
+            "source": {
+                "owner": self.source.owner.value,
+                "ref": self.source.ref,
+                "observed_at": self.source.observed_at,
+                "freshness": self.source.freshness.value,
+            },
+        }
+
+    @property
+    def evidence_digest(self) -> str:
+        return _digest(self._evidence_body())
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class CapabilityActionContract:
     """Existing-owner exact action contract for one closed capability."""
 
@@ -410,6 +481,7 @@ class WebCeoSessionCapabilityReceipt:
     tool_schema_digest: str
     capability_contract_digest: str
     observer_evidence_digest: str
+    action_surface_evidence_digest: str
     serviceability_evidence_digest: str
     observations: tuple[CapabilityObservation, ...]
 
@@ -433,6 +505,10 @@ class WebCeoSessionCapabilityReceipt:
                 "CAPABILITY_CONTRACT_DIGEST_INVALID",
             ),
             (self.observer_evidence_digest, "OBSERVER_EVIDENCE_DIGEST_INVALID"),
+            (
+                self.action_surface_evidence_digest,
+                "ACTION_SURFACE_EVIDENCE_DIGEST_INVALID",
+            ),
             (
                 self.serviceability_evidence_digest,
                 "SERVICEABILITY_EVIDENCE_DIGEST_INVALID",
@@ -487,6 +563,7 @@ class WebCeoSessionCapabilityReceipt:
             "tool_schema_digest": self.tool_schema_digest,
             "capability_contract_digest": self.capability_contract_digest,
             "observer_evidence_digest": self.observer_evidence_digest,
+            "action_surface_evidence_digest": self.action_surface_evidence_digest,
             "serviceability_evidence_digest": self.serviceability_evidence_digest,
             "observations": [item.to_dict() for item in self.observations],
         }
@@ -512,7 +589,7 @@ def build_receipt_from_effective_tool_schema(
     session_ref: str,
     binding_ref: str,
     binding_generation: int,
-    action_scope_ref: str,
+    action_surface: CurrentActionSurfaceFacts,
     observed_at_ms: int,
     expires_at_ms: int,
     action_serviceability: Sequence[ActionServiceabilityFact] | None = None,
@@ -527,7 +604,30 @@ def build_receipt_from_effective_tool_schema(
     lifecycle, permission, retry, or provider discovery.
     """
 
-    _token(action_scope_ref, code="ACTION_SCOPE_REF_INVALID")
+    if not isinstance(action_surface, CurrentActionSurfaceFacts):
+        raise WebCeoSessionCapabilityError("CURRENT_ACTION_SURFACE_INVALID")
+    if (
+        action_surface.session_ref != session_ref
+        or action_surface.binding_ref != binding_ref
+        or action_surface.binding_generation != binding_generation
+    ):
+        raise WebCeoSessionCapabilityError("ACTION_SURFACE_BINDING_MISMATCH")
+    receipt_observed_at_ms = _positive_int(
+        observed_at_ms,
+        code="OBSERVED_AT_INVALID",
+    )
+    receipt_expires_at_ms = _positive_int(
+        expires_at_ms,
+        code="EXPIRES_AT_INVALID",
+    )
+    if (
+        action_surface.observed_at_ms > receipt_observed_at_ms
+        or action_surface.expires_at_ms < receipt_expires_at_ms
+    ):
+        raise WebCeoSessionCapabilityError(
+            "ACTION_SURFACE_NOT_CURRENT_FOR_RECEIPT"
+        )
+    action_scope_ref = action_surface.action_scope_ref
     effective = _normalize_tool_descriptors(effective_tools)
     contracts = _normalize_capability_contracts(capability_contracts)
     if type(schema_complete) is not bool:
@@ -710,6 +810,7 @@ def build_receipt_from_effective_tool_schema(
         tool_schema_digest=tool_schema_digest,
         capability_contract_digest=capability_contract_digest,
         observer_evidence_digest=observer_evidence_digest,
+        action_surface_evidence_digest=action_surface.evidence_digest,
         serviceability_evidence_digest=serviceability_evidence_digest,
         observations=tuple(observations),
     )
@@ -735,30 +836,6 @@ class CurrentSessionBindingFacts:
             code="CURRENT_BINDING_GENERATION_INVALID",
         )
 
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class CurrentActionSurfaceFacts:
-    """Current effective-action observation scope from the existing surface owner.
-
-    This is a transient action-time fact, not another RuntimeBinding or
-    capability registry. The owner must rotate ``action_scope_ref`` whenever
-    the effective action set can change; on ChatGPT it must be no broader than
-    the message-scoped app/action selection.
-    """
-
-    session_ref: str
-    binding_ref: str
-    binding_generation: int
-    action_scope_ref: str
-
-    def __post_init__(self) -> None:
-        _token(self.session_ref, code="ACTION_SURFACE_SESSION_REF_INVALID")
-        _token(self.binding_ref, code="ACTION_SURFACE_BINDING_REF_INVALID")
-        _positive_int(
-            self.binding_generation,
-            code="ACTION_SURFACE_BINDING_GENERATION_INVALID",
-        )
-        _token(self.action_scope_ref, code="ACTION_SURFACE_REF_INVALID")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -944,6 +1021,7 @@ def validate_session_capability_receipt(
         tool_schema_digest=raw["tool_schema_digest"],
         capability_contract_digest=raw["capability_contract_digest"],
         observer_evidence_digest=raw["observer_evidence_digest"],
+        action_surface_evidence_digest=raw["action_surface_evidence_digest"],
         serviceability_evidence_digest=raw["serviceability_evidence_digest"],
         observations=tuple(observations),
     )
@@ -1003,6 +1081,7 @@ def assess_web_ceo_session_capabilities(
     expected_binding_ref: str,
     expected_binding_generation: int,
     expected_action_scope_ref: str,
+    expected_action_surface_evidence_digest: str,
     expected_capability_contract_digest: str,
     expected_observer_evidence_digest: str,
     expected_serviceability_evidence_digest: str,
@@ -1031,6 +1110,13 @@ def assess_web_ceo_session_capabilities(
         code="EXPECTED_BINDING_GENERATION_INVALID",
     )
     _token(expected_action_scope_ref, code="EXPECTED_ACTION_SCOPE_REF_INVALID")
+    if (
+        not isinstance(expected_action_surface_evidence_digest, str)
+        or _DIGEST_RE.fullmatch(expected_action_surface_evidence_digest) is None
+    ):
+        raise WebCeoSessionCapabilityError(
+            "EXPECTED_ACTION_SURFACE_EVIDENCE_DIGEST_INVALID"
+        )
     if (
         not isinstance(expected_capability_contract_digest, str)
         or _DIGEST_RE.fullmatch(expected_capability_contract_digest) is None
@@ -1091,6 +1177,8 @@ def assess_web_ceo_session_capabilities(
         or receipt.binding_ref != expected_binding_ref
         or receipt.binding_generation != expected_binding_generation
         or receipt.action_scope_ref != expected_action_scope_ref
+        or receipt.action_surface_evidence_digest
+        != expected_action_surface_evidence_digest
         or receipt.capability_contract_digest
         != expected_capability_contract_digest
         or receipt.observer_evidence_digest
@@ -1225,6 +1313,7 @@ def build_guarded_commitment_plan_from_selection_decision(
         raise WebCeoSessionCapabilityError("CURRENT_BINDING_INVALID")
     if not isinstance(current_action_surface, CurrentActionSurfaceFacts):
         raise WebCeoSessionCapabilityError("CURRENT_ACTION_SURFACE_INVALID")
+    current_ms = _positive_int(now_ms, code="CURRENT_TIME_INVALID")
     if (
         current_action_surface.session_ref != current_binding.session_ref
         or current_action_surface.binding_ref != current_binding.binding_ref
@@ -1232,6 +1321,11 @@ def build_guarded_commitment_plan_from_selection_decision(
         != current_binding.binding_generation
     ):
         raise WebCeoSessionCapabilityError("ACTION_SURFACE_BINDING_MISMATCH")
+    if (
+        current_ms < current_action_surface.observed_at_ms
+        or current_ms > current_action_surface.expires_at_ms
+    ):
+        raise WebCeoSessionCapabilityError("ACTION_SURFACE_NOT_CURRENT")
     required_capabilities, receiver_binding_mode = _placement_action_requirements(
         placement_selection,
         principal_action_demand=principal_action_demand,
@@ -1259,12 +1353,15 @@ def build_guarded_commitment_plan_from_selection_decision(
         expected_binding_ref=current_binding.binding_ref,
         expected_binding_generation=current_binding.binding_generation,
         expected_action_scope_ref=current_action_surface.action_scope_ref,
+        expected_action_surface_evidence_digest=(
+            current_action_surface.evidence_digest
+        ),
         expected_capability_contract_digest=expected_capability_contract_digest,
         expected_observer_evidence_digest=expected_observer_evidence_digest,
         expected_serviceability_evidence_digest=(
             expected_serviceability_evidence_digest
         ),
-        now_ms=now_ms,
+        now_ms=current_ms,
         start_state=start_state,
         effect_state=effect_state,
     )
