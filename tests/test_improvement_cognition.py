@@ -158,7 +158,7 @@ def test_empty_grounded_report_does_not_call_provider():
     assert draft["provider"] is None
 
 
-def test_evaluation_packet_exposes_ids_and_digest_not_private_prose(monkeypatch):
+def test_evaluation_packet_exposes_only_opaque_derived_refs(monkeypatch):
     def reasoner(prompt, **kwargs):
         return {"ok": True, "text": json.dumps(response()), "tools_used": []}
 
@@ -166,22 +166,41 @@ def test_evaluation_packet_exposes_ids_and_digest_not_private_prose(monkeypatch)
     draft = C.draft_proposals(report())
     packet = C.evaluation_packet(draft)
     encoded = json.dumps(packet, sort_keys=True)
-    assert packet["proposal_ids"] == ["PROP.REUSE.001"]
+    assert packet["proposal_count"] == 1
+    assert len(packet["proposal_refs"]) == 1
+    assert packet["proposal_refs"][0].startswith("proposal:")
+    assert packet["evidence_binding_digest"].startswith("sha256:")
+    assert packet["draft_digest"].startswith("sha256:")
     assert packet["requires_independent_judge"] is True
     assert packet["same_model_self_grade_is_acceptance"] is False
+    assert "PROP.REUSE.001" not in encoded
+    assert DIGEST not in encoded
     assert "The consumer may not expose context" not in encoded
     assert "Which current owner" not in encoded
 
 
-def test_evaluation_packet_refuses_prose_smuggled_as_proposal_id(monkeypatch):
+def test_evaluation_packet_hashes_valid_private_proposal_id_instead_of_republishing(monkeypatch):
     def reasoner(prompt, **kwargs):
         return {"ok": True, "text": json.dumps(response()), "tools_used": []}
 
     patch_reasoner(monkeypatch, reasoner)
     draft = C.draft_proposals(report())
-    draft["proposals"][0]["proposal_id"] = "private prose must never cross this boundary"
-    with pytest.raises(ValueError, match="invalid_proposal_id"):
-        C.evaluation_packet(draft)
+    secret_shaped_valid_id = "PRIVATE_HYPOTHESIS_PROSE_MUST_NOT_CROSS"
+    draft["proposals"][0]["proposal_id"] = secret_shaped_valid_id
+    packet = C.evaluation_packet(draft)
+    assert secret_shaped_valid_id not in json.dumps(packet, sort_keys=True)
+
+
+def test_evaluation_packet_hashes_caller_controlled_evidence_digest(monkeypatch):
+    def reasoner(prompt, **kwargs):
+        return {"ok": True, "text": json.dumps(response()), "tools_used": []}
+
+    patch_reasoner(monkeypatch, reasoner)
+    draft = C.draft_proposals(report())
+    caller_digest = "sha256:" + "b" * 64
+    draft["evidence_digest"] = caller_digest
+    packet = C.evaluation_packet(draft)
+    assert caller_digest not in json.dumps(packet, sort_keys=True)
 
 
 def test_evaluation_packet_refuses_authority_flag_tampering(monkeypatch):
