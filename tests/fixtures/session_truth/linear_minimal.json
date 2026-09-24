@@ -1,0 +1,23 @@
+{
+  "schema": "mastermind.linear_observation.v1",
+  "available": true,
+  "observed_at": "2026-08-27T08:00:00Z",
+  "issues": [
+    {
+      "id": "MAS-109",
+      "status": "In Progress",
+      "parent_id": null,
+      "workstream": "WS:CHAIRMAN-CONTROL-ROOM",
+      "completion": "production-proof-required",
+      "projection_revision": 7,
+      "github_relations": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "number": 155,
+          "relation": "program_gate"
+        }
+      ],
+      "updated_at": "2026-08-27T07:30:00Z"
+    }
+  ]
+}

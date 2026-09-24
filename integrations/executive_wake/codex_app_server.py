@@ -1,0 +1,241 @@
+"""Codex App Server Wake PR3 integration boundary.
+
+This module owns no wake lifecycle, retry state, provider session registry, or
+credentials.  Trusted process composition injects one narrow client capable of
+delivering a fixed continuation signal to the exact runtime-only native handle
+already selected by Executive Wake routing.
+"""
+from __future__ import annotations
+
+import dataclasses
+from typing import Protocol, Sequence, runtime_checkable
+
+from control_plane.operator_harness_contract import ATTENTION_TURN_INSTRUCTION
+from control_plane.wake_ack_ingress import TrustedWorkerWakeAckProjection
+from control_plane.wake_dispatcher import (
+    TransportOutcome,
+    TransportReceipt,
+    WakeTransportCompletion,
+    WakeEffectUnknownError,
+    WakeNudge,
+    WakePreSubmitError,
+)
+from control_plane.wake_events import utc_now_iso
+
+
+CODEX_WAKE_INSTRUCTION = ATTENTION_TURN_INSTRUCTION
+
+
+@dataclasses.dataclass(frozen=True)
+class CodexWakeDeliveryObservation:
+    """Provider-side evidence for one exact native-thread nudge."""
+
+    native_handle: str
+    nudge_id: str
+    accepted: bool
+    delivered: bool
+    target_ack_projection: TrustedWorkerWakeAckProjection | None = dataclasses.field(
+        default=None,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if not str(self.native_handle or "").strip():
+            raise ValueError("Codex wake observation requires a native handle")
+        if not str(self.nudge_id or "").strip():
+            raise ValueError("Codex wake observation requires a nudge id")
+        if type(self.accepted) is not bool or type(self.delivered) is not bool:
+            raise ValueError("Codex wake accepted/delivered evidence must be boolean")
+        if self.delivered and not self.accepted:
+            raise ValueError("Codex wake cannot be delivered without provider acceptance")
+        if self.target_ack_projection is not None:
+            if not isinstance(
+                self.target_ack_projection, TrustedWorkerWakeAckProjection
+            ):
+                raise ValueError("Codex wake ACK projection must be trusted and typed")
+            if not self.delivered:
+                raise ValueError("Codex wake ACK projection requires exact delivery")
+
+
+@runtime_checkable
+class CodexAppServerWakeClient(Protocol):
+    """Narrow injected provider client; no Executive authority-bearing inputs."""
+
+    async def deliver_wake(
+        self,
+        *,
+        native_handle: str,
+        nudge_id: str,
+        opaque_ids: Sequence[str],
+        instruction: str,
+    ) -> CodexWakeDeliveryObservation: ...
+
+    async def reconcile_wake(
+        self,
+        *,
+        native_handle: str,
+        nudge_id: str,
+        opaque_ids: Sequence[str],
+    ) -> CodexWakeDeliveryObservation: ...
+
+
+class CodexAppServerWakeDispatcher:
+    """Deliver one bounded nudge to one exact runtime-bound Codex thread."""
+
+    transport_id = "codex-app-server"
+    reasoning_surface = "codex"
+
+    def __init__(self, client: CodexAppServerWakeClient) -> None:
+        if client is None:
+            raise ValueError("Codex wake dispatcher requires an injected client")
+        self.client = client
+
+    @staticmethod
+    def _receipt(
+        outcome: TransportOutcome,
+        reason_code: str,
+        *,
+        nudge_id: str | None = None,
+    ) -> TransportReceipt:
+        details = () if not nudge_id else (("nudge_id", str(nudge_id)),)
+        return TransportReceipt(
+            outcome=outcome,
+            reason_code=reason_code,
+            created_at=utc_now_iso(),
+            details=details,
+        )
+
+    async def nudge(
+        self,
+        wake: WakeNudge,
+    ) -> TransportReceipt | WakeTransportCompletion:
+        """Perform at most one provider call; uncertainty never triggers retry/failover."""
+
+        if not isinstance(wake, WakeNudge):
+            raise ValueError("Codex wake dispatcher requires a WakeNudge")
+        native_handle = str(wake.native_handle or "").strip()
+        if (
+            not native_handle
+            or wake.wake_transport != self.transport_id
+            or wake.reasoning_surface != self.reasoning_surface
+        ):
+            return self._receipt(
+                TransportOutcome.TARGET_UNAVAILABLE,
+                "target_unavailable",
+                nudge_id=wake.nudge_id,
+            )
+
+        opaque_ids = tuple(wake.obligation_ids) + tuple(wake.attempt_command_ids)
+        try:
+            observation = await self.client.deliver_wake(
+                native_handle=native_handle,
+                nudge_id=wake.nudge_id,
+                opaque_ids=opaque_ids,
+                instruction=CODEX_WAKE_INSTRUCTION,
+            )
+        except WakePreSubmitError as exc:
+            return self._receipt(
+                exc.outcome,
+                exc.reason_code,
+                nudge_id=wake.nudge_id,
+            )
+        except Exception as exc:
+            raise WakeEffectUnknownError(
+                "Codex turn/start effect is unknown after provider call began"
+            ) from exc
+
+        return self._completion_from_observation(
+            wake,
+            observation,
+            native_handle=native_handle,
+        )
+
+    async def reconcile(
+        self,
+        wake: WakeNudge,
+    ) -> TransportReceipt | WakeTransportCompletion:
+        """Reduce one late result through the existing client without turn/start."""
+
+        if not isinstance(wake, WakeNudge):
+            raise WakeEffectUnknownError(
+                "Codex late reconciliation requires the exact persisted nudge"
+            )
+        native_handle = str(wake.native_handle or "").strip()
+        if (
+            not native_handle
+            or wake.wake_transport != self.transport_id
+            or wake.reasoning_surface != self.reasoning_surface
+        ):
+            raise WakeEffectUnknownError(
+                "Codex late reconciliation identity is not the bound transport"
+            )
+        reconcile_wake = getattr(self.client, "reconcile_wake", None)
+        if not callable(reconcile_wake):
+            raise WakeEffectUnknownError(
+                "Codex current-writer client has no reconciliation operation"
+            )
+        opaque_ids = tuple(wake.obligation_ids) + tuple(wake.attempt_command_ids)
+        try:
+            observation = await reconcile_wake(
+                native_handle=native_handle,
+                nudge_id=wake.nudge_id,
+                opaque_ids=opaque_ids,
+            )
+        except Exception as exc:
+            raise WakeEffectUnknownError(
+                "Codex late completion remains effect-unknown"
+            ) from exc
+        return self._completion_from_observation(
+            wake,
+            observation,
+            native_handle=native_handle,
+        )
+
+    def _completion_from_observation(
+        self,
+        wake: WakeNudge,
+        observation: CodexWakeDeliveryObservation,
+        *,
+        native_handle: str,
+    ) -> TransportReceipt | WakeTransportCompletion:
+        if not isinstance(observation, CodexWakeDeliveryObservation):
+            raise WakeEffectUnknownError(
+                "Codex provider returned an untyped observation after possible write"
+            )
+        if (
+            observation.native_handle != native_handle
+            or observation.nudge_id != wake.nudge_id
+        ):
+            raise WakeEffectUnknownError(
+                "Codex provider observation identity does not match the attempted nudge"
+            )
+        if observation.delivered:
+            receipt = self._receipt(
+                TransportOutcome.DELIVERED,
+                "delivered",
+                nudge_id=wake.nudge_id,
+            )
+            if observation.target_ack_projection is not None:
+                return WakeTransportCompletion(
+                    receipt=receipt,
+                    target_ack_projection=observation.target_ack_projection,
+                )
+            return receipt
+        if observation.accepted:
+            return self._receipt(
+                TransportOutcome.ACCEPTED,
+                "accepted",
+                nudge_id=wake.nudge_id,
+            )
+        return self._receipt(
+            TransportOutcome.TARGET_UNAVAILABLE,
+            "target_unavailable",
+            nudge_id=wake.nudge_id,
+        )
+
+__all__ = [
+    "CODEX_WAKE_INSTRUCTION",
+    "CodexAppServerWakeClient",
+    "CodexAppServerWakeDispatcher",
+    "CodexWakeDeliveryObservation",
+]

@@ -182,12 +182,26 @@ def _delegation_authority_error(*, allowed_tools: list[str] | None,
             sorted(missing_agents)
         )
     for agent_name in sorted(_DELEGATION_AGENT_NAMES):
+        if profiles[agent_name].get("sandbox_mode") != "read-only":
+            return f"Codex delegation agent {agent_name!r} must remain read-only"
         server_cfg = profiles[agent_name].get("mcp_servers") or {}
         allowed_server_layers = set(_DELEGATION_DENIED_TOOLS) | {"research"}
-        if set(server_cfg) != allowed_server_layers:
+        if not isinstance(server_cfg, dict) or set(server_cfg) != allowed_server_layers:
             return f"Codex delegation agent {agent_name!r} has an unreviewed MCP layer"
         for server, denied in _DELEGATION_DENIED_TOOLS.items():
-            actual = set((server_cfg.get(server) or {}).get("disabled_tools") or [])
+            layer = server_cfg.get(server)
+            # Codex parses role files before merging parent transport overrides.
+            # These four servers are inert; active-book reads use research only.
+            if (
+                not isinstance(layer, dict)
+                or set(layer) != {"command", "enabled", "disabled_tools"}
+                or layer["command"] != "false"
+                or layer["enabled"] is not False
+                or not isinstance(layer["disabled_tools"], list)
+                or not all(isinstance(tool, str) for tool in layer["disabled_tools"])
+            ):
+                return f"Codex delegation agent {agent_name!r} lacks the {server!r} fixed disabled transport"
+            actual = set(layer.get("disabled_tools") or [])
             if not denied.issubset(actual):
                 return f"Codex delegation agent {agent_name!r} lacks the {server!r} write fence"
         research = server_cfg.get("research") or {}
@@ -281,11 +295,11 @@ def _mcp_overrides(mcp_servers: dict | None, *, allowed_tools: list[str] | None,
 
 
 def _delegation_placeholder_overrides(rendered_servers: set[str]) -> list[str]:
-    """Give child config layers valid, disabled bases for certified servers absent this turn.
+    """Keep named portfolio servers inert in the persisted research parent.
 
-    The custom agent TOMLs add only ``disabled_tools`` leaves so the parent's exact
-    ``enabled_tools`` allow-list is preserved.  A disabled inert base keeps those partial layers
-    valid when (for example) a China parent has no US ``bot`` or ``desk`` transport.
+    Native role TOMLs independently carry complete, disabled transports because
+    their loader parses before parent overlays.  These parent placeholders keep
+    the same ceiling; actual book-scoped reads use the fixed research transport.
     """
     inert = shutil.which("false") or "/usr/bin/false"
     out: list[str] = []

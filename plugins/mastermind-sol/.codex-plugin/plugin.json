@@ -1,0 +1,19 @@
+{
+  "name": "mastermind-sol",
+  "version": "0.1.0",
+  "description": "Governed Chairman and Sol workflows for current-source recovery, company-state reconciliation, bounded CEO-intent drafting, return review, pull-request review, and durable closeout.",
+  "author": {
+    "name": "Mastermind-X"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Mastermind Sol",
+    "shortDescription": "Governed Chairman and Sol operating workflows",
+    "longDescription": "Recover current Mastermind truth, reconcile company state, draft bounded CEO intent, review returns and pull requests, and close out accepted work without creating another control plane.",
+    "developerName": "Mastermind-X",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ]
+  }
+}

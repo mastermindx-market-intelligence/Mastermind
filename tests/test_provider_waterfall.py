@@ -122,3 +122,31 @@ def test_non_provider_codex_failure_is_not_replayed(monkeypatch):
 
     assert out["ok"] is False
     assert calls == ["codex"]
+
+
+def test_codex_refresh_failure_falls_back_to_oauth(monkeypatch):
+    from brain import cli_bridge, provider_waterfall as pw
+
+    monkeypatch.setattr(pw, "_shared_modules",
+                        lambda: (_SharedAuth, _SharedKeyPool()))
+    monkeypatch.setattr(pw, "provider_rungs", lambda _role: [
+        {"provider": "codex", "key_id": "codex_account",
+         "env_name": None, "cooling": False},
+        {"provider": "oauth", "key_id": "claude_code_oauth_5",
+         "env_name": "CLAUDE_CODE_OAUTH_TOKEN_5", "cooling": False},
+    ])
+    monkeypatch.setattr(pw, "_note_codex", lambda *_args, **_kwargs: None)
+    calls = []
+
+    async def fake_reason(_prompt, **kwargs):
+        calls.append(kwargs["_backend_override"])
+        if kwargs["_backend_override"] == "codex":
+            return {"ok": False, "text": None, "backend": "codex",
+                    "error": "Your access token could not be refreshed. "
+                             "Please log out and sign in again."}
+        return {"ok": True, "text": "claude", "backend": "sdk"}
+
+    monkeypatch.setattr(cli_bridge, "_reason", fake_reason)
+    out = asyncio.run(pw.reason("test", role="pm"))
+    assert out["text"] == "claude"
+    assert calls == ["codex", "cli"]

@@ -1,0 +1,25 @@
+{
+  "schema": "mastermind.business_mcp_auth_policy.v1",
+  "policy_id": "mastermind-steward-v1",
+  "resource": "https://mcp.example.invalid/mcp/steward/v1",
+  "resource_metadata_url": "https://mcp.example.invalid/.well-known/oauth-protected-resource/mcp/steward/v1",
+  "issuer": "https://identity.example.invalid/",
+  "authorization_servers": [
+    "https://identity.example.invalid/"
+  ],
+  "jwks_uri": "https://identity.example.invalid/.well-known/jwks.json",
+  "required_scopes": [
+    "mastermind.steward.read"
+  ],
+  "allowed_subject_digests": [
+    "0000000000000000000000000000000000000000000000000000000000000000"
+  ],
+  "allowed_algorithms": [
+    "RS256"
+  ],
+  "clock_skew_seconds": 30,
+  "max_token_lifetime_seconds": 900,
+  "jwks_cache_ttl_seconds": 300,
+  "unknown_kid_refresh_cooldown_seconds": 30,
+  "fetch_failure_backoff_seconds": 5
+}

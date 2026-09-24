@@ -1,0 +1,18 @@
+{
+  "authorship": {
+    "author_ref": "person:c0-worker",
+    "independent_reviewer_ref": "person:sol"
+  },
+  "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+  "created_at": "2026-09-01T01:00:00Z",
+  "private_evidence_root_ref": "private-eval-root:agent_eval/holdouts/current_source_comprehension/temporal_cutoff_ordering/v1/bundle.json",
+  "risk_tier": "LOW",
+  "scenario_family": "mastermind.current_source_comprehension.v1",
+  "scenario_id": "scenario:current_source_comprehension:temporal_cutoff_ordering",
+  "schema": "mastermind.agent_evaluation_corpus_holdout_seal.v1",
+  "seal_digest": "sha256:8cbdcb29eb04a09dbfbc820e4822b2791ab6f1cf893645959a77c8c4478042ec",
+  "seal_status": "PROVENANCE_PLACEHOLDER_BODY_UNRECOVERABLE",
+  "sealed_body_digest": "sha256:3d64942d80dfec2c34eac854200d291db3e3a7ac9b9e4a2a30f70d61b9b30e4b",
+  "sealing_method": "SHA256_OVER_CANONICAL_BUNDLE",
+  "temporal_cutoff": "2026-09-01T00:00:00Z"
+}

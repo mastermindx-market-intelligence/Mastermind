@@ -72,6 +72,33 @@ def _bounded_code_change_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
+def _automated_research_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "objective": "Implement the assigned bounded deliverable and return evidence.",
+        "department": "executive-infrastructure",
+        "priority": 10,
+        "execution_profile": "research_only",
+    }
+    payload.update(overrides)
+    return payload
+
+
+_AUTOMATED_LITERAL_VECTORS = (
+    (
+        "req-chairman-ceo-20260829-001",
+        "auto-7f73c16f713e8251775a37fee5ce66d2",
+    ),
+    (
+        "req-grok-secretary-20260829-002",
+        "auto-07466eaeff41f99266e2d21a4725e778",
+    ),
+    (
+        "req-control-room-20260829-003",
+        "auto-010f21de0fbb975648070ce46d17d7b9",
+    ),
+)
+
+
 # ===========================================================================
 # §4.1 — required/optional fields; nothing else accepted
 # ===========================================================================
@@ -822,3 +849,84 @@ def test_priority_bound_refuse_edge_is_identical_between_copies(value):
     with pytest.raises(schemas.GatewayError) as excinfo:
         schemas._validate_submit(payload)
     assert excinfo.value.code == "invalid_input"
+
+
+# ===========================================================================
+# AD-ID1 — transport-neutral automated request identity (additive v2 only)
+# ===========================================================================
+
+
+def test_automated_request_field_sets_are_exact_and_leave_v1_unchanged():
+    assert cr.REQUIRED_FIELDS == frozenset(
+        {"operation_key", "objective", "department", "priority", "execution_profile"}
+    )
+    assert cr.OPTIONAL_FIELDS == frozenset(
+        {"workstream", "allowed_write_paths", "validation", "attempt_limit"}
+    )
+    assert cr.AUTOMATED_REQUIRED_FIELDS == frozenset(
+        {"objective", "department", "priority", "execution_profile"}
+    )
+    assert cr.AUTOMATED_OPTIONAL_FIELDS == cr.OPTIONAL_FIELDS
+
+
+@pytest.mark.parametrize("request_ref,expected", _AUTOMATED_LITERAL_VECTORS)
+def test_automated_identity_literal_vectors_are_transport_neutral(request_ref, expected):
+    """A frontend label is provenance only and never enters this digest."""
+
+    for _simulated_ingress in ("chatgpt-sol", "grok-secretary", "control-room"):
+        assert cr.automated_intent_id(request_ref) == expected
+        assert ceo_intent.INTENT_ID_RE.fullmatch(expected)
+
+
+@pytest.mark.parametrize(
+    "request_ref",
+    [
+        " req-chairman-ceo-20260829-001",
+        "req-chairman-ceo-20260829-001 ",
+        "REQ-chairman-ceo-20260829-001",
+        "req-short",
+    ],
+)
+def test_automated_request_ref_is_exact_never_stripped_or_case_folded(request_ref):
+    with pytest.raises(cr.CeoRequestInvalid):
+        cr.automated_intent_id(request_ref)
+
+
+def test_automated_normalization_reuses_v1_semantics_without_operation_key():
+    payload = _automated_research_payload(
+        objective="  bounded objective  ",
+        workstream="WS:MAS-208",
+        attempt_limit=3,
+    )
+    normalized = cr.normalize_automated_request(payload)
+    assert normalized == {
+        "objective": "bounded objective",
+        "department": "executive-infrastructure",
+        "priority": 10,
+        "execution_profile": "research_only",
+        "workstream": "WS:MAS-208",
+        "allowed_write_paths": [],
+        "validation": {},
+        "attempt_limit": 3,
+    }
+    assert "operation_key" not in normalized
+
+
+@pytest.mark.parametrize(
+    "field",
+    sorted(
+        set(schemas.FORBIDDEN_INPUT_FIELDS)
+        | {
+            "operation_key",
+            "provider",
+            "account",
+            "session",
+            "host",
+            "transport",
+        }
+    ),
+)
+def test_automated_request_refuses_caller_identity_authority_and_transport_fields(field):
+    payload = _automated_research_payload(**{field: "smuggled"})
+    with pytest.raises(cr.CeoRequestInvalid):
+        cr.normalize_automated_request(payload)

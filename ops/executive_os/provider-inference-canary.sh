@@ -9,6 +9,21 @@
 set -euo pipefail
 umask 077
 
+SLOT_ID="codex-01"
+
+usage() {
+  /bin/echo "usage: $0 [--slot-id codex-01|codex-pro-01|codex-pro-02|codex-pro-03]" >&2
+  exit 64
+}
+
+if [ "$#" -gt 0 ]; then
+  [ "$#" -eq 2 ] && [ "$1" = "--slot-id" ] || usage
+  case "$2" in
+    codex-01|codex-pro-01|codex-pro-02|codex-pro-03) SLOT_ID="$2" ;;
+    *) usage ;;
+  esac
+fi
+
 [ "$(/usr/bin/id -u)" -eq 0 ] || {
   /bin/echo "provider-inference-canary.sh must run as root" >&2
   exit 77
@@ -25,6 +40,7 @@ PYTHON_BINARY="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12
   exit 65
 }
 
-"$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_inference_canary.py"
+"$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_inference_canary.py" \
+  --slot-id "$SLOT_ID"
 status=$?
 exit "$status"

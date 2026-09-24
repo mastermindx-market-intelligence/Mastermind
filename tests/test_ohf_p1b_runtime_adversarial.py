@@ -23,6 +23,11 @@ from control_plane.operator_harness_contract import (
     RequestedExecutionProfile,
     WorkspaceIdentity,
 )
+from control_plane.operator_harness_contract import CheckpointObservation
+from control_plane.operator_harness_contract import (
+    OPTIONAL_ADAPTER_PROTOCOLS,
+    SupportsCheckpoint,
+)
 
 
 def _runtime(tmp_path):
@@ -108,6 +113,15 @@ def _started(tmp_path, *, attest=True):
             attestation=_allow(profile),
         )
     return runtime, lease, profile, epoch, generation
+
+
+def _started_for_checkpoint(tmp_path):
+    runtime, lease, _profile, _epoch, generation = _started(tmp_path)
+    return runtime, lease, generation
+
+
+def _checkpoint(value):
+    return CheckpointObservation({"candidate": value})
 
 
 def test_tx5_blocks_pre_attestation_and_refused_launch(tmp_path):
@@ -324,3 +338,78 @@ def test_ohf_mode_requires_profile_and_tx1_receipt(tmp_path):
             ).fetchone()[0]
             == 0
         )
+
+
+def test_cctx0_stale_checkpoint_intent_is_refused_without_sequence_advance(tmp_path):
+    runtime, lease, generation = _started_for_checkpoint(tmp_path)
+    harness = runtime.operator_harness
+    stale = OperationId("ohf-op:stale-checkpoint")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=stale,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    intervening = OperationId("ohf-op:intervening-checkpoint")
+    harness.reserve_checkpoint_operation(
+        generation=generation,
+        operation_id=intervening,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    harness.apply_checkpoint_operation(
+        generation=generation,
+        operation_id=intervening,
+        observation=_checkpoint("committed"),
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    with pytest.raises(
+        StateConflict, match="checkpoint operation result does not match INTENT"
+    ):
+        harness.apply_checkpoint_operation(
+            generation=generation,
+            operation_id=stale,
+            observation=_checkpoint("too-late"),
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        )
+    attempt = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert attempt is not None and attempt.checkpoint_sequence == 1
+
+
+def test_cctx0_checkpoint_adds_no_durable_schema(tmp_path):
+    from control_plane.executive_backup import _LEGACY_TABLE_COLUMNS
+    from control_plane.executive_backup import _V4_ATTEMPT_COLUMNS
+    from control_plane.executive_backup import _V4_JOB_COLUMNS
+
+    runtime = Runtime.at(tmp_path)
+    frozen = {name: columns for name, columns, _key in _LEGACY_TABLE_COLUMNS}
+    with runtime.store.read() as connection:
+        tables = {
+            str(row["name"])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        expected_tables = set(frozen) | {"schema_migrations"}
+        assert tables == expected_tables, (
+            "Fresh installs must not add durable tables outside the frozen legacy "
+            "registry and schema_migrations."
+        )
+        for table in ("attempts", "jobs"):
+            columns = tuple(
+                str(row["name"])
+                for row in connection.execute(f"PRAGMA table_info({table})")
+            )
+            if table == "attempts":
+                expected = set(frozen[table]) | set(_V4_ATTEMPT_COLUMNS)
+            else:
+                expected = set(frozen[table]) | set(_V4_JOB_COLUMNS)
+            assert set(columns) == expected
+        assert "cctx0_checkpoint" not in tables
+
+
+def test_cctx0_checkpoint_protocol_fence_is_frozen() -> None:
+    assert OPTIONAL_ADAPTER_PROTOCOLS["checkpoint"] is SupportsCheckpoint
+    assert len(OPTIONAL_ADAPTER_PROTOCOLS) == 7

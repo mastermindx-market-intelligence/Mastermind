@@ -1,0 +1,722 @@
+# CF2-H0 final-review continuation progress
+
+Plan: `docs/superpowers/plans/2026-08-27-executive-capacity-cf2-h0-final-review-continuation.md`
+
+## Task 1 — complete
+
+### Frozen carrier and procedure
+
+- Worktree: `/Users/chriswong/Documents/Cluade/Mastermind-h0-source-closure-20260827`
+- Branch: `codex/cf2-h0-source-closure-20260827`
+- Pre-edit HEAD: `bb40b24838b0633e154d96db5074d517d644072f`
+- Preserved merge parents: `1f1c29048af584f6e7fcf28453957bc84d6e057a` and protected master `af43f356f4f7f34cb3514d1d1099b50444af8487`
+- Protected Skillpack pin: `mastermindx-market-intelligence/Mastermind@af43f356f4f7f34cb3514d1d1099b50444af8487`
+- Loaded from that exact pin: `docs/sol_skills/INDEX.md`, `docs/sol_skills/COLD_START.md`, and `docs/sol_skills/REVIEW_RETURN.md`; each declares `mastermind.sol_skillpack.v1`, version `1.0.0`, compatible with project `bootstrap_major = 1`.
+- Pre-edit baseline supplied by the coordinating reviewer: `scripts/ci_pytest.py --plan-only` reported `discovered=330 excluded=0 running=330`; the frozen seven-file pytest matrix reached 100% and exited 0 at `bb40b24838b0633e154d96db5074d517d644072f`.
+
+### RED evidence
+
+The first source/test edit was behavioral test coverage only. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'pre_flags_recovery_v1 or recovery_v1_digest_preserves_exact_pre_flags or recovery_v1_digest_keeps_flags or complete_post_read_file_state_drift or rechecks_descriptor_security_after_file_read or true_traversal_ancestor_obeys_complete_security_law'
+```
+
+Result: exit 1; `27 failed, 1 passed, 170 deselected in 14.15s`.
+
+The failures discriminated the current defects:
+
+- both exact pre-flags recovery-v1 replay cases refused with `RECOVERY_TREE_DIGEST_MISMATCH`;
+- the recovered v1 digest no longer matched the pre-flags canonical byte identity;
+- post-read file type, mode, UID, GID, link-count, and BSD-flag drift was accepted;
+- post-read ACL and xattr drift was accepted; and
+- insecure true traversal-ancestor owner, mode, device, link, ACL, and xattr state at open, plus retained identity/security drift at revalidation, was accepted.
+
+The one passing case was the retained negative law: a stable nonzero BSD flag is still refused as recovery-v1 security validation even though flags must not participate in the legacy digest identity.
+
+After the native traversal policy was narrowed, the link-count distinction was added RED-first. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'traversal_ancestor_tolerates_positive_link_count_churn or fixed_system_root_freezes_exact_link_count'
+```
+
+RED result: exit 1; `F. [100%]`; 1 failed and 1 passed. The positive traversal-ancestor churn case refused with `SOURCE_REPAIR_PARENT_DRIFT`; the fixed-system-root exact-link-count refusal already passed.
+
+### Implemented law
+
+- A regular file now has one authoritative before/after tuple: device, inode, file type, permission mode, UID, GID, link count, BSD flags, size, mtime, and ctime. ACL, xattr, and flag security validation is rerun after the descriptor content read.
+- Retained traversal-only ancestors above the fixed H0 system root require directory type, a trusted owner, no group/other write, positive link count, no extended ACL, an approved native traversal xattr-name set, the required device relationship, and an exact retained parent/name relationship. Revalidation freezes device, inode, type, mode, UID, GID, the initially observed platform flags, and the exact initially observed xattr-name set.
+- Traversal-only ancestor `nlink` is required to remain at least 1 but its numeric value and timestamps are not frozen. Shared native ancestors legitimately change link counts when unrelated processes create or remove siblings.
+- The fixed H0 system root separately freezes the full descriptor directory state, including exact link count and timestamps, enforces literal zero BSD flags, forbids extended ACLs, permits only the existing approved H0 xattrs, and retains its exact parent/name relationship.
+- Existing H0-owned transition parents keep their phase-derived link-count rules.
+- Hermetic test-adapter traversal permits the fixture UID/GID in addition to root ownership; production passes the root UID/GID and therefore requires root ownership without hard-coding one platform GID.
+- Only legacy pathname `_closed_tree_digest()` directory/file canonical rows omit `flags`. Zero-flags refusal remains a separate validation, and the descriptor-based source-repair v2 digest still emits `flags: 0`.
+
+### Empirical macOS traversal exceptions
+
+The initial literal-zero policy was invalid for traversal-only native ancestors. Exact observation command:
+
+```text
+/usr/bin/stat -f '%N flags=%f nlink=%l uid=%u gid=%g mode=%p dev=%d ino=%i' / /var /var/folders /private /Library /private/var/folders/sb
+```
+
+Observed platform flags were `/=1048576`, `/var=557056`, `/var/folders=1048576`, `/private=1081344`, `/Library=1048576`, and `/private/var/folders/sb=1048576`. `/var` is a symlink in the pathname observation; retained descriptor traversal still binds the resolved directory identities and relations.
+
+Exact xattr-name observation command:
+
+```text
+/usr/bin/xattr / /private /private/var /private/var/folders /private/var/folders/sb /Library
+```
+
+Result: `/private/var/folders/sb: com.apple.rootless`; the other queried paths emitted no names. The traversal-local policy therefore permits `com.apple.rootless` only as an initially observed, exactly revalidated name; `_APPROVED_SYSTEM_XATTRS` was not broadened, extended ACLs remain forbidden, and no platform xattr is cleared or mutated.
+
+An intermediate 47-case recovery/crash run reached 43 passes and 4 false refusals while an unrelated pytest process (PID 92054 in the Macro repository) created and deleted siblings below a retained native temp ancestor. Each of the four cases passed in isolation. This was the direct evidence for validating traversal `nlink >= 1` without freezing its numeric value. The fixed H0 system root and H0-owned transition objects were not weakened.
+
+### GREEN evidence
+
+Expanded focused selector:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'pre_flags_recovery_v1 or recovery_v1_digest_preserves_exact_pre_flags or recovery_v1_digest_keeps_flags or complete_post_read_file_state_drift or rechecks_descriptor_security_after_file_read or true_traversal_ancestor_obeys_complete_security_law or traversal_ancestor_tolerates_positive_link_count_churn or fixed_system_root_freezes_exact_link_count'
+```
+
+Result: exit 0; `............................. [100%]` (29 selected cases passed).
+
+Exact recovery/crash matrix:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery or crash'
+```
+
+Result: exit 0; `............................................... [100%]` (47 selected cases passed).
+
+Complete Task 1 module:
+
+```text
+python3 -m pytest --collect-only -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; `tests/test_capacity_host_artifacts.py: 274`.
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; pytest reached `[100%]` with no failures (all 274 collected cases passed).
+
+Apple system-Python compilation:
+
+```text
+/usr/bin/python3 -m py_compile ops/executive_os/capacity_host_artifacts.py tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; no output.
+
+```text
+git diff --check
+```
+
+Result: exit 0; no output.
+
+### Files and commit identity
+
+- Modified: `ops/executive_os/capacity_host_artifacts.py`
+- Modified: `tests/test_capacity_host_artifacts.py`
+- Added SDD evidence: `.superpowers/sdd/2026-08-27-executive-capacity-cf2-h0-final-review-continuation/progress.md`
+- Preserved and included continuation plan: `docs/superpowers/plans/2026-08-27-executive-capacity-cf2-h0-final-review-continuation.md`
+- Narrow commit message: `fix(exec): close H0 descriptor state gaps`
+- Commit identity: the single Task 1 commit containing this ledger. Its exact SHA is reported in the coordinating handoff after commit; a commit cannot embed its own SHA because changing this file changes that SHA.
+
+### Scope boundary and caveats
+
+- Task 2 was not started.
+- No provider home, credential, service, OAuth, routing, WP/C1/Slack Relay, native/root, launchd, or host state was read or modified as part of the implementation.
+- No branch, worktree, PR, push, deployment, or native install ceremony was created or performed.
+- This is repository implementation and local verification evidence only; it is not an H0 native-host pass or CF2-P0 acceptance receipt.
+
+## Task 1 independent-review follow-up
+
+### Review finding and re-pin
+
+- Re-pinned clean carrier HEAD `6dd8125edf1f2561e5c5a9c1c7f2115b5206a075` on `codex/cf2-h0-source-closure-20260827`; protected `origin/master` remained `af43f356f4f7f34cb3514d1d1099b50444af8487`.
+- Independent review reproduced that a stable arbitrary user `stat.UF_NODUMP` bit on a traversal-only ancestor was accepted at initial open. The cause was that `_require_source_repair_ancestor()` enforced type, owner, mode, device, positive link count, and ACL rules but no initial flag allow-policy; the later exact snapshot therefore legitimized every initially observed bit.
+
+### Review-fix RED
+
+The behavioral tests were added before the production allow-policy. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'traversal_ancestor_refuses_stable_user_flag_at_open or traversal_ancestor_accepts_observed_platform_flags'
+```
+
+Result: exit 1; `F... [100%]`. `test_source_repair_traversal_ancestor_refuses_stable_user_flag_at_open` failed with `Failed: DID NOT RAISE CapacityHostArtifactError`; the three positive cases for the actually observed macOS platform flag combinations passed.
+
+### Bounded review fix
+
+- Traversal-only ancestors now permit only the union of the platform-managed bits required by the observed native states: `SF_NOUNLINK` (`0x00100000`), `SF_RESTRICTED` (`0x00080000`), and `UF_HIDDEN` (`0x00008000`). Any other initial bit, including stable `UF_NODUMP`, refuses with `SOURCE_REPAIR_PARENT_INVALID`.
+- Each stat constant is loaded through `getattr`; Darwin-only numeric fallbacks preserve Apple system-Python compatibility where `stat.SF_RESTRICTED` is absent. Non-Darwin platforms use a zero allowed mask.
+- The allowed initial value is still exactly snapshotted, so any later flag drift refuses. The fixed H0 system-root zero-flags law and all H0-owned zero-flags laws remain unchanged.
+- `_APPROVED_SYSTEM_XATTRS` and the traversal-local xattr-name policy are unchanged.
+
+### Added legacy-v1 directory fixture
+
+Final spec review requested an exact nested recovery-v1 identity fixture in addition to the flat-file cases. A real nested directory/file tree is observed through deterministic fixed UID/GID/link metadata and asserted against the literal pre-flags v1 digest `1da4f381e08384e9cc388a87d845788a08cfafb12c0f1c76a1218ffb737c3e70`.
+
+Exact characterization command before any further source change:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery_v1_digest_preserves_committed_nested_pre_flags_fixture'
+```
+
+Result: exit 0; `. [100%]`. The implementation already preserved nested legacy-v1 byte identity, so this addition was test-only.
+
+### Review-fix GREEN
+
+Expanded Task 1 focused selector:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'pre_flags_recovery_v1 or recovery_v1_digest_preserves_exact_pre_flags or recovery_v1_digest_keeps_flags or committed_nested_pre_flags or complete_post_read_file_state_drift or rechecks_descriptor_security_after_file_read or true_traversal_ancestor_obeys_complete_security_law or traversal_ancestor_tolerates_positive_link_count_churn or fixed_system_root_freezes_exact_link_count or traversal_ancestor_refuses_stable_user_flag_at_open or traversal_ancestor_accepts_observed_platform_flags'
+```
+
+Result: exit 0; `.................................. [100%]` (34 selected cases passed).
+
+Recovery/crash selector, now including the nested recovery fixture:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery or crash'
+```
+
+Result: exit 0; 48 selected cases reached `[100%]` with no failures.
+
+Complete module:
+
+```text
+python3 -m pytest --collect-only -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; `tests/test_capacity_host_artifacts.py: 279`.
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; all 279 collected cases reached `[100%]` with no failures.
+
+Apple system-Python compilation and guarded-mask proof:
+
+```text
+/usr/bin/python3 -m py_compile ops/executive_os/capacity_host_artifacts.py tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; no output.
+
+```text
+/usr/bin/python3 -c 'from ops.executive_os import capacity_host_artifacts as artifacts; print(artifacts._TRAVERSAL_ANCESTOR_ALLOWED_FLAGS)'
+```
+
+Result: exit 0; `1605632`, exactly `0x00100000 | 0x00080000 | 0x00008000`.
+
+```text
+git diff --check
+```
+
+Result: exit 0; no output.
+
+### Review-fix files and commit identity
+
+- Modified: `ops/executive_os/capacity_host_artifacts.py`
+- Modified: `tests/test_capacity_host_artifacts.py`
+- Appended: `.superpowers/sdd/2026-08-27-executive-capacity-cf2-h0-final-review-continuation/progress.md`
+- Narrow follow-up message: `fix(exec): restrict H0 traversal ancestor flags`
+- Commit identity: the follow-up commit containing this appended ledger. Its exact SHA is reported after commit because embedding a commit's own SHA changes that SHA.
+
+### Review-fix scope boundary
+
+- Task 2 and Task 3 were not started.
+- No native/root/provider/service/credential/OAuth/routing/WP/C1/Slack Relay state was touched.
+- No new native flag bit was observed or silently added; the live full-module path completed under the explicit reviewed mask.
+
+## Task 2 — in progress
+
+### Frozen pickup and independent e4 identity
+
+- Exact pickup HEAD: `90420a97e9a9ddd4aef6abb83fadf0a12f22481e` on the existing clean `codex/cf2-h0-source-closure-20260827` carrier.
+- Protected `origin/master` and Skillpack pin: `af43f356f4f7f34cb3514d1d1099b50444af8487`.
+- Loaded from that exact pin: `docs/sol_skills/INDEX.md`, `docs/sol_skills/COLD_START.md`, and `docs/sol_skills/REVIEW_RETURN.md`; schema `mastermind.sol_skillpack.v1`, version `1.0.0`, compatible with project `bootstrap_major = 1`.
+- Independently derived from direct Git objects without executing installed/repository payload code: e4 commit `e4e44867ace335ac9208a3990a10c163e199492d`, tree `ee1b95af3341a49151890cec1a6a31997f632aec`, canonical manifest SHA-256 `ecb9a58eec12890126c291a451921ab0dd738baee765c61aae3a42fd74a31fc9`, byte length `190196` including one final LF, and `1122` entries.
+
+### RED evidence
+
+The first Task 2 filesystem edit changed tests only. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'trusted_e4 or self_authored_payload or wrong_trusted_e4_tree or basename_relation or preserved_semantic_reads or absolute_evidence_view'
+```
+
+Result: exit 1; `FFFFFFFFFF [100%]` (10 failed).
+
+The failures discriminated the current defects:
+
+- no reviewed e4 tree/manifest trust constants existed;
+- an arbitrary payload plus self-authored internally matching manifest under the exact e4 basename was accepted;
+- a canonically shaped manifest carrying the wrong e4 tree was accepted;
+- an exact release-basename swap was accepted when descriptor-metadata side effects were held constant, proving the retained root was not rebound to its parent/name relation;
+- runtime, generation, topology, rollback, and legacy semantic views had no descriptor-read capability, so the preserved verifier could not use the retained graph as its read authority; and
+- an absolute evidence view had no retained-descriptor read capability and opened its absolute parent directly instead of starting at a retained `/` and traversing component by component.
+
+The installed-release sentinel test remains present and continues to forbid execution of installed `release_manifest.py` payload bytes.
+
+The live adversarial controller then required deeper retained-graph coverage. Those tests were also added before their production capabilities. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'unrelated_retained_view or approved_xattr_name_set_drift or optional_absence or forbidden_stable_ancestor_flags or fixed_macos_root_alias or supplied_retained_semantic_views'
+```
+
+Result: exit 1; `FFFFFFF [100%]` (7 failed).
+
+The additional RED failures proved that an unrelated retained release view could be injected, an approved xattr name could appear after a semantic read without refusal, optional absence had no retained-parent capability, absolute-view ancestors accepted a stable forbidden user flag, native `/var` and `/tmp` symlink components had no authenticated traversal, and the preserved verifier body had no retained-view input contract and therefore could not be proven free of pathname reads.
+
+The first full-module attempt was interrupted by the controller after 45m51s because it exceeded the 279-case pre-change baseline by more than threefold; it is not acceptance evidence. Deterministic profiling isolated repeated retained-repository graph revalidation, not e4 manifest traversal: one source-repair test spent 21.917s across 619 `_RepositoryView.revalidate` calls, including 78,613 `_revalidate_object` calls and 25,379 retained-parent capability checks. A performance regression test was added before optimizing the graph walk. Exact RED command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'full_revalidation_walks_retained_parent_capability_once'
+```
+
+Result: exit 1; `F [100%]`. The one full retained-graph revalidation performed 18 parent-capability checks instead of the required two (one explicit outer check and one identity-bound root relation check), proving repeated ancestor recursion across sibling/descendant objects.
+
+The RED was strengthened to a branching three-level graph with an exact per-object xattr-audit counter and paired with a refusal-path descriptor-ownership regression. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'full_revalidation_walks_retained_parent_capability_once or closes_guard_descriptor_when_initial_guard_audit_refuses'
+```
+
+Result: exit 1; `FF [100%]`. The branching graph performed 20 parent-capability checks instead of two, and the initial `/` guard descriptor was opened but never closed when its security audit refused.
+
+### GREEN evidence
+
+The retained graph now uses one shared `seen` set per complete temporal gate, so every retained object, relation, exact xattr-name set, BSD-flag state, and ACL state is audited once while semantic reads still recheck their complete ancestor chain before and after reading. Guard descriptor ownership is registered before its first security audit, and retained runtime file hashes are reused within one authenticated runtime verification.
+
+The two performance/refusal regressions turned green:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'full_revalidation_walks_retained_parent_capability_once or closes_guard_descriptor_when_initial_guard_audit_refuses'
+```
+
+Result: exit 0; `.. [100%]` (2 selected cases passed). The branching three-level graph performs exactly two retained-parent capability checks and exactly one xattr-name audit per retained object for the full gate.
+
+The representative source-repair test used for deterministic timing improved from `25.42s` before the shared graph walk to `9.72s` after it:
+
+```text
+python3 -m pytest -vv --durations=5 -o addopts='' tests/test_capacity_host_artifacts.py::test_source_repair_host_commits_generation_last_and_verify_is_zero_mutation
+```
+
+Result: exit 0; 1 passed in `10.77s`, with the test call reported as `9.72s`.
+
+The complete discriminating Task 2 selector, including the performance and refusal-path regressions:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'unrelated_retained_view or approved_xattr_name_set_drift or optional_absence or forbidden_stable_ancestor_flags or fixed_macos_root_alias or supplied_retained_semantic_views or trusted_e4 or self_authored_payload or wrong_trusted_e4_tree or basename_relation or preserved_semantic_reads or absolute_evidence_view or inert_release_manifest_verifier_never_executes_installed_payload or full_revalidation_walks_retained_parent_capability_once or closes_guard_descriptor_when_initial_guard_audit_refuses'
+```
+
+Result: exit 0; `.................... [100%]` (20 selected cases passed).
+
+Preserved-invariant and source-repair compatibility gate:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'preserved or source_repair'
+```
+
+Result: exit 0; all selected cases reached `[100%]` with no failures in about 81 seconds, down from about 176 seconds before the shared graph walk.
+
+Complete module with explicit elapsed time:
+
+```text
+/usr/bin/time -p python3 -m pytest -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; all 298 collected cases reached `[100%]`; `real 1148.81`, `user 476.21`, `sys 513.97`. This bounded 19m08.81s run replaces the interrupted 45m51s non-evidence run.
+
+Final collection, Apple system-Python compilation, and diff gates:
+
+```text
+python3 -m pytest --collect-only -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; `tests/test_capacity_host_artifacts.py: 298`.
+
+```text
+/usr/bin/python3 -m py_compile ops/executive_os/capacity_host_artifacts.py tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; no output.
+
+```text
+git diff --check
+```
+
+Result: exit 0; no output.
+
+### Task 2 files and scope boundary
+
+- Modified: `ops/executive_os/capacity_host_artifacts.py`
+- Modified: `tests/test_capacity_host_artifacts.py`
+- Appended: `.superpowers/sdd/2026-08-27-executive-capacity-cf2-h0-final-review-continuation/progress.md`
+- Task 3 was not started.
+- No native/root/provider/service/credential/OAuth/routing/WP/C1/Slack Relay state was touched.
+- No installed release payload was executed; the strengthened sentinel authenticates its manifest first and then refuses changed payload bytes without launching any subprocess.
+- Task 2 remains repository implementation proof only, not native H0, CF2-P0, merge, deploy, or production acceptance.
+
+## Task 2 review-fix follow-up (2026-08-27)
+
+Exact clean pickup was `c1eb17720054e8b538250af8d875b3968b5921f3`
+with parent `90420a97e9a9ddd4aef6abb83fadf0a12f22481e`. Current protected
+master `b901dee0272a99b8a1d60385848b99b7273e8261` supplied the compatible
+`INDEX`, `REVIEW_RETURN`, `RECONCILE_STATE`, and `COMMISSION_WAVE` procedures.
+
+### RED evidence
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'preserved_fd_budget or absolute_component_validation or native_alias_descriptor_is_owned or stably_unsafe_regular or generation_parent_capability or retained_prior_generation'
+```
+
+Result: exit 1; `FFFFFFFFFFFFFFF [100%]` (15 selected failures). The exact
+failures proved the FD-budget constant/gate absent, absolute-component
+validator absent, all four alias audit-stage descriptors leaked, stable 0666
+and hardlinked files were accepted into a retained graph, lifecycle parent
+selection was absent, and retained prior-generation inventory/hash
+authentication was absent.
+
+The first complete-module review-fix run exposed one integration-level error
+contract regression at 44% and was stopped immediately after the failure:
+
+```text
+/usr/bin/time -p python3 -m pytest -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 1 after interruption; the existing
+`test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor`
+expected `REPAIR_CARRIER_INVALID`, but the newly strengthened generic retained
+view rejected the injected carrier hardlink during construction with the
+internal `SOURCE_METADATA_INVALID` reason. This proved that constructor-time
+retained-view refusals escaped the public repair-carrier error boundary.
+
+### GREEN evidence
+
+The preserved repair-carrier hardlink refusal remains enforced at retained
+view construction, while the public verifier now normalizes that internal
+refusal to its stable carrier contract and closes any partially constructed
+view:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py::test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor
+```
+
+Result: exit 0; `. [100%]`.
+
+The complete new review-fix selector passed:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'preserved_fd_budget or absolute_component_validation or native_alias_descriptor_is_owned or stably_unsafe_regular or generation_parent_capability or retained_prior_generation or role_security_policy or release_manifest_bad_manifest_never_opens_payload or release_manifest_unexpected_child_never_opens_payload or release_manifest_metadata_mismatch_precedes_hash or production_preserved_invariant_callers_use_source_repair_parents or fixed_parent_approved_xattr_name_set_drift'
+```
+
+Result: exit 0; `................ [100%]` (16 selected cases passed).
+
+The positive FD-budget subprocess was also run directly so its captured
+resource receipt was explicit. It began at soft limit 256, authenticated the
+reviewed uplift before constructing the exact-scale graph, retained all 1,122
+children plus the graph root, and revalidated successfully:
+
+```text
+{"actual": 16384, "count": 1123, "observed": 16384, "peak": 1137}
+```
+
+Result: exit 0. The reviewed fixed minimum is therefore 16,384 descriptors;
+the exact-scale retained graph peaked at 1,137 open descriptors in the isolated
+subprocess.
+
+The prior Task 2 focused set remained green:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'unrelated_retained_view or approved_xattr_name_set_drift or optional_absence or forbidden_stable_ancestor_flags or fixed_macos_root_alias or supplied_retained_semantic_views or trusted_e4 or self_authored_payload or wrong_trusted_e4_tree or basename_relation or preserved_semantic_reads or absolute_evidence_view or inert_release_manifest_verifier_never_executes_installed_payload or full_revalidation_walks_retained_parent_capability_once or closes_guard_descriptor_when_initial_guard_audit_refuses'
+```
+
+Result: exit 0; `.................... [100%]` (20 selected cases passed).
+
+The preserved/source-repair compatibility gate passed:
+
+```text
+/usr/bin/time -p python3 -m pytest -q -x tests/test_capacity_host_artifacts.py -k 'preserved or source_repair'
+```
+
+Result: exit 0; all selected cases reached `[100%]`; `real 74.54`,
+`user 31.99`, `sys 33.49`.
+
+The complete module then passed from an unchanged production/test source
+state:
+
+```text
+/usr/bin/time -p python3 -m pytest -q -x tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; all 325 cases reached `[100%]`; `real 1044.23`,
+`user 461.86`, `sys 454.41`. This is faster than the accepted 298-case Task 2
+run (`real 1148.81`) despite 27 additional review-fix regressions and replaces
+the interrupted 44% integration run.
+
+Final collection, Apple system-Python compilation, and diff gates:
+
+```text
+python3 -m pytest --collect-only -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; `tests/test_capacity_host_artifacts.py: 325`.
+
+```text
+/usr/bin/python3 -m py_compile ops/executive_os/capacity_host_artifacts.py tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; no output.
+
+```text
+git diff --check
+```
+
+Result: exit 0; no output.
+
+### Review-fix files and boundary
+
+- Modified: `ops/executive_os/capacity_host_artifacts.py`
+- Modified: `tests/test_capacity_host_artifacts.py`
+- Appended: `.superpowers/sdd/2026-08-27-executive-capacity-cf2-h0-final-review-continuation/progress.md`
+- Exact parent for the single follow-up commit:
+  `c1eb17720054e8b538250af8d875b3968b5921f3`.
+- Task 3 remains held. No native/root/provider/service/credential/OAuth/routing,
+  WP/C1/Slack Relay, PR, merge, push, deployment, or installed payload execution
+  occurred. This is repository implementation proof only.
+
+## Task 2 fix round 2 commissioned (2026-08-27)
+
+- Exact clean reviewed pickup: `c14422ab27857eae89566a5e7a716dc67080c54b`, parent `c1eb17720054e8b538250af8d875b3968b5921f3`, tree `f3b2b636b6814b3e6b1e6f4205ebf6dda5510143`.
+- Live protected master and compatible Skillpack re-pinned to `b901dee0272a99b8a1d60385848b99b7273e8261` immediately before modification.
+- Loaded from that exact pin: `INDEX`, `REVIEW_RETURN`, `RECONCILE_STATE`, and `COMMISSION_WAVE`; schema `mastermind.sol_skillpack.v1`, version `1.0.0`, minimum bootstrap major `1`.
+- Both independent exact-head reviewers returned `REQUEST_CHANGES`. Confirmed findings are recorded in `task-2-fix-round-2-findings.md` and cover exact per-object producer metadata, typed subprocess timeouts, first-guard descriptor ownership, and positive role-directory link count.
+- Ruling: treat the broad topology/rollback/legacy role tuples as a root-cause compatibility defect and replace them with exact per-object policies derived from already-authenticated canonical producer facts. This preserves the one retained graph and costs a larger test matrix; if wrong, valid native H0 evidence would remain falsely refused or an unbound metadata union could weaken substitution resistance.
+- Collision ruling: Task 2 remains disjoint from protected-master movement and the separately owned Slack Agent Relay/autonomy lanes. No protected path from those lanes may enter this fix round.
+- Task 3, publication, native ceremony, P0, provider/OAuth, services, routing, workers, and fan-out remain held pending fresh dual PASS.
+
+## Task 2 fix round 2 — Finding A RED
+
+Tests were added before production changes for the three canonical heterogeneous
+producer surfaces. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'retained_topology_accepts_exact_per_row_producer_metadata or retained_rollback_accepts_exact_moved_artifact_metadata or retained_legacy_accepts_each_canonical_producer_metadata'
+```
+
+Result: exit 1; `FFF [100%]` (3 selected failures). Each faithful
+root-owned producer fixture failed because the retained graph had no exact
+per-object policy derivation: `_topology_object_security_policy`,
+`_rollback_object_security_policy`, and `_legacy_object_security_policy` were
+absent. The fixtures encode config/attestation `root:<row worker_gid> 0440`,
+plist `root:wheel 0644`, moved-artifact metadata, rollback receipt
+`root:wheel 0400`, and the two distinct legacy group identities. Their paired
+negative cases exchange two otherwise admitted GIDs, so an unbound UID/GID/mode
+union cannot satisfy GREEN.
+
+## Task 2 fix round 2 — Finding B RED
+
+Timeout behavior was injected before production normalization at launchctl
+`print-disabled`, each of the five fixed label `print` calls, `dscl`,
+`dsmemberutil`, `dseditgroup`, `id -G`, the source-repair CLI boundary, and a
+precommit preserved-invariant gate. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'preserved_native_command_timeout or source_repair_cli_normalizes_subprocess_timeout or precommit_subprocess_timeout or postcommit_subprocess_timeout'
+```
+
+Result: exit 1; 12 failed and 1 passed. All ten command-stage cases leaked raw
+`subprocess.TimeoutExpired`; the CLI case also leaked the raw exception with
+argv rather than returning exit 65 with a closed reason; and the precommit case
+escaped raw instead of entering authorized recovery. The postcommit replay
+already became `SourceRepairIncomplete(POST_COMMIT_RECONCILIATION_REQUIRED)`,
+which is the frozen same-carrier behavior and remained as a positive guard.
+
+## Task 2 fix round 2 — Finding C RED
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'owns_every_guard_before_each_admission_failure or closes_after_one_close_refuses'
+```
+
+Result: exit 1; `F...... [100%]` (1 failed, 6 passed). The first guard
+`fstat` case opened descriptor 11 but observed no close (`[] != [11]`), proving
+the descriptor was not owned before the first fallible audit. The other five
+admission stages and the close-refusal case already retained exact one-close or
+close-all behavior and remain positive guards.
+
+## Task 2 fix round 2 — Finding D RED
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'repository_role_directory_refuses_stable_zero_link_count or repository_role_directory_freezes_each_admitted_positive_link_count'
+```
+
+Result: exit 1; `F. [100%]` (1 failed, 1 passed). A stable synthetic role
+directory `st_nlink == 0` was admitted; the paired positive-count case already
+froze and rejected later drift from one admitted positive value to another.
+
+## Task 2 fix round 2 — focused GREEN
+
+- Finding A exact metadata policies: exit 0; 3 passed.
+- Finding B typed subprocess/lifecycle handling: exit 0; 13 passed.
+- Finding C guard ownership/close behavior: exit 0; 7 passed.
+- Finding D positive directory link count: exit 0; 2 passed.
+
+Exact commands are recorded in `task-2-report.md`. All four focused selectors
+were re-run after the complete bounded production repair, and all passed.
+
+Consolidated new selector: exit 0; 25 passed. Prior review selector
+`python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery or crash'`:
+exit 0; 47 passed. Legacy-v1 selector
+`python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery_v1'`:
+exit 0; 5 passed. The exact consolidated command is preserved in
+`task-2-report.md`.
+
+## Task 2 fix round 2 — Finding A self-review type RED
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'exact_topology_policy_refuses_directory_substitution'
+```
+
+Result: exit 1; `F [100%]` (1 failed). A stable directory substitution with
+the exact config UID/GID/mode was admitted, proving the per-object tuple also
+needed to bind `S_IFREG`/`S_IFDIR` before snapshot.
+
+## Task 2 fix round 2 — final GREEN and proof
+
+- Self-review type selector: exit 0; 1 passed.
+- Complete Finding A selector: exit 0; 4 passed.
+- Consolidated new selector: exit 0; 26 passed.
+- Prior review selector `-k 'recovery or crash'`: exit 0; 47 passed.
+- Legacy-v1 selector `-k 'recovery_v1'`: exit 0; 5 passed.
+- Preserved/source-repair selector: exit 0; 67 passed; `real 78.78`,
+  `user 33.08`, `sys 35.59`.
+- Complete module: exit 0; all 351 collected cases reached `[100%]`;
+  `real 1167.21`, `user 492.10`, `sys 512.08`.
+- Apple `/usr/bin/python3` compilation: exit 0; no output.
+- `git diff --check`: exit 0; no output.
+- Final protected master re-pin remained
+  `b901dee0272a99b8a1d60385848b99b7273e8261`.
+
+Every exact command and RED/GREEN receipt is recorded in `task-2-report.md`.
+Task 3 and all native/provider/Slack/OAuth/service/routing/publication surfaces
+remained held; no installed preserved payload was executed.
+
+## Task 2 fix round 3 commissioned (2026-08-27)
+
+- Spec/security re-review returned PASS on exact head `5a18e70f3f44b3541fb0d6dc16e5e5c9723958f5`, tree `666ac7ed91d98df515cdb298a55f33ba8c81ee8f`.
+- Quality/lifecycle re-review returned REQUEST_CHANGES on one remaining Finding B ordering defect: exact `RECEIPT_DURABLE/NONE` with no visible generation is structurally precommit, but recovery authorization is not established until after two fallible semantic observers.
+- Ruling: the structural descriptor-bound no-visible-generation classification is sufficient to derive the existing table-owned precommit recovery grant before those observers. This uses the canonical transition authority and costs four additional crash-stage cases; if wrong, a genuinely visible commit could be rolled back, so every visible/ambiguous generation case remains explicitly unauthorized and exit 70.
+- Exact requirements and the reviewer reproduction are frozen in `task-2-fix-round-3-finding.md`.
+- Protected master remained `b901dee0272a99b8a1d60385848b99b7273e8261`; PR #178 remained disjoint at `4122dd245f60937cde44777cd5eda00ac03d25c9`.
+- Task 3 and every downstream/native/publication lane remain held pending a new immutable head and fresh dual PASS.
+
+## Task 2 fix round 3 — RED
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'receipt_durable_precommit_observer_subprocess_failure_restores_exact_state'
+```
+
+Result: exit 1; `FFFF [100%]` (4 failed). Source timeout, source generic
+`SubprocessError`, archived-generation timeout, and archived-generation generic
+`SubprocessError` all returned `POST_COMMIT_RECONCILIATION_REQUIRED`; none
+consumed the canonical `RECOVERY/RECEIPT_DURABLE/NONE` transition or restored
+the exact prior source/generation layout.
+
+## Task 2 fix round 3 — implementation and GREEN (2026-08-27)
+
+- Once the retained generation-parent inventory proves no visible non-prefix
+  child and the descriptor-bound phase is exactly `RECEIPT_DURABLE/NONE`, the
+  repair loop now derives the existing table-owned `RECOVER_PRECOMMIT` grant
+  before either semantic observer runs. No state, transition, retry, receipt,
+  recovery path, pathname authority, or duplicate control plane was added.
+- The first focused GREEN attempt correctly reached the existing rollback
+  helper but remained RED (`FFFF [100%]`): after the helper created the
+  authenticated `failure-<intent_id>` namespace, `reconcile_source_repair()`
+  still rejected the durable receipt plus a partially restored archive as
+  `SOURCE_REPAIR_POSITION_AMBIGUOUS`. The bounded integration repair permits
+  that archive shape only while the exact validated failure namespace is
+  present; the existing failure-namespace validator and transition table still
+  determine the rollback phase and permitted next states.
+- Final focused proof from one unchanged source state:
+  - four receipt-durable source/archive observer timeout/generic failures:
+    `.... [100%]`, exit 0;
+  - ordinary precommit and genuine postcommit timeout/lifecycle selector:
+    `............. [100%]` (13), exit 0;
+  - recovery/crash selector: 49 passed, exit 0;
+  - `recovery_v1`: `..... [100%]` (5), exit 0;
+  - visible/ambiguous/postcommit refusal selector: `......... [100%]` (9),
+    exit 0;
+  - preserved/source-repair: 67 passed, exit 0, `real 89.26`, `user 35.09`,
+    `sys 41.11`;
+  - complete module: 355 passed, exit 0, `real 1236.55`, `user 527.51`,
+    `sys 550.27`;
+  - Apple `/usr/bin/python3 -m py_compile` for production and test modules:
+    exit 0;
+  - collection: 355 tests; `git diff --check`: exit 0.
+- The four new cases consume exactly
+  `SOURCE_REPAIR_TRANSITIONS[(RECOVERY, RECEIPT_DURABLE, NONE)]`, restore the
+  exact prior closed-tree source and generation digests, remove both archived
+  objects, finish at `ROLLED_BACK/INSTALLED_SOURCE`, and expose only
+  `SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID`; private argv/output/error markers
+  remain cause-only and absent from the public message.
+- Final remote re-pin observed protected `master` advance from review-time
+  `b901dee0272a99b8a1d60385848b99b7273e8261` to
+  `e2092cb6235519ac7f50fb3aa50ec1c1a6f627c0`. The former is an ancestor of the
+  latter and `git diff b901dee..e2092cb -- docs/sol_skills` is empty, so the
+  protected procedure used for this bounded work is unchanged. No fetch into,
+  merge from, or rebase onto protected master was performed.
+
+## Task 2 fix round 4 commissioned (2026-08-28)
+
+- Chairman continuation remains active for end-to-end completion on the same carrier.
+- The H0 continuation heartbeat was paused before this mutation turn to prevent a duplicate wake.
+- Protected master and the compatible Skillpack were re-pinned at
+  `e80e9aea894c758ae7a95720ab56c9cbc868b1ba` (`mastermind.sol_skillpack.v1`,
+  version `1.0.1`, bootstrap major `1`).
+- Current protected master was merged without conflict into the same H0 carrier at
+  `4edd434e64dc23d5796b996fe9389d6ac1f3818c`; parent identities are the prior H0
+  head `21d423fa1d02c0046b09de121ecb18d5a6df0942` and protected master `e80e9aea...`.
+- Wake #174 and protected installer/source-law movement have zero direct changed-path overlap with
+  the H0 Task 2 owner/test paths. Wake remains held and is not folded into this carrier.
+- Controller reinspection reproduced two still-open lifecycle defects that a broad reconciliation
+  audit had mistakenly conflated with the already-fixed receipt-durable observer defects:
+  `before_final_rename` can leave `.candidate-*` after rollback, and generation-parent namespace
+  drift after the initial scan can be missed before rollback.
+- Exact requirements are frozen in `task-2-fix-round-4-generation-parent-findings.md`.
+- Route: Sol + Codex for subtle fail-closed lifecycle repair. WHY NOT FABLE: architecture and the
+  minimal repair boundary are frozen; principal cross-repository continuity is unnecessary.
+
+## Task 2 fix round 4 — corrected RED, repair, and proof (2026-08-28)
+
+- Source archaeology corrected the initial review premise: the real
+  `crash_at="before_final_rename"` raises `SourceRepairIncomplete` and already
+  preserves the exact hidden candidate for successful forward replay. It is a
+  positive guard, not a RED. The two true RED cases inject a rollback-eligible
+  final semantic-observer failure after the hidden candidate exists, with and
+  without a new non-prefix visible child.
+- Corrected RED selector: exit 1; `.FF [100%]`. The real crash guard passed;
+  both final-observer cases observed one stale rollback consumption instead of
+  zero.
+- The minimal repair binds the existing receipt-durable recovery grant to the
+  exact byte-encoded empty generation-parent child-name snapshot, prevents
+  receipt/generation-prefix reminting, and re-reads the same retained descriptor
+  immediately before grant consumption. Any child, drift, or scan error revokes
+  rollback and preserves effect-unknown same-carrier reconciliation.
+- Corrected GREEN selector: 3 passed. Focused lifecycle selector: 17 passed.
+  Recovery/crash: 50 passed. `recovery_v1`: 5 passed.
+  Visible/ambiguous/postcommit: 17 passed. Complete module: 358 passed,
+  `real 1373.46`, `user 540.14`, `sys 598.49`.
+- Apple `/usr/bin/python3 -m py_compile` and `git diff --check` passed before
+  the evidence append and are repeated on the committed head. Protected
+  `master` remained exactly `e80e9aea894c758ae7a95720ab56c9cbc868b1ba`.
+- Task 3 and all host/native/credential/service/PR/Slack/Linear/Wake/OCR/OAuth/
+  provider/P0/routing/publication/other-worktree surfaces remained held.

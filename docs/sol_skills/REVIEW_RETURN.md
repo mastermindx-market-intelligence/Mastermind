@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.0
+skillpack_version: 1.0.1
 minimum_bootstrap_major: 1
 skill: review_return
 ---
@@ -8,12 +8,18 @@ skill: review_return
 # REVIEW RETURN — Adversarially Review Work Against Intent
 
 Use when Fable, Claude, Codex, Grok, a mechanical agent or another session returns a PR,
-research packet, production receipt or claimed completion.
+research packet, production receipt or claimed completion. Reviews against original outcome, not
+merely implementation quality, while ensuring a watcher-enabled worker is never left indefinitely
+waiting for Sol's ruling.
+
+Apply `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` whenever the returning counterpart is on a
+watch/wait path.
 
 ## Mission
 
-Decide whether the returned work actually advances/completes the **original user/machine
-outcome**, not merely whether its code is competent or CI is green.
+Decide whether the returned work actually advances/completes the **original user/machine outcome**,
+not merely whether its code is competent or CI is green, while ensuring a watcher-enabled worker is
+never left indefinitely waiting for Sol's ruling.
 
 ## Step 1 — Recover the authority packet
 
@@ -26,8 +32,8 @@ Before reading the worker's self-assessment as truth, recover:
 * explicit non-goals;
 * required production/browser/machine-consumer proof.
 
-The worker's prompt/PR body is evidence of what it believed the commission was; it is not
-higher authority than the accepted architecture.
+The worker's prompt/PR body is evidence of what it believed the commission was; it is not higher
+authority than the accepted architecture.
 
 ## Step 2 — Verify current implementation identity
 
@@ -42,6 +48,59 @@ Pin:
 * whether another overlapping PR/source-law change landed after pickup.
 
 Do not review a mutable branch name as if it were an immutable artifact.
+
+## Step 2A — Review reuse after protected-base movement
+
+For release-sensitive work, `semantic review and integration proof are separate receipts`.
+
+The semantic review binds one immutable candidate head, its exact owned path/blob set, its governing
+source set, its dependency closure, findings and capability boundary. Integration proof binds that
+same semantic head to the current protected base through the latest GitHub merge ref or an equivalent
+immutable integrated candidate.
+
+Do not invalidate an immutable semantic review merely because protected master advanced.
+
+Classify current-base movement as one of:
+
+```text
+REVIEW_REUSE_ALLOWED
+FULL_REREVIEW_REQUIRED
+RELEASE_BLOCKED
+```
+
+`REVIEW_REUSE_ALLOWED` requires all of:
+
+* the reviewed semantic head is unchanged;
+* candidate-owned paths and blobs are byte-identical;
+* the governing material source set is unchanged or bounded current comparison proves the movement
+  non-material;
+* protected movement is disjoint from owned paths and does not materially intersect the declared
+  dependency closure;
+* the latest-base merge ref/integrated candidate is conflict-free and passes required repository and
+  security checks;
+* no unresolved blocker/thread applies;
+* capability/non-goal claims are unchanged and no new live/production proof is claimed.
+
+When those predicates hold, retain the substantive semantic review, refresh only the current
+compatibility/integration receipt, and leave the source branch unchanged. A short Program-CEO
+compatibility review is sufficient; do not commission a complete restatement from another account.
+
+`FULL_REREVIEW_REQUIRED` when any candidate-owned blob/path changes; governing source changes
+materially; dependency movement affects behavior; authority, identity, security, effect, retry or
+persistence semantics change; a prior finding is touched; the capability claim strengthens; or
+production/live proof is newly owed or its evidence epoch moved.
+
+`RELEASE_BLOCKED` when current source, merge-ref identity, materiality, collision, checks, review
+state or effect state cannot be established.
+
+Do not merge protected master into the candidate merely to make `behind_by=0`, do not regenerate
+byte-identical source on a new head for fresh timestamps, and do not create a replacement PR. Current
+integration checks, expected-head merge, effect reconciliation, post-merge readback and capability
+honesty remain mandatory.
+
+Apply
+`docs/superpowers/specs/2026-09-02-autonomy-release-compatibility-review-reuse.md`
+when this procedure is protected.
 
 ## Step 3 — Ask the Sol review questions
 
@@ -74,8 +133,8 @@ Prioritize:
 * production configuration or credentials smuggled into a hermetic wave;
 * required consumer missing despite infrastructure landing.
 
-Avoid expanding the review into unrelated cleanup. A real adjacent defect becomes a separate
-bounded follow-up unless it makes the current capability unsafe/false.
+Avoid expanding the review into unrelated cleanup. A real adjacent defect becomes a separate bounded
+follow-up unless it makes the current capability unsafe/false.
 
 ## Step 5 — Test claims with discriminating evidence
 
@@ -101,13 +160,13 @@ Use three practical classes:
 **BLOCKER** — violates architecture/authority/security/canonical truth or makes the promised
 capability false. Must repair before acceptance.
 
-**MAJOR / follow-up required** — capability can be correct but a material usability/operability
-issue needs its own bounded wave.
+**MAJOR / follow-up required** — capability can be correct but a material usability/operability issue
+needs its own bounded wave.
 
 **NONBLOCKING** — cleanup/clarity that does not change the promised outcome or authority.
 
-Do not turn every nit into a release block. Do not waive a constitutional boundary because the
-rest of the implementation is excellent.
+Do not turn every nit into a release block. Do not waive a constitutional boundary because the rest
+of the implementation is excellent.
 
 ## Step 7 — If requesting changes, bound the repair
 
@@ -127,16 +186,100 @@ Do not send the builder back to “rethink everything” unless the architecture
 
 Accept only when:
 
-* every blocker is closed on the exact current head;
-* required hosted CI/checks are green on that head;
+* every blocker is closed on the exact current semantic head;
+* required latest-base integration/hosted checks are green for that same semantic head;
 * the changed-file set and authority surface remain bounded;
 * production/browser/consumer proof exists when the wave owes it;
 * the capability ledger is updated truthfully;
 * no higher-priority accepted source law collided during review.
 
 A records-only architecture PR may be accepted without production proof when its contract says
-implementation is a later wave. An implementation PR may be `BUILT_NOT_PROVEN` when production
-proof is explicitly deferred. Preserve those distinctions.
+implementation is a later wave. An implementation PR may be `BUILT_NOT_PROVEN` when production proof
+is explicitly deferred. Preserve those distinctions.
+
+When Step 2A returns `REVIEW_REUSE_ALLOWED`, exact-current-head means the unchanged semantic head plus
+its passing current integration proof; it does not require an ancestry-only source-branch commit.
+When Step 2A returns `FULL_REREVIEW_REQUIRED`, review the new immutable semantic head before
+acceptance. When it returns `RELEASE_BLOCKED`, do not improvise around the missing evidence.
+
+### Step 8A — Source Continuity remote-complete and release-maintainer boundary
+
+`REMOTE_COMPLETE_VERIFIED is evidence, not terminality or writer-release authority`. It proves only
+the deterministic source identity encoded by the receipt. The `START`ed builder remains the source
+writer until Sol accepts the builder result, sends terminal STOP, the exact child source is removed
+(or `WATCH_STOP_FAILED` is recorded without reopening the child), and `BRANCH_WRITER_RELEASED` is
+established under the session-close law.
+
+After that release, an authorized owner may create a fresh maintenance-only release operation on the same PR/branch.
+That release maintainer is not a successor feature builder: it may perform only bounded current-base
+integration/release maintenance already authorized by Sol, must not edit feature semantics, and gains
+no automatic Ready, merge, deployment, runtime, lifecycle, retry, receiver-transfer, or production
+authority from `REMOTE_COMPLETE_VERIFIED` or writer release.
+
+Step 2A review-reuse classification remains controlling. If the reviewed semantic head and owned
+blobs remain unchanged and protected movement is proven non-material, classify
+`REVIEW_REUSE_ALLOWED` and refresh integration proof only. Any owned semantic blob change, material
+source/dependency/authority change, touched prior finding, or strengthened capability claim requires
+`FULL_REREVIEW_REQUIRED`. Unknown current-source, collision, integration, review, or effect state is
+`RELEASE_BLOCKED`. This preserves existing PR #404 review-reuse semantics rather than creating a
+second review or release rule.
+
+### Step 8B — Technical writer-gate evidence for same-PR release
+
+Before commissioning the maintenance-only release operation of Step 8A, read the technical writer gate
+for the exact PR branch with `scripts/source_continuity.py writer-gate` and cite its receipt digest. The
+observed state must be recorded in the release commission:
+
+* `TECHNICAL_WRITER_GATE_UNAVAILABLE` does not block a clean RCH-1 same-PR release; it records that
+  branch custody is procedural only, so the release maintainer's fresh exact-head
+  `REMOTE_COMPLETE_VERIFIED` re-proof is the sole stale-writer detection and any moved head/tree is
+  `RELEASE_BLOCKED` until reconciled. Checkpoint abandonment after writer loss (RCH-1A) is not available
+  on that branch.
+* `TECHNICAL_WRITER_GATE_ACTIVE` records that stale writers are technically fenced by GitHub and only the
+  accepted source-writer integration in `always` mode can mediate an expected-head update. Before
+  relying on this state, review the receipt's complete `rule_types`, `enforcing_ruleset_ids` and
+  `bypass_actors`: `lock_branch` and every other applicable mutation rule must preserve that same
+  mediation path; an unknown applicable rule is `UNKNOWN_APPLICABLE_RULE`; the accepted integration
+  in `pull_request` mode and every `exempt` or additional actor are `BYPASS_WIDENED`, never `ACTIVE`.
+  `rule_types` is the applicable census: only the inert `merge_queue`/`branch_name_pattern`/
+  `tag_name_pattern` types are excluded, so confirm the branch carries no other rule you expected to
+  see before relying on the state.
+* `legacy_branch_protected` is the branch's own classic branch-protection readback, not the ambiguous
+  branch summary flag. Classic protection is enforced alongside rulesets, so any present layer is
+  `LEGACY_PROTECTION_PRESENT` and `UNAVAILABLE` in V1 — the receipt does not model whether that layer
+  leaves the accepted integration an expected-head path. An unreadable or moved classic readback is a
+  refusal, never absence.
+
+The receipt is evidence only; neither state grants Ready, merge, fence, retry, receiver-transfer, or
+production authority, and neither weakens `EFFECT_UNKNOWN`, local-dirt, or exact-session stickiness.
+
+## Step 9 — Close or continue the reciprocal dialogue explicitly
+
+A worker return does not become terminal merely because Sol has enough information to continue
+CEO-only adjudication.
+
+After every watcher-enabled `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must post **exactly one
+explicit edge in the same lawful carrier/thread before leaving that dialogue turn**:
+
+### Nonterminal
+
+Use `SOL CONTINUE`, `SOL RULING / CONTINUE`, or `SOL REQUEST_REPAIR` (or the exact currently accepted
+semantic equivalent). Name the exact child operation, state the next action, and tell the worker to
+re-arm its watcher after its next nonterminal return.
+
+### Terminal
+
+Use `SOL STOP`, `SOL ACCEPTED / STOP`, or `SOL CLOSED / STOP`. State that the child wave is terminal,
+tell the worker to stop work and disarm its temporary watcher, state that no further reply is needed
+except any exact terminal consumption receipt required by current transport law or watcher shutdown
+failure, and state that this STOP authorizes no independent next wave.
+
+If final CEO review/merge/release work remains after the worker portion is complete, **STOP the worker
+child wave first** and conduct that CEO work outside the child operation. Never leave a worker on an
+armed watcher because “the next step is mine.”
+
+If watcher shutdown fails, report `WATCH_STOP_FAILED` (or current accepted equivalent), keep the
+child operation terminal, and never let the leftover watcher originate another continuation.
 
 ## Review-return output
 
@@ -144,17 +287,24 @@ State:
 
 ```text
 Verdict: PASS | REQUEST_CHANGES | HOLD | BLOCK
-Exact head reviewed
+Exact semantic head reviewed
+Current integration proof/base
+Review reuse classification
 Capability gained
 Blocking findings
 Nonblocking residue / separate follow-ups
 Proof reviewed
 What the merge would and would not make true
 Exact continuation action
+Dialogue edge: CONTINUE | STOP | NOT_WATCHER_ENABLED
+Watcher state: ARMED | DISARMED | WATCH_STOP_FAILED | NOT_APPLICABLE
 ```
 
 ## K1 pass criteria
 
-A fresh Sol reviewing a worker return must catch a technically green architecture violation,
-false completion, duplicate authority/policy implementation or missing real consumer without
-needing the original authoring session's hidden reasoning.
+A fresh Sol reviewing a worker return must catch a technically green architecture violation, false
+completion, duplicate authority/policy implementation or missing real consumer without needing the
+original authoring session's hidden reasoning. It must not repeat a semantic review solely because
+protected ancestry moved when review reuse is proven. For watcher-enabled returns, K1 also fails if
+Sol leaves the counterpart waiting without an explicit nonterminal continuation or terminal STOP
+edge.

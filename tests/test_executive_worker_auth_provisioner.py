@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import os
+import importlib.util
 import signal
 import stat
 import subprocess
 import time
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +83,50 @@ def test_enrollment_and_rotation_are_explicit_and_never_ready_by_themselves() ->
     assert "</dev/tty >/dev/tty 2>/dev/tty" in source
 
 
+def test_personal_pro_slot_is_catalog_derived_and_cannot_take_low_level_overrides() -> None:
+    source = _source()
+    assert "--slot-id" in source
+    assert "provider_worker_slots.py" in source
+    assert 'resolve_slot_field "worker_user"' in source
+    assert 'resolve_slot_field "worker_uid"' in source
+    assert 'resolve_slot_field "worker_gid"' in source
+    assert 'resolve_slot_field "provider_home"' in source
+    assert 'resolve_slot_field "readiness_receipt"' in source
+    assert 'resolve_slot_field "workspace_binding_class"' in source
+    assert 'resolve_slot_field "default_credential_kind"' in source
+    assert "slot identity cannot be combined with low-level identity/path overrides" in source
+    assert source.index("resolve_selected_slot") < source.index(
+        'case "$WORKER_UID" in'
+    )
+    assert "personal-pro-dedicated-worker-attested" not in source
+    assert "_mastermind_codex_01" not in source
+    assert "codex-pro-01/provider-home" not in source
+
+
+def test_selected_slot_is_bound_through_identity_readiness_and_canary() -> None:
+    source = _source()
+    ready = source.split('if [ "$VERIFY_READY" = "true" ]; then', 1)[1].split(
+        'if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ]; then', 1
+    )[0]
+    assert ready.count('--worker-uid "$WORKER_UID"') >= 5
+    assert ready.count('--worker-gid "$WORKER_GID"') >= 5
+    assert ready.count('--worker-user "$WORKER_USER"') == 2
+    assert ready.count('--worker-group "$WORKER_GROUP"') == 2
+    assert 'provider-inference-canary.sh" --slot-id "$SLOT_ID"' in ready
+    assert '--receipt "$READINESS_RECEIPT"' in ready
+    assert 'READINESS_RECEIPT="$(resolve_slot_field "readiness_receipt")"' in source
+
+
+def test_personal_pro_slot_operation_has_no_normal_mac_codex_path() -> None:
+    source = _source()
+    assert "/Users/chriswong/.codex" not in source
+    assert 'CODEX_HOME="$HOME/.codex"' not in source
+    assert 'CODEX_HOME="~/.codex"' not in source
+    assert 'HOME="$PROVIDER_HOME"' in source
+    assert 'CODEX_HOME="$PROVIDER_HOME"' in source
+    assert 'cd -- "$PROVIDER_HOME"' in source
+
+
 def test_verify_ready_is_identity_first_exactly_one_canary_and_replay_safe() -> None:
     source = _source()
     branch = source.split('if [ "$VERIFY_READY" = "true" ]; then', 1)[1].split(
@@ -128,6 +175,121 @@ def test_readiness_and_rotation_share_one_crash_durable_transaction_lock() -> No
     replacement = source.split("prepare_explicit_replacement() {", 1)[1].split("\n}", 1)[0]
     assert "invalidate_readiness_receipt" in replacement
     assert "run_codex_as_worker logout" in replacement
+
+
+def test_credential_mutation_requires_verified_disarm_before_any_effect() -> None:
+    source = _source()
+    gate = source.index("require_autonomy_disarmed_for_credential_mutation\nfi")
+    assert '"$SCRIPT_DIR/credential_rotation_interlock.py"' in source
+    assert gate < source.index("acquire_readiness_transaction_lock\nfi")
+    assert gate < source.index('if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ]; then')
+    assert gate < source.index('if [ "$ENROLL_PERSONAL_ACCESS_TOKEN" = "true" ]; then')
+    assert gate < source.index('if [ "$REAUTHORIZE_DEVICE" = "true" ]; then')
+    interlock = source.split(
+        "require_autonomy_disarmed_for_credential_mutation() {", 1
+    )[1].split("\n}", 1)[0]
+    assert "AUTH_PATH" not in interlock
+    assert "auth.json" not in interlock
+    assert "login" not in interlock
+    assert "logout" not in interlock
+
+
+def test_root_credential_interlock_uses_static_control_config_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = ROOT / "ops" / "executive_os" / "credential_rotation_interlock.py"
+    spec = importlib.util.spec_from_file_location("credential_rotation_interlock_root", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    control_path = tmp_path / "control.json"
+    worker_path = tmp_path / "worker.json"
+    receipt_path = tmp_path / "autonomy.json"
+    transaction_path = tmp_path / "transaction.lock"
+    calls: list[bool] = []
+
+    monkeypatch.setattr(module, "_require_safe_config", lambda _path: None)
+
+    def load_control(_path: Path, *, enforce_current_uid: bool):
+        calls.append(enforce_current_uid)
+        return {
+            "coo_autonomy_armed": False,
+            "coo_operator_harness_armed": False,
+        }
+
+    monkeypatch.setattr(module, "load_control_config", load_control)
+    monkeypatch.setattr(
+        module,
+        "load_worker_config",
+        lambda _path, *, require_root_owner: {"operator_harness_armed": False},
+    )
+
+    module.assert_credential_mutation_disarmed(
+        control_config=control_path,
+        worker_config=worker_path,
+        autonomy_receipt=receipt_path,
+        autonomy_transaction=transaction_path,
+    )
+    assert calls == [False]
+
+
+def test_static_control_config_validation_is_root_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import executive_os_phase1c as service_cli
+
+    monkeypatch.setattr(service_cli.os, "geteuid", lambda: 501)
+    with pytest.raises(service_cli.ServiceError, match="static control config validation requires root"):
+        service_cli.load_control_config(
+            tmp_path / "unread.json", enforce_current_uid=False
+        )
+
+
+def test_credential_interlock_pure_state_rejects_every_armed_or_mixed_bit() -> None:
+    path = ROOT / "ops" / "executive_os" / "credential_rotation_interlock.py"
+    spec = importlib.util.spec_from_file_location("credential_rotation_interlock", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    CredentialInterlockError = module.CredentialInterlockError
+    evaluate_credential_mutation_state = module.evaluate_credential_mutation_state
+
+    disarmed_control = {
+        "coo_autonomy_armed": False,
+        "coo_operator_harness_armed": False,
+    }
+    disarmed_worker = {"operator_harness_armed": False}
+    evaluate_credential_mutation_state(
+        disarmed_control,
+        disarmed_worker,
+        transaction_present=False,
+    )
+    cases = (
+        (
+            {**disarmed_control, "coo_autonomy_armed": True},
+            disarmed_worker,
+            False,
+        ),
+        (
+            {**disarmed_control, "coo_operator_harness_armed": True},
+            disarmed_worker,
+            False,
+        ),
+        (
+            disarmed_control,
+            {"operator_harness_armed": True},
+            False,
+        ),
+        (disarmed_control, disarmed_worker, True),
+    )
+    for control, worker, transaction_present in cases:
+        with pytest.raises(CredentialInterlockError):
+            evaluate_credential_mutation_state(
+                control,
+                worker,
+                transaction_present=transaction_present,
+            )
 
 
 def test_catchable_termination_preserves_lock_while_child_survives(tmp_path: Path) -> None:
@@ -185,6 +347,74 @@ wait "$child_pid"
                 os.kill(child_pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+def test_post_install_auth_operations_prefer_installed_binary_over_mutable_source() -> None:
+    source = _source()
+    selection = source.index('if [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ]; then')
+    assignment = source.index('CODEX_BINARY="$INSTALLED_CODEX_BINARY"', selection)
+    readiness_requires_install = source.index('elif [ "$VERIFY_READY" = "true" ]; then', assignment)
+    source_attestation = source.index('[ -f "$CODEX_BINARY" ]', readiness_requires_install)
+    ready_branch = source.index('if [ "$VERIFY_READY" = "true" ]; then', source_attestation)
+
+    assert selection < assignment < readiness_requires_install < source_attestation < ready_branch
+    assert 'mutable Homebrew enrollment source is' in source
+    assert 'credential rotation, Personal-Pro enrollment, --verify-only' in source
+    assert '--binary "$INSTALLED_CODEX_BINARY"' in source[ready_branch:]
+
+
+def test_installed_codex_path_uses_install_receipt_without_recopying_or_rehashing() -> None:
+    source = _source()
+    installed = source.split("# BEGIN installed Codex fast path", 1)[1].split(
+        "# END installed Codex fast path", 1
+    )[0]
+
+    assert "load_codex_attestation_receipt" in installed
+    assert 'CODEX_EXECUTABLE="$INSTALLED_CODEX_BINARY"' in installed
+    owner_binding = source.index('CODEX_ATTESTATION_OWNER_GID="$WORKER_GID"')
+    slot_gid_override = source.index('WORKER_GID="$(resolve_slot_field "worker_gid")"')
+    assert owner_binding < slot_gid_override
+    for required in (
+        'CODEX_ATTESTATION_RECEIPT',
+        'CODEX_ATTESTATION_OWNER_GID',
+        '"$CODEX_VERSION"',
+        '"$CODEX_TEAM_ID"',
+        '"$CODEX_SHA256"',
+    ):
+        assert required in installed
+    for forbidden in (
+        "mktemp",
+        "ditto",
+        "codesign",
+        "shasum",
+        "PINNED_CODEX_BINARY",
+        "run_codex_as_worker --version",
+    ):
+        assert forbidden not in installed
+
+    runner = source.split("run_codex_as_worker() {", 1)[1].split("\n}", 1)[0]
+    assert '"$CODEX_EXECUTABLE" "$@"' in runner
+    cleanup = source.split("cleanup() {", 1)[1].split("\n}", 1)[0]
+    assert "INSTALLED_CODEX_BINARY" not in cleanup
+    assert "CODEX_EXECUTABLE" not in cleanup
+
+
+def test_preinstall_codex_path_retains_full_staging_attestation() -> None:
+    source = _source()
+    staged = source.split("# BEGIN pre-install Codex staging path", 1)[1].split(
+        "# END pre-install Codex staging path", 1
+    )[0]
+
+    for required in (
+        'mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX"',
+        '/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"',
+        '/usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY"',
+        '/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY"',
+        '/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY"',
+        'CODEX_EXECUTABLE="$PINNED_CODEX_BINARY"',
+        'run_codex_as_worker --version',
+    ):
+        assert required in staged
 
 
 def test_metadata_pinning_and_login_status_remain_strict_and_non_disclosing() -> None:
@@ -264,4 +494,11 @@ def test_runbook_documents_one_canary_gate_and_company_admin_provenance() -> Non
     assert "--recover-readiness-transaction" in flat
     assert "Provider readiness is not Git handoff Gate B" in flat
     assert "git_handoff_preflight.py" in flat
+    assert "autonomy-control.sh" in flat
+    assert "ARMED_READY" in flat
+    assert "DISARMED" in flat
+    assert "--gate-b-receipt" in flat
+    assert "--expected-credential-kind" in flat
+    assert "--workspace-binding-class" in flat
+    assert "--credential-expires-at" in flat
     assert runbook.count("provider-inference-canary.sh") <= 1

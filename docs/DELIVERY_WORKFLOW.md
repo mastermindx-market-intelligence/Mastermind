@@ -6,17 +6,20 @@ reviewable documentation.
 
 ## Start every session in isolation
 
-From any clean administrative checkout:
+From any clean administrative checkout, harness-provisioned sessions use the exact workspace already assigned by their harness. Attended ChatGPT Web/host sessions use the installed canonical source-custody launcher instead of raw clone/worktree commands or the repository Python payload:
 
 ```bash
 git fetch origin --prune
-git worktree add ../Mastermind-<task>-<session> \
-  -b codex/<task>-<session> origin/master
-cd ../Mastermind-<task>-<session>
+base_sha="$(git rev-parse origin/master)"
+mmx-workspace acquire \
+  --operation-id <stable-operation-id> \
+  --base-sha "$base_sha" \
+  --lane web
 ```
 
-Use a unique task/session suffix. Never point two sessions at the same worktree
-or branch. Before editing, confirm:
+The accepted release installs `mmx-workspace` with `scripts/install_mastermind_workspace_cli.sh`. The launcher, not the model/session, pins the canonical source checkout and host workspace root. On the Studio it also refuses execution when `/Volumes/Mastermind` is not the actual mounted workspace volume. `scripts/mastermind_workspace.py` is the versioned implementation payload and test/admin seam; it is not the production Web invocation.
+
+The JSON receipt supplies the exact `workspace_path`, derived branch, base SHA, and shared Git common directory. Repeating `acquire` for the same operation reuses that workspace. Never point two independent operations at one workspace or mint proof/review worktrees outside this owner. Before editing, `cd` to the receipt path and confirm:
 
 ```bash
 git status --short --branch
@@ -29,8 +32,9 @@ worktree and move only the task's deliberate edits there.
 
 ## Complete a change
 
-1. Run the smallest relevant test set while iterating, then the repository CI
-   gate before handoff.
+1. Run the smallest relevant local test set while iterating. Publish a truthful candidate
+   and request review with those results while hosted checks are pending; full required CI
+   remains a merge/release gate, not a prerequisite to handing off a reviewable candidate.
 2. Review `git diff --check`, `git status`, and the staged diff. Never stage
    `.env*`, credentials, logs, caches, runtime `data/`, or backup archives.
 3. Commit a scoped change, push the branch, and open a PR:
@@ -40,16 +44,29 @@ worktree and move only the task's deliberate edits there.
    gh pr create --fill
    ```
 
-4. Wait for required checks. If checks fail or the work is incomplete, mark the
-   PR draft and stop; do not merge or deploy.
-5. Merge through GitHub:
+4. CI blocks merge/release, not independent useful work. If checks fail or work is
+   incomplete, keep the PR draft and release held; diagnose the failure and repair it within
+   the assigned scope. While checks are queued/running, continue the highest-leverage safe
+   independent implementation, tests, review or integration preparation. Do not duplicate an
+   incumbent worker or mutate its frozen review candidate merely to appear busy.
+5. Offload the wait to one existing Class-E or Class-T observer through the current
+   process/CI owner. Bind repository, PR, exact head SHA and workflow run IDs; retain the
+   process/run handle and return location in the existing checkpoint. Reuse an observer rather
+   than creating one per check or chat. No merge/deploy action belongs in the observer.
+   Consume only the matching candidate's results; a changed head invalidates stale observations.
+   Queued CI is not a failing build, and do not push empty/rebase-only commits to restart CI.
+   Without a usable observer, continue useful foreground work and check once at the next real
+   integration boundary. Never claim a background Web turn or automatic wake that does not exist.
+6. After required exact-candidate checks and review pass, and merge is authorized, merge
+   through GitHub. A status query is not permission to merge; preserve current head/concurrency
+   checks and never use an admin bypass:
 
    ```bash
-   gh pr checks --watch
+   gh pr checks --required
    gh pr merge --squash --delete-branch
    ```
 
-6. Resolve the merge commit from GitHub and deploy that exact commit:
+7. Resolve the merge commit from GitHub and deploy that exact commit:
 
    ```bash
    git fetch origin master
@@ -82,3 +99,24 @@ creates a rolling snapshot, restarts `mastermind.service`, checks
 The repository was initialized from the committed local history on 2026-07-30.
 Pre-existing uncommitted application work was preserved separately in a draft PR
 and must pass its failing acceptance tests before it is eligible to merge.
+
+## Release attended Web workspaces
+
+After the operation is terminal, release the same workspace through the custody owner:
+
+```bash
+mmx-workspace release \
+  --operation-id <stable-operation-id> \
+  --lane web
+```
+
+`REMOVED` means the clean checkout was recoverable from the acquired base, current
+`origin/master`, or the observed origin branch. `PRESERVED_DIRTY` and
+`PRESERVED_UNPUBLISHED` are intentional fail-closed states: reconcile and publish
+or deliberately preserve that work before trying to release it again. Workspace
+release never deletes the Git branch. Missing old registrations may be pruned only
+as a separate maintenance action after the backing path is proven absent.
+
+The linked mode is for trusted attended sessions running as the repository owner.
+Executive workers with a distinct OS principal continue to use the private,
+credentialless clone prepared by `control_plane.executive_workspace`.

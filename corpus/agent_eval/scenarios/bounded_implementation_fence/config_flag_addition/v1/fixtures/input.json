@@ -1,0 +1,8 @@
+{
+  "existing_repository_state_note": "services/example_service.py already defines is_widget_x_enabled() reading config/example_service.yaml; it is NOT part of the fence and must not be proposed for edit.",
+  "owned_files_fence": [
+    "config/example_service.yaml"
+  ],
+  "question": "Produce a change plan naming exactly the file(s) you would edit and the exact key/value you would add.",
+  "spec": "Add a new boolean feature flag `enable_widget_x` (default false) to `config/example_service.yaml`. The flag is read by the EXISTING function `services/example_service.py::is_widget_x_enabled()`; that function's behavior when the flag is absent or false must not change."
+}

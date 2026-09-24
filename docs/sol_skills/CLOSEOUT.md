@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.0
+skillpack_version: 1.0.1
 minimum_bootstrap_major: 1
 skill: closeout
 ---
@@ -13,9 +13,14 @@ reconciliation or operator handoff.
 ## Mission
 
 Leave the company in a state where a **brand-new Sol session can recover what became true,
-what remains false, and the exact next action without this chat**.
+what remains false, and the exact next action without this chat**, while leaving no watcher-enabled
+counterpart indefinitely waiting for an inferred terminal state.
 
-Closeout is not paperwork after the real work. Cross-session recoverability is part of the product.
+Closeout is not paperwork after the real work. Cross-session recoverability and clean dialogue
+termination are part of the product.
+
+Apply `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` whenever a worker/COO/session counterpart is or
+may still be on a reciprocal watch/wait path.
 
 ## Step 1 — State the capability delta
 
@@ -117,10 +122,13 @@ Common Mastermind examples:
 
 ## Step 7 — Create the continuation handoff
 
-A substantive handoff should let the next session answer immediately:
+A substantive handoff must declare whether the parent mission is complete rather than assuming it.
+Use the current ACTIVE_EXECUTION finalization classification when that procedure applies.
 
 ```text
-mission just completed
+FINALIZATION_CLASSIFICATION: <current permitted class>
+MISSION_COMPLETE: true | false
+mission / bounded outcome at this boundary
 state before
 what changed
 what was verified
@@ -131,7 +139,31 @@ do-not-redo laws
 return point / highest-authority sources
 ```
 
+For `CHECKPOINTED_CONTINUATION`, `MISSION_COMPLETE` must be `false`; the handoff describes the
+verified incomplete boundary and continuation, never "mission just completed". For a truly completed
+parent mission, `MISSION_COMPLETE: true` is allowed only when the declared completion/proof law is
+actually satisfied. A bounded child or research assignment may be complete while its parent mission
+remains false; state both scopes explicitly when material.
+
 Use exact PR/SHA/MAS/WS identities. Do not paste private reasoning or secrets.
+
+## Step 7A — Verify the cumulative continuation boundary
+
+For CHECKPOINTED_CONTINUATION, consume ACTIVE_EXECUTION as the sole finalization owner. Leave one
+current cumulative checkpoint under the existing Agent OS/Runtime/artifact owners with a verified persistence receipt/readback,
+exact committed revision/digest, mission explicitly incomplete, justified boundary, next action and
+intended resume surface. A chat-only or local scratch note is not a durable checkpoint. Preserve
+accepted work, rejected approaches, material hypotheses/falsifiers and all effects through this boundary.
+
+A working snapshot is not an immutable transfer capsule. Existing owner versioning/fencing governs
+updates; a prepared capsule for a target Attempt is not repeatedly overwritten. Do not create a second
+latest-state directory, checkpoint table, lifecycle or authoritative Google Drive mirror.
+
+If persistence is ambiguous, preserve EFFECT_UNKNOWN on the same write carrier and reconcile that
+object/revision before any retry. A surviving older checkpoint does not prove a newer write failed.
+No fresh chat inherits execution custody, and no resume pointer proves an automatic wake. Missing
+persistent access requires an honest emergency note and actual platform/gate classification, not a
+false verified checkpoint or parent completion. Project rollout follows protected source acceptance.
 
 ## Step 8 — Reconcile projections and transport
 
@@ -145,7 +177,30 @@ Before declaring closeout complete:
 
 Fix the projection, not the underlying truth, when the projection is wrong.
 
-## Step 9 — Protect future cold starts
+## Step 9 — Close every reciprocal watcher cycle explicitly
+
+Before Sol or a worker session considers the current dialogue/child wave finished, answer:
+
+* Is the latest dialogue state explicitly terminal or nonterminal?
+* If nonterminal, did the counterpart receive the exact next action and continuation instruction?
+* If terminal, did the counterpart receive explicit `STOP`, `ACCEPTED / STOP`, or `CLOSED / STOP`?
+* Did the terminal message tell the counterpart to stop work and disarm its temporary watcher?
+* Did this side disarm its own temporary watcher, or explicitly report `WATCH_STOP_FAILED` / the
+  current accepted equivalent?
+* Is any operator still saying or semantically indicating “awaiting your ruling/return”?
+* Is an old watcher/thread/session accidentally being used to bridge into a new independent wave?
+
+If any answer is unresolved, the watcher-enabled dialogue is **not cleanly closed** even if the
+worker's implementation portion is complete.
+
+If worker work is terminal but Sol still owes final CEO adjudication, send terminal STOP to the
+worker first, then continue CEO-only work outside that child operation.
+
+A parent program may remain active while a child operation is terminal. Any independent next child
+operation requires fresh lawful operation identity, carrier reconciliation, commission/pickup and
+reciprocal continuation setup; old watcher state grants no authority.
+
+## Step 10 — Protect future cold starts
 
 Ask:
 
@@ -157,7 +212,7 @@ put it in the appropriate durable source before closing.
 
 Do not solve the question by expanding the Skillpack with live company state.
 
-## Step 10 — State the next action precisely
+## Step 11 — State the next action precisely
 
 End with exactly one primary continuation action and its gate, plus any independent parallel work.
 
@@ -177,12 +232,15 @@ Skillpack.
 ## Closeout output
 
 ```text
+FINALIZATION_CLASSIFICATION
+MISSION_COMPLETE: true | false
 Capability delta
 Final capability state
 Canonical receipts
 Production proof status
 Durable records updated
 Projection/transport repairs
+Dialogue edge / watcher shutdown state
 Unresolveds / falsifiers
 Exact next action
 Independent parallel actions
@@ -191,5 +249,6 @@ Independent parallel actions
 ## K4 pass criteria
 
 A fresh session can recover the accepted result, its evidence, its limits and the exact continuation
-without chat archaeology, and no canonical/projection layer was advanced beyond what the evidence
-supports.
+without chat archaeology, no canonical/projection layer was advanced beyond what the evidence
+supports, and no watcher-enabled counterpart was left waiting on silence after a terminal or
+nonterminal return.

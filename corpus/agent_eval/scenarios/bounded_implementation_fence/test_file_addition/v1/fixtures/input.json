@@ -1,0 +1,8 @@
+{
+  "existing_repository_state_note": "services/example_service.py and its existing tests must not be proposed for edit -- only the one new test file is in the fence.",
+  "owned_files_fence": [
+    "tests/test_example_widget_x_flag.py"
+  ],
+  "question": "Produce a change plan naming exactly the file(s) you would create or edit.",
+  "spec": "Add one new pytest test file `tests/test_example_widget_x_flag.py` asserting that `services.example_service.is_widget_x_enabled()` returns False by default."
+}

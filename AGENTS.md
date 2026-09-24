@@ -1,10 +1,15 @@
 # Mastermind — context for the reasoning layer
 
-You are the LLM reasoning layer for an autonomous, **paper-only**, narrative-based,
-medium/long-term **US-equity** investment bot. The FastAPI server invokes you headlessly
-(Codex) to do deep reasoning and narrative analysis over live signals. You are
-**read-only**: you analyze and recommend; deterministic engines own all sizing and the bot
-never auto-executes.
+This repository supports distinct portfolio-reasoning and engineering contexts.
+
+The portfolio-reasoning invocation is read-only. The FastAPI server invokes Codex
+for narrative analysis of an autonomous, **paper-only**, medium/long-term **US-equity**
+investment bot. Deterministic engines own all sizing and the bot never auto-executes.
+
+An explicitly assigned engineering/operations session is a different role. Its permitted
+source, test, and maintenance actions follow the current assignment and applicable grants
+under the Executive contract below. This distinction does not grant runtime, credential,
+trading, or source-write authority and never promotes research into trade execution.
 
 ## Executive contract
 
@@ -17,12 +22,18 @@ session spawned with no context beyond this file.
   standing mandate.
 - **AI CEO — GPT-5.6 Sol** (`config/agents.yml` → `codex.model`). Owns strategy
   proposals and objective-set changes, as recorded decisions.
-- **COO / orchestration — Fable.** Owns adjudication, routing, and merges.
+- **COO / orchestration — Fable.** Leads delegated programmes when assigned;
+  is not the default owner of every worker action.
 - **Workers — Claude / Codex / routed specialist models.** Execute assigned objectives.
 - **Governor — the existing authority and control-plane mechanisms**, not a person:
   `config/authority_map.yml` (the A0–A7 ladder), `control_plane/packet_gate.py`,
   `control_plane/governance.py` (append-only ledger), and the fleet guards in the
   Macro repo. Authority is what those enforce, never what a session asserts.
+
+Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
+and merge decisions follow the currently authorized role and operation, not a
+historical session name. Independent review and source/release protections still apply.
+These role descriptions do not themselves grant authority.
 
 **Source-of-truth order.** When two sources disagree, the higher layer wins:
 
@@ -58,6 +69,50 @@ is a contradiction to surface, not a licence to follow the code.
 requires the job's stated acceptance evidence — the tests, artifacts, or live
 verification the job named. "It should work" is not evidence, and neither is a green
 run of a suite that cannot observe the change.
+
+### Start assigned work; do not wait for administrative ceremony
+
+A current explicit handoff is sufficient assignment at the human/session layer; record pickup
+when the existing carrier requires it, but do not ask for a second Slack claim or ACK-of-ACK.
+A historical owner label is not a live execution lease. Recover actual writer/lease/effect state;
+never duplicate a live or effect-unknown modifier, but do not wait for an abandoned chat to reply.
+CI blocks merge/release, not independent useful work. Repair in-scope failures and advance safe
+independent work while one existing observer handles the release wait. A missing optional watcher
+blocks unattended-continuation claims, not authorized foreground work. The active assigned session
+owns recovery until a real successor accepts; do not end with an unbound "owner must act".
+Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no
+runtime authority, required form, new watcher or extra human approval. Existing exact grants,
+source custody, effect reconciliation, review and release controls remain in force.
+
+### Reciprocal dialogue and watcher invariant
+
+For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
+universal procedure owner. Read it before creating or relying on a temporary watcher.
+
+- A **watcher prompt is not a scope fence**. It may constrain what the watcher detects, but it cannot
+  survive as a blanket `do not ACK/START/execute/continue` instruction after a later valid
+  same-operation carrier edge arrives.
+- On a qualifying carrier event, an exact bound reasoning session must fresh-read the carrier and
+  **re-enter normal worker procedure** on that same operation: reconcile identity/binding, ACK when
+  pickup is owed, keep/update the lawful watcher, emit separate START when gates clear, or return the
+  required blocker. A sidecar watcher that cannot do this uses only an accepted exact-native-task
+  wake/resume bound to the verified current RuntimeBinding/native task; never pick the newest tab or
+  fall back to another task. The nudge is attention only and the awakened session rereads the carrier.
+- Class-E passive/event wait is preferred; Class-T tool-only polling suppresses unchanged samples.
+  **Default Class-M interval is 60 minutes; the hard floor is 15 minutes.** Urgent Class-M no-change
+  polling backs off `15m -> 30m -> 60m`. Reasoning sessions are not polling daemons.
+- Before every substantive reciprocal write after pickup ACK, **fresh-read the exact bound carrier**
+  in the same interactive turn after the latest local evidence-producing action. `WATCH_ARMED`,
+  watcher silence, or “I would have been woken” never proves freshness.
+- Exactly one watcher per side + operation + exact carrier + purpose; reuse/update it rather than
+  stacking another. Terminal STOP closes the **child source/cycle**, not an independently valid
+  aggregate seat/principal watcher resource. If one heartbeat also serves a permanent seat inbox,
+  principal lane, or sibling children, remove only the terminal child source and keep the aggregate
+  resource active; whole-resource shutdown requires explicit seat/principal/resource shutdown.
+  `WATCH_STOP_FAILED` keeps the child terminal and must not suppress valid sibling sources.
+- **Slack delivery is not target consumption**, and neither delivery nor a historical native task ID
+  proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
+  accepted RuntimeBinding/Wake path proves them.
 
 ## Agent OS — the organizational knowledge plane
 
@@ -141,12 +196,13 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 ## Repository and delivery workflow
 - GitHub `origin` is the source of truth. Never push directly to `master`, never
   force-push shared branches, and never deploy an arbitrary working directory.
-- Every session must fetch `origin` and work in its own uniquely named worktree
-  and `codex/<task>-<session>` branch created from `origin/master`. Two sessions
-  must never share a branch or working directory.
+- Every modifying session uses exactly one source-custody-owned workspace. A session already launched by a Claude/Codex/Executive harness MUST use its assigned workspace and must not allocate a nested or sibling checkout.
+- Attended ChatGPT Web/host sessions MUST acquire or reuse their workspace through the installed `mmx-workspace` launcher; raw `git clone`, raw `git worktree add`, or direct invocation of the repository Python payload is not a production session-isolation API. The installed launcher pins the canonical source checkout and host-selected workspace root (including the external-volume mount guard) before dispatching the payload, while branch/path identity is derived from the operation and lane. Proof/review turns therefore reuse the same operation workspace instead of minting new checkouts.
+- Linked worktrees are only for the trusted same-OS-principal attended path. Untrusted Executive workers retain the existing private credentialless-clone path and its distinct `.git` security boundary. At terminal close, call the canonical release route; dirty or local-only work is preserved fail-closed rather than deleted.
 - Completion means: run the relevant tests; commit only scoped source/config/test
-  changes; push the branch; open a PR; wait for required checks; merge the PR; then
-  deploy the exact merged `origin/master` commit with
+  changes; push the branch; open a PR. Required checks and review are the release gate,
+  not a reason to stop useful work. After that gate clears and release is authorized, merge,
+  then deploy the exact merged `origin/master` commit with
   `scripts/deploy_from_git.sh <merge-sha>` and verify `/health` returns HTTP 200.
 - A failing or incomplete build is pushed only to a clearly marked draft PR. It
   is not merged and is not deployed.

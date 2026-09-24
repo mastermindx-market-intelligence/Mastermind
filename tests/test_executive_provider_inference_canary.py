@@ -102,6 +102,95 @@ def test_timeout_fails() -> None:
     assert classified["terminal_event_class"] == "timeout"
 
 
+@pytest.mark.parametrize(
+    ("event", "expected_class", "raw_marker"),
+    [
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Output schema is not supported for this request marker-schema-raw"},
+            },
+            "provider_output_schema_unsupported",
+            "marker-schema-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Rate limit exceeded for request marker-rate-raw"},
+            },
+            "provider_rate_limited",
+            "marker-rate-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "This plan does not support Codex usage marker-plan-raw"},
+            },
+            "provider_entitlement_denied",
+            "marker-plan-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Model gpt-test is not available marker-model-raw"},
+            },
+            "provider_model_unavailable",
+            "marker-model-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Unauthorized token sk-abcdefghijklmnopqrstuvwxyz012345 for user@example.com marker-auth-raw"},
+            },
+            "provider_auth_failed",
+            "marker-auth-raw",
+        ),
+        (
+            {
+                "type": "turn.failed",
+                "error": {"message": "Opaque provider failure marker-unknown-raw"},
+            },
+            "provider_turn_failed",
+            "marker-unknown-raw",
+        ),
+        (
+            {
+                "type": "error",
+                "message": "Opaque stream failure marker-stream-raw",
+            },
+            "provider_stream_error",
+            "marker-stream-raw",
+        ),
+    ],
+)
+def test_provider_failure_is_allowlisted_without_retaining_raw_message(
+    event: dict[str, object], expected_class: str, raw_marker: str
+) -> None:
+    stdout = (
+        json.dumps({"type": "thread.started", "thread_id": "t1"}).encode("utf-8")
+        + b"\n"
+        + json.dumps(event).encode("utf-8")
+        + b"\n"
+    )
+    classified = canary.classify_provider_streams(
+        stdout=stdout,
+        stderr=b"",
+        result=None,
+        exit_code=1,
+        timed_out=False,
+    )
+    readiness = canary.evaluate_provider_preflight(
+        login_status_ok=True, canary=classified
+    )
+    encoded = json.dumps(classified)
+    assert classified["terminal_event_class"] == expected_class
+    assert classified["passed"] is False
+    assert readiness["refusal"] == expected_class
+    assert raw_marker not in encoded
+    assert "sk-" not in encoded
+    assert "example.com" not in encoded
+
+
 def test_successful_terminal_turn_and_valid_inert_result_passes(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.provider_home.mkdir()
@@ -240,6 +329,9 @@ def test_canary_script_is_executable_and_syntax_valid() -> None:
         line for line in source.splitlines() if "provider_inference_canary.py" in line
     )
     assert '"$@"' not in source
+    assert "--slot-id" in source
+    for slot_id in ("codex-01", "codex-pro-01", "codex-pro-02", "codex-pro-03"):
+        assert slot_id in source
     assert "--probe-root" not in python_line
     assert "--operator-home" not in python_line
     assert "--receipt-path" not in python_line
@@ -285,6 +377,7 @@ def test_live_cli_rejects_path_overrides_including_duplicates(tmp_path: Path) ->
     assert "probe_root" not in dests
     assert "receipt_path" not in dests
     assert "operator_home" not in dests
+    assert "slot_id" in dests
     for argv in argv_sets:
         with pytest.raises(canary.ProviderCanaryError) as rejected:
             canary.reject_live_path_options(argv)
@@ -293,6 +386,70 @@ def test_live_cli_rejects_path_overrides_including_duplicates(tmp_path: Path) ->
             canary.main(argv)
     assert db.read_bytes() == b"KEEP"
     assert not db.with_name("receipt.json").exists()
+
+
+def test_production_config_is_derived_from_exact_worker_slot() -> None:
+    company = canary.production_config(
+        probe_root=Path("/private/tmp/company"),
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id="codex-01",
+    )
+    first = canary.production_config(
+        probe_root=Path("/private/tmp/pro-01"),
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id="codex-pro-01",
+    )
+    third = canary.production_config(
+        probe_root=Path("/private/tmp/pro-03"),
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id="codex-pro-03",
+    )
+    assert (company.worker_user, company.worker_uid, company.worker_gid) == (
+        "_mastermind_worker",
+        451,
+        451,
+    )
+    assert (first.worker_user, first.worker_uid, first.worker_gid) == (
+        "_mastermind_codex_01",
+        454,
+        454,
+    )
+    assert (third.worker_user, third.worker_uid, third.worker_gid) == (
+        "_mastermind_codex_03",
+        456,
+        456,
+    )
+    assert str(first.provider_home).endswith(
+        "/workers/codex-pro-01/provider-home"
+    )
+    assert first.provider_home != company.provider_home != third.provider_home
+
+
+def test_one_slot_invocation_contains_no_other_slot_home(tmp_path: Path) -> None:
+    config = dataclasses.replace(
+        _config(tmp_path),
+        worker_user="_mastermind_codex_02",
+        worker_uid=455,
+        worker_gid=455,
+        provider_home=Path(
+            "/var/db/mastermind-executive/workers/codex-pro-02/provider-home"
+        ),
+    )
+    invocation = canary.prepare_probe(config)
+    rendered = json.dumps(invocation.env) + " ".join(invocation.argv)
+    assert "codex-pro-02/provider-home" in rendered
+    assert "codex-pro-01/provider-home" not in rendered
+    assert "codex-pro-03/provider-home" not in rendered
+
+
+def test_unknown_slot_has_no_legacy_fallback() -> None:
+    with pytest.raises(canary.ProviderCanaryError) as refused:
+        canary.production_config(
+            probe_root=Path("/private/tmp/unknown"),
+            operator_home=canary.LIVE_OPERATOR_HOME,
+            slot_id="codex-pro-99",
+        )
+    assert refused.value.code == "configuration_invalid"
 
 
 def test_receipt_persistence_cannot_target_executive_or_operator_paths(

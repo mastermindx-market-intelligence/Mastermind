@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
+import re
 import signal
 import stat
+import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Mapping
 
 _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
@@ -25,6 +28,27 @@ from control_plane.codex_worker import (
     CodexWorkerAdapter,
     load_codex_attestation_receipt,
 )
+from control_plane.codex_provider_realm import (
+    REVIEWED_CODEX_PROVIDER_REALMS,
+    CodexProviderRealm,
+    provider_home_credential_loader,
+)
+from control_plane.codex_operator_adapter import CodexOperatorAdapter
+from control_plane.executive_autonomy import (
+    AutonomyRefusal,
+    sha256_file,
+    validate_runtime_guard_file,
+)
+from control_plane.executive_agent_capabilities import (
+    CapabilityPolicyError,
+    ExecutionCapabilityRegistry,
+)
+from control_plane.executive_canary import (
+    PrincipalIdentity,
+    SecretCanaryConfig,
+    SecretCanaryError,
+    run_secret_canary,
+)
 from control_plane.executive_worker_broker import (
     BrokerPolicy,
     DedicatedUIDSweeper,
@@ -33,9 +57,20 @@ from control_plane.executive_worker_broker import (
     activate_launchd_socket,
 )
 from control_plane.executive_ambient_process import DarwinDistnotedClassifier
+from control_plane.subscription_harness_bindings import (
+    HarnessBindingError,
+    SubscriptionHarnessBinding,
+    get_binding,
+)
+from control_plane.worker_adapter import adapter_descriptor
+from control_plane.worker_browser_b1 import BrowserGenerationResource
 
 
-CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v3"
+CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v4"
+SUBSCRIPTION_CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v5"
+AUTONOMY_RECEIPT = Path(
+    "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
+)
 _OPENAI_TEAM_IDENTIFIER = "2DC432GLL2"
 _REVIEWED_AMBIENT_GID_SETS = (
     frozenset({12, 61, 100}),
@@ -60,7 +95,42 @@ _CONFIG_FIELDS = frozenset(
         "launchd_socket_name",
         "uid_sweep_receipt",
         "require_secret_canary",
+        "operator_harness_armed",
     }
+)
+_SUBSCRIPTION_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({"harness_binding_id"})
+_CONTROL_ENV_ATTESTATION_FIELDS = frozenset(
+    {
+        "schema_version",
+        "observed_at",
+        "process_identity",
+        "config_sha256",
+        "release_manifest_sha256",
+        "release_commit_sha",
+        "python_executable_path",
+        "python_executable_sha256",
+        "sentinel_name_sha256",
+        "sentinel_value_sha256",
+        "sentinel_present",
+    }
+)
+_CONTROL_PROCESS_IDENTITY_FIELDS = frozenset(
+    {
+        "pid",
+        "pgid",
+        "session_id",
+        "start_identity",
+        "boot_id",
+        "effective_uid",
+        "effective_gid",
+        "real_uid",
+        "real_gid",
+    }
+)
+_CONTROL_ENV_SENTINEL = "EXECUTIVE_CONTROL_CANARY_VALUE"
+_CONTROL_LABEL = "com.mastermind.executive.control"
+_SECRET_CANARY_ENVELOPE_SCHEMA_VERSION = (
+    "mastermind.executive_secret_canary_envelope/v1"
 )
 
 
@@ -84,10 +154,17 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         value = json.loads(raw.decode("utf-8", errors="strict"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise WorkerConfigError("worker config is not valid UTF-8 JSON") from exc
-    if not isinstance(value, dict) or set(value) != _CONFIG_FIELDS:
+    if not isinstance(value, dict):
         raise WorkerConfigError("worker config fields do not match the schema")
-    if value.get("schema_version") != CONFIG_SCHEMA_VERSION:
+    schema_version = value.get("schema_version")
+    if schema_version == CONFIG_SCHEMA_VERSION:
+        expected_fields = _CONFIG_FIELDS
+    elif schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
+        expected_fields = _SUBSCRIPTION_CONFIG_FIELDS
+    else:
         raise WorkerConfigError("worker config schema version is unsupported")
+    if set(value) != expected_fields:
+        raise WorkerConfigError("worker config fields do not match the schema")
     versions = value.get("allowed_codex_versions")
     if (
         not isinstance(versions, list)
@@ -111,6 +188,14 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         raise WorkerConfigError("the worker config must require the reviewed OpenAI team")
     if value.get("require_secret_canary") is not True:
         raise WorkerConfigError("production worker config must require the secret canary")
+    if not isinstance(value.get("operator_harness_armed"), bool):
+        raise WorkerConfigError("operator_harness_armed must be boolean")
+    if schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
+        binding = _resolve_subscription_binding(value.get("harness_binding_id"))
+        if value["operator_harness_armed"] is not False:
+            raise WorkerConfigError("subscription Codex workers cannot arm the operator harness")
+        if binding.implementation_state == "SPEC_ONLY":
+            raise WorkerConfigError("subscription harness binding is not implemented")
     allowed_groups = value.get("allowed_supplementary_gids")
     if (
         not isinstance(allowed_groups, list)
@@ -124,7 +209,273 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
     return value
 
 
-def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
+def _resolve_subscription_binding(value: Any) -> SubscriptionHarnessBinding:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise WorkerConfigError("subscription harness binding id is invalid")
+    try:
+        binding = get_binding(value)
+        descriptor = adapter_descriptor(binding.adapter_id)
+    except (HarnessBindingError, ValueError) as exc:
+        raise WorkerConfigError("subscription harness binding is not reviewed") from exc
+    if binding.adapter_id != "codex-cli" or not descriptor.implemented:
+        raise WorkerConfigError("subscription harness binding is not implemented by Codex")
+    wire_api = binding.protocol
+    matches = tuple(
+        realm
+        for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
+        if realm.provider_alias == binding.provider
+        and realm.base_url == binding.effective_base_url
+        and realm.wire_api == wire_api
+    )
+    if len(matches) != 1:
+        raise WorkerConfigError("subscription harness binding has no exact reviewed realm")
+    return binding
+
+
+def _resolve_subscription_realm(
+    binding: SubscriptionHarnessBinding,
+) -> CodexProviderRealm:
+    wire_api = binding.protocol
+    matches = tuple(
+        realm
+        for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
+        if realm.provider_alias == binding.provider
+        and realm.base_url == binding.effective_base_url
+        and realm.wire_api == wire_api
+    )
+    if len(matches) != 1:
+        raise WorkerConfigError("subscription harness binding has no exact reviewed realm")
+    return matches[0]
+
+
+def _subscription_binding_for_config(
+    config: Mapping[str, Any],
+) -> SubscriptionHarnessBinding | None:
+    if config.get("schema_version") != SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
+        return None
+    return _resolve_subscription_binding(config.get("harness_binding_id"))
+
+
+def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
+    binding = _subscription_binding_for_config(config)
+    if binding is None:
+        return
+    if binding.implementation_state != "PROVEN_LIVE" or not binding.autonomous_allowed:
+        raise WorkerConfigError("subscription harness binding is not armed for autonomous service")
+
+
+def _canonical_sha256(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _run_environment_probe(argv: list[str]) -> Mapping[str, Any]:
+    completed = subprocess.run(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        timeout=20,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"},
+    )
+    if len(completed.stdout) > 256 * 1024 or len(completed.stderr) > 64 * 1024:
+        raise WorkerConfigError("autonomy environment probe output exceeds the bound")
+    if completed.returncode != 0:
+        raise WorkerConfigError("autonomy environment probe refused")
+    try:
+        value = json.loads(completed.stdout.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WorkerConfigError("autonomy environment probe returned invalid JSON") from exc
+    if not isinstance(value, dict):
+        raise WorkerConfigError("autonomy environment probe returned no object")
+    return value
+
+
+def _build_autonomy_canary_factory(
+    config: Mapping[str, Any],
+    *,
+    release_root: Path = _ROOT,
+    environment_probe_runner: Callable[[list[str]], Mapping[str, Any]] = (
+        _run_environment_probe
+    ),
+    secret_canary_runner: Callable[[SecretCanaryConfig], Mapping[str, Any]] = (
+        run_secret_canary
+    ),
+) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
+    """Bind boot re-attestation to fixed installed paths and no provider call."""
+
+    workspace_root = Path(str(config["workspace_root"])).resolve(strict=True)
+    run_root = Path(str(config["run_root"])).resolve(strict=True)
+    provider_home = Path(str(config["provider_home"])).resolve(strict=True)
+    runtime_root = workspace_root.parents[1]
+    worker_id = str(config["worker_id"])
+    if (
+        workspace_root != runtime_root / "jobs" / "workspaces"
+        or run_root != runtime_root / "jobs" / "runs"
+        or provider_home
+        != runtime_root / "workers" / worker_id / "provider-home"
+    ):
+        raise WorkerConfigError("armed worker paths do not match the fixed host layout")
+    release_root = Path(release_root).resolve(strict=True)
+    release_sha = release_root.name
+    manifest = release_root / ".executive-release-manifest.json"
+    if (
+        re.fullmatch(r"[0-9a-f]{40}", release_sha) is None
+        or not manifest.is_file()
+    ):
+        raise WorkerConfigError("armed worker release identity is unavailable")
+    manifest_sha256 = sha256_file(manifest)
+    probe_script = release_root / "scripts" / "executive_os_phase1c_env_probe.py"
+    if not probe_script.is_file():
+        raise WorkerConfigError("autonomy environment probe is unavailable")
+
+    def issue(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        if set(payload) != {"control_environment_attestation"}:
+            raise WorkerConfigError("autonomy canary request fields differ")
+        attestation = payload.get("control_environment_attestation")
+        if (
+            not isinstance(attestation, Mapping)
+            or set(attestation) != _CONTROL_ENV_ATTESTATION_FIELDS
+            or attestation.get("schema_version")
+            != "mastermind.executive_control_environment_attestation/v1"
+            or attestation.get("sentinel_present") is not True
+            or attestation.get("release_commit_sha") != release_sha
+            or attestation.get("release_manifest_sha256") != manifest_sha256
+            or attestation.get("sentinel_name_sha256")
+            != hashlib.sha256(_CONTROL_ENV_SENTINEL.encode()).hexdigest()
+        ):
+            raise WorkerConfigError("control environment attestation differs")
+        identity = attestation.get("process_identity")
+        digest_fields = (
+            "config_sha256",
+            "python_executable_sha256",
+            "sentinel_value_sha256",
+        )
+        if (
+            not isinstance(identity, Mapping)
+            or set(identity) != _CONTROL_PROCESS_IDENTITY_FIELDS
+            or any(
+                type(identity.get(field)) is not int
+                for field in (
+                    "pid",
+                    "pgid",
+                    "session_id",
+                    "effective_uid",
+                    "effective_gid",
+                    "real_uid",
+                    "real_gid",
+                )
+            )
+            or any(
+                not isinstance(identity.get(field), str) or not identity[field]
+                for field in ("start_identity", "boot_id")
+            )
+            or int(identity["pid"]) <= 1
+            or int(identity["effective_uid"]) != int(config["control_uid"])
+            or int(identity["real_uid"]) != int(config["control_uid"])
+            or int(identity["effective_gid"]) <= 0
+            or int(identity["real_gid"]) != int(identity["effective_gid"])
+            or any(
+                not isinstance(attestation.get(field), str)
+                or re.fullmatch(r"[0-9a-f]{64}", str(attestation[field])) is None
+                for field in digest_fields
+            )
+        ):
+            raise WorkerConfigError("control environment process identity differs")
+        environment_probe = dict(
+            environment_probe_runner(
+                [
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    "-B",
+                    os.fspath(probe_script),
+                    "--pid",
+                    str(identity["pid"]),
+                    "--label",
+                    _CONTROL_LABEL,
+                    "--sentinel-name",
+                    _CONTROL_ENV_SENTINEL,
+                    "--sentinel-value-sha256",
+                    str(attestation["sentinel_value_sha256"]),
+                    "--config-sha256",
+                    str(attestation["config_sha256"]),
+                    "--release-manifest-sha256",
+                    manifest_sha256,
+                    "--control-process-identity-json",
+                    json.dumps(
+                        dict(identity),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    ),
+                    "--expected-worker-uid",
+                    str(config["worker_uid"]),
+                    "--expected-worker-gid",
+                    str(config["worker_gid"]),
+                ]
+            )
+        )
+        environment_probe_sha256 = _canonical_sha256(environment_probe)
+        canary_config = SecretCanaryConfig(
+            expected_worker_uid=int(config["worker_uid"]),
+            expected_worker_gid=int(config["worker_gid"]),
+            control_uid=int(config["control_uid"]),
+            control_gid=int(identity["effective_gid"]),
+            control_environment_sentinel=_CONTROL_ENV_SENTINEL,
+            control_environment_probe_sha256=environment_probe_sha256,
+            administrative_checkout_sentinel=(
+                runtime_root
+                / "control"
+                / "admin-checkout"
+                / release_sha
+                / ".git"
+                / "executive-secret-canary"
+            ),
+            executive_database=(
+                runtime_root
+                / "control"
+                / "db"
+                / "data"
+                / "control_plane"
+                / "executive.sqlite3"
+            ),
+            other_worker_home_sentinel=(
+                runtime_root / "canary-fixtures" / "other-worker-home" / "sentinel"
+            ),
+            forbidden_production_sentinel=(
+                runtime_root / "canary-fixtures" / "production-like" / "sentinel"
+            ),
+            codex_home=provider_home,
+        )
+        try:
+            secret_canary = dict(secret_canary_runner(canary_config))
+        except SecretCanaryError as exc:
+            raise WorkerConfigError("autonomy secret canary refused") from exc
+        return {
+            "schema_version": _SECRET_CANARY_ENVELOPE_SCHEMA_VERSION,
+            "secret_canary": secret_canary,
+            "control_environment_probe": environment_probe,
+            "control_environment_probe_sha256": environment_probe_sha256,
+        }
+
+    return issue
+
+
+def _build_broker(
+    config: dict[str, Any],
+    *,
+    autonomy_guard=None,
+) -> ExecutiveWorkerBroker:
     policy = BrokerPolicy(
         control_uid=int(config["control_uid"]),
         worker_uid=int(config["worker_uid"]),
@@ -153,22 +504,110 @@ def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
         expected_binary_path=Path(config["codex_binary"]),
         expected_owner_gid=policy.worker_gid,
     )
+    binding = _subscription_binding_for_config(config)
+    provider_realm = _resolve_subscription_realm(binding) if binding is not None else None
+    credential_loader = (
+        provider_home_credential_loader(
+            policy.provider_home,
+            provider_realm,
+            expected_uid=policy.worker_uid,
+            expected_gid=policy.worker_gid,
+        )
+        if provider_realm is not None
+        else None
+    )
     adapter = CodexWorkerAdapter(
         Path(config["codex_binary"]),
+        codex_home=policy.provider_home,
         binary_attestation=binary_attestation,
         allowed_versions=frozenset(config["allowed_codex_versions"]),
         required_team_identifier=str(config["required_team_identifier"]),
+        provider_realm=provider_realm,
+        provider_credential_loader=credential_loader,
     )
     sweeper = DedicatedUIDSweeper(
         policy.worker_uid,
         receipt_path=Path(config["uid_sweep_receipt"]),
         ambient_classifier=DarwinDistnotedClassifier(),
     )
-    return ExecutiveWorkerBroker(adapter, policy, sweeper)
+
+    try:
+        capability_registry = ExecutionCapabilityRegistry.load()
+    except CapabilityPolicyError as exc:
+        raise WorkerConfigError(f"worker capability policy is invalid: {exc}") from exc
+
+    def resolve_operator_profile(requested):
+        matching = []
+        for profile in capability_registry.profiles.values():
+            if not profile.enabled or profile.execution_surface != "codex-app-server":
+                continue
+            try:
+                manifest = profile.capability_manifest(
+                    harness_binary_digest=requested.harness_binary_digest
+                )
+            except CapabilityPolicyError:
+                continue
+            if (
+                manifest == requested.capabilities
+                and profile.sandbox_policy == requested.sandbox_policy
+                and profile.approval_policy == requested.approval_policy
+                and profile.network_policy == requested.network_policy
+                and profile.write_capable == requested.write_capable
+                and profile.native_helper_policy == requested.native_helper_policy
+                and profile.expected_config_digest == requested.expected_config_digest
+            ):
+                matching.append(profile)
+        if len(matching) != 1:
+            raise WorkerConfigError(
+                "requested Operator Harness profile does not resolve to one reviewed policy"
+            )
+        return matching[0]
+
+    def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+        profile = resolve_operator_profile(requested)
+        return CodexOperatorAdapter(
+            binary_path=Path(config["codex_binary"]),
+            codex_home=Path(config["provider_home"]),
+            workspace_root=workspace,
+            worker_id=policy.worker_id,
+            expected_harness_version=binary_attestation.version,
+            expected_config_digest=profile.expected_config_digest,
+            app_server_config_overrides=profile.app_server_config_overrides(),
+            native_helper_grant=profile.native_helper,
+            network_policy=profile.network_policy,
+            turn_input_loader=turn_input_loader,
+        )
+
+    def operator_resource_factory(workspace, requested, epoch, generation):
+        profile = resolve_operator_profile(requested)
+        if not profile.resource_grants:
+            return None
+        return BrowserGenerationResource(
+            workspace=workspace,
+            requested=requested,
+            epoch=epoch,
+            generation=generation,
+            profile=profile,
+        )
+
+    armed = bool(config["operator_harness_armed"])
+    return ExecutiveWorkerBroker(
+        adapter,
+        policy,
+        sweeper,
+        adapter_id="codex-cli",
+        operator_adapter_factory=operator_adapter_factory,
+        operator_resource_factory=operator_resource_factory,
+        operator_harness_armed=armed,
+        autonomy_guard=autonomy_guard,
+        autonomy_canary_factory=(
+            _build_autonomy_canary_factory(config) if armed else None
+        ),
+    )
 
 
-async def _serve(config: dict[str, Any]) -> None:
-    broker = _build_broker(config)
+async def _serve(config: dict[str, Any], *, autonomy_guard=None) -> None:
+    broker = _build_broker(config, autonomy_guard=autonomy_guard)
     activated = activate_launchd_socket(str(config["launchd_socket_name"]))
     task = asyncio.create_task(broker.serve(activated))
     stopping = asyncio.Event()
@@ -240,7 +679,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 json.dumps(
                     {
-                        "schema_version": CONFIG_SCHEMA_VERSION,
+                        "schema_version": value["schema_version"],
                         "valid": True,
                         "worker_id": value["worker_id"],
                         "worker_uid": value["worker_uid"],
@@ -251,8 +690,33 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
-        config = _load_config(args.config, require_root_owner=True)
-        asyncio.run(_serve(config))
+        config_path = Path(args.config)
+        config = _load_config(config_path, require_root_owner=True)
+        _assert_service_activation_allowed(config)
+        autonomy_guard = None
+        if config.get("operator_harness_armed") is True:
+            own_config_sha256 = sha256_file(config_path)
+            release_sha = _ROOT.name
+            if re.fullmatch(r"[0-9a-f]{40}", release_sha) is None:
+                raise WorkerConfigError(
+                    "armed worker release root is not an exact commit SHA"
+                )
+
+            def require_autonomy() -> None:
+                try:
+                    validate_runtime_guard_file(
+                        AUTONOMY_RECEIPT,
+                        role="worker",
+                        own_config_sha256=own_config_sha256,
+                        release_sha=release_sha,
+                    )
+                except AutonomyRefusal as exc:
+                    raise WorkerConfigError(
+                        "Executive autonomy receipt refused"
+                    ) from exc
+
+            autonomy_guard = require_autonomy
+        asyncio.run(_serve(config, autonomy_guard=autonomy_guard))
         return 0
     except (WorkerBrokerError, BinaryAttestationError, OSError, ValueError) as exc:
         # BinaryAttestationError (and its CodexAttestationReceiptError subclass

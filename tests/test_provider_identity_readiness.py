@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from ops.executive_os import provider_identity_policy as identity_policy
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,6 +29,63 @@ identity = _load("provider_identity_probe_test", "provider_identity_probe.py")
 readiness = _load("provider_readiness_test", "provider_readiness.py")
 
 
+def test_personal_pro_readiness_receipt_storage_is_exact_slot_readable_nonwritable() -> None:
+    uid, gid, mode = readiness.receipt_storage_contract(
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        worker_gid=454,
+    )
+    assert (uid, gid, mode) == (0, 454, 0o440)
+    assert mode & 0o040
+    assert not mode & 0o020
+    assert not mode & 0o004
+
+    assert readiness.receipt_storage_contract(
+        workspace_binding_class=identity_policy.COMPANY_WORKSPACE_BINDING_CLASS,
+        worker_gid=451,
+    ) == (0, 0, 0o400)
+
+
+def test_personal_pro_readiness_receipt_rejects_gid_outside_reviewed_slot_catalog() -> None:
+    with pytest.raises(readiness.ReadinessError, match="readiness_receipt_reader_invalid"):
+        readiness.receipt_storage_contract(
+            workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            worker_gid=499,
+        )
+
+
+def test_personal_pro_receipt_persistence_uses_exact_slot_group_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "readiness-personal.json"
+    calls: list[tuple[str, int, int]] = []
+    real_fchmod = readiness.os.fchmod
+
+    monkeypatch.setattr(readiness, "_validate_receipt_directory", lambda _path: None)
+    monkeypatch.setattr(readiness, "_assert_no_macos_acl", lambda _path: None)
+    monkeypatch.setattr(readiness, "_fsync_directory", lambda _path: None)
+
+    def fchown(descriptor: int, uid: int, gid: int) -> None:
+        calls.append(("chown", uid, gid))
+
+    def fchmod(descriptor: int, mode: int) -> None:
+        calls.append(("chmod", mode, 0))
+        real_fchmod(descriptor, mode)
+
+    monkeypatch.setattr(readiness.os, "fchown", fchown)
+    monkeypatch.setattr(readiness.os, "fchmod", fchmod)
+
+    readiness.persist_receipt(
+        path,
+        {"schema_version": readiness.SCHEMA_VERSION},
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        worker_gid=454,
+    )
+
+    assert ("chown", 0, 454) in calls
+    assert ("chmod", 0o440, 0) in calls
+    assert path.stat().st_mode & 0o777 == 0o440
+
+
 def test_readiness_receipt_is_fixed_root_only_and_exclusive_created() -> None:
     source = (
         ROOT / "ops" / "executive_os" / "provider_readiness.py"
@@ -36,8 +95,11 @@ def test_readiness_receipt_is_fixed_root_only_and_exclusive_created() -> None:
     )
     assert 'SCHEMA_VERSION = "mastermind.executive_provider_readiness/v2"' in source
     assert "os.O_EXCL" in source and 'getattr(os, "O_NOFOLLOW", 0)' in source
-    assert "os.fchown(descriptor, 0, 0)" in source
-    assert "os.fchmod(descriptor, 0o400)" in source
+    assert "receipt_storage_contract(" in source
+    assert readiness.receipt_storage_contract(
+        workspace_binding_class=identity_policy.COMPANY_WORKSPACE_BINDING_CLASS,
+        worker_gid=451,
+    ) == (0, 0, 0o400)
     assert "_fsync_directory(path.parent)" in source
 
 
@@ -107,6 +169,53 @@ def test_personal_token_fallback_is_explicitly_isolated() -> None:
     assert primary["passed"] is False
 
 
+def test_personal_pro_device_identity_passes_only_under_dedicated_policy() -> None:
+    personal = identity.evaluate_identity(
+        account_read=_account("pro"),
+        auth_mode="chatgpt",
+        expected_kind="device-auth",
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+    )
+    company = identity.evaluate_identity(
+        account_read=_account("pro"),
+        auth_mode="chatgpt",
+        expected_kind="device-auth",
+        workspace_binding_class=identity_policy.COMPANY_WORKSPACE_BINDING_CLASS,
+    )
+    assert personal["passed"] is True
+    assert personal["plan_type"] == "pro"
+    assert personal["workspace_binding_class"] == (
+        identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS
+    )
+    assert company["passed"] is False
+    assert company["refusal"] == "company_plan_required"
+
+
+@pytest.mark.parametrize(
+    ("mode", "kind", "expected_refusal"),
+    [
+        ("agentIdentity", "service-account", "personal_pro_device_auth_required"),
+        (
+            "personalAccessToken",
+            "personal-access-token",
+            "personal_pro_device_auth_required",
+        ),
+        ("chatgpt", "service-account", "auth_mode_policy_mismatch"),
+    ],
+)
+def test_personal_pro_policy_rejects_non_device_credentials(
+    mode: str, kind: str, expected_refusal: str
+) -> None:
+    result = identity.evaluate_identity(
+        account_read=_account("pro"),
+        auth_mode=mode,
+        expected_kind=kind,
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+    )
+    assert result["passed"] is False
+    assert result["refusal"] == expected_refusal
+
+
 def test_missing_null_unknown_and_unreviewed_auth_modes_fail() -> None:
     for auth_mode in (None, "", "futureMode", "apikey", "chatgptAuthTokens"):
         result = identity.evaluate_identity(
@@ -158,6 +267,24 @@ def test_exact_pinned_login_status_is_the_auth_mode_source(
     assert identity.classify_login_status(
         returncode=0, stderr=b"Logged in using an API key - redacted\n"
     ) is None
+
+
+def test_live_probe_rejects_invalid_worker_principal_before_root_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        identity,
+        "binary_identity",
+        lambda _binary: {"safe": "binary-identity-sentinel"},
+    )
+    with pytest.raises(identity.IdentityProbeError, match="worker_identity_invalid"):
+        identity.live_probe(
+            binary=Path("/opt/codex/bin/codex"),
+            provider_home=Path("/var/lib/mastermind-executive"),
+            expected_kind="service-account",
+            workspace_binding_class=identity.WORKSPACE_BINDING_CLASS,
+            worker_user="worker",
+        )
 
 
 def _config_read(*, effective=None, origins=None, layers=None):
@@ -283,6 +410,10 @@ def _auth_meta():
     }
 
 
+def _personal_auth_meta(uid: int = 454):
+    return {**_auth_meta(), "uid": uid, "gid": uid, "inode": 1000 + uid}
+
+
 def _binary_meta():
     return {
         **_auth_meta(),
@@ -329,6 +460,21 @@ def _identity():
     }
 
 
+def _personal_identity(uid: int = 454):
+    return {
+        **identity.evaluate_identity(
+            account_read=_account("pro"),
+            auth_mode="chatgpt",
+            expected_kind="device-auth",
+            workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        ),
+        "observed_at": "2026-08-20T00:00:00Z",
+        "codex_binary": _binary_meta(),
+        "credential_lstat": _personal_auth_meta(uid),
+        "forced_chatgpt_workspace_id_applied": False,
+    }
+
+
 def _receipt():
     return readiness.compose_receipt(
         identity=_identity(),
@@ -350,6 +496,57 @@ def test_composite_receipt_binds_current_credential_and_binary() -> None:
     assert receipt["provider_identity"]["auth_mode"] == "agentIdentity"
     assert receipt["inference_canary"]["canary_id"] == "canary-123456789abc"
     assert receipt["codex_binary"]["team_identifier"] == readiness.CODEX_TEAM_ID
+
+
+def test_personal_pro_receipt_binds_one_worker_uid_and_rejects_cross_slot_reuse() -> None:
+    auth = _personal_auth_meta(454)
+    receipt = readiness.compose_receipt(
+        identity=_personal_identity(454),
+        canary=_canary(),
+        auth_identity=auth,
+        binary_identity=_binary_meta(),
+        expected_kind="device-auth",
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        credential_expires_at=_credential_expiry(),
+        worker_uid=454,
+        worker_gid=454,
+    )
+    readiness.validate_receipt_document(
+        receipt,
+        auth_identity=auth,
+        binary_identity=_binary_meta(),
+        expected_kind="device-auth",
+        workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        worker_uid=454,
+        worker_gid=454,
+    )
+    with pytest.raises(readiness.ReadinessError, match="worker_identity_mismatch"):
+        readiness.validate_receipt_document(
+            receipt,
+            auth_identity=_personal_auth_meta(455),
+            binary_identity=_binary_meta(),
+            expected_kind="device-auth",
+            workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            worker_uid=455,
+            worker_gid=455,
+        )
+
+
+def test_company_receipt_cannot_be_relabelled_as_personal_pro() -> None:
+    receipt = _receipt()
+    with pytest.raises(
+        readiness.ReadinessError,
+        match="expected_kind_mismatch|workspace_binding_mismatch",
+    ):
+        readiness.validate_receipt_document(
+            receipt,
+            auth_identity=_auth_meta(),
+            binary_identity=_binary_meta(),
+            expected_kind="device-auth",
+            workspace_binding_class=identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
+            worker_uid=451,
+            worker_gid=451,
+        )
 
 
 def test_duplicate_same_identity_validates_but_stale_auth_or_binary_fails_closed() -> None:

@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import dataclasses
 import hashlib
+import inspect
 import itertools
 import json
 import os
@@ -21,16 +22,38 @@ import pytest
 from control_plane.codex_worker import (
     BinaryAttestation,
     CancelReceipt,
+    CodexWorkerAdapter,
     CollectionReceipt,
     GitPreflightFailed,
     GitPreflightTimeout,
     LaunchValidationError,
     LaunchValidationStageError,
+    ProcessInspector,
     ProcessRef,
     ValidationReceipt,
     WorkerResult,
     WorkerRunStatus,
 )
+from control_plane.claude_subscription_worker import (
+    attest_claude_binary as attest_fixture_claude_binary,
+)
+from control_plane.codex_provider_realm import (
+    _PROVIDER_REALM_OWNER_SEAM,
+    issue_provider_realm_enrollment_receipt,
+)
+from control_plane.model_router import (
+    _CAPACITY_OWNER_SEAM,
+    export_capacity_owner_fact,
+)
+from control_plane.subscription_canary_admission import seal_subscription_canary_admission
+from control_plane.subscription_harness_bindings import DEFAULT_BINDINGS_PATH
+from control_plane.subscription_provider_profiles import DEFAULT_PROFILES_PATH
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    bind_reviewed_adapter,
+    construct_reviewed_adapter,
+)
+from control_plane.worker_execution_contract import WorkerLaunchSpec
 from control_plane.executive_worker_broker import (
     BROKER_REQUEST_SCHEMA_VERSION,
     BROKER_RESPONSE_SCHEMA_VERSION,
@@ -49,8 +72,10 @@ from control_plane.executive_worker_broker import (
     UIDSweepReceipt,
     UID_SWEEP_SCHEMA_VERSION,
     WorkerBrokerClient,
+    WorkerBrokerError,
     _ps_pids_for_uid,
 )
+from control_plane.executive_steward import CapacityState, SourceOwner
 
 
 class FakeSweeper:
@@ -74,6 +99,8 @@ class FakeSweeper:
 
 
 class FakeAdapter:
+    adapter_id = "codex-cli"
+
     def __init__(self) -> None:
         self.spec = None
         self.ref = None
@@ -204,6 +231,154 @@ class FakeAdapter:
         )
 
 
+def _reviewed_codex_kwargs(root: Path) -> dict:
+    root.mkdir(parents=True, exist_ok=True)
+    binary = root / "fake-codex"
+    if not binary.exists():
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary.chmod(0o700)
+    info = binary.lstat()
+    attestation = BinaryAttestation(
+        path=str(binary),
+        real_path=str(binary.resolve()),
+        version="test-0",
+        sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+        team_identifier=None,
+        size=info.st_size,
+        device=info.st_dev,
+        inode=info.st_ino,
+        mode=stat.S_IMODE(info.st_mode),
+        uid=info.st_uid,
+        gid=info.st_gid,
+        mtime_ns=info.st_mtime_ns,
+    )
+    codex_home = root / "codex-home"
+    codex_home.mkdir(mode=0o700, exist_ok=True)
+    return {
+        "binary_path": binary,
+        "codex_home": codex_home,
+        "binary_attestation": attestation,
+        "allowed_versions": frozenset({"test-0"}),
+        "required_team_identifier": None,
+    }
+
+
+def _reviewed_codex_adapter(root: Path) -> CodexWorkerAdapter:
+    kwargs = _reviewed_codex_kwargs(root)
+    return construct_reviewed_adapter(  # type: ignore[return-value]
+        "codex-cli",
+        kwargs.pop("binary_path"),
+        **kwargs,
+    )
+
+
+_CLAUDE_FIXTURE_VERSION = "2.1.239"
+_CLAUDE_FIXTURE_MODEL = "claude-opus-4-6"
+
+
+class _TypedClaudePolicyObserver:
+    """Consumer-side typed seam fake for the native Claude adapter.
+
+    No producer is synthesized: this only satisfies the frozen seam the worker
+    consumes, exactly as the ``claude-code`` tests require.
+    """
+
+    def __init__(self, attestation: object, exact_model: str) -> None:
+        self._attestation = attestation
+        self._exact_model = exact_model
+        self.generation: object = 1
+        self.calls = 0
+
+    def observe(self) -> object:
+        from control_plane.claude_worker import ManagedModelPolicyObservation
+
+        self.calls += 1
+        return ManagedModelPolicyObservation(
+            exact_model=self._exact_model,
+            binary_sha256=self._attestation.sha256,
+            binary_version=self._attestation.version,
+            generation=self.generation,
+        )
+
+
+def _reviewed_claude_code_kwargs(root: Path) -> dict:
+    """Reviewed native-Claude construction arguments over one fixture binary."""
+
+    from control_plane.claude_worker import attest_claude_code_binary
+
+    root.mkdir(parents=True, exist_ok=True)
+    binary = root / "fixture-claude"
+    if not binary.exists():
+        binary.write_text(
+            f"#!/bin/sh\nprintf '{_CLAUDE_FIXTURE_VERSION} (Claude Code)\\n'\n",
+            encoding="utf-8",
+        )
+        binary.chmod(0o700)
+    allowed_versions = frozenset({_CLAUDE_FIXTURE_VERSION})
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=allowed_versions
+    )
+    return {
+        "binary_path": binary,
+        "allowed_versions": allowed_versions,
+        "exact_model": _CLAUDE_FIXTURE_MODEL,
+        "max_turns": 4,
+        "managed_policy_observer": _TypedClaudePolicyObserver(
+            attestation, _CLAUDE_FIXTURE_MODEL
+        ),
+    }
+
+
+def _reviewed_claude_code_adapter(root: Path) -> object:
+    """One native Claude adapter built through the reviewed factory only."""
+
+    from control_plane.claude_worker import ClaudeCodeWorkerAdapter
+
+    kwargs = _reviewed_claude_code_kwargs(root)
+    adapter = construct_reviewed_adapter(
+        "claude-code", kwargs.pop("binary_path"), **kwargs
+    )
+    assert type(adapter) is ClaudeCodeWorkerAdapter
+    return adapter
+
+
+def _audit_codex_project_configuration(workspace: Path) -> str:
+    """Give the workspace the existing audited Codex project config and a HEAD.
+
+    Validation fixtures hand the spec to the reviewed common Codex adapter,
+    whose project-configuration preflight demands the audited ``.codex``
+    bytes inside its own clean clone.  The audited checkout content is
+    ``control_plane``'s own ``.codex/config.toml``; nothing is invented here.
+    """
+
+    from control_plane.codex_worker import _PROJECT_ROOT
+
+    def git(*arguments: str) -> str:
+        completed = subprocess.run(
+            ["/usr/bin/git", *arguments],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+        )
+        return completed.stdout.decode("utf-8", errors="strict")
+
+    project_config = workspace / ".codex" / "config.toml"
+    project_config.parent.mkdir(mode=0o700, exist_ok=True)
+    project_config.write_bytes(
+        (_PROJECT_ROOT / ".codex" / "config.toml").read_bytes()
+    )
+    project_config.chmod(0o600)
+    (workspace / "README.md").write_text("fixture\n", encoding="utf-8")
+    git("init", "-q")
+    git("add", "README.md", ".codex/config.toml")
+    git(
+        "-c", "user.name=Broker Fixture",
+        "-c", "user.email=broker-fixture@example.invalid",
+        "commit", "-qm", "fixture",
+    )
+    return git("rev-parse", "HEAD").strip()
+
+
 def _fixture(tmp_path: Path):
     worker_uid = os.geteuid()
     worker_gid = os.getegid()
@@ -217,8 +392,13 @@ def _fixture(tmp_path: Path):
     run_dir = run_root / "run-1"
     schema = run_dir / "input" / "result.schema.json"
     workspace.mkdir(mode=0o700)
+    # Create the run directory itself at the audited worker-private mode:
+    # mkdir(parents=True) would leave the intermediate directory world-readable
+    # and the reviewed run-directory boundary would correctly refuse it.
+    run_dir.mkdir(mode=0o700)
     schema.parent.mkdir(parents=True, mode=0o700)
     schema.write_text("{}\n", encoding="utf-8")
+    expected_base_sha = _audit_codex_project_configuration(workspace)
     policy = BrokerPolicy(
         control_uid=control_uid,
         worker_uid=worker_uid,
@@ -232,9 +412,15 @@ def _fixture(tmp_path: Path):
             set(os.getgroups()) - {worker_gid}
         ),
     )
+    reviewed = _reviewed_codex_adapter(tmp_path / "reviewed-adapter")
     adapter = FakeAdapter()
     sweeper = FakeSweeper()
-    broker = ExecutiveWorkerBroker(adapter, policy, sweeper)
+    broker = ExecutiveWorkerBroker(reviewed, policy, sweeper)
+    # The reviewed construction above proves the binding law; the recording
+    # fake then stands in for the adapter on both the primary and validation
+    # seams, which are the same reviewed adapter for the Codex broker.
+    broker.adapter = adapter
+    broker.validation_adapter = adapter
     peer = PeerCredentials(uid=control_uid, gid=worker_gid, pid=100)
     spec = {
         "run_id": "run-1",
@@ -244,11 +430,10 @@ def _fixture(tmp_path: Path):
         "run_dir": str(run_dir),
         "prompt": "bounded harmless proof",
         "result_schema_path": str(schema),
-        "codex_home": str(provider_home),
         "authorities": ["READ", "RUN_TESTS"],
         "authority": None,
         "worker_user": "fixture-worker",
-        "expected_base_sha": "b" * 40,
+        "expected_base_sha": expected_base_sha,
         "allowed_artifact_paths": [],
         "isolation_roots": [str(workspace_root), str(run_root)],
         "isolation_denied_paths": [],
@@ -315,6 +500,261 @@ def _request(operation: str, payload: dict, *, suffix: str = "1") -> dict:
         "operation": operation,
         "payload": payload,
     }
+
+
+
+def _protocol_stub(adapter_id: str):
+    class _Stub:
+        async def start(self, spec):
+            return None
+
+        async def collect_result(self, ref):
+            return None
+
+        async def cancel(self, ref, reason):
+            return None
+
+        async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
+            return None
+
+        async def status(self, ref):
+            return WorkerRunStatus.RUNNING
+
+    _Stub.adapter_id = adapter_id
+    return _Stub()
+
+
+def test_broker_adapter_identity_is_fixed_and_unimplemented_ids_fail_closed(tmp_path: Path):
+    broker, adapter, sweeper, peer, spec = _fixture(tmp_path)
+    assert broker.adapter is adapter
+    assert broker.adapter_id == "codex-cli"
+    assert adapter.adapter_id == "codex-cli"
+    with pytest.raises(WorkerBrokerError, match="not implemented"):
+        ExecutiveWorkerBroker(
+            _protocol_stub("openai-compatible"),
+            broker.policy,
+            sweeper,
+            adapter_id="openai-compatible",
+        )
+
+
+def test_broker_refuses_adapter_identity_mismatch(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    with pytest.raises(WorkerBrokerError, match="does not match descriptor"):
+        ExecutiveWorkerBroker(
+            _protocol_stub("openai-compatible"),
+            broker.policy,
+            sweeper,
+            adapter_id="codex-cli",
+        )
+
+
+def test_broker_refuses_statusless_adapter(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+
+    class AdapterWithoutStatus:
+        adapter_id = "codex-cli"
+
+        async def start(self, spec):
+            return None
+
+        async def collect_result(self, ref):
+            return None
+
+        async def cancel(self, ref, reason):
+            return None
+
+        async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
+            return None
+
+    with pytest.raises(WorkerBrokerError, match="does not expose status"):
+        ExecutiveWorkerBroker(
+            AdapterWithoutStatus(), broker.policy, sweeper, adapter_id="codex-cli"
+        )
+
+
+def test_broker_refuses_caller_label_versus_object_identity(tmp_path: Path):
+    broker, adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    assert adapter.adapter_id == "codex-cli"
+    with pytest.raises(WorkerBrokerError, match="does not match descriptor"):
+        ExecutiveWorkerBroker(
+            adapter, broker.policy, sweeper, adapter_id="openai-compatible"
+        )
+
+
+def test_broker_refuses_foreign_class_claiming_reviewed_identity(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+
+    class Spoof:
+        adapter_id = "codex-cli"
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(WorkerBrokerError) as refused:
+        ExecutiveWorkerBroker(Spoof(), broker.policy, sweeper, adapter_id="codex-cli")
+    assert type(refused.value.__cause__) is AdapterBindingError
+    assert "reviewed implementation" in str(refused.value)
+
+
+def test_factory_and_bind_refuse_foreign_subclass_and_rebox(tmp_path: Path):
+    import inspect
+
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    assert "adapter" not in inspect.signature(construct_reviewed_adapter).parameters
+
+    class Spoof:
+        adapter_id = "codex-cli"
+
+        def status(self, ref=None):
+            return None
+
+    class ClaimSubclass(CodexWorkerAdapter):
+        pass
+
+    kwargs = _reviewed_codex_kwargs(tmp_path / "claim-subclass")
+    subclass_instance = ClaimSubclass(kwargs.pop("binary_path"), **kwargs)
+    foreign = Spoof()
+    rebox = object.__new__(CodexWorkerAdapter)
+    rebox.__dict__.update(
+        {
+            "binary": None,
+            "_codex_home": None,
+            "inspector": ProcessInspector(),
+            "_runs": {},
+        }
+    )
+    claimants = (foreign, subclass_instance, rebox)
+
+    for claimant in claimants:
+        with pytest.raises(AdapterBindingError, match="does not accept a caller-supplied"):
+            construct_reviewed_adapter("codex-cli", claimant)
+        with pytest.raises(AdapterBindingError) as binding_refused:
+            bind_reviewed_adapter(claimant, "codex-cli")
+        if claimant is rebox:
+            assert "was not constructed by the reviewed class" in str(binding_refused.value)
+        with pytest.raises(WorkerBrokerError) as refused:
+            ExecutiveWorkerBroker(
+                claimant, broker.policy, sweeper, adapter_id="codex-cli"
+            )
+        assert type(refused.value.__cause__) is AdapterBindingError
+
+
+def test_broker_reports_raising_binding_attribute_access_as_worker_broker_error(
+    tmp_path: Path,
+):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+
+    class RaisingAdapterId:
+        @property
+        def adapter_id(self):
+            raise RuntimeError("adapter-id-boom")
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(WorkerBrokerError) as refused_id:
+        ExecutiveWorkerBroker(
+            RaisingAdapterId(), broker.policy, sweeper, adapter_id="codex-cli"
+        )
+    assert type(refused_id.value.__cause__) is AdapterBindingError
+    assert type(refused_id.value.__cause__.__cause__) is RuntimeError
+    assert "adapter-id-boom" in str(refused_id.value.__cause__.__cause__)
+
+    class RaisingStatus:
+        adapter_id = "codex-cli"
+
+        @property
+        def status(self):
+            raise RuntimeError("status-boom")
+
+    with pytest.raises(WorkerBrokerError) as refused_status:
+        ExecutiveWorkerBroker(
+            RaisingStatus(), broker.policy, sweeper, adapter_id="codex-cli"
+        )
+    assert type(refused_status.value.__cause__) is AdapterBindingError
+    assert type(refused_status.value.__cause__.__cause__) is RuntimeError
+    assert "status-boom" in str(refused_status.value.__cause__.__cause__)
+
+
+def test_broker_binds_real_codex_adapter_identity(tmp_path: Path):
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    kwargs = _reviewed_codex_kwargs(tmp_path / "real-codex")
+    adapter = CodexWorkerAdapter(kwargs.pop("binary_path"), **kwargs)
+    bound = ExecutiveWorkerBroker(adapter, broker.policy, sweeper)
+    assert bound.adapter is adapter
+    assert type(bound.adapter) is CodexWorkerAdapter
+    assert bound.adapter_id == "codex-cli"
+    assert adapter.adapter_id == "codex-cli"
+    assert callable(adapter.status)
+
+
+def test_reviewed_constructor_binds_two_exact_heterogeneous_adapter_identities(
+    tmp_path: Path,
+):
+    codex_kwargs = _reviewed_codex_kwargs(tmp_path / "codex")
+    codex = construct_reviewed_adapter(
+        "codex-cli", codex_kwargs.pop("binary_path"), **codex_kwargs
+    )
+    codex_descriptor = bind_reviewed_adapter(codex, "codex-cli")
+
+    bindings = json.loads(DEFAULT_BINDINGS_PATH.read_text(encoding="utf-8"))
+    profiles = json.loads(DEFAULT_PROFILES_PATH.read_text(encoding="utf-8"))
+    binding_id = "glm-coding-plan.claude-code-anthropic"
+    bindings["bindings"][binding_id]["implementation_state"] = "BUILT_NOT_PROVEN"
+    claude_binary = tmp_path / "fixture-claude"
+    claude_binary.write_text(
+        "#!/bin/sh\nprintf '2.1.239 (Claude Code)\\n'\n",
+        encoding="utf-8",
+    )
+    claude_binary.chmod(0o700)
+    claude_attestation = attest_fixture_claude_binary(
+        claude_binary, allowed_versions=frozenset({"2.1.239"})
+    )
+    with _CAPACITY_OWNER_SEAM.install_test_key(
+        b"hf1q-test-capacity-owner"
+    ), _PROVIDER_REALM_OWNER_SEAM.install_test_key(
+        b"hf1q-test-provider-realm-owner"
+    ), _PROVIDER_REALM_OWNER_SEAM.install_test_enrollment("enrolled"):
+        capacity_fact = export_capacity_owner_fact(
+            worker_id="worker-1",
+            state=CapacityState.AVAILABLE,
+            generation=7,
+        )
+        realm_receipt = issue_provider_realm_enrollment_receipt(
+            binding_id=binding_id,
+            bindings_document=bindings,
+            profiles_document=profiles,
+            generation=3,
+        )
+        admission = seal_subscription_canary_admission(
+            capacity_fact=capacity_fact,
+            realm_receipt=realm_receipt,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+        claude = construct_reviewed_adapter(
+            "claude-compatible-subscription",
+            claude_binary,
+            admission=admission,
+            credential_loader=lambda: "fixture-credential",
+            binary_attestation=claude_attestation,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+    claude_descriptor = bind_reviewed_adapter(
+        claude, "claude-compatible-subscription"
+    )
+
+    assert type(codex) is not type(claude)
+    assert codex.adapter_id == codex_descriptor.adapter_id == "codex-cli"
+    assert claude.adapter_id == claude_descriptor.adapter_id
+    assert claude.adapter_id == claude.binding.adapter_id
+    assert claude.binding.implementation_state == "BUILT_NOT_PROVEN"
+    assert codex_descriptor.implemented
+    assert not claude_descriptor.implemented
+    assert "provider_home" not in inspect.signature(type(claude).__init__).parameters
+    assert "codex_home" not in inspect.signature(type(claude).__init__).parameters
 
 
 def test_broker_rejects_wrong_peer_and_unknown_operation(tmp_path: Path) -> None:
@@ -402,6 +842,81 @@ def test_broker_enforces_roots_principal_and_declared_argv(tmp_path: Path) -> No
                 ),
                 peer=peer,
             )
+
+    asyncio.run(scenario())
+
+
+def test_broker_start_is_provider_neutral(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        response = await broker.execute(
+            _request(
+                "start",
+                {"launch_spec": spec, "validation_commands": [["/usr/bin/true"]]},
+            ),
+            peer=peer,
+        )
+
+        assert response["ok"] is True
+        assert isinstance(adapter.spec, WorkerLaunchSpec)
+        assert not hasattr(adapter.spec, "codex_home")
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "codex_home",
+        "provider_home",
+        "claude_home",
+        "credential_path",
+        "api_key",
+        "token",
+        "provider_session_id",
+    ],
+)
+def test_broker_refuses_provider_owned_wire_fields_before_adapter_start(
+    tmp_path: Path, field: str
+) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        supplied = dict(spec)
+        supplied[field] = str(broker.policy.provider_home)
+
+        with pytest.raises(BrokerProtocolError, match="provider-owned fields"):
+            await broker.execute(
+                _request(
+                    "start",
+                    {"launch_spec": supplied, "validation_commands": []},
+                ),
+                peer=peer,
+            )
+
+        assert adapter.spec is None
+
+    asyncio.run(scenario())
+
+
+def test_broker_refuses_another_real_private_home_before_adapter_start(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        other_home = tmp_path / "other-provider-home"
+        other_home.mkdir(mode=0o700)
+        supplied = dict(spec, codex_home=str(other_home))
+
+        with pytest.raises(BrokerProtocolError, match="provider-owned fields"):
+            await broker.execute(
+                _request(
+                    "start",
+                    {"launch_spec": supplied, "validation_commands": []},
+                ),
+                peer=peer,
+            )
+
+        assert adapter.spec is None
 
     asyncio.run(scenario())
 
@@ -574,9 +1089,9 @@ def test_remote_adapter_round_trips_extended_process_identity(tmp_path: Path) ->
             client,
             validation_commands_for_spec=lambda _spec: [["/usr/bin/true"]],
         )
-        from control_plane.executive_worker_broker import _launch_spec
+        from control_plane.executive_worker_broker import _launch_spec_from_wire
 
-        launch_spec = _launch_spec(spec_value, broker.policy)
+        launch_spec = _launch_spec_from_wire(spec_value, broker.policy)
         try:
             ref = await remote.start(launch_spec)
             assert ref.session_id == ref.pid
@@ -593,10 +1108,13 @@ def test_remote_adapter_round_trips_extended_process_identity(tmp_path: Path) ->
 def test_remote_adapter_uses_job_and_validation_timeouts(tmp_path: Path) -> None:
     async def scenario() -> None:
         broker, adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
-        from control_plane.executive_worker_broker import _jsonable, _launch_spec
+        from control_plane.executive_worker_broker import (
+            _jsonable,
+            _launch_spec_from_wire,
+        )
 
         spec = dataclasses.replace(
-            _launch_spec(spec_value, broker.policy),
+            _launch_spec_from_wire(spec_value, broker.policy),
             timeout_seconds=1800.0,
             cancel_grace_seconds=15.0,
         )
@@ -730,9 +1248,9 @@ def test_remote_controller_retains_terminal_and_fresh_absence_sweeps(
     tmp_path: Path,
 ) -> None:
     broker, adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
-    from control_plane.executive_worker_broker import _jsonable, _launch_spec
+    from control_plane.executive_worker_broker import _jsonable, _launch_spec_from_wire
 
-    spec = _launch_spec(spec_value, broker.policy)
+    spec = _launch_spec_from_wire(spec_value, broker.policy)
     ref = asyncio.run(adapter.start(spec))
     terminal = FakeSweeper().sweep("run_terminal").to_dict()
     terminal["residual_pids_before"] = [777]
@@ -2073,5 +2591,430 @@ def test_unterminated_response_redacts_secret_shaped_runs(tmp_path: Path) -> Non
             server.close()
             await server.wait_closed()
             socket_path.unlink(missing_ok=True)
+
+    asyncio.run(scenario())
+
+
+class _PublicationBarrierAdapter(FakeAdapter):
+    """Pause only the first fake launch; production broker logic stays intact."""
+
+    def __init__(self):
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release_first = asyncio.Event()
+        self.start_count = 0
+
+    async def start(self, spec):
+        self.start_count += 1
+        if self.start_count == 1:
+            self.entered.set()
+            await self.release_first.wait()
+        return await super().start(spec)
+
+
+class _ObservedStartLock:
+    """Expose acquisition requests without changing asyncio.Lock's FIFO order."""
+
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.requests = {}
+        self.signals = {}
+
+    async def acquire(self):
+        task = asyncio.current_task()
+        assert task is not None
+        name = task.get_name()
+        ordinal = self.requests.get(name, 0) + 1
+        self.requests[name] = ordinal
+        self.signals.setdefault((name, ordinal), asyncio.Event()).set()
+        return await self.lock.acquire()
+
+    def release(self):
+        self.lock.release()
+
+    async def requested(self, name, ordinal):
+        await asyncio.wait_for(
+            self.signals.setdefault((name, ordinal), asyncio.Event()).wait(), 2.0
+        )
+
+    async def __aenter__(self):
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, *_args):
+        self.release()
+
+
+@pytest.mark.parametrize("contender_run_id", ["run-1", "run-2"])
+def test_broker_success_publication_does_not_reopen_launch_admission(
+    tmp_path: Path, contender_run_id: str
+) -> None:
+    async def scenario():
+        broker, _adapter, sweeper, peer, spec = _fixture(tmp_path)
+        adapter = _PublicationBarrierAdapter()
+        lock = _ObservedStartLock()
+        broker.adapter = adapter
+        broker._state_lock = lock
+        payload = {"launch_spec": spec, "validation_commands": [["/usr/bin/true"]]}
+        first = asyncio.create_task(
+            broker.execute(_request("start", payload, suffix="publish-a"), peer=peer),
+            name="publish-first",
+        )
+        second = None
+        try:
+            await asyncio.wait_for(adapter.entered.wait(), 2.0)
+            async with lock:
+                adapter.release_first.set()
+                await lock.requested("publish-first", 2)
+                second = asyncio.create_task(
+                    broker.execute(
+                        _request("start", dict(payload, launch_spec=dict(
+                            spec, run_id=contender_run_id
+                        )), suffix="publish-b"), peer=peer,
+                    ),
+                    name="publish-contender",
+                )
+                await lock.requested("publish-contender", 1)
+            results = await asyncio.wait_for(
+                asyncio.gather(first, second, return_exceptions=True), 2.0
+            )
+            assert adapter.start_count == 1, "contender entered adapter.start twice"
+            assert isinstance(results[1], BrokerStateError)
+            assert str(results[1]) == "the worker broker already has active work"
+            response = results[0]
+            assert response["schema_version"] == BROKER_RESPONSE_SCHEMA_VERSION
+            assert response["request_id"] == "req-publish-a"
+            assert response["operation"] == "start" and response["ok"] is True
+            assert set(response["result"]) == {
+                "adapter_id", "process_ref", "launch_attestation", "startup_sweep"
+            }
+            assert response["result"]["adapter_id"] == "codex-cli"
+            assert response["result"]["process_ref"]["run_id"] == spec["run_id"]
+            assert response["result"]["launch_attestation"] == adapter.launch_attestation(adapter.ref)
+            assert response["result"]["startup_sweep"] is None
+            status = await broker.execute(_request("status", {"run_id": spec["run_id"]}), peer=peer)
+            assert status["result"]["active_run_id"] == spec["run_id"]
+            assert status["result"]["starting"] is False
+            assert list(broker._runs) == [spec["run_id"]]
+            assert broker._runs[spec["run_id"]].launch_attestation == response["result"]["launch_attestation"]
+            assert broker._runs[spec["run_id"]].validation_commands == (("/usr/bin/true",),)
+            assert sweeper.calls == []
+        finally:
+            tasks = [task for task in (first, second) if task is not None]
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_broker_post_return_cancellation_keeps_unpublished_start_fenced(tmp_path: Path) -> None:
+    """Characterize original behavior; the withdrawn else/finally fix breaks it."""
+    async def scenario():
+        broker, _adapter, sweeper, peer, spec = _fixture(tmp_path)
+        adapter = _PublicationBarrierAdapter()
+        lock = _ObservedStartLock()
+        broker.adapter = adapter
+        broker._state_lock = lock
+        payload = {"launch_spec": spec, "validation_commands": []}
+        first = asyncio.create_task(
+            broker.execute(_request("start", payload), peer=peer), name="cancel-first"
+        )
+        try:
+            await asyncio.wait_for(adapter.entered.wait(), 2.0)
+            async with lock:
+                adapter.release_first.set()
+                await lock.requested("cancel-first", 2)
+                first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            assert broker._starting is True, "unpublished successful launch lost its fence"
+            assert broker._active_run_id is None and not broker._runs
+            with pytest.raises(BrokerStateError, match="already has active work"):
+                await broker.execute(_request("start", payload, suffix="after-cancel"), peer=peer)
+            assert adapter.start_count == 1
+            assert sweeper.calls == []
+        finally:
+            if not first.done():
+                first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure_stage", ["adapter", "attestation"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_broker_failed_start_never_publishes_success(
+    tmp_path: Path, failure_stage: str, cleanup_fails: bool
+) -> None:
+    async def scenario():
+        broker, _adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        failure = ValueError("fixture launch failure")
+
+        class FailingAdapter(FakeAdapter):
+            async def start(self, launch_spec):
+                if failure_stage == "adapter":
+                    raise failure
+                return await super().start(launch_spec)
+
+            def launch_attestation(self, ref):
+                raise failure
+
+        class CleanupSweeper(FakeSweeper):
+            def sweep(self, reason):
+                receipt = super().sweep(reason)
+                if cleanup_fails:
+                    raise RuntimeError("fixture cleanup failure")
+                return receipt
+
+        broker.adapter = FailingAdapter()
+        broker.sweeper = CleanupSweeper()
+        payload = {"launch_spec": spec, "validation_commands": []}
+        with pytest.raises(ValueError) as raised:
+            await broker.execute(_request("start", payload), peer=peer)
+        assert raised.value is failure
+        assert broker._active_run_id is None and not broker._runs
+        assert broker._starting is False
+        assert broker.sweeper.calls == ["start_failed"]
+        if cleanup_fails:
+            assert broker._quarantined_reason == "start cleanup failed: RuntimeError"
+            with pytest.raises(BrokerStateError, match="quarantined"):
+                await broker.execute(_request("start", payload, suffix="after-error"), peer=peer)
+        else:
+            assert broker._quarantined_reason is None
+            assert broker.last_sweep.reason == "start_failed"
+            broker.adapter = FakeAdapter()
+            assert (await broker.execute(_request("start", payload, suffix="after-error"), peer=peer))["ok"] is True
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure", [asyncio.CancelledError(), BaseException("fixture shutdown")])
+def test_broker_start_base_exception_retains_original_finalization(tmp_path: Path, failure) -> None:
+    async def scenario():
+        broker, _adapter, sweeper, peer, spec = _fixture(tmp_path)
+
+        class InterruptedAdapter(FakeAdapter):
+            async def start(self, launch_spec):
+                raise failure
+
+        broker.adapter = InterruptedAdapter()
+        with pytest.raises(type(failure)) as raised:
+            await broker.execute(_request("start", {"launch_spec": spec, "validation_commands": []}), peer=peer)
+        assert raised.value is failure
+        assert broker._starting is False
+        assert broker._active_run_id is None and not broker._runs
+        assert sweeper.calls == []
+
+    asyncio.run(scenario())
+
+def test_remote_adapter_reattaches_exact_broker_run_without_starting_again(
+    tmp_path: Path,
+) -> None:
+    broker, adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
+    from control_plane.executive_worker_broker import (
+        _jsonable,
+        _launch_spec_from_wire,
+    )
+    from control_plane.worker_execution_contract import WorkerRecoveryBinding
+
+    spec = _launch_spec_from_wire(spec_value, broker.policy)
+    ref = asyncio.run(adapter.start(spec))
+    prompt_path = Path(spec.run_dir) / "input" / "worker-prompt.txt"
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    binding = WorkerRecoveryBinding.bind(
+        adapter_id="codex-cli",
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
+    )
+
+    class Client:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        def request_sync(self, operation, payload):
+            self.calls.append((operation, payload))
+            assert operation == "status"
+            assert payload == {"run_id": ref.run_id}
+            return {
+                "run": {
+                    "status": "RUNNING",
+                    "process_ref": _jsonable(ref),
+                }
+            }
+
+    client = Client()
+    remote = RemoteCodexWorkerAdapter(client)  # type: ignore[arg-type]
+    recovered = remote.reattach(spec, binding)
+    repeated = remote.reattach(spec, binding)
+    assert recovered == repeated == ref
+    assert remote._refs[ref.run_id] == ref
+    assert remote._specs[ref.run_id] == spec
+    assert client.calls == [("status", {"run_id": ref.run_id})]
+
+
+# ---------------------------------------------------------------------------
+# Discriminators for the broker response identity, the reviewed common Codex
+# validation adapter binding, and the inert descriptor floor.  These tests
+# must fail RED against the supplied preimage and turn GREEN only after the
+# corrections in control_plane/executive_worker_broker.py reconcile the
+# adapter-identity return/check, the RemoteClaudeWorkerAdapter, and the
+# separate common Codex validation adapter.
+# ---------------------------------------------------------------------------
+
+
+def test_claude_code_descriptor_remains_unarmed_after_correction(
+    tmp_path: Path,
+) -> None:
+    from control_plane.worker_adapter import adapter_descriptor, adapter_implementation
+
+    from control_plane.claude_worker import ClaudeCodeWorkerAdapter
+
+    descriptor = adapter_descriptor("claude-code")
+    assert descriptor.implemented is False
+    assert descriptor.implementation == (
+        "control_plane.claude_worker.ClaudeCodeWorkerAdapter"
+    )
+    assert adapter_implementation("claude-code") is ClaudeCodeWorkerAdapter
+    assert (
+        adapter_descriptor("claude-compatible-subscription").implementation
+        != descriptor.implementation
+    )
+    # The distinct subscription realm keeps its own inert descriptor; the two
+    # adapter ids are never interchangeable.
+    assert (
+        adapter_descriptor("claude-compatible-subscription").adapter_id
+        == "claude-compatible-subscription"
+        != descriptor.adapter_id
+    )
+
+
+def test_broker_response_identity_mismatch_refuses_start(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+
+        class IdentitySpoof(FakeAdapter):
+            @property
+            def adapter_id(self) -> str:
+                return "claude-code"
+
+        original_adapter = adapter
+
+        async def attempt() -> None:
+            with pytest.raises(WorkerBrokerError, match="does not match descriptor"):
+                ExecutiveWorkerBroker(
+                    IdentitySpoof(),
+                    broker.policy,
+                    broker.sweeper,
+                    adapter_id="codex-cli",
+                )
+
+        await attempt()
+        assert broker.adapter is original_adapter
+
+    asyncio.run(scenario())
+
+
+def test_claude_broker_uses_common_codex_validation_adapter(tmp_path: Path) -> None:
+    from control_plane.claude_worker import ClaudeCodeWorkerAdapter
+    from control_plane.codex_worker import CodexWorkerAdapter as ExactCodexAdapter
+    from control_plane.worker_adapter import adapter_descriptor
+
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    # The primary native Claude adapter is reviewed-constructed, never a stub.
+    claude_adapter = _reviewed_claude_code_adapter(tmp_path / "claude-primary")
+    # The validation adapter is a separately reviewed common Codex adapter.
+    validation_adapter = _reviewed_codex_adapter(tmp_path / "validation-codex")
+    broker_obj = ExecutiveWorkerBroker(
+        claude_adapter,
+        broker.policy,
+        sweeper,
+        adapter_id="claude-code",
+        validation_adapter=validation_adapter,
+        validation_adapter_id="codex-cli",
+    )
+    # Exact class plus reviewed-construction binding stay active on both sides.
+    assert type(broker_obj.adapter) is ClaudeCodeWorkerAdapter
+    assert broker_obj.adapter is claude_adapter
+    assert bind_reviewed_adapter(broker_obj.adapter, "claude-code") == (
+        adapter_descriptor("claude-code")
+    )
+    assert bind_reviewed_adapter(
+        broker_obj.adapter, "claude-code"
+    ).implemented is False
+    assert broker_obj.adapter_id == "claude-code"
+    assert type(validation_adapter) is ExactCodexAdapter
+    assert bind_reviewed_adapter(validation_adapter, "codex-cli") == (
+        adapter_descriptor("codex-cli")
+    )
+    assert broker_obj.validation_adapter is validation_adapter
+    assert broker_obj.validation_adapter_id == "codex-cli"
+
+
+def test_claude_broker_refuses_non_codex_validation_adapter(tmp_path: Path) -> None:
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    # Both sides are real reviewed adapters: the refusal must come from the
+    # broker's validation-identity law, not from a stub failing to bind.
+    claude_adapter = _reviewed_claude_code_adapter(tmp_path / "claude-primary")
+    other_claude_adapter = _reviewed_claude_code_adapter(
+        tmp_path / "claude-wrong-validation"
+    )
+    with pytest.raises(WorkerBrokerError, match="common Codex sandbox") as refused:
+        ExecutiveWorkerBroker(
+            claude_adapter,
+            broker.policy,
+            sweeper,
+            adapter_id="claude-code",
+            validation_adapter=other_claude_adapter,
+            validation_adapter_id="claude-code",
+        )
+    # The reviewed Claude adapter is not the reviewed common Codex sandbox, and
+    # it is never conflated with the separate subscription realm descriptor.
+    assert refused.value.__cause__ is None
+    assert "claude-compatible-subscription" not in str(refused.value)
+
+
+def test_remote_claude_worker_adapter_has_immutable_claude_identity() -> None:
+    from control_plane.executive_worker_broker import (
+        RemoteClaudeWorkerAdapter,
+        RemoteCodexWorkerAdapter,
+    )
+
+    assert RemoteClaudeWorkerAdapter.adapter_id == "claude-code"
+    assert RemoteCodexWorkerAdapter.adapter_id == "codex-cli"
+    assert issubclass(RemoteClaudeWorkerAdapter, RemoteCodexWorkerAdapter)
+
+
+def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, peer, spec = _fixture(tmp_path)
+        adapter.finished.set()
+        await broker.execute(
+            _request(
+                "start",
+                {"launch_spec": spec, "validation_commands": [["/usr/bin/true"]]},
+            ),
+            peer=peer,
+        )
+        await broker.execute(
+            _request("collect", {"run_id": "run-1"}),
+            peer=peer,
+        )
+        with pytest.raises(BrokerProtocolError, match="not frozen"):
+            await broker.execute(
+                _request(
+                    "validate",
+                    {
+                        "run_id": "run-1",
+                        "argv": ["/usr/bin/false"],
+                        "timeout_seconds": 10,
+                    },
+                ),
+                peer=peer,
+            )
 
     asyncio.run(scenario())

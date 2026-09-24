@@ -1,0 +1,91 @@
+{
+  "schema": "mastermind.session_truth_task7_artifact_manifest.v1",
+  "source_commit": "8e6ccc3e893e8ab080ead0bb3e6054d98bf82ed0",
+  "files": [
+    {
+      "path": "authored_record_delta_comparison.json",
+      "bytes": 1614,
+      "sha256": "a3aa5338fcb1c22af99ca4834ff0f814c8bf53d4d76cb7d669b0e2fd914516f6"
+    },
+    {
+      "path": "authored_record_delta_run.json",
+      "bytes": 1556,
+      "sha256": "db16ab82d7d58434989be6c93bc25b829b45d98943273b4a8a0d1de6557b1096"
+    },
+    {
+      "path": "comparison.json",
+      "bytes": 915,
+      "sha256": "241439e130ddf776b89da1f228da76f978d041b78f02b92555f0661683fff696"
+    },
+    {
+      "path": "executive_observation.v1.json",
+      "bytes": 123,
+      "sha256": "a362237c1511c34a29d49cd81366516dc9f85020ebf3557bb02f6f9a4eff10ec"
+    },
+    {
+      "path": "github_observation.v1.json",
+      "bytes": 1455,
+      "sha256": "f950c1c600f434803e5f1e21192fcd9e7cdadbce6d5e58430a43f777de30a030"
+    },
+    {
+      "path": "identity_observation.v1.json",
+      "bytes": 129,
+      "sha256": "c45350775858ef2b5c5bf647ef15889f7d4d3d28a7f8135bb5e6b0b86b211a9d"
+    },
+    {
+      "path": "linear_observation.v1.json",
+      "bytes": 661,
+      "sha256": "77246305673b494ab699227053fa5c0853947c1885698d9e8444506330c52058"
+    },
+    {
+      "path": "proof.md",
+      "bytes": 6859,
+      "sha256": "49b7b2a24b9986c0153e6beb9ea4664469e12061f200dc8923f691fbf89b47a6"
+    },
+    {
+      "path": "receipt_authored_record_before.json",
+      "bytes": 759217,
+      "sha256": "02bfdfd456fdc8ec6b317bb4e0485e01bd0cfa0470890a90f4838d4b9ed13843"
+    },
+    {
+      "path": "receipt_clock_1.json",
+      "bytes": 759217,
+      "sha256": "c6bd9f8fc9eb13bd32b783e28d16e5979de7ad39047996cc568eb4deafb61c97"
+    },
+    {
+      "path": "receipt_clock_2.json",
+      "bytes": 759227,
+      "sha256": "b9c9545afc000843d829d7542ad6663ad86025310a4e0b0a2179f961094cb230"
+    },
+    {
+      "path": "required_executive_counterfactual.json",
+      "bytes": 1097570,
+      "sha256": "277a4323cee1cdd7b05dc6395723721adacb26c8be893c63ee2d7f8c74f310ad"
+    },
+    {
+      "path": "review.md",
+      "bytes": 3510,
+      "sha256": "eb3bbece85e0174382edf02b73cbcce93130883e98a5a87b46d5b5f50f708bfa"
+    },
+    {
+      "path": "run_log.json",
+      "bytes": 2879,
+      "sha256": "ca2a8209517bba782a6049df38ee0d578088a196fe69a3f71020f5a2b3e1294d"
+    },
+    {
+      "path": "semantic_projection_clock_1.json",
+      "bytes": 5866,
+      "sha256": "2646cc9640fd037ff6d6ca3e21e3e5681d204a38e3c971779073453186fa9006"
+    },
+    {
+      "path": "semantic_projection_clock_2.json",
+      "bytes": 5866,
+      "sha256": "2646cc9640fd037ff6d6ca3e21e3e5681d204a38e3c971779073453186fa9006"
+    },
+    {
+      "path": "slack_observation.v1.json",
+      "bytes": 1831,
+      "sha256": "8cdc3c66e17a351a10b7030f481270cf90c5b5a3b41cf16c7ff1762418fade7e"
+    }
+  ]
+}

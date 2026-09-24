@@ -1,0 +1,24 @@
+_metadata:
+  major_version: 2
+  minor_version: 1
+
+display_information:
+  name: Mastermind Agent Relay
+  description: Governed Slack transport for bounded Sol and COO agent dialogue.
+
+features:
+  bot_user:
+    display_name: Mastermind Relay
+    always_online: false
+
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - chat:write
+
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
+  is_hosted: false

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en" data-control-room-mode="remote-read-only">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Chairman Control Room · Remote</title>
+<link rel="stylesheet" href="/static/control_room.css">
+</head>
+<body>
+<a class="ccr-skip" href="#needs-you">Skip to what needs you</a>
+
+<header class="ccr-topbar">
+  <div class="ccr-brand" aria-label="Mastermind X Chairman Control Room">
+    <span class="ccr-brand-mark">MX</span>
+    <div><p class="ccr-brand-kicker">Mastermind X</p><h1>Chairman Control Room</h1></div>
+  </div>
+  <button type="button" id="ccr-command" class="ccr-command" aria-haspopup="dialog" aria-controls="ccr-palette">
+    <span class="ccr-command-icon">⌕</span><span>Search work and PRs</span><kbd>⌘K</kbd>
+  </button>
+  <div class="ccr-topbar-right">
+    <div id="ccr-source-pulse" class="ccr-source-pulse" aria-label="Source freshness"></div>
+    <span class="ccr-local-badge ccr-remote-badge">Remote · read-only</span>
+    <button type="button" id="ccr-theme" class="ccr-icon-button">Theme</button>
+  </div>
+</header>
+
+<div id="ccr-refresh-banner" class="ccr-refresh-banner" hidden>
+  <span class="ccr-refresh-dot"></span><span id="ccr-refresh-banner-text">Showing last accepted remote projection</span>
+</div>
+
+<div class="ccr-layout ccr-remote-layout">
+  <nav class="ccr-sidebar" aria-label="Control Room">
+    <div class="ccr-nav-group">
+      <a class="ccr-nav-link is-active" href="#today" data-nav="today"><span>Today</span><span id="nav-today-count" class="ccr-nav-count">—</span></a>
+      <a class="ccr-nav-link" href="#work" data-nav="work"><span>Work</span><span id="nav-work-count" class="ccr-nav-count">—</span></a>
+      <a class="ccr-nav-link" href="#system" data-nav="system"><span>System</span><span id="nav-system-count" class="ccr-nav-count">—</span></a>
+    </div>
+    <div class="ccr-sidebar-foot"><span id="ccr-composed-age">State —</span><span id="ccr-live-builds-label">Remote projection</span></div>
+  </nav>
+
+  <main class="ccr-main">
+    <section id="degraded" class="ccr-alarm is-empty" aria-labelledby="degraded-heading">
+      <div><p class="ccr-section-eyebrow">Truth boundary</p><h2 id="degraded-heading">A source is degraded</h2></div><ul></ul>
+    </section>
+
+    <section id="today" class="ccr-view-section">
+      <div class="ccr-page-heading"><div><p class="ccr-section-eyebrow">Chairman today</p><h2>What deserves your attention</h2></div><p class="ccr-page-note">Read-only projection from Executive OS and Agent OS source law.</p></div>
+      <section id="needs-you" class="ccr-needs" aria-labelledby="needs-you-heading">
+        <div class="ccr-section-head"><div><p class="ccr-section-eyebrow">Chairman</p><h3 id="needs-you-heading">Needs you</h3></div><span class="ccr-count" data-tally="chairman">—</span></div>
+        <ul class="ccr-attention-list"></ul>
+      </section>
+      <section id="attention-secondary" class="ccr-attention-secondary">
+        <div class="ccr-attention-mini" id="sol-attention"><div class="ccr-mini-head"><span>Sol attention</span><span class="ccr-count" data-tally="ceo">—</span></div><ul class="ccr-mini-list"></ul></div>
+        <div class="ccr-attention-mini" id="coo"><div class="ccr-mini-head"><span>Fable / ops attention</span><span class="ccr-count" data-tally="coo">—</span></div><ul class="ccr-mini-list"></ul></div>
+      </section>
+      <section class="ccr-focus-section" aria-labelledby="focus-heading">
+        <div class="ccr-section-head ccr-section-head-work"><div><p class="ccr-section-eyebrow">Current concentration</p><h3 id="focus-heading">Focus</h3><p class="ccr-help">Deterministic source facts only.</p></div><button type="button" class="ccr-text-button" id="show-all-work">View all work</button></div>
+        <div id="ccr-focus-list" class="ccr-mission-list"></div>
+      </section>
+    </section>
+
+    <section id="work" class="ccr-view-section ccr-work-section" aria-labelledby="work-heading">
+      <div class="ccr-page-heading ccr-page-heading-work">
+        <div><p class="ccr-section-eyebrow">Company board</p><h2 id="work-heading">Work</h2></div>
+        <div class="ccr-work-tools">
+          <label class="ccr-filter-input"><span class="sr-only">Filter work</span><input type="search" id="ccr-work-filter" placeholder="Filter work…" autocomplete="off"></label>
+          <div class="ccr-segmented" aria-label="Work filter"><button type="button" class="is-active" data-work-mode="focus">Focus</button><button type="button" data-work-mode="all">All</button></div>
+        </div>
+      </div>
+      <div class="ccr-work-summary"><span><strong data-tally="work">—</strong> work references</span><span id="ccr-work-filter-note">Showing deterministic focus</span></div>
+      <div id="ccr-work-list" class="ccr-mission-list ccr-mission-list-all"></div>
+    </section>
+
+    <section id="system" class="ccr-view-section ccr-system" aria-labelledby="system-heading">
+      <div class="ccr-page-heading"><div><p class="ccr-section-eyebrow">Evidence</p><h2 id="system-heading">System</h2></div><p class="ccr-page-note">Immutable build identity and per-source freshness. No local path or action authority is projected.</p></div>
+      <section class="ccr-system-card"><div class="ccr-system-card-head"><div><p class="ccr-section-eyebrow">Source freshness</p><h3>Remote inputs</h3></div></div><dl id="ccr-sources" class="ccr-stamps"></dl></section>
+      <section class="ccr-system-card">
+        <div class="ccr-system-card-head"><div><p class="ccr-section-eyebrow">Unreconciled</p><h3>Open builds</h3></div><span class="ccr-count" data-tally="loose">—</span></div>
+        <div class="ccr-loose-grid"><details id="unjoined-prs" class="ccr-fold"><summary><span>Open PRs no work card claims</span><span class="ccr-count" data-tally="unjoined">—</span></summary><ul></ul></details></div>
+      </section>
+    </section>
+  </main>
+</div>
+
+<div id="ccr-drawer-scrim" class="ccr-drawer-scrim" hidden></div>
+<aside id="ccr-detail-drawer" class="ccr-detail-drawer" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="ccr-detail-title">
+  <div class="ccr-drawer-head"><div><p id="ccr-detail-ref" class="ccr-section-eyebrow">Work</p><h2 id="ccr-detail-title">Work detail</h2></div><button type="button" id="ccr-drawer-close" class="ccr-icon-button" aria-label="Close detail">×</button></div>
+  <div id="ccr-detail-body" class="ccr-detail-body"></div>
+</aside>
+
+<div id="ccr-palette" class="ccr-palette-wrap" role="dialog" aria-modal="true" aria-labelledby="ccr-palette-title" hidden>
+  <button type="button" class="ccr-palette-backdrop" id="ccr-palette-backdrop" aria-label="Close search"></button>
+  <div class="ccr-palette"><div class="ccr-palette-input-row"><span class="ccr-command-icon">⌕</span><label class="sr-only" for="ccr-palette-input" id="ccr-palette-title">Search Control Room</label><input type="search" id="ccr-palette-input" placeholder="Workstream or PR…" autocomplete="off"><kbd>Esc</kbd></div><div id="ccr-palette-results" class="ccr-palette-results"></div><p class="ccr-palette-law">Search navigates already-loaded truth only.</p></div>
+</div>
+
+<script src="/static/control_room.js"></script>
+</body>
+</html>

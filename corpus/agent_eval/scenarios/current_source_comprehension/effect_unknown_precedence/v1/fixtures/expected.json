@@ -1,0 +1,4 @@
+{
+  "answer": "INVALID_EFFECT_UNKNOWN",
+  "rationale": "EFFECT_UNKNOWN is checked first in the precedence order, before the unauthorized/hidden-source check that would otherwise produce INVALID_LEAKAGE. The lower-priority unauthorized-source reason code remains visible in reason_codes, but the assigned validity status is INVALID_EFFECT_UNKNOWN."
+}

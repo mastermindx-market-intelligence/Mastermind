@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -250,6 +251,85 @@ def test_since_is_passed_through_to_the_brief(tmp_path):
     assert packet["brief"]["generated_at"] == "2026-08-13T00:00:00Z"
 
 
+def test_packet_uses_injected_bounded_runner_for_real_agent_os_brief(
+    tmp_path, monkeypatch, frozen_git
+):
+    from control_plane.chairman_control_room_remote import default_runner
+
+    macro = make_macro_root(tmp_path)
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail(
+            "injected runner must own the Agent OS subprocess"
+        ),
+    )
+
+    packet = build_packet(
+        repo_root=tmp_path,
+        macro_root_flag=os.fspath(macro),
+        environ={},
+        now="2026-08-13T00:00:00Z",
+        runner=default_runner,
+        max_output_bytes=64 * 1024,
+    )
+
+    assert packet["brief"]["schema"] == BRIEF_SCHEMA
+    assert packet["brief"]["generated_at"] == "2026-08-13T00:00:00Z"
+
+
+def test_immutable_packet_routes_macro_identity_through_bounded_runner(
+    tmp_path, monkeypatch
+):
+    macro = make_macro_root(tmp_path)
+    calls = []
+
+    def bounded_runner(argv, *, cwd, timeout, max_bytes):
+        calls.append((list(argv), Path(cwd), timeout, max_bytes))
+        if argv[0] == "git":
+            stdout = "b" * 40 + "\n"
+        else:
+            stdout = json.dumps({
+                "schema": BRIEF_SCHEMA,
+                "generated_at": "2026-08-13T00:00:00Z",
+            })
+        return {
+            "code": 0,
+            "stdout": stdout,
+            "stderr": "",
+            "timed_out": False,
+            "limit_exceeded": False,
+            "invalid_utf8": False,
+        }
+
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail(
+            "immutable bounded collection must not use capture_output subprocess.run"
+        ),
+    )
+
+    packet = build_packet(
+        repo_root=tmp_path,
+        macro_root_flag=os.fspath(macro),
+        environ={},
+        now="2026-08-13T00:00:00Z",
+        runner=bounded_runner,
+        max_output_bytes=64 * 1024,
+        mastermind_identity={"sha": "a" * 40, "branch": "immutable-release"},
+    )
+
+    assert packet["mastermind"] == {
+        "root": os.fspath(tmp_path),
+        "sha": "a" * 40,
+        "branch": "immutable-release",
+    }
+    assert packet["macro"]["sha"] == "b" * 40
+    assert [call[0][0] for call in calls] == [sys.executable, "git"]
+    assert all(call[3] <= 64 * 1024 for call in calls)
+
+
 # ---------------------------------------------------------------------------
 # 2. degraded when the Macro checkout is missing — the fail-open proof
 # ---------------------------------------------------------------------------
@@ -269,9 +349,7 @@ def test_missing_macro_root_degrades_and_still_exits_zero(tmp_path, monkeypatch,
     assert packet["macro"]["root"] is None
     assert packet["macro"]["sha"] is None
     assert packet["macro"]["resolved_via"] is None
-    assert [c["via"] for c in packet["macro"]["candidates_tried"]] == [
-        "flag", "sibling", "vendor",
-    ]
+    assert [c["via"] for c in packet["macro"]["candidates_tried"]] == ["flag"]
     assert all(c["usable"] is False for c in packet["macro"]["candidates_tried"])
     assert packet["handoffs"] == []
     assert packet["degraded"]
@@ -535,8 +613,6 @@ def test_env_is_used_when_no_flag_is_given(tmp_path):
 
 
 def test_unusable_candidates_are_recorded_with_reasons(tmp_path):
-    absent = tmp_path / "absent"
-
     no_script = tmp_path / "no_script"
     (no_script / "agentos").mkdir(parents=True)
 
@@ -546,19 +622,18 @@ def test_unusable_candidates_are_recorded_with_reasons(tmp_path):
 
     good = make_macro_root(tmp_path, name="good")
 
-    # Stage them through the ladder: flag -> env -> sibling.  The sibling slot is
+    # Stage them through the discovery ladder: env -> sibling.  The sibling slot is
     # `<repo_root>/../Macro Dashboard`, so build a repo_root whose parent holds one.
     home = tmp_path / "home"
     (home / "sub").mkdir(parents=True)
     (home / "Macro Dashboard").symlink_to(good, target_is_directory=True)
 
     resolved, via, candidates = resolve_macro_root(
-        os.fspath(absent), {ENV_MACRO_ROOT: os.fspath(no_script)}, home / "sub"
+        None, {ENV_MACRO_ROOT: os.fspath(no_script)}, home / "sub"
     )
     assert via == "sibling"
     assert resolved == home / "Macro Dashboard"
     assert [(c["via"], c["usable"], c["reason"]) for c in candidates] == [
-        ("flag", False, "missing"),
         ("env", False, "no scripts/agentos.py"),
         ("sibling", True, None),
     ]
@@ -570,6 +645,34 @@ def test_unusable_candidates_are_recorded_with_reasons(tmp_path):
         "via": "flag", "path": os.fspath(no_store), "usable": False,
         "reason": "no agentos/ store",
     }
+
+
+def test_unusable_explicit_root_never_falls_through_to_valid_discovery_candidates(
+    tmp_path,
+):
+    missing = tmp_path / "missing-explicit"
+    env_root = make_macro_root(tmp_path, name="from_env")
+    home = tmp_path / "home"
+    repo = home / "Mastermind"
+    repo.mkdir(parents=True)
+    make_macro_root(home, name="Macro Dashboard")
+
+    resolved, via, candidates = resolve_macro_root(
+        os.fspath(missing),
+        {ENV_MACRO_ROOT: os.fspath(env_root)},
+        repo,
+    )
+
+    assert resolved is None
+    assert via is None
+    assert candidates == [
+        {
+            "via": "flag",
+            "path": os.fspath(missing),
+            "usable": False,
+            "reason": "missing",
+        }
+    ]
 
 
 def test_vendor_is_last_because_the_pin_is_stale_by_design(tmp_path):
@@ -634,3 +737,82 @@ def test_module_imports_no_execution_plane():
         and name != "control_plane.strategic_state"
     }
     assert not forbidden, f"read-only bridge must not import {sorted(forbidden)}"
+
+
+def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    repo.mkdir()
+    macro.mkdir()
+    boot_python = tmp_path / "sealed-python"
+    mastermind_sha = "a" * 40
+    macro_sha = "b" * 40
+    packet = {
+        "schema": SCHEMA,
+        "mastermind": {"sha": mastermind_sha},
+        "macro": {"sha": macro_sha},
+    }
+    seen = {}
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps(packet)
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = list(argv)
+        seen["kwargs"] = dict(kwargs)
+        return Result()
+
+    def fake_sha(path):
+        return mastermind_sha if path.resolve() == repo.resolve() else macro_sha
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod, "git_sha", fake_sha)
+    result = mod.build_packet_in_interpreter(
+        boot_python=boot_python,
+        repo_root=repo,
+        macro_root=macro,
+        timeout=3.0,
+        now="2026-09-16T10:00:00Z",
+    )
+    assert result == packet
+    assert seen["argv"][:3] == [str(boot_python.resolve()), "-I", "-B"]
+    env = seen["kwargs"]["env"]
+    assert "HOME" not in env
+    assert env["PYTHONNOUSERSITE"] == "1"
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert {env["GIT_CONFIG_VALUE_0"], env["GIT_CONFIG_VALUE_1"]} == {
+        str(repo.resolve()), str(macro.resolve()),
+    }
+    assert env["MACRO_MASTERMIND_REPO"] == str(repo.resolve())
+
+
+def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    repo.mkdir()
+    macro.mkdir()
+    packet = {
+        "schema": SCHEMA,
+        "mastermind": {"sha": "c" * 40},
+        "macro": {"sha": "d" * 40},
+    }
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps(packet)
+
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Result())
+    monkeypatch.setattr(mod, "git_sha", lambda _p: "a" * 40)
+    monkeypatch.setattr(
+        mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
+    )
+    result = mod.build_packet_in_interpreter(
+        boot_python=tmp_path / "sealed-python",
+        repo_root=repo,
+        macro_root=macro,
+        timeout=3.0,
+    )
+    assert result["degraded"] == [
+        "installed boot helper unavailable: grounding_mismatch"
+    ]

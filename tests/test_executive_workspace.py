@@ -749,6 +749,10 @@ def test_packing_collapses_the_local_clone_to_a_single_object_file(tmp_path):
     source = tmp_path / "loose"
     source.mkdir()
     _git(source, "init", "-q")
+    # This fixture must stay loose until the explicit repack below. Runner
+    # maintenance settings must not compact it while commits are created.
+    _git(source, "config", "gc.auto", "0")
+    _git(source, "config", "maintenance.auto", "false")
     _git(source, "config", "user.name", "Executive Test")
     _git(source, "config", "user.email", "executive@example.invalid")
     for index in range(40):
@@ -921,6 +925,32 @@ def test_install_sh_prunes_unreachable_objects_after_repack_and_before_final_cho
     assert "not company state" in comment_block
 
 
+def test_install_sh_normalizes_safe_promisor_markers_after_prune_before_final_trust():
+    install_text = _INSTALL_SH.read_text(encoding="utf-8")
+
+    prune_marker = '/usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now'
+    normalize_marker = '"$RELEASE_ROOT/ops/executive_os/admin_checkout.py" normalize'
+    final_chown = '/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"'
+    loose_assertion = "administrative checkout still holds loose objects after repack"
+
+    prune_index = install_text.index(prune_marker)
+    normalize_index = install_text.index(normalize_marker, prune_index)
+    chown_index = install_text.index(final_chown, normalize_index)
+    assertion_index = install_text.index(loose_assertion, chown_index)
+    assert prune_index < normalize_index < chown_index < assertion_index
+
+    invocation_start = install_text.rindex('/usr/bin/sudo -u "$CONTROL_USER"', prune_index, normalize_index)
+    invocation = install_text[invocation_start:normalize_index + len(normalize_marker) + 320]
+    assert 'GIT_NO_LAZY_FETCH=1' in invocation
+    assert 'GIT_NO_REPLACE_OBJECTS=1' in invocation
+    assert 'GIT_TERMINAL_PROMPT=0' in invocation
+    assert '--checkout "$ADMIN_CHECKOUT"' in invocation
+    assert '--expected-commit "$EXPECTED_SHA"' in invocation
+    refusal = install_text[normalize_index:chown_index]
+    assert "administrative checkout promisor normalization refused" in refusal
+    assert "exit 65" in refusal
+
+
 def test_prune_after_repack_reaches_zero_loose_objects_and_stays_clonable(tmp_path: Path):
     """The full fix, proved end to end without root.
 
@@ -996,3 +1026,196 @@ def test_prune_after_repack_reaches_zero_loose_objects_and_stays_clonable(tmp_pa
     # Raises if the base commit object is missing from the clone result.
     _git(workspace, "cat-file", "-e", f"{expected_sha}^{{commit}}")
     assert _git(workspace, "rev-parse", "HEAD") == expected_sha
+
+
+def test_linked_workspace_shares_git_store_and_reuses_exact_operation(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-001",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-001",
+    )
+    workspace = Path(receipt.workspace_path)
+
+    assert workspace == root / "web" / "web-op-001"
+    assert (workspace / ".git").is_file()
+    assert receipt.base_sha == base_sha
+    assert receipt.head_sha == base_sha
+    assert receipt.branch == "sol/web-op-001"
+    assert receipt.reused is False
+    source_common_raw = Path(_git(source, "rev-parse", "--git-common-dir"))
+    source_common = (source / source_common_raw).resolve() if not source_common_raw.is_absolute() else source_common_raw.resolve()
+    assert Path(receipt.common_git_dir) == source_common
+    assert _git(workspace, "status", "--porcelain=v1") == ""
+
+    reused = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-001",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-001",
+    )
+    assert reused.workspace_path == receipt.workspace_path
+    assert reused.reused is True
+
+
+def test_linked_workspace_release_removes_clean_base_but_keeps_branch(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-002",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-002",
+    )
+
+    inspection = executive_workspace.inspect_linked_worktree(
+        source,
+        root,
+        receipt.workspace_path,
+        expected_operation_id="web-op-002",
+    )
+    assert inspection.state == "RELEASABLE"
+    assert inspection.recoverability == "UNCHANGED_FROM_ACQUIRED_BASE"
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        receipt.workspace_path,
+        expected_operation_id="web-op-002",
+    )
+    assert released.state == "REMOVED"
+    assert released.removed is True
+    assert not Path(receipt.workspace_path).exists()
+    assert _git(source, "rev-parse", "refs/heads/sol/web-op-002") == base_sha
+
+
+def test_linked_workspace_release_preserves_dirty_work(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-003",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-003",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "uncommitted.txt").write_text("preserve me\n", encoding="utf-8")
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="web-op-003",
+    )
+    assert released.state == "PRESERVED_DIRTY"
+    assert released.dirty is True
+    assert released.removed is False
+    assert workspace.exists()
+
+
+def test_linked_workspace_release_preserves_local_only_commit(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-004",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-004",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("local only\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "local only")
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="web-op-004",
+    )
+    assert released.state == "PRESERVED_UNPUBLISHED"
+    assert released.dirty is False
+    assert released.removed is False
+    assert released.head_sha != base_sha
+    assert workspace.exists()
+
+
+def test_linked_workspace_refuses_unmanaged_or_mismatched_identity(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-005",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-005",
+    )
+
+    with pytest.raises(WorkspaceError, match="operation identity"):
+        executive_workspace.inspect_linked_worktree(
+            source,
+            root,
+            receipt.workspace_path,
+            expected_operation_id="web-op-other",
+        )
+
+    unmanaged = tmp_path / "unmanaged"
+    _git(source, "worktree", "add", "--detach", str(unmanaged), base_sha)
+    with pytest.raises(WorkspaceError, match="outside the managed"):
+        executive_workspace.inspect_linked_worktree(source, root, unmanaged)
+
+
+def test_linked_workspace_release_accepts_head_published_to_origin_branch(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-006",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-006",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("published\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "published")
+    head = _git(workspace, "rev-parse", "HEAD")
+    _git(workspace, "push", "-u", "origin", "sol/web-op-006")
+    assert _git(source, "rev-parse", "refs/remotes/origin/sol/web-op-006") == head
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="web-op-006",
+    )
+    assert released.state == "REMOVED"
+    assert released.recoverability == "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"
+    assert released.removed is True
+    assert not workspace.exists()
+    assert _git(source, "rev-parse", "refs/heads/sol/web-op-006") == head

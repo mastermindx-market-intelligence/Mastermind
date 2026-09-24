@@ -1,0 +1,9 @@
+{
+  "candidate_actions": [
+    "STAND_DOWN_IMMEDIATELY_ON_SEAT_CLAIM",
+    "VERIFY_THE_CLAIM_NAMES_MY_OWN_SESSION_ID_BEFORE_STANDING_DOWN",
+    "STAND_DOWN_AFTER_POSTING_A_CORRECTION_NAMING_THE_SEAT"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "A message on a shared, multi-session carrier seat reads: 'this seat already has an active claim.' The worker is mid-task and is deciding whether to stand down. The carrier is known to be a SHARED seat that can host multiple concurrent sessions at once."
+}

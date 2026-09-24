@@ -7,15 +7,18 @@ import hashlib
 import json
 import os
 import pwd
+import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
 from control_plane import codex_worker as cw
+from control_plane import worker_execution_contract as wec
 
 
 _FAKE_CODEX = r'''#!/usr/bin/python3
@@ -63,7 +66,13 @@ result = {
     "artifacts": [],
 }
 
-if mode in {"sleep", "sleep-stubborn"}:
+if mode == "exit-escaped-pipe-holder":
+    child = subprocess.Popen(["/bin/sleep", "60"], start_new_session=True)
+    with open(os.path.join(os.path.dirname(result_path), "child.pid"), "w") as handle:
+        handle.write(str(child.pid))
+    raise SystemExit(0)
+
+if mode in {"sleep", "sleep-stubborn", "sleep-escaped-pipe-holder"}:
     if mode == "sleep-stubborn":
         ready_path = os.path.join(os.path.dirname(result_path), "child.ready")
         child = subprocess.Popen([
@@ -80,6 +89,8 @@ if mode in {"sleep", "sleep-stubborn"}:
             time.sleep(0.01)
         else:
             raise SystemExit(98)
+    elif mode == "sleep-escaped-pipe-holder":
+        child = subprocess.Popen(["/bin/sleep", "60"], start_new_session=True)
     else:
         child = subprocess.Popen(["/bin/sleep", "60"])
     with open(os.path.join(os.path.dirname(result_path), "child.pid"), "w") as handle:
@@ -664,6 +675,7 @@ def _fixture(
     binary, attestation = _fake_binary(tmp_path)
     adapter = cw.CodexWorkerAdapter(
         binary,
+        codex_home=codex_home,
         binary_attestation=attestation,
         allowed_versions=frozenset({"test-0"}),
         required_team_identifier=None,
@@ -676,7 +688,6 @@ def _fixture(
         run_dir=run_dir,
         prompt=prompt,
         result_schema_path=schema_path,
-        codex_home=codex_home,
         authorities=authorities,
         authority=authority,
         expected_base_sha=head,
@@ -690,6 +701,53 @@ def _fixture(
 
 def _capture(run_dir: Path) -> dict:
     return json.loads((run_dir / "output" / "capture.json").read_text(encoding="utf-8"))
+
+
+def test_codex_adapter_refuses_start_without_one_configured_private_home(
+    tmp_path: Path,
+) -> None:
+    configured, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    adapter = cw.CodexWorkerAdapter(
+        configured.binary.real_path,
+        binary_attestation=configured.binary,
+        allowed_versions=frozenset({"test-0"}),
+        required_team_identifier=None,
+    )
+
+    with pytest.raises(cw.LaunchValidationError, match="Codex home is not configured"):
+        asyncio.run(adapter.start(spec))
+
+
+@pytest.mark.parametrize("second_name", ["codex-home", "second-codex-home"])
+def test_codex_adapter_rejects_every_second_home_binding(
+    tmp_path: Path, second_name: str
+) -> None:
+    adapter, _spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    second = tmp_path / second_name
+    second.mkdir(mode=0o700, exist_ok=True)
+
+    with pytest.raises(cw.LaunchValidationError, match="already configured"):
+        adapter._bind_legacy_codex_home(second)
+
+
+def test_codex_adapter_revalidates_private_home_at_start_time(tmp_path: Path) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    configured_home = adapter.codex_home
+    moved_home = tmp_path / "moved-codex-home"
+    configured_home.rename(moved_home)
+    configured_home.symlink_to(moved_home, target_is_directory=True)
+
+    with pytest.raises(cw.LaunchValidationError, match="real directory"):
+        asyncio.run(adapter.start(spec))
+
+
+def test_codex_adapter_types_missing_private_home_at_start_time(tmp_path: Path) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    configured_home = adapter.codex_home
+    configured_home.rename(tmp_path / "removed-codex-home")
+
+    with pytest.raises(cw.LaunchValidationError, match="CODEX_HOME is unavailable"):
+        asyncio.run(adapter.start(spec))
 
 
 def test_success_uses_exact_one_shot_argv_empty_env_and_private_logs(tmp_path: Path):
@@ -783,15 +841,15 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(tmp_path: P
             secret_canary_verdict=_passing_canary(),
             require_secret_canary=True,
         )
-        (spec.codex_home / "auth.json").write_text(
+        (adapter.codex_home / "auth.json").write_text(
             '{"token":"dedicated-auth-secret-canary"}', encoding="utf-8"
         )
         ref = await adapter.start(spec)
         attestation = adapter.launch_attestation(ref)
         receipt = await adapter.collect_result(ref)
-        return ref, attestation, receipt, spec, workspace
+        return ref, attestation, receipt, spec, workspace, adapter
 
-    ref, attestation, receipt, spec, workspace = asyncio.run(exercise())
+    ref, attestation, receipt, spec, workspace, adapter = asyncio.run(exercise())
     document = attestation.to_dict()
     assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
     assert document["schema_version"] == cw.LAUNCH_ATTESTATION_SCHEMA_VERSION
@@ -803,7 +861,7 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(tmp_path: P
     assert document["workspace_identity"]["path"] == str(workspace.resolve())
     assert document["worker_identity"]["effective_uid"] == os.geteuid()
     assert document["worker_identity"]["effective_gid"] == os.getegid()
-    assert document["provider_home_identity"]["path"] == str(spec.codex_home.resolve())
+    assert document["provider_home_identity"]["path"] == str(adapter.codex_home.resolve())
     assert document["secret_canary_verdict"]["passed"] is True
     assert document["launch_nonce"] == ref.launch_nonce
     assert document["process_identity"]["pid"] == ref.pid
@@ -1021,7 +1079,7 @@ def test_real_codex_sandbox_profile_enforces_exact_write_and_sensitive_denials(
     environment = {
         "PATH": cw._SAFE_PATH,
         "HOME": str(sandbox_home),
-        "CODEX_HOME": str(spec.codex_home),
+        "CODEX_HOME": str(adapter.codex_home),
         "TMPDIR": str(sandbox_tmp) + "/",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
@@ -1066,13 +1124,13 @@ def test_real_codex_sandbox_profile_enforces_exact_write_and_sensitive_denials(
     assert not (workspace / "proof" / "other.md").exists()
     assert probe(controller_db, os.O_RDONLY).returncode != 0
     assert probe(controller_wal, os.O_RDONLY).returncode != 0
-    assert probe(Path(spec.codex_home) / "auth.json", os.O_RDONLY).returncode != 0
+    assert probe(adapter.codex_home / "auth.json", os.O_RDONLY).returncode != 0
     # The read-only base profile must not make the interactive user's home or
     # unrelated Git/credential material ambiently readable.  The probe opens
     # only a directory descriptor and never enumerates or reads its contents.
     assert probe(Path.home(), os.O_RDONLY).returncode != 0
 
-    native_adapter = cw.CodexWorkerAdapter(binary)
+    native_adapter = cw.CodexWorkerAdapter(binary, codex_home=adapter.codex_home)
     receipt = asyncio.run(
         native_adapter.run_validation_argv(
             spec,
@@ -1484,7 +1542,16 @@ def test_cancel_signals_verified_process_group_and_kills_descendant(tmp_path: Pa
         pytest.fail("cancelled Codex descendant survived its process group")
 
 
-def test_cancel_sigkills_descendant_that_ignores_sigterm(tmp_path: Path):
+def test_cancel_sigkills_descendant_that_ignores_sigterm(tmp_path: Path, monkeypatch):
+    original_killpg = cw.os.killpg
+    kill_calls: list[tuple[int, int]] = []
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
     async def exercise():
         adapter, spec, _workspace_path, run_dir = _fixture(
             tmp_path, prompt="sleep-stubborn", timeout=30, grace=0.1
@@ -1503,11 +1570,14 @@ def test_cancel_sigkills_descendant_that_ignores_sigterm(tmp_path: Path):
         assert os.getpgid(child_pid) == ref.pgid
         cancel = await adapter.cancel(ref, "operator requested")
         receipt = await adapter.collect_result(ref)
-        return cancel, receipt, child_pid
+        return cancel, receipt, child_pid, ref.pgid
 
-    cancel, receipt, child_pid = asyncio.run(exercise())
+    cancel, receipt, child_pid, original_pgid = asyncio.run(exercise())
     assert cancel.signal_sent is True
     assert cancel.escalated_to_sigkill is True
+    assert [
+        (pgid, sig) for pgid, sig in kill_calls if sig == signal.SIGKILL
+    ] == [(original_pgid, signal.SIGKILL)]
     assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
     for _ in range(100):
         try:
@@ -1563,6 +1633,2735 @@ def test_cancel_refuses_pid_reuse_identity_mismatch(tmp_path: Path):
     asyncio.run(exercise())
 
 
+def test_cancel_retires_local_transport_after_original_group_absence(tmp_path: Path, monkeypatch):
+    original_killpg = cw.os.killpg
+    original_group_exists = cw._process_group_exists
+    kill_calls: list[tuple[int, int]] = []
+    group_probes: list[int] = []
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    def traced_group_exists(pgid: int) -> bool:
+        group_probes.append(pgid)
+        return original_group_exists(pgid)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    monkeypatch.setattr(cw, "_process_group_exists", traced_group_exists)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="sleep-escaped-pipe-holder", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[ref.run_id]
+        popen = getattr(state.finalization.transport, "_proc", None)
+        assert popen is not None
+
+        def forbidden_underlying_kill():
+            raise AssertionError("local transport close called underlying Popen.kill")
+
+        monkeypatch.setattr(popen, "kill", forbidden_underlying_kill)
+        child_path = run_dir / "output" / "child.pid"
+        child_pid = None
+        for _ in range(100):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.02)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        assert child_pgid != ref.pgid
+        try:
+            cancel = await asyncio.wait_for(adapter.cancel(ref, "operator requested"), 3.0)
+            assert cancel.signal_sent is True
+            assert cancel.escalated_to_sigkill is False
+            assert original_killpg(child_pgid, 0) is None
+            assert all(pgid != child_pgid for pgid, _sig in kill_calls)
+            probes_after_cancel = len(group_probes)
+
+            class ForbiddenInspector(cw.ProcessInspector):
+                def boot_session_id(self):
+                    raise AssertionError("post-latch boot probe")
+
+                def identity(self, pid):
+                    raise AssertionError("post-latch pid probe")
+
+            adapter.inspector = ForbiddenInspector()
+            receipt = await adapter.collect_result(ref)
+            assert len(group_probes) == probes_after_cancel
+            assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
+        finally:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    asyncio.run(exercise())
+
+
+def test_validation_retires_local_transport_after_original_group_absence(tmp_path: Path, monkeypatch):
+    original_killpg = cw.os.killpg
+    original_group_exists = cw._process_group_exists
+    kill_calls: list[tuple[int, int]] = []
+    group_probes: list[tuple[int, bool]] = []
+    absence_seen = False
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    def traced_group_exists(pgid: int) -> bool:
+        nonlocal absence_seen
+        if absence_seen:
+            raise AssertionError("post-latch process-group probe")
+        result = original_group_exists(pgid)
+        group_probes.append((pgid, result))
+        if result is False:
+            absence_seen = True
+        return result
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    monkeypatch.setattr(cw, "_process_group_exists", traced_group_exists)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(tmp_path, grace=0.1)
+        child_path = run_dir / "validation-escaped.pid"
+        child_program = (
+            "import pathlib,subprocess,sys,time; "
+            "p=subprocess.Popen(['/bin/sleep','60'], start_new_session=True); "
+            "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(60)"
+        )
+        task = asyncio.create_task(adapter.run_validation_argv(
+            spec,
+            ("/usr/bin/python3", "-c", child_program, str(child_path)),
+            timeout_seconds=1.0,
+        ))
+        child_pid = None
+        for _ in range(100):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.02)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        try:
+            receipt = await asyncio.wait_for(task, 3.0)
+            assert receipt.timed_out is True
+            assert receipt.error is not None
+            assert receipt.exit_code is not None
+            assert absence_seen is True
+            assert group_probes
+            assert original_killpg(child_pgid, 0) is None
+            assert all(pgid != child_pgid for pgid, _sig in kill_calls)
+        finally:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    asyncio.run(exercise())
+
+
+
+def test_validation_absence_latch_retires_transport_when_wait_already_done():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        finalization.group_proven_absent = True
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        kwargs = dict(
+            pid=424242,
+            pgid=424242,
+            start_identity="captured",
+            boot_id="captured",
+            grace_seconds=0.01,
+        )
+        await adapter._terminate_validation_process(
+            process, wait_task, finalization, **kwargs
+        )
+        assert transport.close_calls == 1
+        assert finalization.transport_close_completed is True
+        await adapter._terminate_validation_process(
+            process, wait_task, finalization, **kwargs
+        )
+        assert transport.close_calls == 1
+
+    asyncio.run(exercise())
+
+
+
+def test_cancel_wait_done_refuses_boot_change_before_residual_probe(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+        def get_returncode(self):
+            return 0
+        def close(self):
+            raise AssertionError("transport must not close after boot drift")
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+    class FakeRef:
+        pid = 424242
+        pgid = 424242
+        boot_session_id = "captured-boot"
+        process_start_identity = "captured-start"
+    class FakeSpec:
+        cancel_grace_seconds = 0.01
+    class ChangedBootInspector:
+        def boot_session_id(self):
+            return "changed-boot"
+        def identity(self, _pid):
+            raise AssertionError("PID identity must not be probed after boot drift")
+    def forbidden_group_probe(_pgid: int) -> bool:
+        raise AssertionError("process group must not be probed after boot drift")
+    monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        state = type("State", (), {})()
+        state.process = process
+        state.process_wait_task = wait_task
+        state.finalization = finalization
+        state.ref = FakeRef()
+        state.spec = FakeSpec()
+        state.termination_lock = asyncio.Lock()
+        state.stdout_task = None
+        state.stderr_task = None
+        state.stream_errors = []
+        state.violation = asyncio.Event()
+        state.escalated = False
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = ChangedBootInspector()
+        with pytest.raises(cw.ProcessIdentityError, match="boot identity changed"):
+            await adapter._terminate(state)
+    asyncio.run(exercise())
+
+
+def test_validation_wait_done_refuses_boot_change_before_group_probe(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    class ChangedBootInspector:
+        def boot_session_id(self):
+            return "changed"
+
+        def identity(self, _pid):
+            raise AssertionError("PID identity must not be probed after boot drift")
+
+    def forbidden_group_probe(_pgid: int) -> bool:
+        raise AssertionError("process group must not be probed after boot drift")
+
+    monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = ChangedBootInspector()
+        with pytest.raises(cw.ProcessIdentityError, match="boot identity changed"):
+            await adapter._terminate_validation_process(
+                process,
+                wait_task,
+                finalization,
+                pid=424242,
+                pgid=424242,
+                start_identity="captured",
+                boot_id="captured",
+                grace_seconds=0.01,
+            )
+        assert transport.close_calls == 0
+
+    asyncio.run(exercise())
+
+def test_validation_wait_done_requires_leader_unresolved_before_group_probe(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+        def get_returncode(self):
+            return 0
+        def close(self):
+            self.close_calls += 1
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+    class ResolvedInspector:
+        def boot_session_id(self):
+            return "captured-boot"
+        def identity(self, _pid):
+            return "captured-start", 424242
+    def forbidden_group_probe(_pgid: int) -> bool:
+        raise AssertionError("group probe before leader-unresolved proof")
+    monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = ResolvedInspector()
+        with pytest.raises(cw.ProcessIdentityError, match="remained resolvable"):
+            await adapter._terminate_validation_process(
+                process, wait_task, finalization,
+                pid=424242, pgid=424242,
+                start_identity="captured-start", boot_id="captured-boot",
+                grace_seconds=0.01,
+            )
+        assert transport.close_calls == 0
+    asyncio.run(exercise())
+
+
+def test_cancel_wait_done_requires_leader_unresolved_before_group_probe(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+        def get_returncode(self):
+            return 0
+        def close(self):
+            raise AssertionError("transport must not close before leader-unresolved proof")
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+    class FakeRef:
+        pid = 424242
+        pgid = 424242
+        boot_session_id = "captured-boot"
+        process_start_identity = "captured-start"
+    class FakeSpec:
+        cancel_grace_seconds = 0.01
+    class ResolvedInspector:
+        def boot_session_id(self):
+            return "captured-boot"
+        def identity(self, _pid):
+            return "captured-start", 424242
+    def forbidden_group_probe(_pgid: int) -> bool:
+        raise AssertionError("group probe before leader-unresolved proof")
+    monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        state = type("State", (), {})()
+        state.process = process
+        state.process_wait_task = wait_task
+        state.finalization = finalization
+        state.ref = FakeRef()
+        state.spec = FakeSpec()
+        state.termination_lock = asyncio.Lock()
+        state.stdout_task = None
+        state.stderr_task = None
+        state.stream_errors = []
+        state.violation = asyncio.Event()
+        state.escalated = False
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = ResolvedInspector()
+        with pytest.raises(cw.ProcessIdentityError, match="remained resolvable"):
+            await adapter._terminate(state)
+    asyncio.run(exercise())
+
+
+def test_local_transport_retirement_requires_known_returncode():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return None
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = None
+
+    transport = FakeTransport()
+    finalization = cw._capture_process_finalization(FakeProcess(transport))
+    finalization.group_proven_absent = True
+    with pytest.raises(cw.ProcessIdentityError, match="requires known return code"):
+        cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 0
+
+
+def test_local_transport_retirement_rejects_replaced_transport():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    original = FakeTransport()
+    process = FakeProcess(original)
+    finalization = cw._capture_process_finalization(process)
+    replacement = FakeTransport()
+    process._transport = replacement
+    finalization.group_proven_absent = True
+    with pytest.raises(cw.ProcessIdentityError, match="transport identity changed"):
+        cw._retire_process_transport(finalization, label="test")
+    assert original.close_calls == 0
+    assert replacement.close_calls == 0
+
+
+def test_local_transport_retirement_rejects_missing_output_pipe():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = [object(), object(), object()]
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    transport = FakeTransport()
+    process = FakeProcess(transport)
+    finalization = cw._capture_process_finalization(process)
+    finalization.group_proven_absent = True
+    transport.pipes[1] = None
+    with pytest.raises(cw.ProcessIdentityError, match="pipe 1 disappeared"):
+        cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 0
+
+
+def test_local_transport_close_failure_is_not_retried():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+            raise RuntimeError("close failed")
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    transport = FakeTransport()
+    finalization = cw._capture_process_finalization(FakeProcess(transport))
+    finalization.group_proven_absent = True
+    for _ in range(2):
+        with pytest.raises(cw.ProcessIdentityError, match="transport close failed"):
+            cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 1
+
+
+def test_local_transport_requires_transport_returncode_accessor():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    transport = FakeTransport()
+    finalization = cw._capture_process_finalization(FakeProcess(transport))
+    finalization.group_proven_absent = True
+    with pytest.raises(cw.ProcessIdentityError, match="return code"):
+        cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 0
+
+
+def test_local_transport_rejects_replaced_stderr_stream_object():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeStream:
+        def __init__(self, transport):
+            self._transport = transport
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+            self.stdin = FakeStream(transport.pipes[0])
+            self.stdout = FakeStream(transport.pipes[1])
+            self.stderr = FakeStream(transport.pipes[2])
+
+    transport = FakeTransport()
+    process = FakeProcess(transport)
+    finalization = cw._capture_process_finalization(process)
+    finalization.group_proven_absent = True
+    process.stderr = FakeStream(transport.pipes[2])
+    with pytest.raises(cw.ProcessIdentityError, match="stream 2"):
+        cw._retire_process_transport(finalization, label="test")
+    assert transport.close_calls == 0
+
+
+def test_validation_allows_short_stream_drain_after_wait(tmp_path: Path, monkeypatch):
+    original = cw._hash_validation_stream
+
+    async def delayed(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        await asyncio.sleep(0.05)
+        return result
+
+    monkeypatch.setattr(cw, "_hash_validation_stream", delayed)
+
+    async def exercise():
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        return await adapter.run_validation_argv(
+            spec, ("/usr/bin/true",), timeout_seconds=5
+        )
+
+    receipt = asyncio.run(exercise())
+    assert receipt.exit_code == 0
+    assert receipt.timed_out is False
+    assert receipt.error is None
+
+
+def test_cancel_reconciles_already_exited_original_group_without_signal(
+    tmp_path: Path, monkeypatch
+):
+    original_killpg = cw.os.killpg
+    kill_calls: list[tuple[int, int]] = []
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="exit-escaped-pipe-holder", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        child_path = run_dir / "output" / "child.pid"
+        child_pid = None
+        for _ in range(200):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.01)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        await asyncio.sleep(0.1)
+        try:
+            cancel = await asyncio.wait_for(
+                adapter.cancel(ref, "operator requested"), 3.0
+            )
+            receipt = await adapter.collect_result(ref)
+            return ref, child_pid, child_pgid, cancel, receipt
+        except BaseException:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    ref, child_pid, child_pgid, cancel, receipt = asyncio.run(exercise())
+    try:
+        assert cancel.signal_sent is False
+        assert cancel.already_exited is True
+        assert receipt.result.status is cw.WorkerRunStatus.CANCELLED
+        assert all(
+            not (pgid == ref.pgid and sig in {signal.SIGTERM, signal.SIGKILL})
+            for pgid, sig in kill_calls
+        )
+        assert original_killpg(child_pgid, 0) is None
+    finally:
+        try:
+            original_killpg(child_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def test_validation_reconciles_already_exited_group_without_signal(
+    tmp_path: Path, monkeypatch
+):
+    original_killpg = cw.os.killpg
+    kill_calls: list[tuple[int, int]] = []
+
+    def traced_killpg(pgid: int, sig: int):
+        kill_calls.append((pgid, sig))
+        return original_killpg(pgid, sig)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(tmp_path, grace=0.1)
+        child_path = run_dir / "validation-exited-child.pid"
+        program = (
+            "import pathlib,subprocess,sys; "
+            "p=subprocess.Popen(['/bin/sleep','60'], start_new_session=True); "
+            "pathlib.Path(sys.argv[1]).write_text(str(p.pid))"
+        )
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/usr/bin/python3", "-c", program, str(child_path)),
+                timeout_seconds=1.0,
+            )
+        )
+        child_pid = None
+        for _ in range(200):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.01)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        try:
+            receipt = await asyncio.wait_for(task, 3.0)
+            return child_pid, child_pgid, receipt
+        except BaseException:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    child_pid, child_pgid, receipt = asyncio.run(exercise())
+    try:
+        assert receipt.error is not None
+        assert receipt.exit_code == 0
+        assert all(
+            sig not in {signal.SIGTERM, signal.SIGKILL}
+            for _pgid, sig in kill_calls
+        )
+        assert original_killpg(child_pgid, 0) is None
+    finally:
+        try:
+            original_killpg(child_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+
+def test_worker_normal_exit_foreign_pipe_holder_fails_boundedly_not_success(
+    tmp_path: Path
+):
+    original_killpg = cw.os.killpg
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(
+            tmp_path, prompt="exit-escaped-pipe-holder", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        child_path = run_dir / "output" / "child.pid"
+        child_pid = None
+        for _ in range(200):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.01)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        try:
+            receipt = await asyncio.wait_for(adapter.collect_result(ref), 3.0)
+            return child_pid, child_pgid, receipt
+        except BaseException:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    child_pid, child_pgid, receipt = asyncio.run(exercise())
+    try:
+        assert receipt.result.status is cw.WorkerRunStatus.INVALID_RESULT
+        assert "expected one thread.started" in (receipt.result.error or "")
+        assert original_killpg(child_pgid, 0) is None
+    finally:
+        try:
+            original_killpg(child_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def test_validation_normal_exit_foreign_pipe_holder_fails_boundedly_not_success(
+    tmp_path: Path
+):
+    original_killpg = cw.os.killpg
+
+    async def exercise():
+        adapter, spec, _workspace_path, run_dir = _fixture(tmp_path, grace=0.1)
+        child_path = run_dir / "validation-normal-exit-child.pid"
+        program = (
+            "import pathlib,subprocess,sys; "
+            "p=subprocess.Popen(['/bin/sleep','60'], start_new_session=True); "
+            "pathlib.Path(sys.argv[1]).write_text(str(p.pid))"
+        )
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/usr/bin/python3", "-c", program, str(child_path)),
+                timeout_seconds=5.0,
+            )
+        )
+        child_pid = None
+        for _ in range(200):
+            try:
+                child_pid = int(child_path.read_text())
+            except (FileNotFoundError, ValueError):
+                await asyncio.sleep(0.01)
+                continue
+            break
+        assert child_pid is not None
+        child_pgid = os.getpgid(child_pid)
+        try:
+            receipt = await asyncio.wait_for(task, 3.0)
+            return child_pid, child_pgid, receipt
+        except BaseException:
+            try:
+                original_killpg(child_pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    child_pid, child_pgid, receipt = asyncio.run(exercise())
+    try:
+        assert receipt.exit_code == 0
+        assert receipt.timed_out is False
+        assert "forced local stream finalization" in (receipt.error or "")
+        assert original_killpg(child_pgid, 0) is None
+    finally:
+        try:
+            original_killpg(child_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+
+def test_validation_absence_latch_concurrent_entries_close_transport_once():
+    class FakeTransport:
+        def __init__(self):
+            self.pipes = (object(), object(), object())
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    async def exercise():
+        transport = FakeTransport()
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        finalization.group_proven_absent = True
+        wait_task = asyncio.create_task(asyncio.sleep(0, result=0))
+        await wait_task
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        kwargs = dict(pid=424242, pgid=424242, start_identity='captured', boot_id='captured', grace_seconds=0.01)
+        await asyncio.gather(
+            adapter._terminate_validation_process(process, wait_task, finalization, **kwargs),
+            adapter._terminate_validation_process(process, wait_task, finalization, **kwargs),
+        )
+        assert transport.close_calls == 1
+        assert finalization.transport_close_completed is True
+
+    asyncio.run(exercise())
+
+
+def test_validation_finalization_state_survives_cancellation_after_transport_close():
+    class FakeTransport:
+        def __init__(self, closed: asyncio.Event):
+            self.pipes = (object(), object(), object())
+            self.closed = closed
+            self.close_calls = 0
+
+        def get_pipe_transport(self, fd):
+            return self.pipes[fd]
+
+        def get_returncode(self):
+            return 0
+
+        def close(self):
+            self.close_calls += 1
+            self.closed.set()
+
+    class FakeProcess:
+        def __init__(self, transport):
+            self._transport = transport
+            self.returncode = 0
+
+    async def exercise():
+        closed = asyncio.Event()
+        release = asyncio.Event()
+        transport = FakeTransport(closed)
+        process = FakeProcess(transport)
+        finalization = cw._capture_process_finalization(process)
+        finalization.group_proven_absent = True
+
+        async def gated_wait():
+            await release.wait()
+            return 0
+
+        wait_task = asyncio.create_task(gated_wait())
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        kwargs = dict(
+            pid=424242,
+            pgid=424242,
+            start_identity="captured",
+            boot_id="captured",
+            grace_seconds=0.01,
+        )
+        first = asyncio.create_task(
+            adapter._terminate_validation_process(
+                process, wait_task, finalization, **kwargs
+            )
+        )
+        await asyncio.wait_for(closed.wait(), 1.0)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert transport.close_calls == 1
+        assert finalization.transport_close_completed is True
+
+        release.set()
+        await adapter._terminate_validation_process(
+            process, wait_task, finalization, **kwargs
+        )
+        assert transport.close_calls == 1
+        assert finalization.transport_close_count == 1
+
+    asyncio.run(exercise())
+
+
 def test_local_schema_validator_fails_closed_on_unknown_keyword():
     with pytest.raises(cw.ResultValidationError, match="unsupported JSON Schema"):
         cw.validate_json_schema({"x": 1}, {"type": "object", "unevaluatedProperties": False})
+
+
+def test_owned_task_settlement_consumes_precompleted_failure() -> None:
+    async def exercise() -> None:
+        async def fail_owned_task() -> None:
+            raise RuntimeError("precompleted owned task failure")
+
+        task = asyncio.create_task(fail_owned_task())
+        await asyncio.sleep(0)
+        assert task.done()
+        assert getattr(task, "_log_traceback", False) is True
+
+        settlement = await cw._settle_or_cancel_owned_tasks(
+            (task,), timeout=0.01
+        )
+
+        assert settlement.converged is True
+        assert settlement.errors == ("owned task 1 failed: RuntimeError",)
+        assert getattr(task, "_log_traceback", False) is False
+
+    asyncio.run(exercise())
+
+
+def test_owned_task_settlement_consumes_failure_during_bounded_wait() -> None:
+    async def exercise() -> None:
+        release = asyncio.Event()
+
+        async def fail_owned_task() -> None:
+            await release.wait()
+            raise RuntimeError("owned task failed during settlement")
+
+        task = asyncio.create_task(fail_owned_task())
+        asyncio.get_running_loop().call_later(0.01, release.set)
+
+        settlement = await cw._settle_or_cancel_owned_tasks(
+            (task,), timeout=0.2
+        )
+
+        assert task.done()
+        assert settlement.converged is True
+        assert settlement.errors == ("owned task 1 failed: RuntimeError",)
+        assert getattr(task, "_log_traceback", False) is False
+
+    asyncio.run(exercise())
+
+
+def test_bounded_task_convergence_rejects_failed_owned_task() -> None:
+    async def exercise() -> None:
+        async def fail_owned_task() -> None:
+            raise RuntimeError("bounded convergence task failure")
+
+        task = asyncio.create_task(fail_owned_task())
+        await asyncio.sleep(0)
+
+        with pytest.raises(
+            cw.ProcessIdentityError,
+            match="owned task 1 failed: RuntimeError",
+        ):
+            await cw._bounded_task_convergence(
+                (task,), label="review settlement"
+            )
+        assert getattr(task, "_log_traceback", False) is False
+
+    asyncio.run(exercise())
+
+
+def test_monitor_bounds_owned_tasks_after_pre_latch_identity_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        monkeypatch.setattr(cw, "_LOCAL_TRANSPORT_FINALIZATION_SECONDS", 0.01)
+
+        def forbidden_group_probe(_pgid: int) -> bool:
+            raise AssertionError("cleanup must not probe a PID/PGID after identity failure")
+
+        def forbidden_signal(_pgid: int, _sig: int) -> None:
+            raise AssertionError("cleanup must not signal after identity failure")
+
+        monkeypatch.setattr(cw, "_process_group_exists", forbidden_group_probe)
+        monkeypatch.setattr(cw.os, "killpg", forbidden_signal)
+
+        never = asyncio.Event()
+        process_wait_task = asyncio.create_task(never.wait())
+        stdout_task = asyncio.create_task(never.wait())
+        stderr_task = asyncio.create_task(never.wait())
+        state = type("State", (), {})()
+        state.violation = asyncio.Event()
+        state.violation.set()
+        state.process = type("Process", (), {"returncode": None})()
+        state.process_wait_task = process_wait_task
+        state.stdout_task = stdout_task
+        state.stderr_task = stderr_task
+        state.spec = type("Spec", (), {"timeout_seconds": 1.0})()
+        state.timed_out = False
+        state.stream_errors = []
+        state.finalization = type(
+            "Finalization",
+            (),
+            {"group_proven_absent": False, "error": None},
+        )()
+        state.finished_at = None
+
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+
+        async def fail_before_absence_latch(_state) -> None:
+            raise cw.ProcessIdentityError(
+                "process identity changed before final settlement"
+            )
+
+        monkeypatch.setattr(adapter, "_terminate", fail_before_absence_latch)
+        monitor_task = asyncio.create_task(adapter._monitor(state))
+        owned_tasks = (process_wait_task, stdout_task, stderr_task)
+        try:
+            done, _pending = await asyncio.wait({monitor_task}, timeout=0.2)
+            assert monitor_task in done, (
+                "pre-latch identity failure left adapter-owned tasks unbounded"
+            )
+            await monitor_task
+            assert all(task.done() for task in owned_tasks)
+            assert any(
+                "process identity changed before final settlement" in error
+                for error in state.stream_errors
+            )
+            assert state.finalization.error == (
+                "process identity changed before final settlement"
+            )
+            assert state.finished_at is not None
+        finally:
+            for task in owned_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*owned_tasks, return_exceptions=True)
+            if not monitor_task.done():
+                monitor_task.cancel()
+            await asyncio.gather(monitor_task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+def test_validation_identity_failure_retires_owned_tasks_and_preserves_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        monkeypatch.setattr(cw, "_LOCAL_STREAM_DRAIN_SECONDS", 0.01)
+        recorded_hash_tasks: list[asyncio.Task[object]] = []
+        terminate_calls = 0
+        kill_calls: list[tuple[int, int]] = []
+        original_killpg = cw.os.killpg
+
+        async def never_finish_hash(*_args, **_kwargs):
+            task = asyncio.current_task()
+            assert task is not None
+            recorded_hash_tasks.append(task)
+            await asyncio.Event().wait()
+            raise AssertionError("cancelled hash task resumed")
+
+        async def fail_validation_termination(*_args, **_kwargs) -> bool:
+            nonlocal terminate_calls
+            terminate_calls += 1
+            raise cw.ProcessIdentityError(
+                "validation process identity changed before final settlement"
+            )
+
+        async def observed_returncode(_process) -> int:
+            return 0
+
+        def traced_killpg(pgid: int, sig: int) -> None:
+            kill_calls.append((pgid, sig))
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw, "_hash_validation_stream", never_finish_hash)
+        monkeypatch.setattr(cw, "_wait_for_known_returncode", observed_returncode)
+        monkeypatch.setattr(
+            adapter,
+            "_terminate_validation_process",
+            fail_validation_termination,
+        )
+        monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="validation process identity changed before final settlement",
+            ):
+                await asyncio.wait_for(
+                    adapter.run_validation_argv(
+                        spec,
+                        ("/usr/bin/true",),
+                        timeout_seconds=5,
+                    ),
+                    timeout=1.0,
+                )
+            assert terminate_calls == 1
+            assert len(recorded_hash_tasks) == 2
+            assert all(task.done() for task in recorded_hash_tasks), (
+                "validation identity failure leaked stream/hash tasks"
+            )
+            assert kill_calls == []
+        finally:
+            for task in recorded_hash_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*recorded_hash_tasks, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+def test_validation_uses_private_codex_home_without_requiring_provider_auth(
+    tmp_path: Path,
+) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    (adapter.codex_home / "auth.json").unlink()
+
+    with pytest.raises(
+        cw.LaunchValidationError,
+        match="dedicated CODEX_HOME/auth.json is required",
+    ):
+        asyncio.run(adapter.start(spec))
+
+    receipt = asyncio.run(
+        adapter.run_validation_argv(
+            spec,
+            ("/usr/bin/true",),
+            timeout_seconds=5,
+        )
+    )
+    assert receipt.exit_code == 0
+    assert receipt.error is None
+    assert receipt.timed_out is False
+
+
+def test_validation_still_requires_private_real_codex_home_without_auth(
+    tmp_path: Path,
+) -> None:
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    (adapter.codex_home / "auth.json").unlink()
+    adapter.codex_home.chmod(0o755)
+
+    with pytest.raises(
+        cw.LaunchValidationError,
+        match="CODEX_HOME must be mode 0700 or narrower",
+    ):
+        asyncio.run(
+            adapter.run_validation_argv(
+                spec,
+                ("/usr/bin/true",),
+                timeout_seconds=5,
+            )
+        )
+
+
+def test_validation_cancellation_preserves_cancelled_error_when_identity_cleanup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        recorded_hash_tasks: list[asyncio.Task[object]] = []
+        processes: list[asyncio.subprocess.Process] = []
+        kill_calls: list[tuple[int, int]] = []
+        original_create = asyncio.create_subprocess_exec
+        original_killpg = cw.os.killpg
+
+        async def never_finish_hash(*_args, **_kwargs):
+            task = asyncio.current_task()
+            assert task is not None
+            recorded_hash_tasks.append(task)
+            await asyncio.Event().wait()
+            raise AssertionError("cancelled hash task resumed")
+
+        async def capture_process(*args, **kwargs):
+            process = await original_create(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        async def fail_validation_termination(*_args, **_kwargs) -> bool:
+            raise cw.ProcessIdentityError("validation cleanup identity failure")
+
+        def traced_killpg(pgid: int, sig: int) -> None:
+            kill_calls.append((pgid, sig))
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw, "_hash_validation_stream", never_finish_hash)
+        monkeypatch.setattr(
+            adapter,
+            "_terminate_validation_process",
+            fail_validation_termination,
+        )
+        monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", capture_process)
+        monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/bin/sleep", "60"),
+                timeout_seconds=5,
+            )
+        )
+        try:
+            for _ in range(200):
+                if processes and len(recorded_hash_tasks) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            assert processes and len(recorded_hash_tasks) == 2
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1.0)
+            assert all(hash_task.done() for hash_task in recorded_hash_tasks)
+            assert kill_calls == []
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            for hash_task in recorded_hash_tasks:
+                if not hash_task.done():
+                    hash_task.cancel()
+            await asyncio.gather(*recorded_hash_tasks, return_exceptions=True)
+            for process in processes:
+                if process.returncode is None:
+                    try:
+                        original_killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await process.wait()
+
+    asyncio.run(exercise())
+
+
+def test_validation_cancellation_preserves_cancelled_error_when_signal_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        recorded_hash_tasks: list[asyncio.Task[object]] = []
+        processes: list[asyncio.subprocess.Process] = []
+        signal_calls: list[tuple[int, int]] = []
+        original_create = cw.asyncio.create_subprocess_exec
+        original_hash = cw._hash_validation_stream
+        original_killpg = cw.os.killpg
+
+        async def capture_process(*args, **kwargs):
+            process = await original_create(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        async def recording_hash(*args, **kwargs):
+            task = asyncio.current_task()
+            assert task is not None
+            recorded_hash_tasks.append(task)
+            return await original_hash(*args, **kwargs)
+
+        def refuse_published_signal(pgid: int, sig: int) -> None:
+            if (
+                processes
+                and pgid == processes[0].pid
+                and sig in {signal.SIGTERM, signal.SIGKILL}
+            ):
+                signal_calls.append((pgid, sig))
+                raise PermissionError("synthetic published validation signal refusal")
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", capture_process)
+        monkeypatch.setattr(cw, "_hash_validation_stream", recording_hash)
+        monkeypatch.setattr(cw.os, "killpg", refuse_published_signal)
+
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/bin/sleep", "60"),
+                timeout_seconds=5,
+            )
+        )
+        try:
+            for _ in range(200):
+                if processes and len(recorded_hash_tasks) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            assert processes and len(recorded_hash_tasks) == 2
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await asyncio.wait_for(task, timeout=1.0)
+            cleanup_evidence = []
+            if caught.value.__cause__ is not None:
+                cleanup_evidence.append(str(caught.value.__cause__))
+            cleanup_evidence.extend(
+                getattr(caught.value, "__notes__", ()) or ()
+            )
+            assert any(
+                "validation process signal failed: PermissionError" in item
+                for item in cleanup_evidence
+            ), (
+                "typed cleanup failure was discarded from cancellation: "
+                f"cause={caught.value.__cause__!r}, "
+                f"notes={getattr(caught.value, '__notes__', None)!r}"
+            )
+            assert all(hash_task.done() for hash_task in recorded_hash_tasks)
+            assert signal_calls == [(processes[0].pid, signal.SIGTERM)]
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            for hash_task in recorded_hash_tasks:
+                if not hash_task.done():
+                    hash_task.cancel()
+            await asyncio.gather(*recorded_hash_tasks, return_exceptions=True)
+            for process in processes:
+                if process.returncode is None:
+                    try:
+                        original_killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await asyncio.wait_for(process.wait(), 2.0)
+
+    asyncio.run(exercise())
+
+
+def test_validation_repeated_cancellation_waits_for_terminal_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        recorded_hash_tasks: list[asyncio.Task[object]] = []
+        processes: list[asyncio.subprocess.Process] = []
+        cleanup_started = asyncio.Event()
+        cleanup_release = asyncio.Event()
+        cleanup_finished = asyncio.Event()
+        termination_calls = 0
+        original_create = cw.asyncio.create_subprocess_exec
+        original_killpg = cw.os.killpg
+
+        async def capture_process(*args, **kwargs):
+            process = await original_create(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        async def never_finish_hash(*_args, **_kwargs):
+            task = asyncio.current_task()
+            assert task is not None
+            recorded_hash_tasks.append(task)
+            await asyncio.Event().wait()
+            raise AssertionError("cancelled hash task resumed")
+
+        async def delayed_termination(*_args, **_kwargs) -> bool:
+            nonlocal termination_calls
+            termination_calls += 1
+            cleanup_started.set()
+            try:
+                await cleanup_release.wait()
+            finally:
+                cleanup_finished.set()
+            raise cw.ProcessIdentityError("validation cleanup identity failure")
+
+        monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", capture_process)
+        monkeypatch.setattr(cw, "_hash_validation_stream", never_finish_hash)
+        monkeypatch.setattr(
+            adapter,
+            "_terminate_validation_process",
+            delayed_termination,
+        )
+
+        task = asyncio.create_task(
+            adapter.run_validation_argv(
+                spec,
+                ("/bin/sleep", "60"),
+                timeout_seconds=5,
+            )
+        )
+        try:
+            for _ in range(200):
+                if processes and len(recorded_hash_tasks) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            assert processes and len(recorded_hash_tasks) == 2
+
+            task.cancel()
+            await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)
+            task.cancel()
+            done, _pending = await asyncio.wait({task}, timeout=0.05)
+
+            assert task not in done, (
+                "repeated cancellation escaped before terminal cleanup completed"
+            )
+            assert cleanup_finished.is_set() is False
+            assert any(not hash_task.done() for hash_task in recorded_hash_tasks)
+
+            cleanup_release.set()
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await asyncio.wait_for(task, timeout=1.0)
+
+            cleanup_evidence = []
+            if caught.value.__cause__ is not None:
+                cleanup_evidence.append(str(caught.value.__cause__))
+            cleanup_evidence.extend(
+                getattr(caught.value, "__notes__", ()) or ()
+            )
+            assert any(
+                "validation cleanup identity failure" in item
+                for item in cleanup_evidence
+            )
+            assert cleanup_finished.is_set() is True
+            assert termination_calls == 1
+            assert all(hash_task.done() for hash_task in recorded_hash_tasks)
+            assert processes[0].returncode is None
+        finally:
+            cleanup_release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            for hash_task in recorded_hash_tasks:
+                if not hash_task.done():
+                    hash_task.cancel()
+            await asyncio.gather(*recorded_hash_tasks, return_exceptions=True)
+            for process in processes:
+                if process.returncode is None:
+                    try:
+                        original_killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await asyncio.wait_for(process.wait(), 2.0)
+
+    asyncio.run(exercise())
+
+
+def test_worker_monitor_signal_refusal_retires_owned_tasks_boundedly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        monkeypatch.setattr(cw, "_LOCAL_TRANSPORT_FINALIZATION_SECONDS", 0.01)
+        monkeypatch.setattr(cw, "_LOCAL_STREAM_DRAIN_SECONDS", 0.01)
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        assert state.monitor_task is not None
+        signal_calls: list[tuple[int, int]] = []
+        original_killpg = cw.os.killpg
+
+        def refuse_published_signal(pgid: int, sig: int) -> None:
+            if pgid == ref.pgid and sig in {signal.SIGTERM, signal.SIGKILL}:
+                signal_calls.append((pgid, sig))
+                raise PermissionError("synthetic published worker signal refusal")
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_published_signal)
+        owned_tasks = (state.process_wait_task, state.stdout_task, state.stderr_task)
+        try:
+            state.violation.set()
+            await asyncio.wait_for(state.monitor_task, timeout=1.0)
+            assert all(task is None or task.done() for task in owned_tasks)
+            assert state.finished_at is not None
+            assert state.finalization.error == (
+                "worker process signal failed: PermissionError"
+            )
+            assert any(
+                "worker process signal failed: PermissionError" in item
+                for item in state.stream_errors
+            )
+            assert signal_calls == [(ref.pgid, signal.SIGTERM)]
+            assert state.process.returncode is None
+        finally:
+            if state.process.returncode is None:
+                try:
+                    original_killpg(ref.pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(state.process.wait(), 2.0)
+            for task in owned_tasks:
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in owned_tasks if task is not None),
+                return_exceptions=True,
+            )
+
+    asyncio.run(exercise())
+
+
+def test_validation_residual_group_signal_refusal_is_typed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, run_dir = _fixture(tmp_path, grace=0.1)
+        child_path = run_dir / "validation-residual-child.pid"
+        processes: list[asyncio.subprocess.Process] = []
+        signal_calls: list[tuple[int, int]] = []
+        original_create = cw.asyncio.create_subprocess_exec
+        original_killpg = cw.os.killpg
+        program = (
+            "import pathlib,subprocess,sys; "
+            "p=subprocess.Popen(['/bin/sleep','60'], "
+            "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,"
+            "stderr=subprocess.DEVNULL); "
+            "pathlib.Path(sys.argv[1]).write_text(str(p.pid))"
+        )
+
+        async def capture_process(*args, **kwargs):
+            process = await original_create(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        def refuse_residual_signal(pgid: int, sig: int) -> None:
+            if processes and pgid == processes[0].pid and sig == signal.SIGKILL:
+                signal_calls.append((pgid, sig))
+                raise PermissionError("synthetic validation residual signal refusal")
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", capture_process)
+        monkeypatch.setattr(cw.os, "killpg", refuse_residual_signal)
+
+        child_pid = None
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="validation process signal failed: PermissionError",
+            ):
+                await asyncio.wait_for(
+                    adapter.run_validation_argv(
+                        spec,
+                        ("/usr/bin/python3", "-c", program, str(child_path)),
+                        timeout_seconds=5,
+                    ),
+                    timeout=2.0,
+                )
+            assert processes
+            child_pid = int(child_path.read_text())
+            assert signal_calls == [(processes[0].pid, signal.SIGKILL)]
+        finally:
+            if processes:
+                try:
+                    original_killpg(processes[0].pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    if child_pid is not None:
+                        try:
+                            os.kill(child_pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+            elif child_pid is not None:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_public_cancel_signal_refusal_retires_local_tasks_without_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        monkeypatch.setattr(cw, "_LOCAL_TRANSPORT_FINALIZATION_SECONDS", 0.01)
+        monkeypatch.setattr(cw, "_LOCAL_STREAM_DRAIN_SECONDS", 0.01)
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        assert state.monitor_task is not None
+        signal_calls: list[tuple[int, int]] = []
+        original_killpg = cw.os.killpg
+
+        def refuse_published_signal(pgid: int, sig: int) -> None:
+            if pgid == ref.pgid and sig in {signal.SIGTERM, signal.SIGKILL}:
+                signal_calls.append((pgid, sig))
+                raise PermissionError("synthetic public cancel signal refusal")
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_published_signal)
+        owned_tasks = (
+            state.process_wait_task,
+            state.stdout_task,
+            state.stderr_task,
+        )
+        owned_fd_identities = []
+        for fd in (state.stdout_fd, state.stderr_fd):
+            info = os.fstat(fd)
+            owned_fd_identities.append((fd, info.st_dev, info.st_ino))
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="worker process signal failed: PermissionError",
+            ):
+                await asyncio.wait_for(
+                    adapter.cancel(ref, "operator requested"),
+                    timeout=1.0,
+                )
+            state.violation.set()
+            await asyncio.sleep(0.05)
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="worker process signal failed: PermissionError",
+            ):
+                await adapter._terminate(state)
+            assert signal_calls == [(ref.pgid, signal.SIGTERM)]
+            assert state.monitor_task.done(), (
+                "public cancel signal refusal left monitor able to retry termination"
+            )
+            assert all(task is None or task.done() for task in owned_tasks)
+            assert state.finished_at is not None
+            assert state.finalization.error == (
+                "worker process signal failed: PermissionError"
+            )
+            assert state.finalization.group_proven_absent is False
+            assert state.finalization.transport_close_started is False
+            assert state.finalization.transport_close_completed is False
+            assert state.process.returncode is None
+            same_owned_fds = []
+            for fd, expected_dev, expected_ino in owned_fd_identities:
+                try:
+                    observed = os.fstat(fd)
+                except OSError:
+                    continue
+                if (observed.st_dev, observed.st_ino) == (
+                    expected_dev,
+                    expected_ino,
+                ):
+                    same_owned_fds.append(fd)
+            assert same_owned_fds == []
+        finally:
+            monkeypatch.setattr(cw.os, "killpg", original_killpg)
+            if state.process.returncode is None:
+                try:
+                    original_killpg(ref.pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(state.process.wait(), 2.0)
+            if not state.monitor_task.done():
+                state.monitor_task.cancel()
+            await asyncio.gather(state.monitor_task, return_exceptions=True)
+            for task in owned_tasks:
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in owned_tasks if task is not None),
+                return_exceptions=True,
+            )
+
+    asyncio.run(exercise())
+
+
+def test_public_cancel_caller_cancellation_waits_for_terminal_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        signal_calls: list[tuple[int, int]] = []
+        sigterm_seen = asyncio.Event()
+        original_killpg = cw.os.killpg
+
+        def hold_sigterm_then_kill(pgid: int, sig: int) -> None:
+            if pgid == ref.pgid and sig in {signal.SIGTERM, signal.SIGKILL}:
+                signal_calls.append((pgid, sig))
+                if sig == signal.SIGTERM:
+                    sigterm_seen.set()
+                    # SIGTERM was issued but has not caused exit yet.
+                    return
+            original_killpg(pgid, sig)
+
+        monkeypatch.setattr(cw.os, "killpg", hold_sigterm_then_kill)
+        task = asyncio.create_task(adapter.cancel(ref, "operator requested"))
+        try:
+            await asyncio.wait_for(sigterm_seen.wait(), timeout=1.0)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=3.0)
+
+            assert signal_calls == [
+                (ref.pgid, signal.SIGTERM),
+                (ref.pgid, signal.SIGKILL),
+            ]
+            assert state.process.returncode is not None
+            assert state.finalization.group_proven_absent is True
+            assert state.finalization.error is None
+            assert state.monitor_task is not None
+            assert state.monitor_task.done()
+            assert state.finished_at is not None
+        finally:
+            monkeypatch.setattr(cw.os, "killpg", original_killpg)
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if state.process.returncode is None:
+                try:
+                    original_killpg(ref.pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(state.process.wait(), 2.0)
+            if state.monitor_task is not None and not state.monitor_task.done():
+                state.monitor_task.cancel()
+            if state.monitor_task is not None:
+                await asyncio.gather(state.monitor_task, return_exceptions=True)
+            for owned in (
+                state.process_wait_task,
+                state.stdout_task,
+                state.stderr_task,
+            ):
+                if owned is not None and not owned.done():
+                    owned.cancel()
+            await asyncio.gather(
+                *(
+                    owned
+                    for owned in (
+                        state.process_wait_task,
+                        state.stdout_task,
+                        state.stderr_task,
+                    )
+                    if owned is not None
+                ),
+                return_exceptions=True,
+            )
+
+    asyncio.run(exercise())
+
+
+def test_public_cancel_caller_cancellation_retains_typed_signal_refusal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        original_killpg = cw.os.killpg
+        real_settlement = cw._settle_or_cancel_owned_tasks
+        signal_refused = asyncio.Event()
+        settlement_started = asyncio.Event()
+        settlement_release = asyncio.Event()
+        signal_calls: list[tuple[int, int]] = []
+
+        def refuse_sigterm(pgid: int, sig: int) -> None:
+            if pgid == ref.pgid and sig == signal.SIGTERM:
+                signal_calls.append((pgid, sig))
+                signal_refused.set()
+                raise PermissionError("synthetic public cancellation signal refusal")
+            original_killpg(pgid, sig)
+
+        async def delayed_settlement(*args, **kwargs):
+            settlement_started.set()
+            await settlement_release.wait()
+            return await real_settlement(*args, **kwargs)
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_sigterm)
+        monkeypatch.setattr(cw, "_settle_or_cancel_owned_tasks", delayed_settlement)
+        task = asyncio.create_task(adapter.cancel(ref, "operator requested"))
+        try:
+            await asyncio.wait_for(signal_refused.wait(), timeout=1.0)
+            await asyncio.wait_for(settlement_started.wait(), timeout=1.0)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            settlement_release.set()
+
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await asyncio.wait_for(task, timeout=2.0)
+
+            assert isinstance(caught.value.__cause__, cw.ProcessIdentityError)
+            assert "worker process signal failed: PermissionError" in str(
+                caught.value.__cause__
+            )
+            notes = getattr(caught.value, "__notes__", ()) or ()
+            assert any(
+                "worker process signal failed: PermissionError" in note
+                for note in notes
+            )
+            assert signal_calls == [(ref.pgid, signal.SIGTERM)]
+            assert state.finalization.group_proven_absent is False
+            assert state.finalization.error == (
+                "worker process signal failed: PermissionError"
+            )
+            assert state.monitor_task is not None
+            assert state.monitor_task.done()
+            assert state.finished_at is not None
+        finally:
+            settlement_release.set()
+            monkeypatch.setattr(cw.os, "killpg", original_killpg)
+            monkeypatch.setattr(
+                cw, "_settle_or_cancel_owned_tasks", real_settlement
+            )
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if state.process.returncode is None:
+                try:
+                    original_killpg(ref.pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(state.process.wait(), 2.0)
+            if state.monitor_task is not None and not state.monitor_task.done():
+                state.monitor_task.cancel()
+            if state.monitor_task is not None:
+                await asyncio.gather(state.monitor_task, return_exceptions=True)
+            for owned in (
+                state.process_wait_task,
+                state.stdout_task,
+                state.stderr_task,
+            ):
+                if owned is not None and not owned.done():
+                    owned.cancel()
+            await asyncio.gather(
+                *(
+                    owned
+                    for owned in (
+                        state.process_wait_task,
+                        state.stdout_task,
+                        state.stderr_task,
+                    )
+                    if owned is not None
+                ),
+                return_exceptions=True,
+            )
+
+    asyncio.run(exercise())
+
+
+def test_worker_residual_group_signal_refusal_is_typed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        wait_forever = asyncio.Event()
+        wait_task = asyncio.create_task(wait_forever.wait())
+        finalization = type(
+            "Finalization",
+            (),
+            {
+                "group_proven_absent": False,
+                "error": None,
+                "signal_sent": False,
+                "sigkill_sent": False,
+            },
+        )()
+        ref = type(
+            "Ref",
+            (),
+            {
+                "pid": 424242,
+                "pgid": 424242,
+                "process_start_identity": "captured",
+                "boot_session_id": "boot",
+            },
+        )()
+        state = type(
+            "State",
+            (),
+            {
+                "finalization": finalization,
+                "ref": ref,
+                "process": type("Process", (), {"returncode": None})(),
+                "process_wait_task": wait_task,
+                "escalated": False,
+            },
+        )()
+
+        class Inspector:
+            def boot_session_id(self) -> str:
+                return "boot"
+
+            def identity(self, _pid: int):
+                raise cw.ProcessIdentityError("synthetic reaped leader")
+
+        adapter = object.__new__(cw.CodexWorkerAdapter)
+        adapter.inspector = Inspector()
+        signal_calls: list[tuple[int, int]] = []
+
+        monkeypatch.setattr(cw, "_process_group_exists", lambda _pgid: True)
+
+        def refuse_signal(pgid: int, sig: int) -> None:
+            signal_calls.append((pgid, sig))
+            raise PermissionError("synthetic worker residual signal refusal")
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_signal)
+
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="worker process signal failed: PermissionError",
+            ):
+                await adapter._kill_residual_process_group(
+                    state,
+                    latch_absence=True,
+                )
+            assert signal_calls == [(424242, signal.SIGKILL)]
+            assert finalization.error == "worker process signal failed: PermissionError"
+            assert finalization.group_proven_absent is False
+            assert state.escalated is False
+        finally:
+            wait_task.cancel()
+            await asyncio.gather(wait_task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+def test_start_attestation_identity_failure_reaps_unpublished_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spawned: list[asyncio.subprocess.Process] = []
+    created_fds: list[int] = []
+    real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+    real_path_identity = cw._path_identity
+    real_create_private_file = cw._create_private_file
+
+    async def recording_create_subprocess_exec(*args, **kwargs):
+        process = await real_create_subprocess_exec(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def recording_create_private_file(path: Path):
+        fd = real_create_private_file(path)
+        created_fds.append(fd)
+        return fd
+
+    def fail_attestation_identity(path: Path):
+        if spawned:
+            raise OSError("attestation identity race")
+        return real_path_identity(path)
+
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec)
+    monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+    monkeypatch.setattr(cw, "_path_identity", fail_attestation_identity)
+
+    async def exercise():
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        process = None
+        try:
+            with pytest.raises(OSError, match="attestation identity race"):
+                await adapter.start(spec)
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert spec.run_id not in adapter._runs
+            for _ in range(50):
+                if process.returncode is not None:
+                    break
+                await asyncio.sleep(0.01)
+            open_fds = []
+            for fd in created_fds:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                open_fds.append(fd)
+            assert process.returncode is not None and open_fds == [], (
+                "launch-attestation refusal leaked unpublished resources: "
+                f"process_alive={process.returncode is None}, open_fds={open_fds}"
+            )
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+
+def test_start_prepublication_state_failure_reaps_unpublished_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spawned: list[asyncio.subprocess.Process] = []
+    created_fds: list[int] = []
+    real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+    real_create_private_file = cw._create_private_file
+
+    async def recording_create_subprocess_exec(*args, **kwargs):
+        process = await real_create_subprocess_exec(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def recording_create_private_file(path: Path):
+        fd = real_create_private_file(path)
+        created_fds.append(fd)
+        return fd
+
+    def fail_state_parser():
+        raise RuntimeError("prepublication state construction failed")
+
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec)
+    monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+    monkeypatch.setattr(cw, "_JSONLState", fail_state_parser)
+
+    async def exercise():
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        process = None
+        try:
+            with pytest.raises(
+                RuntimeError, match="prepublication state construction failed"
+            ):
+                await adapter.start(spec)
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert spec.run_id not in adapter._runs
+            for _ in range(50):
+                if process.returncode is not None:
+                    break
+                await asyncio.sleep(0.01)
+            open_fds = []
+            for fd in created_fds:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                open_fds.append(fd)
+            assert process.returncode is not None and open_fds == [], (
+                "prepublication state refusal leaked resources: "
+                f"process_alive={process.returncode is None}, open_fds={open_fds}"
+            )
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_start_cleanup_signal_failure_closes_fds_and_preserves_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        spawned: list[asyncio.subprocess.Process] = []
+        created_fds: list[tuple[int, int, int]] = []
+        kill_calls: list[tuple[int, int]] = []
+        real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+        real_create_private_file = cw._create_private_file
+        real_path_identity = cw._path_identity
+        real_killpg = cw.os.killpg
+
+        async def recording_create_subprocess_exec(*args, **kwargs):
+            process = await real_create_subprocess_exec(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        def recording_create_private_file(path: Path) -> int:
+            fd = real_create_private_file(path)
+            identity = os.fstat(fd)
+            created_fds.append((fd, identity.st_dev, identity.st_ino))
+            return fd
+
+        def fail_attestation_identity(path: Path):
+            if spawned:
+                raise OSError("original attestation identity failure")
+            return real_path_identity(path)
+
+        def refuse_cleanup_signal(pgid: int, sig: int) -> None:
+            if spawned and pgid == spawned[0].pid and sig == signal.SIGKILL:
+                kill_calls.append((pgid, sig))
+                raise PermissionError("synthetic cleanup signal refusal")
+            real_killpg(pgid, sig)
+
+        monkeypatch.setattr(
+            cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec
+        )
+        monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+        monkeypatch.setattr(cw, "_path_identity", fail_attestation_identity)
+        monkeypatch.setattr(cw.os, "killpg", refuse_cleanup_signal)
+
+        process = None
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="unpublished Codex launch cleanup failed",
+            ) as caught:
+                await adapter.start(spec)
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert isinstance(caught.value.__cause__, OSError)
+            assert str(caught.value.__cause__) == "original attestation identity failure"
+            assert "signal:PermissionError" in str(caught.value)
+            assert kill_calls == [(process.pid, signal.SIGKILL)]
+            assert spec.run_id not in adapter._runs
+            open_fds = []
+            for fd, expected_dev, expected_ino in created_fds:
+                try:
+                    observed = os.fstat(fd)
+                except OSError:
+                    continue
+                if (observed.st_dev, observed.st_ino) == (
+                    expected_dev,
+                    expected_ino,
+                ):
+                    open_fds.append(fd)
+            assert open_fds == []
+            assert process.returncode is None
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    real_killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    process.kill()
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd, _expected_dev, _expected_ino in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_start_cancellation_waits_for_unpublished_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        spawned: list[asyncio.subprocess.Process] = []
+        created_fds: list[int] = []
+        cleanup_wait_started = asyncio.Event()
+        allow_cleanup_wait = asyncio.Event()
+        real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+        real_create_private_file = cw._create_private_file
+        real_path_identity = cw._path_identity
+        real_killpg = cw.os.killpg
+
+        class DelayedWaitProcess:
+            def __init__(self, process: asyncio.subprocess.Process) -> None:
+                self._process = process
+
+            def __getattr__(self, name: str):
+                return getattr(self._process, name)
+
+            async def wait(self) -> int:
+                cleanup_wait_started.set()
+                await allow_cleanup_wait.wait()
+                return await self._process.wait()
+
+        async def recording_create_subprocess_exec(*args, **kwargs):
+            process = await real_create_subprocess_exec(*args, **kwargs)
+            spawned.append(process)
+            return DelayedWaitProcess(process)
+
+        def recording_create_private_file(path: Path) -> int:
+            fd = real_create_private_file(path)
+            created_fds.append(fd)
+            return fd
+
+        def fail_attestation_identity(path: Path):
+            if spawned:
+                raise OSError("attestation construction failed before cancellation")
+            return real_path_identity(path)
+
+        monkeypatch.setattr(
+            cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec
+        )
+        monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+        monkeypatch.setattr(cw, "_path_identity", fail_attestation_identity)
+
+        task = asyncio.create_task(adapter.start(spec))
+        process = None
+        try:
+            await asyncio.wait_for(cleanup_wait_started.wait(), 1.0)
+            process = spawned[0]
+            task.cancel()
+            await asyncio.sleep(0)
+            allow_cleanup_wait.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 2.0)
+            assert spec.run_id not in adapter._runs
+            open_fds = []
+            for fd in created_fds:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                open_fds.append(fd)
+            assert open_fds == []
+            assert process.returncode is not None
+        finally:
+            allow_cleanup_wait.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    real_killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    process.kill()
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_validation_cleanup_signal_failure_preserves_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        spawned: list[asyncio.subprocess.Process] = []
+        kill_calls: list[tuple[int, int]] = []
+        real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+        real_capture_process_finalization = cw._capture_process_finalization
+        real_killpg = cw.os.killpg
+
+        async def recording_create_subprocess_exec(*args, **kwargs):
+            process = await real_create_subprocess_exec(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        def fail_finalization_capture(process: asyncio.subprocess.Process):
+            if spawned:
+                raise OSError("original validation finalization failure")
+            return real_capture_process_finalization(process)
+
+        def refuse_cleanup_signal(pgid: int, sig: int) -> None:
+            if spawned and pgid == spawned[0].pid and sig == signal.SIGKILL:
+                kill_calls.append((pgid, sig))
+                raise PermissionError("synthetic validation cleanup signal refusal")
+            real_killpg(pgid, sig)
+
+        monkeypatch.setattr(
+            cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec
+        )
+        monkeypatch.setattr(
+            cw, "_capture_process_finalization", fail_finalization_capture
+        )
+        monkeypatch.setattr(cw.os, "killpg", refuse_cleanup_signal)
+
+        process = None
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="unpublished validation launch cleanup failed",
+            ) as caught:
+                await adapter.run_validation_argv(
+                    spec,
+                    ("/bin/sleep", "60"),
+                    timeout_seconds=5,
+                )
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert isinstance(caught.value.__cause__, OSError)
+            assert str(caught.value.__cause__) == (
+                "original validation finalization failure"
+            )
+            assert "signal:PermissionError" in str(caught.value)
+            assert kill_calls == [(process.pid, signal.SIGKILL)]
+            assert process.returncode is None
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                try:
+                    real_killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    process.kill()
+                await asyncio.wait_for(process.wait(), 2.0)
+
+    asyncio.run(exercise())
+
+
+def test_start_cleanup_refuses_unproven_group_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def exercise() -> None:
+        adapter, spec, _workspace_path, _run_dir = _fixture(
+            tmp_path, prompt="sleep", timeout=30, grace=0.1
+        )
+        spawned: list[asyncio.subprocess.Process] = []
+        created_fds: list[int] = []
+        kill_calls: list[tuple[int, int]] = []
+        real_create_subprocess_exec = cw.asyncio.create_subprocess_exec
+        real_create_private_file = cw._create_private_file
+        real_path_identity = cw._path_identity
+        real_killpg = cw.os.killpg
+
+        async def recording_create_subprocess_exec(*args, **kwargs):
+            process = await real_create_subprocess_exec(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        def recording_create_private_file(path: Path) -> int:
+            fd = real_create_private_file(path)
+            created_fds.append(fd)
+            return fd
+
+        def fail_attestation_identity(path: Path):
+            if spawned:
+                raise OSError("attestation failed before absence proof")
+            return real_path_identity(path)
+
+        def recording_killpg(pgid: int, sig: int) -> None:
+            if spawned and pgid == spawned[0].pid and sig == signal.SIGKILL:
+                kill_calls.append((pgid, sig))
+            real_killpg(pgid, sig)
+
+        async def refuse_absence(_pgid: int, *, timeout: float = 2.0) -> bool:
+            del timeout
+            return False
+
+        monkeypatch.setattr(
+            cw.asyncio, "create_subprocess_exec", recording_create_subprocess_exec
+        )
+        monkeypatch.setattr(cw, "_create_private_file", recording_create_private_file)
+        monkeypatch.setattr(cw, "_path_identity", fail_attestation_identity)
+        monkeypatch.setattr(cw.os, "killpg", recording_killpg)
+        monkeypatch.setattr(cw, "_wait_for_process_group_exit", refuse_absence)
+
+        process = None
+        try:
+            with pytest.raises(
+                cw.ProcessIdentityError,
+                match="process-group-still-present",
+            ) as caught:
+                await adapter.start(spec)
+            assert len(spawned) == 1
+            process = spawned[0]
+            assert isinstance(caught.value.__cause__, OSError)
+            assert str(caught.value.__cause__) == (
+                "attestation failed before absence proof"
+            )
+            assert kill_calls == [(process.pid, signal.SIGKILL)]
+            assert spec.run_id not in adapter._runs
+            open_fds = []
+            for fd in created_fds:
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                open_fds.append(fd)
+            assert open_fds == []
+            assert process.returncode is not None
+        finally:
+            if process is None and spawned:
+                process = spawned[0]
+            if process is not None and process.returncode is None:
+                process.kill()
+                await asyncio.wait_for(process.wait(), 2.0)
+            for fd in created_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+    asyncio.run(exercise())
+
+
+def test_unpublished_cleanup_consumes_done_wait_task_after_signal_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        async def fail_wait() -> int:
+            raise RuntimeError("owned wait task failed")
+
+        wait_task = asyncio.create_task(fail_wait())
+        await asyncio.sleep(0)
+        assert wait_task.done()
+
+        process = type("Process", (), {"pid": 424242})()
+        gather_calls: list[tuple[object, ...]] = []
+        real_gather = cw.asyncio.gather
+
+        def refuse_signal(_pgid: int, _sig: int) -> None:
+            raise PermissionError("synthetic signal refusal")
+
+        async def recording_gather(*awaitables, **kwargs):
+            gather_calls.append(awaitables)
+            return await real_gather(*awaitables, **kwargs)
+
+        monkeypatch.setattr(cw.os, "killpg", refuse_signal)
+        monkeypatch.setattr(cw.asyncio, "gather", recording_gather)
+
+        error = await cw._cleanup_unpublished_process(
+            process,
+            wait_task=wait_task,
+            owned_fds=(),
+            label="unpublished test launch",
+        )
+        assert isinstance(error, cw.ProcessIdentityError)
+        assert "signal:PermissionError" in str(error)
+        assert gather_calls == [(wait_task,)]
+        assert isinstance(wait_task.exception(), RuntimeError)
+
+    asyncio.run(exercise())
+
+def test_worker_launch_binds_stdout_and_stderr_to_durable_files(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> tuple[cw.CollectionReceipt, bool, bool]:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        direct_stdout = state.process.stdout is None
+        direct_stderr = state.process.stderr is None
+        return await adapter.collect_result(ref), direct_stdout, direct_stderr
+
+    receipt, direct_stdout, direct_stderr = asyncio.run(exercise())
+    assert direct_stdout is True
+    assert direct_stderr is True
+    assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
+
+
+def test_reattach_replays_terminal_result_without_provider_start(
+    tmp_path: Path,
+) -> None:
+    adapter, spec, _workspace_path, run_dir = _fixture(tmp_path)
+    prompt_path = run_dir / "input" / "worker-prompt.txt"
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    logs = run_dir / "logs"
+    output = run_dir / "output"
+    logs.mkdir(mode=0o700)
+    output.mkdir(mode=0o700)
+    result = {
+        "run_id": spec.run_id,
+        "job_id": spec.job_id,
+        "worker_id": spec.worker_id,
+        "status": "COMPLETED",
+        "summary": "recovered durable result",
+        "artifacts": [],
+    }
+    events = (
+        {"type": "thread.started", "thread_id": "thread-recovered"},
+        {"type": "turn.started"},
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": json.dumps(result, sort_keys=True),
+            },
+        },
+        {
+            "type": "turn.completed",
+            "usage": {"input_tokens": 13, "output_tokens": 8},
+        },
+    )
+    stdout = logs / "stdout.jsonl"
+    stderr = logs / "stderr.log"
+    result_path = output / "result.json"
+    stdout.write_text(
+        "".join(json.dumps(event, sort_keys=True) + "\n" for event in events),
+        encoding="utf-8",
+    )
+    stderr.write_bytes(b"")
+    result_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+    for path in (stdout, stderr, result_path):
+        path.chmod(0o600)
+    ref = cw.ProcessRef(
+        run_id=spec.run_id,
+        pid=987654,
+        pgid=987654,
+        process_start_identity="absent-start",
+        boot_session_id="boot-recovered",
+        launch_nonce="nonce-recovered",
+        provider_session_id=None,
+        stdout_path=str(stdout),
+        stderr_path=str(stderr),
+        result_path=str(result_path),
+        started_at="2026-09-18T00:00:00+00:00",
+        binary=adapter.binary,
+        base_sha=spec.expected_base_sha or "",
+        session_id=987654,
+        effective_uid=os.geteuid(),
+        effective_gid=os.getegid(),
+        real_uid=os.getuid(),
+        real_gid=os.getgid(),
+    )
+
+    class AbsentInspector:
+        def boot_session_id(self) -> str:
+            return ref.boot_session_id
+
+        def identity(self, _pid: int):
+            raise cw.ProcessIdentityError("fixture process is absent")
+
+        def inspect(self, _pid: int):
+            raise cw.ProcessIdentityError("fixture process is absent")
+
+    adapter.inspector = AbsentInspector()
+    binding = wec.WorkerRecoveryBinding.bind(
+        adapter_id=adapter.adapter_id,
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
+    )
+    recovered_ref = adapter.reattach(spec, binding)
+    receipt = asyncio.run(adapter.collect_result(recovered_ref))
+    assert recovered_ref == ref
+    assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
+    assert receipt.result.provider_session_id == "thread-recovered"
+    assert receipt.result.usage == {"input_tokens": 13, "output_tokens": 8}
+    assert receipt.result.structured_output["summary"] == "recovered durable result"
+
+
+def _live_recovery_fixture(
+    tmp_path: Path,
+    *,
+    argv: tuple[str, ...] = ("/bin/sleep", "60"),
+) -> tuple[cw.CodexWorkerAdapter, cw.LaunchSpec, wec.WorkerRecoveryBinding, subprocess.Popen]:
+    adapter, spec, _workspace_path, run_dir = _fixture(tmp_path)
+    prompt_path = run_dir / "input" / "worker-prompt.txt"
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    logs = run_dir / "logs"
+    output = run_dir / "output"
+    logs.mkdir(mode=0o700)
+    output.mkdir(mode=0o700)
+    stdout = logs / "stdout.jsonl"
+    stderr = logs / "stderr.log"
+    result = output / "result.json"
+    for path in (stdout, stderr, result):
+        path.write_bytes(b"")
+        path.chmod(0o600)
+    process = subprocess.Popen(argv, start_new_session=True)
+    observed = adapter.inspector.inspect(process.pid)
+    ref = cw.ProcessRef(
+        run_id=spec.run_id,
+        pid=process.pid,
+        pgid=observed.pgid,
+        process_start_identity=observed.start_identity,
+        boot_session_id=adapter.inspector.boot_session_id(),
+        launch_nonce="nonce-live-recovery",
+        provider_session_id=None,
+        stdout_path=str(stdout),
+        stderr_path=str(stderr),
+        result_path=str(result),
+        started_at=cw._utc_now(),
+        binary=adapter.binary,
+        base_sha=spec.expected_base_sha or "",
+        session_id=observed.session_id,
+        effective_uid=observed.effective_uid,
+        effective_gid=observed.effective_gid,
+        real_uid=observed.real_uid,
+        real_gid=observed.real_gid,
+    )
+    binding = wec.WorkerRecoveryBinding.bind(
+        adapter_id=adapter.adapter_id,
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
+    )
+    threading.Thread(target=process.wait, daemon=True).start()
+    return adapter, spec, binding, process
+
+
+def test_recovered_cancel_reports_graceful_exact_absence_without_sigkill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    original_killpg = cw.os.killpg
+    signals: list[int] = []
+
+    def traced_killpg(pgid: int, value: int) -> None:
+        if value != 0:
+            signals.append(value)
+        original_killpg(pgid, value)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    try:
+        time.sleep(0.1)
+        ref = adapter.reattach(spec, binding)
+        receipt = asyncio.run(adapter.cancel(ref, "restart cancellation"))
+        process.wait(timeout=2)
+    finally:
+        monkeypatch.setattr(cw.os, "killpg", original_killpg)
+        if process.poll() is None:
+            original_killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=2)
+    assert receipt.signal_sent is True
+    assert receipt.escalated_to_sigkill is False
+    assert receipt.already_exited is False
+    assert signals == [signal.SIGTERM]
+
+
+def test_recovered_cancel_escalates_only_the_verified_residual_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready = tmp_path / "residual.ready"
+    child_program = (
+        "import pathlib,signal,sys,time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(60)"
+    )
+    program = (
+        "import os,subprocess,sys,time; "
+        "subprocess.Popen(['/usr/bin/python3','-c',sys.argv[2],sys.argv[1]]); "
+        "[(time.sleep(0.01)) for _ in range(500) if not os.path.exists(sys.argv[1])]; "
+        "time.sleep(60)"
+    )
+    adapter, spec, binding, process = _live_recovery_fixture(
+        tmp_path,
+        argv=("/usr/bin/python3", "-c", program, str(ready), child_program),
+    )
+    original_killpg = cw.os.killpg
+    signals: list[int] = []
+
+    def traced_killpg(pgid: int, value: int) -> None:
+        if value != 0:
+            signals.append(value)
+        original_killpg(pgid, value)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    try:
+        for _ in range(200):
+            if ready.exists():
+                break
+            time.sleep(0.01)
+        assert ready.exists()
+        ref = adapter.reattach(spec, binding)
+        receipt = asyncio.run(adapter.cancel(ref, "restart cancellation"))
+        process.wait(timeout=2)
+    finally:
+        monkeypatch.setattr(cw.os, "killpg", original_killpg)
+        try:
+            original_killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        if process.poll() is None:
+            process.wait(timeout=2)
+    assert receipt.signal_sent is True
+    assert receipt.escalated_to_sigkill is True
+    assert receipt.already_exited is False
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_duplicate_reattach_is_idempotent_for_the_same_execution(tmp_path: Path) -> None:
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    try:
+        first = adapter.reattach(spec, binding)
+        second = adapter.reattach(spec, binding)
+        assert first == second == binding.process_ref
+        receipt = asyncio.run(adapter.cancel(first, "fixture cleanup"))
+        assert receipt.signal_sent is True
+    finally:
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.wait(timeout=2)
+
+
+def test_recovery_reattach_anchors_exact_group_members(tmp_path: Path) -> None:
+    """Recovery remembers an exact group witness before leader loss can occur."""
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    try:
+        ref = adapter.reattach(spec, binding)
+        state = adapter._runs[ref.run_id]
+        assert isinstance(state, cw._RecoveredRunState)
+        assert state.group_member_identities[ref.pid] == ref.process_start_identity
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)

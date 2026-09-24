@@ -8,17 +8,128 @@ import json
 import os
 import shutil
 import socket
+import sqlite3
 import stat
 import subprocess
 import tempfile
+import threading
 import ast
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+
+def _phase3_dialogue_material(parent, candidate, obligation, route):
+    from control_plane.dialogue_source_resolution import (
+        DialogueSourceObservation, PhysicalDialogueSourceIdentity,
+        attention_source_ref, correlated_source_ref,
+    )
+    from control_plane.session_targets import route_digest
+    from control_plane.wake_events import mint_obligation
+
+    _progress, continuation, _successor = _phase3_source_messages(parent, candidate)
+    source = DialogueSourceObservation(
+        workspace_id="T0BRD2AQXQV", channel_id="C0BSBM78V1N",
+        thread_ts="1788000000.123456",
+        predecessor_message_key=continuation["message_key"],
+        predecessor_message_fingerprint=continuation["fingerprint"],
+    )
+    attention = mint_obligation(
+        wake_kind=obligation.wake_kind, source_kind=obligation.source_kind,
+        source_ref=attention_source_ref(
+            parent_fingerprint=parent["fingerprint"],
+            message_key=source.predecessor_message_key,
+            target_seat=obligation.declared_target_seat,
+        ),
+        declared_target_seat=obligation.declared_target_seat,
+        job_id=candidate.job_id, attempt_id=candidate.attempt_id,
+        root_job_id=candidate.root_job_id, workstream=obligation.workstream,
+        source_workstream=parent["work_ref"],
+        source_created_at=obligation.source_created_at, emitted_at=obligation.emitted_at,
+    )
+    attention_route = dataclasses.replace(route, obligation_id=attention.obligation_id)
+    logical = correlated_source_ref(
+        attention_source_ref=attention.source_ref,
+        parent_fingerprint=parent["fingerprint"], operation_key=parent["operation_key"],
+        candidate=candidate.to_dict(),
+    )
+    correlated = mint_obligation(
+        wake_kind=attention.wake_kind, source_kind=attention.source_kind,
+        source_ref=logical, declared_target_seat=attention.declared_target_seat,
+        job_id=candidate.job_id, attempt_id=candidate.attempt_id,
+        root_job_id=candidate.root_job_id, workstream=attention.workstream,
+        source_workstream=attention.source_workstream,
+        source_created_at=attention.source_created_at, emitted_at=attention.emitted_at,
+    )
+    correlated_route = dataclasses.replace(
+        attention_route, obligation_id=correlated.obligation_id,
+        route_digest=route_digest(
+            obligation_id=correlated.obligation_id,
+            destination=attention_route.destination_digest,
+            policy_digest=attention_route.policy_digest,
+        ),
+    )
+    physical = PhysicalDialogueSourceIdentity.create(
+        logical_source_ref=logical, obligation_id=correlated.obligation_id,
+        observation=source, parent_fingerprint=parent["fingerprint"],
+        operation_key=parent["operation_key"], target_seat=correlated.declared_target_seat,
+        candidate=candidate.to_dict(),
+    )
+    return attention, attention_route, correlated, correlated_route, source, physical
+
+
+def _phase3_source_messages(parent, candidate):
+    from integrations.slack_agent_dialogue.contract_v2 import build_message_v2
+    common = {
+        "schema": "mastermind.agent_dialogue.v2",
+        "work_ref": parent["work_ref"], "commission_ref": parent["commission_ref"],
+        "session_ref": parent["session_ref"],
+        "applies_to": {"kind": "repository", "repository": "mastermindx-market-intelligence/Mastermind", "head_sha": "a" * 40, "pr": "mastermindx-market-intelligence/Mastermind#170"},
+        "summary": "Bounded source transition.", "evidence_refs": [],
+        "requires_response": False,
+    }
+    progress = build_message_v2({
+        **common, "message_key": "asd-progress-001", "message_type": "PROGRESS",
+        "actor_ref": {"kind": "executive_surface", "seat": "coo", "reasoning_surface": "codex"},
+        "reply_to_message_key": None,
+        "body": {"stage": "source", "completed": "Wake accepted.", "next": "Await Sol."},
+        "created_at": "2026-09-03T01:00:00Z",
+    })
+    continuation = build_message_v2({
+        **common, "message_key": "asd-continue-001", "message_type": "CONTINUE",
+        "actor_ref": {"kind": "executive_surface", "seat": "ceo", "reasoning_surface": "codex"},
+        "reply_to_message_key": progress["message_key"],
+        "body": {"instruction": "Continue the bounded source.", "stop_condition": "Stop on conflict.", "scope_change": False},
+        "created_at": "2026-09-03T01:00:01Z",
+    })
+    successor = build_message_v2({
+        **common, "message_key": "asd-progress-002", "message_type": "PROGRESS",
+        "actor_ref": {"kind": "worker_attempt", "job_id": candidate.job_id, "attempt_id": candidate.attempt_id, "worker_id": candidate.worker_id},
+        "applies_to": {"kind": "executive_attempt", "job_id": candidate.job_id, "attempt_id": candidate.attempt_id, "worker_id": candidate.worker_id},
+        "reply_to_message_key": continuation["message_key"],
+        "body": {"stage": "source", "completed": "Continuation consumed.", "next": "Continue."},
+        "created_at": "2026-09-03T01:00:02Z",
+    })
+    return progress, continuation, successor
+
 from common.redaction import TRUNCATION_MARKER
-from control_plane.executive_runtime import JobPayload, JobStatus, Runtime
+from control_plane import ceo_intent as ceo_intent_mod
+from control_plane import executive_dialogue_observation as observation_mod
+from control_plane.model_router import ModelRouter
+from control_plane import executive_ceo_ingress as ceo_ingress_mod
+from control_plane.executive_runtime import (
+    AttemptLease,
+    AttemptStatus,
+    JobPayload,
+    JobStatus,
+    OrchestrationDispatchOutcome,
+    Runtime,
+    StateConflict,
+    WorkerStatus,
+)
 from control_plane.executive_canary import (
     PrincipalIdentity,
     SecretCanaryConfig,
@@ -33,23 +144,89 @@ from control_plane.executive_ambient_process import (
 )
 from control_plane.executive_service import (
     CONTROL_PROTOCOL_VERSION,
+    DialogueWakeTarget,
+    DialogueWakeResult,
+    ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
     ServiceConfig,
     ServiceError,
     send_control_request,
 )
+from control_plane.executive_dialogue_observation import (
+    RECONCILE_WAKE,
+    REQUEST_SCHEMA as OBSERVATION_REQUEST_SCHEMA,
+    RESPONSE_SCHEMA as OBSERVATION_RESPONSE_SCHEMA,
+    SUBMIT_WAKE,
+    WAKE_RESPONSE_SCHEMA,
+    ActiveObservationFacts,
+    CanonicalTerminalWakeCandidate,
+    DialogueCandidateReference,
+    DialogueObservationFacts,
+    PublicRuntimeBindingFacts,
+    reduce_dialogue_observation,
+)
+from control_plane.executive_terminal_return import (
+    TerminalReturnCandidate,
+    TerminalReturnProjectionError,
+    reduce_terminal_return,
+)
+from control_plane.executive_orchestration_result import canonical_digest
+from control_plane.session_targets import WakeRoute
+from control_plane.wake_events import mint_obligation
+from control_plane import executive_runtime as er_mod
+from tests.test_executive_os_phase1fc import (
+    _complete_ohf_role,
+    _cycle_through_completed_work,
+    _review_body,
+)
 from control_plane.executive_workspace import (
     LAUNCH_CLEAN_STATUS_ARGS,
     LAUNCH_CLEAN_UNTRACKED_ARGS,
     WorkspaceError,
+    prepare_credentialless_clone,
 )
 from control_plane import executive_service as es_mod
+from integrations.slack_agent_dialogue.contract import validate_commission_ref
+from integrations.mastermind_company_mcp.schemas import (
+    SERVER_IDENTITY as COMPANY_DIALOGUE_SERVER_IDENTITY,
+    SERVER_VERSION as COMPANY_DIALOGUE_SERVER_VERSION,
+    TOOL_SCHEMA_DIGEST as COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+)
+from integrations.slack_agent_dialogue.executive_terminal_return_projector import (
+    ExecutiveTerminalReturnProjector,
+)
 from scripts import executive_os_phase1c as service_cli
+from tests.test_company_dialogue_runtime_binding import parent as dialogue_parent
 
 
 @dataclass
 class _Active:
     lease: object
+
+
+def _projection_receipt(
+    candidate: TerminalReturnCandidate,
+    *,
+    action: str = "POSTED",
+) -> dict[str, object]:
+    return {
+        "action": action,
+        "message_key": candidate.message_key,
+        "fingerprint": "f" * 64,
+        "message_ts": "1787961600.000002",
+        "duplicate_timestamps": [],
+        "thread_ts": "1787961600.000001",
+        "parent_author_user_id": "U0RELAY01",
+        "parent_fingerprint": "a" * 64,
+    }
+
+
+def _capture_projection(
+    received: list[TerminalReturnCandidate],
+    candidate: TerminalReturnCandidate,
+) -> dict[str, object]:
+    received.append(candidate)
+    return _projection_receipt(candidate)
 
 
 class _FakeSupervisor:
@@ -78,6 +255,27 @@ class _FakeSupervisor:
             attempt.attempt_id,
             fence_generation=attempt.fence_generation,
             lease_token=lease.lease_token,
+        )
+        self.started_jobs.append(job_id)
+        return _Active(lease=lease)
+
+    async def start_cycle_job(self, job_id: str, *, command_id: str):
+        outcome = self.runtime.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            lease_owner="service-fixture",
+        )
+        if outcome is None:
+            raise StateConflict(f"no eligible worker capacity for {job_id}")
+        if (
+            outcome.outcome == "TERMINAL"
+            or outcome.attempt.status is not AttemptStatus.CLAIMED
+        ):
+            return outcome
+        assert outcome.lease_token is not None
+        lease = AttemptLease(
+            attempt=outcome.attempt,
+            lease_token=outcome.lease_token,
         )
         self.started_jobs.append(job_id)
         return _Active(lease=lease)
@@ -220,8 +418,6456 @@ def _service(
         config or _config(tmp_path, socket_root=socket_root),
         supervisor_factory=factory,
         backup_backend=backup,
+        autonomy_guard=(
+            (lambda: None)
+            if (config is not None and config.coo_autonomy_armed)
+            else None
+        ),
     )
     return service, holder
+
+
+def _pending_review(tmp_path: Path, *, intent_id: str):
+    runtime, cycle, _dispatches, root, planner, work, work_seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime", intent_id=intent_id, review_workers=["worker-b"]
+        )
+    )
+    review_created = cycle.run_once(root.job_id)
+    assert review_created.action == "REVIEW_CREATED"
+    review = runtime.jobs.get_job(str(review_created.selected_job_id))
+    work_job = runtime.jobs.get_job(work.attempt.job_id)
+    assert review is not None and work_job is not None
+    return runtime, review, _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(work_job.plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+    )
+
+
+def _first_dispatch_command(job) -> str:
+    return f"coo-cycle:{job.root_job_id}:dispatch:{job.job_id}:attempt:1"
+
+
+def _delete_terminal_seal_event(runtime: Runtime, attempt_id: str) -> None:
+    """Create one completed-looking but canonically invalid test fixture."""
+
+    with runtime.store.transaction() as connection:
+        trigger = connection.execute(
+            """SELECT sql FROM sqlite_master
+               WHERE type='trigger' AND name='events_are_immutable_delete'"""
+        ).fetchone()
+        assert trigger is not None and isinstance(trigger[0], str)
+        connection.execute("DROP TRIGGER events_are_immutable_delete")
+        removed = connection.execute(
+            """DELETE FROM events
+               WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED'
+                 AND attempt_id=?""",
+            (attempt_id,),
+        ).rowcount
+        connection.execute(str(trigger[0]))
+    assert removed == 1
+
+
+def test_finish_pickup_projects_a_sealed_terminal_child_once(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        config = _config(tmp_path)
+        runtime, child, body = _pending_review(
+            tmp_path, intent_id="CEO-SERVICE-TERMINAL-ONCE"
+        )
+        dispatch = runtime.attempts.dispatch_cycle_job(
+            child.job_id,
+            command_id=_first_dispatch_command(child),
+            worker_id="worker-b",
+        )
+        assert dispatch is not None and dispatch.lease_token is not None
+        received: list[TerminalReturnCandidate] = []
+
+        class SealingSupervisor(_FakeSupervisor):
+            async def finish_job(self, active: _Active):
+                if not self.started_jobs:
+                    self.started_jobs.append("finished")
+                    return _complete_ohf_role(
+                        self.runtime, dispatch, body, identity_seed=742
+                    )
+                return None
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=lambda opened: SealingSupervisor(opened),
+            terminal_return_projector=lambda candidate: _capture_projection(
+                received, candidate
+            ),
+        )
+        service.runtime = runtime
+        service.supervisor = SealingSupervisor(runtime)
+        try:
+            active = _Active(lease=AttemptLease(dispatch.attempt, dispatch.lease_token))
+            await service._finish_dispatched(child.job_id, active)
+            await service._finish_dispatched(child.job_id, active)
+            assert [candidate.attempt_id for candidate in received] == [
+                dispatch.attempt.attempt_id
+            ]
+            terminal = service.runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+            assert terminal is not None and terminal.status is AttemptStatus.COMPLETED
+            assert service.service_state == "READY"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def _observation_facts(parent: dict) -> DialogueObservationFacts:
+    return DialogueObservationFacts(
+        active=(
+            ActiveObservationFacts(
+                root_job_id="JOB-100",
+                job_id="JOB-101",
+                attempt_id="ATT-201",
+                worker_id="worker-01",
+                attempt_status="RUNNING",
+                worker_status="BUSY",
+                execution_profile_id="profile-readonly",
+                execution_profile_digest="1" * 64,
+                capability_policy_digest="2" * 64,
+                runtime_binding=PublicRuntimeBindingFacts(
+                    session_alias="MM-COO-SEAT",
+                    binding_id="bind-observation-0001",
+                    binding_generation=7,
+                    reasoning_surface="codex",
+                ),
+                parent_fingerprint=parent["fingerprint"],
+                company_dialogue_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+                company_dialogue_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+                company_dialogue_tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+                company_dialogue_attested=True,
+            ),
+        )
+    )
+
+
+def _observation_request(parent: dict | None = None) -> bytes:
+    parent = parent or dialogue_parent()
+    return (
+        json.dumps(
+            {
+                "schema": OBSERVATION_REQUEST_SCHEMA,
+                "request_id": "observation-request-001",
+                "parent": parent,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+
+
+def _dialogue_wake_request(operation: str) -> bytes:
+    parent = dialogue_parent()
+    source_response = reduce_dialogue_observation(
+        parent=parent,
+        thread_ts="1788000000.123456",
+        facts=_observation_facts(parent),
+    )
+    observation = source_response["observation"]
+    candidate = DialogueCandidateReference(
+        mode=source_response["mode"],
+        root_job_id=observation["root_job_id"],
+        job_id=observation["job_id"],
+        attempt_id=observation["attempt_id"],
+        worker_id=observation["worker_id"],
+        evidence_digest=observation["evidence_digest"],
+    )
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "a" * 64,
+        declared_target_seat="ceo",
+        root_job_id="JOB-100",
+        source_workstream="WS:CHAIRMAN-CONTROL-ROOM",
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = WakeRoute(
+        obligation_id=obligation.obligation_id,
+        session_alias="EXECUTIVE-CEO-A",
+        target_seat="ceo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        binding_id="bind-dialogue-wake-0001",
+        binding_generation=7,
+        route_digest="1" * 16,
+        destination_digest="2" * 16,
+        policy_digest="3" * 16,
+        root_job_id="JOB-100",
+        workstream=None,
+        production_armed=True,
+        target_enabled=True,
+        transport_implemented=True,
+        requires_runtime_binding=True,
+        binding_ready=True,
+        human_required=False,
+        policy_version="wake-policy-v1",
+        interface_version="codex-app-server-wake/v1",
+    )
+    return json.dumps(
+        {
+            "schema": "mastermind.dialogue_wake_request/v1",
+            "operation": operation,
+            "parent": parent,
+            "thread_ts": "1788000000.123456",
+            "candidate": candidate.to_dict(),
+            "obligation": obligation.to_dict(),
+            "route": route.to_dict(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def test_absent_dialogue_observation_has_no_listener_lifecycle_state(
+    tmp_path: Path,
+    short_socket_root: Path,
+) -> None:
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+    )
+
+    assert service.dialogue_observation_socket_path is None
+    assert service.dialogue_observation_ready is False
+    for name in (
+        "_dialogue_observation_server",
+        "_dialogue_observation_tasks",
+        "_dialogue_observation_inode",
+    ):
+        assert not hasattr(service, name)
+
+
+def test_optional_dialogue_observation_is_third_listener_on_one_runtime_and_lock(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
+    calls: list[tuple[Runtime, dict]] = []
+
+    def provider(runtime: Runtime, parent: dict) -> DialogueObservationFacts:
+        calls.append((runtime, parent))
+        return _observation_facts(parent)
+
+    async def exercise() -> None:
+        socket_root = short_socket_root / "observation"
+        observation_path = socket_root / "dialogue-observation.sock"
+        holder: dict[str, object] = {}
+
+        def factory(runtime: Runtime):
+            holder["runtime"] = runtime
+            return _FakeSupervisor(runtime)
+
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root / "operator"),
+            supervisor_factory=factory,
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_observation_facts_provider=provider,
+        )
+        assert service.dialogue_observation_ready is False
+        await service.start()
+        try:
+            assert service.dialogue_observation_ready is True
+            assert service.runtime is holder["runtime"]
+            assert service._lock_fd is not None
+            assert stat.S_IMODE(socket_root.lstat().st_mode) == 0o710
+            assert stat.S_IMODE(observation_path.lstat().st_mode) == 0o660
+            reader, writer = await asyncio.open_unix_connection(observation_path)
+            writer.write(_observation_request())
+            await writer.drain()
+            response = json.loads(await reader.readline())
+            writer.close()
+            await writer.wait_closed()
+            assert response["schema"] == OBSERVATION_RESPONSE_SCHEMA
+            assert response["state"] == "RESOLVED"
+            assert response["mode"] == "ACTIVE_CURRENT_WORKER"
+            assert calls == [(service.runtime, dialogue_parent())]
+        finally:
+            await service.close()
+        assert service.dialogue_observation_ready is False
+        assert not observation_path.exists()
+
+    asyncio.run(exercise())
+
+
+def test_dialogue_observation_authenticates_before_parse_and_refuses_second_frame(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peer = 999
+    calls: list[dict] = []
+    monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: peer)
+
+    def provider(_runtime: Runtime, parent: dict) -> DialogueObservationFacts:
+        calls.append(parent)
+        return _observation_facts(parent)
+
+    async def exchange(path: Path, payload: bytes) -> dict:
+        reader, writer = await asyncio.open_unix_connection(path)
+        writer.write(payload)
+        await writer.drain()
+        response = json.loads(await reader.readline())
+        writer.close()
+        await writer.wait_closed()
+        return response
+
+    async def exercise() -> None:
+        nonlocal peer
+        observation_path = short_socket_root / "observation" / "dialogue-observation.sock"
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root / "operator"),
+            supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_observation_facts_provider=provider,
+        )
+        await service.start()
+        try:
+            denied = await exchange(observation_path, b"not json\n")
+            assert denied == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "PEER_UID_REFUSED",
+            }
+            assert calls == []
+
+            peer = 457
+            second = await exchange(
+                observation_path,
+                _observation_request() + _observation_request(),
+            )
+            assert second == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "MULTIPLE_REQUESTS_REFUSED",
+            }
+            assert calls == []
+
+            malformed = await exchange(
+                observation_path,
+                b'{"schema":"x","schema":"y"}\n',
+            )
+            assert malformed == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "REQUEST_REFUSED",
+            }
+            assert calls == []
+
+            oversized = await exchange(
+                observation_path,
+                b"x" * (64 * 1024 + 1) + b"\n",
+            )
+            assert oversized == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "REQUEST_REFUSED",
+            }
+            assert calls == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_dialogue_coordination_dispatches_closed_wake_operations_on_same_listener(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
+    calls: list[tuple[Runtime, object]] = []
+
+    async def wake_handler(runtime: Runtime, request: object) -> DialogueWakeResult:
+        calls.append((runtime, request))
+        if request.operation == RECONCILE_WAKE:
+            return DialogueWakeResult("MISSING", "WAKE_NOT_RECORDED")
+        return DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+
+    async def exchange(path: Path, payload: bytes) -> dict:
+        reader, writer = await asyncio.open_unix_connection(path)
+        writer.write(payload)
+        await writer.drain()
+        response = json.loads(await reader.readline())
+        writer.close()
+        await writer.wait_closed()
+        return response
+
+    async def exercise() -> None:
+        observation_path = short_socket_root / "coordination" / "dialogue.sock"
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root / "operator"),
+            supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_observation_facts_provider=(
+                lambda _runtime, parent: _observation_facts(parent)
+            ),
+            dialogue_wake_handler=wake_handler,
+        )
+        await service.start()
+        try:
+            assert service.runtime is not None
+            before = len(service.runtime.events.list_events())
+            reconcile = await exchange(
+                observation_path,
+                _dialogue_wake_request(RECONCILE_WAKE) + b"\n",
+            )
+            submit = await exchange(
+                observation_path,
+                _dialogue_wake_request(SUBMIT_WAKE) + b"\n",
+            )
+            assert reconcile == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "MISSING",
+                "reason": "WAKE_NOT_RECORDED",
+            }
+            assert submit == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            assert len(calls) == 2
+            assert all(runtime is service.runtime for runtime, _request in calls)
+            assert [request.operation for _runtime, request in calls] == [
+                RECONCILE_WAKE,
+                SUBMIT_WAKE,
+            ]
+            assert len(service.runtime.events.list_events()) == before
+
+            forged = json.loads(_dialogue_wake_request(SUBMIT_WAKE))
+            forged["candidate"]["evidence_digest"] = "f" * 64
+            refused_candidate = await exchange(
+                observation_path,
+                json.dumps(forged).encode("utf-8") + b"\n",
+            )
+            assert refused_candidate == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "MISSING",
+                "reason": "CANDIDATE_BINDING_REQUIRED",
+            }
+            assert len(calls) == 2
+
+            unknown = json.loads(_dialogue_wake_request(SUBMIT_WAKE))
+            unknown["operation"] = "WAKE_FAILOVER"
+            refused = await exchange(
+                observation_path,
+                json.dumps(unknown).encode("utf-8") + b"\n",
+            )
+            assert refused == {
+                "schema": OBSERVATION_RESPONSE_SCHEMA,
+                "state": "HELD",
+                "reason": "REQUEST_REFUSED",
+            }
+            assert len(calls) == 2
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from control_plane.operator_harness_contract import AttentionTurnObservation
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_digest,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
+    from control_plane.wake_persist import WakeLedgerRepository
+    from control_plane.executive_dialogue_observation import (
+        DialogueWakeRequest,
+    )
+    from tests.test_wake_ack_ingress import _admitted_runtime
+
+    runtime, sealed, generation = _admitted_runtime(tmp_path / "wake-bridge")
+    target = SessionTarget(
+        session_alias="COO-CODEX",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=True,
+    )
+    registry = SessionTargetRegistry(
+        schema=TARGET_SCHEMA,
+        lifecycle_authority="executive_os",
+        production_armed=True,
+        policy_version="dialogue-wake-test",
+        default_alias_by_seat={"coo": target.session_alias},
+        workstream_alias_by_seat={},
+        root_job_bindings={"JOB-100": {"coo": target.session_alias}},
+        targets={target.session_alias: target},
+    )
+    binding = project_runtime_binding(runtime, sealed.attempt_id, target)
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "c" * 64,
+        declared_target_seat="coo",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id="JOB-100",
+        source_workstream="WS:CHAIRMAN-CONTROL-ROOM",
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+
+    class OperatorAdapter:
+        calls: list[dict[str, object]] = []
+
+        def deliver_attention(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return AttentionTurnObservation(
+                process_generation_id=generation.process_generation_id,
+                provider_session_id=binding.native_handle,
+                nudge_id=kwargs["nudge_id"],
+                provider_native_turn_id="turn-dialogue-wake-001",
+                accepted=True,
+                delivered=True,
+            )
+
+    operator = OperatorAdapter()
+    provider_calls = 0
+
+    def target_provider(_runtime, _parent, _obligation):
+        nonlocal provider_calls
+        provider_calls += 1
+        return DialogueWakeTarget(
+            registry=registry,
+            runtime_binding=binding,
+            target_attempt_id=sealed.attempt_id,
+            process_generation_id=generation.process_generation_id,
+            operator_adapter=operator,
+        )
+
+    bridge = ExecutiveDialogueWakeBridge(
+        target_provider=target_provider,
+        carrier_factory=service_cli._build_executive_dialogue_wake_carrier,
+        retry_policy=WakeRetryPolicy(
+            max_delivery_attempts=1,
+            retry_cooldown_s=1,
+            accepted_ttl_s=60,
+            target_unavailable_backoff_s=1,
+            reenable_on_binding_rotation=False,
+            armed=True,
+        ),
+    )
+    request = DialogueWakeRequest(
+        operation=SUBMIT_WAKE,
+        parent=dialogue_parent(),
+        thread_ts="1788000000.123456",
+        candidate=DialogueCandidateReference(
+            mode="ACTIVE_CURRENT_WORKER",
+            root_job_id="JOB-100",
+            job_id=sealed.job_id,
+            attempt_id=sealed.attempt_id,
+            worker_id="worker-a",
+            evidence_digest="4" * 64,
+        ),
+        obligation=obligation,
+        proposed_route=route,
+    )
+
+    first = asyncio.run(bridge(runtime, request))
+    second = asyncio.run(bridge(runtime, request))
+
+    assert first == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+    assert second == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+    assert provider_calls == 2
+    assert len(operator.calls) == 1
+
+    candidate_job = runtime.jobs.get_job(sealed.job_id)
+    assert candidate_job is not None
+    candidate_root = candidate_job.root_job_id
+    production_registry = dataclasses.replace(
+        registry,
+        root_job_bindings={
+            candidate_root: {"coo": target.session_alias},
+        },
+    )
+    monkeypatch.setattr(
+        "control_plane.session_targets.load_session_targets",
+        lambda: production_registry,
+    )
+    with runtime.store.read() as connection:
+        target_bindings = es_mod._dialogue_target_bindings_for_root(
+            runtime,
+            connection,
+            root_job_id=candidate_root,
+            registry=production_registry,
+        )
+    assert target_bindings["coo"] == PublicRuntimeBindingFacts(
+        session_alias=binding.session_alias,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+        reasoning_surface="codex",
+    )
+    assert target_bindings["ceo"] is None
+
+    production_obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "d" * 64,
+        declared_target_seat="coo",
+        job_id=candidate_job.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id=candidate_root,
+        source_workstream="WS:CHAIRMAN-CONTROL-ROOM",
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:02Z",
+    )
+    production_request = dataclasses.replace(
+        request,
+        candidate=dataclasses.replace(
+            request.candidate,
+            root_job_id=candidate_root,
+            job_id=candidate_job.job_id,
+            attempt_id=sealed.attempt_id,
+        ),
+        obligation=production_obligation,
+        proposed_route=route_obligation(
+            production_obligation,
+            production_registry,
+            binding=binding,
+        ),
+    )
+    production_bridge = ExecutiveDialogueWakeBridge(
+        target_provider=None,
+        operator_adapter=operator,
+        carrier_factory=service_cli._build_executive_dialogue_wake_carrier,
+        retry_policy=bridge._retry_policy,
+    )
+    production_result = asyncio.run(
+        production_bridge(runtime, production_request)
+    )
+    assert production_result == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+    assert len(operator.calls) == 2
+
+    (
+        _generic_attention,
+        _generic_attention_route,
+        generic_v2_obligation,
+        generic_v2_route,
+        generic_v2_source,
+        generic_v2_physical,
+    ) = _phase3_dialogue_material(
+        production_request.parent,
+        production_request.candidate,
+        production_obligation,
+        production_request.proposed_route,
+    )
+    generic_v2_request = dataclasses.replace(
+        production_request,
+        obligation=generic_v2_obligation,
+        proposed_route=generic_v2_route,
+        source_observation=generic_v2_source,
+        physical_source=generic_v2_physical,
+        transport_schema="mastermind.dialogue_wake_request/v2",
+    )
+    assert asyncio.run(
+        production_bridge(runtime, generic_v2_request)
+    ) == DialogueWakeResult("RECORDED", "WAKE_RECORDED")
+    generic_v2_history = WakeLedgerRepository(runtime).list_records(
+        generic_v2_obligation.obligation_id
+    )
+    assert generic_v2_history[0].record.physical_source is None
+    assert len(operator.calls) == 3
+
+    moved = dataclasses.replace(
+        request,
+        proposed_route=dataclasses.replace(route, binding_generation=99),
+    )
+    refused = asyncio.run(bridge(runtime, moved))
+    assert refused == DialogueWakeResult("MISSING", "WAKE_ROUTE_REFUSED")
+    assert len(operator.calls) == 3
+
+    stale_binding_bridge = ExecutiveDialogueWakeBridge(
+        target_provider=lambda *_args: dataclasses.replace(
+            target_provider(runtime, request.parent, obligation),
+            runtime_binding=dataclasses.replace(
+                binding,
+                binding_generation=binding.binding_generation + 1,
+            ),
+        ),
+        carrier_factory=service_cli._build_executive_dialogue_wake_carrier,
+        retry_policy=bridge._retry_policy,
+    )
+    stale = asyncio.run(stale_binding_bridge(runtime, request))
+    assert stale == DialogueWakeResult("MISSING", "CURRENT_BINDING_REFUSED")
+    assert len(operator.calls) == 3
+
+    monkeypatch.setattr(
+        runtime.operator_harness,
+        "current_writer_generation",
+        lambda _epoch: dataclasses.replace(
+            generation,
+            generation_number=generation.generation_number + 1,
+        ),
+    )
+    writer_refused = asyncio.run(bridge(runtime, request))
+    assert writer_refused == DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
+    assert len(operator.calls) == 3
+
+
+def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
+    tmp_path: Path,
+) -> None:
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryCurrentFacts,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+    )
+    from control_plane.executive_dialogue_observation import DialogueWakeRequest
+    from control_plane.operator_harness_contract import AttentionTurnObservation
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_digest,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import LedgerPhase, WakeRetryPolicy
+    from control_plane.wake_persist import WakeLedgerRepository
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import PersistedWakeCarrier
+    from tests.test_wake_ack_ingress import _admitted_runtime
+
+    runtime, sealed, generation = _admitted_runtime(tmp_path / "canary-bridge")
+    parent = dialogue_parent()
+    target = SessionTarget(
+        session_alias="COO-CANARY",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
+    registry = SessionTargetRegistry(
+        schema=TARGET_SCHEMA,
+        lifecycle_authority="executive_os",
+        production_armed=False,
+        policy_version="canary-test",
+        default_alias_by_seat={"coo": target.session_alias},
+        workstream_alias_by_seat={},
+        root_job_bindings={"JOB-100": {"coo": target.session_alias}},
+        targets={target.session_alias: target},
+    )
+    binding = project_runtime_binding(runtime, sealed.attempt_id, target)
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "e" * 64,
+        declared_target_seat="coo",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id="JOB-100",
+        source_workstream=parent["work_ref"],
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    candidate = DialogueCandidateReference(
+        mode="ACTIVE_CURRENT_WORKER",
+        root_job_id="JOB-100",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        worker_id="worker-a",
+        evidence_digest="4" * 64,
+    )
+    (
+        attention_obligation, attention_route, obligation, route,
+        source_observation, physical_source,
+    ) = _phase3_dialogue_material(parent, candidate, obligation, route)
+    grant = DialogueWakeCanaryActivationGrant(
+        schema=CANARY_SCHEMA,
+        installed_release_sha="a" * 40,
+        operation_key=parent["operation_key"],
+        source_root_job_id=candidate.root_job_id,
+        source_job_id=candidate.job_id,
+        source_attempt_id=candidate.attempt_id,
+        source_worker_id=candidate.worker_id,
+        source_semantic_digest=candidate.evidence_digest,
+        obligation_id=obligation.obligation_id,
+        target_seat="coo",
+        target_session_alias=target.session_alias,
+        target_attempt_id=sealed.attempt_id,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+        process_generation_id=generation.process_generation_id,
+        policy_digest=route.policy_digest,
+        valid_from_epoch_seconds=1_700_000_000,
+        expires_at_epoch_seconds=1_700_000_600,
+    )
+    facts = DialogueWakeCanaryCurrentFacts(
+        **{name: getattr(grant, name) for name in (
+            "installed_release_sha", "operation_key", "source_root_job_id",
+            "source_job_id", "source_attempt_id", "source_worker_id",
+            "source_semantic_digest", "obligation_id", "target_seat",
+            "target_session_alias", "target_attempt_id", "binding_id",
+            "binding_generation", "process_generation_id", "policy_digest",
+        )}
+    )
+
+    class Operator:
+        calls = 0
+
+        def deliver_attention(self, **kwargs):
+            self.calls += 1
+            return AttentionTurnObservation(
+                process_generation_id=generation.process_generation_id,
+                provider_session_id=binding.native_handle,
+                nudge_id=kwargs["nudge_id"],
+                provider_native_turn_id="turn-canary-1",
+                accepted=True,
+                delivered=True,
+            )
+
+    operator = Operator()
+
+    def factory(**kwargs):
+        if kwargs["historical_only"]:
+            return PersistedWakeCarrier(
+                repository=WakeLedgerRepository(runtime),
+                dispatchers=WakeDispatcherRegistry(),
+                current_binding_for=lambda _route: None,
+                retry_policy=kwargs["retry_policy"],
+                canary_profile=kwargs["canary_profile"],
+                historical_context_for=kwargs["historical_context_for"],
+                physical_source=kwargs.get("physical_source"),
+            )
+        client = CodexCurrentWriterWakeClient(
+            operator_adapter=operator,
+            generation=kwargs["generation"],
+            attempt_id=sealed.attempt_id,
+            runtime_binding=binding,
+            pre_submit_guard=kwargs["pre_submit_guard"],
+        )
+        return PersistedWakeCarrier(
+            repository=WakeLedgerRepository(runtime),
+            dispatchers=WakeDispatcherRegistry(
+                {"codex-app-server": CodexAppServerWakeDispatcher(client)}
+            ),
+            current_binding_for=lambda _route: binding,
+            retry_policy=kwargs["retry_policy"],
+            target_registry=registry,
+            canary_profile=kwargs["canary_profile"],
+            historical_context_for=kwargs["historical_context_for"],
+            physical_source=kwargs.get("physical_source"),
+        )
+
+    resolved = DialogueWakeTarget(
+        registry=registry,
+        runtime_binding=binding,
+        target_attempt_id=sealed.attempt_id,
+        process_generation_id=generation.process_generation_id,
+        operator_adapter=operator,
+    )
+    bridge = ExecutiveDialogueWakeBridge(
+        target_provider=lambda *_args: resolved,
+        retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+        operator_adapter=operator,
+        carrier_factory=factory,
+        canary_profile=DialogueWakeCanaryProfile(grant),
+        canary_current_facts_for=lambda *_args: facts,
+        canary_now_epoch_seconds=lambda: 1_700_000_100,
+    )
+    request = DialogueWakeRequest(
+        operation=SUBMIT_WAKE,
+        parent=parent,
+        thread_ts="1788000000.123456",
+        candidate=candidate,
+        obligation=obligation,
+        proposed_route=route,
+        source_observation=source_observation,
+        physical_source=physical_source,
+        transport_schema="mastermind.dialogue_wake_request/v2",
+    )
+
+    forged = dataclasses.replace(
+        request,
+        candidate=dataclasses.replace(request.candidate, evidence_digest="f" * 64),
+    )
+    assert asyncio.run(bridge(runtime, forged)) == DialogueWakeResult(
+        "MISSING", "WAKE_REQUEST_REFUSED"
+    )
+    assert asyncio.run(bridge(runtime, request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED"
+    )
+    assert asyncio.run(bridge(runtime, forged)) == DialogueWakeResult(
+        "EFFECT_UNKNOWN", "WAKE_EFFECT_UNKNOWN"
+    )
+    assert asyncio.run(bridge(runtime, request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED"
+    )
+    assert operator.calls == 1
+    phases = [
+        item.record.phase
+        for item in WakeLedgerRepository(runtime).list_records(
+            obligation.obligation_id
+        )
+    ]
+    assert phases.count(LedgerPhase.DELIVERY_ATTEMPT) == 1
+
+
+def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The future composition crosses the socket without replacing either resolver."""
+
+    from contextlib import contextmanager
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+        effective_dialogue_wake_canary_route,
+    )
+    from control_plane.ceo_intent import submit_intent
+    from control_plane.operator_harness_contract import (
+        AttentionTurnObservation,
+        CapabilityIdentity,
+        CapabilityManifest,
+        ObservedCapabilityIdentity,
+        OperationId,
+        ProcessIdentityObservation,
+        ProcessLiveness,
+        ProviderWriterState,
+        ReconcileObservation,
+        TurnStartObservation,
+        WorkerLocalWakeAckProjection,
+    )
+    from control_plane.executive_orchestration_principal import (
+        OperatorPrincipalObservation,
+    )
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_digest,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import (
+        AckMode,
+        LedgerPhase,
+        SourceReadHealth,
+        SourceResolution,
+        SourceResolutionCode,
+        TrustedAckContext,
+        WakeLedgerError,
+        WakeRetryPolicy,
+        acknowledge,
+        ack_record,
+        attempt_record,
+        make_delivery_attempt,
+        requested_record,
+        resolved_record,
+    )
+    from control_plane.wake_persist import WakeLedgerRepository
+    from control_plane.wake_events import mint_obligation_id
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_message_v2,
+        build_parent_v2,
+    )
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        HistoricalWakeContext,
+        PersistedWakeCarrier,
+    )
+    from tests import test_wake_ack_ingress as ack_fixtures
+
+    source = _terminal_dialogue_source()
+    runtime = Runtime.at(tmp_path / "runtime")
+    execution_binding = {
+        "eligible_quota_classes": ["default"],
+        "provider": "openai-codex",
+        "model": "fixture-model",
+        "effort": "medium",
+        "cost_class": "small",
+        "base_sha": "b" * 40,
+        "routing_policy_version": "fixture-policy-v1",
+        "execution_profile_id": "fixture-profile-v1",
+        "execution_profile_digest": "1" * 64,
+        "capability_policy_version": "fixture-capabilities-v1",
+        "capability_policy_digest": "2" * 64,
+        "operator_eligible_quota_classes": ["default"],
+        "operator_provider": "openai-codex",
+        "operator_model": "fixture-model",
+        "operator_effort": "medium",
+        "operator_cost_class": "small",
+        "operator_routing_policy_version": "fixture-policy-v1",
+        "operator_execution_profile_id": "fixture-profile-v1",
+        "operator_execution_profile_digest": "1" * 64,
+        "operator_capability_policy_version": "fixture-capabilities-v1",
+        "operator_capability_policy_digest": "2" * 64,
+        "operator_harness_binary_digest": "a" * 64,
+        "operator_harness_version": "1",
+        "operator_harness_armed": True,
+    }
+    runtime.workers.register_worker(
+        "worker-a",
+        provider="openai-codex",
+        account_label="account-a",
+        worker_type="fixture",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "openai-codex",
+                "model": "fixture-model",
+                "effort": "medium",
+                "capabilities": ["read"],
+                "cost_class": "small",
+                "metadata": {
+                    "execution_profile_id": "fixture-profile-v1",
+                    "execution_profile_digest": "1" * 64,
+                    "capability_policy_version": "fixture-capabilities-v1",
+                    "capability_policy_digest": "2" * 64,
+                },
+            }
+        },
+    )
+    admitted = submit_intent(
+        runtime,
+        {**ack_fixtures._intent(), "workstream": source["work_ref"]},
+        execution_binding=execution_binding,
+        dialogue_source=source,
+        require_dialogue_source=True,
+    )
+    root = runtime.jobs.get_job(admitted["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert dispatch is not None and dispatch.lease_token is not None
+    mcp_capability = CapabilityIdentity(
+        name="mastermind-company-dialogue",
+        harness_binary_digest="a" * 64,
+        kind="mcp_server",
+        tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+        mcp_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+        mcp_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+    )
+    profile = dataclasses.replace(
+        ack_fixtures._profile(dispatch),
+        capabilities=CapabilityManifest(required=(mcp_capability,)),
+    )
+    sealed = runtime.operator_harness.seal_operator_harness_attempt(
+        dispatch.attempt.attempt_id,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+    )
+    start_operation = OperationId("ohf-op:canary-socket-start")
+    epoch, generation = runtime.operator_harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        operation_id=start_operation,
+    )
+    process = ProcessIdentityObservation(4101, 4101, "start-4101", "boot-fixture")
+    runtime.operator_harness.bind_start_result(
+        epoch=epoch,
+        generation=generation,
+        operation_id=start_operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        provider_session_id="PROVIDER-SESSION-1",
+        process=process,
+    )
+    principal = OperatorPrincipalObservation(
+        attempt_id=sealed.attempt_id,
+        worker_id="worker-a",
+        process_generation_id=generation.process_generation_id,
+        provider_session_id="PROVIDER-SESSION-1",
+        process_identity={
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        },
+        os_principal_name="fixture-principal",
+        os_principal_uid=os.getuid(),
+        provider_home_identity={
+            "path": "/tmp/wake-canary-home",
+            "device": 1,
+            "inode": 2,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "mode": 0o700,
+        },
+        observed_at_ms=runtime.store.now_ms(),
+    )
+    attestation = dataclasses.replace(
+        ack_fixtures._attestation(profile),
+        capabilities=(
+            ObservedCapabilityIdentity(
+                kind="mcp_server",
+                name=mcp_capability.name,
+                tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+                mcp_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+                mcp_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+            ),
+        ),
+    )
+    runtime.operator_harness.seal_attestation(
+        generation=generation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+        attestation=attestation,
+        principal_observation=principal,
+    )
+
+    parent = build_parent_v2(
+        {
+            "schema": PARENT_SCHEMA_V2,
+            "work_ref": source["work_ref"],
+            "commission_ref": source["commission_ref"],
+            "session_ref": f"asd-session-exec-{sealed.job_id.lower()}",
+            "operation_key": f"exec-{sealed.job_id.lower()}",
+            "watch_mode": source["watch_mode"],
+            "allowed_sol_user_ids": ["U0BRETDUAS2"],
+            "created_at": "2026-09-03T01:00:00Z",
+        }
+    )
+    target = SessionTarget(
+        session_alias="COO-CANARY",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
+    ceo_target = SessionTarget(
+        session_alias="CEO-CANARY",
+        target_seat="ceo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=False,
+    )
+    registry = SessionTargetRegistry(
+        schema=TARGET_SCHEMA,
+        lifecycle_authority="executive_os",
+        production_armed=False,
+        policy_version="canary-socket-test",
+        default_alias_by_seat={
+            "coo": target.session_alias,
+            "ceo": ceo_target.session_alias,
+        },
+        workstream_alias_by_seat={},
+        root_job_bindings={
+            root.job_id: {
+                "coo": target.session_alias,
+                "ceo": ceo_target.session_alias,
+            }
+        },
+        targets={
+            target.session_alias: target,
+            ceo_target.session_alias: ceo_target,
+        },
+    )
+    monkeypatch.setattr(
+        "control_plane.session_targets.load_session_targets", lambda: registry
+    )
+    binding = project_runtime_binding(runtime, sealed.attempt_id, target)
+    facts_reader = object.__new__(ExecutiveControlService)
+    source_facts = facts_reader._runtime_dialogue_observation_facts(runtime, parent)
+    source_response = reduce_dialogue_observation(
+        parent=parent,
+        thread_ts="1788000000.123456",
+        facts=source_facts,
+    )
+    assert source_response.get("state") == "RESOLVED", (
+        source_response,
+        dataclasses.asdict(source_facts),
+    )
+    material = source_response["observation"]
+    candidate = DialogueCandidateReference(
+        mode=source_response["mode"],
+        root_job_id=material["root_job_id"],
+        job_id=material["job_id"],
+        attempt_id=material["attempt_id"],
+        worker_id=material["worker_id"],
+        evidence_digest=material["evidence_digest"],
+    )
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "e" * 64,
+        declared_target_seat="coo",
+        job_id=sealed.job_id,
+        attempt_id=sealed.attempt_id,
+        root_job_id=root.job_id,
+        source_workstream=str(source["work_ref"]),
+        source_created_at="2026-09-03T01:00:00Z",
+        emitted_at="2026-09-03T01:00:01Z",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    (
+        attention_obligation, attention_route, obligation, route,
+        source_observation, physical_source,
+    ) = _phase3_dialogue_material(parent, candidate, obligation, route)
+    grant = DialogueWakeCanaryActivationGrant(
+        schema=CANARY_SCHEMA,
+        installed_release_sha="a" * 40,
+        operation_key=parent["operation_key"],
+        source_root_job_id=candidate.root_job_id,
+        source_job_id=candidate.job_id,
+        source_attempt_id=candidate.attempt_id,
+        source_worker_id=candidate.worker_id,
+        source_semantic_digest=candidate.evidence_digest,
+        obligation_id=obligation.obligation_id,
+        target_seat="coo",
+        target_session_alias=target.session_alias,
+        target_attempt_id=sealed.attempt_id,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+        process_generation_id=generation.process_generation_id,
+        policy_digest=route.policy_digest,
+        valid_from_epoch_seconds=1_700_000_000,
+        expires_at_epoch_seconds=1_700_000_600,
+    )
+
+    call_order: list[tuple[str, int]] = []
+    initial_thread = threading.get_ident()
+    original_read = runtime.store.read
+
+    @contextmanager
+    def observed_read():
+        thread_id = threading.get_ident()
+        call_order.append(("read-enter", thread_id))
+        with original_read() as connection:
+            yield connection
+        call_order.append(("read-exit", thread_id))
+
+    monkeypatch.setattr(runtime.store, "read", observed_read)
+
+    active_operator_state = {
+        "generation": generation,
+        "binding": binding,
+        "process": process,
+        "obligation": obligation,
+        "target_attempt_id": sealed.attempt_id,
+        "provider_turn_id": "turn-canary-1",
+    }
+
+    class Operator:
+        deliver_calls = 0
+        reconcile_calls = 0
+        emit_ack = False
+
+        def deliver_attention(self, **kwargs):
+            self.deliver_calls += 1
+            call_order.append(("deliver", threading.get_ident()))
+            active_generation = active_operator_state["generation"]
+            active_binding = active_operator_state["binding"]
+            active_provider_turn_id = active_operator_state["provider_turn_id"]
+            return AttentionTurnObservation(
+                process_generation_id=active_generation.process_generation_id,
+                provider_session_id=active_binding.native_handle,
+                nudge_id=kwargs["nudge_id"],
+                provider_native_turn_id=active_provider_turn_id,
+                accepted=True,
+                delivered=False,
+            )
+
+        def reconcile(self, observed_generation):
+            self.reconcile_calls += 1
+            active_generation = active_operator_state["generation"]
+            active_binding = active_operator_state["binding"]
+            active_process = active_operator_state["process"]
+            active_obligation = active_operator_state["obligation"]
+            active_target_attempt_id = active_operator_state["target_attempt_id"]
+            active_provider_turn_id = active_operator_state["provider_turn_id"]
+            assert observed_generation == active_generation
+            call_order.append(("reconcile", threading.get_ident()))
+            return ReconcileObservation(
+                process_liveness=ProcessLiveness.ALIVE,
+                observed_process=active_process,
+                provider_session_reachable=True,
+                provider_writer_state=ProviderWriterState.HELD,
+                observed_provider_session_id=active_binding.native_handle,
+                late_attention_observation=AttentionTurnObservation(
+                    process_generation_id=active_generation.process_generation_id,
+                    provider_session_id=active_binding.native_handle,
+                    nudge_id=next(
+                        record.record.nudge_id
+                        for record in WakeLedgerRepository(runtime).list_records(
+                            active_obligation.obligation_id
+                        )
+                        if record.record.phase is LedgerPhase.ACCEPTED
+                    ),
+                    provider_native_turn_id=active_provider_turn_id,
+                    accepted=True,
+                    delivered=True,
+                    wake_ack_projection=(
+                        WorkerLocalWakeAckProjection(
+                            target_attempt_id=active_target_attempt_id,
+                            process_generation_id=active_generation.process_generation_id,
+                            binding_id=active_binding.binding_id,
+                            binding_generation=active_binding.binding_generation,
+                            provider_session_id=active_binding.native_handle,
+                            provider_native_turn_id=active_provider_turn_id,
+                            nudge_id=next(
+                                record.record.nudge_id
+                                for record in WakeLedgerRepository(runtime).list_records(
+                                    active_obligation.obligation_id
+                                )
+                                if record.record.phase is LedgerPhase.ACCEPTED
+                            ),
+                            obligation_ids=(active_obligation.obligation_id,),
+                            terminal_ack_trailer=True,
+                        )
+                        if self.emit_ack else None
+                    ),
+                ),
+            )
+
+    operator = Operator()
+
+    def carrier_factory(**kwargs):
+        repository = WakeLedgerRepository(kwargs["runtime"])
+        if kwargs["historical_only"]:
+            def historical_context(attempt):
+                historical = kwargs["historical_context_for"](attempt)
+                client = CodexCurrentWriterWakeClient(
+                    operator_adapter=historical.operator_adapter,
+                    generation=historical.generation,
+                    attempt_id=historical.target_attempt_id,
+                    runtime_binding=historical.runtime_binding,
+                )
+                return HistoricalWakeContext(
+                    dispatchers=WakeDispatcherRegistry(
+                        {"codex-app-server": CodexAppServerWakeDispatcher(client)}
+                    ),
+                    runtime_binding=historical.runtime_binding,
+                    target_registry=registry,
+                )
+
+            return PersistedWakeCarrier(
+                repository=repository,
+                dispatchers=WakeDispatcherRegistry(),
+                current_binding_for=lambda _route: None,
+                retry_policy=kwargs["retry_policy"],
+                canary_profile=kwargs["canary_profile"],
+                historical_context_for=historical_context,
+                physical_source=kwargs.get("physical_source"),
+            )
+        client = CodexCurrentWriterWakeClient(
+            operator_adapter=kwargs["resolved"].operator_adapter,
+            generation=kwargs["generation"],
+            attempt_id=kwargs["resolved"].target_attempt_id,
+            runtime_binding=kwargs["current_binding"],
+            pre_submit_guard=kwargs["pre_submit_guard"],
+        )
+        return PersistedWakeCarrier(
+            repository=repository,
+            dispatchers=WakeDispatcherRegistry(
+                {"codex-app-server": CodexAppServerWakeDispatcher(client)}
+            ),
+            current_binding_for=lambda _route: kwargs["current_binding"],
+            retry_policy=kwargs["retry_policy"],
+            target_registry=kwargs["resolved"].registry,
+            canary_profile=kwargs["canary_profile"],
+            historical_context_for=kwargs["historical_context_for"],
+            physical_source=kwargs.get("physical_source"),
+        )
+
+    clock = 1_700_000_100
+
+    def now_epoch_seconds():
+        call_order.append(("clock", threading.get_ident()))
+        return clock
+
+    bridge = ExecutiveDialogueWakeBridge(
+        target_provider=None,
+        retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+        operator_adapter=operator,
+        carrier_factory=carrier_factory,
+        canary_profile=DialogueWakeCanaryProfile(grant),
+        canary_now_epoch_seconds=now_epoch_seconds,
+        installed_release_sha=grant.installed_release_sha,
+        operation_key=grant.operation_key,
+    )
+    actual_current_facts = bridge._current_canary_facts
+
+    def observed_current_facts(*args):
+        call_order.append(("current-enter", threading.get_ident()))
+        result = actual_current_facts(*args)
+        call_order.append(("current-exit", threading.get_ident()))
+        return result
+
+    actual_historical_target = bridge._resolve_historical_target
+    historical_resolution_enabled = True
+
+    def observed_historical_target(*args):
+        call_order.append(("historical-enter", threading.get_ident()))
+        if not historical_resolution_enabled:
+            raise StateConflict("diagnostic historical resolver removal")
+        result = actual_historical_target(*args)
+        call_order.append(("historical-exit", threading.get_ident()))
+        return result
+
+    monkeypatch.setattr(bridge, "_current_canary_facts", observed_current_facts)
+    monkeypatch.setattr(bridge, "_resolve_historical_target", observed_historical_target)
+    request = {
+        "schema": "mastermind.dialogue_wake_request/v2",
+        "operation": SUBMIT_WAKE,
+        "parent": parent,
+        "source_observation": source_observation.to_dict(),
+        "candidate": candidate.to_dict(),
+        "attention_obligation": attention_obligation.to_dict(),
+        "route": attention_route.to_dict(),
+    }
+
+    async def exchange(
+        path: Path, payload: dict[str, object] = request
+    ) -> dict[str, object]:
+        return await _raw_request(
+            path,
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n",
+        )
+
+    async def exercise() -> None:
+        monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
+        observation_path = short_socket_root / "canary-defaults" / "dialogue.sock"
+        service = ExecutiveControlService(
+            _config(tmp_path / "service", socket_root=short_socket_root / "operator",
+                    runtime_root=runtime.store.root),
+            runtime_factory=lambda _root: runtime,
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_wake_handler=bridge,
+        )
+        await service.start()
+        try:
+            import integrations.slack_agent_dialogue.runtime as relay_runtime
+            from control_plane.dialogue_source_resolution import (
+                DialogueSourceObservation,
+                DialogueSourceMessage,
+                DialogueSourceSnapshot,
+                PhysicalDialogueSourceIdentity,
+                attention_source_ref,
+                correlated_source_ref,
+            )
+            from integrations.slack_agent_dialogue.engine import (
+                DialogueEngine,
+                DialoguePolicy,
+                SlackMessage,
+            )
+            from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
+            from integrations.slack_agent_dialogue.executive_observation_client import (
+                ExecutiveDialogueObservationClient,
+                ExecutiveObservationClientError,
+            )
+            from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
+            from integrations.slack_agent_dialogue.service import (
+                AgentDialogueService,
+                ServiceConfig as RelayServiceConfig,
+            )
+            from integrations.slack_agent_dialogue.contract_v2 import (
+                render_message_v2,
+                render_parent_v2,
+            )
+            from integrations.slack_agent_dialogue.turn_runtime_primitives import (
+                ActiveWaiterKey,
+            )
+            from tests.test_slack_agent_dialogue_engine_v2 import (
+                ExactV2AuthorityPolicy,
+            )
+
+            source_progress, source_continuation, source_successor = (
+                _phase3_source_messages(parent, candidate)
+            )
+            composition_messages = tuple(
+                build_message_v2(
+                    {
+                        **message,
+                        "applies_to": {
+                            "kind": "executive_attempt",
+                            "job_id": candidate.job_id,
+                            "attempt_id": candidate.attempt_id,
+                            "worker_id": candidate.worker_id,
+                        },
+                        "fingerprint": "",
+                    }
+                )
+                for message in (source_progress, source_continuation)
+            )
+            slack_client = InMemorySlackClient(
+                relay_bot_user_id="U0RELAY001"
+            )
+            slack_client.add_parent(
+                SlackMessage(
+                    ts="1788000000.123456",
+                    author_user_id="U0RELAY001",
+                    text=render_parent_v2(parent),
+                )
+            )
+            for index, message in enumerate(
+                composition_messages,
+                start=1,
+            ):
+                slack_client.add_reply(
+                    SlackMessage(
+                        ts=f"178800000{index}.123456",
+                        author_user_id="U0RELAY001",
+                        text=render_message_v2(message),
+                        thread_ts="1788000000.123456",
+                    )
+                )
+            dialogue_policy = DialoguePolicy(
+                workspace_id=source_observation.workspace_id,
+                channel_id=source_observation.channel_id,
+                relay_bot_user_id="U0RELAY001",
+                allowed_sol_user_ids=("U0BRETDUAS2",),
+                allowed_parent_user_ids=("U0RELAY001",),
+                poll_interval_seconds=0,
+                method_timeout_seconds=1,
+            )
+            authority = ExactV2AuthorityPolicy()
+            active_waiters = relay_runtime.ActiveWaiterRegistry()
+            dialogue_service = AgentDialogueService(
+                RelayServiceConfig(
+                    socket_path=short_socket_root / "relay" / "agent-relay.sock",
+                    allowed_peer_uids=(os.geteuid(),),
+                ),
+                DialogueEngine(
+                    dialogue_policy,
+                    slack_client,
+                    authority_policy=authority,
+                ),
+                engine_v2=DialogueEngineV2(
+                    dialogue_policy,
+                    slack_client,
+                    authority_policy=authority,
+                    active_waiter_registry=active_waiters,
+                ),
+            )
+            monkeypatch.setattr(
+                relay_runtime,
+                "EXECUTIVE_OBSERVATION_SOCKET_PATH",
+                observation_path,
+            )
+            observation_client = ExecutiveDialogueObservationClient(
+                observation_path,
+                timeout_seconds=1,
+            )
+            turn_runtime = relay_runtime.build_turn_runtime(
+                dialogue_service,
+                registry=registry,
+                observation_client=observation_client,
+                emitted_at=lambda: "2026-09-03T01:00:02Z",
+            )
+            active_waiters.register(
+                ActiveWaiterKey.from_parent(parent, target_seat="coo")
+            )
+            source_rpc_calls = 0
+            source_rpc_results = []
+            actual_source_reconcile = bridge.reconcile_dialogue_sources
+
+            def observed_source_reconcile(*args):
+                nonlocal source_rpc_calls
+                source_rpc_calls += 1
+                result = actual_source_reconcile(*args)
+                source_rpc_results.append(result)
+                return result
+
+            monkeypatch.setattr(
+                bridge,
+                "reconcile_dialogue_sources",
+                observed_source_reconcile,
+            )
+            composition_receipts = await turn_runtime.reconcile_once()
+            assert len(composition_receipts) == 1
+            assert source_rpc_calls == 1, composition_receipts
+            assert source_rpc_results == [
+                {"state": "NO_RESOLUTION_REQUIRED", "reason": "SOURCE_PRESENT"}
+            ]
+            assert composition_receipts[0].outcome.value == "ACTIVE_WAITER_SUPPRESSED"
+            assert composition_receipts[0].reason == "EXACT_ACTIVE_WAITER"
+            assert (operator.deliver_calls, operator.reconcile_calls) == (0, 0)
+            with pytest.raises(
+                ExecutiveObservationClientError,
+                match="RESPONSE_REFUSED",
+            ):
+                await observation_client.reconcile_dialogue_sources(
+                    DialogueSourceSnapshot(
+                        workspace_id=source_observation.workspace_id,
+                        channel_id=source_observation.channel_id,
+                        thread_ts=source_observation.thread_ts,
+                        parent_fingerprint=parent["fingerprint"],
+                        operation_key=parent["operation_key"],
+                        messages=tuple(
+                            DialogueSourceMessage.create(message)
+                            for message in composition_messages
+                        ),
+                    )
+                )
+
+            # The concrete observation client is bound to the Runtime's one
+            # invocation-local ContextVar.  Prove that exceptional and
+            # cancelled candidates reset it, and concurrent candidates cannot
+            # observe one another's thread scope.
+            candidate_batch = await turn_runtime._candidate_collector.collect()
+            assert len(candidate_batch) == 1
+            composition_candidate = candidate_batch[0]
+            wake_context = observation_client._wake_context
+            assert wake_context is not None and wake_context.get() is None
+            original_candidate_inner = turn_runtime._reconcile_candidate_inner
+
+            async def failing_candidate_inner(_candidate):
+                assert wake_context.get() is not None
+                raise RuntimeError("diagnostic candidate failure")
+
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                failing_candidate_inner,
+            )
+            failed_receipt = await turn_runtime._reconcile_candidate(
+                composition_candidate
+            )
+            assert failed_receipt.reason == "TURN_CANDIDATE_PROCESSING_FAILED"
+            assert wake_context.get() is None
+
+            candidate_started = asyncio.Event()
+            candidate_release = asyncio.Event()
+
+            async def cancelled_candidate_inner(_candidate):
+                assert wake_context.get() is not None
+                candidate_started.set()
+                await candidate_release.wait()
+
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                cancelled_candidate_inner,
+            )
+            async def cancelled_scope_probe():
+                try:
+                    return await turn_runtime._reconcile_candidate(
+                        composition_candidate
+                    )
+                except asyncio.CancelledError:
+                    assert wake_context.get() is None
+                    with pytest.raises(
+                        ExecutiveObservationClientError,
+                        match="RESPONSE_REFUSED",
+                    ):
+                        await observation_client.reconcile_dialogue_sources(
+                            DialogueSourceSnapshot(
+                                workspace_id=source_observation.workspace_id,
+                                channel_id=source_observation.channel_id,
+                                thread_ts=source_observation.thread_ts,
+                                parent_fingerprint=parent["fingerprint"],
+                                operation_key=parent["operation_key"],
+                                messages=(),
+                            )
+                        )
+                    raise
+
+            cancelled_task = asyncio.create_task(cancelled_scope_probe())
+            await candidate_started.wait()
+            cancelled_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await cancelled_task
+            assert wake_context.get() is None
+
+            parallel_seen: list[tuple[str, str]] = []
+            parallel_ready = asyncio.Event()
+            parallel_count = 0
+
+            async def parallel_exchange(source_request):
+                nonlocal parallel_count
+                own_thread = wake_context.get().thread_ts
+                sent_thread = source_request["snapshot"]["thread_ts"]
+                parallel_count += 1
+                if parallel_count == 2:
+                    parallel_ready.set()
+                await parallel_ready.wait()
+                parallel_seen.append((own_thread, sent_thread))
+                return {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "NOT_APPLICABLE",
+                    "reason": "TEST_PARALLEL_SCOPE",
+                }
+
+            async def parallel_candidate_inner(_candidate):
+                scope = wake_context.get()
+                await observation_client.reconcile_dialogue_sources(
+                    DialogueSourceSnapshot(
+                        workspace_id=source_observation.workspace_id,
+                        channel_id=source_observation.channel_id,
+                        thread_ts=scope.thread_ts,
+                        parent_fingerprint=scope.parent_fingerprint,
+                        operation_key=scope.operation_key,
+                        messages=(),
+                    )
+                )
+                return composition_receipts[0]
+
+            original_exchange = observation_client._exchange
+            monkeypatch.setattr(
+                observation_client,
+                "_exchange",
+                parallel_exchange,
+            )
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                parallel_candidate_inner,
+            )
+            second_candidate = dataclasses.replace(
+                composition_candidate,
+                thread_ts="1788000000.123457",
+            )
+            await asyncio.gather(
+                turn_runtime._reconcile_candidate(composition_candidate),
+                turn_runtime._reconcile_candidate(second_candidate),
+            )
+            assert sorted(parallel_seen) == [
+                ("1788000000.123456", "1788000000.123456"),
+                ("1788000000.123457", "1788000000.123457"),
+            ]
+            assert wake_context.get() is None
+            monkeypatch.setattr(
+                observation_client,
+                "_exchange",
+                original_exchange,
+            )
+            monkeypatch.setattr(
+                turn_runtime,
+                "_reconcile_candidate_inner",
+                original_candidate_inner,
+            )
+
+            composition_source_frame = {
+                "schema": "mastermind.dialogue_source_reconcile_request/v1",
+                "operation": "RECONCILE_DIALOGUE_SOURCES",
+                "parent": parent,
+                "snapshot": {
+                    "workspace_id": source_observation.workspace_id,
+                    "channel_id": source_observation.channel_id,
+                    "thread_ts": source_observation.thread_ts,
+                    "parent_fingerprint": parent["fingerprint"],
+                    "operation_key": parent["operation_key"],
+                    "complete": True,
+                    "messages": list(composition_messages),
+                },
+            }
+            blocked_for_ceo = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-blocked-source-target",
+                    "message_type": "BLOCKED",
+                    "reply_to_message_key": None,
+                    "body": {
+                        "blocker_code": "SOURCE_MOVED",
+                        "reason": "The protected source moved.",
+                        "needed_from": "sol",
+                        "work_paused": True,
+                    },
+                    "requires_response": True,
+                    "created_at": "2026-09-03T01:00:03Z",
+                    "fingerprint": "",
+                }
+            )
+            from integrations.slack_agent_dialogue.turn_watcher import (
+                TurnRoutingFacts,
+                classify_turn,
+            )
+            blocked_decision = classify_turn(
+                parent=parent,
+                messages=[blocked_for_ceo],
+                routing=TurnRoutingFacts(
+                    bound_operation_key=parent["operation_key"],
+                    bound_commission_fingerprint=parent["fingerprint"],
+                    root_job_id=candidate.root_job_id,
+                    routing_workstream=None,
+                    source_workstream=parent["work_ref"],
+                    ceo_target_bound=True,
+                    coo_target_bound=True,
+                ),
+            )
+            assert blocked_decision.action.value == "WAKE_CEO", blocked_decision
+
+            def mismatched_target_grant(message, *, target_seat):
+                mismatched_attention = attention_source_ref(
+                    parent_fingerprint=parent["fingerprint"],
+                    message_key=message["message_key"],
+                    target_seat=target_seat,
+                )
+                mismatched_logical = correlated_source_ref(
+                    attention_source_ref=mismatched_attention,
+                    parent_fingerprint=parent["fingerprint"],
+                    operation_key=parent["operation_key"],
+                    candidate=candidate.to_dict(),
+                )
+                return dataclasses.replace(
+                    grant,
+                    obligation_id=mint_obligation_id(
+                        source_kind="agent_dialogue_attention",
+                        source_ref=mismatched_logical,
+                        wake_kind="dialogue_turn_pending",
+                    ),
+                    target_seat=target_seat,
+                )
+
+            target_mismatch_cases = (
+                (
+                    composition_source_frame,
+                    mismatched_target_grant(
+                        composition_messages[-1], target_seat="ceo"
+                    ),
+                ),
+                (
+                    {
+                        **composition_source_frame,
+                        "snapshot": {
+                            **composition_source_frame["snapshot"],
+                            "messages": [blocked_for_ceo],
+                        },
+                    },
+                    mismatched_target_grant(blocked_for_ceo, target_seat="coo"),
+                ),
+            )
+            for mismatch_frame, mismatch_grant in target_mismatch_cases:
+                bridge._canary_profile = DialogueWakeCanaryProfile(mismatch_grant)
+                assert await exchange(observation_path, mismatch_frame) == {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "UNKNOWN",
+                    "reason": "SOURCE_GRANT_DISAGREES",
+                }
+                assert WakeLedgerRepository(runtime).list_records(
+                    mismatch_grant.obligation_id
+                ) == ()
+                assert (operator.deliver_calls, operator.reconcile_calls) == (0, 0)
+
+            terminal_mode_candidate = dataclasses.replace(
+                candidate,
+                mode="TERMINAL_RESULT",
+            )
+            (
+                _terminal_attention,
+                _terminal_attention_route,
+                terminal_mode_obligation,
+                _terminal_mode_route,
+                _terminal_source,
+                _terminal_physical,
+            ) = _phase3_dialogue_material(
+                parent,
+                terminal_mode_candidate,
+                obligation,
+                route,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                dataclasses.replace(
+                    grant,
+                    obligation_id=terminal_mode_obligation.obligation_id,
+                )
+            )
+            assert await exchange(observation_path, composition_source_frame) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "NO_RESOLUTION_REQUIRED",
+                "reason": "SOURCE_PRESENT",
+            }
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                dataclasses.replace(
+                    grant,
+                    obligation_id="WAKE-" + "f" * 32,
+                )
+            )
+            assert await exchange(observation_path, composition_source_frame) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "ADVANCED_WITHOUT_REQUEST",
+            }
+            import control_plane.dialogue_source_resolution as source_resolution_mod
+            import control_plane.wake_events as wake_events_mod
+
+            actual_dialogue_mint = source_resolution_mod.mint_obligation_id
+            actual_wake_mint = wake_events_mod.mint_obligation_id
+            monkeypatch.setattr(
+                source_resolution_mod,
+                "mint_obligation_id",
+                lambda **_kwargs: grant.obligation_id,
+            )
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                lambda **_kwargs: grant.obligation_id,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            dual_mode = await exchange(observation_path, composition_source_frame)
+            assert dual_mode == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN",
+                "reason": "SOURCE_CANDIDATE_AMBIGUOUS",
+            }
+            monkeypatch.setattr(
+                source_resolution_mod,
+                "mint_obligation_id",
+                actual_dialogue_mint,
+            )
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                actual_wake_mint,
+            )
+
+            first = await exchange(observation_path)
+            assert first == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            assert operator.deliver_calls == 1
+            source_frame = {
+                "schema": "mastermind.dialogue_source_reconcile_request/v1",
+                "operation": "RECONCILE_DIALOGUE_SOURCES",
+                "parent": parent,
+                "snapshot": {
+                    "workspace_id": source_observation.workspace_id,
+                    "channel_id": source_observation.channel_id,
+                    "thread_ts": source_observation.thread_ts,
+                    "parent_fingerprint": parent["fingerprint"],
+                    "operation_key": parent["operation_key"],
+                    "complete": True,
+                    "messages": [source_progress, source_continuation],
+                },
+            }
+            from control_plane.dialogue_source_resolution import (
+                DialogueSourceObservation,
+                PhysicalDialogueSourceIdentity,
+                attention_source_ref,
+                correlated_source_ref,
+            )
+            initial_key = f"asd-initial-{parent['fingerprint']}"
+            initial_attention = attention_source_ref(
+                parent_fingerprint=parent["fingerprint"],
+                message_key=initial_key,
+                target_seat="coo",
+            )
+            initial_logical = correlated_source_ref(
+                attention_source_ref=initial_attention,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                candidate=candidate.to_dict(),
+            )
+            initial_obligation = mint_obligation(
+                wake_kind="dialogue_turn_pending",
+                source_kind="agent_dialogue_attention",
+                source_ref=initial_logical,
+                declared_target_seat="coo",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                root_job_id=candidate.root_job_id,
+                source_workstream=parent["work_ref"],
+                source_created_at="2026-09-03T01:00:00Z",
+                emitted_at="2026-09-03T01:00:01Z",
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                dataclasses.replace(grant, obligation_id=initial_obligation.obligation_id)
+            )
+            initial_response = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {**source_frame["snapshot"], "messages": []},
+                },
+            )
+            assert initial_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "NO_RESOLUTION_REQUIRED",
+                "reason": "SOURCE_PRESENT",
+            }
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            provider_before_source = (operator.deliver_calls, operator.reconcile_calls)
+            present_source = await exchange(observation_path, source_frame)
+            assert present_source == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "NO_RESOLUTION_REQUIRED",
+                "reason": "SOURCE_PRESENT",
+            }
+            advanced_source = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert advanced_source == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "TARGET_ACK_REQUIRED",
+            }
+            assert (operator.deliver_calls, operator.reconcile_calls) == provider_before_source
+            deliver_index = next(
+                index for index, item in enumerate(call_order) if item[0] == "deliver"
+            )
+            worker_thread = call_order[deliver_index][1]
+            assert worker_thread != initial_thread
+            worker_prefix = [
+                name for name, thread_id in call_order[:deliver_index]
+                if thread_id == worker_thread
+            ]
+            final_guard_start = len(worker_prefix) - 1 - worker_prefix[::-1].index(
+                "current-enter"
+            )
+            assert worker_prefix[final_guard_start:] == [
+                "current-enter",
+                "read-enter",
+                "clock",
+                "read-exit",
+                "current-exit",
+            ]
+
+            persisted_before_profile_checks = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            provider_calls_before_profile_checks = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            )
+            null_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(None),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant.installed_release_sha,
+                operation_key=grant.operation_key,
+            )
+            changed_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(
+                    dataclasses.replace(grant, source_semantic_digest="f" * 64)
+                ),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant.installed_release_sha,
+                operation_key=grant.operation_key,
+            )
+            for incompatible in (null_bridge, changed_bridge):
+                service._dialogue_wake_handler = incompatible
+                for operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                    refused = await exchange(
+                        observation_path,
+                        {**request, "operation": operation},
+                    )
+                    assert refused == {
+                        "schema": WAKE_RESPONSE_SCHEMA,
+                        "state": "EFFECT_UNKNOWN",
+                        "reason": "WAKE_EFFECT_UNKNOWN",
+                    }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_calls_before_profile_checks
+            assert tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ) == persisted_before_profile_checks
+            service._dialogue_wake_handler = bridge
+
+            turn_operation = OperationId("ohf-op:canary-socket-turn")
+            turn = runtime.operator_harness.reserve_turn(
+                epoch=epoch,
+                generation=generation,
+                operation_id=turn_operation,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+            )
+            runtime.operator_harness.acknowledge_turn(
+                turn=turn,
+                operation_id=turn_operation,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                observation=TurnStartObservation("NATIVE-CANARY-G1", True),
+            )
+            runtime.operator_harness.record_reconcile_observation(
+                generation=generation,
+                observation=ReconcileObservation(
+                    ProcessLiveness.PROVEN_DEAD,
+                    process,
+                    True,
+                    ProviderWriterState.RELEASED,
+                    binding.native_handle,
+                ),
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+            )
+            resume = OperationId("ohf-op:canary-socket-resume")
+            generation2 = runtime.operator_harness.reserve_same_epoch_resume(
+                epoch=epoch,
+                old_generation=generation,
+                operation_id=resume,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+            )
+            process2 = ProcessIdentityObservation(
+                4102, 4102, "start-4102", "boot-fixture"
+            )
+            runtime.operator_harness.bind_resume_result(
+                epoch=epoch,
+                generation=generation2,
+                operation_id=resume,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                provider_session_id=binding.native_handle,
+                process=process2,
+            )
+            runtime.operator_harness.seal_attestation(
+                generation=generation2,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                requested=profile,
+                attestation=attestation,
+                principal_observation=OperatorPrincipalObservation.from_dict(
+                    {
+                        **principal.to_dict(),
+                        "process_generation_id": generation2.process_generation_id,
+                        "process_identity": {
+                            "pid": process2.pid,
+                            "pgid": process2.pgid,
+                            "process_start_identity": process2.process_start_identity,
+                            "boot_id": process2.boot_id,
+                        },
+                    }
+                ),
+            )
+
+            class BridgeWrapper:
+                canary_profile = bridge.canary_profile
+
+                async def __call__(self, opened, wake_request):
+                    return await bridge(opened, wake_request)
+
+                async def historical_only(self, opened, wake_request):
+                    return await bridge.historical_only(opened, wake_request)
+
+            class FakeHistoricalHandler:
+                canary_profile = bridge.canary_profile
+
+                async def historical_only(self, _opened, _wake_request):
+                    raise AssertionError("fake handler must not receive forced fallback")
+
+            noncanary = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+            )
+            counts_before_exact_class_checks = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            )
+            persisted_before_exact_class_checks = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            for excluded in (BridgeWrapper(), FakeHistoricalHandler(), noncanary):
+                service._dialogue_wake_handler = excluded
+                for operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                    excluded_response = await exchange(
+                        observation_path,
+                        {**request, "operation": operation},
+                    )
+                    assert excluded_response == {
+                        "schema": WAKE_RESPONSE_SCHEMA,
+                        "state": "MISSING",
+                        "reason": "CANDIDATE_BINDING_REQUIRED",
+                    }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            ) == counts_before_exact_class_checks
+            assert tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ) == persisted_before_exact_class_checks
+            service._dialogue_wake_handler = bridge
+
+            phases_before_counterfactual = [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ]
+            nonlocal historical_resolution_enabled
+            historical_resolution_enabled = False
+            blocked = await exchange(observation_path)
+            assert blocked == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "EFFECT_UNKNOWN",
+                "reason": "WAKE_EFFECT_UNKNOWN",
+            }
+            assert operator.reconcile_calls == 0
+            assert [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ] == phases_before_counterfactual
+
+            historical_resolution_enabled = True
+            replay = await exchange(observation_path)
+            assert replay == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            assert operator.deliver_calls == 1
+            assert operator.reconcile_calls == 1
+            assert [name for name, _thread_id in call_order].count(
+                "historical-enter"
+            ) == 2
+            assert [name for name, _thread_id in call_order].count(
+                "historical-exit"
+            ) == 1
+            assert [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ].count(LedgerPhase.DELIVERY_ATTEMPT) == 1
+
+            delayed_source_payload = {
+                **source_frame,
+                "snapshot": {
+                    **source_frame["snapshot"],
+                    "messages": [
+                        *source_frame["snapshot"]["messages"],
+                        source_successor,
+                    ],
+                },
+            }
+            pending_ack = await exchange(observation_path, delayed_source_payload)
+            assert pending_ack == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "DELIVERED_ACK_PENDING",
+                "source_observation": source_observation.to_dict(),
+            }
+            provider_before_delayed_ack = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            )
+            canonical_ack_frame = {
+                "schema": "mastermind.dialogue_delayed_ack_request/v1",
+                "operation": "RECONCILE_WAKE_ACK",
+                "parent": parent,
+                "source_observation": pending_ack["source_observation"],
+            }
+            for excluded in (BridgeWrapper(), FakeHistoricalHandler(), noncanary):
+                service._dialogue_wake_handler = excluded
+                assert await exchange(observation_path, canonical_ack_frame) == {
+                    "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                    "state": "NOT_APPLICABLE",
+                    "reason": "NONCANARY_PROFILE",
+                }
+            service._dialogue_wake_handler = bridge
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_before_delayed_ack
+            delayed_ack_mutations = []
+            for field in pending_ack["source_observation"]:
+                mutated_source = dict(pending_ack["source_observation"])
+                mutated_source[field] = (
+                    "T0BRD2AQXQW" if field == "workspace_id"
+                    else "C0BSBM78V1P" if field == "channel_id"
+                    else "1788000000.123457" if field == "thread_ts"
+                    else "asd-other-source-01" if field == "predecessor_message_key"
+                    else "f" * 64
+                )
+                delayed_ack_mutations.append((field, {
+                    **canonical_ack_frame,
+                    "source_observation": mutated_source,
+                }))
+            delayed_ack_mutations.extend((
+                ("operation_key", {
+                    **canonical_ack_frame,
+                    "parent": build_parent_v2({
+                        **parent, "operation_key": "other-operation-001",
+                        "fingerprint": "",
+                    }),
+                }),
+                ("parent_fingerprint", {
+                    **canonical_ack_frame,
+                    "parent": build_parent_v2({
+                        **parent,
+                        "session_ref": f"{parent['session_ref']}-other",
+                        "fingerprint": "",
+                    }),
+                }),
+            ))
+            for mutation_name, mutation in delayed_ack_mutations:
+                refused_ack = await exchange(observation_path, mutation)
+                assert refused_ack["state"] == "HOLD", mutation_name
+                assert (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                ) == provider_before_delayed_ack, mutation_name
+
+            # A freshly installed grant with the same source and target
+            # identities but a different policy must not reuse the persisted
+            # G1 route or enter the historical provider resolver.
+            changed_policy_grant = dataclasses.replace(
+                grant,
+                policy_digest="c" * 16,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                changed_policy_grant
+            )
+            historical_before_policy_change = [
+                name for name, _thread_id in call_order
+            ].count("historical-enter")
+            changed_policy_ack = await exchange(
+                observation_path,
+                canonical_ack_frame,
+            )
+            assert changed_policy_ack["schema"] == (
+                "mastermind.dialogue_delayed_ack_response/v1"
+            )
+            assert changed_policy_ack["state"] in {"HOLD", "EFFECT_UNKNOWN"}
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_before_delayed_ack
+            assert [name for name, _thread_id in call_order].count(
+                "historical-enter"
+            ) == historical_before_policy_change
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            # A present closed canary profile whose grant was removed is a
+            # fail-closed canary state, not the generic/non-canary path.
+            service._dialogue_wake_handler = null_bridge
+            null_grant_ack = await exchange(observation_path, canonical_ack_frame)
+            assert null_grant_ack == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "HOLD",
+                "reason": "ACK_GRANT_UNAVAILABLE",
+            }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == provider_before_delayed_ack
+            service._dialogue_wake_handler = bridge
+            operator.emit_ack = True
+            delayed_ack = await exchange(
+                observation_path,
+                canonical_ack_frame,
+            )
+            assert delayed_ack == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "EFFECT_UNKNOWN",
+                "reason": "ACK_EFFECT_UNKNOWN",
+            }
+            assert operator.deliver_calls == provider_before_delayed_ack[0]
+            assert operator.reconcile_calls == provider_before_delayed_ack[1] + 1
+            assert [
+                item.record.phase
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            ].count(LedgerPhase.TARGET_ACKNOWLEDGED) == 0
+
+            resolver_calls = operator.reconcile_calls
+            historical_calls = [
+                name for name, _thread_id in call_order
+            ].count("historical-enter")
+            delivered_history = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            terminal_replay = await exchange(observation_path)
+            assert terminal_replay == replay
+            terminal_reconcile = await exchange(
+                observation_path,
+                {**request, "operation": RECONCILE_WAKE},
+            )
+            assert terminal_reconcile == replay
+            assert operator.reconcile_calls == resolver_calls
+            assert operator.deliver_calls == 1
+            assert [name for name, _thread_id in call_order].count(
+                "historical-enter"
+            ) == historical_calls
+            replayed_history = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation.obligation_id
+                )
+            )
+            assert replayed_history == delivered_history
+            assert sum(
+                record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                for record in replayed_history
+            ) == 1
+
+            # A second physical source uses the now-current resumed generation.
+            # This proves the whole delayed-ACK path rather than combining the
+            # separate dispatcher and socket fixtures by inference.
+            parent2 = parent
+            source_response2 = reduce_dialogue_observation(
+                parent=parent2,
+                thread_ts=source_observation.thread_ts,
+                facts=facts_reader._runtime_dialogue_observation_facts(
+                    runtime, parent2
+                ),
+            )
+            material2 = source_response2["observation"]
+            candidate2 = DialogueCandidateReference(
+                mode=source_response2["mode"],
+                root_job_id=material2["root_job_id"],
+                job_id=material2["job_id"],
+                attempt_id=material2["attempt_id"],
+                worker_id=material2["worker_id"],
+                evidence_digest=material2["evidence_digest"],
+            )
+            target_intent = {
+                **ack_fixtures._intent(),
+                "intent_id": "CEO-WAKE-ACK-TARGET-002",
+                "objective": "Provide a distinct hermetic delayed ACK target.",
+            }
+            target_admission = submit_intent(
+                runtime,
+                target_intent,
+                execution_binding=execution_binding,
+            )
+            target_root = runtime.jobs.get_job(target_admission["job_id"])
+            assert target_root is not None
+            target_planner = runtime.jobs.create_cycle_planner(
+                target_root.job_id,
+                command_id=f"coo-cycle:{target_root.job_id}:create-planner:0",
+            )
+            runtime.workers.register_worker(
+                "worker-b",
+                provider="openai-codex",
+                account_label="account-b",
+                worker_type="fixture",
+                capabilities=["read"],
+                quota_classes={
+                    "default": {
+                        "provider": "openai-codex",
+                        "model": "fixture-model",
+                        "effort": "medium",
+                        "capabilities": ["read"],
+                        "cost_class": "small",
+                        "metadata": {
+                            "execution_profile_id": "fixture-profile-v1",
+                            "execution_profile_digest": "1" * 64,
+                            "capability_policy_version": "fixture-capabilities-v1",
+                            "capability_policy_digest": "2" * 64,
+                        },
+                    }
+                },
+            )
+            target_dispatch = runtime.attempts.dispatch_cycle_job(
+                target_planner.job_id,
+                command_id=(
+                    f"coo-cycle:{target_root.job_id}:dispatch:"
+                    f"{target_planner.job_id}:attempt:1"
+                ),
+                worker_id="worker-b",
+            )
+            assert target_dispatch is not None
+            assert target_dispatch.lease_token is not None
+            target_profile = dataclasses.replace(
+                ack_fixtures._profile(target_dispatch),
+                capabilities=CapabilityManifest(required=(mcp_capability,)),
+            )
+            target_sealed = runtime.operator_harness.seal_operator_harness_attempt(
+                target_dispatch.attempt.attempt_id,
+                fence_generation=target_dispatch.attempt.fence_generation,
+                lease_token=target_dispatch.lease_token,
+                requested=target_profile,
+            )
+            target_start = OperationId("ohf-op:canary-delayed-ack-target")
+            target_epoch, target_generation = runtime.operator_harness.reserve_start(
+                target_sealed.attempt_id,
+                fence_generation=target_sealed.fence_generation,
+                lease_token=target_dispatch.lease_token,
+                operation_id=target_start,
+            )
+            target_process = ProcessIdentityObservation(
+                4201, 4201, "start-4201", "boot-fixture"
+            )
+            runtime.operator_harness.bind_start_result(
+                epoch=target_epoch,
+                generation=target_generation,
+                operation_id=target_start,
+                fence_generation=target_sealed.fence_generation,
+                lease_token=target_dispatch.lease_token,
+                provider_session_id="PROVIDER-SESSION-2",
+                process=target_process,
+            )
+            target_principal = dataclasses.replace(
+                principal,
+                attempt_id=target_sealed.attempt_id,
+                worker_id="worker-b",
+                process_generation_id=target_generation.process_generation_id,
+                provider_session_id="PROVIDER-SESSION-2",
+                process_identity={
+                    "pid": target_process.pid,
+                    "pgid": target_process.pgid,
+                    "process_start_identity": target_process.process_start_identity,
+                    "boot_id": target_process.boot_id,
+                },
+                observed_at_ms=runtime.store.now_ms(),
+            )
+            target_attestation = dataclasses.replace(
+                ack_fixtures._attestation(target_profile),
+                capabilities=(
+                    ObservedCapabilityIdentity(
+                        kind="mcp_server",
+                        name=mcp_capability.name,
+                        tool_schema_digest=COMPANY_DIALOGUE_TOOL_SCHEMA_DIGEST,
+                        mcp_server_identity=COMPANY_DIALOGUE_SERVER_IDENTITY,
+                        mcp_server_version=COMPANY_DIALOGUE_SERVER_VERSION,
+                    ),
+                ),
+            )
+            runtime.operator_harness.seal_attestation(
+                generation=target_generation,
+                fence_generation=target_sealed.fence_generation,
+                lease_token=target_dispatch.lease_token,
+                requested=target_profile,
+                attestation=target_attestation,
+                principal_observation=target_principal,
+            )
+            binding2 = project_runtime_binding(
+                runtime, target_sealed.attempt_id, target
+            )
+            continuation2 = build_message_v2({
+                **source_continuation,
+                "message_key": "asd-continue-002",
+                "applies_to": {
+                    "kind": "executive_attempt",
+                    "job_id": candidate2.job_id,
+                    "attempt_id": candidate2.attempt_id,
+                    "worker_id": candidate2.worker_id,
+                },
+                "reply_to_message_key": source_successor["message_key"],
+                "created_at": "2026-09-03T01:00:03Z",
+                "fingerprint": "",
+            })
+            successor2 = build_message_v2({
+                **source_successor,
+                "message_key": "asd-progress-003",
+                "reply_to_message_key": continuation2["message_key"],
+                "created_at": "2026-09-03T01:00:04Z",
+                "fingerprint": "",
+            })
+            source_observation2 = DialogueSourceObservation(
+                workspace_id=source_observation.workspace_id,
+                channel_id=source_observation.channel_id,
+                thread_ts=source_observation.thread_ts,
+                predecessor_message_key=continuation2["message_key"],
+                predecessor_message_fingerprint=continuation2["fingerprint"],
+            )
+            attention2 = mint_obligation(
+                wake_kind=obligation.wake_kind,
+                source_kind=obligation.source_kind,
+                source_ref=attention_source_ref(
+                    parent_fingerprint=parent["fingerprint"],
+                    message_key=continuation2["message_key"],
+                    target_seat="coo",
+                ),
+                declared_target_seat="coo",
+                job_id=candidate2.job_id,
+                attempt_id=candidate2.attempt_id,
+                root_job_id=candidate2.root_job_id,
+                workstream=obligation.workstream,
+                source_workstream=parent["work_ref"],
+                source_created_at=obligation.source_created_at,
+                emitted_at="2026-09-03T01:00:03Z",
+            )
+            attention_route2 = route_obligation(
+                attention2, registry, binding=binding2
+            )
+            logical2 = correlated_source_ref(
+                attention_source_ref=attention2.source_ref,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                candidate=candidate2.to_dict(),
+            )
+            obligation2 = mint_obligation(
+                wake_kind=attention2.wake_kind,
+                source_kind=attention2.source_kind,
+                source_ref=logical2,
+                declared_target_seat="coo",
+                job_id=candidate2.job_id,
+                attempt_id=candidate2.attempt_id,
+                root_job_id=candidate2.root_job_id,
+                workstream=obligation.workstream,
+                source_workstream=parent["work_ref"],
+                source_created_at=attention2.source_created_at,
+                emitted_at=attention2.emitted_at,
+            )
+            route2 = dataclasses.replace(
+                attention_route2,
+                obligation_id=obligation2.obligation_id,
+                route_digest=route_digest(
+                    obligation_id=obligation2.obligation_id,
+                    destination=attention_route2.destination_digest,
+                    policy_digest=attention_route2.policy_digest,
+                ),
+            )
+            grant2 = dataclasses.replace(
+                grant,
+                operation_key=parent2["operation_key"],
+                source_root_job_id=candidate2.root_job_id,
+                source_job_id=candidate2.job_id,
+                source_attempt_id=candidate2.attempt_id,
+                source_worker_id=candidate2.worker_id,
+                source_semantic_digest=candidate2.evidence_digest,
+                obligation_id=obligation2.obligation_id,
+                target_attempt_id=target_sealed.attempt_id,
+                binding_id=binding2.binding_id,
+                binding_generation=binding2.binding_generation,
+                process_generation_id=target_generation.process_generation_id,
+                policy_digest=route2.policy_digest,
+            )
+            bridge2 = ExecutiveDialogueWakeBridge(
+                target_provider=lambda *_args: DialogueWakeTarget(
+                    registry=registry,
+                    runtime_binding=binding2,
+                    target_attempt_id=target_sealed.attempt_id,
+                    process_generation_id=target_generation.process_generation_id,
+                    operator_adapter=operator,
+                ),
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(grant2),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant2.installed_release_sha,
+                operation_key=grant2.operation_key,
+            )
+            service._dialogue_wake_handler = bridge2
+            active_operator_state.update({
+                "generation": target_generation,
+                "binding": binding2,
+                "process": target_process,
+                "obligation": obligation2,
+                "target_attempt_id": target_sealed.attempt_id,
+                "provider_turn_id": "turn-canary-2",
+            })
+            operator.emit_ack = False
+            wake2 = {
+                "schema": "mastermind.dialogue_wake_request/v2",
+                "operation": SUBMIT_WAKE,
+                "parent": parent2,
+                "source_observation": source_observation2.to_dict(),
+                "candidate": candidate2.to_dict(),
+                "attention_obligation": attention2.to_dict(),
+                "route": attention_route2.to_dict(),
+            }
+            parsed_wake2 = observation_mod.parse_wake_request(
+                json.dumps(wake2, sort_keys=True, separators=(",", ":")).encode()
+            )
+            assert parsed_wake2.operation == SUBMIT_WAKE
+            assert parsed_wake2.obligation.obligation_id == obligation2.obligation_id
+            delivered2 = await exchange(observation_path, wake2)
+            assert delivered2 == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }, (
+                delivered2,
+                wake2["operation"],
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [
+                    item.record.phase
+                    for item in WakeLedgerRepository(runtime).list_records(
+                        obligation2.obligation_id
+                    )
+                ],
+            )
+            assert await exchange(
+                observation_path, {**wake2, "operation": RECONCILE_WAKE}
+            ) == {
+                "schema": WAKE_RESPONSE_SCHEMA,
+                "state": "RECORDED",
+                "reason": "WAKE_RECORDED",
+            }
+            source_frame2 = {
+                "schema": "mastermind.dialogue_source_reconcile_request/v1",
+                "operation": "RECONCILE_DIALOGUE_SOURCES",
+                "parent": parent2,
+                "snapshot": {
+                    "workspace_id": source_observation2.workspace_id,
+                    "channel_id": source_observation2.channel_id,
+                    "thread_ts": source_observation2.thread_ts,
+                    "parent_fingerprint": parent2["fingerprint"],
+                    "operation_key": parent2["operation_key"],
+                    "complete": True,
+                    "messages": [
+                        source_progress,
+                        source_continuation,
+                        source_successor,
+                        continuation2,
+                        successor2,
+                    ],
+                },
+            }
+            pending2 = await exchange(observation_path, source_frame2)
+            assert pending2 == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "ACK_REQUIRED",
+                "reason": "DELIVERED_ACK_PENDING",
+                "source_observation": source_observation2.to_dict(),
+            }
+            ack2 = {
+                "schema": "mastermind.dialogue_delayed_ack_request/v1",
+                "operation": "RECONCILE_WAKE_ACK",
+                "parent": parent2,
+                "source_observation": pending2["source_observation"],
+            }
+            calls_before_ack2 = (operator.deliver_calls, operator.reconcile_calls)
+            operator.emit_ack = True
+            for index, message in enumerate(
+                (source_successor, continuation2, successor2), start=3
+            ):
+                slack_client.add_reply(
+                    SlackMessage(
+                        ts=f"178800000{index}.123456",
+                        author_user_id="U0RELAY001",
+                        text=render_message_v2(message),
+                        thread_ts=source_observation2.thread_ts,
+                    )
+                )
+            original_ack_sender = service._send_dialogue_observation
+            dropped_ack_response = False
+
+            async def drop_first_ack_response(writer, payload):
+                nonlocal dropped_ack_response
+                if (
+                    not dropped_ack_response
+                    and payload.get("schema")
+                    == "mastermind.dialogue_delayed_ack_response/v1"
+                    and payload.get("state") == "RECORDED"
+                ):
+                    dropped_ack_response = True
+                    writer.close()
+                    return
+                await original_ack_sender(writer, payload)
+
+            monkeypatch.setattr(
+                service, "_send_dialogue_observation", drop_first_ack_response
+            )
+            first_connected_pass = await turn_runtime.reconcile_once()
+            assert len(first_connected_pass) == 1
+            assert first_connected_pass[0].outcome.value == "RECONCILIATION_INCOMPLETE", first_connected_pass
+            assert (
+                first_connected_pass[0].reason
+                == "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED"
+            )
+            assert dropped_ack_response
+            assert sum(
+                item.record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation2.obligation_id
+                )
+            ) == 1
+            assert sum(
+                item.record.phase is LedgerPhase.SOURCE_RESOLVED
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation2.obligation_id
+                )
+            ) == 0
+            monkeypatch.setattr(
+                service, "_send_dialogue_observation", original_ack_sender
+            )
+            replay_calls = operator.reconcile_calls
+            concurrent_ack_wires = await asyncio.gather(
+                exchange(observation_path, ack2),
+                exchange(observation_path, ack2),
+                return_exceptions=True,
+            )
+            assert concurrent_ack_wires == [
+                {
+                    "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                    "state": "RECORDED",
+                    "reason": "ACK_ALREADY_RECORDED",
+                },
+                {
+                    "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                    "state": "RECORDED",
+                    "reason": "ACK_ALREADY_RECORDED",
+                },
+            ]
+            ack2_history = tuple(
+                item.record
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation2.obligation_id
+                )
+            )
+            assert sum(
+                record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+                for record in ack2_history
+            ) == 1
+            assert sum(
+                record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                for record in ack2_history
+            ) == 1
+            assert operator.deliver_calls == calls_before_ack2[0]
+            assert operator.reconcile_calls == calls_before_ack2[1] + 1
+            assert operator.reconcile_calls == replay_calls
+            assert await exchange(observation_path, ack2) == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "RECORDED",
+                "reason": "ACK_ALREADY_RECORDED",
+            }
+            assert operator.reconcile_calls == replay_calls
+            terminal_policy_grant = dataclasses.replace(
+                grant2,
+                policy_digest="d" * 16,
+            )
+            bridge2._canary_profile = DialogueWakeCanaryProfile(
+                terminal_policy_grant
+            )
+            assert await exchange(observation_path, ack2) == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "HOLD",
+                "reason": "ACK_HISTORY_REFUSED",
+            }
+            assert operator.reconcile_calls == replay_calls
+            bridge2._canary_profile = DialogueWakeCanaryProfile(grant2)
+
+            # The same validator that gates the terminal replay refuses a
+            # second attempt and an incomplete nudge command group.
+            from integrations.slack_agent_dialogue import (
+                persisted_wake_carrier as carrier_mod,
+            )
+
+            persisted_ack2 = WakeLedgerRepository(runtime).list_records(
+                obligation2.obligation_id
+            )
+            attempt_event = next(
+                item
+                for item in persisted_ack2
+                if item.record.phase is LedgerPhase.DELIVERY_ATTEMPT
+            )
+            assert carrier_mod._validated_delayed_ack_attempt(
+                obligation2,
+                (*persisted_ack2, attempt_event),
+                grant2,
+            ) is None
+            malformed_attempt = dataclasses.replace(
+                attempt_event,
+                record=dataclasses.replace(
+                    attempt_event.record,
+                    nudge_attempt_command_ids=(
+                        *attempt_event.record.nudge_attempt_command_ids,
+                        f"{obligation2.obligation_id}:A2",
+                    ),
+                ),
+            )
+            assert carrier_mod._validated_delayed_ack_attempt(
+                obligation2,
+                tuple(
+                    malformed_attempt if item is attempt_event else item
+                    for item in persisted_ack2
+                ),
+                grant2,
+            ) is None
+
+            # A syntactically valid alternate nudge identity on both durable
+            # attempt phases remains causal, but must not receive terminal
+            # replay credit because it was not minted from the destination
+            # and singleton command group.
+            alternate_nudge_id = "NUDGE-" + "f" * 32
+            forged_nudge_history = tuple(
+                dataclasses.replace(
+                    item,
+                    record=dataclasses.replace(
+                        item.record,
+                        nudge_id=alternate_nudge_id,
+                    ),
+                )
+                if item.record.phase in {
+                    LedgerPhase.DELIVERY_ATTEMPT,
+                    LedgerPhase.DELIVERED,
+                }
+                else item
+                for item in persisted_ack2
+            )
+            from control_plane.wake_ledger import assert_causal
+
+            assert_causal(tuple(item.record for item in forged_nudge_history))
+            original_list_records = WakeLedgerRepository.list_records
+
+            def forged_terminal_history(repository_self, obligation_id):
+                if obligation_id == obligation2.obligation_id:
+                    return forged_nudge_history
+                return original_list_records(repository_self, obligation_id)
+
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_records",
+                forged_terminal_history,
+            )
+            calls_before_forged_terminal = (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count(
+                    "historical-enter"
+                ),
+            )
+            assert await exchange(observation_path, ack2) == {
+                "schema": "mastermind.dialogue_delayed_ack_response/v1",
+                "state": "HOLD",
+                "reason": "ACK_HISTORY_REFUSED",
+            }
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+                [name for name, _thread_id in call_order].count(
+                    "historical-enter"
+                ),
+            ) == calls_before_forged_terminal
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_records",
+                original_list_records,
+            )
+            assert WakeLedgerRepository(runtime).list_records(
+                obligation2.obligation_id
+            ) == persisted_ack2
+            second_connected_pass = await turn_runtime.reconcile_once()
+            assert len(second_connected_pass) == 1
+            assert second_connected_pass[0].outcome.value == "NO_ACTION"
+            assert operator.reconcile_calls == replay_calls
+            assert sum(
+                item.record.phase is LedgerPhase.SOURCE_RESOLVED
+                for item in WakeLedgerRepository(runtime).list_records(
+                    obligation2.obligation_id
+                )
+            ) == 1
+
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+            active_operator_state.update({
+                "generation": generation,
+                "binding": binding,
+                "process": process,
+                "obligation": obligation,
+                "target_attempt_id": sealed.attempt_id,
+                "provider_turn_id": "turn-canary-1",
+            })
+
+            repository = WakeLedgerRepository(runtime)
+            for index, terminal_phase in enumerate(
+                (
+                    LedgerPhase.TARGET_ACKNOWLEDGED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                    LedgerPhase.FAILED,
+                    LedgerPhase.TARGET_UNAVAILABLE,
+                ),
+                start=1,
+            ):
+                terminal_obligation = mint_obligation(
+                    wake_kind="dialogue_turn_pending",
+                    source_kind="agent_dialogue_attention",
+                    source_ref="agent_dialogue_attention:"
+                    + format(index, "x") * 64,
+                    declared_target_seat="coo",
+                    job_id=sealed.job_id,
+                    attempt_id=sealed.attempt_id,
+                    root_job_id=root.job_id,
+                    source_workstream=str(source["work_ref"]),
+                    source_created_at="2026-09-03T01:00:00Z",
+                    emitted_at=f"2026-09-03T01:00:0{index + 1}Z",
+                )
+                terminal_route = route_obligation(
+                    terminal_obligation, registry, binding=binding
+                )
+                terminal_grant = dataclasses.replace(
+                    grant,
+                    obligation_id=terminal_obligation.obligation_id,
+                    policy_digest=terminal_route.policy_digest,
+                )
+                terminal_profile = DialogueWakeCanaryProfile(terminal_grant)
+                effective_terminal_route = effective_dialogue_wake_canary_route(
+                    terminal_profile, terminal_route
+                )
+                delivery_attempt = make_delivery_attempt(
+                    terminal_obligation,
+                    effective_terminal_route,
+                    attempt_n=1,
+                )
+                rows = [
+                    (requested_record(terminal_obligation), terminal_obligation),
+                    (
+                        attempt_record(
+                            delivery_attempt, LedgerPhase.DELIVERY_ATTEMPT
+                        ),
+                        terminal_obligation,
+                    ),
+                ]
+                if terminal_phase in {
+                    LedgerPhase.TARGET_ACKNOWLEDGED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                }:
+                    rows.append(
+                        (
+                            attempt_record(
+                                delivery_attempt, LedgerPhase.DELIVERED
+                            ),
+                            terminal_obligation,
+                        )
+                    )
+                if terminal_phase in {
+                    LedgerPhase.TARGET_ACKNOWLEDGED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                }:
+                    ack = acknowledge(
+                        terminal_obligation,
+                        trusted=TrustedAckContext(
+                            ack_mode=AckMode.REASONING_SESSION,
+                            target_seat="coo",
+                            session_alias=binding.session_alias,
+                            reasoning_surface=binding.reasoning_surface,
+                            binding_id=binding.binding_id,
+                            binding_generation=binding.binding_generation,
+                            acknowledged_at="2026-09-03T01:01:00Z",
+                        ),
+                        claimed_obligation_ids=(
+                            terminal_obligation.obligation_id,
+                        ),
+                        delivered_command_id=attempt_record(
+                            delivery_attempt, LedgerPhase.DELIVERED
+                        ).command_id,
+                    )
+                    rows.append((ack_record(terminal_obligation, ack), terminal_obligation))
+                if terminal_phase is LedgerPhase.SOURCE_RESOLVED:
+                    resolution = SourceResolution(
+                        obligation_id=terminal_obligation.obligation_id,
+                        code=SourceResolutionCode.RUNTIME_REVIEW_ABSENT,
+                        health=SourceReadHealth.HEALTHY,
+                        source_present=False,
+                        source_kind=terminal_obligation.source_kind.value,
+                        source_ref=terminal_obligation.source_ref,
+                        snapshot_digest="ab" * 16,
+                        resolved_at="2026-09-03T01:01:00Z",
+                    )
+                    rows.append(
+                        (
+                            resolved_record(terminal_obligation, resolution),
+                            terminal_obligation,
+                        )
+                    )
+                elif terminal_phase in {
+                    LedgerPhase.FAILED,
+                    LedgerPhase.TARGET_UNAVAILABLE,
+                }:
+                    rows.append(
+                        (
+                            attempt_record(delivery_attempt, terminal_phase),
+                            terminal_obligation,
+                        )
+                    )
+                if terminal_phase is LedgerPhase.SOURCE_RESOLVED:
+                    with pytest.raises(
+                        WakeLedgerError,
+                        match="source resolution code does not match the obligation source",
+                    ):
+                        repository.append_records_atomic(rows)
+                    assert repository.list_records(
+                        terminal_obligation.obligation_id
+                    ) == ()
+                    continue
+                repository.append_records_atomic(rows)
+                terminal_bridge = ExecutiveDialogueWakeBridge(
+                    target_provider=None,
+                    retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                    operator_adapter=operator,
+                    carrier_factory=carrier_factory,
+                    canary_profile=terminal_profile,
+                    canary_now_epoch_seconds=now_epoch_seconds,
+                    installed_release_sha=terminal_grant.installed_release_sha,
+                    operation_key=terminal_grant.operation_key,
+                )
+                terminal_resolver_calls = 0
+                actual_terminal_resolver = terminal_bridge._resolve_historical_target
+
+                def observed_terminal_resolver(*args):
+                    nonlocal terminal_resolver_calls
+                    terminal_resolver_calls += 1
+                    return actual_terminal_resolver(*args)
+
+                monkeypatch.setattr(
+                    terminal_bridge,
+                    "_resolve_historical_target",
+                    observed_terminal_resolver,
+                )
+                service._dialogue_wake_handler = terminal_bridge
+                terminal_request = {
+                    "schema": "mastermind.dialogue_wake_request/v1",
+                    "operation": SUBMIT_WAKE,
+                    "parent": parent,
+                    "thread_ts": "1788000000.123456",
+                    "candidate": candidate.to_dict(),
+                    "obligation": terminal_obligation.to_dict(),
+                    "route": terminal_route.to_dict(),
+                }
+                before_terminal_socket = tuple(
+                    item.record
+                    for item in repository.list_records(
+                        terminal_obligation.obligation_id
+                    )
+                )
+                calls_before_terminal_socket = (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                )
+                for operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                    terminal_response = await exchange(
+                        observation_path,
+                        {**terminal_request, "operation": operation},
+                    )
+                    assert terminal_response == {
+                        "schema": WAKE_RESPONSE_SCHEMA,
+                        "state": "RECORDED",
+                        "reason": "WAKE_RECORDED",
+                    }
+                assert terminal_resolver_calls == 0
+                assert (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                ) == calls_before_terminal_socket
+                after_terminal_socket = tuple(
+                    item.record
+                    for item in repository.list_records(
+                        terminal_obligation.obligation_id
+                    )
+                )
+                assert after_terminal_socket == before_terminal_socket
+                assert sum(
+                    record.phase is LedgerPhase.DELIVERY_ATTEMPT
+                    for record in after_terminal_socket
+                ) == 1
+            service._dialogue_wake_handler = bridge
+            main_records = tuple(
+                item.record for item in repository.list_records(obligation.obligation_id)
+            )
+            delivered = next(
+                record for record in main_records if record.phase is LedgerPhase.DELIVERED
+            )
+            ack = acknowledge(
+                obligation,
+                trusted=TrustedAckContext(
+                    ack_mode=AckMode.REASONING_SESSION,
+                    target_seat="coo",
+                    session_alias=binding.session_alias,
+                    reasoning_surface=binding.reasoning_surface,
+                    binding_id=binding.binding_id,
+                    binding_generation=binding.binding_generation,
+                    acknowledged_at="2026-09-03T01:02:00Z",
+                ),
+                claimed_obligation_ids=(obligation.obligation_id,),
+                delivered_command_id=delivered.command_id,
+            )
+            repository.append_record(ack_record(obligation, ack), obligation=obligation)
+            calls_before_resolution = (operator.deliver_calls, operator.reconcile_calls)
+            history_before_false_absence = tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            )
+            edited_predecessor = build_message_v2(
+                {
+                    **source_continuation,
+                    "body": {
+                        "instruction": "Edited after delivery.",
+                        "stop_condition": "Stop on conflict.",
+                        "scope_change": False,
+                    },
+                    "fingerprint": "",
+                }
+            )
+            fork_successor = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-progress-fork",
+                    "created_at": "2026-09-03T01:00:03Z",
+                    "fingerprint": "",
+                }
+            )
+            wrong_actor_successor = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-progress-wrong-actor",
+                    "actor_ref": {
+                        "kind": "executive_surface",
+                        "seat": "ceo",
+                        "reasoning_surface": "codex",
+                    },
+                    "applies_to": source_progress["applies_to"],
+                    "created_at": "2026-09-03T01:00:04Z",
+                    "fingerprint": "",
+                }
+            )
+            false_absence_histories = {
+                "deleted_predecessor": [source_progress, source_successor],
+                "orphan_successor": [source_successor],
+                "edited_predecessor": [
+                    source_progress,
+                    edited_predecessor,
+                    source_successor,
+                ],
+                "forked_successor": [
+                    *source_frame["snapshot"]["messages"],
+                    source_successor,
+                    fork_successor,
+                ],
+                "wrong_actor_successor": [
+                    *source_frame["snapshot"]["messages"],
+                    wrong_actor_successor,
+                ],
+            }
+            for false_case, false_messages in false_absence_histories.items():
+                false_response = await exchange(
+                    observation_path,
+                    {
+                        **source_frame,
+                        "snapshot": {
+                            **source_frame["snapshot"],
+                            "messages": false_messages,
+                        },
+                    },
+                )
+                assert false_response["state"] != "RECORDED", (
+                    false_case,
+                    false_response,
+                )
+                assert tuple(
+                    item.record
+                    for item in repository.list_records(obligation.obligation_id)
+                ) == history_before_false_absence
+                assert (
+                    operator.deliver_calls,
+                    operator.reconcile_calls,
+                ) == calls_before_resolution
+            resolved_source_payload = {
+                **source_frame,
+                "snapshot": {
+                    **source_frame["snapshot"],
+                    "messages": [
+                        *source_frame["snapshot"]["messages"],
+                        source_successor,
+                    ],
+                },
+            }
+            original_source_send = service._send_dialogue_observation
+            dropped_resolution_response = False
+            first_resolution_barrier = threading.Barrier(2)
+            first_resolution_results = []
+
+            def synchronized_first_resolution(*args):
+                # Both requests are admitted to the test barrier before either
+                # handler opens RuntimeStore's real BEGIN IMMEDIATE transaction.
+                first_resolution_barrier.wait(timeout=2)
+                result = actual_source_reconcile(*args)
+                first_resolution_results.append(result)
+                return result
+
+            monkeypatch.setattr(
+                bridge,
+                "reconcile_dialogue_sources",
+                synchronized_first_resolution,
+            )
+
+            async def drop_first_resolution_response(writer, payload):
+                nonlocal dropped_resolution_response
+                if (
+                    not dropped_resolution_response
+                    and payload.get("schema")
+                    == "mastermind.dialogue_source_reconcile_response/v1"
+                    and payload.get("state") == "RECORDED"
+                ):
+                    dropped_resolution_response = True
+                    writer.close()
+                    return
+                await original_source_send(writer, payload)
+
+            monkeypatch.setattr(
+                service,
+                "_send_dialogue_observation",
+                drop_first_resolution_response,
+            )
+            first_resolution_wire = await asyncio.gather(
+                exchange(observation_path, resolved_source_payload),
+                exchange(observation_path, resolved_source_payload),
+                return_exceptions=True,
+            )
+            assert dropped_resolution_response
+            assert sorted(
+                item["reason"] for item in first_resolution_results
+            ) == ["SOURCE_ALREADY_RESOLVED", "SOURCE_RESOLVED"]
+            assert sum(isinstance(item, json.JSONDecodeError) for item in first_resolution_wire) == 1
+            assert sum(
+                isinstance(item, dict)
+                and item.get("reason") in {"SOURCE_RESOLVED", "SOURCE_ALREADY_RESOLVED"}
+                for item in first_resolution_wire
+            ) == 1
+            monkeypatch.setattr(
+                service,
+                "_send_dialogue_observation",
+                original_source_send,
+            )
+            monkeypatch.setattr(
+                bridge,
+                "reconcile_dialogue_sources",
+                observed_source_reconcile,
+            )
+            resolved_response = await exchange(
+                observation_path,
+                resolved_source_payload,
+            )
+            assert resolved_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED",
+                "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            resolution_history = tuple(
+                item.record for item in repository.list_records(obligation.obligation_id)
+            )
+            assert sum(record.phase is LedgerPhase.SOURCE_RESOLVED for record in resolution_history) == 1
+            original_resolution = next(
+                record for record in resolution_history
+                if record.phase is LedgerPhase.SOURCE_RESOLVED
+            )
+            later_healthy_ack = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-ack-later-healthy",
+                    "message_type": "ACK",
+                    "reply_to_message_key": source_successor["message_key"],
+                    "body": {"acknowledged": True},
+                    "created_at": "2026-09-03T01:04:00Z",
+                    "fingerprint": "",
+                }
+            )
+            later_history_response = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [
+                            *source_frame["snapshot"]["messages"],
+                            source_successor,
+                            later_healthy_ack,
+                        ],
+                    },
+                },
+            )
+            assert later_history_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED", "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            after_later_history = tuple(
+                item.record for item in repository.list_records(obligation.obligation_id)
+            )
+            assert after_later_history == resolution_history
+            assert next(
+                record for record in after_later_history
+                if record.phase is LedgerPhase.SOURCE_RESOLVED
+            ) == original_resolution
+            replay_resolution = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert replay_resolution == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED", "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            assert tuple(item.record for item in repository.list_records(obligation.obligation_id)) == resolution_history
+            assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+
+            concurrent_resolution_replays = await asyncio.gather(
+                exchange(observation_path, resolved_source_payload),
+                exchange(observation_path, resolved_source_payload),
+            )
+            assert concurrent_resolution_replays == [
+                {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "RECORDED",
+                    "reason": "SOURCE_ALREADY_RESOLVED",
+                },
+                {
+                    "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                    "state": "RECORDED",
+                    "reason": "SOURCE_ALREADY_RESOLVED",
+                },
+            ]
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            await service.close()
+            reopened_runtime = Runtime.at(tmp_path / "runtime")
+            reopened_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+                operator_adapter=operator,
+                carrier_factory=carrier_factory,
+                canary_profile=DialogueWakeCanaryProfile(grant),
+                canary_now_epoch_seconds=now_epoch_seconds,
+                installed_release_sha=grant.installed_release_sha,
+                operation_key=grant.operation_key,
+            )
+            service._runtime_factory = lambda _root: reopened_runtime
+            service._dialogue_wake_handler = reopened_bridge
+            await service.start()
+            assert await exchange(
+                observation_path,
+                resolved_source_payload,
+            ) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED",
+                "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            assert tuple(
+                item.record
+                for item in WakeLedgerRepository(reopened_runtime).list_records(
+                    obligation.obligation_id
+                )
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+            service._dialogue_wake_handler = bridge
+
+            actual_wake_mint_after_request = wake_events_mod.mint_obligation_id
+            post_request_mints = []
+
+            def observed_post_request_mint(**kwargs):
+                post_request_mints.append(kwargs)
+                return actual_wake_mint_after_request(**kwargs)
+
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                observed_post_request_mint,
+            )
+            assert await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [
+                            *source_frame["snapshot"]["messages"],
+                            source_successor,
+                        ],
+                    },
+                },
+            ) == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "RECORDED",
+                "reason": "SOURCE_ALREADY_RESOLVED",
+            }
+            # Four calls are the closed obligation/physical hydration checks.
+            # Re-entering the two-mode pre-request branch adds two more.
+            assert len(post_request_mints) == 4
+            monkeypatch.setattr(
+                wake_events_mod,
+                "mint_obligation_id",
+                actual_wake_mint_after_request,
+            )
+
+            resolver_counts_before_resolved_wake = (
+                [name for name, _thread_id in call_order].count("current-enter"),
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            )
+            for wake_operation in (SUBMIT_WAKE, RECONCILE_WAKE):
+                assert await exchange(
+                    observation_path,
+                    {**request, "operation": wake_operation},
+                ) == {
+                    "schema": WAKE_RESPONSE_SCHEMA,
+                    "state": "RECORDED",
+                    "reason": "WAKE_RECORDED",
+                }
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+            assert (
+                [name for name, _thread_id in call_order].count("current-enter"),
+                [name for name, _thread_id in call_order].count("historical-enter"),
+            ) == resolver_counts_before_resolved_wake
+
+            original_connection_read = (
+                WakeLedgerRepository.list_ledger_records_on_connection
+            )
+            noncausal_history = tuple(
+                record
+                for record in resolution_history
+                if record.phase in {
+                    LedgerPhase.WAKE_REQUESTED,
+                    LedgerPhase.SOURCE_RESOLVED,
+                }
+            )
+
+            def noncausal_connection_read(self, connection, obligation_id):
+                if obligation_id == obligation.obligation_id:
+                    return noncausal_history
+                return original_connection_read(self, connection, obligation_id)
+
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_ledger_records_on_connection",
+                noncausal_connection_read,
+            )
+            noncausal_replay = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [
+                            *source_frame["snapshot"]["messages"],
+                            source_successor,
+                        ],
+                    },
+                },
+            )
+            assert noncausal_replay == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN",
+                "reason": "SOURCE_RECONCILIATION_UNKNOWN",
+            }
+            monkeypatch.setattr(
+                WakeLedgerRepository,
+                "list_ledger_records_on_connection",
+                original_connection_read,
+            )
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+
+            changed_grant = dataclasses.replace(
+                grant,
+                source_semantic_digest="f" * 64,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(changed_grant)
+            changed_grant_replay = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [*source_frame["snapshot"]["messages"], source_successor],
+                    },
+                },
+            )
+            assert changed_grant_replay == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN", "reason": "SOURCE_GRANT_DISAGREES",
+            }
+            assert tuple(item.record for item in repository.list_records(obligation.obligation_id)) == resolution_history
+            assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+
+            changed_candidate = dataclasses.replace(
+                candidate,
+                evidence_digest="9" * 64,
+            )
+            (
+                _changed_attention,
+                _changed_attention_route,
+                changed_obligation,
+                changed_route,
+                _changed_source_observation,
+                _changed_physical_source,
+            ) = _phase3_dialogue_material(
+                parent,
+                changed_candidate,
+                obligation,
+                route,
+            )
+            changed_identity_grant = dataclasses.replace(
+                grant,
+                source_semantic_digest=changed_candidate.evidence_digest,
+                obligation_id=changed_obligation.obligation_id,
+                policy_digest=changed_route.policy_digest,
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(
+                changed_identity_grant
+            )
+            changed_identity_source = await exchange(
+                observation_path,
+                source_frame,
+            )
+            assert changed_identity_source == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN",
+                "reason": "SOURCE_RECONCILIATION_UNKNOWN",
+            }
+            assert repository.list_records(changed_obligation.obligation_id) == ()
+            assert tuple(
+                item.record
+                for item in repository.list_records(obligation.obligation_id)
+            ) == resolution_history
+            assert (
+                operator.deliver_calls,
+                operator.reconcile_calls,
+            ) == calls_before_resolution
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+
+            result_message = build_message_v2(
+                {
+                    **source_progress,
+                    "message_key": "asd-result-invalid-interior",
+                    "message_type": "RESULT",
+                    "actor_ref": {
+                        "kind": "worker_attempt",
+                        "job_id": candidate.job_id,
+                        "attempt_id": candidate.attempt_id,
+                        "worker_id": candidate.worker_id,
+                    },
+                    "applies_to": {
+                        "kind": "executive_attempt",
+                        "job_id": candidate.job_id,
+                        "attempt_id": candidate.attempt_id,
+                        "worker_id": candidate.worker_id,
+                    },
+                    "reply_to_message_key": None,
+                    "body": {"status": "PASS", "result": "Result awaiting a Sol response."},
+                    "created_at": "2026-09-03T01:03:00Z",
+                    "fingerprint": "",
+                }
+            )
+            invalid_ruling = build_message_v2(
+                {
+                    **source_progress,
+                    "message_key": "asd-ruling-invalid-interior",
+                    "message_type": "RULING",
+                    "actor_ref": {
+                        "kind": "executive_surface",
+                        "seat": "ceo",
+                        "reasoning_surface": "codex",
+                    },
+                    "reply_to_message_key": result_message["message_key"],
+                    "body": {
+                        "authority_class": "WITHIN_COMMISSION",
+                        "selected_option": "opt-continue",
+                        "decision": "Continue.",
+                        "rationale": "Exercise the invalid interior transition.",
+                        "canonical_ref": None,
+                    },
+                    "created_at": "2026-09-03T01:03:01Z",
+                    "fingerprint": "",
+                }
+            )
+            later_progress = build_message_v2(
+                {
+                    **source_successor,
+                    "message_key": "asd-progress-after-invalid-interior",
+                    "reply_to_message_key": invalid_ruling["message_key"],
+                    "created_at": "2026-09-03T01:03:02Z",
+                    "fingerprint": "",
+                }
+            )
+            invalid_attention = attention_source_ref(
+                parent_fingerprint=parent["fingerprint"],
+                message_key=result_message["message_key"],
+                target_seat="ceo",
+            )
+            invalid_logical = correlated_source_ref(
+                attention_source_ref=invalid_attention,
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                candidate=candidate.to_dict(),
+            )
+            invalid_obligation = mint_obligation(
+                wake_kind="dialogue_turn_pending",
+                source_kind="agent_dialogue_attention",
+                source_ref=invalid_logical,
+                declared_target_seat="ceo",
+                job_id=candidate.job_id,
+                attempt_id=candidate.attempt_id,
+                root_job_id=candidate.root_job_id,
+                source_workstream=parent["work_ref"],
+                source_created_at="2026-09-03T01:03:00Z",
+                emitted_at="2026-09-03T01:03:01Z",
+            )
+            invalid_base_route = dataclasses.replace(
+                route,
+                obligation_id=invalid_obligation.obligation_id,
+                target_seat="ceo",
+                route_digest=route_digest(
+                    obligation_id=invalid_obligation.obligation_id,
+                    destination=route.destination_digest,
+                    policy_digest=route.policy_digest,
+                ),
+            )
+            invalid_grant = dataclasses.replace(
+                grant,
+                obligation_id=invalid_obligation.obligation_id,
+                target_seat="ceo",
+                policy_digest=invalid_base_route.policy_digest,
+            )
+            invalid_physical = PhysicalDialogueSourceIdentity.create(
+                logical_source_ref=invalid_logical,
+                obligation_id=invalid_obligation.obligation_id,
+                observation=DialogueSourceObservation(
+                    workspace_id=source_observation.workspace_id,
+                    channel_id=source_observation.channel_id,
+                    thread_ts=source_observation.thread_ts,
+                    predecessor_message_key=result_message["message_key"],
+                    predecessor_message_fingerprint=result_message["fingerprint"],
+                ),
+                parent_fingerprint=parent["fingerprint"],
+                operation_key=parent["operation_key"],
+                target_seat="ceo",
+                candidate=candidate.to_dict(),
+            )
+            invalid_effective_route = effective_dialogue_wake_canary_route(
+                DialogueWakeCanaryProfile(invalid_grant), invalid_base_route
+            )
+            invalid_attempt = make_delivery_attempt(
+                invalid_obligation, invalid_effective_route, attempt_n=1
+            )
+            invalid_delivered = attempt_record(invalid_attempt, LedgerPhase.DELIVERED)
+            invalid_ack = acknowledge(
+                invalid_obligation,
+                trusted=TrustedAckContext(
+                    ack_mode=AckMode.REASONING_SESSION,
+                    target_seat="ceo",
+                    session_alias=binding.session_alias,
+                    reasoning_surface=binding.reasoning_surface,
+                    binding_id=binding.binding_id,
+                    binding_generation=binding.binding_generation,
+                    acknowledged_at="2026-09-03T01:04:00Z",
+                ),
+                claimed_obligation_ids=(invalid_obligation.obligation_id,),
+                delivered_command_id=invalid_delivered.command_id,
+            )
+            repository.append_records_atomic(
+                (
+                    (requested_record(invalid_obligation, physical_source=invalid_physical), invalid_obligation),
+                    (attempt_record(invalid_attempt, LedgerPhase.DELIVERY_ATTEMPT), invalid_obligation),
+                    (invalid_delivered, invalid_obligation),
+                    (ack_record(invalid_obligation, invalid_ack), invalid_obligation),
+                )
+            )
+            invalid_before = tuple(
+                item.record for item in repository.list_records(invalid_obligation.obligation_id)
+            )
+            bridge._canary_profile = DialogueWakeCanaryProfile(invalid_grant)
+            invalid_response = await exchange(
+                observation_path,
+                {
+                    **source_frame,
+                    "snapshot": {
+                        **source_frame["snapshot"],
+                        "messages": [result_message, invalid_ruling, later_progress],
+                    },
+                },
+            )
+            assert invalid_response == {
+                "schema": "mastermind.dialogue_source_reconcile_response/v1",
+                "state": "UNKNOWN", "reason": "SOURCE_SUCCESSOR_REFUSED",
+            }
+            assert tuple(
+                item.record for item in repository.list_records(invalid_obligation.obligation_id)
+            ) == invalid_before
+            assert (operator.deliver_calls, operator.reconcile_calls) == calls_before_resolution
+            bridge._canary_profile = DialogueWakeCanaryProfile(grant)
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+
+def test_dialogue_observation_shutdown_never_unlinks_replaced_inode(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(es_mod, "_peer_uid", lambda _connection: 457)
+
+    async def exercise() -> None:
+        observation_path = short_socket_root / "observation" / "dialogue-observation.sock"
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root / "operator"),
+            supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+            dialogue_observation_socket_path=observation_path,
+            dialogue_observation_peer_uid=457,
+            dialogue_observation_group_gid=os.getegid(),
+            dialogue_observation_facts_provider=lambda _runtime, parent: _observation_facts(parent),
+        )
+        await service.start()
+        bound = observation_path.lstat()
+        observation_path.unlink()
+        observation_path.write_text("foreign", encoding="utf-8")
+        await service.close()
+        assert observation_path.read_text(encoding="utf-8") == "foreign"
+        assert (bound.st_dev, bound.st_ino) != (
+            observation_path.lstat().st_dev,
+            observation_path.lstat().st_ino,
+        )
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("failure_phase", ["chown", "chmod", "post_bind_validation"])
+def test_dialogue_observation_bind_failure_cleans_only_its_owned_inode_and_lock(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_phase: str,
+) -> None:
+    observation_root = short_socket_root / "observation-bind-failure"
+    observation_root.mkdir(mode=0o710)
+    os.chown(observation_root, os.geteuid(), os.getegid())
+    observation_root.chmod(0o710)
+    observation_path = observation_root / "dialogue-observation.sock"
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        dialogue_observation_socket_path=observation_path,
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+        dialogue_observation_facts_provider=(
+            lambda _runtime, parent: _observation_facts(parent)
+        ),
+    )
+
+    if failure_phase == "chown":
+        real_chown = es_mod.os.chown
+
+        def fail_chown(path, *args, **kwargs):
+            if Path(path) == observation_path:
+                raise OSError("injected dialogue socket chown failure")
+            return real_chown(path, *args, **kwargs)
+
+        monkeypatch.setattr(es_mod.os, "chown", fail_chown)
+    elif failure_phase == "chmod":
+        real_chmod = Path.chmod
+
+        def fail_chmod(path: Path, *args, **kwargs):
+            if path == observation_path:
+                raise OSError("injected dialogue socket chmod failure")
+            return real_chmod(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "chmod", fail_chmod)
+    else:
+        real_lstat = Path.lstat
+        calls = 0
+
+        def fail_validation(path: Path, *args, **kwargs):
+            nonlocal calls
+            if path == observation_path:
+                calls += 1
+                if calls == 3:
+                    raise OSError("injected post-bind validation failure")
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "lstat", fail_validation)
+
+    with pytest.raises(ServiceError, match="CAPABILITY_NOT_READY"):
+        asyncio.run(service.start())
+
+    assert not observation_path.exists()
+    assert service._dialogue_observation_server is None
+    assert service._dialogue_observation_inode is None
+    assert service._lock_fd is None
+
+
+def test_dialogue_observation_parent_symlink_fails_capability_not_ready(
+    tmp_path: Path, short_socket_root: Path,
+) -> None:
+    real = short_socket_root / "real-observation"
+    real.mkdir()
+    alias = short_socket_root / "observation-alias"
+    alias.symlink_to(real, target_is_directory=True)
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        dialogue_observation_socket_path=alias / "dialogue-observation.sock",
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+        dialogue_observation_facts_provider=lambda _runtime, parent: _observation_facts(parent),
+    )
+    with pytest.raises(ServiceError, match="CAPABILITY_NOT_READY"):
+        asyncio.run(service.start())
+
+
+def test_dialogue_observation_prefilters_exact_parent_before_candidate_bound(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        dialogue_observation_socket_path=(
+            short_socket_root / "observation-filter" / "dialogue-observation.sock"
+        ),
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+    )
+    queries: list[tuple[str, tuple[object, ...]]] = []
+    matching_count = 0
+
+    class Cursor:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchall(self):
+            return self._rows
+
+    class Connection:
+        def execute(self, sql, parameters=()):
+            nonlocal matching_count
+            normalized = " ".join(str(sql).split())
+            values = tuple(parameters)
+            queries.append((normalized, values))
+            if "dialogue_source_digest" in normalized:
+                return Cursor([{"job_id": "JOB-100"}])
+            return Cursor([{} for _ in range(matching_count)])
+
+    class ReadContext:
+        def __enter__(self):
+            return Connection()
+
+        def __exit__(self, *_args):
+            return False
+
+    fake_runtime = SimpleNamespace(store=SimpleNamespace(read=ReadContext))
+    parent = dialogue_parent()
+    requested_source = es_mod.normalize_executive_dialogue_source(
+        {
+            "schema_version": es_mod.EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
+            "work_ref": parent["work_ref"],
+            "commission_ref": parent["commission_ref"],
+            "watch_mode": parent["watch_mode"],
+        }
+    )
+    monkeypatch.setattr(
+        es_mod,
+        "_dialogue_source_from_root_creation",
+        lambda _connection, *, root_job_id: requested_source,
+    )
+
+    facts = service._runtime_dialogue_observation_facts(fake_runtime, parent)
+
+    assert facts.complete is True
+    assert facts.active == ()
+    assert facts.terminal == ()
+    sql, parameters = queries[0]
+    assert "EXISTS" in sql
+    assert "j.orchestration_role='aggregation'" in sql
+    assert "j.root_job_id=j.job_id" in sql
+    assert "$.provenance.dialogue_source_digest" in sql
+    assert len(parameters) == 1
+    assert isinstance(parameters[0], str)
+    assert len(parameters[0]) == 64
+    child_sql, child_parameters = queries[1]
+    assert "j.root_job_id=?" in child_sql
+    assert "('exec-' || lower(j.job_id))=?" in child_sql
+    assert "('asd-session-exec-' || lower(j.job_id))=?" in child_sql
+    assert "LIMIT 5" in child_sql
+    assert child_parameters == (
+        "JOB-100",
+        parent["operation_key"],
+        parent["session_ref"],
+    )
+
+    matching_count = 5
+    overflow = service._runtime_dialogue_observation_facts(fake_runtime, parent)
+    assert overflow.complete is False
+    assert overflow.active == ()
+    assert overflow.terminal == ()
+
+
+def test_public_terminal_wake_read_reuses_real_service_projection_and_wake_owners(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_parent_v2,
+    )
+    from control_plane.wake_ledger import requested_record
+    from control_plane.wake_persist import WakeLedgerRepository
+    from tests import test_executive_os_phase1fc as phase1fc_fixtures
+
+    original_submit = phase1fc_fixtures.submit_intent
+
+    def sourced_submit(runtime, payload):
+        return original_submit(
+            runtime,
+            {**payload, "workstream": "WS:EXECUTIVE-OS"},
+            dialogue_source=_terminal_dialogue_source(),
+            require_dialogue_source=True,
+        )
+
+    monkeypatch.setattr(phase1fc_fixtures, "submit_intent", sourced_submit)
+    runtime, _cycle, _dispatches, _root, _planner, work, _seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime",
+            intent_id="CEO-SERVICE-CANONICAL-TERMINAL-WAKE-READ",
+            review_workers=["worker-b"],
+        )
+    )
+    observed: dict[str, object] = {}
+
+    class ApplyingProjector:
+        async def project(self, candidate, *, before_write):
+            source = _terminal_dialogue_source()
+            parent = build_parent_v2(
+                {
+                    "schema": PARENT_SCHEMA_V2,
+                    "work_ref": source["work_ref"],
+                    "commission_ref": source["commission_ref"],
+                    "session_ref": candidate.session_ref,
+                    "operation_key": candidate.operation_key,
+                    "watch_mode": source["watch_mode"],
+                    "allowed_sol_user_ids": ["U0BRETDUAS2"],
+                    "created_at": "2026-09-03T01:00:00Z",
+                }
+            )
+            observed["candidate"] = candidate
+            observed["parent"] = parent
+            before_write()
+            return {
+                **_projection_receipt(candidate),
+                "thread_ts": "1787961600.000001",
+                "parent_fingerprint": parent["fingerprint"],
+            }
+
+        async def reconcile(self, _candidate):
+            raise AssertionError("fresh projection must not reconcile")
+
+    service = ExecutiveControlService(
+        _config(tmp_path / "service"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        terminal_return_projector=ApplyingProjector(),
+    )
+    service.runtime = runtime
+    asyncio.run(
+        service._project_terminal_return(
+            work.attempt.job_id,
+            expected_attempt_id=work.attempt.attempt_id,
+        )
+    )
+    terminal = observed["candidate"]
+    parent = observed["parent"]
+    original_read = runtime.store.read
+    read_calls = 0
+
+    def counted_read():
+        nonlocal read_calls
+        read_calls += 1
+        return original_read()
+
+    monkeypatch.setattr(runtime.store, "read", counted_read)
+    terminal_facts = service._runtime_dialogue_observation_facts(runtime, parent)
+    assert read_calls == 1
+    assert len(terminal_facts.terminal) == 1
+    assert terminal_facts.terminal[0].binding_revalidated is True
+    obligation = mint_obligation(
+        wake_kind="dialogue_turn_pending",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "e" * 64,
+        declared_target_seat="ceo",
+        job_id=terminal.job_id,
+        attempt_id=terminal.attempt_id,
+        root_job_id=terminal.root_job_id,
+        source_workstream="WS:EXECUTIVE-OS",
+        source_created_at="2026-09-03T01:00:02Z",
+        emitted_at="2026-09-03T01:00:03Z",
+    )
+    WakeLedgerRepository(runtime).append_record(
+        requested_record(obligation),
+        obligation=obligation,
+    )
+
+    exact_candidate = CanonicalTerminalWakeCandidate(
+        root_job_id=terminal.root_job_id,
+        job_id=terminal.job_id,
+        attempt_id=terminal.attempt_id,
+        worker_id=terminal.worker_id,
+    )
+    direct_reader = getattr(
+        observation_mod,
+        "read_runtime_canonical_terminal_wake",
+        None,
+    )
+    facts_owner = getattr(
+        observation_mod,
+        "runtime_canonical_terminal_facts",
+        None,
+    )
+    assert callable(direct_reader), "standalone Runtime reader is not exposed"
+    assert callable(facts_owner), "canonical Runtime facts owner is not exposed"
+    owner_connections: list[sqlite3.Connection] = []
+
+    def observed_owner(runtime_arg, candidate_arg, connection_arg):
+        owner_connections.append(connection_arg)
+        return facts_owner(runtime_arg, candidate_arg, connection_arg)
+
+    monkeypatch.setattr(
+        observation_mod,
+        "runtime_canonical_terminal_facts",
+        observed_owner,
+    )
+
+    result = service.read_canonical_dialogue_terminal_wake(
+        source_root_job_id=terminal.root_job_id,
+        candidate=exact_candidate,
+    )
+    with runtime.store.read() as connection:
+        caller_connection = connection
+        event_count_before = int(
+            connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        )
+        same_snapshot = service.read_canonical_dialogue_terminal_wake(
+            source_root_job_id=terminal.root_job_id,
+            candidate=exact_candidate,
+            connection=connection,
+        )
+        direct_snapshot = direct_reader(
+            runtime=runtime,
+            source_root_job_id=terminal.root_job_id,
+            candidate=exact_candidate,
+            connection=connection,
+        )
+    replay = service.read_canonical_dialogue_terminal_wake(
+        source_root_job_id=terminal.root_job_id,
+        candidate=exact_candidate,
+    )
+    with runtime.store.read() as connection:
+        event_count_after = int(
+            connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        )
+
+    assert result.state == "RESOLVED"
+    assert result.terminal_applied is True
+    assert result.wake is not None
+    assert result.wake.obligation_id == obligation.obligation_id
+    assert result.wake.status == "PENDING_RETRYABLE"
+    assert same_snapshot.to_dict() == result.to_dict()
+    assert direct_snapshot.to_dict() == result.to_dict()
+    assert replay.to_dict() == result.to_dict()
+    assert caller_connection in owner_connections
+    assert event_count_after == event_count_before
+
+    for field, value in (
+        ("root_job_id", "JOB-WRONG-ROOT"),
+        ("job_id", "JOB-WRONG"),
+        ("attempt_id", "ATT-WRONG"),
+        ("worker_id", "worker-wrong"),
+    ):
+        wrong_candidate = dataclasses.replace(exact_candidate, **{field: value})
+        wrong = direct_reader(
+            runtime=runtime,
+            source_root_job_id=wrong_candidate.root_job_id,
+            candidate=wrong_candidate,
+        )
+        assert wrong.state == "ABSENT"
+        assert wrong.reason == "CANONICAL_TERMINAL_ABSENT"
+        assert wrong.terminal_applied is False
+
+    wrong_source_root = direct_reader(
+        runtime=runtime,
+        source_root_job_id="JOB-WRONG-ROOT",
+        candidate=exact_candidate,
+    )
+    assert wrong_source_root.state == "UNAVAILABLE"
+    assert wrong_source_root.reason == "READ_REQUEST_INVALID"
+
+    command_base, _material = observation_mod.terminal_return_event_material(
+        terminal
+    )
+    applied_command = observation_mod.terminal_return_phase_spec(command_base)[-1][2]
+    # Simulate out-of-band disk corruption by bypassing the immutable Event
+    # API. Production writers cannot perform this update.
+    connection = sqlite3.connect(runtime.store.path)
+    try:
+        row = connection.execute(
+            "SELECT payload_json FROM events WHERE command_id=?",
+            (applied_command,),
+        ).fetchone()
+        assert row is not None
+        malformed_payload = json.loads(str(row[0]))
+        malformed_payload["projection_receipt"]["fingerprint"] = "malformed"
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE command_id=?",
+            (
+                json.dumps(
+                    malformed_payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                applied_command,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    malformed = direct_reader(
+        runtime=runtime,
+        source_root_job_id=exact_candidate.root_job_id,
+        candidate=exact_candidate,
+    )
+    assert malformed.state == "CONFLICT"
+    assert malformed.reason == "CANONICAL_TERMINAL_CONFLICT"
+    assert malformed.terminal_state == "CONFLICT"
+    assert malformed.terminal_applied is False
+    assert "malformed" not in json.dumps(malformed.to_dict(), sort_keys=True)
+
+
+def test_terminal_wake_runtime_owner_is_single_and_service_wrappers_are_thin() -> None:
+    root = Path(__file__).resolve().parents[1]
+    service_path = root / "control_plane" / "executive_service.py"
+    observation_path = root / "control_plane" / "executive_dialogue_observation.py"
+    service_source = service_path.read_text(encoding="utf-8")
+    observation_source = observation_path.read_text(encoding="utf-8")
+    service_tree = ast.parse(service_source, filename=str(service_path))
+    observation_tree = ast.parse(observation_source, filename=str(observation_path))
+
+    service_class = next(
+        node
+        for node in service_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "ExecutiveControlService"
+    )
+    service_methods = {
+        node.name: node
+        for node in service_class.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    delegates = {
+        "_runtime_canonical_terminal_facts": "runtime_canonical_terminal_facts",
+        "read_canonical_dialogue_terminal_wake": "read_runtime_canonical_terminal_wake",
+        "_terminal_return_event_material": "terminal_return_event_material",
+        "_validate_terminal_return_event": "validate_terminal_return_event",
+        "_normalize_terminal_return_projection_receipt": (
+            "normalize_terminal_return_projection_receipt"
+        ),
+        "_terminal_return_phase_spec": "terminal_return_phase_spec",
+        "_inspect_terminal_return_history": "inspect_terminal_return_history",
+    }
+    for method_name, owner_name in delegates.items():
+        method = service_methods[method_name]
+        body = list(method.body)
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            body = body[1:]
+        assert len(body) == 1, method_name
+        owner_calls = [
+            node
+            for node in ast.walk(method)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "dialogue_observation"
+            and node.func.attr == owner_name
+        ]
+        assert len(owner_calls) == 1, (method_name, owner_name)
+        assert not any(
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and any(
+                token in node.value.upper()
+                for token in ("SELECT ", "INSERT ", "UPDATE ", "DELETE ")
+            )
+            for node in ast.walk(method)
+        ), method_name
+
+    extracted_constants = {
+        "_TERMINAL_RETURN_PROJECTION_SCHEMA",
+        "_TERMINAL_RETURN_PREPARED_EVENT",
+        "_TERMINAL_RETURN_ATTEMPTED_EVENT",
+        "_TERMINAL_RETURN_PRE_SUBMIT_REFUSED_EVENT",
+        "_TERMINAL_RETURN_EFFECT_UNKNOWN_EVENT",
+        "_TERMINAL_RETURN_PROVEN_NO_EFFECT_EVENT",
+        "_TERMINAL_RETURN_APPLIED_EVENT",
+        "_TERMINAL_RETURN_RECEIPT_ACTIONS",
+    }
+    assigned_names: set[str] = set()
+    for node in service_tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            assigned_names.update(
+                target.id for target in targets if isinstance(target, ast.Name)
+            )
+    assert assigned_names.isdisjoint(extracted_constants)
+
+    owner_names = set(delegates.values())
+    observation_functions = [
+        node.name
+        for node in observation_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in owner_names
+    ]
+    assert sorted(observation_functions) == sorted(owner_names)
+    imported_modules = {
+        node.module
+        for node in ast.walk(observation_tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    assert "control_plane.executive_service" not in imported_modules
+    assert "ExecutiveControlService" not in {
+        node.id for node in ast.walk(observation_tree) if isinstance(node, ast.Name)
+    }
+    assert "/var/run/mastermind-agent-relay" not in observation_source
+    assert "/var/run/mastermind-dialogue-observation" not in observation_source
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "Runtime"
+        and node.func.attr == "at"
+        for node in ast.walk(observation_tree)
+    )
+
+
+@pytest.mark.parametrize("node_kind", ["socket", "symlink"])
+def test_dialogue_observation_foreign_or_symlink_socket_is_never_reclaimed(
+    tmp_path: Path,
+    short_socket_root: Path,
+    node_kind: str,
+) -> None:
+    observation_root = short_socket_root / f"observation-{node_kind}"
+    observation_root.mkdir(mode=0o710)
+    os.chown(observation_root, os.geteuid(), os.getegid())
+    observation_root.chmod(0o710)
+    observation_path = observation_root / "dialogue-observation.sock"
+    foreign: socket.socket | None = None
+    if node_kind == "socket":
+        foreign = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        foreign.bind(os.fspath(observation_path))
+        observation_path.chmod(0o660)
+    else:
+        target = observation_root / "foreign.sock"
+        target.write_text("foreign", encoding="utf-8")
+        observation_path.symlink_to(target)
+
+    service = ExecutiveControlService(
+        _config(tmp_path, socket_root=short_socket_root / "operator"),
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        dialogue_observation_socket_path=observation_path,
+        dialogue_observation_peer_uid=457,
+        dialogue_observation_group_gid=os.getegid(),
+        dialogue_observation_facts_provider=(
+            lambda _runtime, parent: _observation_facts(parent)
+        ),
+    )
+    try:
+        with pytest.raises(ServiceError, match="CAPABILITY_NOT_READY"):
+            asyncio.run(service.start())
+        assert os.path.lexists(observation_path)
+    finally:
+        if foreign is not None:
+            foreign.close()
+
+
+def test_finish_pickup_provider_silence_and_failure_do_not_rewrite_lifecycle(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        for mode in ("silent", "definite", "effect_unknown", "raises"):
+            root = tmp_path / mode
+            config = _config(root)
+            runtime, child, body = _pending_review(
+                root, intent_id=f"CEO-SERVICE-TERMINAL-{mode.upper()}"
+            )
+            dispatch = runtime.attempts.dispatch_cycle_job(
+                child.job_id,
+                command_id=_first_dispatch_command(child),
+                worker_id="worker-b",
+            )
+            assert dispatch is not None and dispatch.lease_token is not None
+
+            class SealingSupervisor(_FakeSupervisor):
+                async def finish_job(self, active: _Active):
+                    return _complete_ohf_role(
+                        self.runtime, dispatch, body, identity_seed=743
+                    )
+
+            async def raises(_candidate: TerminalReturnCandidate) -> None:
+                raise RuntimeError("effect unknown")
+
+            async def definite(_candidate: TerminalReturnCandidate) -> None:
+                raise TerminalReturnProjectionError(
+                    "DIALOGUE_BINDING_UNAVAILABLE"
+                )
+
+            async def effect_unknown(_candidate: TerminalReturnCandidate) -> None:
+                raise TerminalReturnProjectionError("EFFECT_UNKNOWN")
+
+            projectors = {
+                "silent": None,
+                "definite": definite,
+                "effect_unknown": effect_unknown,
+                "raises": raises,
+            }
+
+            service = ExecutiveControlService(
+                config,
+                supervisor_factory=lambda opened: SealingSupervisor(opened),
+                terminal_return_projector=projectors[mode],
+            )
+            service.runtime = runtime
+            service.supervisor = SealingSupervisor(runtime)
+            try:
+                active = _Active(lease=AttemptLease(dispatch.attempt, dispatch.lease_token))
+                await service._finish_dispatched(child.job_id, active)
+                terminal = service.runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+                job = service.runtime.jobs.get_job(child.job_id)
+                assert terminal is not None and terminal.status is AttemptStatus.COMPLETED
+                assert job is not None and job.status is JobStatus.COMPLETED
+                assert service.service_state == "READY"
+                assert service._terminal_return_last_diagnostic == (
+                        {
+                            "silent": "terminal-return:PROJECTOR_UNBOUND",
+                            # Legacy injected callables expose no exact write
+                            # boundary, so every post-invocation refusal is
+                            # conservatively possible-effect state.
+                            "definite": "terminal-return:EFFECT_UNKNOWN",
+                            "effect_unknown": "terminal-return:EFFECT_UNKNOWN",
+                            "raises": "terminal-return:EFFECT_UNKNOWN:RuntimeError",
+                        }[mode]
+                )
+            finally:
+                await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_cycle_immediate_terminal_outcome_uses_the_same_projection_pickup(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        config = _config(tmp_path)
+        runtime, receipt, body = _pending_review(
+            tmp_path, intent_id="CEO-SERVICE-IMMEDIATE-TERMINAL"
+        )
+        received: list[TerminalReturnCandidate] = []
+
+        class ImmediateTerminalSupervisor(_FakeSupervisor):
+            async def start_cycle_job(self, job_id: str, *, command_id: str):
+                dispatched = self.runtime.attempts.dispatch_cycle_job(
+                    job_id, command_id=command_id, worker_id="worker-b"
+                )
+                assert dispatched is not None and dispatched.lease_token is not None
+                _complete_ohf_role(
+                    self.runtime, dispatched, body, identity_seed=746
+                )
+                terminal = self.runtime.attempts.get_attempt(dispatched.attempt.attempt_id)
+                assert terminal is not None
+                return OrchestrationDispatchOutcome(
+                    command_id=command_id,
+                    job_id=job_id,
+                    attempt=terminal,
+                    outcome="TERMINAL",
+                )
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=lambda opened: ImmediateTerminalSupervisor(opened),
+            terminal_return_projector=lambda candidate: _capture_projection(
+                received, candidate
+            ),
+        )
+        service.runtime = runtime
+        service.supervisor = ImmediateTerminalSupervisor(runtime)
+        try:
+            # This test targets only the immediate-terminal post-dispatch seam;
+            # the host-profile guard has independent coverage in this module.
+            service._require_bound_coo_job = lambda job: job
+            service._require_coo_workspace = lambda job: {}
+            outcome = await service._dispatch_cycle_job_exact(
+                receipt.job_id, _first_dispatch_command(receipt)
+            )
+            assert outcome.outcome == "TERMINAL"
+            assert [candidate.attempt_id for candidate in received] == [
+                outcome.attempt.attempt_id
+            ]
+            assert service.service_state == "READY"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_startup_reconstructs_a_missed_terminal_projection_from_runtime_truth(
+    tmp_path: Path,
+    short_socket_root: Path,
+) -> None:
+    """Deleting startup terminal-fact recovery must strand this result."""
+
+    async def exercise() -> None:
+        runtime, cycle, dispatches, root, planner, work, work_seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-RESTART-RECOVERY",
+                review_workers=["worker-b", "worker-b"],
+            )
+        )
+        assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+        assert cycle.run_once(root.job_id).action == "DISPATCHED"
+        rejecting_review = dispatches[-1]
+        work_job = runtime.jobs.get_job(work.attempt.job_id)
+        assert work_job is not None
+        reject_body = _review_body(
+            root_id=root.job_id,
+            plan_attempt_id=planner.attempt.attempt_id,
+            plan_digest=str(work_job.plan_digest),
+            target_job_id=work.attempt.job_id,
+            target_attempt_id=work.attempt.attempt_id,
+            target_result_digest=work_seal["role_result_digest"],
+            repair_round=0,
+            verdict="reject",
+        )
+        reject_seal, _ = _complete_ohf_role(
+            runtime,
+            rejecting_review,
+            reject_body,
+            identity_seed=748,
+        )
+
+        assert cycle.run_once(root.job_id).action == "REPAIR_CREATED"
+        assert cycle.run_once(root.job_id).action == "DISPATCHED"
+        repair = dispatches[-1]
+        repair_body = {
+            "schema_version": "mastermind.repair_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": str(work_job.plan_digest),
+            "plan_step_id": "step-1",
+            "repair_round": 1,
+            "supersedes_job_id": work.attempt.job_id,
+            "rejected_review_job_id": rejecting_review.attempt.job_id,
+            "rejected_review_result_digest": reject_seal["role_result_digest"],
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        repair_seal, _ = _complete_ohf_role(
+            runtime,
+            repair,
+            repair_body,
+            identity_seed=749,
+        )
+
+        valid_by_job_id = {
+            planner.job_id: ("plan", planner.attempt.attempt_id),
+            work.attempt.job_id: ("work", work.attempt.attempt_id),
+            rejecting_review.attempt.job_id: (
+                "review",
+                rejecting_review.attempt.attempt_id,
+            ),
+            repair.attempt.job_id: ("repair", repair.attempt.attempt_id),
+        }
+        expected = tuple(
+            valid_by_job_id[job.job_id]
+            for job in runtime.jobs.list_jobs()
+            if job.job_id in valid_by_job_id
+        )
+        assert {role for role, _attempt_id in expected} == {
+            "plan",
+            "work",
+            "review",
+            "repair",
+        }
+        before_events = tuple(runtime.events.list_events())
+
+        received: list[TerminalReturnCandidate] = []
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=lambda candidate: _capture_projection(
+                received, candidate
+            ),
+        )
+        await service.start()
+        try:
+            # The prior process could have exited after Runtime committed the
+            # terminal transaction but before the projector callback.  A fresh
+            # service must recover that durable fact without another provider
+            # finish, Job transition, or caller-supplied job/attempt identity.
+            assert tuple(
+                (candidate.role, candidate.attempt_id) for candidate in received
+            ) == expected
+            after_events = tuple(service.runtime.events.list_events())
+            assert after_events[: len(before_events)] == before_events
+            projection_events = after_events[len(before_events) :]
+            assert len(projection_events) == 3 * len(expected)
+            assert [event.event_type for event in projection_events] == [
+                event_type
+                for _role, _attempt_id in expected
+                for event_type in (
+                    "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+                    "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+                    "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+                )
+            ]
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_startup_does_not_project_terminal_returns_while_awaiting_canary(
+    tmp_path: Path,
+    short_socket_root: Path,
+) -> None:
+    """AWAITING_CANARY must not emit reconstructed external projections."""
+
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-CANARY-HOLD",
+                review_workers=["worker-b"],
+            )
+        )
+        before_events = tuple(runtime.events.list_events())
+        received: list[TerminalReturnCandidate] = []
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=lambda candidate: _capture_projection(
+                received, candidate
+            ),
+            service_state="AWAITING_CANARY",
+        )
+        await service.start()
+        try:
+            assert planner.attempt.attempt_id not in {
+                candidate.attempt_id for candidate in received
+            }
+            assert received == []
+            assert tuple(service.runtime.events.list_events()) == before_events
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_canary_activation_replays_preexisting_sourced_terminal_once(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests import test_executive_os_phase1fc as phase1fc_fixtures
+
+    original_submit = phase1fc_fixtures.submit_intent
+
+    def sourced_submit(runtime, payload):
+        return original_submit(
+            runtime,
+            {**payload, "workstream": "WS:EXECUTIVE-OS"},
+            dialogue_source=_terminal_dialogue_source(),
+            require_dialogue_source=True,
+        )
+
+    monkeypatch.setattr(phase1fc_fixtures, "submit_intent", sourced_submit)
+
+    async def exercise() -> None:
+        config = dataclasses.replace(
+            _config(tmp_path, socket_root=short_socket_root),
+            terminal_return_armed=True,
+            terminal_return_socket_path=tmp_path / "agent-relay.sock",
+        )
+        runtime, _cycle, _dispatches, _root, planner, work, _seal = (
+            _cycle_through_completed_work(
+                config.runtime_root,
+                intent_id="CEO-SERVICE-CANARY-TERMINAL-REPLAY",
+                review_workers=["worker-b"],
+            )
+        )
+
+        class ApplyingProjector:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            async def project(self, candidate, *, before_write):
+                self.calls.append(candidate.attempt_id)
+                before_write()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("an APPLIED candidate must not reconcile")
+
+        # Leave exactly the planner unresolved so activation has one observable
+        # obligation while startup also audits an existing APPLIED family.
+        setup_projector = ApplyingProjector()
+        setup = ExecutiveControlService(
+            _config(tmp_path / "setup"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=setup_projector,
+        )
+        setup.runtime = runtime
+        await setup._project_terminal_return(
+            work.attempt.job_id,
+            expected_attempt_id=work.attempt.attempt_id,
+        )
+        assert setup_projector.calls == [work.attempt.attempt_id]
+
+        activated_projector = ApplyingProjector()
+
+        def factory(opened):
+            supervisor = _FakeSupervisor(opened)
+            supervisor.secret_canary_verdict = {}
+            supervisor.require_complete_launch_attestation = False
+            return supervisor
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=factory,
+            terminal_return_projector_factory=(
+                lambda _runtime_provider, _socket_path: activated_projector
+            ),
+            service_state="AWAITING_CANARY",
+        )
+        await service.start()
+        assert activated_projector.calls == []
+        verdict = {
+            "schema_version": "mastermind.executive_secret_canary/v1",
+            "passed": True,
+            "checks": {
+                "control_service_environment": "DENIED",
+                "administrative_checkout": "DENIED",
+                "executive_database": "DENIED",
+                "other_worker_home": "DENIED",
+                "forbidden_production_path": "DENIED",
+            },
+            "receipt_sha256": "b" * 64,
+            "control_environment_probe_sha256": "c" * 64,
+            "observed_at": "2026-08-11T00:00:00Z",
+            "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
+        }
+        await service.activate_canary(verdict)
+        assert service.service_state == "READY"
+        assert activated_projector.calls == [planner.attempt.attempt_id]
+        await service.close()
+
+        restart_projector = ApplyingProjector()
+        restarted = ExecutiveControlService(
+            config,
+            supervisor_factory=factory,
+            terminal_return_projector_factory=(
+                lambda _runtime_provider, _socket_path: restart_projector
+            ),
+        )
+        await restarted.start()
+        try:
+            assert restart_projector.calls == []
+            assert restarted._terminal_return_last_diagnostic == (
+                "terminal-return:ALREADY_APPLIED"
+            )
+        finally:
+            await restarted.close()
+
+    asyncio.run(exercise())
+
+
+def test_startup_bound_counts_only_unresolved_source_eligible_obligations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Keep the algorithmic boundary small while using complete canonical
+    # Runtime graphs.  The production ceiling itself remains frozen at 256.
+    assert es_mod._TERMINAL_RETURN_STARTUP_REPLAY_LIMIT == 256
+    assert es_mod._TERMINAL_RETURN_STARTUP_PHASE_AUDIT_LIMIT == 4096
+    monkeypatch.setattr(es_mod, "_TERMINAL_RETURN_STARTUP_REPLAY_LIMIT", 2)
+
+    from tests import test_executive_os_phase1fc as phase1fc_fixtures
+
+    original_register = phase1fc_fixtures._register
+
+    def register_once(runtime: Runtime, worker_id: str = "worker-1") -> None:
+        try:
+            original_register(runtime, worker_id)
+        except StateConflict as exc:
+            if "already registered" not in str(exc):
+                raise
+
+    monkeypatch.setattr(phase1fc_fixtures, "_register", register_once)
+    original_complete = phase1fc_fixtures._complete_ohf_role
+    completion_ordinal = 0
+
+    def complete_once(runtime, outcome, role_result, *, identity_seed: int):
+        nonlocal completion_ordinal
+        completion_ordinal += 1
+        return original_complete(
+            runtime,
+            outcome,
+            role_result,
+            identity_seed=identity_seed + completion_ordinal * 10_000,
+        )
+
+    monkeypatch.setattr(
+        phase1fc_fixtures,
+        "_complete_ohf_role",
+        complete_once,
+    )
+
+    def completed_planners(root: Path, prefix: str, count: int):
+        cycles = [
+            _cycle_through_completed_work(
+                root,
+                intent_id=f"{prefix}-{index}",
+                review_workers=["worker-b"],
+            )
+            for index in range(count)
+        ]
+        return cycles[0][0], [role for cycle in cycles for role in cycle[4:6]]
+
+    async def exercise() -> None:
+        applied_runtime, applied_planners = completed_planners(
+            tmp_path / "applied-runtime",
+            "CEO-SERVICE-HISTORICAL-APPLIED",
+            3,
+        )
+
+        class ApplyingProjector:
+            calls = 0
+
+            async def project(self, candidate, *, before_write):
+                self.calls += 1
+                before_write()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("fresh projection must not reconcile")
+
+        applying = ApplyingProjector()
+        initial = ExecutiveControlService(
+            _config(tmp_path / "initial"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=applying,
+        )
+        initial.runtime = applied_runtime
+        for planner in applied_planners:
+            await initial._project_terminal_return(
+                planner.job_id,
+                expected_attempt_id=planner.attempt.attempt_id,
+            )
+        assert applying.calls == 6
+
+        class CountingProjector:
+            calls = 0
+
+            async def project(self, _candidate, *, before_write):
+                del before_write
+                self.calls += 1
+                raise AssertionError("historical rows must not be replayed")
+
+            async def reconcile(self, _candidate):
+                self.calls += 1
+                raise AssertionError("historical rows must not be reconciled")
+
+        applied_counter = CountingProjector()
+        applied_restart = ExecutiveControlService(
+            _config(tmp_path / "applied-restart"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=applied_counter,
+        )
+        applied_restart.runtime = applied_runtime
+        await applied_restart._replay_terminal_returns_on_startup()
+        assert applied_restart.service_state == "READY"
+        assert applied_counter.calls == 0
+
+        before_audit = tuple(applied_runtime.events.list_events())
+        monkeypatch.setattr(
+            es_mod,
+            "_TERMINAL_RETURN_STARTUP_PHASE_AUDIT_LIMIT",
+            2,
+        )
+        audit_counter = CountingProjector()
+        audit_restart = ExecutiveControlService(
+            _config(tmp_path / "audit-restart"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=audit_counter,
+        )
+        audit_restart.runtime = applied_runtime
+        await audit_restart._replay_terminal_returns_on_startup()
+        assert audit_restart.service_state == "QUARANTINED"
+        assert audit_restart._terminal_return_last_diagnostic == (
+            "terminal-return:STARTUP_PHASE_AUDIT_LIMIT_EXCEEDED"
+        )
+        assert audit_counter.calls == 0
+        assert tuple(applied_runtime.events.list_events()) == before_audit
+        monkeypatch.setattr(
+            es_mod,
+            "_TERMINAL_RETURN_STARTUP_PHASE_AUDIT_LIMIT",
+            4096,
+        )
+
+        source_free_runtime, _source_free_planners = completed_planners(
+            tmp_path / "source-free-runtime",
+            "CEO-SERVICE-HISTORICAL-SOURCE-FREE",
+            3,
+        )
+        armed_config = dataclasses.replace(
+            _config(tmp_path / "source-free-restart"),
+            terminal_return_armed=True,
+            terminal_return_socket_path=tmp_path / "agent-relay.sock",
+        )
+        source_free_counter = CountingProjector()
+        source_free_restart = ExecutiveControlService(
+            armed_config,
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector_factory=(
+                lambda _runtime_provider, _socket_path: source_free_counter
+            ),
+        )
+        source_free_restart.runtime = source_free_runtime
+        await source_free_restart._replay_terminal_returns_on_startup()
+        assert source_free_restart.service_state == "READY"
+        assert source_free_counter.calls == 0
+        assert source_free_restart._terminal_return_last_diagnostic == (
+            "terminal-return:SKIPPED_SOURCE_FREE"
+        )
+
+        unresolved_runtime, _unresolved_planners = completed_planners(
+            tmp_path / "unresolved-runtime",
+            "CEO-SERVICE-HISTORICAL-UNRESOLVED",
+            3,
+        )
+        unresolved_counter = CountingProjector()
+        unresolved_restart = ExecutiveControlService(
+            _config(tmp_path / "unresolved-restart"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=unresolved_counter,
+        )
+        unresolved_restart.runtime = unresolved_runtime
+        before = tuple(unresolved_runtime.events.list_events())
+        await unresolved_restart._replay_terminal_returns_on_startup()
+        assert unresolved_restart.service_state == "QUARANTINED"
+        assert unresolved_restart._terminal_return_last_diagnostic == (
+            "terminal-return:STARTUP_REPLAY_LIMIT_EXCEEDED"
+        )
+        assert unresolved_counter.calls == 0
+        assert tuple(unresolved_runtime.events.list_events()) == before
+
+    asyncio.run(exercise())
+
+
+def test_startup_quarantines_malformed_applied_namespace_before_relay(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-MALFORMED-APPLIED-STARTUP",
+                review_workers=["worker-b"],
+            )
+        )
+        attempt_id = planner.attempt.attempt_id
+        with runtime.store.transaction() as connection:
+            runtime.store.append_event(
+                connection,
+                aggregate_type="terminal_return_projection",
+                aggregate_id=attempt_id,
+                event_type="EXECUTIVE_TERMINAL_RETURN_APPLIED",
+                actor="foreign-writer",
+                job_id=planner.job_id,
+                attempt_id=attempt_id,
+                worker_id=planner.attempt.worker_id,
+                payload={},
+                command_id=f"terminal-return:{attempt_id}:foreign:applied",
+            )
+
+        class RefusingProjector:
+            calls = 0
+
+            async def project(self, _candidate, *, before_write):
+                del before_write
+                self.calls += 1
+                raise AssertionError("malformed APPLIED must fail before Relay")
+
+            async def reconcile(self, _candidate):
+                self.calls += 1
+                raise AssertionError("malformed APPLIED must fail before Relay")
+
+        projector = RefusingProjector()
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=projector,
+        )
+        service.runtime = runtime
+        before = tuple(runtime.events.list_events())
+        await service._replay_terminal_returns_on_startup()
+        assert service.service_state == "QUARANTINED"
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:EVIDENCE_REFUSED"
+        )
+        assert projector.calls == 0
+        assert tuple(runtime.events.list_events()) == before
+
+    asyncio.run(exercise())
+
+
+def test_startup_validates_every_fresh_candidate_before_first_relay_write(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-FRESH-PROOF-STARTUP",
+                review_workers=["worker-b"],
+            )
+        )
+        _delete_terminal_seal_event(runtime, work.attempt.attempt_id)
+
+        class RefusingProjector:
+            calls = 0
+
+            async def project(self, _candidate, *, before_write):
+                del before_write
+                self.calls += 1
+                raise AssertionError("proof census must finish before Relay")
+
+            async def reconcile(self, _candidate):
+                self.calls += 1
+                raise AssertionError("proof census must finish before Relay")
+
+        projector = RefusingProjector()
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=projector,
+        )
+        service.runtime = runtime
+        before = tuple(runtime.events.list_events())
+        await service._replay_terminal_returns_on_startup()
+        assert service.service_state == "QUARANTINED"
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:EVIDENCE_REFUSED"
+        )
+        assert projector.calls == 0
+        assert tuple(runtime.events.list_events()) == before
+        assert planner.attempt.attempt_id != work.attempt.attempt_id
+
+    asyncio.run(exercise())
+
+
+def test_close_drains_terminal_flight_created_by_dispatch_shutdown_race(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-CLOSE-TERMINAL-RACE",
+                review_workers=["worker-b"],
+            )
+        )
+        finish_release = asyncio.Event()
+        projector_entered = asyncio.Event()
+        projector_release = asyncio.Event()
+
+        class FinishingSupervisor(_FakeSupervisor):
+            async def finish_job(self, _active):
+                await finish_release.wait()
+
+        class BlockingProjector:
+            async def project(self, candidate, *, before_write):
+                before_write()
+                projector_entered.set()
+                await projector_release.wait()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("fresh projection must not reconcile")
+
+        config = _config(tmp_path / "service", shutdown_grace_seconds=0.1)
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=lambda opened: FinishingSupervisor(opened),
+            terminal_return_projector=BlockingProjector(),
+        )
+        service.runtime = runtime
+        service.supervisor = FinishingSupervisor(runtime)
+        active = _Active(lease=SimpleNamespace(attempt=planner.attempt))
+        dispatch_task = asyncio.create_task(
+            service._finish_dispatched(planner.job_id, active)
+        )
+        service._dispatch_tasks[planner.job_id] = dispatch_task
+
+        close_task = asyncio.create_task(service.close())
+        while not service._closing:
+            await asyncio.sleep(0)
+        finish_release.set()
+        await asyncio.wait_for(projector_entered.wait(), timeout=1)
+        with pytest.raises(
+            ServiceError,
+            match="terminal service work has not drained; custody retained",
+        ):
+            await asyncio.wait_for(close_task, timeout=1)
+        assert len(service._terminal_return_flights) == 1
+        _digest, terminal_flight = next(
+            iter(service._terminal_return_flights.values())
+        )
+        assert terminal_flight.done() is False
+        assert terminal_flight.cancelled() is False
+
+        projector_release.set()
+        await asyncio.wait_for(asyncio.shield(terminal_flight), timeout=1)
+        await asyncio.wait_for(service.close(), timeout=1)
+        assert service._terminal_return_flights == {}
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=f"terminal-return:{planner.attempt.attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_close_shields_attempted_terminal_flight_through_cleanup(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-CANCELLED-CLOSE-TERMINAL-FLIGHT",
+                review_workers=["worker-b"],
+            )
+        )
+        projector_entered = asyncio.Event()
+        projector_release = asyncio.Event()
+        sends = 0
+
+        class BlockingProjector:
+            async def project(self, candidate, *, before_write):
+                nonlocal sends
+                before_write()
+                sends += 1
+                projector_entered.set()
+                await projector_release.wait()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("fresh projection must not reconcile")
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=BlockingProjector(),
+        )
+        service.runtime = runtime
+        projection_task = asyncio.create_task(
+            service._project_terminal_return(
+                planner.job_id,
+                expected_attempt_id=planner.attempt.attempt_id,
+            )
+        )
+        await asyncio.wait_for(projector_entered.wait(), timeout=1)
+
+        close_task = asyncio.create_task(service.close())
+        await asyncio.sleep(0)
+        close_task.cancel()
+        await asyncio.sleep(0)
+        assert close_task.done() is False
+        assert sends == 1
+
+        projector_release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await close_task
+        await projection_task
+        assert service._terminal_return_flights == {}
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+        class NoSecondSendProjector:
+            async def project(self, _candidate, *, before_write):
+                del before_write
+                raise AssertionError("restart must not send an applied result")
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("restart must not reconcile an applied result")
+
+        restarted = ExecutiveControlService(
+            _config(tmp_path / "restarted"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=NoSecondSendProjector(),
+        )
+        restarted.runtime = runtime
+        await restarted._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+        assert restarted._terminal_return_last_diagnostic == (
+            "terminal-return:ALREADY_APPLIED"
+        )
+
+    asyncio.run(exercise())
+
+
+def test_effect_unknown_restart_reconciles_read_only_and_never_sends_twice(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-EFFECT-UNKNOWN-RESTART",
+                review_workers=["worker-b"],
+            )
+        )
+        attempt_id = planner.attempt.attempt_id
+
+        class EffectUnknownProjector:
+            def __init__(self) -> None:
+                self.project_calls = 0
+                self.reconcile_calls = 0
+
+            async def project(self, _candidate):
+                self.project_calls += 1
+                raise TerminalReturnProjectionError("EFFECT_UNKNOWN")
+
+            async def reconcile(self, _candidate):
+                self.reconcile_calls += 1
+                return None
+
+            async def __call__(self, candidate):
+                return await self.project(candidate)
+
+        first_projector = EffectUnknownProjector()
+        first = ExecutiveControlService(
+            _config(tmp_path / "first"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=first_projector,
+        )
+        first.runtime = runtime
+        await first._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert first_projector.project_calls == 1
+        assert first._terminal_return_last_diagnostic == (
+            "terminal-return:EFFECT_UNKNOWN"
+        )
+
+        restarted_projector = EffectUnknownProjector()
+        restarted = ExecutiveControlService(
+            _config(tmp_path / "restarted"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=restarted_projector,
+        )
+        restarted.runtime = runtime
+        await restarted._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+
+        assert restarted_projector.project_calls == 0
+        assert restarted_projector.reconcile_calls == 1
+        assert restarted._terminal_return_last_diagnostic == (
+            "terminal-return:EFFECT_UNKNOWN"
+        )
+        projection_events = runtime.events.list_events(
+            attempt_id=attempt_id,
+            command_id_prefix=f"terminal-return:{attempt_id}:",
+        )
+        assert [event.event_type for event in projection_events] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN",
+        ]
+
+        class RecoveredProjector(EffectUnknownProjector):
+            async def reconcile(self, candidate):
+                self.reconcile_calls += 1
+                return _projection_receipt(candidate, action="RECOVERED")
+
+        recovered_projector = RecoveredProjector()
+        recovered = ExecutiveControlService(
+            _config(tmp_path / "recovered"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=recovered_projector,
+        )
+        recovered.runtime = runtime
+        await recovered._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert recovered_projector.project_calls == 0
+        assert recovered_projector.reconcile_calls == 1
+        assert recovered._terminal_return_last_diagnostic == "terminal-return:APPLIED"
+
+        already_applied_projector = EffectUnknownProjector()
+        already_applied = ExecutiveControlService(
+            _config(tmp_path / "already-applied"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=already_applied_projector,
+        )
+        already_applied.runtime = runtime
+        await already_applied._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert already_applied_projector.project_calls == 0
+        assert already_applied_projector.reconcile_calls == 0
+        assert already_applied._terminal_return_last_diagnostic == (
+            "terminal-return:ALREADY_APPLIED"
+        )
+        projection_events = runtime.events.list_events(
+            attempt_id=attempt_id,
+            command_id_prefix=f"terminal-return:{attempt_id}:",
+        )
+        assert [event.event_type for event in projection_events] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_pre_submit_refusal_is_durable_and_recoverable(
+    tmp_path: Path,
+) -> None:
+    """A proven no-send refusal may retry; a possible dispatch may not."""
+
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-PRE-SUBMIT-REFUSAL",
+                review_workers=["worker-b"],
+            )
+        )
+        attempt_id = planner.attempt.attempt_id
+
+        class PreSubmitRefusal:
+            project_calls = 0
+            reconcile_calls = 0
+
+            async def project(self, _candidate, *, before_write):
+                self.project_calls += 1
+                raise TerminalReturnProjectionError("DIALOGUE_BINDING_UNAVAILABLE")
+
+            async def reconcile(self, _candidate):
+                self.reconcile_calls += 1
+                raise AssertionError("a proven pre-submit refusal must not reconcile")
+
+        refused_projector = PreSubmitRefusal()
+        refused = ExecutiveControlService(
+            _config(tmp_path / "refused"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=refused_projector,
+        )
+        refused.runtime = runtime
+        await refused._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert refused._terminal_return_last_diagnostic == (
+            "terminal-return:PRE_SUBMIT_REFUSED:DIALOGUE_BINDING_UNAVAILABLE"
+        )
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=attempt_id,
+                command_id_prefix=f"terminal-return:{attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+        ]
+
+        class RecoveredProjector:
+            project_calls = 0
+            reconcile_calls = 0
+
+            async def project(self, candidate, *, before_write):
+                self.project_calls += 1
+                before_write()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                self.reconcile_calls += 1
+                raise AssertionError("recoverable pre-submit state must retry project")
+
+        recovered_projector = RecoveredProjector()
+        recovered = ExecutiveControlService(
+            _config(tmp_path / "recovered-pre-submit"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=recovered_projector,
+        )
+        recovered.runtime = runtime
+        await recovered._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert recovered_projector.project_calls == 1
+        assert recovered_projector.reconcile_calls == 0
+        assert recovered._terminal_return_last_diagnostic == "terminal-return:APPLIED"
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=attempt_id,
+                command_id_prefix=f"terminal-return:{attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_projection_is_single_flight_per_service(
+    tmp_path: Path,
+) -> None:
+    """Concurrent offers of one durable candidate may cross Relay only once."""
+
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-SINGLE-FLIGHT",
+                review_workers=["worker-b"],
+            )
+        )
+        attempt_id = planner.attempt.attempt_id
+
+        class BlockingProjector:
+            def __init__(self) -> None:
+                self.project_calls = 0
+                self.entered = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def project(self, candidate, *, before_write):
+                self.project_calls += 1
+                self.entered.set()
+                await self.release.wait()
+                before_write()
+                return _projection_receipt(candidate)
+
+        projector = BlockingProjector()
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=projector,
+        )
+        service.runtime = runtime
+        assert not hasattr(service, "_terminal_return_candidates")
+
+        first = asyncio.create_task(
+            service._project_terminal_return(
+                planner.job_id,
+                expected_attempt_id=attempt_id,
+            )
+        )
+        await asyncio.wait_for(projector.entered.wait(), timeout=1)
+        second = asyncio.create_task(
+            service._project_terminal_return(
+                planner.job_id,
+                expected_attempt_id=attempt_id,
+            )
+        )
+        await asyncio.sleep(0)
+        projector.release.set()
+        await asyncio.gather(first, second)
+
+        assert projector.project_calls == 1
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=attempt_id,
+                command_id_prefix=f"terminal-return:{attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_prepared_material_conflict_refuses_across_restart(
+    tmp_path: Path,
+) -> None:
+    runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime",
+            intent_id="CEO-SERVICE-TERMINAL-DURABLE-CANDIDATE-CONFLICT",
+            review_workers=["worker-b"],
+        )
+    )
+    attempt_id = planner.attempt.attempt_id
+    material = runtime.validated_role_completion(
+        planner.job_id,
+        expected_attempt_id=attempt_id,
+    )
+    candidate = reduce_terminal_return(material=material)
+
+    first = ExecutiveControlService(
+        _config(tmp_path / "first"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        terminal_return_projector=lambda _candidate: None,
+    )
+    first.runtime = runtime
+    phase, _applied_command, _event_material = (
+        first._begin_terminal_return_projection(candidate)
+    )
+    assert phase == "PREPARED"
+
+    alternate_digest = (
+        "0" * 64 if candidate.terminal_digest != "0" * 64 else "1" * 64
+    )
+    conflicting = dataclasses.replace(
+        candidate,
+        terminal_evidence_digest=alternate_digest,
+        message_key=f"asd-exec-result-{alternate_digest}",
+    )
+    restarted = ExecutiveControlService(
+        _config(tmp_path / "restarted"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        terminal_return_projector=lambda _candidate: None,
+    )
+    restarted.runtime = runtime
+
+    with pytest.raises(StateConflict, match="projection event drifted"):
+        restarted._begin_terminal_return_projection(conflicting)
+
+    prepared = [
+        event
+        for event in runtime.events.list_events(
+            attempt_id=attempt_id,
+            aggregate_type="terminal_return_projection",
+            aggregate_id=attempt_id,
+        )
+        if event.event_type == "EXECUTIVE_TERMINAL_RETURN_PREPARED"
+    ]
+    assert len(prepared) == 1
+
+
+def test_terminal_return_tick_does_not_automatically_reoffer_pre_submit_refusal(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-PRE-SUBMIT-TICK",
+                review_workers=["worker-b"],
+            )
+        )
+
+        class RecoveringProjector:
+            def __init__(self) -> None:
+                self.available = False
+                self.project_calls = 0
+
+            async def project(self, candidate, *, before_write):
+                self.project_calls += 1
+                if not self.available:
+                    raise TerminalReturnProjectionError("SERVICE_UNAVAILABLE")
+                before_write()
+                return _projection_receipt(candidate)
+
+        projector = RecoveringProjector()
+        service = ExecutiveControlService(
+            _config(
+                tmp_path / "service",
+                coo_tick_interval_seconds=1.0,
+            ),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=projector,
+        )
+        service.runtime = runtime
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:PRE_SUBMIT_REFUSED:SERVICE_UNAVAILABLE"
+        )
+
+        projector.available = True
+        service._coo_shutdown_event = asyncio.Event()
+        tick = asyncio.create_task(service._coo_tick_loop())
+        await asyncio.sleep(1.1)
+        service._coo_shutdown_event.set()
+        await tick
+
+        assert projector.project_calls == 1
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:PRE_SUBMIT_REFUSED:SERVICE_UNAVAILABLE"
+        )
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_result_without_dispatch_boundary_is_typed_refusal(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-PROTOCOL-REFUSED",
+                review_workers=["worker-b"],
+            )
+        )
+
+        class InvalidProjector:
+            async def project(self, candidate, *, before_write):
+                del before_write
+                return _projection_receipt(candidate, action="POSTED")
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=InvalidProjector(),
+        )
+        service.runtime = runtime
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:PRE_SUBMIT_REFUSED:PRE_SUBMIT_PROTOCOL_REFUSED"
+        )
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_applied_requires_atomic_action_predecessor(
+    tmp_path: Path,
+) -> None:
+    runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime",
+            intent_id="CEO-SERVICE-TERMINAL-ATOMIC-PREDECESSOR",
+            review_workers=["worker-b"],
+        )
+    )
+    material = runtime.validated_role_completion(
+        planner.job_id,
+        expected_attempt_id=planner.attempt.attempt_id,
+    )
+    candidate = reduce_terminal_return(material=material)
+    service = ExecutiveControlService(
+        _config(tmp_path / "service"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        terminal_return_projector=lambda _candidate: None,
+    )
+    service.runtime = runtime
+    phase, applied_command, event_material = (
+        service._begin_terminal_return_projection(candidate)
+    )
+    assert phase == "PREPARED"
+
+    with pytest.raises(StateConflict, match="phase order drifted"):
+        service._complete_terminal_return_projection(
+            candidate,
+            applied_command=applied_command,
+            material=event_material,
+            projection_receipt=_projection_receipt(candidate, action="POSTED"),
+        )
+    assert [
+        event.event_type
+        for event in runtime.events.list_events(
+            attempt_id=planner.attempt.attempt_id,
+            command_id_prefix=f"terminal-return:{planner.attempt.attempt_id}:",
+        )
+    ] == ["EXECUTIVE_TERMINAL_RETURN_PREPARED"]
+
+
+def test_terminal_return_phase_write_revalidates_every_predecessor(
+    tmp_path: Path,
+) -> None:
+    runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime",
+            intent_id="CEO-SERVICE-TERMINAL-PHASE-RACE-DRIFT",
+            review_workers=["worker-b"],
+        )
+    )
+    material = runtime.validated_role_completion(
+        planner.job_id,
+        expected_attempt_id=planner.attempt.attempt_id,
+    )
+    candidate = reduce_terminal_return(material=material)
+    service = ExecutiveControlService(
+        _config(tmp_path / "service"),
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        terminal_return_projector=lambda _candidate: None,
+    )
+    service.runtime = runtime
+    phase, applied_command, event_material = (
+        service._begin_terminal_return_projection(candidate)
+    )
+    assert phase == "PREPARED"
+    command_base, _ = service._terminal_return_event_material(candidate)
+    drifted = {**event_material, "root_job_id": "JOB-FOREIGN"}
+    with runtime.store.transaction() as connection:
+        runtime.store.append_event(
+            connection,
+            aggregate_type="terminal_return_projection",
+            aggregate_id=candidate.attempt_id,
+            event_type="EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+            actor="foreign-writer",
+            job_id=candidate.job_id,
+            attempt_id=candidate.attempt_id,
+            worker_id=candidate.worker_id,
+            payload=drifted,
+            command_id=f"{command_base}:pre-submit-refused",
+        )
+
+    with pytest.raises(StateConflict, match="projection event drifted"):
+        service._record_terminal_return_phase(
+            candidate,
+            phase="ATTEMPTED",
+            material=event_material,
+        )
+    with pytest.raises(StateConflict, match="projection event drifted"):
+        service._complete_terminal_return_projection(
+            candidate,
+            applied_command=applied_command,
+            material=event_material,
+            projection_receipt=_projection_receipt(candidate, action="DUPLICATE"),
+        )
+    assert [
+        event.event_type
+        for event in runtime.events.list_events(
+            attempt_id=candidate.attempt_id,
+            command_id_prefix=f"terminal-return:{candidate.attempt_id}:",
+        )
+    ] == [
+        "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+        "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+    ]
+
+
+def test_terminal_return_phase_race_quarantines_without_provider_commit_or_append(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-PHASE-RACE-QUARANTINE",
+                review_workers=["worker-b"],
+            )
+        )
+        provider_commits = 0
+
+        class RacingProjector:
+            async def project(self, candidate, *, before_write):
+                nonlocal provider_commits
+                command_base, material = service._terminal_return_event_material(
+                    candidate
+                )
+                drifted = {**material, "root_job_id": "JOB-FOREIGN"}
+                with runtime.store.transaction() as connection:
+                    runtime.store.append_event(
+                        connection,
+                        aggregate_type="terminal_return_projection",
+                        aggregate_id=candidate.attempt_id,
+                        event_type=(
+                            "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED"
+                        ),
+                        actor="foreign-writer",
+                        job_id=candidate.job_id,
+                        attempt_id=candidate.attempt_id,
+                        worker_id=candidate.worker_id,
+                        payload=drifted,
+                        command_id=f"{command_base}:pre-submit-refused",
+                    )
+                before_write()
+                provider_commits += 1
+                return _projection_receipt(candidate)
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=RacingProjector(),
+        )
+        service.runtime = runtime
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+
+        assert provider_commits == 0
+        assert service.service_state == "QUARANTINED"
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:EVIDENCE_REFUSED"
+        )
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_PRE_SUBMIT_REFUSED",
+        ]
+        assert service._terminal_return_flights == {}
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_known_zero_after_commit_remains_retryable(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-PROVEN-NO-EFFECT",
+                review_workers=["worker-b"],
+            )
+        )
+        attempt_id = planner.attempt.attempt_id
+
+        class KnownZeroProjector:
+            async def project(self, _candidate, *, before_write):
+                before_write()
+                raise TerminalReturnProjectionError("TRANSPORT_UNAVAILABLE")
+
+        first = ExecutiveControlService(
+            _config(tmp_path / "first"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=KnownZeroProjector(),
+        )
+        first.runtime = runtime
+        await first._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert first._terminal_return_last_diagnostic == (
+            "terminal-return:PROVEN_NO_EFFECT:TRANSPORT_UNAVAILABLE"
+        )
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=attempt_id,
+                command_id_prefix=f"terminal-return:{attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_PROVEN_NO_EFFECT",
+        ]
+
+        class RecoveredProjector:
+            async def project(self, candidate, *, before_write):
+                before_write()
+                # A commissioned retry may discover that another exact actor
+                # already posted the immutable message after the prior proven
+                # no-effect attempt.  DUPLICATE is a valid terminal receipt.
+                return _projection_receipt(candidate, action="DUPLICATE")
+
+        restarted = ExecutiveControlService(
+            _config(tmp_path / "restarted"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=RecoveredProjector(),
+        )
+        restarted.runtime = runtime
+        await restarted._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert restarted._terminal_return_last_diagnostic == "terminal-return:APPLIED"
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=attempt_id,
+                command_id_prefix=f"terminal-return:{attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_PROVEN_NO_EFFECT",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_exact_duplicate_applies_without_false_attempt(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-EXACT-DUPLICATE",
+                review_workers=["worker-b"],
+            )
+        )
+
+        class DuplicateProjector:
+            async def project(self, candidate, *, before_write):
+                del before_write
+                return _projection_receipt(candidate, action="DUPLICATE")
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=DuplicateProjector(),
+        )
+        service.runtime = runtime
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+
+        assert service._terminal_return_last_diagnostic == "terminal-return:APPLIED"
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_post_commit_duplicate_applies_after_attempted_boundary(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-POST-COMMIT-DUPLICATE",
+                review_workers=["worker-b"],
+            )
+        )
+
+        class DuplicateAfterCommitProjector:
+            async def project(self, candidate, *, before_write):
+                before_write()
+                return _projection_receipt(candidate, action="DUPLICATE")
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=DuplicateAfterCommitProjector(),
+        )
+        service.runtime = runtime
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+
+        assert service.service_state == "READY"
+        assert service._terminal_return_last_diagnostic == "terminal-return:APPLIED"
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_APPLIED",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_refuses_malformed_applied_receipt_as_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-MALFORMED-RECEIPT",
+                review_workers=["worker-b"],
+            )
+        )
+
+        class MalformedReceiptProjector:
+            async def project(self, _candidate, *, before_write):
+                before_write()
+                return {
+                    "action": "POSTED",
+                    "message_key": "asd-exec-result-wrong",
+                    "fingerprint": "f" * 64,
+                    "message_ts": "1787961600.000002",
+                    "duplicate_timestamps": [],
+                }
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=MalformedReceiptProjector(),
+        )
+        service.runtime = runtime
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:EFFECT_UNKNOWN:StateConflict"
+        )
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=planner.attempt.attempt_id,
+                command_id_prefix=(
+                    f"terminal-return:{planner.attempt.attempt_id}:"
+                ),
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_attempted_then_unknown_is_reconcile_only_after_restart(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-ATTEMPTED-UNKNOWN",
+                review_workers=["worker-b"],
+            )
+        )
+        attempt_id = planner.attempt.attempt_id
+
+        class PossibleDispatch:
+            def __init__(self) -> None:
+                self.project_calls = 0
+                self.reconcile_calls = 0
+
+            async def project(self, _candidate, *, before_write):
+                self.project_calls += 1
+                before_write()
+                raise TerminalReturnProjectionError("EFFECT_UNKNOWN")
+
+            async def reconcile(self, _candidate):
+                self.reconcile_calls += 1
+                return None
+
+        first_projector = PossibleDispatch()
+        first = ExecutiveControlService(
+            _config(tmp_path / "first-attempted"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=first_projector,
+        )
+        first.runtime = runtime
+        await first._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert first._terminal_return_last_diagnostic == "terminal-return:EFFECT_UNKNOWN"
+
+        restarted_projector = PossibleDispatch()
+        restarted = ExecutiveControlService(
+            _config(tmp_path / "restart-attempted"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=restarted_projector,
+        )
+        restarted.runtime = runtime
+        await restarted._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=attempt_id,
+        )
+        assert restarted_projector.project_calls == 0
+        assert restarted_projector.reconcile_calls == 1
+        assert [
+            event.event_type
+            for event in runtime.events.list_events(
+                attempt_id=attempt_id,
+                command_id_prefix=f"terminal-return:{attempt_id}:",
+            )
+        ] == [
+            "EXECUTIVE_TERMINAL_RETURN_PREPARED",
+            "EXECUTIVE_TERMINAL_RETURN_ATTEMPTED",
+            "EXECUTIVE_TERMINAL_RETURN_EFFECT_UNKNOWN",
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_pickup_reuses_runtime_terminal_validation_after_seal_event_loss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A projector-local receipt checker must not accept a lost Runtime seal."""
+
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-TERMINAL-CANONICAL-VALIDATOR",
+                review_workers=["worker-b"],
+            )
+        )
+        attempt_id = planner.attempt.attempt_id
+        _delete_terminal_seal_event(runtime, attempt_id)
+        before_projection_events = tuple(runtime.events.list_events())
+        canonical_calls: list[tuple[str, str, str]] = []
+        actual_validator = er_mod._validated_role_completion_material
+
+        def observed_validator(connection, *, job_row, expected_role, root_job_id):
+            canonical_calls.append(
+                (str(job_row["current_attempt_id"]), expected_role, root_job_id)
+            )
+            return actual_validator(
+                connection,
+                job_row=job_row,
+                expected_role=expected_role,
+                root_job_id=root_job_id,
+            )
+
+        monkeypatch.setattr(
+            er_mod,
+            "_validated_role_completion_material",
+            observed_validator,
+        )
+
+        received: list[TerminalReturnCandidate] = []
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=lambda candidate: _capture_projection(
+                received, candidate
+            ),
+        )
+        service.runtime = runtime
+        try:
+            await service._project_terminal_return(
+                planner.job_id,
+                expected_attempt_id=attempt_id,
+            )
+
+            assert canonical_calls == [(attempt_id, "plan", root.job_id)]
+            assert received == []
+            assert service._terminal_return_last_diagnostic == (
+                "terminal-return:EVIDENCE_REFUSED"
+            )
+            assert tuple(runtime.events.list_events()) == before_projection_events
+            assert runtime.jobs.get_job(planner.job_id).status is JobStatus.COMPLETED
+            assert (
+                runtime.attempts.get_attempt(attempt_id).status
+                is AttemptStatus.COMPLETED
+            )
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_service_pickup_refuses_unvalidated_sealed_worker_terminal_receipt_shape(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, child, body = _pending_review(
+            tmp_path, intent_id="CEO-SERVICE-SEALED-WORKER"
+        )
+        dispatch = runtime.attempts.dispatch_cycle_job(
+            child.job_id,
+            command_id=_first_dispatch_command(child),
+            worker_id="worker-b",
+        )
+        assert dispatch is not None and dispatch.lease_token is not None
+        _complete_ohf_role(runtime, dispatch, body, identity_seed=747)
+        job = runtime.jobs.get_job(child.job_id)
+        attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+        worker = runtime.workers.get_worker("worker-b")
+        assert job is not None and attempt is not None and worker is not None
+        receipt = dict(attempt.result)
+        receipt["execution_mode"] = "SEALED_WORKER"
+        receipt["result_seal_command_id"] = f"sealed-worker-result:{attempt.attempt_id}"
+        receipt["result_evidence"] = {
+            "schema_version": "fixture",
+            "secret": "must-not-project",
+        }
+        unsigned = dict(receipt)
+        unsigned.pop("terminal_evidence_digest")
+        receipt["terminal_evidence_digest"] = canonical_digest(unsigned)
+        sealed_job = dataclasses.replace(job, result=receipt)
+        sealed_attempt = dataclasses.replace(
+            attempt, execution_mode="SEALED_WORKER", result=receipt
+        )
+        received: list[TerminalReturnCandidate] = []
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=lambda candidate: _capture_projection(
+                received, candidate
+            ),
+        )
+        service.runtime = SimpleNamespace(
+            validated_role_completion=lambda *_args, **_kwargs: (
+                _ for _ in ()
+            ).throw(StateConflict("unvalidated SEALED_WORKER receipt")),
+        )
+        await service._project_terminal_return(
+            child.job_id, expected_attempt_id=attempt.attempt_id
+        )
+        assert received == []
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:EVIDENCE_REFUSED"
+        )
+        await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_armed_service_requires_an_explicit_autonomy_guard(
+    tmp_path: Path, short_socket_root: Path
+) -> None:
+    config = _config(
+        tmp_path,
+        socket_root=short_socket_root,
+        coo_autonomy_armed=True,
+    )
+    with pytest.raises(ValueError, match="autonomy guard"):
+        ExecutiveControlService(
+            config,
+            supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        )
+
+
+def test_armed_startup_guard_refuses_before_runtime_or_socket_mutation(
+    tmp_path: Path, short_socket_root: Path
+) -> None:
+    config = _config(
+        tmp_path,
+        socket_root=short_socket_root,
+        coo_autonomy_armed=True,
+    )
+    calls = []
+
+    def guard() -> None:
+        calls.append("guard")
+        raise RuntimeError("expired receipt details must not escape")
+
+    def runtime_factory(_root):
+        calls.append("runtime")
+        raise AssertionError("runtime must not open after guard refusal")
+
+    service = ExecutiveControlService(
+        config,
+        runtime_factory=runtime_factory,
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        autonomy_guard=guard,
+    )
+    with pytest.raises(StateConflict, match="autonomy receipt refused"):
+        asyncio.run(service.start())
+    assert calls == ["guard"]
+    assert service.service_state == "QUARANTINED"
+    assert not config.socket_path.exists()
+
+
+def test_guard_runs_again_before_each_explicit_coo_cycle(
+    tmp_path: Path, short_socket_root: Path
+) -> None:
+    async def exercise() -> None:
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=3600.0,
+        )
+        calls = []
+
+        def guard() -> None:
+            calls.append("guard")
+            if len(calls) == 3:
+                raise RuntimeError("receipt expired")
+
+        holder = {}
+
+        def factory(runtime):
+            holder["supervisor"] = _FakeSupervisor(runtime)
+            return holder["supervisor"]
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=factory,
+            autonomy_guard=guard,
+        )
+        await service.start()
+        try:
+            assert calls == ["guard"]
+            assert (await _request(service, "register-worker"))["ok"] is True
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "guarded")},
+            )
+            root_id = submitted["result"]["job_id"]
+            first = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert first["ok"] is True
+            assert calls == ["guard", "guard"]
+
+            refused = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert refused["ok"] is False
+            assert "autonomy receipt refused" in refused["error"]["message"]
+            assert "expired" not in json.dumps(refused)
+            assert service.service_state == "QUARANTINED"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
 
 
 async def _request(service: ExecutiveControlService, command: str, args=None):
@@ -238,6 +6884,620 @@ async def _raw_request(path: Path, raw: bytes) -> dict:
     finally:
         writer.close()
         await writer.wait_closed()
+
+
+def _coo_intent(config: ServiceConfig, name: str) -> dict:
+    workspace_name = f"coo-{name.lower()}"
+    branch = f"codex/coo-fixture-{name.lower()}"
+    receipt = prepare_credentialless_clone(
+        config.proof_source_repository,
+        config.proof_workspace_root,
+        job_id=workspace_name,
+        base_sha=config.proof_base_sha,
+        branch=branch,
+        shared_gid=config.proof_shared_gid,
+    )
+    return {
+        "schema": "mastermind.ceo_intent.v2",
+        "intent_id": f"CEO-G1-{name.upper()}",
+        "actor": "ceo-sol",
+        "objective": f"Execute one bounded G1 cycle fixture {name}.",
+        "department": "executive-infrastructure",
+        "priority": 9,
+        "grounding": {
+            "mastermind_sha": config.proof_base_sha,
+            "macro_sha": "b" * 40,
+        },
+        "execution_contract": {
+            "requested_authorities": ["READ"],
+            "branch": branch,
+            "worktree": receipt.workspace_path,
+            "attempt_limit": 2,
+        },
+        "intent_kind": "executive_coo_cycle",
+        "business_impact": "routine",
+    }
+
+
+def _terminal_dialogue_source() -> dict[str, object]:
+    return {
+        "schema_version": "mastermind.executive_dialogue_source/v1",
+        "work_ref": "WS:EXECUTIVE-OS",
+        "commission_ref": {
+            "repository": "mastermindx-market-intelligence/Mastermind",
+            "commit": "c" * 40,
+            "path": "docs/commissions/executive-terminal-return.md",
+            "content_sha256": "d" * 64,
+        },
+        "watch_mode": "turn_watch_v1",
+    }
+
+
+def test_v2_public_dialogue_source_is_rejected_before_admission(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    intent = _coo_intent(config, "dialogue-source")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+    intent["dialogue_source"] = _terminal_dialogue_source()
+
+    with pytest.raises(ceo_intent_mod.CeoIntentError, match="unexpected key"):
+        ceo_intent_mod.validate_intent(intent)
+    assert runtime.jobs.list_jobs() == []
+
+
+def test_v2_trusted_host_dialogue_source_is_immutable_in_root_creation(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    source_state: list[dict[str, object] | None] = [_terminal_dialogue_source()]
+    provider_calls: list[tuple[str, str]] = []
+
+    def source_provider(intent_id: str, workstream: str):
+        provider_calls.append((intent_id, workstream))
+        return source_state[0]
+
+    service = ExecutiveControlService(
+        config,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=source_provider,
+    )
+    service.runtime = runtime
+    intent = _coo_intent(config, "dialogue-source")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+
+    receipt = service._submit_service_intent(intent)
+    duplicate = service._submit_service_intent(intent)
+    event = runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(intent["intent_id"])
+    )
+    assert event is not None
+    assert event["payload"]["provenance"]["dialogue_source"] == source_state[0]
+    expected_source_digest = hashlib.sha256(
+        json.dumps(
+            source_state[0],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert event["payload"]["provenance"]["dialogue_source_digest"] == expected_source_digest
+    assert event["payload"]["provenance"]["fingerprint"] == (
+        ceo_intent_mod.intent_fingerprint(intent)
+    )
+    assert "dialogue_source" not in intent
+    assert duplicate["duplicate"] is True
+    assert duplicate["job_id"] == receipt["job_id"]
+    # Admission observes and immediately re-observes one deep-frozen source.
+    # Durable replay is source-provider independent.
+    assert provider_calls == [(intent["intent_id"], intent["workstream"])] * 2
+
+    original_source = _terminal_dialogue_source()
+    source_state[0] = {
+        **original_source,
+        "commission_ref": {
+            **original_source["commission_ref"],
+            "commit": "e" * 40,
+        },
+    }
+    replay_after_provider_drift = service._submit_service_intent(intent)
+    assert replay_after_provider_drift["duplicate"] is True
+
+    source_state[0] = None
+    replay_during_provider_outage = service._submit_service_intent(intent)
+    assert replay_during_provider_outage["duplicate"] is True
+    assert provider_calls == [(intent["intent_id"], intent["workstream"])] * 2
+    assert [job.job_id for job in runtime.jobs.list_jobs()] == [receipt["job_id"]]
+
+
+def test_v2_dialogue_source_digest_drift_refuses_replay_and_status(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    source = _terminal_dialogue_source()
+    service = ExecutiveControlService(
+        config,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=(
+            lambda _intent_id, _workstream: source
+        ),
+    )
+    service.runtime = runtime
+    intent = _coo_intent(config, "dialogue-source-digest-drift")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+    service._submit_service_intent(intent)
+
+    command_id = ceo_intent_mod.command_id_for(intent["intent_id"])
+    event = runtime.store.find_event_by_command_id(command_id)
+    assert event is not None
+    payload = event["payload"]
+    payload["provenance"]["dialogue_source_digest"] = "0" * 64
+    # Simulate out-of-band disk corruption by bypassing the normal immutable
+    # Event API. The production writer can never perform this update.
+    connection = sqlite3.connect(runtime.store.path)
+    try:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE command_id=?",
+            (
+                json.dumps(
+                    payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ),
+                command_id,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(ceo_intent_mod.CeoIntentError, match="drifted"):
+        service._submit_service_intent(intent)
+    with pytest.raises(ceo_intent_mod.CeoIntentError, match="drifted"):
+        ceo_intent_mod.resolve_intent(
+            runtime,
+            intent["intent_id"],
+        )
+
+
+def test_v2_dialogue_source_reobservation_drift_refuses_before_root_creation(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    first_source = _terminal_dialogue_source()
+    second_source = {
+        **first_source,
+        "commission_ref": {
+            **first_source["commission_ref"],
+            "commit": "e" * 40,
+        },
+    }
+    source_iterator = iter((first_source, second_source))
+
+    def source_provider(_intent_id: str, _workstream: str):
+        return next(source_iterator)
+
+    service = ExecutiveControlService(
+        config,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=source_provider,
+    )
+    service.runtime = runtime
+    intent = _coo_intent(config, "dialogue-source-concurrent-divergence")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+
+    with pytest.raises(ceo_intent_mod.CeoIntentConflict, match="changed"):
+        service._submit_service_intent(intent)
+    assert runtime.jobs.list_jobs() == []
+    assert runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(intent["intent_id"])
+    ) is None
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        pytest.param(
+            lambda _intent_id, _workstream: {
+                **_terminal_dialogue_source(),
+                "work_ref": "WS:FOREIGN",
+            },
+            id="work-ref-mismatch",
+        ),
+        pytest.param(
+            lambda _intent_id, _workstream: {"schema_version": "malformed"},
+            id="malformed",
+        ),
+        pytest.param(
+            lambda _intent_id, _workstream: (_ for _ in ()).throw(
+                RuntimeError("provider unavailable")
+            ),
+            id="provider-error",
+        ),
+        pytest.param(
+            lambda _intent_id, _workstream: None,
+            id="missing",
+        ),
+    ],
+)
+def test_invalid_trusted_dialogue_source_refuses_before_root_creation(
+    tmp_path: Path,
+    provider,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    service = ExecutiveControlService(
+        config,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=provider,
+    )
+    service.runtime = runtime
+    intent = _coo_intent(config, "invalid-dialogue-source")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+
+    with pytest.raises(ceo_intent_mod.CeoIntentError):
+        service._submit_service_intent(intent)
+
+    assert runtime.jobs.list_jobs() == []
+    assert runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(intent["intent_id"])
+    ) is None
+
+
+def test_v2_ingress_public_frame_refuses_dialogue_source_before_submission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    async def should_not_submit(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(ceo_ingress_mod, "_handle_submit_v2", should_not_submit)
+    frame = {
+        "schema": ceo_ingress_mod.SUBMIT_SCHEMA_V2,
+        "request_ref": "req-r2-public-source-refusal-20260903-001",
+        "observed_grounding": {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+        "request": {
+            "objective": "Run one bounded Executive terminal-return fixture.",
+            "department": "executive-infrastructure",
+            "priority": 9,
+            "execution_profile": "research_only",
+            "workstream": "WS:EXECUTIVE-OS",
+            "attempt_limit": 2,
+        },
+        "dialogue_source": _terminal_dialogue_source(),
+    }
+
+    with pytest.raises(ceo_ingress_mod.CeoIngressError) as refused:
+        asyncio.run(
+            ceo_ingress_mod.handle_frame(
+                frame,
+                runtime=object(),
+                grounding_provider=object(),
+                workspace_root=tmp_path,
+                service_state="READY",
+                ceo_ingress_armed=True,
+            )
+        )
+    assert refused.value.code == "invalid_input"
+    assert called is False
+
+    nested = dict(frame["request"])
+    nested["dialogue_source"] = _terminal_dialogue_source()
+    with pytest.raises(ceo_ingress_mod.ceo_request.CeoRequestInvalid):
+        ceo_ingress_mod.ceo_request.normalize_automated_request(nested)
+
+
+def test_v2_ingress_builds_a_source_free_strict_v2_envelope(tmp_path: Path) -> None:
+    normalized = ceo_ingress_mod.ceo_request.normalize_automated_request(
+        {
+            "objective": "Run one bounded Executive terminal-return fixture.",
+            "department": "executive-infrastructure",
+            "priority": 9,
+            "execution_profile": "research_only",
+            "workstream": "WS:EXECUTIVE-OS",
+            "attempt_limit": 2,
+        }
+    )
+    envelope = ceo_ingress_mod._build_envelope(
+        normalized,
+        intent_id="auto-" + "1" * 32,
+        workspace_root=tmp_path,
+        grounding={"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+        strict_v2=True,
+    )
+
+    assert envelope["schema"] == ceo_intent_mod.INTENT_SCHEMA_V2
+    assert "dialogue_source" not in envelope
+    assert ceo_intent_mod.validate_intent(envelope) == envelope
+
+
+def test_v2_ingress_host_source_provider_selects_source_free_strict_root(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    runtime = Runtime.at(config.runtime_root)
+    provider_calls: list[tuple[str, str]] = []
+
+    def source_provider(intent_id: str, workstream: str):
+        provider_calls.append((intent_id, workstream))
+        return _terminal_dialogue_source()
+
+    service = ExecutiveControlService(
+        config,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=source_provider,
+    )
+    service.runtime = runtime
+    grounding = {
+        "mastermind_sha": config.proof_base_sha,
+        "macro_sha": "b" * 40,
+        "boot_packet_schema": ceo_ingress_mod.BOOT_PACKET_SCHEMA,
+    }
+
+    class GroundingProvider:
+        def observe(self):
+            return dict(grounding)
+
+    frame = {
+        "schema": ceo_ingress_mod.SUBMIT_SCHEMA_V2,
+        "request_ref": "req-r2-host-source-20260903-001",
+        "observed_grounding": grounding,
+        "request": {
+            "objective": "Run one bounded Executive terminal-return fixture.",
+            "department": "executive-infrastructure",
+            "priority": 9,
+            "execution_profile": "research_only",
+            "workstream": "WS:EXECUTIVE-OS",
+            "attempt_limit": 2,
+        },
+    }
+
+    async def submit_twice():
+        async def submit():
+            return await ceo_ingress_mod.handle_frame(
+                frame,
+                runtime=runtime,
+                grounding_provider=GroundingProvider(),
+                workspace_root=config.proof_workspace_root,
+                service_state="READY",
+                ceo_ingress_armed=True,
+                strict_v2_admission=True,
+                execution_binding_provider=service._require_current_coo_binding,
+                dialogue_source_provider=source_provider,
+            )
+
+        return [await submit(), await submit()]
+
+    receipts = asyncio.run(submit_twice())
+    receipt = receipts[0]
+
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    assert root.orchestration_role == "aggregation"
+    assert root.orchestration_provenance["creator"] == "ceo_intent"
+    event = runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(receipt["intent_id"])
+    )
+    assert event is not None
+    assert event["payload"]["provenance"]["dialogue_source"] == (
+        _terminal_dialogue_source()
+    )
+    assert {item["job_id"] for item in receipts} == {receipt["job_id"]}
+    assert sorted(item["duplicate"] for item in receipts) == [False, True]
+    assert provider_calls == [
+        (receipt["intent_id"], "WS:EXECUTIVE-OS"),
+        (receipt["intent_id"], "WS:EXECUTIVE-OS"),
+    ]
+
+
+def test_terminal_return_production_composition_is_explicit_and_complete(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    with pytest.raises(ValueError, match="terminal-return"):
+        dataclasses.replace(config, terminal_return_armed=True)
+
+    armed = dataclasses.replace(
+        config,
+        terminal_return_armed=True,
+        terminal_return_socket_path=tmp_path / "agent-relay.sock",
+    )
+
+    class GroundingProvider:
+        def observe(self):
+            return {
+                "mastermind_sha": armed.proof_base_sha,
+                "macro_sha": "b" * 40,
+                "boot_packet_schema": ceo_ingress_mod.BOOT_PACKET_SCHEMA,
+            }
+
+    class Projector:
+        async def project(self, _candidate, *, before_write=None):
+            if before_write is not None:
+                before_write()
+
+        async def reconcile(self, _candidate):
+            return None
+
+    def projector_factory(_runtime_getter, _socket_path):
+        return Projector()
+
+    with pytest.raises(ValueError, match="terminal-return.*CeoIngress"):
+        ExecutiveControlService(
+            armed,
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            ceo_ingress_socket_path=armed.terminal_return_socket_path,
+            ceo_ingress_peer_uid=os.geteuid(),
+            ceo_ingress_grounding_provider=GroundingProvider(),
+            terminal_return_projector_factory=projector_factory,
+        )
+
+    # Terminal-only recovery is a startup capability even while the trusted
+    # admission-source provider is unavailable.  A new strict-v2 admission
+    # will refuse dynamically; construction must not disable durable replay.
+    outage_service = ExecutiveControlService(
+        armed,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_socket_path=tmp_path / "ceo-ingress.sock",
+        ceo_ingress_peer_uid=os.geteuid(),
+        ceo_ingress_grounding_provider=GroundingProvider(),
+        ceo_ingress_armed=True,
+        terminal_return_projector_factory=projector_factory,
+    )
+    assert outage_service._terminal_return_projector is not None
+    outage_runtime = Runtime.at(armed.runtime_root)
+    outage_service.runtime = outage_runtime
+    outage_intent = _coo_intent(armed, "armed-source-outage")
+    outage_intent["workstream"] = "WS:EXECUTIVE-OS"
+    with pytest.raises(
+        ceo_intent_mod.CeoIntentError,
+        match="trusted host dialogue source is unavailable",
+    ):
+        outage_service._submit_service_intent(outage_intent)
+    assert outage_runtime.jobs.list_jobs() == []
+    assert outage_runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(outage_intent["intent_id"])
+    ) is None
+
+    service = ExecutiveControlService(
+        armed,
+        supervisor_factory=lambda opened: _FakeSupervisor(opened),
+        ceo_ingress_dialogue_source_provider=(
+            lambda _intent_id, _workstream: _terminal_dialogue_source()
+        ),
+        terminal_return_projector_factory=projector_factory,
+    )
+    runtime = Runtime.at(armed.runtime_root)
+    service.runtime = runtime
+    intent = _coo_intent(armed, "armed-dialogue-source")
+    intent["workstream"] = "WS:EXECUTIVE-OS"
+
+    receipt = service._submit_service_intent(intent)
+
+    event = runtime.store.find_event_by_command_id(
+        ceo_intent_mod.command_id_for(intent["intent_id"])
+    )
+    assert receipt["job_id"]
+    assert event is not None
+    assert event["payload"]["provenance"]["dialogue_source"] == {
+        **_terminal_dialogue_source(),
+    }
+    assert service._terminal_return_projector is not None
+
+
+def test_armed_terminal_return_skips_source_free_history_without_phase_events(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, _work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-SOURCE-FREE-HISTORY",
+                review_workers=["worker-b"],
+            )
+        )
+        called = False
+
+        class Projector:
+            async def project(self, _candidate, *, before_write=None):
+                nonlocal called
+                called = True
+
+            async def reconcile(self, _candidate):
+                nonlocal called
+                called = True
+
+        config = dataclasses.replace(
+            _config(tmp_path / "service"),
+            terminal_return_armed=True,
+            terminal_return_socket_path=tmp_path / "agent-relay.sock",
+        )
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector_factory=lambda _runtime, _path: Projector(),
+        )
+        service.runtime = runtime
+
+        await service._project_terminal_return(
+            planner.job_id,
+            expected_attempt_id=planner.attempt.attempt_id,
+        )
+
+        assert called is False
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:SKIPPED_SOURCE_FREE"
+        )
+        assert runtime.events.list_events(
+            attempt_id=planner.attempt.attempt_id,
+            aggregate_type="terminal_return_projection",
+        ) == []
+
+    asyncio.run(exercise())
+
+
+def test_terminal_return_independent_candidates_do_not_share_an_io_lock(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, _cycle, _dispatches, _root, planner, work, _seal = (
+            _cycle_through_completed_work(
+                tmp_path / "runtime",
+                intent_id="CEO-SERVICE-INDEPENDENT-TERMINALS",
+                review_workers=["worker-b"],
+            )
+        )
+        both_entered = asyncio.Event()
+        release = asyncio.Event()
+        entered: list[str] = []
+
+        class Projector:
+            async def project(self, candidate, *, before_write):
+                entered.append(candidate.attempt_id)
+                if len(entered) == 2:
+                    both_entered.set()
+                await release.wait()
+                before_write()
+                return _projection_receipt(candidate)
+
+            async def reconcile(self, _candidate):
+                raise AssertionError("a fresh candidate must not reconcile")
+
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=Projector(),
+        )
+        service.runtime = runtime
+        tasks = [
+            asyncio.create_task(
+                service._project_terminal_return(
+                    item.job_id,
+                    expected_attempt_id=item.attempt.attempt_id,
+                )
+            )
+            for item in (planner, work)
+        ]
+        await asyncio.wait_for(both_entered.wait(), timeout=1)
+        release.set()
+        await asyncio.gather(*tasks)
+        assert set(entered) == {
+            planner.attempt.attempt_id,
+            work.attempt.attempt_id,
+        }
+
+    asyncio.run(exercise())
 
 
 def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
@@ -279,7 +7539,7 @@ def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
             assert (await _request(service, "register-worker"))["ok"] is True
 
             created = await _request(service, "create-proof-job")
-            assert created["ok"] is True
+            assert created["ok"] is True, created
             job_id = created["result"]["job_id"]
             first_workspace = Path(created["result"]["worktree"])
             assert first_workspace.parent == service.config.proof_workspace_root
@@ -319,7 +7579,7 @@ def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
             assert len(created["result"]["validation_commands"]) == 1
 
             dispatched = await _request(service, "dispatch", {"job_id": job_id})
-            assert dispatched["ok"] is True
+            assert dispatched["ok"] is True, dispatched
             attempt_id = dispatched["result"]["attempt"]["attempt_id"]
             for _ in range(100):
                 inspected = await _request(service, "job", {"job_id": job_id})
@@ -356,6 +7616,807 @@ def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
             await service.close()
         assert not service.socket_path.exists()
         assert not service.running_marker_path.exists()
+
+    asyncio.run(exercise())
+
+
+def test_host_bound_v2_cycle_uses_exact_profile_and_replays_one_attempt(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        finish_gate = asyncio.Event()
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=3600.0,
+        )
+        service, holder = _service(
+            tmp_path,
+            finish_gate=finish_gate,
+            config=config,
+        )
+        await service.start()
+        try:
+            registered = await _request(service, "register-worker")
+            assert registered["ok"] is True
+            assert set(registered["result"]["quota_classes"]) == {
+                "codex-native",
+                "codex-coo",
+                "codex-coo-default",
+            }
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "one")},
+            )
+            assert submitted["ok"] is True
+            assert submitted["result"]["dispatched"] is False
+            root_id = submitted["result"]["job_id"]
+            root = service.runtime.jobs.get_job(root_id)
+            assert root is not None
+            assert root.constraints["routing_policy_version"] == "2026-08-24.stage4"
+            assert root.constraints["execution_profile_id"] == (
+                "sealed.worker.write.no-extensions.v1"
+            )
+            assert root.constraints["eligible_quota_classes"] == [
+                "codex-coo",
+                "codex-coo-default",
+            ]
+            assert root.constraints["base_sha"] == config.proof_base_sha
+
+            created = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert created["ok"] is True
+            assert created["result"]["action"] == "PLANNER_CREATED"
+            planner_id = created["result"]["selected_job_id"]
+
+            dispatched = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert dispatched["ok"] is True, dispatched
+            assert dispatched["result"]["action"] == "DISPATCHED"
+            attempt_id = dispatched["result"]["receipt"]["attempt"]["attempt_id"]
+            assert "lease_token" not in json.dumps(dispatched, sort_keys=True)
+            assert holder["supervisor"].started_jobs == [planner_id]
+
+            replay = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert replay["ok"] is True
+            assert replay["result"]["action"] == "DISPATCHED"
+            assert replay["result"]["receipt"]["attempt"]["attempt_id"] == attempt_id
+            assert len(service.runtime.attempts.list_attempts(planner_id)) == 1
+
+            submitted_two = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "two")},
+            )
+            root_two = submitted_two["result"]["job_id"]
+            refused = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_two}
+            )
+            assert refused["ok"] is False
+            assert "serialized worker" in refused["error"]["message"]
+            assert [
+                job
+                for job in service.runtime.jobs.list_jobs()
+                if job.parent_job_id == root_two
+            ] == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_armed_operator_lane_binds_read_only_planner_and_not_sealed_worker(
+    tmp_path: Path, short_socket_root: Path
+) -> None:
+    async def exercise() -> None:
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_operator_harness_armed=True,
+            coo_tick_interval_seconds=3600.0,
+            operator_harness_binary_digest="a" * 64,
+            operator_harness_version="0.147.0",
+        )
+        holder: dict[str, object] = {"verified": 0}
+
+        def sealed_factory(runtime: Runtime):
+            supervisor = _FakeSupervisor(runtime)
+            holder["sealed"] = supervisor
+            return supervisor
+
+        class Operator:
+            def __init__(self, runtime: Runtime) -> None:
+                self.runtime = runtime
+                self.started_jobs: list[str] = []
+
+            def reconcile_restart(self, *, requeue_lost: bool = False):
+                assert requeue_lost is False
+                return []
+
+            async def start_cycle_job(self, job_id: str, *, command_id: str):
+                self.started_jobs.append(job_id)
+                outcome = self.runtime.attempts.dispatch_cycle_job(
+                    job_id,
+                    command_id=command_id,
+                    lease_owner="operator-service-fixture",
+                )
+                assert outcome is not None
+                return outcome
+
+        def operator_factory(runtime: Runtime, _sealed):
+            operator = Operator(runtime)
+            holder["operator"] = operator
+            return operator
+
+        async def verify_identity() -> None:
+            holder["verified"] = int(holder["verified"]) + 1
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=sealed_factory,
+            operator_supervisor_factory=operator_factory,
+            operator_identity_verifier=verify_identity,
+            autonomy_guard=lambda: None,
+        )
+        await service.start()
+        try:
+            assert holder["verified"] == 1
+            assert (await _request(service, "register-worker"))["ok"] is True
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "operator")},
+            )
+            assert submitted["ok"] is True
+            root_id = submitted["result"]["job_id"]
+            root = service.runtime.jobs.get_job(root_id)
+            assert root is not None
+            assert root.constraints["operator_harness_armed"] is True
+            assert root.constraints["operator_harness_binary_digest"] == "a" * 64
+
+            created = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert created["ok"] is True, created
+            planner_id = created["result"]["selected_job_id"]
+            planner = service.runtime.jobs.get_job(planner_id)
+            assert planner is not None
+            assert planner.constraints["execution_profile_id"] == (
+                "operator.appserver.readonly.docs-mcp.native-helper.v1"
+            )
+            assert planner.constraints["eligible_quota_classes"] == [
+                "codex-coo-operator"
+            ]
+            assert planner.constraints["harness_binary_digest"] == "a" * 64
+            assert planner.requested_authorities == ["READ"]
+            assert planner.allowed_write_paths == []
+
+            dispatched = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert dispatched["ok"] is True
+            assert dispatched["result"]["action"] == "DISPATCHED"
+            operator = holder["operator"]
+            sealed = holder["sealed"]
+            assert operator.started_jobs == [planner_id]
+            assert sealed.started_jobs == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_bounded_service_tick_advances_only_one_bound_root_action(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        finish_gate = asyncio.Event()
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=1.0,
+        )
+        service, _holder = _service(
+            tmp_path,
+            finish_gate=finish_gate,
+            config=config,
+        )
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "tick")},
+            )
+            root_id = submitted["result"]["job_id"]
+            submitted_two = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "tick-two")},
+            )
+            root_two = submitted_two["result"]["job_id"]
+            children = []
+            for _ in range(60):
+                children = [
+                    job
+                    for job in service.runtime.jobs.list_jobs()
+                    if job.parent_job_id == root_id
+                ]
+                if children:
+                    break
+                await asyncio.sleep(0.025)
+            assert len(children) == 1
+            assert children[0].orchestration_role == "plan"
+            assert service.runtime.attempts.list_attempts(children[0].job_id) == []
+            assert [
+                job
+                for job in service.runtime.jobs.list_jobs()
+                if job.parent_job_id == root_two
+            ] == []
+            assert len(
+                [
+                    job
+                    for job in service.runtime.jobs.list_jobs()
+                    if job.orchestration_role == "plan"
+                ]
+            ) == 1
+            status = await _request(service, "status")
+            assert status["result"]["coo_autonomy"]["armed"] is True
+            assert status["result"]["coo_autonomy"]["last_outcome"]["action"] == (
+                "PLANNER_CREATED"
+            )
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_bounded_service_tick_persists_one_refusal_without_mutating_root(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=1.0,
+        )
+        service, _holder = _service(tmp_path, config=config)
+        await service.start()
+        try:
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "tick-refusal")},
+            )
+            assert submitted["ok"] is True
+            root_id = submitted["result"]["job_id"]
+
+            refusal_events = []
+            for _ in range(80):
+                refusal_events = [
+                    event
+                    for event in service.runtime.events.list_events(job_id=root_id)
+                    if event.event_type == "COO_SERVICE_TICK_REFUSED"
+                ]
+                if refusal_events:
+                    break
+                await asyncio.sleep(0.025)
+            assert len(refusal_events) == 1
+            assert refusal_events[0].payload["reason_code"] == (
+                "bounded_cycle_action_refused"
+            )
+            assert refusal_events[0].payload["error_type"] == "StateConflict"
+            assert [
+                job
+                for job in service.runtime.jobs.list_jobs()
+                if job.parent_job_id == root_id
+            ] == []
+
+            await asyncio.sleep(1.1)
+            assert len(
+                [
+                    event
+                    for event in service.runtime.events.list_events(job_id=root_id)
+                    if event.event_type == "COO_SERVICE_TICK_REFUSED"
+                ]
+            ) == 1
+            status = await _request(service, "status")
+            assert "reviewed COO worker identity" in status["result"][
+                "coo_autonomy"
+            ]["last_error"]
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_armed_service_advances_review_repair_without_web_continue(
+    tmp_path: Path,
+    short_socket_root: Path,
+):
+    async def wait_until(service, predicate, *, timeout: float = 30.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if predicate():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError(
+            "bounded service did not reach aggregation handoff: "
+            f"last_error={service._coo_last_error} "
+            f"last_outcome={service._coo_last_outcome} "
+            f"dispatch_errors={service._dispatch_errors}"
+        )
+
+    class TypedCooSupervisor(_FakeSupervisor):
+        def __init__(self, runtime: Runtime, *, service_config: ServiceConfig):
+            super().__init__(runtime)
+            self.service_config = service_config
+            self.dispatches: dict[str, OrchestrationDispatchOutcome] = {}
+
+        async def start_cycle_job(self, job_id: str, *, command_id: str):
+            job = self.runtime.jobs.get_job(job_id)
+            assert job is not None
+            if job.orchestration_role != "review":
+                self.runtime.workers.set_worker_status(
+                    "codex-reviewer-01",
+                    WorkerStatus.OFFLINE,
+                    quota_class=self.service_config.coo_quota_class,
+                )
+            if job.orchestration_role == "review":
+                self.runtime.workers.set_worker_status(
+                    "codex-reviewer-01", WorkerStatus.AVAILABLE
+                )
+                self.runtime.workers.set_worker_status(
+                    self.service_config.worker_id, WorkerStatus.OFFLINE
+                )
+            outcome = self.runtime.attempts.dispatch_cycle_job(
+                job_id,
+                command_id=command_id,
+                lease_owner="service-typed-fixture",
+            )
+            if outcome is None:
+                raise StateConflict(f"typed fixture capacity unavailable for {job_id}")
+            self.started_jobs.append(job_id)
+            self.dispatches[job_id] = outcome
+            if outcome.lease_token is None:
+                raise RuntimeError(
+                    "OUTCOME TOKEN MISSING " + repr((job_id, command_id))
+                )
+            return _Active(
+                lease=AttemptLease(
+                    attempt=outcome.attempt,
+                    lease_token=str(outcome.lease_token),
+                )
+            )
+
+        async def finish_job(self, active: _Active):
+            dispatch = self.dispatches[active.lease.attempt.job_id]
+            attempt = active.lease.attempt
+            assert dispatch.lease_token is not None
+            assert active.lease.lease_token is not None
+            assert self.started_jobs[-1] == attempt.job_id
+            job = self.runtime.jobs.get_job(attempt.job_id)
+            assert job is not None and job.orchestration_role
+            plan_job = next(
+                item
+                for item in self.runtime.jobs.list_jobs()
+                if item.root_job_id == job.root_job_id
+                and item.orchestration_role == "plan"
+            )
+            if job.orchestration_role == "plan":
+                plan_body = {
+                    "schema_version": "mastermind.execution_plan/v1",
+                    "root_job_id": job.root_job_id,
+                    "plan_attempt_id": attempt.attempt_id,
+                    "steps": [
+                        {
+                            "ordinal": 0,
+                            "step_id": "step-1",
+                            "objective": "Perform one bounded read-only task.",
+                            "business_impact": "routine",
+                            "review_required": True,
+                            "requested_authorities": ["READ"],
+                            "allowed_write_paths": [],
+                            "validation_ids": [],
+                            "attempt_limit": 1,
+                            "cost_class": "small",
+                        }
+                    ],
+                }
+            else:
+                plan_terminal = plan_job.result
+                assert plan_terminal is not None
+                plan_body = plan_terminal["result_envelope"]["role_result"]
+            plan_digest = canonical_digest(plan_body)
+
+            if job.orchestration_role == "plan":
+                body = plan_body
+            elif job.orchestration_role in {"work", "repair"}:
+                body = {
+                    "schema_version": "mastermind.work_result/v1"
+                    if job.orchestration_role == "work"
+                    else "mastermind.repair_result/v1",
+                    "root_job_id": job.root_job_id,
+                    "plan_attempt_id": job.plan_attempt_id,
+                    "plan_digest": plan_digest,
+                    "plan_step_id": job.plan_step_id,
+                    "repair_round": job.repair_round,
+                    "artifacts": [],
+                    "evidence_digests": [],
+                }
+                if job.orchestration_role == "repair":
+                    assert job.supersedes_job_id and job.orchestration_provenance
+                    rejected_review_id = job.orchestration_provenance["source_id"]
+                    rejected_review = self.runtime.jobs.get_job(rejected_review_id)
+                    assert rejected_review is not None and rejected_review.result
+                    body["supersedes_job_id"] = job.supersedes_job_id
+                    body["rejected_review_job_id"] = rejected_review_id
+                    rejected_envelope = rejected_review.result["result_envelope"]
+                    body["rejected_review_result_digest"] = canonical_digest(
+                        rejected_envelope["role_result"]
+                    )
+            elif job.orchestration_role == "review":
+                assert job.reviews_job_id
+                reviewed = self.runtime.jobs.get_job(job.reviews_job_id)
+                reviewed_result = reviewed.result if reviewed is not None else None
+                reviewed_envelope = (
+                    reviewed_result.get("result_envelope")
+                    if reviewed_result is not None
+                    else None
+                )
+                reviewed_body = (
+                    reviewed_envelope.get("role_result")
+                    if reviewed_envelope is not None
+                    else None
+                )
+                assert reviewed_body is not None and reviewed_body[
+                    "schema_version"
+                ] in {
+                    "mastermind.work_result/v1",
+                    "mastermind.repair_result/v1",
+                }
+                assert reviewed_envelope is not None
+                body = _review_body(
+                    root_id=job.root_job_id,
+                    plan_attempt_id=str(job.plan_attempt_id),
+                    plan_digest=plan_digest,
+                    target_job_id=reviewed.job_id,
+                    target_attempt_id=str(reviewed.current_attempt_id),
+                    target_result_digest=canonical_digest(
+                        reviewed_envelope["role_result"]
+                    ),
+                    repair_round=int(job.repair_round or 0),
+                    verdict="reject" if job.repair_round == 0 else "approve",
+                )
+            else:
+                assert job.orchestration_role == "aggregation"
+                handoff = self.runtime.jobs.get_cycle_handoff(job.job_id)
+                body = {
+                    "schema_version": "mastermind.aggregation_result/v1",
+                    "root_job_id": job.root_job_id,
+                    "handoff_digest": handoff["handoff_digest"],
+                    "policy_sha": handoff["policy_sha"],
+                    "plan_attempt_id": handoff["plan_attempt_id"],
+                    "plan_digest": handoff["plan_digest"],
+                    "revisions": [
+                        {
+                            key: item[key]
+                            for key in {
+                                "ordinal",
+                                "plan_step_id",
+                                "current_job_id",
+                                "current_attempt_id",
+                                "current_result_digest",
+                                "repair_round",
+                                "review_required",
+                                "qualifying_review_job_id",
+                                "qualifying_review_attempt_id",
+                                "qualifying_review_result_digest",
+                            }
+                        }
+                        for item in handoff["revisions"]
+                    ],
+                    "aggregate_summary": "One bounded repaired result is ready.",
+                    "evidence_digests": [],
+                }
+
+            seal, _terminal = _complete_ohf_role(
+                self.runtime,
+                dispatch,
+                body,
+                identity_seed=8400 + len(self.started_jobs),
+            )
+            if job.orchestration_role == "review":
+                self.runtime.workers.set_worker_status(
+                    self.service_config.worker_id, WorkerStatus.AVAILABLE
+                )
+                self.runtime.workers.set_worker_status(
+                    "codex-reviewer-01", WorkerStatus.OFFLINE
+                )
+            return seal
+
+    async def exercise() -> None:
+        base_config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=3600.0,
+        )
+        config = base_config
+        object.__setattr__(base_config, "coo_tick_interval_seconds", 0.01)
+
+        def runtime_factory(root: Path):
+            return prewarm_runtime
+
+        def supervisor_factory(runtime: Runtime):
+            return TypedCooSupervisor(runtime, service_config=config)
+
+        service = ExecutiveControlService(
+            config,
+            runtime_factory=runtime_factory,
+            supervisor_factory=supervisor_factory,
+            autonomy_guard=lambda: None,
+        )
+        binding = service._coo_execution_binding
+        reviewer_capabilities = list(
+            ModelRouter.load()
+            .model_aliases[config.coo_model_alias]
+            .capabilities
+        )
+        prewarm_runtime = Runtime.at(config.runtime_root)
+        prewarm_runtime.workers.register_worker(
+            "codex-reviewer-01",
+            provider=str(binding["provider"]),
+            account_label=f"{config.worker_account_label}-reviewer",
+            worker_type=config.worker_type,
+            quota_classes={
+                config.coo_quota_class: {
+                    "provider": str(binding["provider"]),
+                    "model": str(binding["model"]),
+                    "effort": str(binding["effort"]),
+                    "cost_class": str(binding["cost_class"]),
+                    "capabilities": reviewer_capabilities,
+                    "metadata": {
+                        "routing_policy_version": binding[
+                            "routing_policy_version"
+                        ],
+                        "execution_profile_id": binding["execution_profile_id"],
+                        "execution_profile_digest": binding[
+                            "execution_profile_digest"
+                        ],
+                        "capability_policy_version": binding[
+                            "capability_policy_version"
+                        ],
+                        "capability_policy_digest": binding[
+                            "capability_policy_digest"
+                        ],
+                    },
+                    "status": WorkerStatus.OFFLINE,
+                }
+            },
+            metadata={"service_managed": True},
+        )
+        # ``ExecutiveControlService.start`` must reconcile this existing Runtime,
+        # not construct an unrelated instance that drops the reviewer identity.
+        await service.start()
+        try:
+            service._register_worker()
+            runtime = service.runtime
+            submitted = service._submit_service_intent(
+                _coo_intent(config, "offline-delivery")
+            )
+            root_id = str(submitted["job_id"])
+            runtime = service.runtime
+            assert runtime is not None
+            await wait_until(
+                service, lambda: _handoff_ready(runtime, root_id)
+            )
+            assert service._coo_last_error is None
+            assert service._coo_last_tick_at is not None
+            def all_children_completed() -> bool:
+                children = [
+                    job
+                    for job in runtime.jobs.list_jobs()
+                    if job.root_job_id == root_id and job.orchestration_role
+                ]
+                return len(children) == 6 and all(
+                    job.status is JobStatus.COMPLETED for job in children
+                )
+
+            await wait_until(service, all_children_completed)
+            handoff = runtime.jobs.get_cycle_handoff(root_id)
+            revision = handoff["revisions"][0]
+            assert revision["repair_round"] == 1
+            roles = {
+                (job.orchestration_role, int(job.repair_round or 0)): job
+                for job in runtime.jobs.list_jobs()
+                if job.root_job_id == root_id and job.orchestration_role
+            }
+            assert roles[("review", 0)].status is JobStatus.COMPLETED
+            assert roles[("repair", 1)].status is JobStatus.COMPLETED
+            assert revision["current_job_id"] == roles[("repair", 1)].job_id
+            assert (
+                revision["qualifying_review_job_id"]
+                != roles[("review", 0)].job_id
+            )
+            assert sum(
+                job.orchestration_role == "repair"
+                for job in runtime.jobs.list_jobs()
+                if job.root_job_id == root_id
+            ) == 1
+            for child in roles.values():
+                assert child.status is JobStatus.COMPLETED
+            assert service._dispatch_errors == {}
+            pre_close_handoff = handoff
+        finally:
+            await service.close()
+
+        restart_service = ExecutiveControlService(
+            config,
+            runtime_factory=lambda _root: runtime,
+            supervisor_factory=lambda runtime: TypedCooSupervisor(
+                runtime, service_config=config
+            ),
+            autonomy_guard=lambda: None,
+        )
+        await restart_service.start()
+        try:
+            await wait_until(
+                restart_service,
+                lambda: restart_service._startup_reconciliation is not None,
+            )
+            assert restart_service._coo_last_error is None
+            restart_handoff = runtime.jobs.get_cycle_handoff(root_id)
+            assert restart_handoff == pre_close_handoff
+            role_counts = {}
+            for job in runtime.jobs.list_jobs():
+                if job.root_job_id == root_id and job.orchestration_role:
+                    role_counts[job.orchestration_role] = (
+                        role_counts.get(job.orchestration_role, 0) + 1
+                    )
+            assert role_counts == {
+                "plan": 1,
+                "work": 1,
+                "review": 2,
+                "repair": 1,
+                "aggregation": 1,
+            }
+        finally:
+            await restart_service.close()
+
+    asyncio.run(exercise())
+
+
+def _handoff_ready(runtime: Runtime, root_id: str) -> bool:
+    try:
+        runtime.jobs.get_cycle_handoff(root_id)
+    except StateConflict:
+        return False
+    return True
+
+
+def test_unarmed_service_admits_but_cannot_advance_bound_v2_root(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        service, _holder = _service(tmp_path, config=config)
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "held")},
+            )
+            root_id = submitted["result"]["job_id"]
+            refused = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert refused["ok"] is False
+            assert "not armed" in refused["error"]["message"]
+            assert service._coo_tick_task is None
+            assert [
+                job
+                for job in service.runtime.jobs.list_jobs()
+                if job.parent_job_id == root_id
+            ] == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_service_adds_exact_coo_capacity_to_existing_legacy_worker(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        runtime = Runtime.at(config.runtime_root)
+        runtime.workers.register_worker(
+            config.worker_id,
+            provider=config.provider,
+            account_label=config.worker_account_label,
+            worker_type=config.worker_type,
+            capabilities=["code", "research", "tests"],
+            quota_classes={
+                config.quota_class: {
+                    "provider": config.provider,
+                    "model": config.model,
+                    "effort": config.effort,
+                    "cost_class": config.cost_class,
+                    "capabilities": ["code", "research", "tests"],
+                }
+            },
+            metadata={"service_managed": True},
+        )
+        service, _holder = _service(tmp_path, config=config)
+        await service.start()
+        try:
+            registered = await _request(service, "register-worker")
+            assert registered["ok"] is True
+            assert set(registered["result"]["quota_classes"]) == {
+                config.quota_class,
+                config.coo_quota_class,
+                config.coo_default_quota_class,
+            }
+            events = [
+                event
+                for event in service.runtime.events.list_events()
+                if event.event_type == "WORKER_QUOTA_REGISTERED"
+                and event.worker_id == config.worker_id
+            ]
+            assert {event.quota_class for event in events} == {
+                config.coo_quota_class,
+                config.coo_default_quota_class,
+            }
+            assert (await _request(service, "register-worker"))["ok"] is True
+            assert len(
+                [
+                    event
+                    for event in service.runtime.events.list_events()
+                    if event.event_type == "WORKER_QUOTA_REGISTERED"
+                    and event.worker_id == config.worker_id
+                ]
+            ) == 2
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_caller_cannot_override_reviewed_v2_host_execution_binding(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        service, _holder = _service(tmp_path, config=config)
+        await service.start()
+        try:
+            intent = _coo_intent(config, "binding-conflict")
+            intent["execution_contract"]["constraints"] = {
+                "cost_class": "default"
+            }
+            refused = await _request(
+                service, "submit-ceo-intent", {"intent": intent}
+            )
+            assert refused["ok"] is False
+            assert "conflicts with reviewed host composition" in refused["error"][
+                "message"
+            ]
+            assert service.runtime.jobs.list_jobs() == []
+        finally:
+            await service.close()
 
     asyncio.run(exercise())
 
@@ -993,12 +9054,264 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                 tmp_path / "control-environment-attestation.json"
             ),
         }
+        unarmed_path = tmp_path / "control-unarmed.json"
+        unarmed_path.write_text(json.dumps(raw), encoding="utf-8")
+        unarmed_path.chmod(0o400)
+        unarmed = service_cli.load_control_config(unarmed_path)
+        assert not (
+            {
+                "terminal_return_armed",
+                "terminal_return_socket_path",
+            }
+            & set(unarmed)
+        )
+        observation_keys = {
+            "dialogue_observation_socket_path",
+            "dialogue_observation_launchd_socket_name",
+            "dialogue_observation_peer_uid",
+            "dialogue_bridge_armed",
+            "dialogue_wake_retry_policy",
+        }
+        unarmed_wake_policy = {
+            "max_delivery_attempts": None,
+            "retry_cooldown_s": None,
+            "accepted_ttl_s": None,
+            "target_unavailable_backoff_s": None,
+            "reenable_on_binding_rotation": True,
+            "armed": False,
+        }
+        observation_fields = {
+            "dialogue_observation_socket_path": (
+                "/var/run/mastermind-dialogue-observation/"
+                "dialogue-observation.sock"
+            ),
+            "dialogue_observation_launchd_socket_name": "DialogueObservation",
+            "dialogue_observation_peer_uid": 457,
+            "dialogue_bridge_armed": False,
+            "dialogue_wake_retry_policy": unarmed_wake_policy,
+        }
+        assert not (observation_keys & set(unarmed))
+        for missing in observation_keys:
+            partial_path = tmp_path / f"control-observation-missing-{missing}.json"
+            partial = {
+                **raw,
+                **observation_fields,
+            }
+            partial.pop(missing)
+            partial_path.write_text(json.dumps(partial), encoding="utf-8")
+            partial_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="must be supplied together"):
+                service_cli.load_control_config(partial_path)
+
+        observation_path = tmp_path / "control-observation.json"
+        observation_path.write_text(
+            json.dumps(
+                {
+                    **raw,
+                    **observation_fields,
+                }
+            ),
+            encoding="utf-8",
+        )
+        observation_path.chmod(0o400)
+        observation_loaded = service_cli.load_control_config(observation_path)
+        assert observation_loaded["dialogue_observation_socket_path"] == Path(
+            "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+        ).resolve(strict=False)
+        assert observation_loaded["dialogue_observation_peer_uid"] == 457
+        assert observation_loaded["dialogue_bridge_armed"] is False
+
+        armed_observation_path = tmp_path / "control-observation-armed.json"
+        armed_observation_path.write_text(
+            json.dumps(
+                {
+                    **raw,
+                    **observation_fields,
+                    "dialogue_bridge_armed": True,
+                    "dialogue_wake_retry_policy": {
+                        "max_delivery_attempts": 1,
+                        "retry_cooldown_s": 15,
+                        "accepted_ttl_s": 300,
+                        "target_unavailable_backoff_s": 60,
+                        "reenable_on_binding_rotation": True,
+                        "armed": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        armed_observation_path.chmod(0o400)
+        armed_observation_loaded = service_cli.load_control_config(
+            armed_observation_path
+        )
+
+        terminal_return_path = tmp_path / "control-terminal-return.json"
+        terminal_return_path.write_text(
+            json.dumps(
+                {
+                    **raw,
+                    "terminal_return_armed": True,
+                    "terminal_return_socket_path": (
+                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                    ),
+                }
+            ),
+            encoding="utf-8",
+        )
+        terminal_return_path.chmod(0o400)
+        terminal_loaded = service_cli.load_control_config(terminal_return_path)
+        assert terminal_loaded["terminal_return_armed"] is True
+        assert terminal_loaded["terminal_return_socket_path"] == Path(
+            "/var/run/mastermind-agent-relay/agent-relay.sock"
+        ).resolve(strict=False)
+        terminal_unarmed_path = tmp_path / "control-terminal-return-unarmed.json"
+        terminal_unarmed_path.write_text(
+            json.dumps(
+                {
+                    **raw,
+                    "terminal_return_armed": False,
+                    "terminal_return_socket_path": (
+                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                    ),
+                }
+            ),
+            encoding="utf-8",
+        )
+        terminal_unarmed_path.chmod(0o400)
+        terminal_unarmed_loaded = service_cli.load_control_config(
+            terminal_unarmed_path
+        )
+
+        stale_policy_path = tmp_path / "control-stale-policy.json"
+        stale_policy_path.write_text(
+            json.dumps(
+                {
+                    **raw,
+                    "terminal_return_allowed_sol_user_ids": ["U0BRETDUAS2"],
+                    "terminal_return_relay_bot_user_id": "U0RELAY001",
+                }
+            ),
+            encoding="utf-8",
+        )
+        stale_policy_path.chmod(0o400)
+        with pytest.raises(ServiceError, match="unknown=.*terminal_return_allowed"):
+            service_cli.load_control_config(stale_policy_path)
+
         config_path = tmp_path / "control.json"
         config_path.write_text(json.dumps(raw), encoding="utf-8")
         config_path.chmod(0o400)
         loaded = service_cli.load_control_config(config_path)
-        monkeypatch.setattr(service_cli, "activate_launchd_socket", lambda _name: listener)
-        service = service_cli._service_from_config(loaded)
+        monkeypatch.setattr(
+            service_cli, "activate_launchd_socket", lambda _name: listener
+        )
+        captured: dict[str, object] = {}
+
+        def capture_service(config, **kwargs):
+            captured["config"] = config
+            captured["kwargs"] = kwargs
+            return object()
+
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(
+                service_cli, "activate_launchd_socket", lambda _name: listener
+            )
+            composition_patch.setattr(
+                service_cli, "ExecutiveControlService", capture_service
+            )
+            service_cli._service_from_config(
+                terminal_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        composed_config = captured["config"]
+        composed_kwargs = captured["kwargs"]
+        assert isinstance(composed_config, ServiceConfig)
+        assert composed_config.terminal_return_armed is True
+        assert isinstance(composed_kwargs, dict)
+        projector_factory = composed_kwargs["terminal_return_projector_factory"]
+        projector = projector_factory(
+            lambda: object(), composed_config.terminal_return_socket_path
+        )
+        assert isinstance(projector, ExecutiveTerminalReturnProjector)
+
+        captured.clear()
+        activated_names: list[str] = []
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(
+                service_cli,
+                "activate_launchd_socket",
+                lambda name: (activated_names.append(name), listener)[1],
+            )
+            composition_patch.setattr(
+                service_cli, "ExecutiveControlService", capture_service
+            )
+            service_cli._service_from_config(
+                observation_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        observation_kwargs = captured["kwargs"]
+        assert activated_names == ["Operator"]
+        assert "dialogue_observation_socket_path" not in observation_kwargs
+        assert "dialogue_wake_handler" not in observation_kwargs
+
+        captured.clear()
+        activated_names.clear()
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(
+                service_cli,
+                "activate_launchd_socket",
+                lambda name: (activated_names.append(name), listener)[1],
+            )
+            composition_patch.setattr(
+                service_cli, "ExecutiveControlService", capture_service
+            )
+            service_cli._service_from_config(
+                armed_observation_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        observation_kwargs = captured["kwargs"]
+        assert activated_names == ["Operator", "DialogueObservation"]
+        assert observation_kwargs["dialogue_observation_peer_uid"] == 457
+        assert observation_kwargs["dialogue_observation_group_gid"] == 457
+        assert observation_kwargs["dialogue_observation_socket_path"] == Path(
+            "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
+        ).resolve(strict=False)
+        assert isinstance(
+            observation_kwargs["dialogue_wake_handler"],
+            ExecutiveDialogueWakeBridge,
+        )
+
+        captured.clear()
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(
+                service_cli, "activate_launchd_socket", lambda _name: listener
+            )
+            composition_patch.setattr(
+                service_cli, "ExecutiveControlService", capture_service
+            )
+            service_cli._service_from_config(
+                terminal_unarmed_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        unarmed_composed_config = captured["config"]
+        unarmed_composed_kwargs = captured["kwargs"]
+        assert isinstance(unarmed_composed_config, ServiceConfig)
+        assert unarmed_composed_config.terminal_return_armed is False
+        assert unarmed_composed_config.terminal_return_socket_path == Path(
+            "/var/run/mastermind-agent-relay/agent-relay.sock"
+        ).resolve(strict=False)
+        assert isinstance(unarmed_composed_kwargs, dict)
+        assert "terminal_return_projector_factory" not in unarmed_composed_kwargs
+
+        with pytest.raises(ValueError, match="coo_tick_interval_seconds"):
+            service_cli._service_from_config(
+                {**loaded, "coo_tick_interval_seconds": 0}
+            )
+        service = service_cli._service_from_config(
+            loaded,
+            initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+        )
+        assert service.config.terminal_return_armed is False
+        assert service.config.terminal_return_socket_path is None
         await service.start()
         try:
             from control_plane.executive_worker_broker import (
@@ -1010,14 +9323,14 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             assert isinstance(
                 service.supervisor.process_controller, RemoteWorkerProcessController
             )
-            assert service.supervisor.require_complete_launch_attestation is False
+            assert service.supervisor.require_complete_launch_attestation is True
             assert service.supervisor.isolation_roots == (
                 Path(raw["proof_workspace_root"]).resolve(),
                 Path(raw["worker_runs_root"]).resolve(),
             )
             status = await _request(service, "status")
             assert status["ok"] is True
-            assert status["result"]["service_state"] == "AWAITING_CANARY"
+            assert status["result"]["service_state"] == "READY"
         finally:
             await service.close()
 
@@ -1127,6 +9440,34 @@ def test_canary_envelope_binds_live_control_probe_and_inner_receipt(tmp_path: Pa
         raw=raw,
         control_attestation=control_attestation,
     ) == inner
+
+    class _BootClient:
+        async def request(self, operation, payload):
+            assert operation == "autonomy-canary"
+            assert payload == {"control_environment_attestation": control_attestation}
+            return {"envelope": envelope}
+
+    assert asyncio.run(
+        service_cli._request_boot_autonomy_canary(
+            raw,
+            control_attestation,
+            client=_BootClient(),
+        )
+    ) == inner
+    tmp_path.chmod(0o700)
+    persisted = tmp_path / "boot-secret-canary.json"
+    persisted.write_text('{"stale":true}\n', encoding="utf-8")
+    persisted.chmod(0o400)
+    assert asyncio.run(
+        service_cli._request_boot_autonomy_canary(
+            raw,
+            control_attestation,
+            client=_BootClient(),
+            persist_path=persisted,
+        )
+    ) == inner
+    assert stat.S_IMODE(persisted.stat().st_mode) == 0o400
+    assert json.loads(persisted.read_text(encoding="utf-8")) == envelope
 
     stale = dict(control_attestation)
     stale["process_identity"] = {**control_identity, "pid": 9999}
@@ -1261,6 +9602,8 @@ def test_cli_exposes_configured_serve_and_offline_restore_only():
         ]
     )
     assert restore.command == "restore-backup"
+    cycle = service_cli._parser().parse_args(["run-coo-cycle", "JOB-001"])
+    assert cycle.command == "run-coo-cycle" and cycle.root_job_id == "JOB-001"
     # The live JSON protocol deliberately has no restore verb.
     assert "restore" not in {
         "status",
@@ -1272,6 +9615,7 @@ def test_cli_exposes_configured_serve_and_offline_restore_only():
         "register-worker",
         "create-proof-job",
         "dispatch",
+        "run-coo-cycle",
         "cancel",
         "reconcile",
         "requeue",
@@ -1607,3 +9951,49 @@ def test_ambient_process_and_invalid_provider_result_fail_job_keep_service_ready
             await service.close()
 
     asyncio.run(exercise())
+
+def test_service_schedules_recovered_runs_through_existing_dispatch_registry() -> None:
+    async def scenario() -> None:
+        attempt = type(
+            "AttemptFixture",
+            (),
+            {"attempt_id": "ATT-recovered", "job_id": "JOB-recovered"},
+        )()
+        active = type(
+            "ActiveFixture",
+            (),
+            {"lease": type("LeaseFixture", (), {"attempt": attempt})()},
+        )()
+
+        class Supervisor:
+            def __init__(self) -> None:
+                self.values = [active]
+                self.finished: list[object] = []
+
+            def take_recovered_runs(self):
+                values = tuple(self.values)
+                self.values.clear()
+                return values
+
+            async def finish_job(self, value):
+                self.finished.append(value)
+
+        supervisor = Supervisor()
+        service = object.__new__(es_mod.ExecutiveControlService)
+        service.supervisor = supervisor
+        service._dispatch_tasks = {}
+        service._dispatch_errors = {}
+        service._service_state = "READY"
+
+        async def no_projection(_job_id, *, expected_attempt_id):
+            assert expected_attempt_id == "ATT-recovered"
+
+        service._project_terminal_return = no_projection
+        await service._schedule_recovered_runs()
+        tasks = tuple(service._dispatch_tasks.values())
+        assert len(tasks) == 1
+        await asyncio.gather(*tasks)
+        assert supervisor.finished == [active]
+        assert service._dispatch_tasks == {}
+
+    asyncio.run(scenario())

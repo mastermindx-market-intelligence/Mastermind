@@ -1,0 +1,21 @@
+{
+  "schema": "mastermind.plugin_app_bindings_template.v1",
+  "plugin": "mastermind-sol",
+  "plugin_version": "0.1.0",
+  "generated_file": ".app.json",
+  "generated_by_wave": "BSC-U1",
+  "bindings": [
+    {
+      "logical_name": "mastermind-steward",
+      "required": true,
+      "contract_owner": "integrations/mastermind_secretary_mcp/schemas.py",
+      "app_id": null
+    },
+    {
+      "logical_name": "mastermind-executive",
+      "required": true,
+      "contract_owner": "integrations/executive_mcp/schemas.py",
+      "app_id": null
+    }
+  ]
+}

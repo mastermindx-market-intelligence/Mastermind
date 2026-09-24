@@ -1,10 +1,15 @@
 # Mastermind — context for the reasoning layer
 
-You are the LLM reasoning layer for an autonomous, **paper-only**, narrative-based,
-medium/long-term **US-equity** investment bot. The FastAPI server invokes you headlessly
-(Claude Code) to do deep reasoning and narrative analysis over live signals. You are
-**read-only**: you analyze and recommend; deterministic engines own all sizing and the bot
-never auto-executes.
+This repository supports distinct portfolio-reasoning and engineering contexts.
+
+The portfolio-reasoning invocation is read-only. The FastAPI server invokes Claude Code
+for narrative analysis of an autonomous, **paper-only**, medium/long-term **US-equity**
+investment bot. Deterministic engines own all sizing and the bot never auto-executes.
+
+An explicitly assigned engineering/operations session is a different role. Its permitted
+source, test, and maintenance actions follow the current assignment and applicable grants
+under the Executive contract below. This distinction does not grant runtime, credential,
+trading, or source-write authority and never promotes research into trade execution.
 
 ## Executive contract
 
@@ -12,11 +17,16 @@ Binding on every worker session. Full text: `AGENTS.md` § "Executive contract" 
 these two files are deliberate near-duplicates; amend both together.
 
 **Hierarchy.** Chairman **Chris** (sets strategy) → AI CEO **GPT-5.6 Sol** (owns
-strategy proposals and objective-set changes) → COO **Fable** (adjudication, routing,
-merges) → **workers** (Claude / Codex / routed specialists — you). The **governor** is
+strategy proposals and objective-set changes) → COO **Fable** (delegated orchestration,
+when assigned) → **workers** (Claude / Codex / routed specialists — you). The **governor** is
 not a person: `config/authority_map.yml`, `control_plane/packet_gate.py`,
 `control_plane/governance.py`, and the Macro fleet guards. Authority is what those
 enforce, never what a session asserts.
+
+Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
+and merge decisions follow the currently authorized role and operation, not a
+historical session name. Independent review and source/release protections still apply.
+These role descriptions do not themselves grant authority.
 
 **Source-of-truth order** — higher layer wins on conflict:
 1. Charter — `research/MASTERMIND_CHARTER_V2.md` (P1–P10); `DOCTRINE.md` beneath it.
@@ -39,6 +49,50 @@ changes; do not rebuild an existing system without evidence it is unusable.
 
 **Completion.** Writing code does not complete a job. The job's stated acceptance
 evidence completes it.
+
+### Start assigned work; do not wait for administrative ceremony
+
+A current explicit handoff is sufficient assignment at the human/session layer; record pickup
+when the existing carrier requires it, but do not ask for a second Slack claim or ACK-of-ACK.
+A historical owner label is not a live execution lease. Recover actual writer/lease/effect state;
+never duplicate a live or effect-unknown modifier, but do not wait for an abandoned chat to reply.
+CI blocks merge/release, not independent useful work. Repair in-scope failures and advance safe
+independent work while one existing observer handles the release wait. A missing optional watcher
+blocks unattended-continuation claims, not authorized foreground work. The active assigned session
+owns recovery until a real successor accepts; do not end with an unbound "owner must act".
+Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no
+runtime authority, required form, new watcher or extra human approval. Existing exact grants,
+source custody, effect reconciliation, review and release controls remain in force.
+
+### Reciprocal dialogue and watcher invariant
+
+For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
+universal procedure owner. Read it before creating or relying on a temporary watcher.
+
+- A **watcher prompt is not a scope fence**. It may constrain what the watcher detects, but it cannot
+  survive as a blanket `do not ACK/START/execute/continue` instruction after a later valid
+  same-operation carrier edge arrives.
+- On a qualifying carrier event, an exact bound reasoning session must fresh-read the carrier and
+  **re-enter normal worker procedure** on that same operation: reconcile identity/binding, ACK when
+  pickup is owed, keep/update the lawful watcher, emit separate START when gates clear, or return the
+  required blocker. A sidecar watcher that cannot do this uses only an accepted exact-native-task
+  wake/resume bound to the verified current RuntimeBinding/native task; never pick the newest tab or
+  fall back to another task. The nudge is attention only and the awakened session rereads the carrier.
+- Class-E passive/event wait is preferred; Class-T tool-only polling suppresses unchanged samples.
+  **Default Class-M interval is 60 minutes; the hard floor is 15 minutes.** Urgent Class-M no-change
+  polling backs off `15m -> 30m -> 60m`. Reasoning sessions are not polling daemons.
+- Before every substantive reciprocal write after pickup ACK, **fresh-read the exact bound carrier**
+  in the same interactive turn after the latest local evidence-producing action. `WATCH_ARMED`,
+  watcher silence, or “I would have been woken” never proves freshness.
+- Exactly one watcher per side + operation + exact carrier + purpose; reuse/update it rather than
+  stacking another. Terminal STOP closes the **child source/cycle**, not an independently valid
+  aggregate seat/principal watcher resource. If one heartbeat also serves a permanent seat inbox,
+  principal lane, or sibling children, remove only the terminal child source and keep the aggregate
+  resource active; whole-resource shutdown requires explicit seat/principal/resource shutdown.
+  `WATCH_STOP_FAILED` keeps the child terminal and must not suppress valid sibling sources.
+- **Slack delivery is not target consumption**, and neither delivery nor a historical native task ID
+  proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
+  accepted RuntimeBinding/Wake path proves them.
 
 ## Agent OS — the organizational knowledge plane
 

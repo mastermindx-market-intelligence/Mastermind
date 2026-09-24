@@ -27,6 +27,23 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+_SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+if __package__ in {None, ""} and str(_SCRIPT_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIRECTORY))
+
+try:
+    from ops.executive_os.provider_worker_slots import (
+        SlotCatalogError,
+        all_slots,
+        get_slot,
+    )
+except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
+    from provider_worker_slots import (  # type: ignore[no-redef]
+        SlotCatalogError,
+        all_slots,
+        get_slot,
+    )
+
 
 SCHEMA_VERSION = "mastermind.executive_provider_inference_canary/v1"
 PINNED_CODEX_VERSION = "0.147.0"
@@ -83,6 +100,22 @@ INERT_PROMPT = (
     "This is an Executive OS provider-readiness canary. Do not use tools. "
     'Return only the JSON object {"ok": true}.'
 )
+PROVIDER_FAILURE_CLASSES = frozenset(
+    {
+        "provider_output_schema_unsupported",
+        "provider_rate_limited",
+        "provider_usage_limited",
+        "provider_credits_exhausted",
+        "provider_auth_failed",
+        "provider_entitlement_denied",
+        "provider_model_unavailable",
+        "provider_service_tier_unavailable",
+        "provider_request_invalid",
+        "provider_service_unavailable",
+        "provider_turn_failed",
+        "provider_stream_error",
+    }
+)
 EVENT_CLASSES = frozenset(
     {
         "turn_completed",
@@ -93,6 +126,7 @@ EVENT_CLASSES = frozenset(
         "result_invalid",
         "isolation_violation",
         "configuration_invalid",
+        *PROVIDER_FAILURE_CLASSES,
     }
 )
 
@@ -170,13 +204,22 @@ def new_canary_id() -> str:
     return value
 
 
-def production_config(*, probe_root: Path, operator_home: Path) -> ProviderCanaryConfig:
+def production_config(
+    *,
+    probe_root: Path,
+    operator_home: Path,
+    slot_id: str = "codex-01",
+) -> ProviderCanaryConfig:
+    try:
+        slot = get_slot(slot_id)
+    except SlotCatalogError as exc:
+        raise ProviderCanaryError("configuration_invalid") from exc
     return ProviderCanaryConfig(
         canary_id=new_canary_id(),
-        worker_user=WORKER_USER,
-        worker_uid=WORKER_UID,
-        worker_gid=WORKER_GID,
-        provider_home=Path(PROVIDER_HOME),
+        worker_user=slot.worker_user,
+        worker_uid=slot.worker_uid,
+        worker_gid=slot.worker_gid,
+        provider_home=slot.provider_home,
         installed_codex_binary=Path(INSTALLED_CODEX_BINARY),
         expected_codex_version=PINNED_CODEX_VERSION,
         expected_codex_sha256=PINNED_CODEX_SHA256,
@@ -635,6 +678,123 @@ def assert_invocation_isolation(
         raise ProviderCanaryError("isolation_violation")
 
 
+def _provider_failure_class(
+    *, events: Sequence[str], messages: Sequence[str]
+) -> str | None:
+    """Collapse provider failure text into one finite non-secret diagnostic class."""
+
+    text = " ".join(message[:2048] for message in messages[:4]).casefold()
+    unsupported = (
+        "unsupported",
+        "not supported",
+        "not available",
+        "unavailable",
+    )
+    if (
+        ("output schema" in text or "response format" in text or "structured output" in text)
+        and any(token in text for token in unsupported)
+    ):
+        return "provider_output_schema_unsupported"
+    if any(
+        token in text
+        for token in ("rate limit", "rate_limit", "too many requests", "http 429", "status 429")
+    ):
+        return "provider_rate_limited"
+    if any(
+        token in text
+        for token in ("usage limit", "usage_limit", "usage cap", "usage_cap")
+    ):
+        return "provider_usage_limited"
+    if any(
+        token in text
+        for token in (
+            "insufficient_quota",
+            "insufficient quota",
+            "insufficient credit",
+            "credits exhausted",
+            "no credits",
+        )
+    ):
+        return "provider_credits_exhausted"
+    if any(
+        token in text
+        for token in (
+            "unauthorized",
+            "authentication failed",
+            "authentication required",
+            "invalid token",
+            "login required",
+            "http 401",
+            "status 401",
+        )
+    ):
+        return "provider_auth_failed"
+    if any(
+        token in text
+        for token in (
+            "not eligible",
+            "not entitled",
+            "does not have access",
+            "access denied",
+            "feature is not enabled",
+            "usage_not_included",
+            "usage not included",
+            "plan does not support",
+        )
+    ):
+        return "provider_entitlement_denied"
+    if "model" in text and any(token in text for token in unsupported + ("not found",)):
+        return "provider_model_unavailable"
+    if (
+        "service tier" in text or "service_tier" in text
+    ) and any(token in text for token in unsupported + ("invalid",)):
+        return "provider_service_tier_unavailable"
+    if any(
+        token in text
+        for token in (
+            "invalid request",
+            "bad request",
+            "unsupported parameter",
+            "unknown parameter",
+            "invalid value",
+            "http 400",
+            "status 400",
+        )
+    ):
+        return "provider_request_invalid"
+    if any(
+        token in text
+        for token in (
+            "service unavailable",
+            "temporarily unavailable",
+            "internal server error",
+            "http 502",
+            "http 503",
+            "http 504",
+            "status 502",
+            "status 503",
+            "status 504",
+        )
+    ):
+        return "provider_service_unavailable"
+    if "turn.failed" in events:
+        return "provider_turn_failed"
+    if "error" in events:
+        return "provider_stream_error"
+    return None
+
+
+def _provider_error_message(payload: Mapping[str, Any]) -> str | None:
+    event_type = payload.get("type")
+    if event_type == "turn.failed":
+        error = payload.get("error")
+        if isinstance(error, Mapping) and isinstance(error.get("message"), str):
+            return str(error["message"])
+    if event_type == "error" and isinstance(payload.get("message"), str):
+        return str(payload["message"])
+    return None
+
+
 def classify_provider_streams(
     *,
     stdout: bytes,
@@ -663,6 +823,7 @@ def classify_provider_streams(
             "result_valid": False,
         }
     events: list[str] = []
+    provider_messages: list[str] = []
     malformed = False
     for raw_line in stdout.splitlines():
         if not raw_line.strip():
@@ -676,6 +837,9 @@ def classify_provider_streams(
             malformed = True
             continue
         events.append(str(payload["type"]))
+        message = _provider_error_message(payload)
+        if message is not None:
+            provider_messages.append(message)
     result_valid = False
     if result:
         try:
@@ -689,17 +853,20 @@ def classify_provider_streams(
             "terminal_event_class": "malformed_provider_response",
             "result_valid": False,
         }
+    provider_failure = _provider_failure_class(
+        events=events, messages=provider_messages
+    )
     if exit_code != 0:
         return {
             "passed": False,
-            "terminal_event_class": "process_failed",
+            "terminal_event_class": provider_failure or "process_failed",
             "result_valid": False,
         }
     if "turn.completed" not in events:
         if any(event in _JSONL_TERMINAL_EVENTS for event in events):
             return {
                 "passed": False,
-                "terminal_event_class": "process_failed",
+                "terminal_event_class": provider_failure or "process_failed",
                 "result_valid": False,
             }
         return {
@@ -928,15 +1095,21 @@ def live_worker_runner(
 
 
 def _parser() -> argparse.ArgumentParser:
-    return argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Executive Codex provider-inference canary"
     )
+    parser.add_argument(
+        "--slot-id",
+        choices=[row.slot_id for row in all_slots()],
+        default="codex-01",
+    )
+    return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     tokens = list(sys.argv[1:] if argv is None else argv)
     reject_live_path_options(tokens)
-    _parser().parse_args(tokens)
+    args = _parser().parse_args(tokens)
     if sys.platform != "darwin" or os.geteuid() != 0:
         receipt = {
             "schema_version": SCHEMA_VERSION,
@@ -950,11 +1123,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     probe_root: Path | None = None
     try:
+        try:
+            slot = get_slot(args.slot_id)
+        except SlotCatalogError as exc:
+            raise ProviderCanaryError("configuration_invalid") from exc
         probe_root = create_live_probe_root(
-            worker_uid=WORKER_UID, worker_gid=WORKER_GID
+            worker_uid=slot.worker_uid, worker_gid=slot.worker_gid
         )
         config = production_config(
-            probe_root=probe_root, operator_home=LIVE_OPERATOR_HOME
+            probe_root=probe_root,
+            operator_home=LIVE_OPERATOR_HOME,
+            slot_id=slot.slot_id,
         )
         binary = config.installed_codex_binary
         info = binary.lstat()

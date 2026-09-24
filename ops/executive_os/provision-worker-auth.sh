@@ -9,6 +9,7 @@ WORKER_USER="_mastermind_worker"
 WORKER_GROUP="_mastermind_worker"
 WORKER_UID="451"
 WORKER_GID="451"
+CODEX_ATTESTATION_OWNER_GID="$WORKER_GID"
 PROVIDER_HOME="/var/db/mastermind-executive/workers/codex-01/provider-home"
 CODEX_BINARY="/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
 CODEX_VERSION="0.147.0"
@@ -17,6 +18,8 @@ CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 SYSTEM_BIN="$SYSTEM_ROOT/bin"
 SYSTEM_CONFIG="$SYSTEM_ROOT/config"
+SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
+PYTHON_BINARY="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 VERIFY_ONLY="false"
 VERIFY_READY="false"
 ENROLL_SERVICE_ACCOUNT="false"
@@ -32,10 +35,17 @@ READINESS_TRANSACTION_LOCK="$SYSTEM_CONFIG/provider-readiness.transaction.lock"
 READINESS_LOCK_HELD="false"
 READINESS_LOCK_RELEASE_ON_EXIT="true"
 INSTALLED_CODEX_BINARY=""
+CODEX_EXECUTABLE=""
+USING_INSTALLED_CODEX="false"
 PINNED_CODEX_BINARY=""
 IDENTITY_RESULT=""
 POST_IDENTITY_RESULT=""
 CANARY_RESULT=""
+SLOT_ID="codex-01"
+SLOT_SELECTED="false"
+LOW_LEVEL_SLOT_OVERRIDE="false"
+POLICY_OVERRIDE="false"
+OAUTH_SEAT_REF=""
 
 cleanup() {
   if [ -n "$PINNED_CODEX_BINARY" ] && [ -f "$PINNED_CODEX_BINARY" ]; then
@@ -77,7 +87,7 @@ trap 'preserve_readiness_lock_on_signal 131' QUIT
 trap 'preserve_readiness_lock_on_signal 143' TERM
 
 usage() {
-  /bin/echo "usage: sudo /bin/bash $0 MODE [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class company-workspace-admin-attested] [--credential-expires-at UTC] [options]" >&2
+  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [options]" >&2
   /bin/echo "modes: --verify-only | --verify-ready | --enroll-service-account | --enroll-personal-access-token | --reauthorize-device | --recover-readiness-transaction" >&2
   exit 64
 }
@@ -91,13 +101,14 @@ while [ "$#" -gt 0 ]; do
     --reauthorize-device) REAUTHORIZE_DEVICE="true"; shift ;;
     --replace-existing) REPLACE_EXISTING="true"; shift ;;
     --recover-readiness-transaction) RECOVER_READINESS_TRANSACTION="true"; shift ;;
-    --expected-credential-kind) EXPECTED_CREDENTIAL_KIND="${2:-}"; shift 2 ;;
-    --workspace-binding-class) WORKSPACE_BINDING_CLASS="${2:-}"; shift 2 ;;
+    --slot-id) SLOT_ID="${2:-}"; SLOT_SELECTED="true"; shift 2 ;;
+    --expected-credential-kind) EXPECTED_CREDENTIAL_KIND="${2:-}"; POLICY_OVERRIDE="true"; shift 2 ;;
+    --workspace-binding-class) WORKSPACE_BINDING_CLASS="${2:-}"; POLICY_OVERRIDE="true"; shift 2 ;;
     --credential-expires-at) CREDENTIAL_EXPIRES_AT="${2:-}"; shift 2 ;;
     --codex-binary) CODEX_BINARY="${2:-}"; shift 2 ;;
     --codex-version) CODEX_VERSION="${2:-}"; shift 2 ;;
-    --worker-uid) WORKER_UID="${2:-}"; WORKER_GID="${2:-}"; shift 2 ;;
-    --provider-home) PROVIDER_HOME="${2:-}"; shift 2 ;;
+    --worker-uid) WORKER_UID="${2:-}"; WORKER_GID="${2:-}"; LOW_LEVEL_SLOT_OVERRIDE="true"; shift 2 ;;
+    --provider-home) PROVIDER_HOME="${2:-}"; LOW_LEVEL_SLOT_OVERRIDE="true"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -110,6 +121,48 @@ mode_count=0
 [ "$REAUTHORIZE_DEVICE" = "true" ] && mode_count=$((mode_count + 1))
 [ "$RECOVER_READINESS_TRANSACTION" = "true" ] && mode_count=$((mode_count + 1))
 [ "$mode_count" -eq 1 ] || usage
+
+resolve_slot_field() {
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_worker_slots.py" \
+    "$SLOT_ID" "$1"
+}
+
+resolve_selected_slot() {
+  [ "$SLOT_SELECTED" = "true" ] || return 0
+  if [ "$LOW_LEVEL_SLOT_OVERRIDE" = "true" ] || [ "$POLICY_OVERRIDE" = "true" ]; then
+    /bin/echo "slot identity cannot be combined with low-level identity/path overrides" >&2
+    exit 65
+  fi
+  [ -x "$PYTHON_BINARY" ] && [ ! -L "$PYTHON_BINARY" ] || {
+    /bin/echo "pinned Python is required to resolve a provider worker slot" >&2
+    exit 65
+  }
+  WORKER_USER="$(resolve_slot_field "worker_user")"
+  WORKER_GROUP="$(resolve_slot_field "worker_group")"
+  WORKER_UID="$(resolve_slot_field "worker_uid")"
+  WORKER_GID="$(resolve_slot_field "worker_gid")"
+  PROVIDER_HOME="$(resolve_slot_field "provider_home")"
+  READINESS_RECEIPT="$(resolve_slot_field "readiness_receipt")"
+  WORKSPACE_BINDING_CLASS="$(resolve_slot_field "workspace_binding_class")"
+  EXPECTED_CREDENTIAL_KIND="$(resolve_slot_field "default_credential_kind")"
+  OAUTH_SEAT_REF="$(resolve_slot_field "oauth_seat_ref")"
+}
+
+resolve_selected_slot
+
+if [ "$SLOT_SELECTED" = "true" ]; then
+  case "$SLOT_ID" in
+    codex-pro-01|codex-pro-02|codex-pro-03)
+      if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ] \
+        || [ "$ENROLL_PERSONAL_ACCESS_TOKEN" = "true" ]; then
+        /bin/echo "the selected worker slot permits device authorization only" >&2
+        exit 65
+      fi
+      ;;
+    codex-01) ;;
+    *) /bin/echo "selected worker slot is not in the reviewed inventory" >&2; exit 65 ;;
+  esac
+fi
 
 if [ "$REPLACE_EXISTING" = "true" ] \
   && [ "$ENROLL_SERVICE_ACCOUNT" != "true" ] \
@@ -124,16 +177,17 @@ if [ "$VERIFY_READY" = "true" ]; then
     service-account|personal-access-token|device-auth) ;;
     *) /bin/echo "--verify-ready requires an explicit reviewed credential kind" >&2; exit 65 ;;
   esac
-  [ "$WORKSPACE_BINDING_CLASS" = "company-workspace-admin-attested" ] || {
-    /bin/echo "--verify-ready requires the company workspace admin attestation class" >&2
-    exit 65
-  }
+  if [ "$SLOT_SELECTED" != "true" ]; then
+    [ "$WORKSPACE_BINDING_CLASS" = "company-workspace-admin-attested" ] || {
+      /bin/echo "--verify-ready requires the company workspace admin attestation class" >&2
+      exit 65
+    }
+  fi
   case "$CREDENTIAL_EXPIRES_AT" in
     ????-??-??T??:??:??Z) ;;
     *) /bin/echo "--verify-ready requires an exact UTC credential expiry" >&2; exit 65 ;;
   esac
-elif [ -n "$EXPECTED_CREDENTIAL_KIND" ] || [ -n "$WORKSPACE_BINDING_CLASS" ] \
-  || [ -n "$CREDENTIAL_EXPIRES_AT" ]; then
+elif [ "$POLICY_OVERRIDE" = "true" ] || [ -n "$CREDENTIAL_EXPIRES_AT" ]; then
   /bin/echo "identity policy arguments are valid only with --verify-ready" >&2
   exit 65
 fi
@@ -157,7 +211,21 @@ case "$CODEX_VERSION" in
   ''|*[!0-9A-Za-z._-]*) /bin/echo "Codex version is invalid" >&2; exit 65 ;;
 esac
 INSTALLED_CODEX_BINARY="$SYSTEM_BIN/codex-$CODEX_VERSION"
-for absolute_path in "$PROVIDER_HOME" "$CODEX_BINARY"; do
+CODEX_ATTESTATION_RECEIPT="$SYSTEM_ROOT/codex-attestation-$CODEX_VERSION.json"
+# Once this reviewed version is installed, bind every auth/readiness operation
+# to that root-owned versioned binary. The mutable Homebrew enrollment source is
+# only a pre-install bootstrap input and may legitimately upgrade afterward; it
+# must not break credential rotation, Personal-Pro enrollment, --verify-only, or
+# readiness for an already-installed exact release. --verify-ready remains
+# strictly post-install and therefore refuses when the installed binary is absent.
+if [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ]; then
+  CODEX_BINARY="$INSTALLED_CODEX_BINARY"
+  USING_INSTALLED_CODEX="true"
+elif [ "$VERIFY_READY" = "true" ]; then
+  /bin/echo "install the exact release before --verify-ready" >&2
+  exit 65
+fi
+for absolute_path in "$PROVIDER_HOME" "$CODEX_BINARY" "$READINESS_RECEIPT"; do
   case "$absolute_path" in
     /*) ;;
     *) /bin/echo "worker-auth paths must be absolute: $absolute_path" >&2; exit 65 ;;
@@ -255,7 +323,7 @@ run_codex_as_worker() {
         LC_ALL="C.UTF-8" \
         NO_COLOR="1" \
         PATH="/usr/bin:/bin" \
-        "$PINNED_CODEX_BINARY" "$@"
+        "$CODEX_EXECUTABLE" "$@"
   )
 }
 
@@ -306,45 +374,90 @@ esac
   exit 65
 }
 
-# Never execute the Homebrew/user-owned source while this script is root. Copy
-# it first to a root-owned, non-writable temporary path, then attest and execute
-# only that pinned copy. A raced or partial copy cannot pass strict codesign.
-PINNED_CODEX_BINARY="$(/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX")"
-/bin/rm -f -- "$PINNED_CODEX_BINARY"
-/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"
-/usr/sbin/chown root:wheel "$PINNED_CODEX_BINARY"
-/bin/chmod 0555 "$PINNED_CODEX_BINARY"
-[ -f "$PINNED_CODEX_BINARY" ] && [ ! -L "$PINNED_CODEX_BINARY" ] \
-  && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PINNED_CODEX_BINARY")" = "0:0:555:1" ] || {
-    /bin/echo "staged Codex binary is not an immutable root-owned regular file" >&2
+if [ "$USING_INSTALLED_CODEX" = "true" ]; then
+  # BEGIN installed Codex fast path
+  if ! "$PYTHON_BINARY" -I -S -B - \
+      "$SCRIPT_DIR/../.." "$CODEX_ATTESTATION_RECEIPT" "$INSTALLED_CODEX_BINARY" \
+      "$CODEX_ATTESTATION_OWNER_GID" "$CODEX_VERSION" "$CODEX_TEAM_ID" "$CODEX_SHA256" \
+      >/dev/null 2>&1 <<'PYATTEST'
+import pathlib
+import sys
+
+(
+    release_root,
+    receipt_path,
+    binary_path,
+    owner_gid,
+    expected_version,
+    expected_team,
+    expected_sha256,
+) = sys.argv[1:]
+sys.path.insert(0, str(pathlib.Path(release_root).resolve(strict=True)))
+from control_plane.codex_worker import load_codex_attestation_receipt
+
+attestation = load_codex_attestation_receipt(
+    receipt_path,
+    expected_binary_path=binary_path,
+    expected_owner_gid=int(owner_gid),
+)
+if (
+    attestation.path != binary_path
+    or attestation.version != expected_version
+    or attestation.team_identifier != expected_team
+    or attestation.sha256 != expected_sha256
+):
+    raise SystemExit("installed Codex attestation differs from reviewed constants")
+PYATTEST
+  then
+    /bin/echo "installed Codex attestation receipt validation failed" >&2
+    exit 65
+  fi
+  CODEX_EXECUTABLE="$INSTALLED_CODEX_BINARY"
+  # END installed Codex fast path
+else
+  # BEGIN pre-install Codex staging path
+  # Never execute the Homebrew/user-owned source while this script is root. Copy
+  # it first to a root-owned, non-writable temporary path, then attest and execute
+  # only that pinned copy. A raced or partial copy cannot pass strict codesign.
+  PINNED_CODEX_BINARY="$(/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX")"
+  /bin/rm -f -- "$PINNED_CODEX_BINARY"
+  /usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"
+  /usr/sbin/chown root:wheel "$PINNED_CODEX_BINARY"
+  /bin/chmod 0555 "$PINNED_CODEX_BINARY"
+  [ -f "$PINNED_CODEX_BINARY" ] && [ ! -L "$PINNED_CODEX_BINARY" ] \
+    && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PINNED_CODEX_BINARY")" = "0:0:555:1" ] || {
+      /bin/echo "staged Codex binary is not an immutable root-owned regular file" >&2
+      exit 65
+    }
+  case "$(/usr/bin/stat -f '%Sp' "$PINNED_CODEX_BINARY")" in
+    *+) /bin/echo "staged Codex binary has an unexpected filesystem ACL" >&2; exit 65 ;;
+  esac
+  /usr/bin/file -b "$PINNED_CODEX_BINARY" | /usr/bin/grep -q '^Mach-O ' || {
+    /bin/echo "Codex binary must be the native macOS executable, not a script or shim" >&2
     exit 65
   }
-case "$(/usr/bin/stat -f '%Sp' "$PINNED_CODEX_BINARY")" in
-  *+) /bin/echo "staged Codex binary has an unexpected filesystem ACL" >&2; exit 65 ;;
-esac
-/usr/bin/file -b "$PINNED_CODEX_BINARY" | /usr/bin/grep -q '^Mach-O ' || {
-  /bin/echo "Codex binary must be the native macOS executable, not a script or shim" >&2
-  exit 65
-}
-/usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY" >/dev/null 2>&1 || {
-  /bin/echo "Codex binary signature is invalid" >&2
-  exit 65
-}
-OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
-[ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
-  /bin/echo "Codex binary bytes do not match the exact reviewed 0.147.0 allowlist" >&2
-  exit 65
-}
-OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
-[ "$OBSERVED_TEAM" = "$CODEX_TEAM_ID" ] || {
-  /bin/echo "Codex binary signer is not OpenAI" >&2
-  exit 65
-}
-OBSERVED_VERSION="$(run_codex_as_worker --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
-[ "$OBSERVED_VERSION" = "$CODEX_VERSION" ] || {
-  /bin/echo "Codex binary version does not match the explicit allowlist" >&2
-  exit 65
-}
+  /usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY" >/dev/null 2>&1 || {
+    /bin/echo "Codex binary signature is invalid" >&2
+    exit 65
+  }
+  OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
+  [ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
+    /bin/echo "Codex binary bytes do not match the exact reviewed 0.147.0 allowlist" >&2
+    exit 65
+  }
+  OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
+  [ "$OBSERVED_TEAM" = "$CODEX_TEAM_ID" ] || {
+    /bin/echo "Codex binary signer is not OpenAI" >&2
+    exit 65
+  }
+  CODEX_EXECUTABLE="$PINNED_CODEX_BINARY"
+  OBSERVED_VERSION="$(run_codex_as_worker --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
+  [ "$OBSERVED_VERSION" = "$CODEX_VERSION" ] || {
+    /bin/echo "Codex binary version does not match the explicit allowlist" >&2
+    exit 65
+  }
+  # END pre-install Codex staging path
+fi
 
 AUTH_PATH="$PROVIDER_HOME/auth.json"
 
@@ -383,9 +496,6 @@ verify_complete_auth() {
   # never attest metadata that changed during provider validation.
   verify_auth_metadata
 }
-
-SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
-PYTHON_BINARY="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 verify_readiness_transaction_chain() {
   local ancestor mode
@@ -542,10 +652,25 @@ verify_pinned_python_available() {
   }
 }
 
+require_autonomy_disarmed_for_credential_mutation() {
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/credential_rotation_interlock.py" \
+    >/dev/null || {
+      /bin/echo "credential mutation requires a verified autonomy disarm" >&2
+      exit 65
+    }
+}
+
 if [ "$RECOVER_READINESS_TRANSACTION" = "true" ]; then
   verify_pinned_python_available
   recover_readiness_transaction_lock
   exit 0
+fi
+
+if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ] \
+  || [ "$ENROLL_PERSONAL_ACCESS_TOKEN" = "true" ] \
+  || [ "$REAUTHORIZE_DEVICE" = "true" ]; then
+  verify_pinned_python_available
+  require_autonomy_disarmed_for_credential_mutation
 fi
 
 if [ "$VERIFY_READY" = "true" ] || [ "$ENROLL_SERVICE_ACCOUNT" = "true" ] \
@@ -566,6 +691,7 @@ if [ "$VERIFY_READY" = "true" ]; then
   if "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" reuse \
       --receipt "$READINESS_RECEIPT" --auth "$AUTH_PATH" \
       --binary "$INSTALLED_CODEX_BINARY" \
+      --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
       --credential-expires-at "$CREDENTIAL_EXPIRES_AT" >/dev/null 2>&1; then
@@ -574,7 +700,7 @@ if [ "$VERIFY_READY" = "true" ]; then
   else
     reuse_status=$?
   fi
-  [ "$reuse_status" -eq 3 ] || {
+  [ "$reuse_status" -eq 3 ] || [ "$reuse_status" -eq 4 ] || {
     /bin/echo "existing provider readiness receipt is stale or invalid; fail closed" >&2
     exit 65
   }
@@ -582,6 +708,8 @@ if [ "$VERIFY_READY" = "true" ]; then
   IDENTITY_RESULT="$(/usr/bin/mktemp /private/tmp/mastermind-provider-identity.XXXXXX)"
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
       --binary "$INSTALLED_CODEX_BINARY" --provider-home "$PROVIDER_HOME" \
+      --worker-user "$WORKER_USER" --worker-group "$WORKER_GROUP" \
+      --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
       >"$IDENTITY_RESULT" 2>/dev/null; then
@@ -589,25 +717,33 @@ if [ "$VERIFY_READY" = "true" ]; then
     exit 65
   fi
 
+  refresh_args=()
+  if [ "$reuse_status" -eq 4 ]; then
+    refresh_args=(--refresh-expired)
+  fi
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" reserve \
       --receipt "$READINESS_RECEIPT" --auth "$AUTH_PATH" \
       --binary "$INSTALLED_CODEX_BINARY" --identity-json "$IDENTITY_RESULT" \
+      --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
-      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" >/dev/null 2>&1; then
+      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
+      ${refresh_args[@]+"${refresh_args[@]}"} >/dev/null 2>&1; then
     /bin/echo "provider canary reservation failed; no canary spent" >&2
     exit 65
   fi
 
   CANARY_RESULT="$(/usr/bin/mktemp /private/tmp/mastermind-provider-canary.XXXXXX)"
   canary_status=0
-  /bin/bash "$SCRIPT_DIR/provider-inference-canary.sh" \
+  /bin/bash "$SCRIPT_DIR/provider-inference-canary.sh" --slot-id "$SLOT_ID" \
     >"$CANARY_RESULT" 2>/dev/null || canary_status=$?
 
   POST_IDENTITY_RESULT="$(/usr/bin/mktemp /private/tmp/mastermind-provider-post-identity.XXXXXX)"
   post_identity_status=0
   "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
     --binary "$INSTALLED_CODEX_BINARY" --provider-home "$PROVIDER_HOME" \
+    --worker-user "$WORKER_USER" --worker-group "$WORKER_GROUP" \
+    --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
     --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
     --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
     >"$POST_IDENTITY_RESULT" 2>/dev/null || post_identity_status=$?
@@ -616,6 +752,7 @@ if [ "$VERIFY_READY" = "true" ]; then
       --receipt "$READINESS_RECEIPT" --auth "$AUTH_PATH" \
       --binary "$INSTALLED_CODEX_BINARY" --post-identity-json "$POST_IDENTITY_RESULT" \
       --canary-json "$CANARY_RESULT" --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
+      --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --post-identity-command-status "$post_identity_status" \
       --canary-command-status "$canary_status" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
@@ -647,6 +784,9 @@ if [ "$REAUTHORIZE_DEVICE" = "true" ]; then
   prepare_explicit_replacement
   /bin/echo "Starting OpenAI device authorization for the dedicated worker account."
   /bin/echo "Open the URL shown by Codex, enter its one-time code, and finish sign-in; do not share the code."
+  if [ -n "$OAUTH_SEAT_REF" ]; then
+    /bin/echo "Complete this authorization only in the isolated Multilogin seat named $OAUTH_SEAT_REF."
+  fi
   /bin/echo "Do not select a ChatGPT workspace because it happens to work; stop if the intended workspace cannot be bound."
   run_codex_as_worker login --device-auth -c 'cli_auth_credentials_store="file"' \
     </dev/tty >/dev/tty 2>/dev/tty

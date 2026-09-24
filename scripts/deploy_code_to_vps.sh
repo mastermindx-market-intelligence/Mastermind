@@ -86,7 +86,8 @@ probe_forward_evaluation() {
     >>"$LOG" 2>&1
 }
 
-DIRS="app brain bot portfolio data_layer loop bridge control_plane scripts config ops .claude .codex"
+# Whole-source rsync also ships these shared Python packages; rollback must restore them.
+DIRS="app brain bot portfolio data_layer loop bridge control_plane scripts config ops common integrations .claude .codex"
 FILES="pyproject.toml DOCTRINE.md README.md AGENTS.md .deployed_git_sha"
 EXC=(
   --exclude='.git' --exclude='.github'
@@ -178,6 +179,14 @@ rollback_release() {
          rm -f \"\$f\" || restore_failed=1
        fi
      done
+     if [ -f "/etc/systemd/system/$SVC.d/80-datadog.conf" ]; then
+       if [ -n '$PREVIOUS_SHA' ]; then
+         printf '[Service]\nEnvironment=DD_VERSION=%s\n' '$PREVIOUS_SHA' > "/etc/systemd/system/$SVC.d/81-datadog-version.conf" || restore_failed=1
+       else
+         rm -f "/etc/systemd/system/$SVC.d/81-datadog-version.conf" || restore_failed=1
+       fi
+       systemctl daemon-reload || restore_failed=1
+     fi
      systemctl restart '$SVC'
      restart_status=\$?
      [ \"\$restore_failed\" -eq 0 ] && [ \"\$restart_status\" -eq 0 ]"; then
@@ -205,6 +214,12 @@ fi
 if ! "${SSH[@]}" "$BOXHOST" \
   "printf '%s\n' '$EXPECTED_SHA' > '$DPATH/.deployed_git_sha'"; then
   fail_release "release marker write failed"
+fi
+if ! "${SSH[@]}" "$BOXHOST" \
+  "if [ -x '$DPATH/scripts/refresh_datadog_release_tag.sh' ]; then
+     '$DPATH/scripts/refresh_datadog_release_tag.sh' '$EXPECTED_SHA';
+   fi"; then
+  fail_release "Datadog release tag refresh failed"
 fi
 
 # Freeze durable portfolio writers before taking the one-time legacy baseline.  pending_health is

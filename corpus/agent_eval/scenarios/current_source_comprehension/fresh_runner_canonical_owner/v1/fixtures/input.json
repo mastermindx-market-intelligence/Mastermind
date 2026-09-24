@@ -1,0 +1,6 @@
+{
+  "extract": "PR #162 has two records and no scripts/ohf/fresh_sol_eval.py; truthful state NOT_BUILT. Later implementation stays on that carrier. No replacement runner is authorized.",
+  "question": "Per the extract above, which exact carrier owns the Agent Evaluation fresh runner, what is its truthful capability state, and is a new/replacement runner authorized?",
+  "source_doc": "docs/superpowers/specs/2026-08-31-agent-evaluation-fabric-design.md",
+  "source_section": "§3.2 Fresh runner"
+}

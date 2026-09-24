@@ -19,6 +19,7 @@ from typing import Callable, Protocol, Sequence
 
 from control_plane.operator_harness_contract import (
     CandidateResult,
+    CheckpointObservation,
     EventCursor,
     LaunchComparison,
     LaunchDecision,
@@ -37,6 +38,7 @@ from control_plane.operator_harness_contract import (
     TurnStartObservation,
     compare_launch,
 )
+from control_plane.operator_harness_contract import SupportsCheckpoint
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     OperatorPrincipalObservation,
@@ -151,6 +153,21 @@ class RuntimePort(Protocol):
         generation: ProcessGenerationRef,
         operation_id: OperationId,
         operation_kind: str,
+    ) -> None: ...
+
+    def begin_operator_checkpoint(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+    ) -> None: ...
+
+    def apply_operator_checkpoint(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        observation: CheckpointObservation,
     ) -> None: ...
 
     def graceful_stop_operator_generation(
@@ -300,6 +317,79 @@ class OperatorHarnessOrchestrator:
         raise OperatorOperationApplied(
             f"operation {operation_id.command_id} was durably applied before local failure"
         ) from error
+
+    def _observe_required_principal(
+        self,
+        *,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        observation: SessionStartObservation,
+    ) -> OperatorPrincipalObservation | None:
+        """Collect the same typed execution principal for start and resume."""
+
+        principal_required = bool(
+            getattr(
+                self.runtime,
+                "operator_principal_required",
+                lambda _value: False,
+            )(attempt_id)
+        )
+        if not principal_required:
+            return None
+        existing = getattr(
+            self.runtime,
+            "existing_operator_principal",
+            lambda _attempt_id, _generation: None,
+        )(attempt_id, generation)
+        if existing is not None:
+            if not isinstance(existing, OperatorPrincipalObservation):
+                raise OperatorHarnessOrchestrationError(
+                    "runtime returned untyped principal replay evidence"
+                )
+            return existing
+        credential_reader = getattr(
+            self.adapter, "observe_process_credentials", None
+        )
+        home_reader = getattr(
+            self.adapter, "observe_provider_home_identity", None
+        )
+        if not callable(credential_reader) or not callable(home_reader):
+            raise OperatorHarnessOrchestrationError(
+                "orchestration adapter lacks typed principal observations"
+            )
+        credentials = credential_reader(generation)
+        home = home_reader(generation)
+        if not isinstance(
+            credentials, OSProcessCredentialObservation
+        ) or not isinstance(home, ProviderHomeIdentityObservation):
+            raise OperatorHarnessOrchestrationError(
+                "orchestration adapter returned untyped principal evidence"
+            )
+        process = observation.process
+        expected_process = {
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        }
+        if credentials.process_identity != expected_process:
+            raise OperatorHarnessOrchestrationError(
+                "principal process credentials do not match session observation"
+            )
+        return OperatorPrincipalObservation.from_dict(
+            {
+                "schema_version": "mastermind.operator_principal_observation/v1",
+                "attempt_id": attempt_id,
+                "worker_id": generation.worker_id,
+                "process_generation_id": generation.process_generation_id,
+                "provider_session_id": observation.provider_session_id,
+                "process_identity": credentials.process_identity,
+                "os_principal_name": credentials.os_principal_name,
+                "os_principal_uid": credentials.os_principal_uid,
+                "provider_home_identity": home.provider_home_identity,
+                "observed_at_ms": int(time.time() * 1000),
+            }
+        )
 
     def start_attempt(
         self,
@@ -631,6 +721,43 @@ class OperatorHarnessOrchestrator:
                 "graceful_stop external effect is unknown"
             ) from exc
 
+    def checkpoint(
+        self,
+        session: OperatorSessionReceipt | OperatorStartHandle,
+        *,
+        operation_id: OperationId,
+    ) -> CheckpointObservation:
+        self._assert_replayable(operation_id)
+        if not isinstance(self.adapter, SupportsCheckpoint):
+            raise OperatorHarnessOrchestrationError(
+                "adapter does not support checkpoint"
+            )
+        self.runtime.begin_operator_checkpoint(
+            session.attempt_id, session.generation, operation_id
+        )
+        self.runtime.extend_operator_lease(session.attempt_id, 60)
+        try:
+            observed = self.adapter.checkpoint(
+                operation_id=operation_id, generation=session.generation
+            )
+            self.runtime.apply_operator_checkpoint(
+                session.attempt_id,
+                session.generation,
+                operation_id,
+                observed,
+            )
+            return observed
+        except Exception as exc:
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="checkpoint",
+                error=exc,
+            )
+            raise OperatorEffectUnknown(
+                "checkpoint external effect is unknown"
+            ) from exc
+
     def cancel(
         self,
         session: OperatorSessionReceipt | OperatorStartHandle,
@@ -778,8 +905,13 @@ class OperatorHarnessOrchestrator:
         try:
             observed = self.attestation_reader(self.adapter, generation)
             launch = compare_launch(session.launch.requested, observed)
+            principal = self._observe_required_principal(
+                attempt_id=session.attempt_id,
+                generation=generation,
+                observation=observation,
+            )
             self.runtime.seal_operator_attestation(
-                session.attempt_id, generation, observed, launch
+                session.attempt_id, generation, observed, launch, principal
             )
         except Exception as exc:
             self._mark_effect_unknown(

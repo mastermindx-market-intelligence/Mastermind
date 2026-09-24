@@ -13,6 +13,222 @@ type that password locally. The device-login step likewise requires the
 operator to approve OpenAI's one-time code in a browser. Neither secret should
 be pasted into a terminal transcript, issue, PR, or chat.
 
+## Unattended recovery readiness (read-only departure gate)
+
+Before a period without a human at the keyboard, prove each home Mac recovers
+on its own instead of remembering that it was set up. This is a read-only
+observation, so it needs no install stage, no administrator password, and no
+service state change. Run it as the ordinary operator on Studio, M1, and any
+future host being enrolled — but you must say which **role** you are proving,
+because the three profiles have different requirements.
+
+`--profile` is mandatory and has exactly three accepted values. There is no
+default, and the checker never infers the role from which services happen to
+be installed: a Studio whose Executive control plane has stopped looks exactly
+like a worker host that never had one, and guessing the weaker profile there
+would turn a real outage into a pass.
+
+| Host | Command profile | What a `READY` proves |
+|---|---|---|
+| Studio (canonical Executive control host) | `executive-control-host/v1` | physical recovery **and** the installed Executive control, MCP, and sol-state-relay daemons running |
+| Any home Mac, observation only | `home-mac-recovery-base/v1` | physical/local recovery of that Mac only |
+| Mac being admitted as a secondary fleet host | `fleet-secondary-host-preflight/v1` | physical/local recovery **and** proof that the central Executive control, MCP, and sol-state-relay daemons are not installed |
+
+On Studio:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
+  --profile executive-control-host/v1
+```
+
+For physical recovery observation only:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
+  --profile home-mac-recovery-base/v1
+```
+
+Before admitting a Mac into the secondary fleet-host enrollment lane:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
+  --profile fleet-secondary-host-preflight/v1
+```
+
+A `READY` secondary-host preflight is intentionally only permission to continue
+to the existing enrollment/qualification owners. It does **not** prove a Worker,
+provider realm, MH1 gateway, Studio Direct seat, credential, or Fabric route.
+
+It emits one canonical `mastermind.host_recovery_readiness/v1` JSON report on
+stdout and exits `0`. The report stamps the exact `profile` you named, and a
+report produced under one profile is refused if it is later validated as the
+other. `--host-ref host-<64-lower-hex>` optionally stamps an opaque host
+reference; any other value is refused without echoing it. A typed refusal exits
+`65` and writes only a closed code to stderr — an omitted profile is
+`ARGUMENTS_INVALID` and an unrecognized one is `PROFILE_INVALID`, both refused
+before the host is observed at all. Reruns are free and create no effect.
+
+All profiles collect the same fixed superset of observations with the same
+fixed argv. The profile changes classification requirements only; it is never
+command authority and never widens what the checker reads.
+
+
+### `fleet-secondary-host-preflight/v1` is an anti-duplication gate, not enrollment acceptance
+
+Use this profile immediately before handing a physical Mac to the existing
+fleet/worker enrollment owners. It adds exactly one rule to the physical base:
+the three canonical central Executive services must be `NOT_INSTALLED`. A
+running, stopped, or disabled copy is `NOT_READY`, and unknown service state
+fails closed to `UNKNOWN`. Worker/provider services remain advisory because
+this profile neither installs nor qualifies them.
+
+This prevents a secondary Mac from becoming an accidental second Executive
+control plane while keeping host placement, Worker identity, provider capacity,
+MH1 transport, Studio Direct, credentials, and execution acceptance with their
+existing owners. Once enrollment starts, use the owning subsystem's acceptance
+proofs rather than treating this preflight as a permanent worker-health gate.
+
+### `home-mac-recovery-base/v1` is not worker or fabric acceptance
+
+The base profile proves exactly one thing: that this physical Mac comes back on
+its own after a power loss or reboot, and can be reached over Remote Login
+without a human at the keyboard. It is **not** evidence that the host can
+execute Agent Fabric / worker work. Worker-runtime and fabric acceptance are
+defined and gated by their current owners (Fable/Codex autonomy and Agent
+Fabric), and that gate is a separate journey with its own evidence; this
+checker neither performs it nor substitutes for it.
+
+Studio remains the canonical Executive control host. Do **not** install the
+Executive control, MCP, or sol-state-relay daemons on a worker or capacity host
+in order to turn this checker green — that would stand up a duplicate Executive
+control plane, which the strategic state prohibits. On those hosts, the absent
+control daemons are reported as `ADVISORY` visibility only and cannot make the
+base profile `NOT_READY` or `UNKNOWN`. Equally, a green base-profile report on
+Studio is not control-host acceptance: use `executive-control-host/v1` there.
+
+Read `recovery_state` first: `READY`, `NOT_READY`, or `UNKNOWN`. Unknown
+load-bearing evidence — a missing command, a permission refusal, or malformed
+output — fails closed to `UNKNOWN` and is never inferred as a pass. A definite
+defect outranks unknown evidence, so `NOT_READY` wins when both are present.
+`blocking_predicates` and `unknown_predicates` name exactly which predicates
+produced that state, which is the whole point before departure: an operator sees
+that (for example) `auto_restart_after_power_loss` is the single reason a host
+is unsafe.
+
+Each predicate carries a reviewed `requirement` that decides whether it can move
+the overall state:
+
+| Requirement | Load-bearing | Meaning |
+|---|---|---|
+| `REQUIRED` | yes | Unattended recovery depends on it. |
+| `REQUIRED_RUNNING` | yes | An already-installed critical system LaunchDaemon must be running. Control profile only. |
+| `REQUIRED_ABSENT` | yes | A central Executive LaunchDaemon must not be installed on a secondary pre-enrollment host. |
+| `OPTIONAL` | no | Reviewed as preferable, but it does not decide readiness. |
+| `DISARMED_EXPECTED` | no | The current gates intend this service to be absent or disabled. Control profile only. |
+| `ADVISORY` | no | Reported because the operator must know it. |
+
+Every physical predicate — platform, power policy, Remote Login, preboot
+unlock, disk headroom — carries the same requirement in all profiles. The only
+difference is the Executive system LaunchDaemons:
+
+| Label group | `executive-control-host/v1` | `fleet-secondary-host-preflight/v1` | `home-mac-recovery-base/v1` |
+|---|---|---|---|
+| control, MCP, sol-state-relay | `REQUIRED_RUNNING` | `REQUIRED_ABSENT` | `ADVISORY` |
+| worker, backup, privileged broker | `DISARMED_EXPECTED` | `ADVISORY` | `ADVISORY` |
+
+Under the base profile those labels are reported with their truthful observed
+state (`DAEMON_NOT_INSTALLED`, `DAEMON_DISABLED`, `DAEMON_LOADED_NOT_RUNNING`,
+`DAEMON_RUNNING`) and no load-bearing requirement. They are deliberately not
+called `DAEMON_INTENTIONALLY_DISARMED` there, because a worker host is not a
+host where the Executive control plane was gated off — it is a host the control
+plane does not belong to.
+
+These semantics are deliberate and should not be "fixed" later without a
+decision:
+
+- **`autorestart` is required; `autorestartatconnect` is optional.** Recovery
+  after a power cut on a continuously-powered desktop comes from `autorestart`.
+  `autorestartatconnect` only governs restarting when AC is reconnected, and
+  macOS exposes the key only on models that support that behavior — so a `0`
+  there is `ADVISORY` and a missing key is `NOT_APPLICABLE`, never a defect.
+- **Installation is proven by the job definition, never by `print-disabled`.**
+  `launchctl print-disabled system` is an override table, so a normally enabled
+  installed service usually has no row in it at all. Each fixed Executive label
+  is therefore classified from `/Library/LaunchDaemons/<label>.plist` first, then
+  an explicit disable override, then `launchctl print`; Remote Login uses
+  `/System/Library/LaunchDaemons/ssh.plist` plus launchd registration, because
+  that plist ships with macOS whether or not the listener is on. An installed
+  label launchd will not describe is `UNKNOWN`, never `NOT_INSTALLED`.
+- **Unloaded worker, backup, and privileged-broker daemons are not defects.**
+  Under the control profile they are `DISARMED_EXPECTED`, and the report
+  distinguishes
+  `DAEMON_NOT_INSTALLED` from `DAEMON_INTENTIONALLY_DISARMED` so the current
+  gates do not read as failures. A disarmed service found running is `ADVISORY`
+  (`DAEMON_UNEXPECTEDLY_RUNNING`), not a readiness failure.
+- **User-session surfaces are reported separately.** The Executive tunnel,
+  Chairman Control Room, Desktop Commander, and studio-direct MCP are
+  LaunchAgents. They cannot exist before a console login, so
+  `user_session_surfaces` is `ADVISORY` with
+  `USER_SESSION_LOGIN_REQUIRED` rather than pretending system-boot
+  availability.
+- **FileVault-on recovery is conditional, not generic.** A host with FileVault
+  on stops at the preboot unlock screen after a restart, and only one platform
+  generation can be unlocked from there without a human at the keyboard. The
+  local prerequisite is exact: Apple silicon, **macOS 26 or later**, and Remote
+  Login enabled. `disk_encryption_state` therefore stays `ADVISORY` — it only
+  reports the encryption state and never carries encryption or recovery
+  material — while the `REQUIRED` `preboot_remote_unlock` predicate is the
+  load-bearing law:
+
+  | Observed host | `preboot_remote_unlock` |
+  |---|---|
+  | FileVault off | `OK` / `PREBOOT_UNLOCK_NOT_REQUIRED` — no unlock is needed, so macOS 14/15 is fine |
+  | FileVault on, Apple silicon, macOS 26+, Remote Login enabled | `OK` / `PREBOOT_UNLOCK_SUPPORTED` |
+  | FileVault on, macOS below 26 | `NOT_READY` / `PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED` |
+  | FileVault on, not Apple silicon | `NOT_READY` / `PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED` |
+  | FileVault on, Remote Login disabled or not installed | `NOT_READY` / `PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE` |
+  | FileVault encrypting/decrypting/unreadable, or unknown architecture or version | `UNKNOWN` / `PREBOOT_UNLOCK_STATE_UNKNOWN` |
+
+  So an encrypted M1 on macOS 15 is honestly `NOT_READY` for the unattended
+  cruise journey even though every power and service predicate is green, and
+  the same M1 with FileVault off passes. The two remedies are a Chairman-owned
+  decision, not something this observer chooses: upgrade that host to macOS 26+,
+  or leave FileVault off on a physically controlled always-on host.
+- **This predicate is local eligibility only.** It proves the host *can* be
+  unlocked at preboot over Remote Login, never that anything can reach it. The
+  checker opens no socket and performs no reachability probe, so external
+  network path, bastion, and tunnel reachability remain a separate acceptance
+  journey with its own evidence. A green `preboot_remote_unlock` plus an
+  unreachable network is still an unrecoverable host.
+- **`auto_restart_after_power_loss` stays independent.** Preboot unlock decides
+  whether a returning host can be opened; `autorestart` decides whether it
+  returns at all. Neither substitutes for the other, and a host missing both
+  reports both.
+
+`disk_free_floor` uses the reviewed 25 GiB floor in
+`control_plane/executive_recovery_readiness.py`; it reports
+`DISK_FREE_BELOW_FLOOR` and never deletes anything. The observer's only
+external calls are fixed, absolute, read-only macOS tools (`pmset -g custom`,
+`sw_vers`, `sysctl -n hw.optional.arm64`, `fdesetup status`, and
+`launchctl print` / `print-disabled`). It opens no socket, so it observes the
+Remote Login listener's enablement without touching sshd.
+
+### Remediation boundary
+
+This observer never remediates. Turning a red predicate green is a one-time
+local administrator ceremony, and the privileged root actions belong to the
+existing reviewed broker path described in this runbook — do not add a second
+broker, helper, or mutation script beside the checker, and do not widen the
+checker's authority. In particular, power-policy, FileVault, Remote Login, and
+launchd enablement changes remain administrator/broker-owned actions performed
+once at the host, after which the exact same read-only command must turn green
+with no source change. If a host needs authority the current broker does not
+already hold, stop and return the gap for a Chairman/CEO decision instead of
+extending this path.
+
 ## Stage 1 — review and merge (no administrator actions)
 
 The delivery pull request must have a clean pushed head, passing deterministic CI and CodeQL, and
@@ -20,6 +236,295 @@ completed security review. It may then be squash-merged as inert code. Do not
 run `sudo`, create service accounts, replace Python, create worker credentials,
 or load a LaunchDaemon from the unmerged PR checkout. Merge alone is not host
 acceptance and does not make Phase 1C-A complete or live.
+
+## Alternative B — CF2-H0 complete-source closure repair
+
+This is the selected, bounded source repair for an already prepared H0 host. It is separate from
+the broader Stage 2 provisioning procedure below. It rematerializes the accepted Macro commit as
+an ordinary complete repository, archives the superseded installed source and generation, and
+publishes a new six-file generation without changing the existing topology. Its endpoint is H0
+source-closure proof, not P0 acceptance.
+
+The old installed state must match every gate below under the H0 lock before the carrier may
+publish its one durable repair intent or mutate installed state:
+
+| Old installed gate | Required identity |
+|---|---|
+| generation basename and `source-config.json` | `2b05a61f54c876f00c3f03d51bd9df72de4a73e76bc06b2e7bc13a11ee203d60` |
+| `components.json` SHA-256 | `02886a6c79f22534ac24234d8adb3224329976342393988541c2a50d7e297f29` |
+| `host-preparation-receipt.json` | `51c58d18869663d90c593e416c7fc7833b3725378870f576abd3647f62f40830` |
+| `broker-topology.json` | `981e880ba7d21a0003fe2dd8322c5793f2643b815d094374dd6fad3fed31e453` |
+| `rollback-contract.json` | `18d83b0e164ac2e917d84c01fe1d53fc5c1ce0c33ac9580f11d684e16e495093` |
+| `rollback-drill-receipt.json` | `7efba70495cbbf8bcad0c4e47e894a23f4b1618756d8c3e23cae85ad6b7250ba` |
+| receipt outcome | `H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED` |
+| topology/release/preparer commit | `e4e44867ace335ac9208a3990a10c163e199492d` |
+| accepted Macro commit | `dcdd939c45b23abce5ba04f95e330ac914a3904b` |
+| material digest | `35931b4ef965c5d67a7e01444dd483804e48671784716ea8196c94e925466650` |
+
+Any mismatch refuses before installed mutation and returns to Sol. The carrier never rewrites an
+intent around a different observed state.
+
+### Nonprivileged v2 transport and inert exact-commit carrier
+
+Complete all Git review, protected merge verification, and any network acquisition before this
+block. The local Macro repository must already contain the exact accepted commit and its complete
+reachable object graph. The local Mastermind repository must already contain both the immutable
+accepted repair merge and the exact current protected descendant used as the carrier. This block
+performs no provider, service, socket, worker, P0, or root action. It creates a digest-bound Git
+bundle as inert data; no inode created here is later executed as root. The `git bundle create` step
+names the already verified protected ref whose tip is the exact current carrier.
+
+Set the two repository paths and replace the carrier placeholder with the observed current
+40-lower-hex protected `origin/master` commit and the repair placeholder with the immutable accepted
+40-lower-hex repair merge. The repair must be an ancestor of the carrier and all five authenticated
+H0 path modes and blob OIDs must remain identical. Do not substitute a PR head, invent a future
+merge SHA, or precompute a future generation digest.
+
+```bash
+set -euo pipefail
+test "$(/usr/bin/id -u)" -ne 0
+MACRO_REPOSITORY=/absolute/path/to/macro
+MASTERMIND_REPOSITORY=/absolute/path/to/Mastermind
+OPERATOR_USER="$(/usr/bin/id -un)"
+MACRO_COMMIT=dcdd939c45b23abce5ba04f95e330ac914a3904b
+CARRIER_COMMIT_SHA='<40-lower-hex-current-protected-carrier-sha>'
+REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'
+test "$OPERATOR_USER" != root
+[[ "$CARRIER_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
+[[ "$REPAIR_MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+safe_git() {
+  /usr/bin/env -i \
+    HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_LOCAL=/dev/null \
+    GIT_ATTR_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+    SSH_ASKPASS=/usr/bin/false GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 \
+    GIT_NO_REPLACE_OBJECTS=1 GIT_EXTERNAL_DIFF=/usr/bin/false GIT_ALLOW_PROTOCOL=file \
+    /usr/bin/git --no-replace-objects \
+      -c protocol.allow=never -c protocol.file.allow=always \
+      -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+      -c core.attributesFile=/dev/null -c diff.external=/usr/bin/false "$@"
+}
+safe_git -C "$MACRO_REPOSITORY" cat-file -e "$MACRO_COMMIT^{commit}"
+test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse "$CARRIER_COMMIT_SHA^{commit}")" = "$CARRIER_COMMIT_SHA"
+test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse "$REPAIR_MERGE_SHA^{commit}")" = "$REPAIR_MERGE_SHA"
+test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse refs/remotes/origin/master)" = "$CARRIER_COMMIT_SHA"
+safe_git -C "$MASTERMIND_REPOSITORY" merge-base --is-ancestor \
+  "$REPAIR_MERGE_SHA" "$CARRIER_COMMIT_SHA"
+AUTHENTICATED_H0_PATHS=(
+  ops/executive_os/repair-capacity-source-closure.sh
+  ops/executive_os/capacity_host_artifacts.py
+  ops/executive_os/capacity_source_contract.py
+  ops/executive_os/provider_worker_slots.py
+  ops/executive_os/provider_identity_policy.py
+)
+for AUTHENTICATED_H0_PATH in "${AUTHENTICATED_H0_PATHS[@]}"; do
+  REPAIR_TREE_ROW="$(safe_git -C "$MASTERMIND_REPOSITORY" ls-tree \
+    "$REPAIR_MERGE_SHA" -- "$AUTHENTICATED_H0_PATH")"
+  CARRIER_TREE_ROW="$(safe_git -C "$MASTERMIND_REPOSITORY" ls-tree \
+    "$CARRIER_COMMIT_SHA" -- "$AUTHENTICATED_H0_PATH")"
+  test -n "$REPAIR_TREE_ROW"
+  test "$CARRIER_TREE_ROW" = "$REPAIR_TREE_ROW"
+done
+safe_git -C "$MASTERMIND_REPOSITORY" diff --no-ext-diff --no-textconv --quiet --exit-code
+safe_git -C "$MASTERMIND_REPOSITORY" diff --no-ext-diff --no-textconv --cached --quiet --exit-code
+
+REPAIR_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-source-repair.XXXXXX)"
+REPAIR_CHECKOUT="$REPAIR_PARENT/mastermind"
+safe_git clone --no-local --no-hardlinks --no-checkout \
+  "$MASTERMIND_REPOSITORY" "$REPAIR_CHECKOUT"
+safe_git -c core.symlinks=false -C "$REPAIR_CHECKOUT" \
+  checkout --detach "$CARRIER_COMMIT_SHA"
+test -d "$REPAIR_CHECKOUT/.git"
+test ! -f "$REPAIR_CHECKOUT/.git"
+test "$(safe_git -C "$REPAIR_CHECKOUT" rev-parse HEAD)" = "$CARRIER_COMMIT_SHA"
+test -z "$(safe_git -c core.symlinks=false -C "$REPAIR_CHECKOUT" \
+  status --porcelain=v1 --untracked-files=all)"
+test -z "$(/usr/bin/find "$REPAIR_CHECKOUT" -type l -print -quit)"
+test -z "$(/usr/bin/find "$REPAIR_CHECKOUT" -type f -links +1 -print -quit)"
+
+REPAIR_CARRIER="$REPAIR_PARENT/mastermind-exact-commit.bundle"
+safe_git -C "$MASTERMIND_REPOSITORY" bundle create \
+  "$REPAIR_CARRIER" refs/remotes/origin/master
+/bin/chmod 0400 "$REPAIR_CARRIER"
+test "$(safe_git bundle list-heads "$REPAIR_CARRIER")" = \
+  "$CARRIER_COMMIT_SHA refs/remotes/origin/master"
+REPAIR_CARRIER_SHA256="$(/usr/bin/shasum -a 256 "$REPAIR_CARRIER" | /usr/bin/awk '{print $1}')"
+[[ "$REPAIR_CARRIER_SHA256" =~ ^[0-9a-f]{64}$ ]]
+/usr/bin/printf 'repair_carrier_sha256=%s\n' "$REPAIR_CARRIER_SHA256"
+
+TRANSPORT_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-v3-transport.XXXXXX)"
+MACRO_TRANSPORT="$TRANSPORT_PARENT/macro-complete-v3.zip"
+/usr/bin/python3 -I -S -B \
+  "$REPAIR_CHECKOUT/ops/executive_os/capacity_host_artifacts.py" \
+  build-source-transport-v3 \
+  --source-repository "$MACRO_REPOSITORY" \
+  --output "$MACRO_TRANSPORT" \
+  --commit "$MACRO_COMMIT" \
+  >"$TRANSPORT_PARENT/manifest-build-output.json"
+/bin/chmod 0400 "$MACRO_TRANSPORT"
+test "$(/usr/bin/stat -f %l "$MACRO_TRANSPORT")" -eq 1
+MACRO_TRANSPORT_BYTES="$(/usr/bin/stat -f %z "$MACRO_TRANSPORT")"
+test "$MACRO_TRANSPORT_BYTES" -gt 0
+test "$MACRO_TRANSPORT_BYTES" -le 34359738368
+MACRO_TRANSPORT_SHA256="$(/usr/bin/shasum -a 256 "$MACRO_TRANSPORT" | /usr/bin/awk '{print $1}')"
+[[ "$MACRO_TRANSPORT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+/usr/bin/printf 'macro_transport_bytes=%s\n' "$MACRO_TRANSPORT_BYTES"
+/usr/bin/printf 'macro_transport_sha256=%s\n' "$MACRO_TRANSPORT_SHA256"
+```
+
+The explicit `core.symlinks=false` setting applies only while materializing and checking this
+disposable unprivileged checkout. A tracked Git symlink remains a mode-`120000` blob in the
+authenticated commit but is written here as an ordinary single-link file containing the exact link
+target bytes. The clean-status check uses the same interpretation. The whole-checkout symlink and
+hardlink prohibitions remain mandatory, and no privileged/root carrier verification is weakened.
+
+The builder emits `mastermind.capacity_source_transport/v3`. The accepted complete Macro closure is
+larger than the ZIP32 member boundary, so v3 uses one fully reconstructed canonical ZIP64 layout
+with the same exact two members and a hard 32 GiB enclosing-carrier limit. The earlier v2 schema
+remains strict ZIP32 and is never reinterpreted as v3. V3 requires the complete reachable object
+inventory, frozen eleven-path material projection, bounded streaming reads, and ordinary strict
+closure; missing objects, promisor state, alternates, shallow state, replacement refs, grafts,
+remotes, filters, or unsafe metadata refuse. Record the emitted manifest, its object count and
+semantic inventory digest, the payload digest, the enclosing ZIP byte count, and the independently
+calculated enclosing ZIP digest. These are per-carrier proof; they are not a future generation
+identity.
+
+### One offline administrator ceremony
+
+Keep the same Terminal and invoke the checked-in bootstrap once as the unprivileged operator.
+Before reading the bundle or creating the fixed root namespace, the bootstrap resolves its own UID
+and username through absolute `/usr/bin/id` calls. UID 0 or any mismatch with `OPERATOR_USER`
+returns `64 INVALID_INVOCATION` with empty stderr. `sudo` may open one native administrator dialog,
+but root never receives a shell, heredoc, interpreter `-c`, or operator stdin. Before the carrier
+is authenticated, each privileged call is one reviewed absolute macOS system-tool argv. The
+bootstrap copies the inert bundle without preserving metadata into the exclusive fixed literal
+`/private/var/root/mastermind-h0-root-carrier`, authenticates its digest and exact commit with fully
+closed Git configuration, and materializes the complete five-file local-module closure into new
+root-owned inodes:
+
+- `repair-capacity-source-closure.sh`;
+- `capacity_host_artifacts.py`;
+- `capacity_source_contract.py`;
+- `provider_worker_slots.py`; and
+- `provider_identity_policy.py`.
+
+Every retained carrier file is rebound to its expected Git mode and Git blob OID before the first
+carrier Python or shell launch. The authenticated Python verifier independently repeats the exact
+commit/mode/blob checks from the root-created bare repository. Only then does the bootstrap execute
+one repair and two verify-only passes. Their output is buffered until the fixed root namespace has
+been removed successfully; cleanup failure is a typed non-success and cannot emit a clean pass.
+HUP, INT, TERM, ordinary refusal, and success all enter this same cleanup lifecycle. Each
+authenticated repair or verify-only child starts behind an unreleased execution gate and is tracked
+as one process group. Signals received while the bootstrap registers the PID and process-group ID
+are deferred to a pending flag. A pending signal prevents gate release and terminates/reaps the
+still-gated group; after release, a signal delivered to the bootstrap PID terminates that child and
+its descendants and reaps them before namespace cleanup. No delayed child mutation can follow the
+exit-70 receipt. A preexisting fixed namespace is unknown residue: the no-replace `mkdir` refuses
+it and does not delete it.
+
+```bash
+/usr/bin/env -i \
+  HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+  /bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \
+  "$CARRIER_COMMIT_SHA" "$REPAIR_MERGE_SHA" "$OPERATOR_USER" \
+  "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \
+  "$REPAIR_CARRIER" "$REPAIR_CARRIER_SHA256"
+```
+
+The closed launch environment is part of the ceremony boundary. In particular, ambient
+`BASH_ENV`, shell startup files, functions, aliases, and test scheduler hooks are not inherited by
+the noninteractive bootstrap. If execution-gate removal fails after child registration, the still-
+gated process group is terminated and reaped before namespace cleanup and the fixed refusal is
+emitted. An interrupt received during that teardown retains the fixed incomplete/reconcile receipt.
+No post-spawn refusal, interrupt, or unexpected-exit receipt is emitted until the direct child has
+been waited exactly once and absence of the complete process group is proven. The exclusive root
+namespace remains in place while termination proof is unavailable. Fixed success and typed-return
+paths use the same boundary:
+the direct-child wait retains the process-group identity, any surviving member is killed immediately,
+KILL is repeated until whole-group absence is proven, and only then is buffered output parsed and the
+identity cleared. Additional HUP, INT, or TERM
+signals during this proof are deferred; they cannot restore default signal behavior or bypass reap.
+
+The copied bundle remains inert data. An initially observed symlink refuses before privileged
+namespace creation and source-path metadata is never changed. A pre-opened writable descriptor or
+source race can only change the operator bundle and therefore either changes the frozen source
+relation, loses the copied root inode's recorded SHA-256, or leaves the already copied root inode
+unchanged. All privileged Git uses the root-created bundle and bare repository, has
+local/system/global config, hooks, fsmonitor, attributes, replacements, external diff/textconv,
+prompts, lazy fetch, optional locks, locale, `HOME`, `PATH`, and protocols closed, and permits only
+local file transport. No installed release executable or Python module is launched; the reviewed
+carrier verifies the preserved release strictly as inert data.
+
+The carrier reuses exactly
+`/Library/Application Support/MastermindExecutive/locks/cf2-h0.lock`. While holding it, the repair
+verifies the exact old gates and fixed principal/service/socket state, materializes and verifies the
+complete candidate, publishes one durable repair intent, performs the archive-only no-replace
+source/generation swap, and retains all superseded or failed evidence. It does not install a release
+and does not rerender topology. The final generation rename is the last semantic filesystem mutation.
+Its immediately following capacity-generations parent `fsync` is the durability barrier.
+
+If the final rename is visible but that parent `fsync` fails or is ambiguous, exit 70 is not
+completion and must never trigger rollback. Re-enter only the same carrier, exact merge, intent,
+transport, and archive; it fully reverifies the visible committed graph and reconciles forward.
+Never create a second intent/carrier/archive, auto-fail over, or restore the archived promisor
+source after the visible commit. A precommit definite failure restores only the uniquely
+intent-bound old source/generation by no-replace rename and retains the failed candidate in the
+same archive; nothing is deleted or overwritten.
+
+The fixed exit, stdout, and stderr grammar is:
+
+```text
+0  H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED\n  (repair)
+0  H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED\n       (verify-only)
+64 INVALID_INVOCATION\n
+65 H0_SOURCE_CLOSURE_REPAIR_REFUSED\n
+70 H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER\n
+75 H0_LOCK_HELD\n
+77 ROOT_REQUIRED\n
+```
+
+Stderr is empty for every fixed carrier outcome. Any other stdout, any stderr, or a mismatched exit
+is a refusal, not proof.
+
+### Verify-only mutation and identity proof law
+
+Verify-only performs zero program-directed and zero semantic mutation. Kernel-induced access-time
+advancement from required reads is the sole permitted observable metadata delta. Atime is
+non-authoritative, may only remain equal or advance, and is never set, restored, decreased, or used
+to conceal another change. Namespace, bytes/digests, device/inode identity, type, mode, UID/GID,
+links, size, flags, ACLs, xattrs, mtime, ctime, topology/rollback evidence, launchd state, sockets,
+and legacy state remain exact. The shared lock is opened read-only and is neither created nor
+written by verify-only.
+
+This exception applies only to the fixed installed H0 root. Primary host evidence proves that root
+is on writable APFS, is not mounted `MNT_RDONLY`, and its mount does not expose `MNT_NOATIME`;
+mandatory full independent content verification necessarily reads installed bytes. The exception
+does not apply to any other filesystem, root, provider, or worker surface.
+
+The sanitized proof packet preserves two distinct identity axes:
+
+- `e4e44867ace335ac9208a3990a10c163e199492d` remains the exact current
+  topology-preparer/topology-release identity because topology, rollback, release, and preparer
+  bytes are unchanged; and
+- the observed protected repair merge is the exact source-closure/generation-repair identity.
+
+Record only the exact merge, transport/manifest/payload and semantic inventory identities, intent
+and receipt hashes, archive/source/generation semantic digests, new generation basename and six
+hashes, unchanged topology/rollback hashes, UID/GID/common-device facts, exact repair sentinel,
+both verify sentinels, and the permitted atime observation for each verify pass. Do not record a
+provider-home path, account, credential, secret, or invented generation digest.
+
+This H0 principal check is attribute-scoped to fixed record names, UIDs, primary GIDs, and fixed
+membership/nonmembership facts. It never requests a home-directory attribute and never resolves,
+stats, reads, traverses, or enumerates any provider-home. The later P0 carrier must separately
+re-prove provider-home ownership, mode, and non-traversal.
+
+Stop after both verify-only passes. H0 source closure is not P0 acceptance. A distinct P0 re-pin is
+required to bind both exact merge/install identities and replace its constant closure assertion
+with the pure verifier. P0, provider-home proof, every credential and OAuth ceremony, provider
+calls, service mutation/start, socket creation/connection, routing, worker execution, fan-out,
+failover, and CF2-I all remain held.
 
 ## Stage 2 — exact `origin/master` provisioning, install, and acceptance
 
@@ -219,8 +724,25 @@ A Homebrew, Conda, or user-owned Python tree does not meet this boundary. The
 installer does not copy or re-sign an ambient runtime because that would turn a
 mutable, pre-check object into production execution authority.
 
+Before the one administrator install, standardize the Chairman-owned interactive
+provider clients so their own confirmation UI cannot become the next autonomy
+blocker. This changes only the reviewed permission keys, creates one
+`.mastermind-backup` before the first mutation, and never prints provider
+credentials:
+
+```bash
+python3 "$SOURCE_REPO/ops/executive_os/provider_autonomy_profile.py" apply \
+  --codex-config "$HOME/.codex/config.toml" \
+  --claude-settings "$HOME/.claude/settings.json"
+python3 "$SOURCE_REPO/ops/executive_os/provider_autonomy_profile.py" verify \
+  --codex-config "$HOME/.codex/config.toml" \
+  --claude-settings "$HOME/.claude/settings.json"
+```
+
 Install with the exact immutable values that the just-completed provisioner
-printed and re-verified:
+printed and re-verified. `--arm-privileged-broker` is the one-time bridge from
+interactive administrator authority to the typed unattended broker; it does not
+grant a passwordless shell or edit sudoers:
 
 ```bash
 PYTHON_RUNTIME_ROOT='/Library/Frameworks/Python.framework/Versions/3.12'
@@ -233,21 +755,130 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/install.sh" \
   --operator-user "$OPERATOR_USER" \
   --python-runtime-root "$PYTHON_RUNTIME_ROOT" \
   --python-binary "$PYTHON_BINARY" \
-  --python-team-identifier "$PYTHON_TEAM_IDENTIFIER"
+  --python-team-identifier "$PYTHON_TEAM_IDENTIFIER" \
+  --arm-privileged-broker
 ```
 
-Installation leaves both LaunchDaemons disabled and stopped. Run the installed
-release's auth helper exactly once to cross the provider-readiness gate:
+Installation still leaves the ordinary Executive control/worker/backup daemons
+disabled and stopped. With the explicit arm flag, only the root privileged
+broker is socket-activated. From this point onward, reviewed host effects use
+the stable non-root client; no administrator password is involved:
 
 ```bash
+MMX_ADMIN='/Library/Application Support/MastermindExecutive/bin/mmx-admin'
 CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
-sudo /bin/bash \
-  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
-  --verify-ready \
+"$MMX_ADMIN" executive.worker_auth.verify_ready \
+  --request-id "company-ready-$MERGE_SHA" \
   --expected-credential-kind service-account \
   --workspace-binding-class company-workspace-admin-attested \
   --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
 ```
+
+A repeated request with the same id and identical content returns the stored
+terminal receipt only when that original effect actually reached a terminal
+child result. The same id with changed content refuses. A stale in-flight marker
+returns `EFFECT_UNKNOWN` and is never retried blindly.
+
+For the separately reviewed marker-preserving reconciliation path, the broker may
+record `RECONCILED_NOT_APPLIED` only after it proves the exact original
+`verify_ready` request/marker identity and pre-effect readiness state while
+preserving the marker byte-for-byte. That classification is **not** a synthetic
+FAILED/SUCCEEDED child result. It means the requested business effect was proven
+not applied, and the original request id remains non-replayable. Any later
+readiness attempt requires a separately authorized new request id.
+
+To inspect an earlier request's outcome without resubmitting it, query its id
+over the same socket:
+
+```bash
+"$MMX_ADMIN" status --request-id "company-ready-$MERGE_SHA"
+```
+
+This is a status-query only: it never re-executes the action, creates or repairs
+evidence, removes a marker, or retries. Exit `0` means a valid `TERMINAL`
+projection **or** a valid `RECONCILED_NOT_APPLIED` projection was retrieved;
+for the latter, exit `0` confirms successful status retrieval only and does not
+reinterpret the original privileged effect as success. Exit `75` means
+unresolved marker evidence remains (`EFFECT_UNKNOWN`), and `4` means neither
+terminal nor in-flight/reconciled evidence exists (`NOT_FOUND`, which is not
+license to resubmit). Malformed or mismatched reconciliation evidence is
+refused rather than downgraded to a clean state.
+
+### Three isolated Personal Pro readiness slots
+
+The company worker above remains the only installed Executive worker service.
+The three Personal Pro slots are additional, independently attested credential
+realms; they are **not routed**, started, or available for automatic failover by
+this procedure. Their fixed mapping is:
+
+| Worker slot | Multilogin seat | Disabled macOS principal |
+|---|---|---|
+| `codex-pro-01` | `chatgpt1` | `_mastermind_codex_01` |
+| `codex-pro-02` | `chatgpt2` | `_mastermind_codex_02` |
+| `codex-pro-03` | `chatgpt3` | `_mastermind_codex_03` |
+
+Each login ceremony must happen one at a time. Keep the normal Mac Codex app
+and its browser session untouched. When the helper prints the device URL and
+one-time code, approve it only inside the named Multilogin seat in the table.
+If macOS opens a default browser, close that page without approving it and use
+the named Multilogin seat instead. Never sign the normal browser out or copy
+the normal `~/.codex` credential; each helper invocation sets both `HOME` and
+`CODEX_HOME` to the selected worker-only home.
+
+Run exactly the slot matching the open Multilogin seat:
+
+```bash
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-01 --reauthorize-device
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-02 --reauthorize-device
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-03 --reauthorize-device
+```
+
+Do not add `--replace-existing` on a first enrollment. If the selected slot
+already contains a credential, the helper stops with exit 65. Use the
+sanitized status command below to confirm the exact slot. Add
+`--replace-existing` only for a deliberate rotation of that same slot; it
+cannot select or overwrite another slot.
+
+Enrollment proves only safe credential metadata and exact `login status`; it
+does not spend inference and is not READY. Give each Personal Pro device login
+an explicit Chairman revalidation deadline no more than 24 hours ahead, then
+mint one independent readiness receipt per slot:
+
+```bash
+PERSONAL_PRO_REVALIDATE_AT='YYYY-MM-DDTHH:MM:SSZ'
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-01 --verify-ready \
+  --credential-expires-at "$PERSONAL_PRO_REVALIDATE_AT"
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-02 --verify-ready \
+  --credential-expires-at "$PERSONAL_PRO_REVALIDATE_AT"
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-03 --verify-ready \
+  --credential-expires-at "$PERSONAL_PRO_REVALIDATE_AT"
+```
+
+Finally, inspect all four reviewed realms without opening credential bytes or
+printing provider identities, paths, account names, profile IDs, or URLs:
+
+```bash
+sudo "$PYTHON_BINARY" -I -S -B \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provider-slot-status.py"
+```
+
+The status is deliberately narrow: slot and logical seat, filesystem-presence
+and metadata booleans, bounded readiness state/refusal, and worker-process
+presence. `ready` means that slot's current credential metadata, exact binary,
+identity policy, canary, and receipt still match. It does not mean the slot is
+routed, capacity-aware, or authorized to spawn sessions.
 
 For a service or personal access token, `CREDENTIAL_EXPIRES_AT` is the exact
 nonsecret UTC expiry attested by the workspace administrator; do not estimate or
@@ -298,6 +929,41 @@ stopped; the readiness probe then uses the exact installed, attested binary.
 Formal acceptance validates the composite receipt against the current auth
 lstat and installed Codex identity before it creates a Job or starts services.
 
+The readiness boundary is also the OAuth/CLI automation boundary. Executive
+Jobs, planner prompts, native helpers, MCP tools and plugins never invoke
+`codex login`, device authorization, service-token enrollment, credential
+rotation or account switching. They may select only the already-ready dedicated
+`_mastermind_worker` realm named by the current composite receipt. Credential
+expiry or a non-passing/stale receipt removes that slot from readiness; it does
+not authorize an interactive login, copy of the operator's provider home, model
+request for a secret, or automatic failover to another account.
+
+The G4 planner profile does not create another worker or lifecycle. One Codex
+App Server process is still one Executive process generation and its one native
+helper is a subordinate thread inside the same Attempt and session tree. The
+installed launch must attest the exact
+`operator.appserver.readonly.docs-mcp.native-helper.v1` profile: read-only,
+approval `never`, shell/tool network disabled, only the reviewed OpenAI Docs MCP
+server and two tools, empty plugins and configured skills, hidden per-spawn
+role/model/effort, one helper, depth one, and a 60-second helper runtime. Before
+the parent candidate is accepted, the worker must reconcile redacted
+collaboration events against bounded `thread/list` and exact `thread/read`
+lineage. Any unknown or wider state is effect-unknown config drift. A native
+helper result is never an independent-review receipt; review remains a separate
+Executive Job/Attempt on an excluded worker.
+
+Formal Phase 1C-A acceptance proves the installed lifecycle, principals,
+provider readiness and service containment. It does not by itself prove that a
+model actually chose the G4 helper. After acceptance and before any general
+production claim, run exactly one bounded strict-v2 Chairman intent whose
+read-only planner is explicitly instructed to delegate one documentation lookup
+to its native helper. Record only non-secret Job/Attempt/epoch/generation/parent
+thread/child thread IDs, exact capability/config digests, MCP tool identity,
+terminal statuses and receipt hashes. Do not record prompt text, model output,
+credential values or provider-home contents. If no child appears, the honest
+state is `SERVICE_COMPOSED_UNARMED`/capability unused—not a successful G4 live
+proof.
+
 Provider readiness is not Git handoff Gate B. With both LaunchDaemons still
 disabled and stopped, run the installed distinct-UID Git preflight exactly once:
 
@@ -340,6 +1006,62 @@ Success ends with `Phase 1C-A acceptance PASS` and a private receipt root at:
 Do not copy provider auth, canary values, database rows, or environment contents
 into the follow-up PR. Record only the reviewed receipt paths, hashes, Job and
 Attempt IDs, UIDs, exit statuses, and exact SHA.
+
+## Receipt-gated autonomy arm, proof, and credential interlock
+
+Formal acceptance still leaves both installed arm bits false. Do not edit either
+JSON config. From the exact installed release, first prove the closed unarmed
+state, then run the one root transaction that binds the reviewed Gate B receipt,
+formal acceptance, current provider readiness, both configs, exact release and
+Runtime quiescence:
+
+```bash
+AUTONOMY_CONTROL="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/autonomy-control.sh"
+EXPECTED_CREDENTIAL_KIND='service-account'
+WORKSPACE_BINDING_CLASS='company-workspace-admin-attested'
+# Reuse the exact finite UTC value already used for --verify-ready.
+CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
+
+sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+sudo /bin/bash "$AUTONOMY_CONTROL" arm \
+  --expected-sha "$MERGE_SHA" \
+  --gate-b-receipt "$GATE_B_RECEIPT" \
+  --expected-credential-kind "$EXPECTED_CREDENTIAL_KIND" \
+  --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
+  --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
+sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+```
+
+The first status must be exactly `UNARMED`; the post-transaction status must be
+exactly `ARMED_READY`. Arm stops both services before committing either config,
+starts worker then control, and removes its durable transaction marker only
+after exact PID/principal/socket/`READY` proof. Every armed control restart
+obtains a fresh same-PID environment/secret canary through the existing worker
+broker before entering `READY`; a prior-PID envelope is never reused and no
+provider allocation is spent by this boot re-attestation.
+
+Run the bounded strict-v2 Chairman-intent proof described below, then rehearse
+the shrink-only rollback and confirm both services stopped and both configs
+false:
+
+```bash
+sudo /bin/bash "$AUTONOMY_CONTROL" disarm --expected-sha "$MERGE_SHA"
+sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+```
+
+The second status must be exactly `UNARMED` and the canonical receipt must be
+`DISARMED`. A final re-arm is allowed only when the installed release, Gate B,
+acceptance, provider-readiness receipt, credential metadata and every frozen
+capability digest are unchanged and no new authority appeared. Otherwise stop
+for a fresh Chairman decision; never reuse the old arm command as a blind retry.
+
+Credential enrollment, device reauthorization and replacement are explicit
+native operator operations and are refused while any arm bit is true, an
+autonomy transaction marker exists, or the current `DISARMED` receipt does not
+bind both exact configs. Before any later credential rotation, run and verify
+`disarm` as above. The credential helper checks this interlock before readiness
+invalidation, logout, token stdin or device authorization. Executive Jobs,
+workers, MCP tools, plugins and model prompts cannot bypass it.
 
 ## If acceptance fails
 
@@ -388,3 +1110,185 @@ benign identity change self-heals on the next install run. A genuinely
 tampered or wrong binary will instead fail the pre-existing `codesign
 --verify --strict` / exact SHA-256 checks in `install.sh` itself before a
 new receipt is ever written -- which is the correct, fail-closed outcome.
+
+## CF2-H0 — grounded capacity-source host preparation
+
+This is a separate credential-free preparation stage. Run it only from the
+exact merged `origin/master` history, with the reviewed CF2-H0 merge commit
+checked out detached and passed as the explicit expected Mastermind SHA.
+H0 installs the grounded Macro source/runtime and exactly three inert Personal
+Pro broker definitions. The three new labels stay persistently disabled and
+unloaded and their three socket nodes stay absent.
+
+H0 does **not** authenticate a provider, open or create a credential, perform
+OAuth/device authorization, execute a worker/provider call, compose the new
+brokers with the control runtime, route a job, implement CF2-I, fan out work or
+issue CF2-P0 acceptance. Its success outcome is
+`H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED`.
+
+### Build the two inert inputs as the authenticated operator
+
+Do all GitHub review, exact-head and hosted-check review before privilege. Use
+an already-authenticated local Macro repository to acquire the accepted CF1
+commit. Do not give root an anonymous HTTPS remote and do not copy a Macro
+checkout recursively across the privilege boundary.
+
+The reviewed `capacity_host_artifacts.py` helper reads immutable Git objects at
+the exact commit and produces one data-only custom transport. The ZIP contains
+only `manifest.json` and `payload.pack`; it cannot carry the caller's worktree,
+index, Git config, hooks, ignored files, credential helpers or credentials.
+
+```bash
+set -euo pipefail
+test "$(/usr/bin/id -u)" -ne 0
+REPOSITORY=/absolute/path/to/Mastermind
+MACRO_REPOSITORY=/absolute/path/to/authenticated/macro
+OPERATOR_USER="$(/usr/bin/id -un)"
+DELIVERY_PR=<cf2-h0-pr-number>
+MACRO_COMMIT=dcdd939c45b23abce5ba04f95e330ac914a3904b
+test "$OPERATOR_USER" != root
+test "$DELIVERY_PR" -gt 0
+
+git -C "$REPOSITORY" fetch origin master
+test "$(gh pr view "$DELIVERY_PR" --repo mastermindx-market-intelligence/Mastermind \
+  --json state --jq .state)" = MERGED
+PR_MERGE_SHA="$(gh pr view "$DELIVERY_PR" \
+  --repo mastermindx-market-intelligence/Mastermind \
+  --json mergeCommit --jq .mergeCommit.oid)"
+MERGE_SHA="$PR_MERGE_SHA"
+test "$(git -C "$REPOSITORY" rev-parse "$MERGE_SHA^{commit}")" = "$MERGE_SHA"
+git -C "$REPOSITORY" merge-base --is-ancestor \
+  "$MERGE_SHA" refs/remotes/origin/master
+
+H0_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-cf2-h0.XXXXXX)"
+SOURCE_REPO="$H0_PARENT/mastermind-source"
+MACRO_TRANSPORT="$H0_PARENT/macro-cf1-data-only.zip"
+PYYAML_WHEEL="$H0_PARENT/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl"
+
+git clone --no-local --no-hardlinks --no-checkout "$REPOSITORY" "$SOURCE_REPO"
+git -C "$SOURCE_REPO" checkout --detach "$MERGE_SHA"
+git -C "$SOURCE_REPO" remote remove origin
+git -C "$SOURCE_REPO" config --local core.hooksPath /dev/null
+test "$(git -C "$SOURCE_REPO" rev-parse HEAD)" = "$MERGE_SHA"
+test -z "$(git -C "$SOURCE_REPO" remote)"
+test -z "$(git -C "$SOURCE_REPO" status --porcelain=v1)"
+
+git -C "$MACRO_REPOSITORY" fetch origin master
+test "$(git -C "$MACRO_REPOSITORY" rev-parse "$MACRO_COMMIT^{commit}")" = \
+  "$MACRO_COMMIT"
+
+MATERIAL_PATHS=(
+  config/capability_manifest.yml
+  config/metabolism_budget.yml
+  engine/codex_lane/runner.py
+  engine/codex_provider.py
+  engine/llm_auth.py
+  engine/metabolism/budget_gate.py
+  engine/neuralweb/key_pool.py
+  engine/provider_capacity.py
+  engine/provider_health.py
+  lib/ai_costs.py
+  scripts/build_provider_capacity.py
+)
+MATERIAL_ARGUMENTS=()
+for path in "${MATERIAL_PATHS[@]}"; do
+  MATERIAL_ARGUMENTS+=(--material-path "$path")
+done
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/capacity_host_artifacts.py" \
+  build-source-transport \
+  --source-repository "$MACRO_REPOSITORY" \
+  --output "$MACRO_TRANSPORT" \
+  --commit "$MACRO_COMMIT" \
+  "${MATERIAL_ARGUMENTS[@]}"
+test -f "$MACRO_TRANSPORT"
+test ! -L "$MACRO_TRANSPORT"
+test "$(/usr/bin/stat -f '%l' "$MACRO_TRANSPORT")" -eq 1
+MACRO_TRANSPORT_SHA256="$(/usr/bin/shasum -a 256 "$MACRO_TRANSPORT" | \
+  /usr/bin/awk '{print $1}')"
+test "${#MACRO_TRANSPORT_SHA256}" -eq 64
+
+/usr/bin/curl --fail --location --proto '=https' --tlsv1.2 \
+  --output "$PYYAML_WHEEL" \
+  https://files.pythonhosted.org/packages/89/a0/6cf41a19a1f2f3feab0e9c0b74134aa2ce6849093d5517a0c550fe37a648/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl
+test "$(/usr/bin/shasum -a 256 "$PYYAML_WHEEL" | /usr/bin/awk '{print $1}')" = \
+  fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
+```
+
+The wheel filename and SHA-256 are both frozen. The root preparer copies these
+two single-link files into a root-only stage and revalidates the complete
+transport, exact material Git blobs, wheel digest, PyYAML `RECORD` and the full
+pip-free runtime tree before installation.
+
+### Run the exact merged protected checkout as root
+
+Only now begin the local administrator ceremony. Move the dedicated detached
+Mastermind checkout beneath a new root-owned, non-writable parent, remove ACLs
+and removable extended attributes from that disposable clone, and make the whole
+clone root-owned and non-group/other-writable before root executes it. The
+preparer tolerates only macOS's system-maintained `com.apple.provenance` xattr;
+every caller-controlled or otherwise unapproved xattr fails closed. Leaving the
+clone beneath an operator-writable `/private/tmp` parent is forbidden because
+that parent could replace the reviewed tree after preflight. Root must run only
+this clean checkout at the exact merged protected SHA; it must not execute the
+ordinary user checkout or a copied Macro worktree.
+
+```bash
+sudo -v
+ROOT_SOURCE_PARENT="$(sudo /usr/bin/mktemp -d /private/var/root/mastermind-cf2-h0.XXXXXX)"
+ROOT_SOURCE_REPO="$ROOT_SOURCE_PARENT/mastermind-source"
+sudo /bin/mv "$SOURCE_REPO" "$ROOT_SOURCE_REPO"
+sudo /bin/chmod -N "$ROOT_SOURCE_PARENT"
+sudo /usr/bin/xattr -c "$ROOT_SOURCE_PARENT"
+sudo /bin/chmod -RN "$ROOT_SOURCE_REPO"
+sudo /usr/bin/xattr -cr "$ROOT_SOURCE_REPO"
+sudo /usr/sbin/chown -R root:wheel "$ROOT_SOURCE_REPO"
+sudo /bin/chmod -R go-w "$ROOT_SOURCE_REPO"
+sudo /bin/bash "$ROOT_SOURCE_REPO/ops/executive_os/prepare-capacity-host.sh" \
+  --expected-mastermind-sha "$MERGE_SHA" \
+  --operator-user "$OPERATOR_USER" \
+  --macro-transport "$MACRO_TRANSPORT" \
+  --macro-transport-sha256 "$MACRO_TRANSPORT_SHA256" \
+  --pyyaml-wheel "$PYYAML_WHEEL"
+sudo /bin/bash "$ROOT_SOURCE_REPO/ops/executive_os/prepare-capacity-host.sh" \
+  --expected-mastermind-sha "$MERGE_SHA" \
+  --verify-only
+```
+
+The preparer installs exactly three realm configs, three per-realm Codex
+attestation receipts and three launchd plists. Before and after installation it
+proves the new labels are disabled and unloaded and the new socket nodes are
+absent. Installing the definitions grants no service-start authority.
+
+One root-only host lock excludes overlapping H0 preparations. If an earlier
+process was killed after installing only part of the nine-file topology, the
+same carrier proves stopped/absent state, archives every exact partial target
+and temporary artifact, records `INTERRUPTED_H0_PARTIAL_RECOVERED`, and resumes
+from the sealed inputs. Intent and receipt publication are resumable and
+crash-atomic through same-directory candidates, file and directory fsync
+barriers and atomic renames; each target move fsyncs both affected parents. It
+never overwrites an ambiguous target or revives a service. A completed
+generation is never recovered this way; normal follow-up
+uses `--verify-only`.
+
+The preparer then performs the real shrink-only rollback drill: it moves all
+nine new artifacts to a root-only archive, proves disabled/unloaded service and
+absent-socket postconditions, records `SHRINK_ONLY_ROLLBACK_PASS`, and reinstalls
+the same nine inert artifacts. Principals, private homes, any later credentials,
+immutable releases, grounded Macro source, the capacity runtime, the read-only
+telemetry boundary and legacy Phase 1C artifacts are preserved. Rollback does
+not delete them and does not start a service.
+
+The immutable six-file H0 generation (including a self-contained copy of the
+durable rollback-drill receipt) and installed-host receipt are committed
+only after source, runtime, release, topology, legacy-state and rollback proof
+pass. The successful install and each successful verification report
+`H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED`.
+
+Run `--verify-only` a second time to prove zero-write and zero semantic mutation idempotence under
+the sole kernel read-atime observer effect defined above. Then rerun
+the independently governed, read-only CF2-P0 census. Proceed only if that
+census—not this preparer—emits `GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED`. Even
+then, CF2-I-A is the next separate carrier. OAuth/device ceremonies,
+credentials, provider calls, service start, runtime composition, routing,
+fan-out and failover remain held.

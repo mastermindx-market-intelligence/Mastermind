@@ -501,7 +501,10 @@ def _broker_status_stub(tmp_path: Path):
     instance.control_identity = SimpleNamespace(pw_dir=str(tmp_path))
     instance.worker_identity = SimpleNamespace(pw_uid=451)
     instance.worker_group = SimpleNamespace(gr_gid=451)
-    instance.worker_config = {"allowed_supplementary_gids": []}
+    instance.worker_config = {
+        "allowed_supplementary_gids": [],
+        "operator_harness_armed": False,
+    }
     # The real `_write_bytes` chowns to the dedicated control principal, which
     # exists only on the reviewed host; receipt persistence is not under test.
     instance.persisted = {}
@@ -612,6 +615,9 @@ def test_broker_status_success_path_is_unchanged(
         "worker_uid": 451,
         "worker_gid": 451,
         "supplementary_gids": [],
+        "operator_harness_armed": False,
+        "active_operator_attempt_id": None,
+        "active_operator_generation_id": None,
         "startup_sweep": {"passed": True},
         "quarantined_reason": None,
     }
@@ -635,6 +641,9 @@ def test_broker_status_still_refuses_a_zero_exit_that_fails_attestation(
         "worker_uid": 451,
         "worker_gid": 451,
         "supplementary_gids": [],
+        "operator_harness_armed": False,
+        "active_operator_attempt_id": None,
+        "active_operator_generation_id": None,
         "startup_sweep": {"passed": False},
         "quarantined_reason": None,
     }
@@ -650,6 +659,29 @@ def test_broker_status_still_refuses_a_zero_exit_that_fails_attestation(
     assert str(raised.value) == (
         "worker broker did not attest the dedicated principal boundary"
     )
+
+
+def test_broker_status_refuses_operator_arm_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value = {
+        "worker_uid": 451,
+        "worker_gid": 451,
+        "supplementary_gids": [],
+        "operator_harness_armed": True,
+        "active_operator_attempt_id": None,
+        "active_operator_generation_id": None,
+        "startup_sweep": {"passed": True},
+        "quarantined_reason": None,
+    }
+    _stub_subprocess(
+        monkeypatch,
+        _completed(returncode=0, stdout=(json.dumps(value) + "\n").encode("utf-8")),
+    )
+    instance = _broker_status_stub(tmp_path)
+
+    with pytest.raises(acceptance.AcceptanceError, match="principal boundary"):
+        instance._broker_status("worker-broker-startup.json")
 
 
 # ---------------------------------------------------------------------------

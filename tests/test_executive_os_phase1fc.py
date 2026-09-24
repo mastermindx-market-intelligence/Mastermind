@@ -8,16 +8,32 @@ import sqlite3
 import stat
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from jsonschema import Draft202012Validator
 
 import control_plane.executive_coo_cycle as executive_coo_cycle
+import control_plane.ceo_intent as ceo_intent
 import control_plane.executive_runtime as executive_runtime
+from control_plane import executive_placement_selection as placement_selection
 from control_plane.executive_coo_cycle import CooCycle
 from control_plane.ceo_intent import (
+    CeoIntentError,
     INTENT_SCHEMA_V2,
     RECEIPT_SCHEMA_V2,
+    intent_fingerprint,
     submit_intent,
+    validate_intent,
+)
+from control_plane.executive_steward import (
+    CapacityState,
+    EffectState,
+    Freshness,
+    ResponsibilityFact,
+    Seat,
+    SourceOwner,
+    SourceRef,
 )
 from control_plane.executive_orchestration_principal import (
     OperatorPrincipalObservation,
@@ -36,11 +52,15 @@ from control_plane.executive_orchestration_result import (
 )
 from control_plane.executive_runtime import (
     ExecutiveSchemaUpgradeRequired,
+    FiniteControlContext,
+    FiniteReservationDecision,
     JobRequeueOutcome,
+    JobStatus,
     OrchestrationDispatchOutcome,
     PersistenceError,
     Runtime,
     StateConflict,
+    finite_host_binding_digest,
 )
 from control_plane.operator_harness_contract import (
     AuthRealmFact,
@@ -60,7 +80,10 @@ from control_plane.operator_harness_contract import (
     TurnStartObservation,
     WorkspaceIdentity,
 )
-from scripts.executive_os_phase1fc_acceptance import run_acceptance
+from scripts.executive_os_phase1fc_acceptance import (
+    run_acceptance,
+    run_web_ceo_offline_delivery_acceptance,
+)
 
 
 def _v2_intent(**overrides):
@@ -101,6 +124,209 @@ def _register(runtime: Runtime, worker_id: str = "worker-1") -> None:
             }
         },
     )
+
+
+def _register_placement_union(runtime: Runtime) -> None:
+    runtime.workers.register_worker(
+        "worker-a",
+        provider="codex",
+        account_label="worker-a@company",
+        worker_type="mock",
+        capabilities=["read", "research"],
+        quota_classes={
+            "codex-hf1q-step": {
+                "provider": "codex",
+                "capabilities": ["read", "research"],
+                "cost_class": "small",
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "metadata": {
+                    "routing_policy_version": "fph0-routing",
+                    "execution_profile_id": "fph0-execution",
+                    "execution_profile_digest": "b" * 64,
+                    "capability_policy_version": "fph0-capability",
+                    "capability_policy_digest": "c" * 64,
+                },
+            }
+        },
+    )
+    runtime.workers.register_worker(
+        "worker-b",
+        provider="claude-compatible-subscription",
+        account_label="worker-b@company",
+        worker_type="mock",
+        capabilities=["read", "research"],
+        quota_classes={
+            "claude-hf1q-step": {
+                "provider": "claude-compatible-subscription",
+                "capabilities": ["read", "research"],
+                "cost_class": "small",
+            }
+        },
+    )
+
+
+def _v3_execution_binding():
+    return {
+        "eligible_quota_classes": ["codex-hf1q-step"],
+        "provider": "codex",
+        "model": "gpt-5.6-sol",
+        "effort": "xhigh",
+        "cost_class": "small",
+        "base_sha": "a" * 40,
+        "routing_policy_version": "fph0-routing",
+        "execution_profile_id": "fph0-execution",
+        "execution_profile_digest": "b" * 64,
+        "capability_policy_version": "fph0-capability",
+        "capability_policy_digest": "c" * 64,
+        "operator_eligible_quota_classes": ["codex-operator"],
+        "operator_provider": "codex",
+        "operator_model": "gpt-5.6-sol",
+        "operator_effort": "xhigh",
+        "operator_cost_class": "small",
+        "operator_routing_policy_version": "fph0-routing",
+        "operator_execution_profile_id": "fph0-execution",
+        "operator_execution_profile_digest": "b" * 64,
+        "operator_capability_policy_version": "fph0-capability",
+        "operator_capability_policy_digest": "c" * 64,
+        "operator_harness_binary_digest": "d" * 64,
+        "operator_harness_version": "fph0-harness",
+        "operator_harness_armed": False,
+        "host_execution_binding_version": (
+            "mastermind.host_execution_binding/v3"
+        ),
+        "work_placement_union": [
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+            {
+                "provider_realm": "claude-compatible-subscription",
+                "quota_class": "claude-hf1q-step",
+            },
+        ],
+    }
+
+
+def _admit_v2_plan(
+    runtime: Runtime,
+    *,
+    placements: list[dict[str, str] | None] | None = None,
+    admit_claude_union: bool = True,
+    plan_schema_version: str = "mastermind.execution_plan/v2",
+):
+    assert plan_schema_version in {"mastermind.execution_plan/v2", "mastermind.execution_plan/v3"}
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-HF1Q-T2V2-001",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE jobs SET constraints_json=? WHERE job_id=?
+            """,
+            (
+                json.dumps(
+                    {
+                        **root.constraints,
+                        "provider": "codex",
+                        "eligible_quota_classes": ["codex-hf1q-step"],
+                        "work_placement_union": [
+                            {
+                                "provider_realm": "codex",
+                                "quota_class": "codex-hf1q-step",
+                            }
+                        ],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                root.job_id,
+            ),
+        )
+    root = runtime.jobs.get_job(root.job_id)
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    if admit_claude_union and placements and any(
+        item is not None
+        and item.get("provider_realm") == "claude-compatible-subscription"
+        for item in placements
+    ):
+        with runtime.store.transaction() as connection:
+            root_row = connection.execute(
+                "SELECT constraints_json FROM jobs WHERE job_id=?", (root.job_id,)
+            ).fetchone()
+            raw_constraints = json.loads(str(root_row["constraints_json"]))
+            raw_constraints["work_placement_union"].append(
+                {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                }
+            )
+            connection.execute(
+                "UPDATE jobs SET constraints_json=? WHERE job_id=?",
+                (
+                    json.dumps(
+                        raw_constraints,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    ),
+                    root.job_id,
+                ),
+            )
+    steps = []
+    for ordinal, placement in enumerate(placements or [None, None]):
+        step = {
+            "ordinal": ordinal,
+            "step_id": f"step-{ordinal}",
+            "objective": f"Hermetic reviewed placement step {ordinal}.",
+            "business_impact": "routine",
+            "review_required": False,
+            "requested_authorities": ["READ"],
+            "allowed_write_paths": [],
+            "validation_ids": [],
+            "attempt_limit": 1,
+            "cost_class": "small",
+        }
+        if plan_schema_version == "mastermind.execution_plan/v3":
+            step["prerequisite_step_ids"] = []
+        if placement is not None:
+            step["placement"] = dict(placement)
+        steps.append(step)
+    plan_body = {
+        "schema_version": plan_schema_version,
+        "root_job_id": root.job_id,
+        "plan_attempt_id": dispatch.attempt.attempt_id,
+        "steps": steps,
+    }
+    _complete_ohf_role(runtime, dispatch, plan_body, identity_seed=7301)
+    command = (
+        f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}"
+    )
+    admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    return runtime, root, plan_body, admitted
+
+
+def _v3_binding_with(v2_binding, union):
+    return {
+        **v2_binding,
+        "host_execution_binding_version": (
+            "mastermind.host_execution_binding/v3"
+        ),
+        "work_placement_union": union,
+    }
 
 
 def _source(source_id: str = "coo-source") -> dict[str, str]:
@@ -493,10 +719,10 @@ def test_fresh_schema_v4_has_exact_additive_columns_and_migration(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(attempts)")
         ]
 
-    assert [tuple(row) for row in migrations][-1] == (
-        4,
-        "executive_phase1fc_orchestration_contract",
-    )
+    assert [tuple(row) for row in migrations][-2:] == [
+        (4, "executive_phase1fc_orchestration_contract"),
+        (5, "executive_finite_drive_arm_contract"),
+    ]
     assert job_columns[-8:] == [
         "orchestration_role",
         "orchestration_provenance_json",
@@ -829,17 +1055,10 @@ def test_tx9_detached_requeue_is_evidence_bound_and_event_first(tmp_path):
             UPDATE attempts
             SET execution_mode='OPERATOR_HARNESS',
                 requested_execution_profile_json='{}',
-                requested_execution_profile_digest=?,
-                result_json='{"attempt_evidence":"keep"}'
+                requested_execution_profile_digest=?
             WHERE attempt_id=?
             """,
             ("f" * 64, attempt.attempt_id),
-        )
-        connection.execute(
-            """
-            UPDATE jobs SET result_json='{"job_evidence":"keep"}' WHERE job_id=?
-            """,
-            (planner.job_id,),
         )
         connection.execute(
             """
@@ -885,11 +1104,16 @@ def test_tx9_detached_requeue_is_evidence_bound_and_event_first(tmp_path):
     requeue_command = (
         f"coo-cycle:{root.job_id}:requeue:{planner.job_id}:{attempt.attempt_id}"
     )
-    outcome = runtime.jobs.requeue_job(
-        planner.job_id, command_id=requeue_command
+    projection = runtime.jobs.project_retry_safety(
+        planner.job_id, expected_attempt_id=attempt.attempt_id
     )
-    assert isinstance(outcome, JobRequeueOutcome)
-    assert outcome.requeue_kind == "TX9_DETACHED"
+    committed = runtime.jobs.commit_coo_retry_decision(
+        root.job_id,
+        selected_job_id=planner.job_id,
+        expectation=projection,
+    )
+    assert committed.action == "REQUEUED"
+    assert committed.receipt["requeue_kind"] == "TX9_DETACHED"
 
     with runtime.store.read() as connection:
         after_job = dict(
@@ -925,7 +1149,7 @@ def test_tx9_detached_requeue_is_evidence_bound_and_event_first(tmp_path):
     }
     assert after_attempt == before_attempt
     assert after_quota == before_quota
-    assert after_job["result_json"] == '{"job_evidence":"keep"}'
+    assert after_job["result_json"] is None
 
     second = runtime.attempts.dispatch_cycle_job(
         planner.job_id,
@@ -938,7 +1162,7 @@ def test_tx9_detached_requeue_is_evidence_bound_and_event_first(tmp_path):
     quota_before_replay = runtime.workers.get_quota_class("worker-b", "default")
     replay = runtime.jobs.requeue_job(planner.job_id, command_id=requeue_command)
     assert isinstance(replay, JobRequeueOutcome)
-    assert replay.event_id == outcome.event_id
+    assert replay.event_id == committed.receipt["event_id"]
     assert runtime.jobs.get_job(planner.job_id) == current_before_replay
     assert runtime.workers.get_quota_class("worker-b", "default") == quota_before_replay
     with pytest.raises(StateConflict, match="another target"):
@@ -991,8 +1215,15 @@ def test_tx9_exact_worker_and_quota_cutoff_and_snapshot_drift_refuse(tmp_path):
         f"coo-cycle:{root.job_id}:requeue:{planner.job_id}:"
         f"{dispatch.attempt.attempt_id}"
     )
-    outcome = runtime.jobs.requeue_job(planner.job_id, command_id=command)
-    assert isinstance(outcome, JobRequeueOutcome)
+    projection = runtime.jobs.project_retry_safety(
+        planner.job_id, expected_attempt_id=dispatch.attempt.attempt_id
+    )
+    outcome = runtime.jobs.commit_coo_retry_decision(
+        root.job_id,
+        selected_job_id=planner.job_id,
+        expectation=projection,
+    )
+    assert outcome.action == "REQUEUED"
     with runtime.store.transaction() as connection:
         connection.execute(
             """
@@ -1023,6 +1254,9 @@ def test_tx9_exact_worker_quota_later_event_blocks_without_mutation(tmp_path):
             ("f" * 64, dispatch.attempt.attempt_id),
         )
     runtime.operator_harness.invalidate_after_restore()
+    projection = runtime.jobs.project_retry_safety(
+        planner.job_id, expected_attempt_id=dispatch.attempt.attempt_id
+    )
     with runtime.store.transaction() as connection:
         runtime.store.append_event(
             connection,
@@ -1037,8 +1271,13 @@ def test_tx9_exact_worker_quota_later_event_blocks_without_mutation(tmp_path):
         f"coo-cycle:{root.job_id}:requeue:{planner.job_id}:"
         f"{dispatch.attempt.attempt_id}"
     )
-    with pytest.raises(StateConflict, match="later Event"):
-        runtime.jobs.requeue_job(planner.job_id, command_id=command)
+    outcome = runtime.jobs.commit_coo_retry_decision(
+        root.job_id,
+        selected_job_id=planner.job_id,
+        expectation=projection,
+    )
+    assert outcome.action == "RECONCILIATION_REQUIRED"
+    assert outcome.receipt["effect_state"] == "NONE"
     assert runtime.jobs.get_job(planner.job_id) == before
 
 
@@ -1400,6 +1639,63 @@ def _plan_body() -> dict:
     }
 
 
+@pytest.mark.parametrize("plan_version", [1, 2, 3])
+@pytest.mark.parametrize("step_version", [1, 2, 3])
+def test_plan_body_schema_selects_matching_step_shape(plan_version, step_version):
+    from control_plane.executive_orchestration_result import _role_body_schema
+
+    body = _plan_body()
+    body["schema_version"] = f"mastermind.execution_plan/v{plan_version}"
+    if step_version >= 2:
+        body["steps"][0]["placement"] = {
+            "provider_realm": "codex",
+            "quota_class": "codex-hf1q-step",
+        }
+    if step_version == 3:
+        body["steps"][0]["prerequisite_step_ids"] = []
+
+    schema = _role_body_schema("plan")
+    Draft202012Validator.check_schema(schema)
+    assert Draft202012Validator(schema).is_valid(body) is (
+        plan_version == step_version
+    )
+
+
+@pytest.mark.parametrize("plan_version, other_version", [(1, 2), (2, 3), (3, 1)])
+def test_plan_body_schema_refuses_mixed_step_shapes(plan_version, other_version):
+    from control_plane.executive_orchestration_result import _role_body_schema
+
+    body = _plan_body()
+    body["schema_version"] = f"mastermind.execution_plan/v{plan_version}"
+    second = dict(body["steps"][0], ordinal=1, step_id="step-2")
+    body["steps"].append(second)
+    for step, version in zip(body["steps"], (plan_version, other_version)):
+        if version >= 2:
+            step["placement"] = {
+                "provider_realm": "codex",
+                "quota_class": "codex-hf1q-step",
+            }
+        if version == 3:
+            step["prerequisite_step_ids"] = []
+
+    assert not Draft202012Validator(_role_body_schema("plan")).is_valid(body)
+
+
+@pytest.mark.parametrize("missing_field", ["placement", "prerequisite_step_ids"])
+def test_plan_body_schema_requires_v3_fields(missing_field):
+    from control_plane.executive_orchestration_result import _role_body_schema
+
+    body = _plan_body()
+    body["schema_version"] = "mastermind.execution_plan/v3"
+    body["steps"][0].update(
+        placement={"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        prerequisite_step_ids=[],
+    )
+    del body["steps"][0][missing_field]
+
+    assert not Draft202012Validator(_role_body_schema("plan")).is_valid(body)
+
+
 def test_plan_result_closed_wire_round_trips_and_rejects_authority_path_and_duplicates():
     envelope = _result_envelope("plan", _plan_body())
     validated = validate_envelope(
@@ -1463,6 +1759,494 @@ def test_plan_enum_wrong_json_types_raise_typed_refusal(field, bad):
             expected_role="plan",
             expected_root_job_id="JOB-001",
         )
+
+
+def test_t2v2_v1_and_closed_v2_plan_schema_refusals():
+    envelope = _result_envelope("plan", _plan_body())
+    expected = {
+        "expected_job_id": "JOB-100",
+        "expected_run_id": "ATT-100",
+        "expected_worker_id": "worker-1",
+        "expected_role": "plan",
+        "expected_root_job_id": "JOB-001",
+    }
+    validated = validate_envelope(envelope, **expected)
+    assert validated == envelope
+    assert result_digest(validated["role_result"]) == result_digest(
+        _plan_body()
+    )
+
+    placement = json.loads(json.dumps(envelope))
+    placement["role_result"]["steps"][0]["placement"] = {
+        "provider_realm": "codex",
+        "quota_class": "codex-hf1q-step",
+    }
+    with pytest.raises(OrchestrationResultError, match="does not match its closed schema"):
+        validate_envelope(placement, **expected)
+
+    v2 = json.loads(json.dumps(placement))
+    v2["role_result"]["schema_version"] = "mastermind.execution_plan/v2"
+    validated_v2 = validate_envelope(v2, **expected)
+    assert validated_v2["role_result"]["steps"][0]["placement"] == {
+        "provider_realm": "codex",
+        "quota_class": "codex-hf1q-step",
+    }
+    assert result_digest(validated_v2["role_result"]) != result_digest(
+        _plan_body()
+    )
+
+    unknown = json.loads(json.dumps(v2))
+    unknown["role_result"]["steps"][0]["placement"]["worker_id"] = "worker-a"
+    with pytest.raises(OrchestrationResultError, match="does not match its closed schema"):
+        validate_envelope(unknown, **expected)
+
+    wrong_version = json.loads(json.dumps(v2))
+    wrong_version["role_result"]["schema_version"] = "mastermind.execution_plan/v3"
+    with pytest.raises(OrchestrationResultError, match="does not match its closed schema"):
+        validate_envelope(wrong_version, **expected)
+
+    missing_version = json.loads(json.dumps(v2))
+    del missing_version["role_result"]["schema_version"]
+    with pytest.raises(
+        OrchestrationResultError,
+        match="plan role_result does not match its closed schema",
+    ):
+        validate_envelope(missing_version, **expected)
+
+
+def _v3_plan_body(root_job_id: str, plan_attempt_id: str) -> dict:
+    return {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": root_job_id,
+        "plan_attempt_id": plan_attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Acquire source evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Run independent analysis.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 2,
+                "step_id": "step-2",
+                "objective": "Consume accepted step-0 evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-0"],
+            },
+        ],
+    }
+
+
+def test_execution_plan_v3_prerequisite_valid():
+    """V3 plan with valid prerequisite_step_ids (lower-ordinal) passes."""
+    expected = {
+        "expected_job_id": "JOB-100",
+        "expected_run_id": "ATT-100",
+        "expected_worker_id": "worker-1",
+        "expected_role": "plan",
+        "expected_root_job_id": "JOB-001",
+    }
+    envelope = _result_envelope("plan", _v3_plan_body("JOB-001", "ATT-100"))
+    validated = validate_envelope(envelope, **expected)
+    assert validated["role_result"]["schema_version"] == "mastermind.execution_plan/v3"
+    assert validated["role_result"]["steps"][2]["prerequisite_step_ids"] == ["step-0"]
+
+
+def test_execution_plan_v3_prerequisite_unknown_step():
+    """prerequisite_step_ids naming an unknown step_id raises."""
+    envelope = _result_envelope("plan", {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-100",
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Acquire source evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": ["missing-step"],
+            },
+        ],
+    })
+    with pytest.raises(OrchestrationResultError, match="unknown step"):
+        validate_envelope(
+            envelope,
+            expected_job_id="JOB-100",
+            expected_run_id="ATT-100",
+            expected_worker_id="worker-1",
+            expected_role="plan",
+            expected_root_job_id="JOB-001",
+        )
+
+
+def test_execution_plan_v3_prerequisite_self_reference():
+    """A step cannot depend on itself."""
+    envelope = _result_envelope("plan", {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-100",
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-1",
+                "objective": "Do something.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-1"],
+            },
+        ],
+    })
+    with pytest.raises(OrchestrationResultError, match="lower-ordinal"):
+        validate_envelope(
+            envelope,
+            expected_job_id="JOB-100",
+            expected_run_id="ATT-100",
+            expected_worker_id="worker-1",
+            expected_role="plan",
+            expected_root_job_id="JOB-001",
+        )
+
+
+def test_execution_plan_v3_prerequisite_forward_reference():
+    """A step cannot depend on a higher-ordinal step."""
+    envelope = _result_envelope("plan", {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-100",
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "First step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Second step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-2"],
+            },
+            {
+                "ordinal": 2,
+                "step_id": "step-2",
+                "objective": "Third step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+        ],
+    })
+    with pytest.raises(OrchestrationResultError, match="lower-ordinal"):
+        validate_envelope(
+            envelope,
+            expected_job_id="JOB-100",
+            expected_run_id="ATT-100",
+            expected_worker_id="worker-1",
+            expected_role="plan",
+            expected_root_job_id="JOB-001",
+        )
+
+
+def test_execution_plan_v3_prerequisite_duplicate():
+    """Duplicate entries in prerequisite_step_ids raise."""
+    envelope = _result_envelope("plan", {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-100",
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "First step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Second step.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-0", "step-0"],
+            },
+        ],
+    })
+    with pytest.raises(OrchestrationResultError, match="duplicate"):
+        validate_envelope(
+            envelope,
+            expected_job_id="JOB-100",
+            expected_run_id="ATT-100",
+            expected_worker_id="worker-1",
+            expected_role="plan",
+            expected_root_job_id="JOB-001",
+        )
+
+
+def test_t2v2_two_step_placement_projection_and_exact_claim_refusal(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    runtime, root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        placements=[
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+            {
+                "provider_realm": "claude-compatible-subscription",
+                "quota_class": "claude-hf1q-step",
+            },
+        ],
+    )
+    constraints_by_step = {
+        job.plan_step_id: job.constraints
+        for job in admitted
+        if job.orchestration_role == "work"
+    }
+    expected_root_constraints = {
+        key: value
+        for key, value in root.constraints.items()
+        if key != "work_placement_union"
+    }
+    assert constraints_by_step == {
+        "step-0": {
+            **expected_root_constraints,
+            "cost_class": "small",
+            "eligible_quota_classes": ["codex-hf1q-step"],
+            "provider": "codex",
+        },
+        "step-1": {
+            **expected_root_constraints,
+            "cost_class": "small",
+            "eligible_quota_classes": ["claude-hf1q-step"],
+            "provider": "claude-compatible-subscription",
+        },
+    }
+    step_1 = next(
+        job for job in admitted if job.plan_step_id == "step-1"
+    )
+    unavailable = runtime.workers.get_worker("worker-b")
+    assert unavailable is not None
+    runtime.workers.set_worker_status(
+        "worker-b",
+        status="OFFLINE",
+    )
+    assert runtime.workers.get_quota_class(
+        "worker-b", "claude-hf1q-step"
+    ).status.value == "OFFLINE"
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        step_1.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:dispatch:{step_1.job_id}:attempt:1"
+        ),
+    )
+    assert dispatch is None
+    assert runtime.attempts.list_attempts(step_1.job_id) == []
+
+    step_0 = next(
+        job for job in admitted if job.plan_step_id == "step-0"
+    )
+    exact = runtime.attempts.dispatch_cycle_job(
+        step_0.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:dispatch:{step_0.job_id}:attempt:1"
+        ),
+    )
+    assert exact is not None
+    assert exact.attempt.quota_class == "codex-hf1q-step"
+    assert exact.attempt.placement_snapshot["provider"] == "codex"
+
+
+def test_t2v2_exact_root_refuses_claude_step_before_child_creation(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    with pytest.raises(
+        StateConflict,
+        match="plan step placement is outside the reviewed host work-placement union",
+    ):
+        _admit_v2_plan(
+            runtime,
+            admit_claude_union=False,
+            placements=[
+                {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+                {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+            ],
+        )
+    work_children = [
+        job
+        for job in runtime.jobs.list_jobs()
+        if job.orchestration_role == "work"
+    ]
+    assert work_children == []
+    assert [
+        event
+        for event in runtime.events.list_events()
+        if event.event_type == "COO_PLAN_ADMITTED"
+    ] == []
+
+
+def test_t2v2_placement_refuses_concrete_identity_keys():
+    concrete_identities = [
+        ("worker_id", "worker-a"),
+        ("session_id", "session-a"),
+        ("credential_home", "/credential/home"),
+        ("native_task_id", "task-a"),
+        ("lease_token", "lease-a"),
+        ("host", "host-a"),
+    ]
+    for field, value in concrete_identities:
+        envelope = _result_envelope("plan", _plan_body())
+        envelope["role_result"]["schema_version"] = "mastermind.execution_plan/v2"
+        envelope["role_result"]["steps"][0]["placement"] = {
+            "provider_realm": "codex",
+            "quota_class": "codex-hf1q-step",
+            field: value,
+        }
+        with pytest.raises(
+            OrchestrationResultError,
+            match="does not match its closed schema",
+        ):
+            validate_envelope(
+                envelope,
+                expected_job_id="JOB-100",
+                expected_run_id="ATT-100",
+                expected_worker_id="worker-1",
+                expected_role="plan",
+                expected_root_job_id="JOB-001",
+            )
+
+
+def test_t2v2_admission_replay_preserves_exact_step_requirements(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    runtime, root, plan_body, admitted = _admit_v2_plan(
+        runtime,
+        placements=[
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        ],
+    )
+    before = [runtime.jobs.get_job(job.job_id) for job in admitted]
+    assert all(job is not None for job in before)
+    replay = runtime.jobs.admit_cycle_plan(
+        root.job_id,
+        command_id=(
+            f"coo-cycle:{root.job_id}:admit-plan:{plan_body['plan_attempt_id']}"
+        ),
+    )
+    after = [runtime.jobs.get_job(job.job_id) for job in replay]
+    assert after == before
+    assert len([job for job in runtime.jobs.list_jobs() if job.orchestration_role == "work"]) == 2
+    for job in replay:
+        assert job.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]
+        assert job.constraints["provider"] == "codex"
 
 
 @pytest.mark.parametrize(("field", "bad"), [("verdict", {}), ("severity", [])])
@@ -1559,7 +2343,7 @@ def test_raw_observation_freezes_schema_bytes_length_and_digest():
         RawRoleResultObservation(**kwargs, schema_version="wrong")
 
 
-def test_run_once_cycle_performs_one_deterministic_action_and_replays_adverse_state(
+def test_run_once_cycle_blocks_generic_failed_with_retry_evidence_and_replays(
     tmp_path,
 ):
     runtime = Runtime.at(tmp_path)
@@ -1597,37 +2381,299 @@ def test_run_once_cycle_performs_one_deterministic_action_and_replays_adverse_st
         payload={"summary": "fixture adverse", "errors": ["failed"]},
     )
 
-    requeued = cycle.run_once(root.job_id)
-    assert requeued.action == "REQUEUED"
-    assert requeued.command_id == (
-        f"coo-cycle:{root.job_id}:requeue:{planner_id}:{attempt.attempt_id}"
-    )
-    assert runtime.jobs.get_job(planner_id).status.value == "QUEUED"
-
-    second_dispatch = cycle.run_once(root.job_id)
-    assert second_dispatch.action == "DISPATCHED"
-    second_job = runtime.jobs.get_job(planner_id)
-    assert second_job.attempt_count == 2
-    second_attempt = runtime.attempts.get_attempt(str(second_job.current_attempt_id))
-    with runtime.store.read() as connection:
-        second_token = connection.execute(
-            "SELECT lease_token FROM attempts WHERE attempt_id=?",
-            (second_attempt.attempt_id,),
-        ).fetchone()[0]
-    runtime.attempts.fail_attempt(
-        second_attempt.attempt_id,
-        fence_generation=second_attempt.fence_generation,
-        lease_token=str(second_token),
-        payload={"summary": "fixture exhausted", "errors": ["failed"]},
-    )
-
+    failed_before = runtime.jobs.get_job(planner_id)
     blocked = cycle.run_once(root.job_id)
     assert blocked.action == "BLOCKED"
-    assert blocked.receipt["reason"] == "plan_terminal_adverse"
+    assert blocked.receipt["reason"] == "state_conflict"
+    retry_evidence = {
+        "retry_safety": "GENERIC_FAILED",
+        "terminal_status": "FAILED",
+        "job_id": planner_id,
+        "attempt_id": attempt.attempt_id,
+        "attempt_job_id": planner_id,
+        "current_attempt_id": attempt.attempt_id,
+        "provenance_digest": first.orchestration_provenance_digest,
+        "retry_lineage_available": True,
+        "effect_unknown": False,
+        "writer_or_provider_generation_live": False,
+        "candidate_present": False,
+        "result_present": True,
+        "seal_present": False,
+        "effective_grant_non_modifying": True,
+    }
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            retry_evidence,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert blocked.receipt["evidence"] == {
+        "retry_safety": {
+            "schema_version": "mastermind.executive_retry_safety_receipt/v1",
+            "decision": "NEEDS_RECONCILIATION",
+            "evidence": retry_evidence,
+            "evidence_digest": expected_digest,
+        }
+    }
+    assert runtime.jobs.get_job(planner_id) == failed_before
+    assert not any(
+        event.event_type == "JOB_REQUEUED"
+        for event in runtime.events.list_events(job_id=planner_id)
+    )
     events_before = runtime.events.list_events(job_id=root.job_id)
     replay = cycle.run_once(root.job_id)
     assert replay.to_dict() == blocked.to_dict()
     assert runtime.events.list_events(job_id=root.job_id) == events_before
+
+
+def test_coo_retry_gate_requeues_only_exact_tx9_detached_lost(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    root, planner, dispatch = _dispatched_planner(runtime)
+    attempt = dispatch.attempt
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE attempts SET execution_mode='OPERATOR_HARNESS',
+              requested_execution_profile_json='{}',
+              requested_execution_profile_digest=? WHERE attempt_id=?
+            """,
+            ("f" * 64, attempt.attempt_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO harness_session_epochs(
+              session_epoch_id,attempt_id,worker_id,epoch_number,
+              provider_session_id,state,created_at_ms
+            ) VALUES('EPOCH-COO-TX9',?,?,1,'SESSION-COO-TX9','CURRENT',1)
+            """,
+            (attempt.attempt_id, attempt.worker_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO process_generations(
+              process_generation_id,session_epoch_id,worker_id,
+              provider_session_id,generation_number,started_at_ms,
+              executive_writer_held,provider_writer_state,created_at_ms
+            ) VALUES('GEN-COO-TX9','EPOCH-COO-TX9',?,'SESSION-COO-TX9',1,1,1,'HELD',1)
+            """,
+            (attempt.worker_id,),
+        )
+    assert runtime.operator_harness.invalidate_after_restore() == 1
+    before_events = runtime.events.list_events(job_id=planner.job_id)
+
+    requeued = CooCycle(runtime).run_once(root.job_id)
+
+    command = (
+        f"coo-cycle:{root.job_id}:requeue:{planner.job_id}:{attempt.attempt_id}"
+    )
+    assert requeued.action == "REQUEUED"
+    assert requeued.selected_job_id == planner.job_id
+    assert requeued.command_id == command
+    assert requeued.receipt["requeue_kind"] == "TX9_DETACHED"
+    retry_evidence = {
+        "retry_safety": "SAFE_PRE_EFFECT_INFRASTRUCTURE",
+        "terminal_status": "LOST",
+        "job_id": planner.job_id,
+        "attempt_id": attempt.attempt_id,
+        "attempt_job_id": planner.job_id,
+        "current_attempt_id": attempt.attempt_id,
+        "provenance_digest": requeued.receipt["payload"]["tx9_evidence_digest"],
+        "retry_lineage_available": True,
+        "effect_unknown": False,
+        "writer_or_provider_generation_live": False,
+        "candidate_present": False,
+        "result_present": False,
+        "seal_present": False,
+        "effective_grant_non_modifying": True,
+    }
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            retry_evidence,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert requeued.receipt["retry_safety"] == {
+        "schema_version": "mastermind.executive_retry_safety_receipt/v1",
+        "decision": "SAFE_REQUEUE",
+        "evidence": retry_evidence,
+        "evidence_digest": expected_digest,
+    }
+    after_events = runtime.events.list_events(job_id=planner.job_id)
+    assert [event.event_type for event in after_events[len(before_events) :]] == [
+        "JOB_REQUEUED"
+    ]
+    assert runtime.jobs.get_job(planner.job_id).status is executive_runtime.JobStatus.QUEUED
+    current_before_replay = runtime.jobs.get_job(planner.job_id)
+    replay = runtime.jobs.requeue_job(planner.job_id, command_id=command)
+    assert replay.event_id == requeued.receipt["event_id"]
+    assert runtime.jobs.get_job(planner.job_id) == current_before_replay
+
+
+def test_coo_retry_gate_blocks_tx9_when_prior_effect_unknown_is_unresolved(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    root, planner, dispatch = _dispatched_planner(runtime)
+    attempt = dispatch.attempt
+    assert dispatch.lease_token is not None
+    operation = OperationId("ohf-op:coo-tx9-effect-unknown")
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE attempts SET execution_mode='OPERATOR_HARNESS',
+              requested_execution_profile_json='{}',
+              requested_execution_profile_digest=? WHERE attempt_id=?
+            """,
+            (hashlib.sha256(b"{}").hexdigest(), attempt.attempt_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO harness_session_epochs(
+              session_epoch_id,attempt_id,worker_id,epoch_number,
+              provider_session_id,state,created_at_ms
+            ) VALUES('EPOCH-COO-TX9-UNKNOWN',?,?,1,
+              'SESSION-COO-TX9-UNKNOWN','CURRENT',1)
+            """,
+            (attempt.attempt_id, attempt.worker_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO process_generations(
+              process_generation_id,session_epoch_id,worker_id,
+              provider_session_id,generation_number,started_at_ms,
+              executive_writer_held,provider_writer_state,created_at_ms
+            ) VALUES('GEN-COO-TX9-UNKNOWN','EPOCH-COO-TX9-UNKNOWN',?,
+              'SESSION-COO-TX9-UNKNOWN',1,1,1,'HELD',1)
+            """,
+            (attempt.worker_id,),
+        )
+        runtime.store.append_event(
+            connection,
+            aggregate_type="operator_operation",
+            aggregate_id=operation.command_id,
+            event_type="OPERATOR_OPERATION_INTENT",
+            command_id=operation.command_id,
+            actor="supervisor",
+            job_id=planner.job_id,
+            attempt_id=attempt.attempt_id,
+            worker_id=attempt.worker_id,
+            quota_class=attempt.quota_class,
+            payload={
+                "schema_version": "mastermind.operator_harness_intent/v1",
+                "operation_kind": "begin_turn",
+                "attempt_id": attempt.attempt_id,
+                "session_epoch_id": "EPOCH-COO-TX9-UNKNOWN",
+                "process_generation_id": "GEN-COO-TX9-UNKNOWN",
+                "worker_id": attempt.worker_id,
+                "provider_session_id": "SESSION-COO-TX9-UNKNOWN",
+            },
+        )
+    assert runtime.operator_harness.record_effect_unknown(
+        attempt_id=attempt.attempt_id,
+        operation_id=operation,
+        fence_generation=attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        phase="provider_response_missing",
+        detail="fixture call may have taken effect",
+    )
+    assert runtime.operator_harness.invalidate_after_restore() == 1
+    assert any(
+        event.event_type == "OPERATOR_OPERATION_EFFECT_UNKNOWN"
+        for event in runtime.events.list_events(attempt_id=attempt.attempt_id)
+    )
+    attempts_before = runtime.attempts.list_attempts(planner.job_id)
+
+    blocked = CooCycle(runtime).run_once(root.job_id)
+
+    assert blocked.action == "BLOCKED"
+    retry_receipt = blocked.receipt["evidence"]["retry_safety"]
+    assert retry_receipt["decision"] == "NEEDS_RECONCILIATION"
+    assert retry_receipt["evidence"]["retry_safety"] == (
+        "SAFE_PRE_EFFECT_INFRASTRUCTURE"
+    )
+    assert retry_receipt["evidence"]["effect_unknown"] is True
+    assert retry_receipt["evidence"]["attempt_id"] == attempt.attempt_id
+    assert not any(
+        event.event_type == "JOB_REQUEUED"
+        for event in runtime.events.list_events(job_id=planner.job_id)
+    )
+    assert runtime.attempts.list_attempts(planner.job_id) == attempts_before
+    assert len(attempts_before) == 1
+    events_after_block = runtime.events.list_events()
+
+    replay = CooCycle(runtime).run_once(root.job_id)
+
+    assert replay.to_dict() == blocked.to_dict()
+    assert runtime.events.list_events() == events_after_block
+    assert runtime.attempts.list_attempts(planner.job_id) == attempts_before
+
+
+@pytest.mark.parametrize(
+    ("terminal", "retry_safety", "decision"),
+    [
+        ("RATE_LIMITED", "UNKNOWN", "NEEDS_RECONCILIATION"),
+        ("LOST", "EFFECT_UNKNOWN", "NEEDS_RECONCILIATION"),
+    ],
+)
+def test_coo_retry_gate_blocks_unproven_recoverable_statuses_without_requeue(
+    tmp_path, terminal, retry_safety, decision
+):
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    root, planner, dispatch = _dispatched_planner(runtime)
+    attempt = dispatch.attempt
+    with runtime.store.read() as connection:
+        lease_token = str(
+            connection.execute(
+                "SELECT lease_token FROM attempts WHERE attempt_id=?",
+                (attempt.attempt_id,),
+            ).fetchone()[0]
+        )
+    if terminal == "RATE_LIMITED":
+        runtime.attempts.rate_limit_attempt(
+            attempt.attempt_id,
+            fence_generation=attempt.fence_generation,
+            lease_token=lease_token,
+        )
+    else:
+        with runtime.store.transaction() as connection:
+            connection.execute(
+                "UPDATE attempts SET provider_session_id='PROVIDER-LOST' WHERE attempt_id=?",
+                (attempt.attempt_id,),
+            )
+        runtime.attempts.mark_lost(
+            attempt.attempt_id,
+            fence_generation=attempt.fence_generation,
+            lease_token=lease_token,
+            reason="fixture process absent",
+            verified_process_absent=True,
+        )
+    terminal_before = runtime.jobs.get_job(planner.job_id)
+
+    blocked = CooCycle(runtime).run_once(root.job_id)
+
+    assert blocked.action == "BLOCKED"
+    assert blocked.receipt["reason"] == "state_conflict"
+    assert blocked.receipt["evidence"]["retry_safety"]["decision"] == decision
+    assert (
+        blocked.receipt["evidence"]["retry_safety"]["evidence"]["retry_safety"]
+        == retry_safety
+    )
+    assert (
+        blocked.receipt["evidence"]["retry_safety"]["evidence"]["attempt_id"]
+        == attempt.attempt_id
+    )
+    assert runtime.jobs.get_job(planner.job_id) == terminal_before
+    assert not any(
+        event.event_type == "JOB_REQUEUED"
+        for event in runtime.events.list_events(job_id=planner.job_id)
+    )
 
 
 def test_dispatch_return_crash_replays_same_claim_without_block_or_sentinel_mutation(
@@ -1810,13 +2856,14 @@ def _review_body(
     target_result_digest: str,
     repair_round: int,
     verdict: str,
+    plan_step_id: str = "step-1",
 ) -> dict[str, Any]:
     return {
         "schema_version": "mastermind.review_result/v1",
         "root_job_id": root_id,
         "plan_attempt_id": plan_attempt_id,
         "plan_digest": plan_digest,
-        "plan_step_id": "step-1",
+        "plan_step_id": plan_step_id,
         "reviewed_job_id": target_job_id,
         "reviewed_attempt_id": target_attempt_id,
         "reviewed_result_digest": target_result_digest,
@@ -2102,6 +3149,393 @@ def test_run_once_typed_plan_work_independent_review_and_aggregation_complete(
     assert cycle.run_once(root.job_id).action == "NO_ACTION"
 
 
+def test_heterogeneous_pair_results_reach_independent_review_and_exact_aggregation_handoff(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-HF1Q-PAIR-T3",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        worker = (
+            "worker-a"
+            if job.orchestration_role in {"plan", "aggregation"}
+            or (job.orchestration_role == "work" and job.plan_step_id == "step-codex")
+            else "worker-b"
+        )
+        if job.orchestration_role == "work":
+            assert job.constraints["eligible_quota_classes"] == ["default"]
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-codex",
+                "objective": "Hermetic reviewed Codex child result.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-claude",
+                "objective": "Hermetic reviewed Claude-compatible child result.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=3301)
+    admission = cycle.run_once(root.job_id)
+    assert admission.action == "PLAN_ADMITTED"
+    work_ids = list(admission.receipt["work_job_ids"])
+    assert len(work_ids) == 2
+    assert [str(runtime.jobs.get_job(job_id).plan_step_id) for job_id in work_ids] == [
+        "step-codex",
+        "step-claude",
+    ]
+
+    work_by_step = {}
+    for work_id in work_ids:
+        job = runtime.jobs.get_job(work_id)
+        assert job is not None
+        worker = "worker-a" if job.plan_step_id == "step-codex" else "worker-b"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            work_id,
+            command_id=(
+                f"coo-cycle:{root.job_id}:dispatch:{work_id}:attempt:1"
+            ),
+            worker_id=worker,
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        work_by_step[str(job.plan_step_id)] = outcome
+    assert {value.attempt.worker_id for value in work_by_step.values()} == {
+        "worker-a",
+        "worker-b",
+    }
+
+    seals_by_step = {}
+    for step_id, work in work_by_step.items():
+        body = {
+            "schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": step_id,
+            "repair_round": 0,
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        seals_by_step[step_id] = _complete_ohf_role(
+            runtime, work, body, identity_seed=3302 if step_id == "step-codex" else 3303
+        )[0]
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review = dispatches[-1]
+    reviewed_job = runtime.jobs.get_job(review.attempt.job_id)
+    assert reviewed_job is not None and reviewed_job.reviews_job_id
+    reviewed_work = work_by_step["step-codex"]
+    body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=reviewed_work.attempt.job_id,
+        target_attempt_id=reviewed_work.attempt.attempt_id,
+        target_result_digest=seals_by_step["step-codex"]["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-codex",
+    )
+    _complete_ohf_role(runtime, review, body, identity_seed=3304)
+    assert review.attempt.worker_id != reviewed_work.attempt.worker_id
+
+    handoff_outcome = cycle.run_once(root.job_id)
+    assert handoff_outcome.action == "HANDOFF_CREATED"
+    handoff = runtime.jobs.get_cycle_handoff(root.job_id)
+    assert len(handoff["revisions"]) == 2
+    assert {item["current_attempt_id"] for item in handoff["revisions"]} == {
+        value.attempt.attempt_id for value in work_by_step.values()
+    }
+    assert {item["current_result_digest"] for item in handoff["revisions"]} == {
+        value["role_result_digest"] for value in seals_by_step.values()
+    }
+    assert handoff["revisions"][0]["qualifying_review_attempt_id"]
+    assert handoff["revisions"][1]["qualifying_review_attempt_id"] is None
+
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    aggregation = dispatches[-1]
+    aggregation_body = {
+        "schema_version": "mastermind.aggregation_result/v1",
+        "root_job_id": root.job_id,
+        "handoff_digest": handoff["handoff_digest"],
+        "policy_sha": handoff["policy_sha"],
+        "plan_attempt_id": handoff["plan_attempt_id"],
+        "plan_digest": handoff["plan_digest"],
+        "revisions": [
+            {key: item[key] for key in (
+                "ordinal",
+                "plan_step_id",
+                "current_job_id",
+                "current_attempt_id",
+                "current_result_digest",
+                "repair_round",
+                "review_required",
+                "qualifying_review_job_id",
+                "qualifying_review_attempt_id",
+                "qualifying_review_result_digest",
+            )}
+            for item in handoff["revisions"]
+        ],
+        "aggregate_summary": "Two reviewed heterogeneous results are ready.",
+        "evidence_digests": [],
+    }
+    _complete_ohf_role(
+        runtime, aggregation, aggregation_body, identity_seed=3306
+    )
+    assert runtime.jobs.get_job(root.job_id).status is executive_runtime.JobStatus.COMPLETED
+
+
+def test_heterogeneous_pair_qualification_receipts_use_existing_runtime_events_only(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-HF1Q-PAIR-T5",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        worker = (
+            "worker-a"
+            if job.orchestration_role in {"plan", "aggregation"}
+            or (job.orchestration_role == "work" and job.plan_step_id == "step-codex")
+            else "worker-b"
+        )
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-codex",
+                "objective": "Hermetic reviewed Codex child result.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-claude",
+                "objective": "Hermetic review-exempt Claude child result.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=3401)
+    admitted = cycle.run_once(root.job_id)
+    assert admitted.action == "PLAN_ADMITTED"
+    work_ids = list(admitted.receipt["work_job_ids"])
+    work_dispatches = []
+    for work_id in work_ids:
+        work_job = runtime.jobs.get_job(work_id)
+        assert work_job is not None
+        worker = "worker-a" if work_job.plan_step_id == "step-codex" else "worker-b"
+        work_dispatch = runtime.attempts.dispatch_cycle_job(
+            work_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{work_id}:attempt:1",
+            worker_id=worker,
+        )
+        assert work_dispatch is not None
+        work_dispatches.append(work_dispatch)
+
+    work_seals = {}
+    for work in work_dispatches:
+        work_job = runtime.jobs.get_job(work.attempt.job_id)
+        assert work_job is not None
+        work_body = {
+            "schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": str(work_job.plan_step_id),
+            "repair_round": 0,
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        work_seals[str(work_job.plan_step_id)] = _complete_ohf_role(
+            runtime,
+            work,
+            work_body,
+            identity_seed=3402 if work.attempt.worker_id == "worker-a" else 3403,
+        )[0]
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review = dispatches[-1]
+    reviewed = work_by_worker(work_dispatches, "worker-a")
+    review_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=reviewed.attempt.job_id,
+        target_attempt_id=reviewed.attempt.attempt_id,
+        target_result_digest=work_seals["step-codex"]["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-codex",
+    )
+    _complete_ohf_role(runtime, review, review_body, identity_seed=3404)
+    assert cycle.run_once(root.job_id).action == "HANDOFF_CREATED"
+    handoff = runtime.jobs.get_cycle_handoff(root.job_id)
+
+    claims = [
+        event
+        for event in runtime.events.list_events()
+        if event.event_type == "JOB_CLAIMED"
+    ]
+    seals = [
+        event
+        for event in runtime.events.list_events()
+        if event.event_type == "ORCHESTRATION_ROLE_RESULT_SEALED"
+    ]
+    assert len(claims) == 4
+    assert len(seals) == 4
+    work_claims = [
+        event for event in claims if event.job_id in set(work_ids)
+    ]
+    work_seal_events = [
+        event for event in seals if event.job_id in set(work_ids)
+    ]
+    assert {event.worker_id for event in work_claims} == {"worker-a", "worker-b"}
+    assert {event.quota_class for event in work_claims} == {"default"}
+    assert {event.attempt_id for event in work_claims} == {
+        value.attempt.attempt_id for value in work_dispatches
+    }
+    assert {event.attempt_id for event in work_seal_events} == {
+        value.attempt.attempt_id for value in work_dispatches
+    }
+    assert all(set(event.payload).isdisjoint(
+        {"adapter_id", "harness_id", "binding_id", "profile_id"}
+    ) for event in work_claims)
+    assert all(
+        event.payload["result_envelope"]["worker_id"] == event.worker_id
+        for event in work_seal_events
+    )
+    assert all(set(event.payload).isdisjoint(
+        {"adapter_id", "harness_id", "binding_id", "profile_id"}
+    ) for event in work_seal_events)
+
+    revisions_by_attempt = {
+        item["current_attempt_id"]: item for item in handoff["revisions"]
+    }
+    assert set(revisions_by_attempt) == {
+        value.attempt.attempt_id for value in work_dispatches
+    }
+    reviewed_revision = revisions_by_attempt[reviewed.attempt.attempt_id]
+    assert reviewed_revision["current_result_digest"] == (
+        work_seals["step-codex"]["role_result_digest"]
+    )
+    assert reviewed_revision["qualifying_review_attempt_id"] == (
+        review.attempt.attempt_id
+    )
+    assert reviewed_revision["qualifying_review_result_digest"] == (
+        next(
+            event.payload["role_result_digest"]
+            for event in seals
+            if event.attempt_id == review.attempt.attempt_id
+        )
+    )
+    assert set(handoff).isdisjoint(
+        {"adapter_id", "harness_id", "binding_id", "profile_id"}
+    )
+
+    with runtime.store.read() as connection:
+        provider_owners = {
+            row[1]
+            for row in connection.execute(
+                "SELECT type,name FROM sqlite_master WHERE type='table'"
+            )
+            if row[1] in {"provider_accounts", "wake_queue", "result_store"}
+        }
+    assert provider_owners == set()
+
+
+def work_by_worker(
+    dispatches: list[OrchestrationDispatchOutcome], worker_id: str
+) -> OrchestrationDispatchOutcome:
+    matches = [item for item in dispatches if item.attempt.worker_id == worker_id]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def test_run_once_without_accepted_supervisor_blocks_before_claim(tmp_path):
     runtime = Runtime.at(tmp_path)
     _register(runtime, "worker-a")
@@ -2200,8 +3634,37 @@ def test_coo_cycle_cli_help_is_inert_and_requires_existing_runtime_root(tmp_path
 
 def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine():
     receipt = run_acceptance("90db9baf5bcc5f2221e3c9870c2aa09a95293c99")
+    cycle = receipt["cycle"]
+    assert cycle["actions"] == [
+        "PLANNER_CREATED",
+        "DISPATCHED",
+        "BLOCKED",
+    ]
+    assert cycle["blocked_selected_job_id"] == cycle["planner_job_id"]
+    assert cycle["blocked_reason"] == "state_conflict"
+    assert cycle["retry_safety_schema_version"] == (
+        "mastermind.executive_retry_safety_receipt/v1"
+    )
+    assert cycle["retry_safety_cause"] == "GENERIC_FAILED"
+    assert cycle["retry_safety_decision"] == "NEEDS_RECONCILIATION"
+    assert cycle["planner_attempt_count_after_replay"] == 1
+    assert len(cycle["supervisor_dispatch_calls"]) == 1
+    assert cycle["replay_matches_blocked"] is True
+    assert cycle["event_stream_unchanged"] is True
+    assert cycle["events_before_replay"] == cycle["events_after_replay"]
+    assert cycle["event_stream_digest_before_replay"] == (
+        cycle["event_stream_digest_after_replay"]
+    )
+    exhaustion = receipt["bounded_exhaustion"]
+    assert exhaustion["actions"] == ["REQUEUED", "DISPATCHED", "BLOCKED"]
+    assert exhaustion["first_requeue_kind"] == "TX9_DETACHED"
+    assert exhaustion["attempt_limit"] == 2
+    assert exhaustion["planner_attempt_count"] == 2
+    assert exhaustion["second_terminal_status"] == "LOST"
+    assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
+    assert len(exhaustion["supervisor_dispatch_calls"]) == 2
     assert receipt["receipt_digest"] == (
-        "348ee4dc9eccf953700edc0abb15e07fda93dc9f9da0a0c45ccc9fa4393dd30f"
+        "63b65e499e40e817d52bf803e70b5b3f0530591d62a0c1388a9bea3ddf84c6fc"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
@@ -2219,10 +3682,13 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
         "be6176fa45f80467923b9c283e9b696f303a4ed2fea5b9e655c8971afcc96b62"
     )
     assert receipt["cycle"]["acceptance_digest"] == (
-        "718034d631868390dfb7c15beca01b5f7316dc3f43b5e2b7251152f4ceed6932"
+        "1572cc4b36d7ccc1fd007624920986b63f23c0f6c40bb9ae051c1b49f5b649a7"
     )
     assert receipt["tx9"]["acceptance_digest"] == (
-        "8f0533558e6c6795213cd11af429822af96ff60b1bbc99cf2a27168b01697f89"
+        "9a43476a06fb3ecc4351b96d5646c7b0e521fd30092c3882bc5e8d4532825585"
+    )
+    assert receipt["bounded_exhaustion"]["acceptance_digest"] == (
+        "0245cfb4ce39c35af076ca3686501ae4e1c51e7acdd77be81b3b5b7cfc8f066c"
     )
     assert receipt["tx9"]["quota_byte_state_equal"] is True
     assert receipt["tx9"]["quarantined_worker_excluded"] is True
@@ -2235,7 +3701,3110 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
         "runtime_roots_removed_on_exit": True,
         "provider_adapters_constructed": 0,
         "provider_calls": 0,
-        "executive_supervisor_fixture_instances": 6,
+        "executive_supervisor_fixture_instances": 7,
         "host_install_or_migration_calls": 0,
         "production_armed": False,
     }
+
+
+def test_web_ceo_offline_delivery_reject_repair_re_review_reaches_handoff_without_sol_turn(
+    tmp_path: Path,
+) -> None:
+    receipt = run_web_ceo_offline_delivery_acceptance(tmp_path)
+    assert receipt["acceptance_id"] == "WEB-CEO-OFFLINE-DELIVERY-V1"
+    assert receipt["web_sol_turns_between_admission_and_handoff"] == 0
+    assert receipt["review_verdicts"] == ["reject", "approve"]
+    assert receipt["repair_rounds"] == [1]
+    assert receipt["aggregation_handoff_ready"] is True
+    assert receipt["production_accepted"] is False
+    assert receipt["manual_continue_edges"] == 0
+    assert receipt["sol_final_acceptance_pending"] is True
+    assert receipt["production_deploy_authority"] is False
+    assert receipt["new_control_planes_created"] == 0
+
+
+def test_fph0_d3_d4_d5_d6_d8_trusted_v3_union_projects_and_fails_closed(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-FPH0-TRUSTED-V3-001",
+            business_impact="routine",
+        ),
+        execution_binding=_v3_execution_binding(),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    assert root.constraints["work_placement_union"] == [
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+    ]
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    placements = [
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+    ]
+    steps = []
+    for ordinal, placement in enumerate(placements):
+        steps.append(
+            {
+                "ordinal": ordinal,
+                "step_id": f"step-{ordinal}",
+                "objective": f"FPH0 trusted placement {ordinal}.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": dict(placement),
+            }
+        )
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v2",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": dispatch.attempt.attempt_id,
+        "steps": steps,
+    }
+    _complete_ohf_role(runtime, dispatch, plan_body, identity_seed=7401)
+    command = f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}"
+    admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert {
+        job.plan_step_id: (
+            job.constraints["provider"],
+            job.constraints["eligible_quota_classes"],
+        )
+        for job in admitted
+        if job.orchestration_role == "work"
+    } == {
+        "step-0": ("codex", ["codex-hf1q-step"]),
+        "step-1": ("claude-compatible-subscription", ["claude-hf1q-step"]),
+    }
+    assert all(
+        "work_placement_union"
+        not in job.constraints
+        for job in admitted
+        if job.orchestration_role == "work"
+    )
+    replay = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert [job.job_id for job in replay] == [job.job_id for job in admitted]
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CREATED'"
+        ).fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='COO_PLAN_ADMITTED'"
+        ).fetchone()[0] == 1
+        stored_root = json.loads(
+            connection.execute(
+                "SELECT constraints_json FROM jobs WHERE job_id=?", (root.job_id,)
+            ).fetchone()[0]
+        )
+    assert stored_root["work_placement_union"] == root.constraints[
+        "work_placement_union"
+    ]
+
+
+def test_fph0_d3_d4_d5_d6_d8_trusted_v3_union_projects_and_fails_closed(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-FPH0-TRUSTED-V3-001",
+            business_impact="routine",
+        ),
+        execution_binding=_v3_execution_binding(),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    assert root.constraints["work_placement_union"] == [
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+    ]
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    placements = [
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+    ]
+    steps = []
+    for ordinal, placement in enumerate(placements):
+        steps.append(
+            {
+                "ordinal": ordinal,
+                "step_id": f"step-{ordinal}",
+                "objective": f"FPH0 trusted placement {ordinal}.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": dict(placement),
+            }
+        )
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v2",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": dispatch.attempt.attempt_id,
+        "steps": steps,
+    }
+    _complete_ohf_role(runtime, dispatch, plan_body, identity_seed=7401)
+    command = f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}"
+    admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert {
+        job.plan_step_id: (
+            job.constraints["provider"],
+            job.constraints["eligible_quota_classes"],
+        )
+        for job in admitted
+        if job.orchestration_role == "work"
+    } == {
+        "step-0": ("codex", ["codex-hf1q-step"]),
+        "step-1": ("claude-compatible-subscription", ["claude-hf1q-step"]),
+    }
+    assert all(
+        "work_placement_union" not in job.constraints
+        for job in admitted
+        if job.orchestration_role == "work"
+    )
+    replay = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert [job.job_id for job in replay] == [job.job_id for job in admitted]
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='JOB_CREATED'"
+        ).fetchone()[0] == 4
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='COO_PLAN_ADMITTED'"
+        ).fetchone()[0] == 1
+        stored_root = json.loads(
+            connection.execute(
+                "SELECT constraints_json FROM jobs WHERE job_id=?", (root.job_id,)
+            ).fetchone()[0]
+        )
+    assert stored_root["work_placement_union"] == root.constraints[
+        "work_placement_union"
+    ]
+
+def test_fph0_d8_v2_caller_union_is_dropped_not_honored(tmp_path, monkeypatch):
+    runtime = Runtime.at(tmp_path)
+    v2 = _v3_execution_binding()
+    v2.pop("work_placement_union", None)
+    v2.pop("host_execution_binding_version", None)
+    payload = _v2_intent(intent_id="CEO-FPH0-V2-DROP-001")
+    payload["execution_contract"]["constraints"] = {
+        "work_placement_union": [
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"}
+        ]
+    }
+    monkeypatch.setattr(ceo_intent, "validate_intent", lambda value: value)
+    captured = {}
+    original_create_job = runtime.jobs.create_job
+
+    def create_job(*args, **kwargs):
+        captured["constraints"] = kwargs["constraints"]
+        return original_create_job(*args, **kwargs)
+
+    monkeypatch.setattr(runtime.jobs, "create_job", create_job)
+    receipt = submit_intent(runtime, payload, execution_binding=v2)
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    assert "work_placement_union" not in captured["constraints"]
+    assert "work_placement_union" not in root.constraints
+
+
+def test_fph0_d1_binding_versions_and_v2_compatibility(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    v2 = _v3_execution_binding()
+    v2.pop("work_placement_union", None)
+    v2.pop("host_execution_binding_version", None)
+    baseline = submit_intent(
+        runtime,
+        _v2_intent(intent_id="CEO-FPH0-COMPAT-NO-VERSION"),
+        execution_binding=v2,
+    )
+    no_version = runtime.jobs.get_job(baseline["job_id"])
+    assert no_version is not None
+    for intent_id, binding in (
+        ("CEO-FPH0-COMPAT-V2", v2),
+        (
+            "CEO-FPH0-COMPAT-V2-EXPLICIT",
+            {
+                **v2,
+                "host_execution_binding_version": (
+                    "mastermind.host_execution_binding/v2"
+                ),
+            },
+        ),
+    ):
+        receipt = submit_intent(
+            runtime,
+            _v2_intent(intent_id=intent_id),
+            execution_binding=binding,
+        )
+        job = runtime.jobs.get_job(receipt["job_id"])
+        assert job is not None
+        assert executive_runtime._json_dumps(job.constraints) == (
+            executive_runtime._json_dumps(no_version.constraints)
+        )
+        assert "work_placement_union" not in job.constraints
+
+    for intent_id, mutation in (
+        ("CEO-FPH0-COMPAT-MISSING", lambda value: value.pop("model")),
+        ("CEO-FPH0-COMPAT-EXTRA", lambda value: value.update(extra=1)),
+    ):
+        malformed = dict(v2)
+        mutation(malformed)
+        with pytest.raises(
+            CeoIntentError,
+            match="v2 host execution binding fields are incomplete or drifted",
+        ):
+            submit_intent(
+                runtime,
+                _v2_intent(intent_id=intent_id),
+                execution_binding=malformed,
+            )
+
+    with pytest.raises(
+        CeoIntentError,
+        match="host execution binding version is unknown",
+    ):
+        submit_intent(
+            runtime,
+            _v2_intent(intent_id="CEO-FPH0-D2-UNKNOWN"),
+            execution_binding={
+                **v2,
+                "host_execution_binding_version": (
+                    "mastermind.host_execution_binding/v4"
+                ),
+            },
+        )
+
+
+def test_fph0_d2_union_shape_is_bounded_regex_only_and_typed(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    v2 = _v3_execution_binding()
+    v2.pop("work_placement_union", None)
+    v2.pop("host_execution_binding_version", None)
+    valid_member = {"provider_realm": "codex", "quota_class": "codex-hf1q-step"}
+    invalid_cases = [
+        (object(), "host work-placement union must be a bounded list"),
+        ([], "host work-placement union must admit at least one placement"),
+        (
+            [valid_member] * 9,
+            "host work-placement union must be a bounded list",
+        ),
+        (
+            [object()],
+            "host work-placement union member must name exactly "
+            "a provider realm and quota class",
+        ),
+        (
+            [{**valid_member, "extra": "value"}],
+            "host work-placement union member must name exactly "
+            "a provider realm and quota class",
+        ),
+        (
+            [{"provider_realm": "codex"}],
+            "host work-placement union member must name exactly "
+            "a provider realm and quota class",
+        ),
+        (
+            [{"provider_realm": "codex", "quota_class": " "}],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [{"provider_realm": "CODEX", "quota_class": "codex-hf1q-step"}],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [{"provider_realm": "codex", "quota_class": "-codex-hf1q-step"}],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [{"provider_realm": "-codex", "quota_class": "codex-hf1q-step"}],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [
+                {
+                    "provider_realm": "codex",
+                    "quota_class": "c" * 65,
+                }
+            ],
+            "host work-placement union member values are invalid",
+        ),
+        (
+            [valid_member, valid_member.copy()],
+            "host work-placement union members must be distinct",
+        ),
+    ]
+    for ordinal, (union, message) in enumerate(invalid_cases):
+        context = pytest.raises(CeoIntentError)
+        if message is not None:
+            context = pytest.raises(CeoIntentError, match=message)
+        with context:
+            submit_intent(
+                runtime,
+                _v2_intent(intent_id=f"CEO-FPH0-D2-{ordinal}"),
+                execution_binding=_v3_binding_with(v2, union),
+            )
+    with pytest.raises(
+        CeoIntentError,
+        match="host execution binding version is unknown",
+    ):
+        submit_intent(
+            runtime,
+            _v2_intent(intent_id="CEO-FPH0-D2-UNKNOWN"),
+            execution_binding={
+                **v2,
+                "host_execution_binding_version": (
+                    "mastermind.host_execution_binding/v4"
+                ),
+            },
+        )
+
+    union_inputs = [
+        [
+            {"quota_class": "z-step", "provider_realm": "codex"},
+            {
+                "quota_class": "a-step",
+                "provider_realm": "claude-compatible-subscription",
+            },
+        ],
+        [
+            {
+                "provider_realm": "claude-compatible-subscription",
+                "quota_class": "a-step",
+            },
+            {"provider_realm": "codex", "quota_class": "z-step"},
+        ],
+    ]
+    canonical_roots = []
+    for ordinal, union in enumerate(union_inputs):
+        receipt = submit_intent(
+            runtime,
+            _v2_intent(intent_id=f"CEO-FPH0-D3-{ordinal}"),
+            execution_binding=_v3_binding_with(v2, union),
+        )
+        root = runtime.jobs.get_job(receipt["job_id"])
+        assert root is not None
+        assert root.constraints["work_placement_union"] == [
+            {
+                "provider_realm": "claude-compatible-subscription",
+                "quota_class": "a-step",
+            },
+            {"provider_realm": "codex", "quota_class": "z-step"},
+        ]
+        canonical_roots.append(executive_runtime._json_dumps(root.constraints))
+    assert canonical_roots[0] == canonical_roots[1]
+
+
+def test_fph0_d5_union_admission_grants_no_router_eligibility():
+    def source(owner):
+        return SourceRef(
+            owner=owner,
+            ref="fph0-current",
+            observed_at="2026-09-14T00:00:00Z",
+            freshness=Freshness.CURRENT,
+        )
+
+    responsibility = ResponsibilityFact(
+        responsibility_ref="WS:FPH0",
+        title="FPH0 fail-closed Router proof",
+        accountable_seat=Seat.COO,
+        state="waiting_capacity",
+        root_job_id=None,
+        source=source(SourceOwner.AGENT_OS),
+    )
+    demand = placement_selection.PlacementDemand(
+        required_capabilities=frozenset({"read"}),
+        quota_class="codex-hf1q-step",
+        provider="codex",
+        allowed_modes=frozenset(
+            {placement_selection.PlacementMode.NEW_SESSION_MATERIALIZATION}
+        ),
+    )
+
+    def candidate(**overrides):
+        values = {
+            "worker_id": "worker-a",
+            "provider": "codex",
+            "account_label": "worker-a.company",
+            "quota_class": "codex-hf1q-step",
+            "capabilities": frozenset({"read"}),
+            "observed_at_ms": 1,
+            "occupancy": placement_selection.OccupancyState.FREE,
+            "occupancy_source": source(SourceOwner.RUNTIME_BINDING),
+            "capacity_state": CapacityState.AVAILABLE,
+            "capacity_source": source(SourceOwner.CAPACITY),
+            "host_source_closure_proven": True,
+            "closure_source": source(SourceOwner.CAPACITY),
+            "effect_state": EffectState.NONE,
+            "mode": placement_selection.PlacementMode.NEW_SESSION_MATERIALIZATION,
+            "creation_surface_accessible": True,
+            "session_creation_allowed": True,
+        }
+        values.update(overrides)
+        return placement_selection.PlacementCandidateFact(**values)
+
+    quota_mismatch = placement_selection.select_placement(
+        responsibility=responsibility,
+        demand=demand,
+        candidates=(candidate(quota_class="claude-hf1q-step"),),
+    )
+    assert quota_mismatch.selected is None
+    assert quota_mismatch.exclusions[0].reason is (
+        placement_selection.ExclusionReason.QUOTA_CLASS_MISMATCH
+    )
+    provider_mismatch = placement_selection.select_placement(
+        responsibility=responsibility,
+        demand=demand,
+        candidates=(candidate(provider="claude-compatible-subscription"),),
+    )
+    assert provider_mismatch.selected is None
+    assert provider_mismatch.exclusions[0].reason is (
+        placement_selection.ExclusionReason.PROVIDER_MISMATCH
+    )
+
+
+def test_fph0_v3_refuses_caller_union_collision(
+    tmp_path, monkeypatch
+):
+    runtime = Runtime.at(tmp_path)
+    v2 = _v3_execution_binding()
+    v2.pop("work_placement_union")
+    v2.pop("host_execution_binding_version")
+    payload = _v2_intent(intent_id="CEO-FPH0-COLLISION-001")
+    payload["execution_contract"]["constraints"] = {
+        "work_placement_union": [
+            {"provider_realm": "codex", "quota_class": "codex-hf1q-step"}
+        ]
+    }
+    monkeypatch.setattr(ceo_intent, "validate_intent", lambda value: value)
+    with pytest.raises(
+        StateConflict,
+        match=(
+            "caller constraint work_placement_union conflicts "
+            "with reviewed host composition"
+        ),
+    ):
+        runtime.jobs.create_v2_orchestration_root(
+            payload,
+            fingerprint=ceo_intent.intent_fingerprint(payload),
+            command_id=ceo_intent.command_id_for(payload["intent_id"]),
+            workspace_root=None,
+            execution_binding=_v3_binding_with(
+                v2,
+                [{"provider_realm": "codex", "quota_class": "codex-hf1q-step"}],
+            ),
+        )
+
+
+def test_fph0_d7_composition_and_v2_constant_are_byte_preserved():
+    assert executive_runtime.SCHEMA_VERSION == 5
+    assert executive_runtime.V3_HOST_EXECUTION_BINDING_KEYS == (
+        executive_runtime.V2_HOST_EXECUTION_BINDING_KEYS
+        | {"work_placement_union"}
+    )
+    assert executive_runtime.WORK_PLACEMENT_UNION_MAX_MEMBERS == 8
+    assert executive_runtime._json_dumps(
+        sorted(executive_runtime.V2_HOST_EXECUTION_BINDING_KEYS)
+    ) == executive_runtime._json_dumps(
+        [
+            "base_sha",
+            "capability_policy_digest",
+            "capability_policy_version",
+            "cost_class",
+            "effort",
+            "eligible_quota_classes",
+            "execution_profile_digest",
+            "execution_profile_id",
+            "model",
+            "operator_capability_policy_digest",
+            "operator_capability_policy_version",
+            "operator_cost_class",
+            "operator_effort",
+            "operator_eligible_quota_classes",
+            "operator_execution_profile_digest",
+            "operator_execution_profile_id",
+            "operator_harness_armed",
+            "operator_harness_binary_digest",
+            "operator_harness_version",
+            "operator_model",
+            "operator_provider",
+            "operator_routing_policy_version",
+            "provider",
+            "routing_policy_version",
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 2: accepted_current_step_revision — RED tests (Step 1)
+# ---------------------------------------------------------------------------
+
+def _reviewed_work_reject_and_repair(
+    tmp_path: Path,
+    *,
+    intent_id: str,
+    review_workers: list[str],
+):
+    """Shared fixture: work complete → independent reject → repair created + dispatched + completed."""
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(runtime, _v2_intent(intent_id=intent_id))
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+    review_index = 0
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        nonlocal review_index
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        if job.orchestration_role == "review":
+            worker = review_workers[review_index]
+            review_index += 1
+        else:
+            worker = "worker-a"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-1",
+                "objective": "Bounded reviewed work for repair path.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            }
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=5101)
+    admission = cycle.run_once(root.job_id)
+    assert admission.action == "PLAN_ADMITTED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    work = dispatches[-1]
+    work_body = {
+        "schema_version": "mastermind.work_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-1",
+        "repair_round": 0,
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    work_seal, _ = _complete_ohf_role(runtime, work, work_body, identity_seed=5102)
+
+    # First review: reject
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    rejecting_review = dispatches[-1]
+    plan_digest = runtime.jobs.get_job(work.attempt.job_id).plan_digest
+    reject_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="reject",
+    )
+    reject_seal, _ = _complete_ohf_role(
+        runtime, rejecting_review, reject_body, identity_seed=5103
+    )
+
+    # Repair created and dispatched
+    repair_created = cycle.run_once(root.job_id)
+    assert repair_created.action == "REPAIR_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    repair = dispatches[-1]
+    repair_body = {
+        "schema_version": "mastermind.repair_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "plan_digest": str(plan_digest),
+        "plan_step_id": "step-1",
+        "repair_round": 1,
+        "supersedes_job_id": work.attempt.job_id,
+        "rejected_review_job_id": rejecting_review.attempt.job_id,
+        "rejected_review_result_digest": reject_seal["role_result_digest"],
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    repair_seal, _ = _complete_ohf_role(
+        runtime, repair, repair_body, identity_seed=5104
+    )
+    return (
+        runtime, cycle, dispatches, root, planner, work, repair,
+        rejecting_review, work_seal, repair_seal, plan_body,
+    )
+
+
+def test_accepted_current_step_revision_work_complete_review_queued_raises_StateConflict(
+    tmp_path: Path,
+) -> None:
+    """Helper raises StateConflict when work is complete but review is only queued."""
+    runtime, cycle, dispatches, root, planner, work, _, _, work_seal, _, plan_body = (
+        _reviewed_work_reject_and_repair(
+            tmp_path,
+            intent_id="CEO-T2-QUEUED",
+            review_workers=["worker-b", "worker-b"],
+        )
+    )
+    # Review for the repair is still queued (not yet completed)
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+
+    admission = runtime.events.get_event_by_command_id(
+        f"coo-cycle:{root.job_id}:admit-plan:{planner.attempt.attempt_id}"
+    )
+    assert admission is not None
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        from control_plane.executive_runtime import (
+            _accepted_current_step_revision,
+        )
+        with pytest.raises(
+            executive_runtime.StateConflict,
+            match="current revision lacks a qualifying independent approval",
+        ):
+            _accepted_current_step_revision(
+                connection,
+                root_row=root_row,
+                admission=admission.payload,
+                plan_body=plan_body,
+                plan_step_id="step-1",
+            )
+
+
+def test_accepted_current_step_revision_work_complete_independent_reject_raises_StateConflict(
+    tmp_path: Path,
+) -> None:
+    """Helper raises StateConflict when work has an unresolved independent reject."""
+    runtime, cycle, dispatches, root, planner, work, _, rejecting_review, work_seal, _, plan_body = (
+        _reviewed_work_reject_and_repair(
+            tmp_path,
+            intent_id="CEO-T2-REJECT",
+            review_workers=["worker-b", "worker-b"],
+        )
+    )
+    # The fixture already completed the rejecting review and created the repair.
+    # At this point work is superseded and the current revision (repair) has no
+    # reviews at all yet — calling the helper on the *work* step would raise
+    # "plan step has no initial work revision".  We test the reject on the
+    # work revision by setting up a fresh work+reject scenario manually so the
+    # reject is on the current (work) revision, not a superseded one.
+
+    # Manually: create a simple work-only cycle with an independent reject
+    runtime2 = Runtime.at(tmp_path / "rt2")
+    _register(runtime2, "worker-a")
+    _register(runtime2, "worker-b")
+    receipt2 = submit_intent(
+        runtime2, _v2_intent(intent_id="CEO-T2-MANUAL-REJECT")
+    )
+    root2 = runtime2.jobs.get_job(receipt2["job_id"])
+    dispatches2: list[OrchestrationDispatchOutcome] = []
+
+    def dispatch2(job_id: str, command_id: str):
+        job = runtime2.jobs.get_job(job_id)
+        worker = "worker-b" if job and job.orchestration_role == "review" else "worker-a"
+        outcome = runtime2.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches2.append(outcome)
+        return outcome
+
+    cycle2 = CooCycle(runtime2, dispatcher=dispatch2)
+    assert cycle2.run_once(root2.job_id).action == "PLANNER_CREATED"
+    assert cycle2.run_once(root2.job_id).action == "DISPATCHED"
+    planner2 = dispatches2[-1]
+    plan_body2 = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root2.job_id,
+        "plan_attempt_id": planner2.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-1",
+                "objective": "Bounded work for reject test.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            }
+        ],
+    }
+    _complete_ohf_role(runtime2, planner2, plan_body2, identity_seed=5501)
+    admitted2 = cycle2.run_once(root2.job_id)
+    assert admitted2.action == "PLAN_ADMITTED"
+
+    assert cycle2.run_once(root2.job_id).action == "DISPATCHED"
+    work2 = dispatches2[-1]
+    work_body2 = {
+        "schema_version": "mastermind.work_result/v1",
+        "root_job_id": root2.job_id,
+        "plan_attempt_id": planner2.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body2),
+        "plan_step_id": "step-1",
+        "repair_round": 0,
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    work_seal2, _ = _complete_ohf_role(runtime2, work2, work_body2, identity_seed=5502)
+
+    # Create and complete an independent reject review
+    assert cycle2.run_once(root2.job_id).action == "REVIEW_CREATED"
+    assert cycle2.run_once(root2.job_id).action == "DISPATCHED"
+    reject_review2 = dispatches2[-1]
+    reject_body2 = _review_body(
+        root_id=root2.job_id,
+        plan_attempt_id=planner2.attempt.attempt_id,
+        plan_digest=str(result_digest(plan_body2)),
+        target_job_id=work2.attempt.job_id,
+        target_attempt_id=work2.attempt.attempt_id,
+        target_result_digest=work_seal2["role_result_digest"],
+        repair_round=0,
+        verdict="reject",
+    )
+    _complete_ohf_role(runtime2, reject_review2, reject_body2, identity_seed=5503)
+
+    admission_event2 = runtime2.events.get_event_by_command_id(
+        f"coo-cycle:{root2.job_id}:admit-plan:{planner2.attempt.attempt_id}"
+    )
+    with runtime2.store.read() as connection:
+        root_row2 = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root2.job_id,)
+        ).fetchone()
+        from control_plane.executive_runtime import (
+            _accepted_current_step_revision,
+        )
+        with pytest.raises(
+            executive_runtime.StateConflict,
+            match="current revision has an unresolved independent reject verdict",
+        ):
+            _accepted_current_step_revision(
+                connection,
+                root_row=root_row2,
+                admission=admission_event2.payload,
+                plan_body=plan_body2,
+                plan_step_id="step-1",
+            )
+
+
+def test_accepted_current_step_revision_repair_complete_independent_approve_returns_revision(
+    tmp_path: Path,
+) -> None:
+    """Helper returns repair revision after independent approval; manifest names repair not predecessor."""
+    (
+        runtime, cycle, dispatches, root, planner, work, repair,
+        _, work_seal, repair_seal, plan_body,
+    ) = _reviewed_work_reject_and_repair(
+        tmp_path,
+        intent_id="CEO-T2-REPAIR-APPROVE",
+        review_workers=["worker-b", "worker-b"],
+    )
+
+    # Approve the repair (worker-b != repair's worker-a so independent)
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    repair_review = dispatches[-1]
+    plan_digest = runtime.jobs.get_job(work.attempt.job_id).plan_digest
+    approve_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(plan_digest),
+        target_job_id=repair.attempt.job_id,
+        target_attempt_id=repair.attempt.attempt_id,
+        target_result_digest=repair_seal["role_result_digest"],
+        repair_round=1,
+        verdict="approve",
+    )
+    _complete_ohf_role(runtime, repair_review, approve_body, identity_seed=5305)
+
+    admission = runtime.events.get_event_by_command_id(
+        f"coo-cycle:{root.job_id}:admit-plan:{planner.attempt.attempt_id}"
+    )
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        from control_plane.executive_runtime import (
+            _accepted_current_step_revision,
+        )
+        result = _accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission.payload,
+            plan_body=plan_body,
+            plan_step_id="step-1",
+        )
+
+    # Manifest names the repair, not the rejected work
+    assert result["current_job_id"] == repair.attempt.job_id
+    assert result["current_attempt_id"] == repair.attempt.attempt_id
+    assert result["current_result_digest"] == repair_seal["role_result_digest"]
+    assert result["repair_round"] == 1
+    # Must not be the rejected predecessor's values
+    assert result["current_job_id"] != work.attempt.job_id
+    assert result["current_attempt_id"] != work.attempt.attempt_id
+
+
+def test_accepted_current_step_revision_aggregation_non_regression(
+    tmp_path: Path,
+) -> None:
+    """Aggregation output is byte-for-byte identical after extracting helper."""
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime, _v2_intent(intent_id="CEO-T2-AGGREGATION-CHECK")
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        worker = "worker-b" if job and job.orchestration_role == "review" else "worker-a"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner_dispatch = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner_dispatch.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Bounded work for aggregation check.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            }
+        ],
+    }
+    _complete_ohf_role(runtime, planner_dispatch, plan_body, identity_seed=5401)
+    admitted = cycle.run_once(root.job_id)
+    assert admitted.action == "PLAN_ADMITTED"
+
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    work_dispatch = dispatches[-1]
+    work_body = {
+        "schema_version": "mastermind.work_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner_dispatch.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-0",
+        "repair_round": 0,
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    work_seal, _ = _complete_ohf_role(
+        runtime, work_dispatch, work_body, identity_seed=5402
+    )
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review_dispatch = dispatches[-1]
+    review_body = {
+        "schema_version": "mastermind.review_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner_dispatch.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-0",
+        "reviewed_job_id": work_dispatch.attempt.job_id,
+        "reviewed_attempt_id": work_dispatch.attempt.attempt_id,
+        "reviewed_result_digest": work_seal["role_result_digest"],
+        "repair_round": 0,
+        "verdict": "approve",
+        "evidence_digests": [],
+        "findings": [],
+    }
+    _complete_ohf_role(runtime, review_dispatch, review_body, identity_seed=5403)
+
+    handoff_outcome = cycle.run_once(root.job_id)
+    assert handoff_outcome.action == "HANDOFF_CREATED"
+
+    admission_event = runtime.events.get_event_by_command_id(
+        f"coo-cycle:{root.job_id}:admit-plan:{planner_dispatch.attempt.attempt_id}"
+    )
+    assert admission_event is not None
+    admission_payload = admission_event.payload
+
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+
+        from control_plane.executive_runtime import (
+            _accepted_current_step_revision,
+            _current_orchestration_tree_material,
+        )
+
+        # Full aggregation before helper extraction
+        revisions_before, _ = _current_orchestration_tree_material(
+            connection,
+            root_row,
+            admission_payload,
+            plan_body,
+        )
+
+        # Per-step helper result
+        helper_result = _accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission_payload,
+            plan_body=plan_body,
+            plan_step_id="step-0",
+        )
+
+        # Must be byte-equivalent for step-0
+        assert revisions_before[0] == helper_result
+
+
+def test_accepted_current_step_revision_cancelled_unclaimed_review_keeps_json_null(
+    tmp_path: Path,
+) -> None:
+    """Terminal unclaimed review history keeps JSON null, not the string 'None'."""
+    runtime, _cycle, _dispatches, root, planner, work, work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="CEO-T2-CANCELLED-UNCLAIMED",
+            review_workers=["worker-b", "worker-b"],
+        )
+    )
+    queued = runtime.jobs.create_cycle_review(
+        root.job_id,
+        work.attempt.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-review:{work.attempt.job_id}:1",
+    )
+    assert queued.current_attempt_id is None
+    runtime.jobs.cancel_job(queued.job_id)
+    replacement = runtime.jobs.create_cycle_review(
+        root.job_id,
+        work.attempt.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-review:{work.attempt.job_id}:2",
+    )
+    dispatched = runtime.attempts.dispatch_cycle_job(
+        replacement.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{replacement.job_id}:attempt:1",
+        worker_id="worker-b",
+    )
+    assert dispatched is not None
+    plan_digest = runtime.jobs.get_job(work.attempt.job_id).plan_digest
+    approve_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-1",
+    )
+    _complete_ohf_role(runtime, dispatched, approve_body, identity_seed=6101)
+
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        admission, plan_body = executive_runtime._validated_plan_admission(
+            connection, root_row
+        )
+        revisions, history = executive_runtime._current_orchestration_tree_material(
+            connection, root_row, admission, plan_body
+        )
+        helper = executive_runtime._accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=plan_body,
+            plan_step_id="step-1",
+        )
+
+    cancelled = [item for item in history if item["job_id"] == queued.job_id]
+    assert len(cancelled) == 1
+    assert cancelled[0]["kind"] == "review"
+    assert cancelled[0]["status"] == "CANCELLED"
+    assert cancelled[0]["attempt_id"] is None
+    assert cancelled[0]["verdict"] is None
+    assert cancelled[0]["result_digest"] is None
+    assert cancelled[0]["independent"] is False
+    assert revisions[0] == helper
+    assert helper["qualifying_review_job_id"] == replacement.job_id
+
+
+def test_accepted_current_step_revision_second_canonical_approval_is_retained_in_history(
+    tmp_path: Path,
+) -> None:
+    """Exclude only the helper's selected approval; retain a later canonical approval.
+
+    Current public create_cycle_review refuses a second post-approval review.
+    The two-approval discriminator uses the existing private insertion owner
+    plus normal dispatch/seal/complete owners. This is a stored-state history
+    identity check, not a current public stale-approval bypass.
+    """
+    runtime, cycle, dispatches, root, planner, work, work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="CEO-T2-TWO-CANONICAL-APPROVALS",
+            review_workers=["worker-b", "worker-b"],
+        )
+    )
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    first_review = dispatches[-1]
+    plan_digest = runtime.jobs.get_job(work.attempt.job_id).plan_digest
+    approve_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-1",
+    )
+    _complete_ohf_role(runtime, first_review, approve_body, identity_seed=6201)
+
+    with pytest.raises(StateConflict, match="replacement review"):
+        runtime.jobs.create_cycle_review(
+            root.job_id,
+            work.attempt.job_id,
+            command_id=f"coo-cycle:{root.job_id}:create-review:{work.attempt.job_id}:2",
+        )
+
+    with runtime.store.transaction() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        admission, _plan_body = executive_runtime._validated_plan_admission(
+            connection, root_row
+        )
+        inserted = executive_runtime._insert_cycle_child(
+            connection,
+            runtime.store,
+            root_row=root_row,
+            role="review",
+            objective="Hermetic second review.",
+            requested_authorities=["READ"],
+            allowed_write_paths=[],
+            validation_commands=[],
+            cost_class="small",
+            attempt_limit=(
+                executive_runtime.CooCyclePolicy.load().review_job_attempt_limit
+            ),
+            review_required=False,
+            command_id=(
+                f"coo-cycle:{root.job_id}:create-review:{work.attempt.job_id}:2"
+            ),
+            plan_attempt_id=admission["plan_attempt_id"],
+            plan_digest=admission["plan_digest"],
+            plan_step_id="step-1",
+            repair_round=0,
+            reviews_job_id=work.attempt.job_id,
+            provenance_source_id=work.attempt.job_id,
+            provenance_source_digest=work_seal["role_result_digest"],
+            creation_evidence={
+                "reviewed_result_digest": work_seal["role_result_digest"]
+            },
+        )
+        second_id = str(inserted["job_id"])
+
+    second = runtime.attempts.dispatch_cycle_job(
+        second_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{second_id}:attempt:1",
+        worker_id="worker-b",
+    )
+    assert second is not None
+    _complete_ohf_role(runtime, second, approve_body, identity_seed=6202)
+
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        admission, plan_body = executive_runtime._validated_plan_admission(
+            connection, root_row
+        )
+        revisions, history = executive_runtime._current_orchestration_tree_material(
+            connection, root_row, admission, plan_body
+        )
+        helper = executive_runtime._accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=plan_body,
+            plan_step_id="step-1",
+        )
+
+    assert revisions[0] == helper
+    assert helper["qualifying_review_job_id"] == first_review.attempt.job_id
+    assert helper["qualifying_review_attempt_id"] == first_review.attempt.attempt_id
+    assert len(history) == 1
+    assert history[0]["kind"] == "review"
+    assert history[0]["job_id"] == second_id
+    assert history[0]["attempt_id"] == second.attempt.attempt_id
+    assert history[0]["status"] == "COMPLETED"
+    assert history[0]["verdict"] == "approve"
+    assert history[0]["independent"] is True
+    assert history[0]["result_digest"] is not None
+
+
+def test_accepted_current_step_revision_repaired_multistep_nonzero_ordinal_matches_aggregation(
+    tmp_path: Path,
+) -> None:
+    """Two-step repair: helper matches aggregation at ordinal 1 and original history."""
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    _register(runtime, "worker-b")
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-T2-REPAIRED-MULTISTEP",
+            business_impact="routine",
+        ),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    dispatches: list[OrchestrationDispatchOutcome] = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        worker = "worker-b" if job and job.orchestration_role == "review" else "worker-a"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id=worker
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Unreviewed bounded work.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Reviewed bounded work that will be repaired.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, planner, plan_body, identity_seed=6301)
+    admitted = cycle.run_once(root.job_id)
+    assert admitted.action == "PLAN_ADMITTED"
+    work_by_step = {}
+    work_seals = {}
+    for work_id in admitted.receipt["work_job_ids"]:
+        job = runtime.jobs.get_job(work_id)
+        assert job is not None
+        outcome = runtime.attempts.dispatch_cycle_job(
+            work_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{work_id}:attempt:1",
+            worker_id="worker-a",
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        body = {
+            "schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": job.plan_step_id,
+            "repair_round": 0,
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        work_by_step[str(job.plan_step_id)] = outcome
+        work_seals[str(job.plan_step_id)] = _complete_ohf_role(
+            runtime,
+            outcome,
+            body,
+            identity_seed=6302 if job.plan_step_id == "step-0" else 6303,
+        )[0]
+
+    current = work_by_step["step-1"]
+    current_seal = work_seals["step-1"]
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    rejecting = dispatches[-1]
+    reject_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=current.attempt.job_id,
+        target_attempt_id=current.attempt.attempt_id,
+        target_result_digest=current_seal["role_result_digest"],
+        repair_round=0,
+        verdict="reject",
+        plan_step_id="step-1",
+    )
+    reject_seal, _ = _complete_ohf_role(
+        runtime, rejecting, reject_body, identity_seed=6304
+    )
+
+    repair_created = cycle.run_once(root.job_id)
+    assert repair_created.action == "REPAIR_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    repair = dispatches[-1]
+    repair_body = {
+        "schema_version": "mastermind.repair_result/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "plan_digest": result_digest(plan_body),
+        "plan_step_id": "step-1",
+        "repair_round": 1,
+        "supersedes_job_id": current.attempt.job_id,
+        "rejected_review_job_id": rejecting.attempt.job_id,
+        "rejected_review_result_digest": reject_seal["role_result_digest"],
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    repair_seal, _ = _complete_ohf_role(
+        runtime, repair, repair_body, identity_seed=6305
+    )
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    approving = dispatches[-1]
+    approve_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=result_digest(plan_body),
+        target_job_id=repair.attempt.job_id,
+        target_attempt_id=repair.attempt.attempt_id,
+        target_result_digest=repair_seal["role_result_digest"],
+        repair_round=1,
+        verdict="approve",
+        plan_step_id="step-1",
+    )
+    _complete_ohf_role(runtime, approving, approve_body, identity_seed=6306)
+
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (root.job_id,)
+        ).fetchone()
+        admission, admitted_plan = executive_runtime._validated_plan_admission(
+            connection, root_row
+        )
+        revisions, history = executive_runtime._current_orchestration_tree_material(
+            connection, root_row, admission, admitted_plan
+        )
+        helper_0 = executive_runtime._accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=admitted_plan,
+            plan_step_id="step-0",
+        )
+        helper_1 = executive_runtime._accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=admitted_plan,
+            plan_step_id="step-1",
+        )
+
+    assert len(revisions) == 2
+    assert revisions[0] == helper_0
+    assert revisions[1] == helper_1
+    assert helper_0["ordinal"] == 0
+    assert helper_0["review_required"] is False
+    assert helper_0["qualifying_review_job_id"] is None
+    assert helper_0["current_job_id"] == work_by_step["step-0"].attempt.job_id
+    assert helper_1["ordinal"] == 1
+    assert helper_1["repair_round"] == 1
+    assert helper_1["current_job_id"] == repair.attempt.job_id
+    assert helper_1["current_attempt_id"] == repair.attempt.attempt_id
+    assert helper_1["current_result_digest"] == repair_seal["role_result_digest"]
+    assert helper_1["qualifying_review_job_id"] == approving.attempt.job_id
+    assert helper_1["current_job_id"] != current.attempt.job_id
+    assert len(history) == 2
+    kinds = {item["kind"] for item in history}
+    assert kinds == {"superseded_revision", "review"}
+    superseded = next(item for item in history if item["kind"] == "superseded_revision")
+    rejected = next(item for item in history if item["kind"] == "review")
+    assert superseded["job_id"] == current.attempt.job_id
+    assert superseded["attempt_id"] == current.attempt.attempt_id
+    assert superseded["status"] == "COMPLETED"
+    assert superseded["verdict"] is None
+    assert superseded["independent"] is None
+    assert rejected["job_id"] == rejecting.attempt.job_id
+    assert rejected["attempt_id"] == rejecting.attempt.attempt_id
+    assert rejected["status"] == "COMPLETED"
+    assert rejected["verdict"] == "reject"
+    assert rejected["independent"] is True
+    for item in history:
+        assert item["attempt_id"] is None or item["attempt_id"] != "None"
+
+
+# ---------------------------------------------------------------------------
+# Dependency-ready V3 admission
+# ---------------------------------------------------------------------------
+
+
+def test_v3_plan_admission_reserves_deferred_work_and_seals_initial_manifests(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    receipt = submit_intent(
+        runtime,
+        _v2_intent(
+            intent_id="CEO-V3-PLAN-ADMISSION-001",
+            business_impact="routine",
+        ),
+        execution_binding=_v3_execution_binding(),
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v3",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": dispatch.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-0",
+                "objective": "Acquire source evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-1",
+                "objective": "Run independent analysis.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "claude-compatible-subscription",
+                    "quota_class": "claude-hf1q-step",
+                },
+                "prerequisite_step_ids": [],
+            },
+            {
+                "ordinal": 2,
+                "step_id": "step-2",
+                "objective": "Consume accepted step-0 evidence.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+                "placement": {
+                    "provider_realm": "codex",
+                    "quota_class": "codex-hf1q-step",
+                },
+                "prerequisite_step_ids": ["step-0"],
+            },
+        ],
+    }
+    _complete_ohf_role(runtime, dispatch, plan_body, identity_seed=7601)
+    command = f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}"
+
+    admitted = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert [job.plan_step_id for job in admitted] == ["step-0", "step-1"]
+
+    replay = runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+    assert [job.job_id for job in replay] == [job.job_id for job in admitted]
+
+    with runtime.store.read() as connection:
+        deferred = connection.execute(
+            """
+            SELECT job_id FROM jobs
+            WHERE root_job_id=? AND plan_step_id='step-2'
+              AND orchestration_role='work'
+            """,
+            (root.job_id,),
+        ).fetchall()
+        admission_row = connection.execute(
+            """
+            SELECT payload_json FROM events
+            WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+            """,
+            (root.job_id,),
+        ).fetchone()
+        assert admission_row is not None
+        admission = json.loads(str(admission_row["payload_json"]))
+        creation_rows = connection.execute(
+            """
+            SELECT j.plan_step_id,e.payload_json
+            FROM jobs j JOIN events e ON e.job_id=j.job_id
+            WHERE j.root_job_id=? AND j.orchestration_role='work'
+              AND e.event_type='JOB_CREATED'
+            ORDER BY j.plan_step_id
+            """,
+            (root.job_id,),
+        ).fetchall()
+
+    assert deferred == []
+    assert admission["schema_version"] == "mastermind.coo_plan_admission/v2"
+    assert admission["reserved_children_total"] == (
+        executive_runtime.CooCyclePolicy.load().reserved_children_total(
+            (False, False, False)
+        )
+    )
+    assert [step["plan_step_id"] for step in admission["steps"]] == [
+        "step-0",
+        "step-1",
+        "step-2",
+    ]
+    assert admission["steps"][0]["prerequisite_step_ids"] == []
+    assert admission["steps"][1]["prerequisite_step_ids"] == []
+    assert admission["steps"][2]["prerequisite_step_ids"] == ["step-0"]
+    assert admission["steps"][2]["initial_work_job_id"] is None
+    assert admission["steps"][2]["initial_work_command_id"] is None
+    assert len(creation_rows) == 2
+    for row in creation_rows:
+        payload = json.loads(str(row["payload_json"]))
+        manifest = payload["dependency_manifest"]
+        manifest_without_digest = dict(manifest)
+        manifest_digest = manifest_without_digest.pop("dependency_manifest_digest")
+        assert payload["dependency_manifest_digest"] == manifest_digest
+        assert executive_runtime.orchestration_digest(manifest_without_digest) == (
+            manifest_digest
+        )
+        assert manifest == {
+            "schema_version": "mastermind.work_dependency_manifest/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": dispatch.attempt.attempt_id,
+            "plan_digest": result_digest(plan_body),
+            "plan_step_id": row["plan_step_id"],
+            "prerequisite_step_ids": [],
+            "revisions": [],
+            "dependency_manifest_digest": manifest_digest,
+        }
+
+    connection = sqlite3.connect(runtime.store.path)
+    try:
+        trigger_sql = connection.execute(
+            """
+            SELECT sql FROM sqlite_master
+            WHERE type='trigger' AND name='events_are_immutable_update'
+            """
+        ).fetchone()[0]
+        event = connection.execute(
+            """
+            SELECT e.event_id,e.payload_json FROM events e
+            JOIN jobs j ON j.job_id=e.job_id
+            WHERE j.root_job_id=? AND j.plan_step_id='step-0'
+              AND e.event_type='JOB_CREATED'
+            """,
+            (root.job_id,),
+        ).fetchone()
+        corrupted = json.loads(str(event[1]))
+        corrupted["dependency_manifest"]["dependency_manifest_digest"] = "f" * 64
+        corrupted["dependency_manifest_digest"] = "f" * 64
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(
+                    corrupted,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ),
+                int(event[0]),
+            ),
+        )
+        connection.execute(trigger_sql)
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(StateConflict, match="semantic payload drifted"):
+        runtime.jobs.admit_cycle_plan(root.job_id, command_id=command)
+
+
+
+def test_work_dependency_manifest_validator_is_closed_and_typed() -> None:
+    manifest = {
+        "schema_version": "mastermind.work_dependency_manifest/v1",
+        "root_job_id": "JOB-001",
+        "plan_attempt_id": "ATT-manifest-001",
+        "plan_digest": "a" * 64,
+        "plan_step_id": "step-0",
+        "prerequisite_step_ids": [],
+        "revisions": [],
+    }
+    manifest["dependency_manifest_digest"] = (
+        executive_runtime.orchestration_digest(manifest)
+    )
+    assert executive_runtime._validate_work_dependency_manifest(
+        manifest,
+        root_job_id="JOB-001",
+        plan_attempt_id="ATT-manifest-001",
+        plan_digest="a" * 64,
+        plan_step_id="step-0",
+    ) == manifest
+
+    opened = {**manifest, "unexpected": True}
+    with pytest.raises(StateConflict, match="closed wire"):
+        executive_runtime._validate_work_dependency_manifest(
+            opened,
+            root_job_id="JOB-001",
+            plan_attempt_id="ATT-manifest-001",
+            plan_digest="a" * 64,
+            plan_step_id="step-0",
+        )
+
+    drifted = {**manifest, "dependency_manifest_digest": "b" * 64}
+    with pytest.raises(StateConflict, match="digest drifted"):
+        executive_runtime._validate_work_dependency_manifest(
+            drifted,
+            root_job_id="JOB-001",
+            plan_attempt_id="ATT-manifest-001",
+            plan_digest="a" * 64,
+            plan_step_id="step-0",
+        )
+
+    wrong_type = {
+        **manifest,
+        "prerequisite_step_ids": [{"not": "an identifier"}],
+        "revisions": [{}],
+    }
+    wrong_type["dependency_manifest_digest"] = (
+        executive_runtime.orchestration_digest(
+            {
+                key: value
+                for key, value in wrong_type.items()
+                if key != "dependency_manifest_digest"
+            }
+        )
+    )
+    with pytest.raises(StateConflict, match="identity is invalid"):
+        executive_runtime._validate_work_dependency_manifest(
+            wrong_type,
+            root_job_id="JOB-001",
+            plan_attempt_id="ATT-manifest-001",
+            plan_digest="a" * 64,
+            plan_step_id="step-0",
+        )
+
+
+def test_v2_plan_admission_retains_v1_wire_without_dependency_manifest(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    placements = [
+        {"provider_realm": "codex", "quota_class": "codex-hf1q-step"},
+        {
+            "provider_realm": "claude-compatible-subscription",
+            "quota_class": "claude-hf1q-step",
+        },
+    ]
+    runtime, root, _plan_body, admitted = _admit_v2_plan(
+        runtime,
+        placements=placements,
+    )
+    assert len(admitted) == 2
+    with runtime.store.read() as connection:
+        admission_row = connection.execute(
+            """
+            SELECT payload_json FROM events
+            WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+            """,
+            (root.job_id,),
+        ).fetchone()
+        assert admission_row is not None
+        admission = json.loads(str(admission_row["payload_json"]))
+        creation_payloads = [
+            json.loads(str(row[0]))
+            for row in connection.execute(
+                """
+                SELECT e.payload_json FROM events e
+                JOIN jobs j ON j.job_id=e.job_id
+                WHERE j.root_job_id=? AND j.orchestration_role='work'
+                  AND e.event_type='JOB_CREATED'
+                ORDER BY j.plan_step_id
+                """,
+                (root.job_id,),
+            ).fetchall()
+        ]
+    assert admission["schema_version"] == "mastermind.coo_plan_admission/v1"
+    assert all(
+        set(step)
+        == {
+            "ordinal",
+            "plan_step_id",
+            "step_slots",
+            "review_required",
+            "work_job_id",
+            "member_command_id",
+        }
+        for step in admission["steps"]
+    )
+    assert all("dependency_manifest" not in payload for payload in creation_payloads)
+    assert all(
+        "dependency_manifest_digest" not in payload for payload in creation_payloads
+    )
+# Finite cycle cutoff tests
+# ---------------------------------------------------------------------------
+
+FINITE_TEST_CONFIG_PIN = hashlib.sha256(
+    b"phase1fc-fin-cutoff-test-config"
+).hexdigest()
+FINITE_TEST_SOURCE_PIN = hashlib.sha256(
+    b"phase1fc-fin-cutoff-test-source"
+).hexdigest()
+FINITE_TEST_BINDING_PIN = hashlib.sha256(
+    b"phase1fc-fin-cutoff-test-binding"
+).hexdigest()
+FINITE_ATTESTATION = hashlib.sha256(
+    b"phase1fc-fin-cutoff-test-attestation"
+).hexdigest()
+
+
+class _MutableClock:
+    def __init__(self, value: int = 1_800_000_000_000) -> None:
+        self.value = value
+
+    def __call__(self) -> int:
+        return self.value
+
+    def advance(self, *, seconds: int) -> None:
+        self.value += seconds * 1_000
+
+
+def _armed_v2_binding():
+    """V2 binding for finite arm tests."""
+    return {
+        "eligible_quota_classes": ["codex-hf1q-step"],
+        "provider": "codex",
+        "model": "gpt-5.6-sol",
+        "effort": "xhigh",
+        "cost_class": "small",
+        "base_sha": "a" * 40,
+        "routing_policy_version": "fph0-routing",
+        "execution_profile_id": "fph0-execution",
+        "execution_profile_digest": "b" * 64,
+        "capability_policy_version": "fph0-capability",
+        "capability_policy_digest": "c" * 64,
+        "operator_eligible_quota_classes": ["codex-operator"],
+        "operator_provider": "codex",
+        "operator_model": "gpt-5.6-sol",
+        "operator_effort": "xhigh",
+        "operator_cost_class": "small",
+        "operator_routing_policy_version": "fph0-routing",
+        "operator_execution_profile_id": "fph0-execution",
+        "operator_execution_profile_digest": "b" * 64,
+        "operator_capability_policy_version": "fph0-capability",
+        "operator_capability_policy_digest": "c" * 64,
+        "operator_harness_binary_digest": "d" * 64,
+        "operator_harness_version": "fph0-harness",
+        "operator_harness_armed": True,
+    }
+
+
+def _finite_bound_definition(
+    root,
+    envelope,
+    *,
+    runtime: Runtime | None = None,
+    cap: int = 340,
+    expires_at_ms: int | None = None,
+) -> dict:
+    now = runtime.store.now_ms() if runtime is not None else 0
+    from control_plane.executive_authority import ExecutiveAuthorityPolicy
+    from control_plane.executive_coo_policy import CooCyclePolicy
+    value = {
+        "schema_version": executive_runtime.FINITE_CONTROL_CONTEXT_SCHEMA,
+        "mode": "manual_finite",
+        "phase": "bound",
+        "intent_id": envelope["intent_id"],
+        "intent_fingerprint": intent_fingerprint(validate_intent(envelope)),
+        "config_snapshot_sha256": FINITE_TEST_CONFIG_PIN,
+        "source_release_sha256": FINITE_TEST_SOURCE_PIN,
+        "authority_policy_sha256": ExecutiveAuthorityPolicy.load().sha256,
+        "coo_policy_sha256": CooCyclePolicy.load().policy_sha256,
+        "binding_digest_sha256": FINITE_TEST_BINDING_PIN,
+        "host_binding_digest_sha256": finite_host_binding_digest(root.constraints),
+        "control_attestation_digest": FINITE_ATTESTATION,
+        "root_job_id": root.job_id,
+        "max_total_attempts": cap,
+        "expires_at_ms": (
+            int(expires_at_ms) if expires_at_ms is not None else now + 3_600_000
+        ),
+    }
+    return value
+
+
+def _submit_finite_root(runtime: Runtime, intent_id: str):
+    """Submit intent with armed v2 binding and return root."""
+    envelope = _v2_intent(intent_id=intent_id)
+    receipt = submit_intent(
+        runtime, envelope, execution_binding=_armed_v2_binding()
+    )
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    return envelope, root
+
+
+def _issue_finite_context(definition: dict) -> FiniteControlContext:
+    return executive_runtime._issue_finite_control_context(
+        definition,
+        _producer_capability=(
+            executive_runtime._FINITE_CONTROL_COMPOSITION_PRODUCER
+        ),
+    )
+
+
+def _arm_finite_cycle(runtime: Runtime, context: FiniteControlContext):
+    return runtime.jobs.arm_finite_cycle(
+        context.definition["root_job_id"], owner_issued_policy=context
+    )
+
+
+def _table_counts(runtime: Runtime) -> dict[str, int]:
+    path = runtime.store.path
+    connection = sqlite3.connect(path)
+    try:
+        return {
+            table: int(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            )
+            for table in (
+                "jobs",
+                "attempts",
+                "events",
+                "workers",
+                "worker_quota_classes",
+                "harness_session_epochs",
+                "process_generations",
+            )
+        }
+    finally:
+        connection.close()
+
+
+def test_finite_cutoff_returns_no_new_work_when_expired(tmp_path):
+    """Expired finite root returns NO_NEW_WORK with zero mutation."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    # Create root with armed binding and bind context
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-CUTOFF-EXP")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    # Verify finite status is expired
+    status = runtime.jobs.finite_cycle_status(root.job_id)
+    assert status is not None
+    assert status["expired"] is True
+    assert status["exhausted"] is False
+
+    # Run cycle - should return NO_NEW_WORK
+    before = _table_counts(runtime)
+    cycle = CooCycle(runtime)
+    outcome = cycle.run_once(root.job_id)
+    after = _table_counts(runtime)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert outcome.selected_job_id is None
+    assert outcome.command_id is None
+    assert outcome.receipt["halt_reason"] == "expired"
+    assert outcome.receipt["expired"] is True
+    assert outcome.receipt["exhausted"] is False
+    # Verify no mutations occurred
+    assert after == before
+
+
+def test_finite_cutoff_returns_no_new_work_when_exhausted(tmp_path):
+    """Exhausted finite root returns NO_NEW_WORK with zero mutation."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    # Create root and arm with cap=10 (enough for full cycle)
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-CUTOFF-EXH")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, cap=10, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    # Verify expired status
+    status = runtime.jobs.finite_cycle_status(root.job_id)
+    assert status is not None
+    assert status["expired"] is True
+
+    # Run cycle - should return NO_NEW_WORK
+    before = _table_counts(runtime)
+    cycle = CooCycle(runtime)
+    outcome = cycle.run_once(root.job_id)
+    after = _table_counts(runtime)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert outcome.selected_job_id is None
+    assert outcome.receipt["halt_reason"] == "expired"
+    assert outcome.receipt["expired"] is True
+    assert outcome.receipt["exhausted"] is False
+    # Verify no mutations occurred
+    assert after == before
+
+
+def test_finite_cutoff_preserves_legacy_unarmed_behavior(tmp_path):
+    """Unarmed root retains existing behavior without any finite checks."""
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+
+    receipt = submit_intent(runtime, _v2_intent(intent_id="CEO-FINITE-LEGACY-001"))
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+
+    # Verify no finite status
+    status = runtime.jobs.finite_cycle_status(root.job_id)
+    assert status is None
+
+    # Run cycle - should work normally (create planner)
+    cycle = CooCycle(runtime)
+    outcome = cycle.run_once(root.job_id)
+
+    assert outcome.action == "PLANNER_CREATED"
+    assert outcome.selected_job_id is not None
+
+
+def test_finite_cutoff_no_dispatcher_call_on_cutoff(tmp_path):
+    """NO_NEW_WORK does not call dispatcher when cutoff is active."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-NO-DISP")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    dispatcher_called = False
+
+    def tracking_dispatcher(job_id: str, command_id: str):
+        nonlocal dispatcher_called
+        dispatcher_called = True
+        return runtime.attempts.dispatch_cycle_job(job_id, command_id=command_id)
+
+    cycle = CooCycle(runtime, dispatcher=tracking_dispatcher)
+    outcome = cycle.run_once(root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert dispatcher_called is False
+
+
+def test_finite_cutoff_idempotent_same_outcome(tmp_path):
+    """NO_NEW_WORK is byte-identical across repeated calls with same DB/clock."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-IDEM-001")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    cycle = CooCycle(runtime)
+
+    outcome1 = cycle.run_once(root.job_id)
+    outcome2 = cycle.run_once(root.job_id)
+    outcome3 = cycle.run_once(root.job_id)
+
+    assert outcome1.action == outcome2.action == outcome3.action == "NO_NEW_WORK"
+    assert outcome1.to_dict() == outcome2.to_dict() == outcome3.to_dict()
+
+
+def test_finite_cutoff_allows_incumbent_active_dispatch(tmp_path):
+    """When root is expired with no active dispatch, returns NO_NEW_WORK."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-INCU-001")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, cap=100, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    # Verify expired
+    status = runtime.jobs.finite_cycle_status(root.job_id)
+    assert status["expired"] is True
+
+    # Run cycle - should return NO_NEW_WORK
+    before = _table_counts(runtime)
+    outcome = CooCycle(runtime).run_once(root.job_id)
+    after = _table_counts(runtime)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert after == before  # No mutations
+
+
+def test_finite_cutoff_closes_requeue_path(tmp_path):
+    """Expired finite root closes requeue path and returns NO_NEW_WORK."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-CLOSE-REQ")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    # Verify expired
+    status = runtime.jobs.finite_cycle_status(root.job_id)
+    assert status["expired"] is True
+
+    # Run cycle - should return NO_NEW_WORK
+    before = _table_counts(runtime)
+    outcome = CooCycle(runtime).run_once(root.job_id)
+    after = _table_counts(runtime)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert after == before  # No mutations
+
+
+def test_finite_cutoff_closes_create_planner_path(tmp_path):
+    """Expired finite root closes create-planner path."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-CLOSE-PLAN")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    # Verify expired
+    status = runtime.jobs.finite_cycle_status(root.job_id)
+    assert status["expired"] is True
+
+    # Run cycle - should not create planner
+    before = _table_counts(runtime)
+    outcome = CooCycle(runtime).run_once(root.job_id)
+    after = _table_counts(runtime)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert after == before  # No mutations
+    # Verify no planner was created
+    children = [j for j in runtime.jobs.list_jobs() if j.root_job_id == root.job_id and j.job_id != root.job_id]
+    assert len(children) == 0
+
+
+def test_finite_cutoff_closes_dispatch_queued_path(tmp_path):
+    """Expired finite root closes dispatch-queued path."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-CLOSE-DISP")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    # Verify expired
+    status = runtime.jobs.finite_cycle_status(root.job_id)
+    assert status["expired"] is True
+
+    # Run cycle - should return NO_NEW_WORK
+    before = _table_counts(runtime)
+    outcome = CooCycle(runtime).run_once(root.job_id)
+    after = _table_counts(runtime)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert after == before  # No mutations
+
+
+def test_finite_cutoff_allows_handoff_after_cutoff_if_completed(tmp_path):
+    """If all work completed before cutoff, handoff is allowed after cutoff."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-HANDOFF-001")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    # Verify expired
+    status = runtime.jobs.finite_cycle_status(root.job_id)
+    assert status["expired"] is True
+
+    # Run cycle - should return NO_NEW_WORK
+    before = _table_counts(runtime)
+    outcome = CooCycle(runtime).run_once(root.job_id)
+    after = _table_counts(runtime)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert after == before  # No mutations
+
+
+def test_finite_cutoff_deterministic_no_new_work_receipt(tmp_path):
+    """NO_NEW_WORK receipt has deterministic structure and bounded reason."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-DET-001")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    cycle = CooCycle(runtime)
+    outcome = cycle.run_once(root.job_id)
+
+    # Verify receipt structure
+    assert "schema_version" in outcome.receipt
+    assert outcome.receipt["schema_version"] == "mastermind.executive_coo_finite_cutoff/v1"
+    assert outcome.receipt["halt_reason"] in ("expired", "budget_exhausted", None)
+    assert isinstance(outcome.receipt["expired"], bool)
+    assert isinstance(outcome.receipt["exhausted"], bool)
+    assert isinstance(outcome.receipt["spent"], int)
+    assert isinstance(outcome.receipt["remaining"], int)
+    assert "policy_sha" in outcome.receipt
+
+    # Verify outcome digest is computed
+    assert "outcome_digest" in outcome.to_dict()
+
+
+def test_finite_cutoff_no_block_event_on_cutoff(tmp_path):
+    """NO_NEW_WORK does not emit a block event unlike BLOCKED action."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register(runtime, "worker-a")
+
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-NO-BLOCK")
+
+    definition = _finite_bound_definition(
+        root, envelope,
+        runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+
+    # Advance clock past expiry
+    clock.advance(seconds=7200)
+
+    # Get event count before
+    events_before = len([
+        e for e in runtime.events.list_events()
+        if e.event_type == "COO_CYCLE_BLOCKED"
+    ])
+
+    outcome = CooCycle(runtime).run_once(root.job_id)
+    assert outcome.action == "NO_NEW_WORK"
+
+    # Verify no block event was created
+    events_after = len([
+        e for e in runtime.events.list_events()
+        if e.event_type == "COO_CYCLE_BLOCKED"
+    ])
+    assert events_after == events_before
+
+
+
+# ---------------------------------------------------------------------------
+# Escalated finite-halt discriminators.
+#
+# The advisory first-issuance read is never a capability: ``already_issued`` is
+# derived from persisted Attempt evidence alone and is reported before the
+# Runtime ever re-reads the bound context, the durable arm or the persisted host
+# pin.  Every fixture below drives the real Runtime owner APIs; the only
+# indirection is a delegating recorder whose wrapped call still executes the
+# real dispatcher and the real advisory read.
+
+_FINITE_OPERATOR_QUOTA_CLASSES = {
+    "codex-operator": {
+        "provider": "codex",
+        "capabilities": ["read", "research"],
+        "cost_class": "small",
+        "model": "gpt-5.6-sol",
+        "effort": "xhigh",
+        "metadata": {
+            "routing_policy_version": "fph0-routing",
+            "execution_profile_id": "fph0-execution",
+            "execution_profile_digest": "b" * 64,
+            "capability_policy_version": "fph0-capability",
+            "capability_policy_digest": "c" * 64,
+        },
+    }
+}
+
+
+def _register_finite_operator(runtime: Runtime) -> None:
+    runtime.workers.register_worker(
+        "worker-a",
+        provider="codex",
+        account_label="worker-a@company",
+        worker_type="mock",
+        capabilities=["read", "research"],
+        quota_classes=_FINITE_OPERATOR_QUOTA_CLASSES,
+    )
+
+
+def _recording_dispatcher(runtime: Runtime):
+    """Delegating dispatcher that records the exact commands it is asked to replay."""
+
+    calls: list[tuple[str, str]] = []
+
+    def dispatch(job_id: str, command_id: str):
+        calls.append((job_id, command_id))
+        return runtime.attempts.dispatch_cycle_job(
+            job_id, command_id=command_id, worker_id="worker-a"
+        )
+
+    return dispatch, calls
+
+
+def _recorded_first_issuance(runtime: Runtime):
+    """Delegating advisory recorder around the real first-issuance read."""
+
+    reads: list[tuple[str, str, FiniteReservationDecision]] = []
+    original = runtime.jobs.validate_finite_first_issuance
+
+    def record(root_job_id: str, attempt_id: str) -> FiniteReservationDecision:
+        decision = original(root_job_id, attempt_id)
+        reads.append((root_job_id, attempt_id, decision))
+        return decision
+
+    runtime.jobs.validate_finite_first_issuance = record
+    return reads
+
+
+def _halted_finite_incumbent(
+    tmp_path: Path,
+    *,
+    intent_id: str,
+    issue_attempt: bool = True,
+    dispatch_attempt: bool = True,
+    fail_before_halt: bool = False,
+    halt: str = "expired",
+) -> SimpleNamespace:
+    """Armed finite root holding one child, halted by its own deadline.
+
+    Everything before the halt runs through the existing Runtime owner
+    boundaries: strict-v2 submission, cycle planner creation, the exact COO
+    dispatch command and — when ``issue_attempt`` is set — the operator harness
+    reservation plus start binding that puts the Attempt into the persisted
+    ``already_issued`` state the advisory read reports.  ``fail_before_halt``
+    fails the child while its lease is still live, then lets the deadline pass.
+    ``halt`` selects how the composition closes: ``"expired"`` lets the
+    deadline pass, ``"exhausted"`` arms a one-attempt cap instead, and
+    ``None`` leaves the composition open with a live lease.
+    """
+
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register_finite_operator(runtime)
+    envelope = _v2_intent(intent_id=intent_id)
+    receipt = submit_intent(runtime, envelope, execution_binding=_armed_v2_binding())
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    definition = _finite_bound_definition(
+        root,
+        envelope,
+        runtime=runtime,
+        cap=1 if halt == "exhausted" else 100,
+        expires_at_ms=clock.value + 3_600_000,
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+    )
+    dispatch = None
+    if dispatch_attempt:
+        dispatch = runtime.attempts.dispatch_cycle_job(
+            planner.job_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+            worker_id="worker-a",
+        )
+        assert isinstance(dispatch, OrchestrationDispatchOutcome)
+        if issue_attempt:
+            harness = runtime.operator_harness
+            profile = _orchestration_profile(dispatch)
+            sealed = harness.seal_operator_harness_attempt(
+                dispatch.attempt.attempt_id,
+                fence_generation=dispatch.attempt.fence_generation,
+                lease_token=dispatch.lease_token,
+                requested=profile,
+            )
+            operation = OperationId(f"ohf-op:{intent_id.lower()}")
+            epoch, generation = harness.reserve_start(
+                sealed.attempt_id,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                operation_id=operation,
+            )
+            harness.bind_start_result(
+                epoch=epoch,
+                generation=generation,
+                operation_id=operation,
+                fence_generation=sealed.fence_generation,
+                lease_token=dispatch.lease_token,
+                provider_session_id=f"SESSION-{intent_id}",
+                process=ProcessIdentityObservation(
+                    2101, 2101, f"start-{intent_id}", "boot-finite"
+                ),
+            )
+    if fail_before_halt:
+        failed = runtime.jobs.fail_job(planner.job_id, {"summary": "boom"})
+        assert failed.status == JobStatus.FAILED
+    if halt == "expired":
+        clock.advance(seconds=7_200)
+    job = runtime.jobs.get_job(planner.job_id)
+    assert job is not None
+    if fail_before_halt:
+        assert job.status == JobStatus.FAILED
+    elif dispatch_attempt:
+        assert job.status == JobStatus.RUNNING
+        assert job.current_attempt_id == dispatch.attempt.attempt_id
+    else:
+        assert job.status == JobStatus.QUEUED
+    status = runtime.jobs.finite_cycle_status(root.job_id)
+    assert status is not None
+    if halt == "expired":
+        assert status["expired"] is True
+    elif halt == "exhausted":
+        assert status["expired"] is False
+        assert status["exhausted"] is True
+    else:
+        assert status["expired"] is False
+        assert status["exhausted"] is False
+    return SimpleNamespace(
+        runtime=runtime,
+        root=root,
+        job=job,
+        clock=clock,
+        definition=definition,
+        dispatch=dispatch,
+    )
+
+
+def _rebound_runtime(fixture: SimpleNamespace, definition: dict) -> Runtime:
+    """A second in-process Runtime over the same store, rebinding its context.
+
+    ``bind_finite_control_context`` never retargets inside one process, so a
+    defective composition is reached the only way the product allows: a fresh
+    owner runtime over the same persisted store, whose first binding is the
+    defective definition.
+    """
+
+    rebound = Runtime.at(fixture.runtime.store.root, clock=fixture.clock)
+    rebound.store.bind_finite_control_context(_issue_finite_context(definition))
+    return rebound
+
+
+def test_finite_halt_settles_already_issued_same_root_incumbent(tmp_path):
+    """Halt keeps the one lawful mutation: the already issued incumbent replay."""
+    fixture = _halted_finite_incumbent(tmp_path, intent_id="CEO-FINITE-SETTLE-1")
+    runtime = fixture.runtime
+    dispatch, calls = _recording_dispatcher(runtime)
+    command = f"coo-cycle:{fixture.root.job_id}:dispatch:{fixture.job.job_id}:attempt:1"
+    before = _table_counts(runtime)
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "DISPATCHED"
+    assert outcome.selected_job_id == fixture.job.job_id
+    assert outcome.command_id == command
+    assert calls == [(fixture.job.job_id, command)]
+    assert _table_counts(runtime) == before
+
+
+def test_finite_halt_reads_the_current_attempt_before_any_dispatch(tmp_path):
+    """The advisory seam is read for the current Attempt, before any dispatch."""
+    fixture = _halted_finite_incumbent(tmp_path, intent_id="CEO-FINITE-READ-1")
+    runtime = fixture.runtime
+    sequence: list[str] = []
+    dispatch, _calls = _recording_dispatcher(runtime)
+
+    def dispatch_and_record(job_id: str, command_id: str):
+        sequence.append("dispatch")
+        return dispatch(job_id, command_id)
+
+    original = runtime.jobs.validate_finite_first_issuance
+
+    def read_and_record(root_job_id: str, attempt_id: str):
+        decision = original(root_job_id, attempt_id)
+        sequence.append("read")
+        return decision
+
+    runtime.jobs.validate_finite_first_issuance = read_and_record
+
+    outcome = CooCycle(runtime, dispatcher=dispatch_and_record).run_once(
+        fixture.root.job_id
+    )
+
+    assert outcome.action == "DISPATCHED"
+    assert sequence == ["read", "dispatch"]
+    direct = original(fixture.root.job_id, fixture.job.current_attempt_id)
+    assert direct.already_issued is True
+    assert direct.authorized_first_launch is False
+    assert "finite_control" not in outcome.receipt
+
+
+def test_finite_halt_refuses_a_first_launch_that_is_not_yet_issued(tmp_path):
+    """A halt with a merely claimed Attempt offers no authorized work at all."""
+    fixture = _halted_finite_incumbent(
+        tmp_path, intent_id="CEO-FINITE-UNISSUED-1", issue_attempt=False
+    )
+    runtime = fixture.runtime
+    dispatch, calls = _recording_dispatcher(runtime)
+    before = _table_counts(runtime)
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert calls == []
+    assert _table_counts(runtime) == before
+    advisory = outcome.receipt["finite_control"]["advisory_first_issuance"]
+    assert len(advisory) == 1
+    assert advisory[0]["authorized_first_launch"] is False
+    assert advisory[0]["already_issued"] is False
+    assert advisory[0]["halt_reason"] != "already_issued"
+
+
+def test_finite_halt_closes_requeue_path_without_mutation(tmp_path):
+    """A recoverable child at halt is never requeued; zero writes are made."""
+    fixture = _halted_finite_incumbent(
+        tmp_path,
+        intent_id="CEO-FINITE-REQUEUE-1",
+        issue_attempt=False,
+        fail_before_halt=True,
+    )
+    runtime = fixture.runtime
+    assert fixture.job.attempt_count < fixture.job.attempt_limit
+    before = _table_counts(runtime)
+
+    outcome = CooCycle(runtime).run_once(fixture.root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert _table_counts(runtime) == before
+    recovered = runtime.jobs.get_job(fixture.job.job_id)
+    assert recovered.status == JobStatus.FAILED
+
+
+def test_finite_halt_closes_queued_dispatch_path_without_mutation(tmp_path):
+    """A queued child at halt is never dispatched; zero writes are made."""
+    fixture = _halted_finite_incumbent(
+        tmp_path,
+        intent_id="CEO-FINITE-QUEUED-1",
+        issue_attempt=False,
+        dispatch_attempt=False,
+    )
+    runtime = fixture.runtime
+    dispatch, calls = _recording_dispatcher(runtime)
+    before = _table_counts(runtime)
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert calls == []
+    assert _table_counts(runtime) == before
+    queued = runtime.jobs.get_job(fixture.job.job_id)
+    assert queued.status == JobStatus.QUEUED
+    assert queued.attempt_count == 0
+
+
+def test_finite_halt_refuses_already_issued_without_bound_context(tmp_path):
+    """``already_issued`` cannot substitute for the missing bound context."""
+    fixture = _halted_finite_incumbent(tmp_path, intent_id="CEO-FINITE-NOCTX-1")
+    armed_only = Runtime.at(fixture.runtime.store.root, clock=fixture.clock)
+    assert armed_only.store._finite_control_context is None
+    dispatch, calls = _recording_dispatcher(armed_only)
+    before = _table_counts(armed_only)
+
+    outcome = CooCycle(armed_only, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert calls == []
+    assert _table_counts(armed_only) == before
+    control = outcome.receipt["finite_control"]
+    assert control["armed"] is True
+    assert control["bound"] is False
+    assert control["context_proven"] is False
+    assert "armed_root_without_bound_context" in control["refusal_reasons"]
+
+
+def test_finite_halt_refuses_already_issued_under_admission_only_context(tmp_path):
+    """``already_issued`` cannot authorize work under an admission-only phase."""
+    fixture = _halted_finite_incumbent(tmp_path, intent_id="CEO-FINITE-ADMIT-1")
+    admission_only = {
+        key: value
+        for key, value in fixture.definition.items()
+        if key not in {"root_job_id", "max_total_attempts", "expires_at_ms"}
+    }
+    admission_only["phase"] = "admission_only"
+    assert admission_only["phase"] == "admission_only"
+    rebound = _rebound_runtime(fixture, admission_only)
+    dispatch, calls = _recording_dispatcher(rebound)
+    before = _table_counts(rebound)
+
+    outcome = CooCycle(rebound, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert calls == []
+    assert _table_counts(rebound) == before
+    control = outcome.receipt["finite_control"]
+    assert control["bound"] is False
+    assert control["context_proven"] is False
+    assert "admission_only_context" in control["refusal_reasons"]
+
+
+def test_finite_halt_refuses_already_issued_under_foreign_bound_context(tmp_path):
+    """``already_issued`` cannot authorize a root the context does not bind."""
+    fixture = _halted_finite_incumbent(tmp_path, intent_id="CEO-FINITE-FORGN-1")
+    foreign = dict(fixture.definition)
+    foreign["root_job_id"] = "JOB-999"
+    rebound = _rebound_runtime(fixture, foreign)
+    dispatch, calls = _recording_dispatcher(rebound)
+    before = _table_counts(rebound)
+
+    outcome = CooCycle(rebound, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert calls == []
+    assert _table_counts(rebound) == before
+    control = outcome.receipt["finite_control"]
+    assert control["context_proven"] is False
+    assert "foreign_bound_context" in control["refusal_reasons"]
+
+
+def test_finite_halt_refuses_already_issued_when_the_pinned_composition_drifts(
+    tmp_path,
+):
+    """``already_issued`` cannot survive an arm/context or host pin drift."""
+    fixture = _halted_finite_incumbent(tmp_path, intent_id="CEO-FINITE-PIN-1")
+    drifted = dict(fixture.definition)
+    drifted["host_binding_digest_sha256"] = "e" * 64
+    rebound = _rebound_runtime(fixture, drifted)
+    dispatch, calls = _recording_dispatcher(rebound)
+    before = _table_counts(rebound)
+
+    outcome = CooCycle(rebound, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert calls == []
+    assert _table_counts(rebound) == before
+    control = outcome.receipt["finite_control"]
+    assert control["context_proven"] is False
+    assert "arm_context_projection_drift" in control["refusal_reasons"]
+    assert "host_binding_pin_drift" in control["refusal_reasons"]
+    advisory = control["advisory_first_issuance"]
+    assert advisory == [
+        {
+            "authorized_first_launch": False,
+            "already_issued": True,
+            "halt_reason": "already_issued",
+        }
+    ]
+
+
+def test_finite_halt_refuses_already_issued_on_a_malformed_arm(tmp_path):
+    """A duplicated durable arm refuses instead of reading as armed."""
+    fixture = _halted_finite_incumbent(tmp_path, intent_id="CEO-FINITE-ARM-1")
+    runtime = fixture.runtime
+    with sqlite3.connect(str(runtime.store.path)) as connection:
+        connection.row_factory = sqlite3.Row
+        arm = dict(
+            connection.execute(
+                "SELECT * FROM events WHERE event_type='COO_FINITE_DRIVE_ARMED'"
+            ).fetchone()
+        )
+        arm.pop("event_id")
+        arm["job_id"] = None
+        arm["sequence"] = 9999
+        arm["command_id"] = f"arm-coo-root:{fixture.root.job_id}:corrupt"
+        columns = sorted(arm)
+        connection.execute(
+            f"INSERT INTO events ({','.join(columns)}) "
+            f"VALUES ({','.join('?' * len(columns))})",
+            tuple(arm[column] for column in columns),
+        )
+    with pytest.raises(StateConflict):
+        runtime.jobs.finite_cycle_status(fixture.root.job_id)
+    dispatch, calls = _recording_dispatcher(runtime)
+    before = _table_counts(runtime)
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert calls == []
+    assert _table_counts(runtime) == before
+    assert outcome.receipt["halt_reason"] == "malformed_arm"
+    assert outcome.receipt["finite_control"]["refusal_reasons"] == ["malformed_arm"]
+
+
+def test_finite_halt_refuses_an_unarmed_bound_root_before_any_dispatch(tmp_path):
+    """A bound context with no durable arm refuses before any incumbent dispatch.
+
+    This unarmed state is owner-reachable exactly once, between admission and
+    arming: the root is admitted under an admission-only context, then a fresh
+    owner runtime binds the bound context before ``arm_finite_cycle`` has run.
+    The Runtime's own owner seams refuse to build any incumbent here (a fresh
+    effect without the arm raises), so the discriminator is proven at the
+    gate: every path, incumbent dispatch included, closes with zero writes.
+    """
+    from control_plane.executive_authority import ExecutiveAuthorityPolicy
+    from control_plane.executive_coo_policy import CooCyclePolicy
+
+    clock = _MutableClock(1_800_000_000_000)
+    admitting = Runtime.at(tmp_path, clock=clock)
+    _register_finite_operator(admitting)
+    envelope = _v2_intent(intent_id="CEO-FINITE-NOARM-1")
+    precomputed = executive_runtime._normalise_constraints(_armed_v2_binding())
+    admission_only = {
+        "schema_version": executive_runtime.FINITE_CONTROL_CONTEXT_SCHEMA,
+        "mode": "manual_finite",
+        "phase": "admission_only",
+        "intent_id": envelope["intent_id"],
+        "intent_fingerprint": intent_fingerprint(validate_intent(envelope)),
+        "config_snapshot_sha256": FINITE_TEST_CONFIG_PIN,
+        "source_release_sha256": FINITE_TEST_SOURCE_PIN,
+        "authority_policy_sha256": ExecutiveAuthorityPolicy.load().sha256,
+        "coo_policy_sha256": CooCyclePolicy.load().policy_sha256,
+        "binding_digest_sha256": FINITE_TEST_BINDING_PIN,
+        "host_binding_digest_sha256": finite_host_binding_digest(precomputed),
+        "control_attestation_digest": FINITE_ATTESTATION,
+    }
+    admitting.store.bind_finite_control_context(
+        _issue_finite_context(admission_only)
+    )
+    receipt = submit_intent(
+        admitting, envelope, execution_binding=_armed_v2_binding()
+    )
+    root = admitting.jobs.get_job(receipt["job_id"])
+    assert root is not None
+
+    # A fresh owner runtime binds the bound composition before any arm exists.
+    unarmed = Runtime.at(admitting.store.root, clock=clock)
+    definition = _finite_bound_definition(
+        root, envelope, runtime=unarmed, expires_at_ms=clock.value + 3_600_000
+    )
+    unarmed.store.bind_finite_control_context(_issue_finite_context(definition))
+    assert unarmed.jobs.finite_cycle_status(root.job_id) is None
+    assert unarmed.store._finite_control_context is not None
+    dispatch, calls = _recording_dispatcher(unarmed)
+    before = _table_counts(unarmed)
+
+    outcome = CooCycle(unarmed, dispatcher=dispatch).run_once(root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert calls == []
+    assert _table_counts(unarmed) == before
+    assert outcome.receipt["halt_reason"] == "unproven_finite_context"
+    control = outcome.receipt["finite_control"]
+    assert control["armed"] is False
+    assert control["bound"] is True
+    assert control["context_proven"] is False
+    assert "bound_root_without_durable_arm" in control["refusal_reasons"]
+    assert control["advisory_first_issuance"] == []
+    assert control["settled_incumbent_job_id"] is None
+
+
+def test_finite_halt_precedes_a_preexisting_durable_cycle_block(tmp_path):
+    """An expired finite root answers NO_NEW_WORK even when a block exists.
+
+    The block below is written lawfully through the real cycle while the
+    composition is still live (absent supervisor, one queued planner).  Once
+    the deadline passes, the finite gate is established before any durable
+    block is replayed, so the halt — not the stale block — answers, with
+    zero new events or rows and no dispatcher call.
+    """
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register_finite_operator(runtime)
+    envelope, root = _submit_finite_root(runtime, "CEO-FINITE-PREBLOCK-1")
+    definition = _finite_bound_definition(
+        root, envelope, runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+    )
+
+    blocked = CooCycle(runtime).run_once(root.job_id)
+    assert blocked.action == "BLOCKED"
+    assert blocked.receipt["reason"] == "exact_dispatch_unavailable"
+    assert runtime.jobs.validated_cycle_block(root.job_id) is not None
+    block_events = [
+        event
+        for event in runtime.events.list_events(job_id=root.job_id)
+        if event.event_type == "COO_CYCLE_BLOCKED"
+    ]
+    assert len(block_events) == 1
+
+    # The deadline passes: the halt must win over the durable block replay.
+    clock.advance(seconds=7_200)
+    assert runtime.jobs.finite_cycle_status(root.job_id)["expired"] is True
+    dispatch, calls = _recording_dispatcher(runtime)
+    before = _table_counts(runtime)
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert outcome.selected_job_id is None
+    assert outcome.command_id is None
+    assert outcome.receipt["halt_reason"] == "expired"
+    assert calls == []
+    assert _table_counts(runtime) == before
+    # The preexisting block is untouched: neither replayed nor duplicated.
+    assert [
+        event
+        for event in runtime.events.list_events(job_id=root.job_id)
+        if event.event_type == "COO_CYCLE_BLOCKED"
+    ] == block_events
+    assert blocked.to_dict() != outcome.to_dict()
+
+
+def test_finite_halt_refuses_zero_write_when_current_policy_is_malformed(
+    tmp_path, monkeypatch
+):
+    """A malformed current policy never precedes or breaks the finite halt.
+
+    The halt is established before ``CooCyclePolicy.load()`` ever runs, and a
+    policy that cannot load reads as pin drift — a refusal — instead of
+    raising out of the gate or falling through to the legacy invalid_policy
+    block write.
+    """
+    fixture = _halted_finite_incumbent(
+        tmp_path, intent_id="CEO-FINITE-BADPOL-1", issue_attempt=False
+    )
+    runtime = fixture.runtime
+
+    def invalid_policy():
+        raise executive_coo_cycle.CooCyclePolicyError("fixture policy drift")
+
+    monkeypatch.setattr(
+        executive_coo_cycle.CooCyclePolicy, "load", staticmethod(invalid_policy)
+    )
+    dispatch, calls = _recording_dispatcher(runtime)
+    before = _table_counts(runtime)
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "NO_NEW_WORK"
+    assert outcome.receipt["halt_reason"] == "expired"
+    assert (
+        outcome.receipt["policy_sha"] == executive_coo_cycle.EXPECTED_POLICY_SHA256
+    )
+    assert calls == []
+    assert _table_counts(runtime) == before
+    control = outcome.receipt["finite_control"]
+    assert control["context_proven"] is True
+    assert control["current_policy_pin_drift"] is True
+    assert control["settled_incumbent_job_id"] is None
+    assert not any(
+        event.event_type == "COO_CYCLE_BLOCKED"
+        for event in runtime.events.list_events(job_id=fixture.root.job_id)
+    )
+
+
+def test_finite_halt_settles_already_issued_incumbent_when_budget_is_exhausted(
+    tmp_path,
+):
+    """A budget-exhausted halt still settles the already issued incumbent."""
+    fixture = _halted_finite_incumbent(
+        tmp_path, intent_id="CEO-FINITE-SETTLE-CAP", halt="exhausted"
+    )
+    runtime = fixture.runtime
+    dispatch, calls = _recording_dispatcher(runtime)
+    command = f"coo-cycle:{fixture.root.job_id}:dispatch:{fixture.job.job_id}:attempt:1"
+    before = _table_counts(runtime)
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(fixture.root.job_id)
+
+    assert outcome.action == "DISPATCHED"
+    assert outcome.selected_job_id == fixture.job.job_id
+    assert outcome.command_id == command
+    assert calls == [(fixture.job.job_id, command)]
+    assert _table_counts(runtime) == before
+
+
+def test_finite_halt_preserves_settlement_under_current_policy_drift(tmp_path):
+    """Current pin drift refuses every incumbent dispatch, never settlement."""
+    from control_plane import executive_authority as authority_module
+
+    fixture = _halted_finite_incumbent(tmp_path, intent_id="CEO-FINITE-DRIFT-1")
+    runtime = fixture.runtime
+    # Both roots pin the same reviewed policy bytes before the drift, so the
+    # currently loaded policy is what drifts underneath them.
+    unissued = _halted_finite_incumbent(
+        tmp_path / "unissued",
+        intent_id="CEO-FINITE-DRIFT-2",
+        issue_attempt=False,
+    )
+    live = _halted_finite_incumbent(
+        tmp_path / "live", intent_id="CEO-FINITE-DRIFT-3", halt=None
+    )
+    drifted_path = tmp_path / "drifted_authority_map.yml"
+    drifted_path.write_bytes(
+        authority_module._POLICY_PATH.read_bytes() + b"\n# drifted pin fixture\n"
+    )
+    original_path = authority_module._POLICY_PATH
+    authority_module._POLICY_PATH = drifted_path
+    try:
+        assert (
+            authority_module.ExecutiveAuthorityPolicy.load().sha256
+            != fixture.definition["authority_policy_sha256"]
+        )
+        # The advisory read itself does not gate on the currently loaded pins.
+        refused = runtime.jobs.validate_finite_first_issuance(
+            fixture.root.job_id, fixture.job.current_attempt_id
+        )
+        assert refused.already_issued is True
+
+        # A halt with no yet-issued incumbent keeps every fresh path closed.
+        fresh_dispatch, fresh_calls = _recording_dispatcher(unissued.runtime)
+        fresh_before = _table_counts(unissued.runtime)
+        fresh = CooCycle(unissued.runtime, dispatcher=fresh_dispatch).run_once(
+            unissued.root.job_id
+        )
+        assert fresh.action == "NO_NEW_WORK"
+        assert fresh_calls == []
+        assert _table_counts(unissued.runtime) == fresh_before
+        control = fresh.receipt["finite_control"]
+        assert control["current_policy_pin_drift"] is True
+        assert control["context_proven"] is True
+        assert control["refusal_reasons"] == []
+
+        # The already issued incumbent no longer reaches the dispatcher either:
+        # ``already_issued`` never survives changed current policy pins.
+        dispatch, calls = _recording_dispatcher(runtime)
+        before = _table_counts(runtime)
+        outcome = CooCycle(runtime, dispatcher=dispatch).run_once(fixture.root.job_id)
+        assert outcome.action == "NO_NEW_WORK"
+        assert calls == []
+        assert _table_counts(runtime) == before
+        incumbent_control = outcome.receipt["finite_control"]
+        assert incumbent_control["current_policy_pin_drift"] is True
+        assert incumbent_control["context_proven"] is True
+        assert incumbent_control["refusal_reasons"] == []
+        assert incumbent_control["settled_incumbent_job_id"] is None
+        assert incumbent_control["advisory_first_issuance"] == [
+            {
+                "authorized_first_launch": False,
+                "already_issued": True,
+                "halt_reason": "already_issued",
+            }
+        ]
+
+        # The same refusal holds before any halt, on the live-lease incumbent
+        # the ordinary active-dispatch reconciliation would otherwise replay.
+        live_dispatch, live_calls = _recording_dispatcher(live.runtime)
+        live_before = _table_counts(live.runtime)
+        unhalting = CooCycle(live.runtime, dispatcher=live_dispatch).run_once(
+            live.root.job_id
+        )
+        assert unhalting.action == "NO_NEW_WORK"
+        assert live_calls == []
+        assert _table_counts(live.runtime) == live_before
+
+        # Lawful settlement survives the drift: the Runtime's incumbent owner
+        # seam still accepts the safety stop under the original live lease,
+        # with no help from the advisory read and no write from this cycle.
+        settled = live.runtime.jobs.cancel_job(live.job.job_id)
+        assert settled.status == JobStatus.CANCEL_REQUESTED
+    finally:
+        authority_module._POLICY_PATH = original_path
+
+
+def test_finite_no_new_work_receipt_reports_the_established_control_facts(tmp_path):
+    """The cutoff receipt carries the gate facts and stays deterministic."""
+    clock = _MutableClock(1_800_000_000_000)
+    runtime = Runtime.at(tmp_path, clock=clock)
+    _register_finite_operator(runtime)
+    envelope = _v2_intent(intent_id="CEO-FINITE-RECEIPT-1")
+    receipt = submit_intent(runtime, envelope, execution_binding=_armed_v2_binding())
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    definition = _finite_bound_definition(
+        root, envelope, runtime=runtime, expires_at_ms=clock.value + 3_600_000
+    )
+    context = _issue_finite_context(definition)
+    runtime.store.bind_finite_control_context(context)
+    _arm_finite_cycle(runtime, context)
+    clock.advance(seconds=7_200)
+
+    cycle = CooCycle(runtime)
+    first = cycle.run_once(root.job_id)
+    second = cycle.run_once(root.job_id)
+
+    assert first.action == second.action == "NO_NEW_WORK"
+    assert first.to_dict() == second.to_dict()
+    assert first.receipt["schema_version"] == (
+        "mastermind.executive_coo_finite_cutoff/v1"
+    )
+    assert first.receipt["halt_reason"] == "expired"
+    control = first.receipt["finite_control"]
+    assert control["armed"] is True
+    assert control["bound"] is True
+    assert control["context_proven"] is True
+    assert control["refusal_reasons"] == []
+    assert control["advisory_first_issuance"] == []
+    assert control["current_policy_pin_drift"] is False
+    assert control["settled_incumbent_job_id"] is None
+
+
+def test_legacy_unarmed_incumbent_still_dispatches_and_is_never_gated(tmp_path):
+    """A root outside every finite composition keeps its exact legacy path."""
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    envelope = _v2_intent(intent_id="CEO-FINITE-LEGACY-DISP")
+    receipt = submit_intent(runtime, envelope)
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    assert runtime.jobs.finite_cycle_status(root.job_id) is None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    harness = runtime.operator_harness
+    sealed = harness.seal_operator_harness_attempt(
+        dispatch.attempt.attempt_id,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=_orchestration_profile(dispatch),
+    )
+    operation = OperationId("ohf-op:legacy-incumbent")
+    epoch, generation = harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        operation_id=operation,
+    )
+    harness.bind_start_result(
+        epoch=epoch,
+        generation=generation,
+        operation_id=operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        provider_session_id="SESSION-LEGACY",
+        process=ProcessIdentityObservation(2102, 2102, "start-legacy", "boot-legacy"),
+    )
+    reads = _recorded_first_issuance(runtime)
+    replay, calls = _recording_dispatcher(runtime)
+    before = _table_counts(runtime)
+
+    outcome = CooCycle(runtime, dispatcher=replay).run_once(root.job_id)
+
+    assert outcome.action == "DISPATCHED"
+    assert outcome.selected_job_id == planner.job_id
+    assert len(calls) == 1
+    assert _table_counts(runtime) == before
+    assert len(reads) == 1
+    assert reads[0][0] == root.job_id
+    assert reads[0][1] == dispatch.attempt.attempt_id
+    assert reads[0][2].already_issued is True

@@ -1,0 +1,20 @@
+{
+  "schema_version": "mastermind.devserver_resource/v1",
+  "resource_id": "chairman-control-room-local",
+  "cwd": ".",
+  "argv": [
+    "/usr/bin/python3",
+    "scripts/chairman_control_room.py",
+    "--port",
+    "{port}",
+    "--repo-root",
+    ".",
+    "--compose-timeout",
+    "240"
+  ],
+  "host": "127.0.0.1",
+  "readiness_path": "/",
+  "readiness_timeout_seconds": 300,
+  "shutdown_grace_seconds": 5,
+  "allowed_generated_paths": []
+}
