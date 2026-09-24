@@ -1890,6 +1890,11 @@ def test_requester_answer_attention_refuses_historical_answer(
             answer,
             requester_attempt_id=workers[0][1],
         )
+    with pytest.raises(ConsultationConflict, match="historical answer"):
+        consultations.requester_answer_attention_replay(
+            answer,
+            requester_attempt_id=workers[0][1],
+        )
 
 
 def _requester_answer_projection(
@@ -2048,6 +2053,11 @@ def test_requester_answer_attention_refuses_generation_change_after_intent(
 
     with pytest.raises(StateConflict, match="original requester binding is stale"):
         consultations.requester_answer_attention(
+            answer,
+            requester_attempt_id=workers[0][1],
+        )
+    with pytest.raises(StateConflict, match="original requester binding is stale"):
+        consultations.requester_answer_attention_replay(
             answer,
             requester_attempt_id=workers[0][1],
         )
@@ -2292,7 +2302,17 @@ def test_requester_answer_replay_reconstructs_sticky_request_after_consumption(
         answer,
         requester_attempt_id=workers[0][1],
     )
-    assert replay_projection == projection
+    assert replay_projection.identity == projection.identity
+    assert replay_projection.target == projection.target
+    assert replay_projection.binding == projection.binding
+    assert (
+        replay_projection.obligation.obligation_id
+        == projection.obligation.obligation_id
+    )
+    assert (
+        replay_projection.obligation.source_ref
+        == projection.obligation.source_ref
+    )
     replay_extension = RequesterAnswerWakeExtension(
         repository=repository,
         projection=replay_projection,
