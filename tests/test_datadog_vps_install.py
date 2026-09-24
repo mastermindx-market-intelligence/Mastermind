@@ -73,11 +73,52 @@ def test_installer_never_enables_high_authority_datadog_features() -> None:
     assert "DD_APM_INSTRUMENTATION_LIBRARIES" in text
     assert "SSI_PREEXISTING" in text
     assert "dd-host-install --uninstall" in text
-    assert "launcher.preload.so" in text
+    assert "ssi_is_armed" in text
+    assert "grep -Fq '/opt/datadog/apm/inject/launcher.preload.so'" not in text
     assert "ROLLBACK_ARMED=1" in text
     assert "rollback_on_exit" in text
     assert "trap 'rollback_on_exit $?' EXIT" in text
     assert "Datadog host SSI did not arm after installer success" in text
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "/run/datadog-apm-inject/launcher.preload.so",
+        "/opt/datadog-packages/datadog-apm-inject/stable/inject/launcher.preload.so",
+        "/opt/datadog/apm/inject/launcher.preload.so",
+    ],
+)
+def test_ssi_detection_accepts_supported_datadog_preload_paths(tmp_path: Path, entry: str) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text(f"{entry}\n", encoding="utf-8")
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--check-ssi-only"],
+        cwd=ROOT,
+        env={**os.environ, "SSI_PRELOAD_FILE": preload.as_posix()},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "armed"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_ssi_detection_rejects_unrelated_preload_library(tmp_path: Path) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("/opt/example/launcher.preload.so\n", encoding="utf-8")
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--check-ssi-only"],
+        cwd=ROOT,
+        env={**os.environ, "SSI_PRELOAD_FILE": preload.as_posix()},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert result.stdout.strip() == "not_armed"
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")

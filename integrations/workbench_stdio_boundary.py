@@ -18,6 +18,7 @@ from mcp.server.stdio import stdio_server
 from mcp.shared.message import SessionMessage
 
 MAX_WIRE_BYTES = 262144
+MODERN_PROTOCOL_VERSION = "2026-07-28"
 _PROTOCOL_SCOPE = ContextVar("workbench_stdio_diagnostics", default=False)
 
 
@@ -175,16 +176,21 @@ def _validated_protocol_line(line: str) -> str:
 
 
 class _ProtocolInput:
-    def __init__(self, source, output: _ProtocolOutput):
+    def __init__(self, source, output: _ProtocolOutput, *, initial_line: str | None = None):
         self._source = source
         self._output = output
+        self._initial_line = initial_line
 
     def __aiter__(self):
         return self
 
     async def __anext__(self):
         while True:
-            line = await anyio.to_thread.run_sync(self._source.readline, MAX_WIRE_BYTES + 1)
+            if self._initial_line is not None:
+                line = self._initial_line
+                self._initial_line = None
+            else:
+                line = await anyio.to_thread.run_sync(self._source.readline, MAX_WIRE_BYTES + 1)
             if not line:
                 raise StopAsyncIteration
             too_long = len(line) > MAX_WIRE_BYTES
@@ -208,13 +214,13 @@ class _ProtocolInput:
 
 
 @asynccontextmanager
-async def private_stdio_server():
+async def private_stdio_server(*, initial_line: str | None = None):
     # Use the SDK's supported stream adapters and existing task group. These
     # wrappers borrow process stdio; they do not own another runtime lifecycle.
     source_wrapper = TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
     output_wrapper = TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     output = _ProtocolOutput(anyio.wrap_file(output_wrapper))
-    source = _ProtocolInput(source_wrapper, output)
+    source = _ProtocolInput(source_wrapper, output, initial_line=initial_line)
     try:
         with _protocol_diagnostics():
             async with stdio_server(stdin=source, stdout=output) as (read, write):
@@ -225,4 +231,93 @@ async def private_stdio_server():
         output_wrapper.detach()
 
 
-__all__ = ["private_stdio_server"]
+async def read_bounded_stdio_line() -> str | None:
+    """Read one bounded physical stdio frame without claiming protocol ownership."""
+    raw = await anyio.to_thread.run_sync(sys.stdin.buffer.readline, MAX_WIRE_BYTES + 1)
+    if not raw:
+        return None
+    if len(raw) > MAX_WIRE_BYTES and not raw.endswith(b"\n"):
+        while True:
+            tail = await anyio.to_thread.run_sync(sys.stdin.buffer.readline, MAX_WIRE_BYTES + 1)
+            if not tail or tail.endswith(b"\n"):
+                break
+    return raw.decode("utf-8", errors="replace")
+
+
+def _bounded_jsonrpc_object(line: str) -> dict[str, object]:
+    if len(line.encode("utf-8")) > MAX_WIRE_BYTES:
+        raise ValueError("PROTOCOL_LIMIT")
+    raw = json.loads(line, object_pairs_hook=_closed_object, parse_constant=_reject_constant)
+    if type(raw) is not dict or raw.get("jsonrpc") != "2.0":
+        raise ValueError("PROTOCOL_ENVELOPE")
+    if not set(raw) <= {"jsonrpc", "id", "method", "params"}:
+        raise ValueError("PROTOCOL_ENVELOPE")
+    request_id = raw.get("id")
+    if "id" in raw and (
+        type(request_id) not in {str, int}
+        or (type(request_id) is str and len(request_id.encode("utf-8")) > 1024)
+        or (type(request_id) is int and not -(2**63) <= request_id < 2**63)
+    ):
+        raise ValueError("PROTOCOL_ID")
+    if type(raw.get("method")) is not str:
+        raise ValueError("PROTOCOL_METHOD")
+    if "params" in raw and type(raw["params"]) is not dict:
+        raise ValueError("PROTOCOL_PARAMS")
+    return raw
+
+
+def is_modern_protocol_request(line: str) -> bool:
+    """Classify only the 2026 stateless envelope; malformed data stays legacy-closed."""
+    try:
+        raw = _bounded_jsonrpc_object(line)
+    except (ValueError, TypeError, RecursionError, UnicodeError):
+        return False
+    if raw["method"] == "server/discover":
+        return True
+    params = raw.get("params") or {}
+    meta = params.get("_meta") if type(params) is dict else None
+    return (
+        type(meta) is dict
+        and meta.get("io.modelcontextprotocol/protocolVersion") == MODERN_PROTOCOL_VERSION
+    )
+
+
+def parse_modern_protocol_request(line: str) -> dict[str, object]:
+    """Validate the closed JSON-RPC envelope used by the Workbench modern seam."""
+    raw = _bounded_jsonrpc_object(line)
+    params = raw.get("params") or {}
+    meta = params.get("_meta") if type(params) is dict else None
+    if meta is not None:
+        if type(meta) is not dict:
+            raise ValueError("PROTOCOL_META")
+        version = meta.get("io.modelcontextprotocol/protocolVersion")
+        if version is not None and version != MODERN_PROTOCOL_VERSION:
+            raise ValueError("PROTOCOL_VERSION")
+    return raw
+
+
+async def write_bounded_stdio_json(payload: dict[str, object]) -> None:
+    """Emit one compact response frame; never write an oversized or non-JSON result."""
+    text = json.dumps(
+        payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+    ) + "\n"
+    data = text.encode("utf-8")
+    if len(data) > MAX_WIRE_BYTES:
+        raise RuntimeError("WORKBENCH_MCP_OUTPUT_LIMIT")
+
+    def _write() -> None:
+        sys.stdout.buffer.write(data)
+        sys.stdout.buffer.flush()
+
+    await anyio.to_thread.run_sync(_write)
+
+
+__all__ = [
+    "MAX_WIRE_BYTES",
+    "MODERN_PROTOCOL_VERSION",
+    "is_modern_protocol_request",
+    "parse_modern_protocol_request",
+    "private_stdio_server",
+    "read_bounded_stdio_line",
+    "write_bounded_stdio_json",
+]

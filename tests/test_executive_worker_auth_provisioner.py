@@ -194,6 +194,58 @@ def test_credential_mutation_requires_verified_disarm_before_any_effect() -> Non
     assert "logout" not in interlock
 
 
+def test_root_credential_interlock_uses_static_control_config_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = ROOT / "ops" / "executive_os" / "credential_rotation_interlock.py"
+    spec = importlib.util.spec_from_file_location("credential_rotation_interlock_root", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    control_path = tmp_path / "control.json"
+    worker_path = tmp_path / "worker.json"
+    receipt_path = tmp_path / "autonomy.json"
+    transaction_path = tmp_path / "transaction.lock"
+    calls: list[bool] = []
+
+    monkeypatch.setattr(module, "_require_safe_config", lambda _path: None)
+
+    def load_control(_path: Path, *, enforce_current_uid: bool):
+        calls.append(enforce_current_uid)
+        return {
+            "coo_autonomy_armed": False,
+            "coo_operator_harness_armed": False,
+        }
+
+    monkeypatch.setattr(module, "load_control_config", load_control)
+    monkeypatch.setattr(
+        module,
+        "load_worker_config",
+        lambda _path, *, require_root_owner: {"operator_harness_armed": False},
+    )
+
+    module.assert_credential_mutation_disarmed(
+        control_config=control_path,
+        worker_config=worker_path,
+        autonomy_receipt=receipt_path,
+        autonomy_transaction=transaction_path,
+    )
+    assert calls == [False]
+
+
+def test_static_control_config_validation_is_root_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import executive_os_phase1c as service_cli
+
+    monkeypatch.setattr(service_cli.os, "geteuid", lambda: 501)
+    with pytest.raises(service_cli.ServiceError, match="static control config validation requires root"):
+        service_cli.load_control_config(
+            tmp_path / "unread.json", enforce_current_uid=False
+        )
+
+
 def test_credential_interlock_pure_state_rejects_every_armed_or_mixed_bit() -> None:
     path = ROOT / "ops" / "executive_os" / "credential_rotation_interlock.py"
     spec = importlib.util.spec_from_file_location("credential_rotation_interlock", path)
@@ -295,6 +347,74 @@ wait "$child_pid"
                 os.kill(child_pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+def test_post_install_auth_operations_prefer_installed_binary_over_mutable_source() -> None:
+    source = _source()
+    selection = source.index('if [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ]; then')
+    assignment = source.index('CODEX_BINARY="$INSTALLED_CODEX_BINARY"', selection)
+    readiness_requires_install = source.index('elif [ "$VERIFY_READY" = "true" ]; then', assignment)
+    source_attestation = source.index('[ -f "$CODEX_BINARY" ]', readiness_requires_install)
+    ready_branch = source.index('if [ "$VERIFY_READY" = "true" ]; then', source_attestation)
+
+    assert selection < assignment < readiness_requires_install < source_attestation < ready_branch
+    assert 'mutable Homebrew enrollment source is' in source
+    assert 'credential rotation, Personal-Pro enrollment, --verify-only' in source
+    assert '--binary "$INSTALLED_CODEX_BINARY"' in source[ready_branch:]
+
+
+def test_installed_codex_path_uses_install_receipt_without_recopying_or_rehashing() -> None:
+    source = _source()
+    installed = source.split("# BEGIN installed Codex fast path", 1)[1].split(
+        "# END installed Codex fast path", 1
+    )[0]
+
+    assert "load_codex_attestation_receipt" in installed
+    assert 'CODEX_EXECUTABLE="$INSTALLED_CODEX_BINARY"' in installed
+    owner_binding = source.index('CODEX_ATTESTATION_OWNER_GID="$WORKER_GID"')
+    slot_gid_override = source.index('WORKER_GID="$(resolve_slot_field "worker_gid")"')
+    assert owner_binding < slot_gid_override
+    for required in (
+        'CODEX_ATTESTATION_RECEIPT',
+        'CODEX_ATTESTATION_OWNER_GID',
+        '"$CODEX_VERSION"',
+        '"$CODEX_TEAM_ID"',
+        '"$CODEX_SHA256"',
+    ):
+        assert required in installed
+    for forbidden in (
+        "mktemp",
+        "ditto",
+        "codesign",
+        "shasum",
+        "PINNED_CODEX_BINARY",
+        "run_codex_as_worker --version",
+    ):
+        assert forbidden not in installed
+
+    runner = source.split("run_codex_as_worker() {", 1)[1].split("\n}", 1)[0]
+    assert '"$CODEX_EXECUTABLE" "$@"' in runner
+    cleanup = source.split("cleanup() {", 1)[1].split("\n}", 1)[0]
+    assert "INSTALLED_CODEX_BINARY" not in cleanup
+    assert "CODEX_EXECUTABLE" not in cleanup
+
+
+def test_preinstall_codex_path_retains_full_staging_attestation() -> None:
+    source = _source()
+    staged = source.split("# BEGIN pre-install Codex staging path", 1)[1].split(
+        "# END pre-install Codex staging path", 1
+    )[0]
+
+    for required in (
+        'mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX"',
+        '/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"',
+        '/usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY"',
+        '/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY"',
+        '/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY"',
+        'CODEX_EXECUTABLE="$PINNED_CODEX_BINARY"',
+        'run_codex_as_worker --version',
+    ):
+        assert required in staged
 
 
 def test_metadata_pinning_and_login_status_remain_strict_and_non_disclosing() -> None:

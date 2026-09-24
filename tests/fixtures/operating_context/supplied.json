@@ -1,0 +1,54 @@
+{
+  "mission": {
+    "mission_id": "mission-001",
+    "job_ref": "job-001",
+    "objective": "Prove the operating-context adapter with hermetic fixtures."
+  },
+  "criteria": {
+    "criteria_ref": "criteria-001",
+    "mission_id": "mission-001",
+    "revision": "criteria-revision-001",
+    "producer": "accepted-criteria-owner"
+  },
+  "context_association": {
+    "mission_id": "mission-001",
+    "context_bundle_id": "context-001",
+    "revision": "revision-001",
+    "context_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "publisher": "mission-context-publisher",
+    "association_id": "association-001",
+    "published_at": "2026-09-14T00:00:00Z"
+  },
+  "context_bundle": {
+    "context_bundle_id": "context-001",
+    "revision": "revision-001",
+    "context_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "selected_items": ["selected-item-001"],
+    "excluded": [],
+    "omitted_due_to_budget": [],
+    "degraded": []
+  },
+  "receipts": [
+    {
+      "mission_id": "mission-001",
+      "context_bundle_id": "context-001",
+      "revision": "revision-001",
+      "context_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "input_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+      "provider_turn_ref": "opaque-provider-turn-001",
+      "receipt_id": "receipt-001",
+      "producer": "receipt-owner",
+      "published_at": "2026-09-14T00:00:01Z"
+    }
+  ],
+  "conversation_ref": "opaque-conversation-001",
+  "artifact_ref": "opaque-artifact-001",
+  "review_ref": "opaque-review-001",
+  "source_digests": [
+    {
+      "source_id": "accepted_criteria",
+      "digest": "6666666666666666666666666666666666666666666666666666666666666666",
+      "producer": "accepted-criteria-owner"
+    }
+  ]
+}

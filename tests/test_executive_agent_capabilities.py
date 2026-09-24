@@ -64,7 +64,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-08-29.browser-b1"
+    assert registry.policy_version == "2026-09-18.browser-b1-runtime-r2"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -472,7 +472,7 @@ def test_browser_profile_uses_existing_capability_registry_for_stdio_mcp_and_one
         "worker-browser-b1-install-manifest.json"
     )
     assert resource.runtime_manifest_digest == (
-        "ca55da0fbdd1366bfc6fd78612ebe9cc669e45ef5c21b084ad338b50e2d0e49d"
+        "c4b15f3ba4d5c20e869b63af86109ed57d2da929d525d1d8a0a2c65625209e9f"
     )
 
     assert profile.mcp_server_grants[0] == registry.mcp_servers[
@@ -581,11 +581,13 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 
-def test_v3_compatibility_digests_and_schema_constants_remain_exact():
-    """CAP-S1 package-identity amendment: opt-in V4 must never move V3 identity.
+def test_v3_ratified_generation_and_schema_constants_remain_exact():
+    """Freeze the explicitly ratified V3 Browser B1 runtime generation.
 
-    These are the exact protected-master values verified live before the V4
-    dispatch/duplicate-key production edit landed.
+    CAP-S1 remains opt-in for V4 and the default schema remains V3.  The
+    Browser B1 runtime receipt is target-generation-bound, so its deliberate
+    ratification rotates the V3 policy identity instead of silently reusing
+    the prior generation.
     """
 
     assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
@@ -596,7 +598,7 @@ def test_v3_compatibility_digests_and_schema_constants_remain_exact():
     assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
     assert registry.capability_packages == {}
     assert registry.policy_digest == (
-        "0d025d2728c7dbf73977ac5997e1bd6832be5660ab996ad7e837e50887f7c856"
+        "daac5b9a290156b2b96bf562ed69ffd79d93ba753d3017799bef303aac2b38ed"
     )
     assert registry.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"

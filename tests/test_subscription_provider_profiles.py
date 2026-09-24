@@ -22,7 +22,9 @@ def test_all_three_subscription_providers_are_reviewed_and_inert_by_default():
 
 
 def test_official_anthropic_compatibility_profiles_pin_supported_models():
-    assert get_profile("glm-coding-plan").model_for("routine") == "GLM-5.3"
+    assert get_profile("glm-coding-plan").model_for("routine") == "GLM-5.3-Flash"
+    assert get_profile("glm-coding-plan").model_for("subagent") == "GLM-5.3-Flash"
+    assert get_profile("glm-coding-plan").model_for("hard") == "GLM-5.3"
     assert get_profile("glm-coding-plan").model_for("fast") == "GLM-5.3-Flash"
     assert get_profile("alibaba-token-plan-personal").model_for() == "qwen3.8-max"
     assert get_profile("alibaba-token-plan-personal").model_for("subagent") == "qwen3.7-max"

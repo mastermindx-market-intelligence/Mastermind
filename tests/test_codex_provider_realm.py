@@ -8,14 +8,21 @@ from pathlib import Path
 
 import pytest
 
+from control_plane import codex_provider_realm as cpr
 from control_plane import codex_worker as cw
+from control_plane import opencode_go_pooled_transport
 from control_plane.codex_provider_realm import (
     ALIBABA_TOKEN_PLAN,
     CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY,
     MINIMAX_TOKEN_PLAN,
+    OPENCODE_GO_TOKEN_PLAN,
     REVIEWED_CODEX_PROVIDER_REALMS,
     CodexProviderRealm,
     ProviderRealmError,
+)
+from scripts.executive_os_phase1c_worker import (
+    WorkerConfigError,
+    _resolve_subscription_binding,
 )
 
 EXECUTIVE_SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
@@ -49,10 +56,23 @@ def _spec(tmp_path: Path) -> cw.WorkerLaunchSpec:
     )
 
 
-def test_subscription_realm_registry_quarantines_minimax_candidate() -> None:
-    assert "minimax-token-plan" not in REVIEWED_CODEX_PROVIDER_REALMS
-    assert set(REVIEWED_CODEX_PROVIDER_REALMS) == {"alibaba-token-plan-sg"}
-    assert set(CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY) == {"minimax-token-plan"}
+def test_subscription_realm_registry_reviews_minimax_and_quarantines_opencode_go() -> None:
+    # MiniMax Token Plan is reviewed for transport after the canary receipt in
+    # control_plane/codex_provider_realm.py; reviewing the realm arms no worker
+    # binding (the minimax codex row stays BUILT_NOT_PROVEN).
+    reviewed_minimax = REVIEWED_CODEX_PROVIDER_REALMS["minimax-token-plan"]
+    assert reviewed_minimax is MINIMAX_TOKEN_PLAN
+    assert reviewed_minimax.base_url == "https://api.minimax.io/v1"
+    assert reviewed_minimax.provider_alias == "minimax"
+    assert reviewed_minimax.wire_api == "responses"
+    # OpenCode Go is still quarantined and still not reviewed.
+    assert "opencode-go" not in REVIEWED_CODEX_PROVIDER_REALMS
+    assert OPENCODE_GO_TOKEN_PLAN.realm_id not in REVIEWED_CODEX_PROVIDER_REALMS
+    assert OPENCODE_GO_TOKEN_PLAN.realm_id in CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY
+    assert set(REVIEWED_CODEX_PROVIDER_REALMS) == {
+        "minimax-token-plan", "alibaba-token-plan-sg",
+    }
+    assert set(CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY) == {"opencode-go"}
     assert MINIMAX_TOKEN_PLAN.base_url == "https://api.minimax.io/v1"
     assert MINIMAX_TOKEN_PLAN.env_key == "MINIMAX_TOKEN_PLAN_KEY"
     assert MINIMAX_TOKEN_PLAN.wire_api == "responses"
@@ -61,13 +81,30 @@ def test_subscription_realm_registry_quarantines_minimax_candidate() -> None:
     )
     assert ALIBABA_TOKEN_PLAN.env_key == "ALIBABA_TOKEN_PLAN_KEY"
     assert ALIBABA_TOKEN_PLAN.wire_api == "responses"
-    for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN):
+    for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN, OPENCODE_GO_TOKEN_PLAN):
         rendered = "\n".join(realm.config_overrides())
         assert realm.base_url in rendered
         assert realm.env_key in rendered
         assert "request_max_retries=0" in rendered
         assert "stream_max_retries=0" in rendered
         assert "sk-" not in rendered.lower()
+
+
+def test_opencode_go_candidate_realm_is_spec_only_and_matches_transport_constant() -> None:
+    assert OPENCODE_GO_TOKEN_PLAN.base_url == (
+        opencode_go_pooled_transport.OPENCODE_GO_BASE_URL.rstrip("/")
+    )
+    assert OPENCODE_GO_TOKEN_PLAN.env_key == "OPENCODE_GO_KEY"
+    assert OPENCODE_GO_TOKEN_PLAN.wire_api == "responses"
+    assert OPENCODE_GO_TOKEN_PLAN.realm_id not in REVIEWED_CODEX_PROVIDER_REALMS
+    assert (
+        OPENCODE_GO_TOKEN_PLAN.realm_id
+        in CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY
+    )
+    with pytest.raises(WorkerConfigError):
+        _resolve_subscription_binding("opencode-go")
+    with pytest.raises(WorkerConfigError):
+        _resolve_subscription_binding("minimax-token-plan")
 
 
 def test_provider_realm_rejects_chat_wire_api() -> None:
@@ -238,3 +275,95 @@ def test_provider_key_is_top_level_only_and_never_argv(tmp_path: Path) -> None:
     assert ALIBABA_TOKEN_PLAN.env_key in rendered
     shell_policy = next(value for value in argv if value.startswith("shell_environment_policy="))
     assert ALIBABA_TOKEN_PLAN.env_key not in shell_policy
+
+
+def test_minimax_realm_promotion_is_bound_to_sanitized_in_repo_evidence() -> None:
+    evidence_path = (
+        Path(__file__).resolve().parents[1]
+        / "review_evidence/provider_realms/minimax_codex_responses_20260915.json"
+    )
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert set(evidence) == {
+        "schema",
+        "source_receipt_schema",
+        "source_receipt_sha256",
+        "observation_started_at",
+        "observation_finished_at",
+        "wall_milliseconds",
+        "harness_id",
+        "harness_version",
+        "realm_id",
+        "candidate_binding_id",
+        "candidate_binding_executed",
+        "observed_slot_pool",
+        "candidate_slot_pool",
+        "provider",
+        "base_url",
+        "wire_api",
+        "requested_model",
+        "served_model",
+        "return_code",
+        "output_sha256",
+        "output_bytes",
+        "transport_reachability",
+        "governed_canary",
+        "provider_capacity_observed",
+        "usage_policy_satisfied",
+        "autonomous_routing_authorized",
+        "credential_material_present",
+    }
+    assert evidence == {
+        "schema": "mastermind.minimax_codex_responses_reachability/v1",
+        "source_receipt_schema": "minimax_codex_canary_receipt/v1",
+        "source_receipt_sha256": (
+            "84771422af5ef24e12f6ec0e82a2b107763fceaca77f1c7c7915493802bee3dd"
+        ),
+        "observation_started_at": "2026-09-15T06:08:24Z",
+        "observation_finished_at": "2026-09-15T06:08:28Z",
+        "wall_milliseconds": 4500,
+        "harness_id": "codex-cli",
+        "harness_version": "0.154.0",
+        "realm_id": "minimax-token-plan",
+        "candidate_binding_id": "minimax-token-plan.codex-responses",
+        "candidate_binding_executed": False,
+        "observed_slot_pool": "minimax",
+        "candidate_slot_pool": "minimax-codex",
+        "provider": "minimax",
+        "base_url": "https://api.minimax.io/v1",
+        "wire_api": "responses",
+        "requested_model": "MiniMax-M3",
+        "served_model": "MiniMax-M3",
+        "return_code": 0,
+        "output_sha256": (
+            "95784973cc639977bff93619700168505cb8f7855e44fa643d34622a43706c87"
+        ),
+        "output_bytes": 4,
+        "transport_reachability": True,
+        "governed_canary": False,
+        "provider_capacity_observed": False,
+        "usage_policy_satisfied": False,
+        "autonomous_routing_authorized": False,
+        "credential_material_present": False,
+    }
+    forbidden_keys = {
+        "key_fingerprint",
+        "key_fingerprint_sha256_12",
+        "key_type",
+        "key_type_tag",
+        "credential",
+        "credential_value",
+        "authorization",
+    }
+    assert forbidden_keys.isdisjoint(evidence)
+    rendered = json.dumps(evidence, sort_keys=True).lower()
+    for forbidden in ("bearer ", "sk-", "/users/", "/home/"):
+        assert forbidden not in rendered
+    source = Path(cpr.__file__).read_text(encoding="utf-8")
+    assert evidence_path.relative_to(Path(__file__).resolve().parents[1]).as_posix() in source
+    assert evidence["source_receipt_sha256"] in source
+    assert cpr.REVIEWED_CODEX_PROVIDER_REALMS[evidence["realm_id"]] is cpr.MINIMAX_TOKEN_PLAN
+    assert evidence["candidate_binding_id"] == "minimax-token-plan.codex-responses"
+    assert evidence["candidate_binding_executed"] is False
+    assert evidence["observed_slot_pool"] != evidence["candidate_slot_pool"]
+    assert evidence["governed_canary"] is False
+    assert evidence["autonomous_routing_authorized"] is False

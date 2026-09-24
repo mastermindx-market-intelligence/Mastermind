@@ -1,6 +1,6 @@
 {
   "schema": "mastermind.subscription_harness_bindings/v1",
-  "verified_at": "2026-09-13T06:58:00Z",
+  "verified_at": "2026-09-15T01:19:02Z",
   "bindings": {
     "glm-coding-plan.claude-code-anthropic": {
       "profile_id": "glm-coding-plan",
@@ -65,7 +65,25 @@
       "protocol": "anthropic",
       "endpoint": {"source": "profile"},
       "model_classes": ["routine", "hard", "fast", "subagent"],
-      "implementation_state": "SPEC_ONLY",
+      "implementation_state": "BUILT_NOT_PROVEN",
+      "autonomous_allowed": false,
+      "activation_gates": [
+        "adapter_implemented",
+        "provider_realm_enrolled",
+        "capacity_known",
+        "real_canary_passed",
+        "usage_policy_satisfied"
+      ]
+    },
+    "minimax-token-plan.codex-responses": {
+      "profile_id": "minimax-token-plan",
+      "provider": "minimax",
+      "harness_id": "codex-cli",
+      "adapter_id": "codex-cli",
+      "protocol": "responses",
+      "endpoint": {"source": "reviewed_override", "base_url": "https://api.minimax.io/v1"},
+      "model_classes": ["routine", "hard", "fast", "subagent"],
+      "implementation_state": "BUILT_NOT_PROVEN",
       "autonomous_allowed": false,
       "activation_gates": [
         "adapter_implemented",

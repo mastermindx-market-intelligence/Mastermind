@@ -67,12 +67,43 @@ def _broker(tmp_path: Path, executor=None) -> PrivilegedActionBroker:
     )
 
 
+def test_trusted_effect_paths_cover_every_root_actuator() -> None:
+    assert broker_module._TRUSTED_EFFECT_PATHS == (
+        "ops/executive_os/service-control.sh",
+        "ops/executive_os/provision-worker-auth.sh",
+        "ops/executive_os/secondary_host_power_policy.py",
+    )
+
+
 def test_peer_uid_must_be_allowlisted_before_spawn(tmp_path: Path) -> None:
     executor = FakeExecutor()
     broker = _broker(tmp_path, executor)
     with pytest.raises(PeerAuthorizationError):
         broker.handle(_raw(), peer_uid=502)
     assert executor.calls == []
+
+
+def test_power_policy_action_uses_existing_receipt_and_replay_owner(tmp_path: Path) -> None:
+    executor = FakeExecutor(stdout=b'{"autorestart":1,"scope":"charger","sleep":0}\n')
+    broker = _broker(tmp_path, executor)
+
+    first = broker.handle(
+        _raw("executive.host.prepare_secondary_power_policy", "req-power-001"),
+        peer_uid=501,
+    )
+    second = broker.handle(
+        _raw("executive.host.prepare_secondary_power_policy", "req-power-001"),
+        peer_uid=501,
+    )
+
+    assert first == second
+    assert first["effect_class"] == "HOST_POWER_POLICY"
+    assert first["action"] == "executive.host.prepare_secondary_power_policy"
+    assert first["outcome"] == "SUCCEEDED"
+    assert len(executor.calls) == 1
+    argv = executor.calls[0][0]
+    assert argv[:4] == ("/usr/bin/python3", "-I", "-S", "-B")
+    assert argv[4].endswith("/ops/executive_os/secondary_host_power_policy.py")
 
 
 def test_success_persists_terminal_receipt_and_replays_without_second_spawn(tmp_path: Path) -> None:
@@ -180,6 +211,35 @@ def test_stale_inflight_different_request_hash_is_conflict(tmp_path: Path) -> No
     with pytest.raises(RequestIdConflictError):
         broker.handle(_raw(), peer_uid=501)
     assert executor.calls == []
+
+
+def test_power_policy_reserved_exit_75_preserves_effect_unknown_marker(tmp_path: Path) -> None:
+    executor = FakeExecutor(returncode=75, stderr=b"secondary-host power policy effect unknown\n")
+    broker = _broker(tmp_path, executor)
+    raw = _raw("executive.host.prepare_secondary_power_policy", "req-power-unknown")
+
+    with pytest.raises(EffectUnknownError, match="action-level effect uncertainty"):
+        broker.handle(raw, peer_uid=501)
+
+    assert len(executor.calls) == 1
+    assert broker.inflight_path("req-power-unknown").is_file()
+    assert not broker.receipt_path("req-power-unknown").exists()
+    projection = broker.query_status(
+        {"schema": STATUS_REQUEST_SCHEMA, "request_id": "req-power-unknown"},
+        peer_uid=501,
+    )
+    assert projection["status"] == "EFFECT_UNKNOWN"
+
+
+def test_non_power_exit_75_remains_terminal_failed(tmp_path: Path) -> None:
+    executor = FakeExecutor(returncode=75)
+    broker = _broker(tmp_path, executor)
+
+    receipt = broker.handle(_raw("executive.services.start", "req-service-75"), peer_uid=501)
+
+    assert receipt["outcome"] == "FAILED"
+    assert receipt["exit_code"] == 75
+    assert not broker.inflight_path("req-service-75").exists()
 
 
 def test_nonzero_child_is_failed_and_external_text_is_bounded_and_redacted(tmp_path: Path) -> None:

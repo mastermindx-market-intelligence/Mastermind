@@ -6,6 +6,7 @@
   "backup_root": "/var/db/mastermind-executive/control/backups",
   "broker_timeout_seconds": 30.0,
   "ceo_ingress_app_armed": false,
+  "ceo_ingress_app_boot_python": "/Library/Application Support/MastermindExecutive/capacity-runtimes/__BOOT_RUNTIME__/bin/python3.12",
   "ceo_ingress_app_macro_root": "/Library/Application Support/MastermindExecutive/macro-sources/__MACRO_SHA__",
   "ceo_ingress_app_peer_uid": 458,
   "ceo_ingress_launchd_socket_name": "CeoIngress",
@@ -28,6 +29,7 @@
   "control_uid": 450,
   "cost_class": "standard",
   "coo_autonomy_armed": false,
+  "ceo_submit_armed": false,
   "coo_operator_harness_armed": false,
   "coo_default_quota_class": "codex-coo-default",
   "coo_model_alias": "coo.sealed",
@@ -60,5 +62,8 @@
   "worker_provider_home": "/var/db/mastermind-executive/workers/codex-01/provider-home",
   "worker_runs_root": "/var/db/mastermind-executive/jobs/runs",
   "worker_uid": 451,
+  "exact_worker_claim_target": {
+    "mode": "disabled"
+  },
   "worker_user": "_mastermind_worker"
 }

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import weakref
 from typing import Protocol, Sequence, runtime_checkable
 
 from control_plane.worker_execution_contract import (
@@ -22,12 +23,14 @@ from control_plane.worker_execution_contract import (
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
+    WorkerRecoveryBinding,
     WorkerProcessRef,
     WorkerRunStatus,
 )
 
 
 ADAPTER_INTERFACE_VERSION = "mastermind.worker_adapter/v1"
+_CONSTRUCTED_REVIEWED_ADAPTERS: weakref.WeakSet[object] = weakref.WeakSet()
 
 
 class AdapterBindingError(ValueError):
@@ -50,6 +53,18 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
         adapter_id="codex-cli",
         implemented=True,
         implementation="control_plane.codex_worker.CodexWorkerAdapter",
+    ),
+    "claude-compatible-subscription": AdapterDescriptor(
+        adapter_id="claude-compatible-subscription",
+        implementation=(
+            "control_plane.claude_subscription_worker"
+            ".ClaudeSubscriptionWorkerAdapter"
+        ),
+    ),
+    "claude-code": AdapterDescriptor(
+        adapter_id="claude-code",
+        implemented=False,
+        implementation="control_plane.claude_worker.ClaudeCodeWorkerAdapter",
     ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
@@ -74,7 +89,7 @@ def adapter_implementation(adapter_id: str) -> type:
     """Resolve a reviewed descriptor to its implementation class."""
 
     descriptor = adapter_descriptor(adapter_id)
-    if not descriptor.implemented or not descriptor.implementation:
+    if not descriptor.implementation:
         raise AdapterBindingError(f"worker adapter {adapter_id!r} is not implemented")
     module_name, _, class_name = descriptor.implementation.rpartition(".")
     try:
@@ -149,6 +164,12 @@ def _is_caller_supplied_adapter(
     )
 
 
+def _codex_constructed_adapters() -> object:
+    from control_plane.codex_worker import _CONSTRUCTED_CODEX_ADAPTERS
+
+    return _CONSTRUCTED_CODEX_ADAPTERS
+
+
 def construct_reviewed_adapter(adapter_id: str, *args: object, **kwargs: object) -> object:
     """Construct the reviewed implementation. Never accepts a caller-supplied instance."""
 
@@ -158,15 +179,15 @@ def construct_reviewed_adapter(adapter_id: str, *args: object, **kwargs: object)
             raise AdapterBindingError(
                 "construct_reviewed_adapter does not accept a caller-supplied adapter"
             )
-    return implementation(*args, **kwargs)
+    adapter = implementation(*args, **kwargs)
+    _CONSTRUCTED_REVIEWED_ADAPTERS.add(adapter)
+    return adapter
 
 
 def bind_reviewed_adapter(adapter: object, adapter_id: str) -> AdapterDescriptor:
     """Prove exact reviewed class, constructed identity, and that status() is live."""
 
     try:
-        from control_plane.codex_worker import _CONSTRUCTED_CODEX_ADAPTERS
-
         descriptor = adapter_descriptor(adapter_id)
     except ValueError as exc:
         raise AdapterBindingError(str(exc)) from exc
@@ -177,8 +198,6 @@ def bind_reviewed_adapter(adapter: object, adapter_id: str) -> AdapterDescriptor
                 f"adapter identity {identity!r} does not match descriptor "
                 f"{descriptor.adapter_id!r}"
             )
-        if not descriptor.implemented:
-            raise AdapterBindingError(f"worker adapter {adapter_id!r} is not implemented")
         if not callable(_require_status(adapter)):
             raise AdapterBindingError(
                 f"worker adapter {descriptor.adapter_id!r} does not expose status"
@@ -190,7 +209,12 @@ def bind_reviewed_adapter(adapter: object, adapter_id: str) -> AdapterDescriptor
                 f"{implementation.__module__}.{implementation.__qualname__} "
                 f"for {descriptor.adapter_id!r}"
             )
-        if adapter not in _CONSTRUCTED_CODEX_ADAPTERS:
+        constructed = (
+            _codex_constructed_adapters()
+            if descriptor.adapter_id == "codex-cli"
+            else _CONSTRUCTED_REVIEWED_ADAPTERS
+        )
+        if adapter not in constructed:
             raise AdapterBindingError(
                 f"{implementation.__qualname__} instance was not constructed "
                 f"by the reviewed class for {descriptor.adapter_id!r}"
@@ -228,12 +252,22 @@ class WorkerExecutionAdapter(Protocol):
     ) -> ValidationReceipt: ...
 
 
+@runtime_checkable
+class RecoverableWorkerExecutionAdapter(WorkerExecutionAdapter, Protocol):
+    """Optional same-execution recovery on top of the stable adapter/v1 floor."""
+
+    def reattach(
+        self, spec: WorkerLaunchSpec, binding: WorkerRecoveryBinding
+    ) -> WorkerProcessRef: ...
+
+
 __all__ = [
     "ADAPTER_DESCRIPTORS",
     "ADAPTER_INTERFACE_VERSION",
     "AdapterBindingError",
     "AdapterDescriptor",
     "WorkerExecutionAdapter",
+    "RecoverableWorkerExecutionAdapter",
     "adapter_descriptor",
     "adapter_implementation",
     "bind_reviewed_adapter",

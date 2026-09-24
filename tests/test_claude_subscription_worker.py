@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import inspect
 import json
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -16,7 +18,12 @@ from control_plane.claude_subscription_worker import (
     attest_claude_binary,
 )
 from control_plane.codex_worker import LaunchValidationError
-from control_plane.executive_worker_broker import ExecutiveWorkerBroker, WorkerBrokerError
+from control_plane.executive_worker_broker import (
+    BROKER_REQUEST_SCHEMA_VERSION,
+    ExecutiveWorkerBroker,
+    WorkerAdapterNotImplementedError,
+    WorkerBrokerError,
+)
 from control_plane.executive_steward import CapacityState, SourceOwner
 from control_plane.codex_provider_realm import (
     _PROVIDER_REALM_OWNER_SEAM,
@@ -47,7 +54,12 @@ from control_plane.subscription_harness_bindings import (
     load_bindings,
 )
 from control_plane.subscription_provider_profiles import DEFAULT_PROFILES_PATH, get_profile
-from control_plane.worker_adapter import ADAPTER_DESCRIPTORS, adapter_descriptor
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    ADAPTER_DESCRIPTORS,
+    adapter_descriptor,
+    construct_reviewed_adapter,
+)
 from control_plane.worker_execution_contract import WorkerLaunchSpec
 from test_executive_worker_broker import _fixture as _broker_fixture
 
@@ -224,10 +236,35 @@ def _adapter(tmp_path: Path, binding_id: str = _GLM_BINDING) -> ClaudeSubscripti
     )
 
 
-def test_common_adapter_descriptor_is_not_implemented_without_receipt():
+def _reviewed_adapter(tmp_path: Path) -> ClaudeSubscriptionWorkerAdapter:
+    tmp_path.mkdir(parents=True, mode=0o700, exist_ok=True)
+    binary = _fake_claude(tmp_path)
+    attestation = attest_claude_binary(binary, allowed_versions=frozenset({"2.1.239"}))
+    bindings, profiles = _documents()
+    admission = _owner_seal(bindings=bindings, profiles=profiles)
+    return construct_reviewed_adapter(
+        get_binding(_GLM_BINDING).adapter_id,
+        binary,
+        admission=admission,
+        credential_loader=lambda: _FAKE_SECRET,
+        allowed_versions=frozenset({"2.1.239"}),
+        binary_attestation=attestation,
+        bindings_document=bindings,
+        profiles_document=profiles,
+    )
+
+
+def test_common_adapter_descriptor_is_implemented_only_through_reviewed_receipt():
     binding = get_binding(_GLM_BINDING)
-    with pytest.raises(ValueError, match="unknown worker adapter"):
-        adapter_descriptor(binding.adapter_id)
+    assert not adapter_descriptor(binding.adapter_id).implemented
+    class ClaimedAdapter:
+        adapter_id = binding.adapter_id
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(AdapterBindingError, match="does not accept"):
+        construct_reviewed_adapter(binding.adapter_id, ClaimedAdapter())
 
 
 def test_worker_takes_adapter_endpoint_and_models_from_binding_catalog(tmp_path: Path):
@@ -329,6 +366,17 @@ def test_current_subscription_profiles_cannot_be_composed_as_unattended_executiv
                 bindings_document=documents[0],
                 profiles_document=documents[1],
             )
+
+
+def test_openai_compatible_binding_cannot_exceed_spec_only_while_adapter_is_unimplemented():
+    descriptor = adapter_descriptor("openai-compatible")
+    assert descriptor.implemented is False
+
+    # While the openai-compatible adapter remains unimplemented, the production
+    # MiniMax row may not claim more than an unproven specification seam.
+    binding = get_binding("minimax-token-plan.openai-compatible")
+    assert binding.implementation_state == "SPEC_ONLY"
+    assert binding.autonomous_allowed is False
 
 
 def test_command_is_fixed_profile_secret_free_and_bash_free(tmp_path: Path):
@@ -554,12 +602,12 @@ def test_worker_identity_must_match_before_spawn(tmp_path: Path) -> None:
         asyncio.run(adapter.start(spec))
 
 
-def test_unimplemented_descriptor_fails_closed_at_broker_construction(tmp_path: Path) -> None:
+def test_caller_supplied_descriptor_fails_closed_at_broker_construction(tmp_path: Path) -> None:
     adapter = _adapter(tmp_path)
     broker_root = tmp_path / "broker-root"
     broker_root.mkdir(mode=0o700)
     _broker, policy, sweeper, _peer, _wire = _broker_fixture(broker_root)
-    with pytest.raises(Exception, match="unknown worker adapter"):
+    with pytest.raises(WorkerBrokerError, match="was not constructed"):
         ExecutiveWorkerBroker(adapter, policy, sweeper, adapter_id=adapter.adapter_id)
 
 
@@ -648,14 +696,125 @@ def test_adapter_refuses_missing_capacity_or_realm_proof_and_changed_catalog(tmp
         )
 
 
-def test_claude_lane_is_spec_only_and_admits_no_broker_execution() -> None:
+def test_claude_lane_is_spec_only_and_broker_execution_refuses_before_provider_entry() -> None:
     binding = get_binding(_GLM_BINDING)
     assert binding.implementation_state == "SPEC_ONLY"
-    assert "claude-compatible-subscription" not in ADAPTER_DESCRIPTORS
-    with pytest.raises(ValueError, match="unknown worker adapter"):
-        adapter_descriptor(binding.adapter_id)
-    with pytest.raises(WorkerBrokerError, match="unknown worker adapter"):
-        ExecutiveWorkerBroker(object(), object(), object(), adapter_id=binding.adapter_id)
+    assert not ADAPTER_DESCRIPTORS[binding.adapter_id].implemented
+    class ClaimedAdapter:
+        adapter_id = binding.adapter_id
+
+        def status(self, ref=None):
+            return None
+
+    with pytest.raises(WorkerBrokerError, match="reviewed implementation"):
+        ExecutiveWorkerBroker(
+            ClaimedAdapter(), object(), object(), adapter_id=binding.adapter_id
+        )
+
+
+def test_broker_execution_refuses_reviewed_spec_only_adapter_before_config_read(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def credential_loader():
+        raise AssertionError("credential/config read")
+
+    adapter = _reviewed_adapter(tmp_path / "reviewed-claude")
+    monkeypatch.setattr(adapter, "credential_loader", credential_loader)
+
+    async def credential_start_tripwire(spec):
+        raise AssertionError("credential/config read")
+
+    fixture_broker, _fixture_adapter, sweeper, _fixture_peer, wire = _broker_fixture(tmp_path)
+    wire["worker_id"] = adapter.admission.worker_id
+    wire["model"] = adapter.selected_model
+    wire["authorities"] = ["READ"]
+    workspace = Path(wire["workspace_path"])
+    assert wire["expected_base_sha"] == _git(workspace, "rev-parse", "HEAD")
+    Path(wire["run_dir"]).chmod(0o700)
+    isolation_roots = [Path(value) for value in wire["isolation_roots"]]
+    run_dir = Path(wire["run_dir"])
+    workspace_root = next(
+        root for root in isolation_roots if workspace.parent == root
+    )
+    run_root = next(root for root in isolation_roots if run_dir.parent == root)
+
+    def isolation_identity(path: Path) -> dict:
+        info = path.lstat()
+        return {
+            "path": str(path),
+            "device": info.st_dev,
+            "inode": info.st_ino,
+            "mode": stat.S_IMODE(info.st_mode),
+            "uid": info.st_uid,
+            "gid": info.st_gid,
+            "mtime_ns": info.st_mtime_ns,
+        }
+
+    manifest = {
+        "schema_version": "mastermind.executive_isolation_manifest/v1",
+        "roots": sorted(
+            (isolation_identity(workspace_root), isolation_identity(run_root)),
+            key=lambda value: value["path"],
+        ),
+        "entries": sorted(
+            (
+                {
+                    "root_path": str(workspace_root),
+                    "disposition": "CURRENT_WORKSPACE",
+                    "identity": isolation_identity(workspace),
+                },
+                {
+                    "root_path": str(run_root),
+                    "disposition": "CURRENT_RUN",
+                    "identity": isolation_identity(run_dir),
+                },
+            ),
+            key=lambda entry: entry["identity"]["path"],
+        ),
+        "workspace_path": str(workspace),
+        "run_dir": str(run_dir),
+    }
+    wire["isolation_manifest"] = manifest
+    wire["isolation_manifest_sha256"] = hashlib.sha256(
+        json.dumps(
+            manifest,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    fixture_broker.adapter = _fixture_adapter
+    fixture_broker.adapter.start = credential_start_tripwire
+    policy = dataclasses.replace(
+        fixture_broker.policy, worker_id=adapter.admission.worker_id
+    )
+    broker = ExecutiveWorkerBroker(
+        adapter, policy, sweeper, adapter_id=adapter.adapter_id
+    )
+    peer = _fixture_peer
+
+    async def scenario() -> None:
+        with pytest.raises(
+            WorkerAdapterNotImplementedError,
+            match=(
+                "is not implemented for broker execution|"
+                "catalog binding is SPEC_ONLY for broker execution|"
+                "does not allow autonomous broker execution"
+            ),
+        ):
+            await broker.execute(
+                {
+                    "schema_version": BROKER_REQUEST_SCHEMA_VERSION,
+                    "request_id": "request-1",
+                    "operation": "start",
+                    "payload": {"launch_spec": wire, "validation_commands": []},
+                },
+                peer=peer,
+            )
+
+    asyncio.run(scenario())
 
 
 def test_catalog_digest_entrypoints_share_one_policy() -> None:

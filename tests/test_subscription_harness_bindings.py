@@ -52,7 +52,15 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         )
         self.assertEqual(
             {binding.protocol for binding in minimax},
-            {"anthropic", "openai-chat"},
+            {"anthropic", "openai-chat", "responses"},
+        )
+        self.assertEqual(
+            {binding.adapter_id for binding in minimax},
+            {
+                "claude-compatible-subscription",
+                "codex-cli",
+                "openai-compatible",
+            },
         )
 
     def test_profile_and_override_endpoints_resolve(self) -> None:
@@ -206,7 +214,7 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
 
     def test_spec_only_lane_cannot_reach_canary(self) -> None:
         binding = get_binding(
-            "minimax-token-plan.openai-compatible",
+            "glm-coding-plan.claude-code-anthropic",
             document=self.catalog,
             profiles_document=self.profiles,
         )
@@ -300,14 +308,130 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         with self.assertRaisesRegex(HarnessBindingError, "protocol is unsupported"):
             validate_bindings(bindings, profiles_document=profiles)
 
-    def test_catalog_is_source_disarmed(self) -> None:
-        for binding_id in self.catalog["bindings"]:
-            binding = get_binding(
+    def test_no_subscription_binding_is_armed(self) -> None:
+        armed = {
+            binding_id
+            for binding_id in self.catalog["bindings"]
+            if get_binding(
                 binding_id,
                 document=self.catalog,
                 profiles_document=self.profiles,
-            )
-            self.assertFalse(binding.autonomous_allowed)
+            ).autonomous_allowed
+        }
+        # control_plane/claude_subscription_worker.py:321-322 refuses to compose
+        # any binding or profile with autonomous_allowed true ("subscription
+        # profile may not self-arm autonomous routing"), so an armed row is a
+        # row the reviewed worker rejects.
+        self.assertEqual(armed, set())
+
+    def test_minimax_codex_binding_loads_and_validates(self) -> None:
+        # The production document itself validates: the row is present and the
+        # reviewed MiniMax Responses realm lets it through load_bindings.
+        self.assertIn("minimax-token-plan.codex-responses", self.raw["bindings"])
+        validate_bindings(self.raw, profiles_document=self.profiles)
+        binding = get_binding(
+            "minimax-token-plan.codex-responses",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(binding.profile_id, "minimax-token-plan")
+        self.assertEqual(binding.provider, "minimax")
+        self.assertEqual(binding.harness_id, "codex-cli")
+        self.assertEqual(binding.protocol, "responses")
+        self.assertEqual(binding.effective_base_url, "https://api.minimax.io/v1")
+        self.assertEqual(
+            binding.model_classes, ("routine", "hard", "fast", "subagent")
+        )
+        self.assertEqual(
+            binding.activation_gates,
+            (
+                "adapter_implemented",
+                "provider_realm_enrolled",
+                "capacity_known",
+                "real_canary_passed",
+                "usage_policy_satisfied",
+            ),
+        )
+
+    def test_minimax_codex_binding_uses_implemented_codex_cli_adapter(self) -> None:
+        binding = get_binding(
+            "minimax-token-plan.codex-responses",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(binding.adapter_id, "codex-cli")
+        descriptor = adapter_descriptor(binding.adapter_id)
+        self.assertTrue(descriptor.implemented)
+
+    def test_minimax_codex_binding_is_built_not_proven_and_disarmed(self) -> None:
+        binding = get_binding(
+            "minimax-token-plan.codex-responses",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(binding.implementation_state, "BUILT_NOT_PROVEN")
+        self.assertIs(binding.autonomous_allowed, False)
+        self.assertEqual(
+            autonomous_activation_blockers(
+                binding,
+                adapter_implemented=True,
+                provider_realm_enrolled=True,
+                capacity_known=True,
+                real_canary_passed=True,
+                usage_policy_satisfied=True,
+            ),
+            ("implementation_not_proven_live", "source_policy_disarmed"),
+        )
+        self.assertIn(
+            "real_canary_not_passed",
+            autonomous_activation_blockers(
+                binding,
+                adapter_implemented=True,
+                provider_realm_enrolled=True,
+                capacity_known=True,
+                real_canary_passed=False,
+                usage_policy_satisfied=True,
+            ),
+        )
+
+    def test_minimax_openai_compatible_row_stays_spec_only(self) -> None:
+        # The openai-compatible adapter is declared implemented=False in
+        # control_plane/worker_adapter.py, so this row may never claim more.
+        descriptor = adapter_descriptor("openai-compatible")
+        self.assertFalse(descriptor.implemented)
+        openai_compatible = get_binding(
+            "minimax-token-plan.openai-compatible",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(openai_compatible.implementation_state, "SPEC_ONLY")
+        self.assertIs(openai_compatible.autonomous_allowed, False)
+        self.assertEqual(openai_compatible.adapter_id, "openai-compatible")
+
+    def test_minimax_rows_carry_their_truthful_states(self) -> None:
+        claude_anthropic = get_binding(
+            "minimax-token-plan.claude-code-anthropic",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(claude_anthropic.implementation_state, "BUILT_NOT_PROVEN")
+        self.assertIs(claude_anthropic.autonomous_allowed, False)
+
+        codex_responses = get_binding(
+            "minimax-token-plan.codex-responses",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(codex_responses.implementation_state, "BUILT_NOT_PROVEN")
+        self.assertIs(codex_responses.autonomous_allowed, False)
+
+        openai_compatible = get_binding(
+            "minimax-token-plan.openai-compatible",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(openai_compatible.implementation_state, "SPEC_ONLY")
+        self.assertIs(openai_compatible.autonomous_allowed, False)
 
 
 if __name__ == "__main__":
