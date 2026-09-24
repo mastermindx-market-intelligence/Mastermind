@@ -1182,3 +1182,137 @@ def test_wqp1_h_route_without_card_renders_no_producer_columns(tmp_path):
     assert queued["capacity"] == {"value": "UNKNOWN", "source": None,
                                   "reason": "no_producer",
                                   "evidence_ref": None, "observed_at": None}
+
+
+def _extend_cache_with_round3_mixed_effects(tmp_path):
+    """Set up a cache_fixture with two cards on the same root:
+
+    1. A gate-passing non-EFFECT_UNKNOWN card with seat=ceo and the
+       blocking reason — its accountability is SOL.
+    2. An EFFECT_UNKNOWN card with ``is_actionable=False`` and
+       ``valid_for_ms=None`` — the round-3 exempt-card shape.  Its
+       effects carrier is an attempt_id; ``accountability`` and
+       ``placement`` are forced to None with the ``exempt_card_not_actionable``
+       skip reason.
+
+    Returns ``(owners, clock, cache)`` for the read-path test.
+    """
+    from scripts import chairman_control_room as ccr
+    owners, clock, cache = cache_fixture(tmp_path)
+    doc = owners[0].state_cache["doc"]
+    # Replace the cache_fixture's responsibility tuple so the test
+    # owns the cardinality exactly (no leftover cards on JOB-001).
+    meta = {"schema": "mastermind.autonomy_validity.v1",
+            "policy": "mapper-inclusive-48h-future-1h.v1",
+            "qualified_at": STAMP, "proof_ref": "b" * 64,
+            "valid_for_ms": 60000}
+    validity_full = {key: dict(meta, sources=[{"observed_at": STAMP,
+                                                 "freshness": "current"}])
+                     for key in ("card", "decision_current", "dispatch",
+                                  "owed_open_age")}
+    delivered_job = "JOB-1"
+    # Card 1: gate-passing non-EFFECT card.
+    card_actionable = {
+        "responsibility_ref": "WS:FIRST",
+        "root_job_id": delivered_job,
+        "root_job_ambiguous": False,
+        "runtime_root_state": "RESOLVED",
+        "freshness": "current",
+        "root_job_candidates": [delivered_job],
+        "is_actionable": True,
+        "owed_turn": {"seat": "ceo", "reason": "blocker_targets_seat"},
+        "validity": dict(validity_full),
+    }
+    # Card 2: EFFECT_UNKNOWN exempt card.  The exemption is
+    # effects-only: even though ``is_actionable=False``, the card's
+    # effects carrier still emits — accountability/placement are
+    # forced to None with the explicit skip reason
+    # ``exempt_card_not_actionable``.  The card's proof_ref is
+    # ``"c" * 64`` so the test can pin the EFFECT card as the source
+    # of effects evidence.  ``valid_for_ms`` is the budget the cache
+    # bracket (:func:`_admitted_row`) requires for admission of a
+    # current row; the round-3 deriver exemption is keyed on
+    # ``is_actionable`` alone here (a column with ``is_actionable``
+    # False AND ``valid_for_ms`` None is also valid but cannot pass
+    # the cache bracket in this fixture — the projection unit tests
+    # in ``test_work_queue_projection.py`` exercise both shapes).
+    proof_exempt = "c" * 64
+    card_exempt = {
+        "responsibility_ref": "WS:SECOND",
+        "root_job_id": delivered_job,
+        "root_job_ambiguous": False,
+        "runtime_root_state": "RESOLVED",
+        "freshness": "current",
+        "root_job_candidates": [delivered_job],
+        "is_actionable": False,
+        "owed_turn": {"seat": "worker", "reason": "blocker_targets_seat"},
+        "placement_state": {"value": "EFFECT_UNKNOWN", "observable": True,
+                            "reason": "test"},
+        "current_worker": {
+            "worker_id": "wrk-ex", "attempt_id": "ATT-" + "ab" * 16,
+            "status": "active", "session_alias": None,
+            "runtime_binding_id": None, "binding_generation": 1,
+            "continuation_state": "active", "effect_state": "active",
+            "capacity_state": "ready", "previous_attempt_id": None,
+            "movement_reason_code": None,
+        },
+        "validity": {key: dict(meta, proof_ref=proof_exempt,
+                                sources=[{"observed_at": STAMP,
+                                           "freshness": "current"}])
+                     for key in ("card", "decision_current", "dispatch",
+                                  "owed_open_age")},
+    }
+    doc["autonomy"]["responsibilities"] = [card_actionable, card_exempt]
+    doc["work"] = [{"work_ref": "WS:FIRST", "agent_os": {"title": "Actionable"}},
+                   {"work_ref": "WS:SECOND", "agent_os": {"title": "Exempt"}}]
+    with owners[0].state_lock:
+        ccr._publish_source_validity(owners[0], doc, tuple(clock), tuple(clock))
+    return owners, clock, cache
+
+
+def test_wqp1_r3_route_with_mixed_effects_renders_effect_exception(tmp_path):
+    """WQ-PROD-1 round 3 / Blocker 1: through the read service's
+    real composer + :func:`derive_work_producers_v1`, the
+    previously-crashing scenario (mixed effects, non-effect card
+    sorted first → carrier=None from the row's first view →
+    :func:`_validate_effects` rejects → WHOLE work read becomes
+    ``projection_refused``) now renders AVAILABLE with R in
+    ``EFFECT_EXCEPTION`` and the EFFECT_UNKNOWN card's evidence
+    attached to the row.
+
+    The test proves the fix end-to-end: the read path's typed
+    refusal code ``projection_refused`` MUST NOT fire — the
+    deriver used the effects row from the card that actually
+    carries the value, not ``views[0]``.
+    """
+    owners, _, cache = _extend_cache_with_round3_mixed_effects(tmp_path)
+    delivered_job = "JOB-1"
+    root_list = _root_list_payload(rows=[
+        {"job_id": delivered_job, "status": "RUNNING", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+        work_acquire=work_acquire, work_compose=None,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    # The read path MUST succeed — no projection_refused — and
+    # land in EFFECT_EXCEPTION with the right evidence.
+    assert result["ok"] is True
+    doc = result["result"]
+    assert doc["availability"] == "AVAILABLE"
+    assert "projection_refused" not in doc["reason_codes"]
+    assert len(doc["groups"]["EFFECT_EXCEPTION"]) == 1
+    row = doc["groups"]["EFFECT_EXCEPTION"][0]
+    assert row["root_job_id"] == delivered_job
+    assert row["effect"]["value"] == "EFFECT_UNKNOWN"
+    assert row["effect"]["source"] == "EFFECT_PRODUCER"
+    # The EFFECT_UNKNOWN card's proof_ref is the evidence anchor on
+    # the rendered row — pinning that the read path correctly
+    # attributes the row to that card, not to ``views[0]``
+    # (which had ``carrier=None`` in the pre-fix code).
+    assert row["effect"]["evidence_ref"] == "c" * 64
+    assert row["effect"]["observed_at"] == STAMP
