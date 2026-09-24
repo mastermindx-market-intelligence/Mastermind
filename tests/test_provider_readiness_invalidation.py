@@ -26,12 +26,13 @@ def _receipt(tmp_path: Path) -> Path:
     [
         (readiness.PERSONAL_PRO_WORKER_BINDING_CLASS, "personal", 0o440),
         (readiness.COMPANY_WORKSPACE_BINDING_CLASS, "company", 0o400),
+        (None, "company", 0o400),
     ],
 )
-def test_invalidate_uses_storage_contract_then_unlinks_and_fsyncs(
+def test_invalidate_uses_storage_contract_rechecks_then_unlinks_and_fsyncs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    binding: str,
+    binding: str | None,
     gid_kind: str,
     expected_mode: int,
 ) -> None:
@@ -40,27 +41,45 @@ def test_invalidate_uses_storage_contract_then_unlinks_and_fsyncs(
     worker_gid = personal_gids[0] if gid_kind == "personal" else readiness.WORKER_GID
     expected_gid = worker_gid if gid_kind == "personal" else 0
     receipt = _receipt(tmp_path)
-    observed: dict[str, object] = {}
+    observed: dict[str, object] = {"identities": []}
 
-    monkeypatch.setattr(readiness, "_validate_receipt_directory", lambda path: observed.setdefault("parent", path.parent))
+    monkeypatch.setattr(
+        readiness,
+        "_validate_receipt_directory",
+        lambda path: observed.setdefault("parent", path.parent),
+    )
 
-    def _lstat(path: Path, *, expected_uid: int, expected_gid: int, expected_mode: int, require_nonempty: bool = False):
-        observed["identity"] = (path, expected_uid, expected_gid, expected_mode, require_nonempty)
-        return {"inode": 1}
+    def _lstat(
+        path: Path,
+        *,
+        expected_uid: int,
+        expected_gid: int,
+        expected_mode: int,
+        require_nonempty: bool = False,
+    ) -> dict[str, int]:
+        observed["identities"].append(
+            (path, expected_uid, expected_gid, expected_mode, require_nonempty)
+        )
+        return {"device": 1, "inode": 2, "ctime_ns": 3}
 
     monkeypatch.setattr(readiness, "lstat_identity", _lstat)
-    monkeypatch.setattr(readiness, "_fsync_directory", lambda path: observed.setdefault("fsync", path))
+    monkeypatch.setattr(
+        readiness,
+        "_fsync_directory",
+        lambda path: observed.setdefault("fsync", path),
+    )
 
-    readiness.invalidate_readiness_receipt(
+    readiness.invalidate_receipt_file(
         receipt,
         workspace_binding_class=binding,
         worker_gid=worker_gid,
     )
 
-    assert not receipt.exists()
+    identity_call = (receipt, 0, expected_gid, expected_mode, False)
+    assert observed["identities"] == [identity_call, identity_call]
     assert observed["parent"] == tmp_path
-    assert observed["identity"] == (receipt, 0, expected_gid, expected_mode, False)
     assert observed["fsync"] == tmp_path
+    assert not receipt.exists()
 
 
 def test_invalidate_wrong_reviewed_personal_slot_gid_refuses_without_unlink(
@@ -82,7 +101,7 @@ def test_invalidate_wrong_reviewed_personal_slot_gid_refuses_without_unlink(
 
     monkeypatch.setattr(readiness, "lstat_identity", _lstat)
     with pytest.raises(readiness.ReadinessError, match="identity_group_mismatch"):
-        readiness.invalidate_readiness_receipt(
+        readiness.invalidate_receipt_file(
             receipt,
             workspace_binding_class=readiness.PERSONAL_PRO_WORKER_BINDING_CLASS,
             worker_gid=wrong_gid,
@@ -106,12 +125,43 @@ def test_invalidate_arbitrary_personal_gid_refuses_before_lstat(
     monkeypatch.setattr(readiness, "lstat_identity", _lstat)
     arbitrary_gid = max(_personal_slot_gids() or [1000]) + 10000
     with pytest.raises(readiness.ReadinessError, match="readiness_receipt_reader_invalid"):
-        readiness.invalidate_readiness_receipt(
+        readiness.invalidate_receipt_file(
             receipt,
             workspace_binding_class=readiness.PERSONAL_PRO_WORKER_BINDING_CLASS,
             worker_gid=arbitrary_gid,
         )
     assert not called
+    assert receipt.exists()
+
+
+@pytest.mark.parametrize(
+    ("binding", "expected_mode"),
+    [
+        (readiness.PERSONAL_PRO_WORKER_BINDING_CLASS, 0o440),
+        (readiness.COMPANY_WORKSPACE_BINDING_CLASS, 0o400),
+    ],
+)
+def test_invalidate_binding_specific_wrong_mode_refuses_without_unlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    binding: str,
+    expected_mode: int,
+) -> None:
+    receipt = _receipt(tmp_path)
+    worker_gid = _personal_slot_gids()[0] if binding == readiness.PERSONAL_PRO_WORKER_BINDING_CLASS else readiness.WORKER_GID
+    monkeypatch.setattr(readiness, "_validate_receipt_directory", lambda path: None)
+
+    def _lstat(path: Path, *, expected_uid: int, expected_gid: int, expected_mode: int, require_nonempty: bool = False):
+        assert expected_mode == (0o440 if binding == readiness.PERSONAL_PRO_WORKER_BINDING_CLASS else 0o400)
+        raise readiness.ReadinessError("identity_mode_mismatch")
+
+    monkeypatch.setattr(readiness, "lstat_identity", _lstat)
+    with pytest.raises(readiness.ReadinessError, match="identity_mode_mismatch"):
+        readiness.invalidate_receipt_file(
+            receipt,
+            workspace_binding_class=binding,
+            worker_gid=worker_gid,
+        )
     assert receipt.exists()
 
 
@@ -140,7 +190,31 @@ def test_invalidate_metadata_refusal_never_unlinks(
 
     monkeypatch.setattr(readiness, "lstat_identity", _lstat)
     with pytest.raises(readiness.ReadinessError, match=reason):
-        readiness.invalidate_readiness_receipt(
+        readiness.invalidate_receipt_file(
+            receipt,
+            workspace_binding_class=readiness.COMPANY_WORKSPACE_BINDING_CLASS,
+            worker_gid=readiness.WORKER_GID,
+        )
+    assert receipt.exists()
+
+
+def test_invalidate_identity_change_before_unlink_refuses_and_preserves_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt = _receipt(tmp_path)
+    monkeypatch.setattr(readiness, "_validate_receipt_directory", lambda path: None)
+    identities = iter(
+        [
+            {"device": 1, "inode": 2, "ctime_ns": 3},
+            {"device": 1, "inode": 4, "ctime_ns": 5},
+        ]
+    )
+    monkeypatch.setattr(readiness, "lstat_identity", lambda *args, **kwargs: next(identities))
+    monkeypatch.setattr(readiness, "_fsync_directory", lambda path: pytest.fail("fsync must not run after refusal"))
+
+    with pytest.raises(readiness.ReadinessError, match="readiness_receipt_changed_before_invalidation"):
+        readiness.invalidate_receipt_file(
             receipt,
             workspace_binding_class=readiness.COMPANY_WORKSPACE_BINDING_CLASS,
             worker_gid=readiness.WORKER_GID,
@@ -160,7 +234,7 @@ def test_invalidate_unsafe_parent_refuses_before_identity_or_unlink(
     )
     monkeypatch.setattr(readiness, "lstat_identity", lambda *args, **kwargs: pytest.fail("identity must not run"))
     with pytest.raises(readiness.ReadinessError, match="readiness_parent_unsafe"):
-        readiness.invalidate_readiness_receipt(
+        readiness.invalidate_receipt_file(
             receipt,
             workspace_binding_class=readiness.COMPANY_WORKSPACE_BINDING_CLASS,
             worker_gid=readiness.WORKER_GID,
@@ -168,7 +242,7 @@ def test_invalidate_unsafe_parent_refuses_before_identity_or_unlink(
     assert receipt.exists()
 
 
-def test_invalidate_cli_forwards_closed_receipt_policy_inputs(
+def test_invalidate_cli_forwards_explicit_personal_policy_inputs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -178,7 +252,7 @@ def test_invalidate_cli_forwards_closed_receipt_policy_inputs(
     def _invalidate(path: Path, *, workspace_binding_class: str | None, worker_gid: int) -> None:
         captured.update(path=path, binding=workspace_binding_class, worker_gid=worker_gid)
 
-    monkeypatch.setattr(readiness, "invalidate_readiness_receipt", _invalidate)
+    monkeypatch.setattr(readiness, "invalidate_receipt_file", _invalidate)
     rc = readiness.main(
         [
             "invalidate",
@@ -198,14 +272,45 @@ def test_invalidate_cli_forwards_closed_receipt_policy_inputs(
     }
 
 
-def test_shell_invalidation_delegates_without_literal_receipt_policy() -> None:
+def test_invalidate_cli_omits_binding_for_legacy_company_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt = tmp_path / "receipt.json"
+    captured: dict[str, object] = {}
+
+    def _invalidate(path: Path, *, workspace_binding_class: str | None, worker_gid: int) -> None:
+        captured.update(path=path, binding=workspace_binding_class, worker_gid=worker_gid)
+
+    monkeypatch.setattr(readiness, "invalidate_receipt_file", _invalidate)
+    rc = readiness.main(
+        [
+            "invalidate",
+            "--receipt",
+            str(receipt),
+            "--worker-gid",
+            str(readiness.WORKER_GID),
+        ]
+    )
+    assert rc == 0
+    assert captured == {
+        "path": receipt,
+        "binding": None,
+        "worker_gid": readiness.WORKER_GID,
+    }
+
+
+def test_shell_invalidation_omits_empty_binding_and_has_no_literal_policy() -> None:
     script = Path("ops/executive_os/provision-worker-auth.sh").read_text(encoding="utf-8")
     block = script.split("invalidate_readiness_receipt() {", 1)[1].split("\n}\n\nprepare_explicit_replacement()", 1)[0]
+    assert 'receipt_binding_args=()' in block
+    assert 'if [ -n "$WORKSPACE_BINDING_CLASS" ]; then' in block
+    assert 'receipt_binding_args=(--workspace-binding-class "$WORKSPACE_BINDING_CLASS")' in block
     assert '[ -e "$READINESS_RECEIPT" ] || [ -L "$READINESS_RECEIPT" ]' in block
     assert 'provider_readiness.py" invalidate' in block
     assert '--receipt "$READINESS_RECEIPT"' in block
-    assert '--workspace-binding-class "$WORKSPACE_BINDING_CLASS"' in block
     assert '--worker-gid "$WORKER_GID"' in block
+    assert '${receipt_binding_args[@]+"${receipt_binding_args[@]}"}' in block
     assert "0:0:400:1" not in block
     assert "stat -f" not in block
     assert "/bin/rm" not in block

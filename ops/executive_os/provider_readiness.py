@@ -839,7 +839,7 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def invalidate_readiness_receipt(
+def invalidate_receipt_file(
     path: Path = RECEIPT_PATH,
     *,
     workspace_binding_class: str | None = None,
@@ -852,12 +852,19 @@ def invalidate_readiness_receipt(
         workspace_binding_class=workspace_binding_class,
         worker_gid=worker_gid,
     )
-    lstat_identity(
+    first_identity = lstat_identity(
         path,
         expected_uid=expected_uid,
         expected_gid=expected_gid,
         expected_mode=expected_mode,
     )
+    if lstat_identity(
+        path,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+        expected_mode=expected_mode,
+    ) != first_identity:
+        raise ReadinessError("readiness_receipt_changed_before_invalidation")
     path.unlink()
     _fsync_directory(path.parent)
 
@@ -1118,7 +1125,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     invalidate = sub.add_parser("invalidate")
     invalidate.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
-    invalidate.add_argument("--workspace-binding-class", required=True)
+    invalidate.add_argument("--workspace-binding-class")
     invalidate.add_argument("--worker-gid", type=int, default=WORKER_GID)
     finalize = sub.add_parser("finalize")
     finalize.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
@@ -1280,7 +1287,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 return 4
         if args.command == "invalidate":
-            invalidate_readiness_receipt(
+            invalidate_receipt_file(
                 args.receipt,
                 workspace_binding_class=args.workspace_binding_class,
                 worker_gid=args.worker_gid,
