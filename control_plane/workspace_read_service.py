@@ -399,18 +399,30 @@ class WorkspaceReadService:
         owns all per-row grouping and the queue-level effect_exception
         read; this method never re-derives them.
 
-        B2: failures split into two typed refusal classes via
+        B2: failures split into typed refusal classes via
         :class:`_WorkRefusal`.  CCR bracket / runtime-receipt /
         observation-state refusals raise ``_WorkRefusal("source_unavailable")``
-        or ``_WorkRefusal("runtime_observation_not_same")``.  A ``ValueError``
-        raised by the acquire or compose call (validator/projection
-        refusal) becomes ``_WorkRefusal("projection_refused")``.  Anything
-        else is a real error envelope — never a typed UNAVAILABLE body.
+        or ``_WorkRefusal("runtime_observation_not_same")``.
+
+        N2: an acquire-raised ``ValueError`` (defensive — the production
+        acquirer swallows its own faults and surfaces a degraded notes
+        list) becomes ``_WorkRefusal("source_integrity_unverified")`` —
+        the runtime could not return a well-formed root list.  A
+        compose-raised ``ValueError`` (the composer's closed-table
+        validator or evidence-freshness rejection) stays
+        ``_WorkRefusal("projection_refused")``.  Anything else is a
+        real error envelope — never a typed UNAVAILABLE body.
         """
         # Work carries no selection (mirrors programs); the selection field
         # is None by the closed-frame validator.  Anything else is a frame
         # contract violation that should refuse 400 before reaching here.
-        before = self.cache.snapshot()
+        # N5: a raising cache yields the same typed refusal body as an
+        # unqualified cache — both wire shapes are unified into
+        # ``_WorkRefusal("source_unavailable")``.
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            raise _WorkRefusal("source_unavailable") from None
         if not _qualified(before, None):
             raise _WorkRefusal("source_unavailable")
         acquire = self._work_acquire
@@ -432,16 +444,35 @@ class WorkspaceReadService:
                 runtime_identity=self.runtime_identity,
             )
         except ValueError:
-            raise _WorkRefusal("projection_refused") from None
+            # N2: the production acquirer swallows its own faults and
+            # surfaces a degraded notes list, so this branch is defensive
+            # only — if any acquirer does raise ``ValueError``, it is a
+            # source-integrity event (the runtime could not return a
+            # well-formed root list), NOT a projection fault.  A
+            # projection fault comes from the composer below.
+            raise _WorkRefusal("source_integrity_unverified") from None
         acquisition = root_list.get("runtime", {}).get("acquisition", {})
         generation = acquisition.get("generation")
         runtime_receipt = (
             dict(generation, snapshot_digest=acquisition.get("snapshot_digest"))
             if isinstance(generation, dict) else None
         )
-        # Runtime acquisition is finalized (including namespace/close checks)
-        # before the second CCR sample.  SAME remains an as-of read fact.
-        after = self.cache.snapshot()
+        # N3: evaluate the CCR receipt state BEFORE the runtime gate.
+        # The runtime acquisition is finalized (namespace/close checks
+        # complete) before the second CCR sample, so a CCR change between
+        # the two samples is positively proven here.  The CCR half of the
+        # receipt must finalize SAME; missing/UNKNOWN/CONFLICT all refuse
+        # as ``source_unavailable`` — the runtime gate below does NOT
+        # subsume this check.
+        # N5: a raising cache yields the same typed refusal body as an
+        # unqualified cache.
+        try:
+            after = self.cache.snapshot()
+        except Exception:
+            raise _WorkRefusal("source_unavailable") from None
+        ccr_receipt = _observation(before, after, None, None)
+        if ccr_receipt["state"] != "SAME":
+            raise _WorkRefusal("source_unavailable")
         if not _qualified(after, None):
             raise _WorkRefusal("source_unavailable")
         receipt = _observation(before, after, None, runtime_receipt)
@@ -781,6 +812,7 @@ class WorkspaceReadService:
             from control_plane.work_queue_projection import (
                 _GROUP_ORDER as _WQ_GROUPS, _utc_now as _wq_utc_now,
                 WORK_QUEUE_SCHEMA,
+                _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED,
             )
             receipt = {"schema": OBSERVATION_SCHEMA, "state": "UNKNOWN", "selection": None,
                        "control_room": None, "runtime": None}
@@ -789,12 +821,20 @@ class WorkspaceReadService:
             # lifecycle_source legitimately differ; the typed refusal carries
             # the read-service's own reason code, not the composer's
             # LIFECYCLE_UNAVAILABLE flag).
+            # N4: the effect_exception.reason uses ``read_refused`` — the
+            # read service is reporting that its OWN read failed (CCR
+            # bracket, runtime observation, projection fault), NOT that the
+            # composer's view of a missing control room document.  The
+            # composer's ``control_room_missing`` is its OWN vocabulary for
+            # a missing control room input; the read service must not
+            # mis-attribute its own failure to the composer's vocabulary.
             return {"ok": True, "result": {"schema": WORK_QUEUE_SCHEMA,
                 "availability": "UNAVAILABLE",
                 "generated_at": _wq_utc_now(),
                 "lifecycle_source": None,
                 "effect_exception": {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
-                                     "observable": False, "reason": "control_room_missing"},
+                                     "observable": False,
+                                     "reason": _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED},
                 "coverage": {"count": 0, "total": None, "truncated": False,
                              "completeness": "PARTIAL"},
                 "groups": {key: [] for key in _WQ_GROUPS},

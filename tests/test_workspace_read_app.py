@@ -912,7 +912,7 @@ def test_work_current_projection_refused_typed_unavailable_maps_to_503_with_no_s
         "generated_at": "2026-09-23T00:00:00Z",
         "lifecycle_source": None,
         "effect_exception": {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
-                             "observable": False, "reason": "control_room_missing"},
+                             "observable": False, "reason": "read_refused"},
         "coverage": {"count": 0, "total": None, "truncated": False,
                      "completeness": "PARTIAL"},
         "groups": {"EFFECT_EXCEPTION": [], "NEEDS_SOL": [], "NEEDS_WORKER": [],

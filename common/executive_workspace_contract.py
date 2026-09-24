@@ -29,6 +29,7 @@ WORK_REFUSAL_REASON_CODES = frozenset({
     "source_unavailable",
     "runtime_observation_not_same",
     "projection_refused",
+    "source_integrity_unverified",
 })
 MAX_REQUEST_BYTES = 8192
 MAX_RESPONSE_BYTES = 2_000_000
