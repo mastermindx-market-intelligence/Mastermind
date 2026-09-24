@@ -133,3 +133,14 @@ def test_spec_keeps_hook_session_id_as_falsifier_not_grant():
     assert "session_id" in text
     assert "CLAUDE_ENV_FILE" in text
     assert "viable investigation seam, not the final security design" in text
+
+
+def test_spec_uses_broad_mission_authority_with_fail_closed_tool_capabilities():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "Authorization semantics — broad mission law, explicit technical capabilities" in text
+    assert "do not enumerate every ordinary action Fable is allowed to take" in text
+    assert "Adding a new reversible implementation technique does not require adding another COO permission token." in text
+    assert "A rich principal profile therefore uses explicit tool/package grants" in text
+    assert "MAY Fable make this decision?" in text
+    assert "CAN this surface execute it now?" in text
+    assert "A technical absence does not shrink Fable's organizational mandate" in text
