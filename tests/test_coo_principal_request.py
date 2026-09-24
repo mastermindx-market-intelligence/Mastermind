@@ -4,6 +4,7 @@ import copy
 
 import pytest
 
+from control_plane import ceo_intent, ceo_request
 from control_plane.coo_principal_request import (
     CooPrincipalRequestError,
     INTENT_ID_RE,
@@ -140,11 +141,13 @@ def test_stable_identity_depends_only_on_work_ref_and_operation_key():
     second_ref = principal_request_ref(changed_semantics)
     assert first_ref == second_ref
     assert REQUEST_REF_RE.fullmatch(first_ref)
+    assert ceo_request.AUTOMATED_REQUEST_REF_RE.fullmatch(first_ref)
 
     first_intent = principal_intent_id(first_ref)
     second_intent = principal_intent_id(second_ref)
     assert first_intent == second_intent
     assert INTENT_ID_RE.fullmatch(first_intent)
+    assert ceo_intent.INTENT_ID_RE.fullmatch(first_intent)
 
 
 def test_same_operation_key_under_different_workstream_is_a_different_request():
