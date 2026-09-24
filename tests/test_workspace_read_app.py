@@ -522,9 +522,15 @@ def test_generic_verifier_cannot_widen_host(rsa_key):
         ("DELETE", "/workspace/programs/current", 405),
         ("HEAD", "/workspace/programs/current", 405),
         ("OPTIONS", "/workspace/programs/current", 405),
+        ("POST", "/workspace/work/current", 405),
+        ("PUT", "/workspace/work/current", 405),
+        ("DELETE", "/workspace/work/current", 405),
+        ("HEAD", "/workspace/work/current", 405),
+        ("OPTIONS", "/workspace/work/current", 405),
         ("POST", "/workspace/mission/current", 405),
         # Trailing slash → 404 (router does not silently redirect)
         ("GET", "/workspace/programs/current/", 404),
+        ("GET", "/workspace/work/current/", 404),
         ("GET", "/workspace/mission/current/", 404),
         # Encoded separator / alternate separator → 400
         ("GET", "/workspace/programs/current%2Fother", 400),
@@ -704,6 +710,138 @@ def test_programs_current_returns_exact_result_envelope(rsa_key):
     assert frame["principal"]["resource"] == RESOURCE
     assert frame["principal"]["scopes"] == [SCOPE]
     assert set(frame["principal"]) == set(contract.PRINCIPAL_KEYS)
+
+
+# ---------------------------------------------------------------------------
+# work-current route (mastermind-OS app) — mirrors programs-current exactly
+# ---------------------------------------------------------------------------
+
+
+def test_work_current_missing_authorization_refuses_401(rsa_key):
+    test_client, fake = _make_app(rsa_key)
+    response = test_client.get("/workspace/work/current")
+    assert response.status_code == 401
+    assert fake.calls == []
+
+
+def test_work_current_malformed_authorization_refuses_401(rsa_key):
+    test_client, fake = _make_app(rsa_key)
+    response = test_client.get(
+        "/workspace/work/current",
+        headers={"Authorization": "Bearer not-a-real-jwt"},
+    )
+    assert response.status_code == 401
+    assert fake.calls == []
+
+
+def test_work_current_expired_token_refuses(rsa_key):
+    test_client, fake = _make_app(rsa_key)
+    token = _workspace_token(rsa_key, exp=NOW - 60)
+    response = test_client.get(
+        "/workspace/work/current",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+    assert fake.calls == []
+
+
+def test_work_current_with_body_refuses_400(rsa_key):
+    test_client, fake = _make_app(rsa_key)
+    token = _workspace_token(rsa_key)
+    response = test_client.request(
+        "GET",
+        "/workspace/work/current",
+        content=b"some-body",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    assert response.status_code == 400
+    assert _body_code(response) == "invalid_input"
+    assert fake.calls == []
+
+
+def test_work_current_with_query_string_refuses_400(rsa_key):
+    test_client, fake = _make_app(rsa_key)
+    token = _workspace_token(rsa_key)
+    response = test_client.get(
+        "/workspace/work/current?unexpected=1",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 400
+    assert _body_code(response) == "invalid_input"
+    assert fake.calls == []
+
+
+def test_work_current_authorize_principal_false_refuses_403(rsa_key):
+    test_client, fake = _make_app(rsa_key, authorize=lambda _p: False)
+    token = _workspace_token(rsa_key)
+    response = test_client.get(
+        "/workspace/work/current",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+    assert _body_code(response) == "access_denied"
+    assert fake.calls == []
+
+
+def test_work_current_happy_path_returns_envelope(rsa_key):
+    expected = {
+        "ok": True,
+        "result": {
+            "schema": "mastermind.workspace_work_queue.v1",
+            "availability": "AVAILABLE",
+            "groups": {
+                "EFFECT_EXCEPTION": [], "NEEDS_SOL": [], "NEEDS_WORKER": [],
+                "WAITING_CAPACITY": [], "RUNNING": [
+                    {"root_job_id": "JOB-1", "lifecycle": {"status": "RUNNING"}}
+                ], "QUEUED": [], "COMPLETED_NOT_ACCEPTED": [], "TERMINAL": [],
+                "UNKNOWN": [],
+            },
+            "source_observation": {"state": "SAME"},
+        },
+    }
+    fake = _FakeWorkspaceClient(envelope=expected)
+    test_client, _ = _make_app(rsa_key, client=fake)
+    token = _workspace_token(rsa_key)
+    response = test_client.get(
+        "/workspace/work/current",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert response.headers["Content-Type"] == "application/json"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json() == expected["result"]
+    assert len(fake.calls) == 1
+    frame = fake.calls[0]
+    assert frame["schema"] == contract.FRAME_SCHEMA
+    assert frame["operation"] == "work"
+    assert frame["selection"] is None
+    assert frame["principal"]["resource"] == RESOURCE
+    assert frame["principal"]["scopes"] == [SCOPE]
+
+
+def test_work_current_post_refuses_405(rsa_key):
+    test_client, fake = _make_app(rsa_key)
+    token = _workspace_token(rsa_key)
+    response = test_client.post(
+        "/workspace/work/current",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 405
+    assert fake.calls == []
+
+
+def test_work_current_trailing_slash_404(rsa_key):
+    test_client, fake = _make_app(rsa_key)
+    token = _workspace_token(rsa_key)
+    response = test_client.get(
+        "/workspace/work/current/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 404
+    assert fake.calls == []
 
 
 def test_mission_current_returns_exact_result_envelope(rsa_key):

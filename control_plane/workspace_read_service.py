@@ -28,6 +28,7 @@ from common.executive_workspace_contract import (
     PROJECTION_SCHEMA,
     RESULT_BODY_SCHEMA,
     RESULT_OBSERVATION_SCHEMA,
+    WORK_SCHEMA,
     canonical,
     digest,
     error,
@@ -318,7 +319,7 @@ class WorkspaceReadService:
     def __init__(self, *, cache, runtime, authorize, armed, runtime_identity,
                  acquire=None, compose=None, bounded_runtime=None,
                  result_acquire=None, result_project=None, mission_v3_acquire=None,
-                 mission_v3_compose=None):
+                 mission_v3_compose=None, work_acquire=None, work_compose=None):
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -335,6 +336,12 @@ class WorkspaceReadService:
         self._result_project = result_project
         self._mission_v3_acquire = mission_v3_acquire
         self._mission_v3_compose = mission_v3_compose
+        # Work-queue producers — list_roots_v2_from_runtime and
+        # compose_work_queue_v1 by default.  Constructor-injected so the
+        # read service never reaches past the service boundary for a writer
+        # or an unfrozen schema.
+        self._work_acquire = work_acquire
+        self._work_compose = work_compose
 
     def _read(self, frame):
         selected = frame["selection"]
@@ -377,6 +384,62 @@ class WorkspaceReadService:
                              **selected, source_validity=after.validity,
                              cache_currentness=after.currentness, source_generation=None,
                              owner_observation=receipt)
+        response = {"ok": True, "result": result}
+        bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
+        return response
+
+    def _read_work(self, frame):
+        """Read the workspace work-queue projection through existing custody.
+
+        Mirrors the programs pipeline (cache bracket → SAME → no selection),
+        but inserts one bounded Runtime root-list acquisition between the
+        two cache samples and threads the acquisition receipt into the
+        observation.  The pure :func:`compose_work_queue_v1` compositor
+        owns all per-row grouping and the queue-level effect_exception
+        read; this method never re-derives them.
+        """
+        # Work carries no selection (mirrors programs); the selection field
+        # is None by the closed-frame validator.  Anything else is a frame
+        # contract violation that should refuse 400 before reaching here.
+        before = self.cache.snapshot()
+        if not _qualified(before, None):
+            raise ValueError("source_unavailable")
+        acquire = self._work_acquire
+        if acquire is None:
+            from control_plane.fabric_job_view import list_roots_v2_from_runtime
+            acquire = list_roots_v2_from_runtime
+        compose = self._work_compose
+        if compose is None:
+            from control_plane.work_queue_projection import compose_work_queue_v1
+            compose = compose_work_queue_v1
+        observed_runtime = (
+            self._bounded_runtime(self.runtime)
+            if self._bounded_runtime else self.runtime
+        )
+        root_list = acquire(
+            observed_runtime,
+            armed=self.armed,
+            runtime_identity=self.runtime_identity,
+        )
+        acquisition = root_list.get("runtime", {}).get("acquisition", {})
+        generation = acquisition.get("generation")
+        runtime_receipt = (
+            dict(generation, snapshot_digest=acquisition.get("snapshot_digest"))
+            if isinstance(generation, dict) else None
+        )
+        # Runtime acquisition is finalized (including namespace/close checks)
+        # before the second CCR sample.  SAME remains an as-of read fact.
+        after = self.cache.snapshot()
+        if not _qualified(after, None):
+            raise ValueError("source_unavailable")
+        receipt = _observation(before, after, None, runtime_receipt)
+        if receipt["state"] != "SAME":
+            raise ValueError("source_unavailable")
+        result = compose(
+            root_list,
+            control_room=before.document,
+            source_observation=receipt,
+        )
         response = {"ok": True, "result": result}
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
@@ -674,7 +737,8 @@ class WorkspaceReadService:
             permission_before = permission_stamp(self.authorize, frame["principal"])
         except Exception:
             return error("access_denied", 403)
-        task = asyncio.create_task(asyncio.to_thread(self._read, frame))
+        worker = self._read_work if frame["operation"] == "work" else self._read
+        task = asyncio.create_task(asyncio.to_thread(worker, frame))
         try:
             result = await await_owned(task)
             try:
@@ -692,6 +756,19 @@ class WorkspaceReadService:
                            "control_room": None, "runtime": None}
                 return {"ok": True, "result": {"schema": PROGRAMS_SCHEMA, "availability": "UNAVAILABLE",
                     "control_room": None, "source_observation": receipt, "reason_codes": ["source_unavailable"]}}
+            if frame["operation"] == "work":
+                from control_plane.work_queue_projection import (
+                    _GROUP_ORDER as _WQ_GROUPS, _utc_now as _wq_utc_now,
+                )
+                receipt = {"schema": OBSERVATION_SCHEMA, "state": "UNKNOWN", "selection": None,
+                           "control_room": None, "runtime": None}
+                return {"ok": True, "result": {"schema": WORK_SCHEMA, "availability": "UNAVAILABLE",
+                    "generated_at": _wq_utc_now(),
+                    "lifecycle_source": None,
+                    "effect_exception": {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER", "observable": False},
+                    "coverage": {"count": 0, "total": None, "truncated": False, "completeness": "PARTIAL"},
+                    "groups": {key: [] for key in _WQ_GROUPS},
+                    "source_observation": receipt, "reason_codes": ["source_unavailable"]}}
             return error("source_unavailable", 503)
 
     async def _handle_v2_frame(self, frame):
