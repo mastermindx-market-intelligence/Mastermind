@@ -45,6 +45,7 @@ from integrations.business_mcp_auth.contracts import VerifiedPrincipal
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.mastermind_executive_app.app import _authenticate
 from integrations.mastermind_workspace_app import contract
+from common.executive_workspace_contract import WORK_SCHEMA
 
 __all__ = ["WorkspaceAppConfig", "create_workspace_app"]
 
@@ -58,6 +59,7 @@ _ENVELOPE_STATUS_TO_HTTP: dict[int, int] = {400: 400, 403: 403, 404: 404, 503: 5
 #: Routes — fixed, full /workspace/... prefix preserved verbatim for parent
 #: mounting at any depth.  No path parameters, no template substitution.
 _PROGRAMS_ROUTE = "/workspace/programs/current"
+_WORK_ROUTE = "/workspace/work/current"
 _MISSION_ROUTE = "/workspace/mission/current"
 _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
 _RESULT_ROUTE = "/workspace/result/current"
@@ -89,7 +91,8 @@ def _envelope_response(envelope: Mapping[str, Any]) -> JSONResponse:
             body = contract.bounded_canonical(dict(result))
         except (TypeError, ValueError):
             return _refuse_json(503, "source_unavailable")
-        status = 503 if result.get("schema") == contract.PROGRAMS_SCHEMA and result.get("availability") == "UNAVAILABLE" else 200
+        status = 503 if (result.get("schema") in (contract.PROGRAMS_SCHEMA, WORK_SCHEMA)
+                         and result.get("availability") == "UNAVAILABLE") else 200
         return Response(body, status_code=status, media_type="application/json", headers={"Cache-Control": "no-store"})
     if ok is False:
         if set(envelope) != {"ok", "status", "error"}:
@@ -490,6 +493,75 @@ async def programs_current(
     return _envelope_response(envelope)
 
 
+async def work_current(
+    request: Request, *, config: WorkspaceAppConfig,
+) -> JSONResponse:
+    """Handle ``GET /workspace/work/current``.
+
+    Same envelope as :func:`programs_current`; no selection, no query
+    string, no body.  Operates on the closed ``operation: "work"`` frame
+    that the read service turns into a work-queue projection through the
+    existing workspace read seam.
+    """
+    principal_or_response = await _authenticate(
+        request, config.authenticator, clock=config.now,
+    )
+    if isinstance(principal_or_response, JSONResponse):
+        return _with_no_store(principal_or_response)
+    principal = principal_or_response
+
+    body_response = await _reject_any_body(request)
+    if body_response is not None:
+        return body_response
+
+    raw_query = request.scope.get("query_string") or b""
+    if raw_query:
+        return _refuse_json(400, "invalid_input")
+
+    permit = _check_authorize(config.authorize_principal, principal)
+    if permit is not None:
+        return permit
+
+    try:
+        permission_before = contract.permission_stamp(config.authorize_principal, principal)
+        principal_frame = contract.principal_frame(principal)
+    except ValueError:
+        return _refuse_json(403, "access_denied")
+
+    try:
+        frame = contract.validate_frame({
+            "schema": contract.FRAME_SCHEMA,
+            "operation": "work",
+            "selection": None,
+            "principal": principal_frame,
+        })
+    except ValueError:
+        return _refuse_json(400, "invalid_input")
+
+    try:
+        envelope = await config.client.request(frame)
+    except Exception:
+        return _refuse_json(503, "internal_error")
+
+    try:
+        instant = config.now()
+        if type(instant) is not int or instant >= principal.expires_at:
+            return _refuse_json(403, "access_denied")
+    except Exception:
+        return _refuse_json(503, "internal_error")
+
+    permit_after = _check_authorize(config.authorize_principal, principal)
+    if permit_after is not None:
+        return permit_after
+
+    try:
+        if contract.permission_stamp(config.authorize_principal, principal) != permission_before:
+            return _refuse_json(403, "access_denied")
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    return _envelope_response(envelope)
+
+
 async def mission_current(
     request: Request, *, config: WorkspaceAppConfig,
 ) -> JSONResponse:
@@ -709,6 +781,7 @@ class _RawPathFence:
     _ALLOWED_METHODS = frozenset({"GET"})
     _KNOWN_ROUTES = (
         _PROGRAMS_ROUTE,
+        _WORK_ROUTE,
         _MISSION_ROUTE,
         _MISSION_V3_ROUTE,
         _RESULT_ROUTE,
@@ -752,6 +825,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def programs_endpoint(request: Request) -> JSONResponse:
         return await programs_current(request, config=config)
 
+    async def work_endpoint(request: Request) -> JSONResponse:
+        return await work_current(request, config=config)
+
     async def mission_endpoint(request: Request) -> JSONResponse:
         return await mission_current(request, config=config)
 
@@ -763,6 +839,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
 
     routes = [
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
+        Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
         Route(_MISSION_ROUTE, mission_endpoint, methods=["GET"]),
         Route(_MISSION_V3_ROUTE, mission_v3_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),

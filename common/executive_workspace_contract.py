@@ -21,6 +21,7 @@ RESULT_BODY_SCHEMA = "mastermind.workspace_role_result.v1"
 PROJECTION_SCHEMA = "mastermind.fabric_role_result_view.v1"
 FABRIC_VIEW_SCHEMA_V2 = "mastermind.fabric_job_view.v2"
 FABRIC_VIEW_SCHEMA_V3 = "mastermind.fabric_job_view.v3"
+WORK_SCHEMA = "mastermind.workspace_work_queue.v1"
 MAX_REQUEST_BYTES = 8192
 MAX_RESPONSE_BYTES = 2_000_000
 #: Result response ceiling — the entire canonical UTF-8 socket
@@ -143,14 +144,14 @@ def response_ceiling_for(operation):
 
 def validate_frame(frame):
     if (type(frame) is not dict or set(frame) != {"schema", "operation", "selection", "principal"}
-            or frame["schema"] != FRAME_SCHEMA or frame["operation"] not in ("programs", "mission")
+            or frame["schema"] != FRAME_SCHEMA or frame["operation"] not in ("programs", "work", "mission")
             or type(frame["principal"]) is not dict or set(frame["principal"]) != PRINCIPAL_KEYS
             or frame["principal"]["resource"] != RESOURCE or frame["principal"]["scopes"] != [SCOPE]
             or any(type(frame["principal"][key]) is not str or not 1 <= len(frame["principal"][key]) <= 256
                    for key in PRINCIPAL_KEYS - {"scopes"})
             or len(canonical(frame)) + 1 > MAX_REQUEST_BYTES):
         raise ValueError("invalid_input")
-    if frame["operation"] == "programs":
+    if frame["operation"] in ("programs", "work"):
         if frame["selection"] is not None:
             raise ValueError("invalid_input")
     else:

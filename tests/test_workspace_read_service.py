@@ -176,3 +176,149 @@ def test_configured_permission_stamp_unavailable_refuses(stage, tmp_path):
     result = run(service(cache, acquire=acquire, authorize=authorize))
     assert result["status"] == 403 and result["error"]["code"] == "access_denied"
     assert len(acquired) == (stage == "after")
+
+
+# ---------------------------------------------------------------------------
+# work-queue operation
+# ---------------------------------------------------------------------------
+
+
+def _work_frame():
+    return {"schema": FRAME_SCHEMA, "operation": "work", "selection": None,
+            "principal": {"policy_id": "workspace-test", "issuer_digest": "a" * 64,
+                "subject_digest": "b" * 64, "client_ref": "fixture-web",
+                "resource": RESOURCE, "scopes": [SCOPE]}}
+
+
+def _same_generation():
+    return {"schema": "mastermind.runtime_read_observation.v1",
+            "state": "SAME", "source_identity": "c" * 64,
+            "before": 1, "after": 1}
+
+
+def _root_list_payload(*, rows, count=None, db_present=True, generation_state="SAME",
+                      degraded=(), truncated=False):
+    return {
+        "schema": "mastermind.fabric_job_root_list.v2",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "runtime": {"root": "/tmp/fake", "db_present": db_present, "identity": None,
+                    "acquisition": {"schema": "mastermind.fabric_runtime_acquisition.v1",
+                                    "query": {"kind": "root_discovery"},
+                                    "owner": "executive_runtime",
+                                    "snapshot_digest": "d" * 64,
+                                    "budgets": {},
+                                    "truncation": {"jobs": False, "attempt_job_ids": [],
+                                                    "roots": truncated, "projection": False},
+                                    "provenance": {"state": "COMPLETE", "unjoined_job_ids": []},
+                                    "generation": {"schema": "mastermind.runtime_read_observation.v1",
+                                                    "state": generation_state,
+                                                    "source_identity": "c" * 64,
+                                                    "before": 1, "after": 1}}},
+        "roots": rows,
+        "count": count if count is not None else len(rows),
+        "total": None if truncated else len(rows),
+        "truncated": truncated,
+        "degraded": list(degraded),
+    }
+
+
+def test_work_available_happy_path(tmp_path):
+    owners, clock, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[
+        {"job_id": "JOB-1", "status": "QUEUED", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+        {"job_id": "JOB-2", "status": "RUNNING", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        return {"schema": "mastermind.workspace_work_queue.v1",
+                "availability": "AVAILABLE", "composed": True,
+                "source_observation": kwargs.get("source_observation")}
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    doc = result["result"]
+    assert doc["schema"] == "mastermind.workspace_work_queue.v1"
+    assert doc["availability"] == "AVAILABLE"
+    assert doc["composed"] is True
+    assert doc["source_observation"]["state"] == "SAME"
+    # The root list itself was passed verbatim to the composer.
+    assert root_list["roots"][0]["job_id"] == "JOB-1"
+
+
+def test_work_non_same_observation_refuses_source_unavailable(tmp_path):
+    owners, clock, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[], count=0,
+                                    generation_state="CONFLICT")
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        raise AssertionError("composer should never be called on CONFLICT")
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    assert result["ok"] is True
+    assert result["result"]["availability"] == "UNAVAILABLE"
+    assert "source_unavailable" in result["result"]["reason_codes"]
+
+
+def test_work_degraded_root_list_renders_unavailable_envelope(tmp_path):
+    """Degraded (db_present=False) root list → queue-level UNAVAILABLE."""
+    owners, clock, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[], count=0, db_present=False)
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        from control_plane.work_queue_projection import compose_work_queue_v1
+        return compose_work_queue_v1(root_list_arg,
+                                      control_room=kwargs.get("control_room"))
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    doc = result["result"]
+    assert doc["availability"] == "UNAVAILABLE"
+    assert doc["reason_codes"] == ["LIFECYCLE_UNAVAILABLE"]
+    assert all(len(rows) == 0 for rows in doc["groups"].values())
+
+
+def test_work_response_bound_respected(tmp_path):
+    """The whole {ok:true,result:BODY} envelope fits under MAX_RESPONSE_BYTES-1."""
+    from common.executive_workspace_contract import MAX_RESPONSE_BYTES
+    owners, clock, cache = cache_fixture(tmp_path)
+    # Build a root list with many synthetic rows; the response must still serialize.
+    rows = [{"job_id": f"JOB-{i}", "status": "RUNNING", "depth": 0,
+             "parent_job_id": None, "orchestration_role": "aggregation"}
+            for i in range(1, 33)]
+    root_list = _root_list_payload(rows=rows)
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        from control_plane.work_queue_projection import compose_work_queue_v1
+        return compose_work_queue_v1(root_list_arg,
+                                      control_room=kwargs.get("control_room"))
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    envelope = {"ok": True, "result": result["result"]}
+    serialized = json_bytes(envelope)
+    assert len(serialized) <= MAX_RESPONSE_BYTES - 1
+
+
+def json_bytes(value):
+    import json
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
