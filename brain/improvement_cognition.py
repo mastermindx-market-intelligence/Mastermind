@@ -2,16 +2,19 @@
 
 This module is deliberately not a planner, queue, ranker, authority source, or store.
 It takes one already-grounded private discovery report, freezes a bounded evidence packet,
-runs exactly one no-tools/no-log reasoning turn, and validates a closed advisory grammar.
+runs exactly one no-tools/no-run-or-thinking-log reasoning turn, and validates a closed
+advisory grammar. Existing provider cost/accounting owners may still record their normal
+bounded usage metadata; this module creates no proposal/session store of its own.
 
 The returned draft cannot become a Chairman Cognition StrategicOption without the existing
-A1/A2 source/classification composition. It grants no execution authority and persists
-nothing.
+A1/A2 source/classification composition. It grants no execution authority.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import tempfile
 from typing import Any
 
 from control_plane.wake_events import canonical_json_bytes
@@ -304,22 +307,40 @@ def _public_safe_draft(draft: Any) -> dict:
     }
 
 
+def _opaque_digest(label: str, value: Any, *, prefix: str | None = None) -> str:
+    raw = label.encode("ascii") + b"\0" + canonical_json_bytes(value)
+    digest = hashlib.sha256(raw).hexdigest()
+    return (prefix or "sha256:") + (digest[:24] if prefix else digest)
+
+
 def evaluation_packet(draft: Any) -> dict:
-    """Public-safe evaluation seam; keeps full hypothesis prose out of public stores."""
+    """Public-safe evaluation metadata with only internally derived opaque identities."""
     draft = _public_safe_draft(draft)
     proposals = draft["proposals"]
+    private_binding = {
+        "schema": draft["schema"],
+        "evidence_digest": draft["evidence_digest"],
+        "proposals": proposals,
+    }
     return {
         "schema": "mastermind.improvement_proposal_evaluation_packet.v1",
-        "evidence_digest": draft.get("evidence_digest"),
-        "proposal_ids": [row["proposal_id"] for row in proposals],
+        "evidence_binding_digest": _opaque_digest(
+            "mastermind.improvement-public-evidence.v1",
+            draft["evidence_digest"],
+        ),
+        "proposal_refs": [
+            _opaque_digest(
+                "mastermind.improvement-public-proposal.v1",
+                {"index": index, "proposal": row},
+                prefix="proposal:",
+            )
+            for index, row in enumerate(proposals)
+        ],
         "proposal_count": len(proposals),
-        "draft_digest": "sha256:" + __import__("hashlib").sha256(
-            canonical_json_bytes({
-                "schema": draft.get("schema"),
-                "evidence_digest": draft.get("evidence_digest"),
-                "proposals": proposals,
-            })
-        ).hexdigest(),
+        "draft_digest": _opaque_digest(
+            "mastermind.improvement-public-draft.v1",
+            private_binding,
+        ),
         "requires_independent_judge": True,
         "same_model_self_grade_is_acceptance": False,
         "execution_authority_granted": False,
