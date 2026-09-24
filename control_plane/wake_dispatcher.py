@@ -41,6 +41,7 @@ from control_plane.wake_ledger import (
     LedgerPhase,
     ObligationStatus,
     UNARMED_RETRY_POLICY,
+    WakeLedgerError,
     WakeLedgerRecord,
     WakeRetryPolicy,
     attempt_record,
