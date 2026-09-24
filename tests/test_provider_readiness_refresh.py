@@ -1416,12 +1416,27 @@ def test_t13b_crash_between_temp_write_and_replace_leaves_no_partial_sibling(
     # (within this test) delegate to the real implementation.
     real_replace = os.replace
     call_count = [0]
+    expected_sibling = (
+        f"readiness.json.superseded-{hashlib.sha256(pre_bytes).hexdigest()[:16]}.json"
+    )
 
     def _replace_once_fails(src: str, dst: str) -> None:
         call_count[0] += 1
         if call_count[0] == 1:
+            # Bind the simulated crash to the sibling replace itself, so a
+            # future earlier os.replace cannot silently relocate the crash.
+            assert str(dst).endswith(expected_sibling), (
+                "first os.replace must be the superseded-sibling rename; got %r" % dst
+            )
             raise OSError("simulated crash between temp write and atomic rename")
         return real_replace(src, dst)
+
+    def _dot_temps() -> list:
+        return sorted(
+            p.name for p in tmp_path.iterdir()
+            if p.name.startswith(".")
+            and any(tag in p.name for tag in (".tmp-", ".refresh-", ".final-"))
+        )
 
     monkeypatch.setattr(readiness.os, "replace", _replace_once_fails)
 
@@ -1452,10 +1467,10 @@ def test_t13b_crash_between_temp_write_and_replace_leaves_no_partial_sibling(
         "digest-named sibling must not exist after the simulated crash"
     )
 
-    # No leftover .tmp- files anywhere in tmp_path.
-    leftovers = [p for p in tmp_path.iterdir() if p.name.startswith(".readiness.json.superseded-") and ".tmp-" in p.name]
+    # No leftover dot-temps of any kind (.tmp-, .refresh-, .final-) in tmp_path.
+    leftovers = _dot_temps()
     assert leftovers == [], (
-        "no .tmp- files must remain after the simulated crash; got %r" % leftovers
+        "no temp files must remain after the simulated crash; got %r" % leftovers
     )
 
     # Live receipt is byte-identical to the pre-state.
@@ -1489,4 +1504,7 @@ def test_t13b_crash_between_temp_write_and_replace_leaves_no_partial_sibling(
     )
     assert (tmp_path / sibling_name).read_bytes() == receipt_bytes, (
         "sibling must be byte-exact to the original receipt bytes"
+    )
+    assert _dot_temps() == [], (
+        "no temp files must remain after the successful retry; got %r" % _dot_temps()
     )
