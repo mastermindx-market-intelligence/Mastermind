@@ -513,6 +513,8 @@ class WorkspaceReadService:
                 derive_work_producers_v1,
             )
             producers = derive_work_producers_v1(before.document)
+            # NB: injected composers (test fakes) MUST accept the four
+            # producer kwargs below — all in-repo fakes take ``**kwargs``.
             result = compose(
                 root_list,
                 control_room=before.document,

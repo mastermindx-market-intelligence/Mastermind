@@ -33,8 +33,12 @@ def cache_fixture(tmp_path):
             "responsibilities": [{
             "responsibility_ref": "WS:ONE", "root_job_id": "JOB-001", "freshness": "current",
             "root_job_candidates": ["JOB-001"], "root_job_ambiguous": False,
-            "runtime_root_state": "RESOLVED", "validity": {key: dict(meta) for key in
-                ("card", "decision_current", "dispatch", "owed_open_age")}}]}}
+            "runtime_root_state": "RESOLVED", "is_actionable": True,
+            "owed_turn": {"seat": "worker", "reason": "blocker_targets_seat"},
+            "validity": {key: dict(meta, sources=[{"observed_at": STAMP,
+                                                       "freshness": "current"}])
+                          for key in ("card", "decision_current", "dispatch",
+                                       "owed_open_age")}}]}}
     owner = ccr.ServerConfig(repo_root=tmp_path, macro_root=None, bindings_path=None,
                             token="fixture", origin="http://127.0.0.1:0", port=0,
                             validity_sample_fn=lambda: tuple(clock))
@@ -969,6 +973,23 @@ def _extend_cache_with_card(tmp_path, *, root_job_id="JOB-1",
             "effect_state": "active", "capacity_state": "ready",
             "previous_attempt_id": None, "movement_reason_code": None,
         }
+    # B1 eligibility gate fields — closed-set defaults so legacy
+    # _extend_cache_with_card callers don't have to specify them.
+    card["is_actionable"] = True
+    card.setdefault("owed_turn", {"seat": seat})
+    if "reason" not in card["owed_turn"]:
+        if seat == "ceo":
+            card["owed_turn"]["reason"] = "blocker_targets_seat"
+        elif seat == "worker":
+            card["owed_turn"]["reason"] = "blocker_targets_seat"
+        else:
+            card["owed_turn"]["reason"] = "attention_targets_seat"
+    card.setdefault("validity", {"card": {}})
+    card["validity"].setdefault("card", {})
+    if "sources" not in card["validity"]["card"]:
+        card["validity"]["card"]["sources"] = [
+            {"observed_at": qualified_at, "freshness": "current"},
+        ]
     doc["autonomy"]["responsibilities"].append(card)
     doc["work"].append({"work_ref": responsibility_ref,
                         "agent_os": {"title": "Producer"}})
@@ -1008,7 +1029,7 @@ def test_wqp1_h_route_with_ceo_card_renders_need_sol(tmp_path):
     assert row["next_actor"]["value"] == "NEEDS_SOL"
     assert row["next_actor"]["source"] == "AGENT_OS"
     assert row["next_actor"]["reason"] == "evidence_supplied"
-    assert row["next_actor"]["evidence_ref"] == "WS:PROD"
+    assert row["next_actor"]["evidence_ref"] == "b" * 64
     assert row["next_actor"]["observed_at"] == STAMP
 
 
@@ -1034,7 +1055,7 @@ def test_wqp1_h_route_with_worker_card_renders_need_worker(tmp_path):
     row = doc["groups"]["NEEDS_WORKER"][0]
     assert row["root_job_id"] == submitted_job_id
     assert row["next_actor"]["value"] == "NEEDS_WORKER"
-    assert row["next_actor"]["evidence_ref"] == "WS:PROD"
+    assert row["next_actor"]["evidence_ref"] == "b" * 64
 
 
 def test_wqp1_h_route_with_waiting_capacity_card_renders_waiting_capacity(tmp_path):
@@ -1095,7 +1116,7 @@ def test_wqp1_h_route_with_effect_unknown_card_renders_effect_exception(tmp_path
     assert row["effect"]["value"] == "EFFECT_UNKNOWN"
     assert row["effect"]["source"] == "EFFECT_PRODUCER"
     assert row["effect"]["reason"] == "evidence_supplied"
-    assert row["effect"]["evidence_ref"] == "WS:PROD"
+    assert row["effect"]["evidence_ref"] == "b" * 64
 
 
 def test_wqp1_h_route_derivation_value_error_refuses_as_projection_refused(tmp_path, monkeypatch):
