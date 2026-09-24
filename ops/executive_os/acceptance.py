@@ -741,6 +741,22 @@ def _validate_protected_membership_snapshot(
         reviewed_users.add(AGENT_RELAY_USER)
         reviewed_user_ids[AGENT_RELAY_USER] = AGENT_RELAY_UID
         protected_group_ids[AGENT_RELAY_GROUP] = AGENT_RELAY_GID
+    else:
+        reserved_uid_owners = {
+            str(candidate)
+            for candidate, candidate_record in users.items()
+            if isinstance(candidate_record, Mapping)
+            and candidate_record.get("unique_uid") == AGENT_RELAY_UID
+        }
+        if reserved_uid_owners:
+            raise AcceptanceError("reserved Agent Relay UID has unexpected owners")
+        reserved_gid_owners = {
+            str(candidate)
+            for candidate, candidate_gid in group_primary_gids.items()
+            if candidate_gid == AGENT_RELAY_GID
+        }
+        if reserved_gid_owners:
+            raise AcceptanceError("reserved Agent Relay GID has unexpected owners")
     reviewed_uuids: dict[str, str] = {}
     for name in reviewed_users:
         record = users.get(name)

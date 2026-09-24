@@ -898,6 +898,28 @@ def test_acceptance_protected_membership_rejects_agent_relay_uid_or_gid_alias() 
         _validate_relay_membership(gid_alias)
 
 
+def test_acceptance_absent_agent_relay_rejects_foreign_reserved_uid_owner() -> None:
+    import pytest
+
+    snapshot = _membership_snapshot()
+    snapshot["users"]["foreign-relay-uid-owner"] = {
+        "primary_gid": 20,
+        "unique_uid": 457,
+        "generated_uid": "00000000-0000-4000-8000-000000000099",
+    }
+    with pytest.raises(RuntimeError, match="reserved Agent Relay UID has unexpected owners"):
+        _validate_membership(snapshot)
+
+
+def test_acceptance_absent_agent_relay_rejects_foreign_reserved_gid_owner() -> None:
+    import pytest
+
+    snapshot = _membership_snapshot()
+    snapshot["group_primary_gids"]["foreign-relay-gid-owner"] = 457
+    with pytest.raises(RuntimeError, match="reserved Agent Relay GID has unexpected owners"):
+        _validate_membership(snapshot)
+
+
 def test_membership_census_rejects_hidden_primary_gid_user() -> None:
     import pytest
 
