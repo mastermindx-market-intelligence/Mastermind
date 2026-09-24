@@ -4,11 +4,26 @@ Run with::
 
     python3 -B tests/fixtures/workspace_work_queue_v1/_regenerate.py
 
-The fixtures are byte-stable inputs the product integrator consumes.  The
-matching test (``tests/test_work_queue_projection.py::test_r6_bytes_match_*``)
-re-runs the composer against the same root-list inputs and asserts
+Three fixtures are produced:
+
+* ``available.json`` — a healthy ``AVAILABLE`` projection over four
+  representative rows (QUEUED, RUNNING, COMPLETED, FAILED) with no
+  producer evidence supplied.
+* ``unavailable.json`` — the composer's ``UNAVAILABLE`` branch over a
+  degraded bounded acquisition (B2: ``coverage.completeness = "PARTIAL"``).
+* ``effect_exception.json`` — an ``AVAILABLE`` projection whose queue-level
+  ``effect_exception`` reads ``EFFECT_UNKNOWN`` AND one row carries an
+  EFFECT_UNKNOWN producer effect (R4 sticky).
+
+The fixtures are byte-stable inputs the product integrator consumes. The
+matching tests
+(``tests/test_work_queue_projection.py::test_r6_bytes_match_deterministic_*``)
+re-run the composer against the same root-list inputs and assert
 byte-identity.  This script is the deterministic producer — keep its
 inputs frozen; do not let it read clocks or files.
+
+Note: ``generated_at`` is the composer wall-clock — every fixture sets it
+to the same frozen constant below so two regenerations are byte-identical.
 """
 from __future__ import annotations
 
@@ -20,6 +35,7 @@ from control_plane.work_queue_projection import compose_work_queue_v1
 HERE = Path(__file__).parent
 
 GENERATED_AT = "2026-09-23T00:00:00Z"
+EVIDENCE_AS_OF = "2026-09-23T00:01:00Z"
 SOURCE_IDENTITY = "b" * 64
 SNAPSHOT_DIGEST = "a" * 64
 
@@ -92,7 +108,9 @@ AVAILABLE_ROOT_LIST = {
     "degraded": [],
 }
 
-# Unavailable fixture: degraded bounded acquisition.
+# Unavailable fixture: degraded bounded acquisition.  B2 forces the
+# coverage envelope to claim PARTIAL completeness (count=0, total=None,
+# truncated from root_list) — never COMPLETE on a degraded source.
 UNAVAILABLE_ROOT_LIST = {
     "schema": "mastermind.fabric_job_root_list.v2",
     "generated_at": GENERATED_AT,
@@ -105,7 +123,11 @@ UNAVAILABLE_ROOT_LIST = {
     "degraded": ["bounded acquisition unavailable: read failed"],
 }
 
-# effect_exception fixture: control_room autonomy reports EFFECT_UNKNOWN on one row.
+# effect_exception fixture: control_room autonomy reports EFFECT_UNKNOWN on one
+# row, AND the same row carries a producer-level EFFECT_UNKNOWN effect
+# (evidence_ref/observed_at supplied).  The queue-level effect_exception
+# is EFFECT_UNKNOWN; the producer's evidence sticks regardless of any
+# later staleness (R4).
 EFFECT_CONTROL_ROOM = {
     "schema": "mastermind.chairman_control_room.v1",
     "generated_at": GENERATED_AT,
@@ -136,7 +158,9 @@ EFFECT_EXCEPTION_ROOT_LIST = {
     "degraded": [],
 }
 
-EFFECTS_INPUT = {"JOB-1": {"state": "EFFECT_UNKNOWN", "carrier": "agent-os:effect"}}
+EFFECTS_INPUT = {"JOB-1": {"state": "EFFECT_UNKNOWN", "carrier": "agent-os:effect",
+                          "evidence_ref": "agent-os:effect",
+                          "observed_at": "2026-09-23T00:00:00Z"}}
 
 
 def _dump(name, document):
@@ -156,6 +180,7 @@ def main():
     effect_exception = compose_work_queue_v1(EFFECT_EXCEPTION_ROOT_LIST,
                                               control_room=EFFECT_CONTROL_ROOM,
                                               effects=EFFECTS_INPUT,
+                                              evidence_as_of=EVIDENCE_AS_OF,
                                               generated_at=GENERATED_AT)
     _dump("effect_exception.json", effect_exception)
 

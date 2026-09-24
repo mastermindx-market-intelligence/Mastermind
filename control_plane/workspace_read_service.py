@@ -759,10 +759,18 @@ class WorkspaceReadService:
             if frame["operation"] == "work":
                 from control_plane.work_queue_projection import (
                     _GROUP_ORDER as _WQ_GROUPS, _utc_now as _wq_utc_now,
+                    WORK_QUEUE_SCHEMA,
                 )
                 receipt = {"schema": OBSERVATION_SCHEMA, "state": "UNKNOWN", "selection": None,
                            "control_room": None, "runtime": None}
-                return {"ok": True, "result": {"schema": WORK_SCHEMA, "availability": "UNAVAILABLE",
+                # B2: key-for-key shape parity with the composer's UNAVAILABLE
+                # branch — only ``generated_at`` (wall-clock), ``source_observation``
+                # (route-built receipt vs composer-supplied) and ``reason_codes``
+                # (route refusal reason vs composer's lifecycle-unavailable flag)
+                # legitimately differ.  ``lifecycle_source`` is ``None`` here
+                # because the read-service fallback fires BEFORE any root list
+                # is admitted, so the runtime identity cannot be echoed.
+                return {"ok": True, "result": {"schema": WORK_QUEUE_SCHEMA, "availability": "UNAVAILABLE",
                     "generated_at": _wq_utc_now(),
                     "lifecycle_source": None,
                     "effect_exception": {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER", "observable": False},

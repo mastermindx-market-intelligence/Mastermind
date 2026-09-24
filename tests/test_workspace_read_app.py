@@ -822,6 +822,84 @@ def test_work_current_happy_path_returns_envelope(rsa_key):
     assert frame["principal"]["scopes"] == [SCOPE]
 
 
+# ---------------------------------------------------------------------------
+# B5 — work-current HTTP 503 mapping for UNAVAILABLE body (closed composer shape)
+# ---------------------------------------------------------------------------
+
+
+def test_work_current_unavailable_body_maps_to_503_with_no_store(rsa_key):
+    """B5: a fake client returning a closed WORK_SCHEMA UNAVAILABLE body
+    renders HTTP 503, ``Cache-Control: no-store``, and passes the body
+    through verbatim.  This is the contract the public App binds to —
+    the read service's typed refusal becomes a 503 here, never a 200."""
+    from common.executive_workspace_contract import WORK_SCHEMA
+    unavailable_body = {
+        "schema": WORK_SCHEMA,
+        "availability": "UNAVAILABLE",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "lifecycle_source": None,
+        "effect_exception": {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                             "observable": False},
+        "coverage": {"count": 0, "total": None, "truncated": False,
+                     "completeness": "PARTIAL"},
+        "groups": {"EFFECT_EXCEPTION": [], "NEEDS_SOL": [], "NEEDS_WORKER": [],
+                   "WAITING_CAPACITY": [], "RUNNING": [], "QUEUED": [],
+                   "COMPLETED_NOT_ACCEPTED": [], "TERMINAL": [], "UNKNOWN": []},
+        "source_observation": {"schema": "mastermind.workspace_source_observation.v1",
+                                "state": "UNKNOWN", "selection": None,
+                                "control_room": None, "runtime": None},
+        "reason_codes": ["LIFECYCLE_UNAVAILABLE"],
+    }
+    envelope = {"ok": True, "result": unavailable_body}
+    fake = _FakeWorkspaceClient(envelope=envelope)
+    test_client, _ = _make_app(rsa_key, client=fake)
+    token = _workspace_token(rsa_key)
+    response = test_client.get(
+        "/workspace/work/current",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 503
+    assert response.headers["Content-Type"] == "application/json"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json() == unavailable_body
+    assert len(fake.calls) == 1
+
+
+def test_work_current_available_body_maps_to_200_with_no_store(rsa_key):
+    """B5 sibling: a healthy AVAILABLE work body renders HTTP 200 with
+    ``Cache-Control: no-store`` — the success path stays cache-free."""
+    from common.executive_workspace_contract import WORK_SCHEMA
+    available_body = {
+        "schema": WORK_SCHEMA,
+        "availability": "AVAILABLE",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "lifecycle_source": {"schema": "mastermind.fabric_job_root_list.v2",
+                             "runtime": None},
+        "effect_exception": {"value": "NONE", "scope": "RUNTIME_CURRENT_WORKER",
+                             "observable": False},
+        "coverage": {"count": 0, "total": 0, "truncated": False,
+                     "completeness": "COMPLETE"},
+        "groups": {"EFFECT_EXCEPTION": [], "NEEDS_SOL": [], "NEEDS_WORKER": [],
+                   "WAITING_CAPACITY": [], "RUNNING": [], "QUEUED": [],
+                   "COMPLETED_NOT_ACCEPTED": [], "TERMINAL": [], "UNKNOWN": []},
+        "source_observation": {"schema": "mastermind.workspace_source_observation.v1",
+                                "state": "SAME", "selection": None,
+                                "control_room": None, "runtime": None},
+        "reason_codes": [],
+    }
+    envelope = {"ok": True, "result": available_body}
+    fake = _FakeWorkspaceClient(envelope=envelope)
+    test_client, _ = _make_app(rsa_key, client=fake)
+    token = _workspace_token(rsa_key)
+    response = test_client.get(
+        "/workspace/work/current",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json() == available_body
+
+
 def test_work_current_post_refuses_405(rsa_key):
     test_client, fake = _make_app(rsa_key)
     token = _workspace_token(rsa_key)

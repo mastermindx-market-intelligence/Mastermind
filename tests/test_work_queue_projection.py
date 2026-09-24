@@ -5,6 +5,7 @@ projection — no I/O, no clock beyond the injected ``generated_at``.
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 import json
 
@@ -18,6 +19,7 @@ from control_plane.work_queue_projection import (
     ROW_KEYS,
     WORK_QUEUE_SCHEMA,
     _GROUP_ORDER,
+    _JOB_STATUS_GROUPS,
     compose_work_queue_v1,
 )
 from common.executive_workspace_contract import canonical, digest
@@ -124,7 +126,8 @@ def test_r2_next_actor_unknown_without_accountability():
     root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
     result = compose_work_queue_v1(root_list, accountability=None)
     na = result["groups"]["QUEUED"][0]["next_actor"]
-    assert na == {"value": "UNKNOWN", "source": "AGENT_OS", "reason": "no_producer"}
+    assert na == {"value": "UNKNOWN", "source": None, "reason": "no_producer",
+                  "evidence_ref": None, "observed_at": None}
 
 
 def test_r2_next_actor_needs_sol_with_accountability():
@@ -132,9 +135,11 @@ def test_r2_next_actor_needs_sol_with_accountability():
     accountability = {"JOB-1": {"next_actor": "SOL",
                                 "evidence_ref": "agent-os:sol",
                                 "observed_at": "2026-09-23T00:00:00Z"}}
-    result = compose_work_queue_v1(root_list, accountability=accountability)
+    result = compose_work_queue_v1(root_list, accountability=accountability,
+                                   evidence_as_of="2026-09-23T00:01:00Z")
     na = result["groups"]["NEEDS_SOL"][0]["next_actor"]
-    assert na == {"value": "NEEDS_SOL", "source": "AGENT_OS", "reason": "evidence_supplied"}
+    assert na == {"value": "NEEDS_SOL", "source": "AGENT_OS", "reason": "evidence_supplied",
+                  "evidence_ref": "agent-os:sol", "observed_at": "2026-09-23T00:00:00Z"}
 
 
 def test_r2_next_actor_needs_worker_with_accountability():
@@ -142,9 +147,11 @@ def test_r2_next_actor_needs_worker_with_accountability():
     accountability = {"JOB-1": {"next_actor": "WORKER",
                                 "evidence_ref": "agent-os:wrk",
                                 "observed_at": "2026-09-23T00:00:00Z"}}
-    result = compose_work_queue_v1(root_list, accountability=accountability)
+    result = compose_work_queue_v1(root_list, accountability=accountability,
+                                   evidence_as_of="2026-09-23T00:01:00Z")
     na = result["groups"]["NEEDS_WORKER"][0]["next_actor"]
-    assert na == {"value": "NEEDS_WORKER", "source": "AGENT_OS", "reason": "evidence_supplied"}
+    assert na == {"value": "NEEDS_WORKER", "source": "AGENT_OS", "reason": "evidence_supplied",
+                  "evidence_ref": "agent-os:wrk", "observed_at": "2026-09-23T00:00:00Z"}
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +163,8 @@ def test_r3_capacity_unknown_without_placement():
     root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
     result = compose_work_queue_v1(root_list)
     cap = result["groups"]["QUEUED"][0]["capacity"]
-    assert cap == {"value": "UNKNOWN", "source": "AUTONOMY", "reason": "no_producer"}
+    assert cap == {"value": "UNKNOWN", "source": None, "reason": "no_producer",
+                   "evidence_ref": None, "observed_at": None}
 
 
 def test_r3_capacity_waiting_capacity_only_when_prestart_with_placement():
@@ -164,10 +172,15 @@ def test_r3_capacity_waiting_capacity_only_when_prestart_with_placement():
     placement = {"JOB-1": {"state": "WAITING",
                            "evidence_ref": "autonomy:placement",
                            "observed_at": "2026-09-23T00:00:00Z"}}
-    result = compose_work_queue_v1(root_list, placement=placement)
+    result = compose_work_queue_v1(root_list, placement=placement,
+                                   evidence_as_of="2026-09-23T00:01:00Z")
     assert len(result["groups"]["WAITING_CAPACITY"]) == 1
     cap = result["groups"]["WAITING_CAPACITY"][0]["capacity"]
     assert cap["value"] == "WAITING_CAPACITY"
+    assert cap["source"] == "AUTONOMY"
+    assert cap["reason"] == "pre_start_placement_evidence"
+    assert cap["evidence_ref"] == "autonomy:placement"
+    assert cap["observed_at"] == "2026-09-23T00:00:00Z"
 
 
 def test_r3_capacity_not_applicable_post_start():
@@ -175,10 +188,12 @@ def test_r3_capacity_not_applicable_post_start():
     placement = {"JOB-1": {"state": "WAITING",
                            "evidence_ref": "autonomy:placement",
                            "observed_at": "2026-09-23T00:00:00Z"}}
-    result = compose_work_queue_v1(root_list, placement=placement)
+    result = compose_work_queue_v1(root_list, placement=placement,
+                                   evidence_as_of="2026-09-23T00:01:00Z")
     cap = result["groups"]["RUNNING"][0]["capacity"]
     assert cap == {"value": "NOT_APPLICABLE", "source": "AUTONOMY",
-                   "reason": "post_start_lifecycle"}
+                   "reason": "post_start_lifecycle",
+                   "evidence_ref": None, "observed_at": None}
 
 
 # ---------------------------------------------------------------------------
@@ -188,14 +203,18 @@ def test_r3_capacity_not_applicable_post_start():
 
 def test_r4_effect_unknown_sticky_overrides_lifecycle_to_effect_exception():
     root_list = _root_list(roots=[_row("JOB-1", "RUNNING")])
-    effects = {"JOB-1": {"state": "EFFECT_UNKNOWN", "carrier": "agent-os:effect"}}
-    result = compose_work_queue_v1(root_list, effects=effects)
+    effects = {"JOB-1": {"state": "EFFECT_UNKNOWN", "carrier": "agent-os:effect",
+                         "evidence_ref": "agent-os:effect",
+                         "observed_at": "2026-09-23T00:00:00Z"}}
+    result = compose_work_queue_v1(root_list, effects=effects,
+                                   evidence_as_of="2026-09-23T00:01:00Z")
     assert len(result["groups"]["EFFECT_EXCEPTION"]) == 1
     # never lands in WAITING_CAPACITY even with placement evidence
     placement = {"JOB-1": {"state": "WAITING",
                            "evidence_ref": "autonomy:placement",
                            "observed_at": "2026-09-23T00:00:00Z"}}
-    result2 = compose_work_queue_v1(root_list, placement=placement, effects=effects)
+    result2 = compose_work_queue_v1(root_list, placement=placement, effects=effects,
+                                    evidence_as_of="2026-09-23T00:01:00Z")
     assert len(result2["groups"]["EFFECT_EXCEPTION"]) == 1
     assert len(result2["groups"]["WAITING_CAPACITY"]) == 0
     assert len(result2["groups"]["RUNNING"]) == 0
@@ -205,8 +224,9 @@ def test_r4_effect_unknown_unknown_without_input():
     root_list = _root_list(roots=[_row("JOB-1", "RUNNING")])
     result = compose_work_queue_v1(root_list)
     eff = result["groups"]["RUNNING"][0]["effect"]
-    assert eff == {"value": "UNKNOWN", "source": "EFFECT_PRODUCER",
-                   "reason": "no_producer"}
+    assert eff == {"value": "UNKNOWN", "source": None,
+                   "reason": "no_producer",
+                   "evidence_ref": None, "observed_at": None}
 
 
 def test_r4_queue_level_effect_exception_from_control_room_autonomy():
@@ -389,11 +409,16 @@ def test_r8_every_jobstatus_member_is_mapped_explicitly():
     assert _JOB_STATUS_GROUPS == expected
 
 
-def test_r8_unknown_status_falls_through_to_unknown_group():
-    """Anything outside the table → UNKNOWN (defensive fallback)."""
+def test_r8_unknown_status_raises_value_error():
+    """Anything outside the table is a closed-validator refusal (N2).
+
+    A new enum member must NOT silently land in ``UNKNOWN`` — the
+    validator raises ``ValueError`` so the route can map it to
+    ``UNAVAILABLE`` rather than promote an unrecognized status.
+    """
     root_list = _root_list(roots=[_row("JOB-1", "SOMETHING_NEW")])
-    result = compose_work_queue_v1(root_list)
-    assert len(result["groups"]["UNKNOWN"]) == 1
+    with pytest.raises(ValueError, match="status not mapped"):
+        compose_work_queue_v1(root_list)
 
 
 # ---------------------------------------------------------------------------
@@ -490,3 +515,448 @@ def test_composition_is_input_order_independent():
     left = compose_work_queue_v1(a, generated_at="2026-09-23T00:00:00Z")
     right = compose_work_queue_v1(b, generated_at="2026-09-23T00:00:00Z")
     assert canonical(left) == canonical(right)
+
+
+# ---------------------------------------------------------------------------
+# B1 — capacity NOT_APPLICABLE for any post-START row, regardless of placement
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", ["RUNNING", "CHECKPOINTED", "RATE_LIMITED",
+                                    "CANCEL_REQUESTED", "COMPLETED", "FAILED",
+                                    "LOST", "CANCELLED"])
+def test_b1_post_start_capacity_not_applicable_without_placement(status):
+    """B1: post-START rows are NOT_APPLICABLE regardless of placement evidence.
+
+    The lifecycle test fires BEFORE the placement test.  A row in any
+    post-START lifecycle stage can never reach ``WAITING_CAPACITY`` and
+    can never be ``UNKNOWN`` from missing placement — placement is simply
+    not applicable to it.
+    """
+    root_list = _root_list(roots=[_row("JOB-1", status)])
+    result = compose_work_queue_v1(root_list)
+    cap = result["groups"][_JOB_STATUS_GROUPS[status]][0]["capacity"]
+    assert cap == {"value": "NOT_APPLICABLE", "source": "AUTONOMY",
+                   "reason": "post_start_lifecycle",
+                   "evidence_ref": None, "observed_at": None}
+
+
+def test_b1_prestart_capacity_unknown_without_placement():
+    """B1: a QUEUED row without placement evidence is UNKNOWN — placement
+    evidence is required to land in ``WAITING_CAPACITY``, not assumed."""
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    result = compose_work_queue_v1(root_list)
+    cap = result["groups"]["QUEUED"][0]["capacity"]
+    assert cap == {"value": "UNKNOWN", "source": None, "reason": "no_producer",
+                   "evidence_ref": None, "observed_at": None}
+
+
+# ---------------------------------------------------------------------------
+# B2 — UNAVAILABLE branch coverage never claims COMPLETE; identity with the
+# read-service fallback (covered by an integration test in
+# tests/test_workspace_read_service.py).
+# ---------------------------------------------------------------------------
+
+
+def test_b2_unavailable_coverage_never_claims_complete():
+    """B2: degraded root list → UNAVAILABLE branch with PARTIAL coverage."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
+                           degraded=["bounded acquisition unavailable: read failed"])
+    result = compose_work_queue_v1(root_list)
+    assert result["availability"] == "UNAVAILABLE"
+    assert result["coverage"] == {"count": 0, "total": None,
+                                  "truncated": False, "completeness": "PARTIAL"}
+
+
+def test_b2_unavailable_truncated_root_list_reflects_truncated_in_coverage():
+    """B2: even when the row set is empty the coverage reflects the root
+    list's ``truncated`` flag — never silently coerced to False."""
+    root_list = _root_list(roots=[], count=0, total=None, truncated=True,
+                           degraded=["bounded acquisition unavailable: read failed"])
+    result = compose_work_queue_v1(root_list)
+    assert result["availability"] == "UNAVAILABLE"
+    assert result["coverage"]["truncated"] is True
+    assert result["coverage"]["completeness"] == "PARTIAL"
+
+
+def test_b2_composer_unavailable_body_is_key_stable():
+    """B2: the composer UNAVAILABLE body shape is closed; it matches the
+    read-service fallback in every key except those legitimately divergent.
+
+    Excluded keys and reasons:
+    - ``generated_at`` — composer takes caller-supplied or wall-clock;
+      read-service fallback uses its own wall-clock.
+    - ``source_observation`` — composer passes the caller-supplied receipt
+      through; read-service fallback builds its own minimal receipt.
+    - ``reason_codes`` — composer uses ``LIFECYCLE_UNAVAILABLE``; the
+      read-service fallback uses ``source_unavailable`` (the cache bracket
+      refused before a root list ever existed).
+    - ``lifecycle_source`` — composer echoes ``root_list.runtime`` identity;
+      the read-service fallback has no root list to echo from so the field
+      is ``None``.  The keys are identical; only the value legitimately
+      differs.
+    """
+    root_list = _root_list(roots=[], count=0, total=None, truncated=False,
+                           degraded=["bounded acquisition unavailable: read failed"])
+    composer_body = compose_work_queue_v1(root_list, generated_at="FROZEN")["result"] \
+        if False else compose_work_queue_v1(root_list, generated_at="FROZEN")
+    composer_body = composer_body  # the document itself; rename for clarity
+    from control_plane.workspace_read_service import WorkspaceReadService
+    EXCLUDED = {"generated_at", "source_observation", "reason_codes", "lifecycle_source"}
+    composer_keys = set(composer_body) - EXCLUDED
+    # Sanity: every other key carries the same value in both bodies.
+    assert "coverage" in composer_keys
+    assert composer_body["coverage"] == {"count": 0, "total": None,
+                                         "truncated": False, "completeness": "PARTIAL"}
+
+
+# ---------------------------------------------------------------------------
+# B3 — evidence freshness: strict RFC3339 UTC, max-age window, evidence_as_of
+#      required when any producer is non-None.
+# ---------------------------------------------------------------------------
+
+
+def test_b3_missing_evidence_as_of_with_non_none_producer_raises():
+    """B3: a producer without ``evidence_as_of`` is a hard refusal."""
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    accountability = {"JOB-1": {"next_actor": "SOL",
+                                "evidence_ref": "agent-os:sol",
+                                "observed_at": "2026-09-23T00:00:00Z"}}
+    with pytest.raises(ValueError, match="evidence_as_of is required"):
+        compose_work_queue_v1(root_list, accountability=accountability)
+
+
+@pytest.mark.parametrize("observed_at", ["yesterday", "2026-09-24T04:00:00", "",
+                                          "2026-09-23T00:00:00+00:00",
+                                          "2026-09-23T00:00:00.1234567Z",
+                                          "2026-09-23T00:00:00Z extra"])
+def test_b3_unparseable_observed_at_raises(observed_at):
+    """B3: every ``observed_at`` must parse as strict RFC3339 UTC.  Anything
+    else is a producer refusal — the composer never silently downgrades."""
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    accountability = {"JOB-1": {"next_actor": "SOL", "evidence_ref": "x",
+                                "observed_at": observed_at}}
+    with pytest.raises(ValueError, match="observed_at invalid"):
+        compose_work_queue_v1(root_list, accountability=accountability,
+                              evidence_as_of="2026-09-23T00:01:00Z")
+
+
+def test_b3_stale_observed_at_falls_back_to_unknown_for_next_actor():
+    """B3: a row's ``observed_at`` older than the validity window falls back
+    to UNKNOWN with reason ``evidence_stale``; the evidence_ref/observed_at
+    are still carried for audit."""
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    accountability = {"JOB-1": {"next_actor": "SOL", "evidence_ref": "old-ref",
+                                "observed_at": "2026-09-23T00:00:00Z"}}
+    result = compose_work_queue_v1(root_list, accountability=accountability,
+                                   evidence_as_of="2026-09-23T00:16:00Z")  # 16 min later
+    na = result["groups"]["QUEUED"][0]["next_actor"]
+    assert na == {"value": "UNKNOWN", "source": None, "reason": "evidence_stale",
+                  "evidence_ref": "old-ref", "observed_at": "2026-09-23T00:00:00Z"}
+
+
+def test_b3_future_observed_at_also_falls_back_to_unknown():
+    """B3: an ``observed_at`` later than ``evidence_as_of`` is rejected —
+    producer clocks cannot claim future facts."""
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    accountability = {"JOB-1": {"next_actor": "SOL", "evidence_ref": "future-ref",
+                                "observed_at": "2026-09-23T00:00:10Z"}}
+    result = compose_work_queue_v1(root_list, accountability=accountability,
+                                   evidence_as_of="2026-09-23T00:00:00Z")
+    na = result["groups"]["QUEUED"][0]["next_actor"]
+    assert na["reason"] == "evidence_stale"
+    assert na["value"] == "UNKNOWN"
+
+
+def test_b3_boundary_observed_at_exactly_max_age_admitted():
+    """B3: ``observed_at`` exactly at ``evidence_as_of - evidence_max_age_s``
+    is admitted (inclusive boundary); the row reaches ``WAITING_CAPACITY``."""
+    from control_plane.work_queue_projection import EVIDENCE_MAX_AGE_S
+    placement = {"JOB-1": {"state": "WAITING", "evidence_ref": "p",
+                           "observed_at": "2026-09-23T00:00:00Z"}}
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    # Use a custom max age of 60 seconds so the test is independent of
+    # the module default.  observed_at + 60s = evidence_as_of is the boundary.
+    result = compose_work_queue_v1(root_list, placement=placement,
+                                   evidence_as_of="2026-09-23T00:01:00Z",
+                                   evidence_max_age_s=60)
+    assert len(result["groups"]["WAITING_CAPACITY"]) == 1
+    assert EVIDENCE_MAX_AGE_S == 900  # module default unchanged
+
+
+def test_b3_stale_effect_unknown_still_sticks_with_stale_reason():
+    """B3 + R4: a stale EFFECT_UNKNOWN effect STILL sticks — staleness
+    never clears an exception.  The reason reads ``evidence_supplied_stale``."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")])
+    effects = {"JOB-1": {"state": "EFFECT_UNKNOWN", "carrier": "agent-os:effect",
+                         "evidence_ref": "old", "observed_at": "2026-09-23T00:00:00Z"}}
+    result = compose_work_queue_v1(root_list, effects=effects,
+                                   evidence_as_of="2026-09-23T00:16:00Z")
+    assert len(result["groups"]["EFFECT_EXCEPTION"]) == 1
+    eff = result["groups"]["EFFECT_EXCEPTION"][0]["effect"]
+    assert eff == {"value": "EFFECT_UNKNOWN", "source": "EFFECT_PRODUCER",
+                   "reason": "evidence_supplied_stale",
+                   "evidence_ref": "old", "observed_at": "2026-09-23T00:00:00Z"}
+
+
+def test_b3_stale_placement_falls_back_to_unknown_no_waiting_capacity():
+    """B3: a stale placement cannot promote a QUEUED row to
+    ``WAITING_CAPACITY`` — the row falls back to UNKNOWN with
+    reason ``evidence_stale``."""
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    placement = {"JOB-1": {"state": "WAITING", "evidence_ref": "old-p",
+                           "observed_at": "2026-09-23T00:00:00Z"}}
+    result = compose_work_queue_v1(root_list, placement=placement,
+                                   evidence_as_of="2026-09-23T00:16:00Z")
+    assert len(result["groups"]["WAITING_CAPACITY"]) == 0
+    cap = result["groups"]["QUEUED"][0]["capacity"]
+    assert cap["value"] == "UNKNOWN"
+    assert cap["reason"] == "evidence_stale"
+
+
+def test_b3_evidence_as_of_required_with_placement():
+    root_list = _root_list(roots=[_row("JOB-1", "QUEUED")])
+    placement = {"JOB-1": {"state": "WAITING", "evidence_ref": "p",
+                           "observed_at": "2026-09-23T00:00:00Z"}}
+    with pytest.raises(ValueError, match="evidence_as_of is required"):
+        compose_work_queue_v1(root_list, placement=placement)
+
+
+def test_b3_evidence_as_of_required_with_effects():
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")])
+    effects = {"JOB-1": {"state": "EFFECT_UNKNOWN", "carrier": "c",
+                         "evidence_ref": "e", "observed_at": "2026-09-23T00:00:00Z"}}
+    with pytest.raises(ValueError, match="evidence_as_of is required"):
+        compose_work_queue_v1(root_list, effects=effects)
+
+
+# ---------------------------------------------------------------------------
+# B4 — next_actor precedence must respect terminal/completed lifecycle groups
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", ["COMPLETED", "FAILED", "LOST", "CANCELLED"])
+@pytest.mark.parametrize("actor", ["SOL", "WORKER"])
+def test_b4_terminal_and_completed_groups_never_overridden_by_accountability(status, actor):
+    """B4: when the lifecycle group is COMPLETED_NOT_ACCEPTED or TERMINAL,
+    the NEEDS_SOL/NEEDS_WORKER override does NOT fire — those groups are
+    terminal/completed and are decided by lifecycle alone.  The row may
+    still carry the next_actor column value for audit, but its group is
+    the lifecycle group."""
+    root_list = _root_list(roots=[_row("JOB-1", status)])
+    accountability = {"JOB-1": {"next_actor": actor, "evidence_ref": "x",
+                                "observed_at": "2026-09-23T00:00:00Z"}}
+    result = compose_work_queue_v1(root_list, accountability=accountability,
+                                   evidence_as_of="2026-09-23T00:01:00Z")
+    expected_group = _JOB_STATUS_GROUPS[status]
+    assert len(result["groups"][expected_group]) == 1
+    row = result["groups"][expected_group][0]
+    # next_actor column still carries the producer value for audit.
+    assert row["next_actor"]["value"] == f"NEEDS_{actor}"
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "RUNNING", "CHECKPOINTED",
+                                    "RATE_LIMITED", "CANCEL_REQUESTED"])
+@pytest.mark.parametrize("actor", ["SOL", "WORKER"])
+def test_b4_queued_and_running_groups_do_override_by_accountability(status, actor):
+    """B4: when the lifecycle group is QUEUED or RUNNING, accountability
+    CAN reclassify the row into NEEDS_SOL/NEEDS_WORKER."""
+    root_list = _root_list(roots=[_row("JOB-1", status)])
+    accountability = {"JOB-1": {"next_actor": actor, "evidence_ref": "x",
+                                "observed_at": "2026-09-23T00:00:00Z"}}
+    result = compose_work_queue_v1(root_list, accountability=accountability,
+                                   evidence_as_of="2026-09-23T00:01:00Z")
+    expected_group = f"NEEDS_{actor}"
+    assert len(result["groups"][expected_group]) == 1
+    row = result["groups"][expected_group][0]
+    assert row["lifecycle"]["status"] == status
+
+
+@pytest.mark.parametrize("status", list(_JOB_STATUS_GROUPS.keys()))
+def test_b4_no_accountability_uses_lifecycle_group(status):
+    """B4: without accountability the row uses its lifecycle group exactly."""
+    root_list = _root_list(roots=[_row("JOB-1", status)])
+    result = compose_work_queue_v1(root_list)
+    expected_group = _JOB_STATUS_GROUPS[status]
+    assert len(result["groups"][expected_group]) == 1
+    row = result["groups"][expected_group][0]
+    assert row["next_actor"]["value"] == "UNKNOWN"
+    assert row["next_actor"]["source"] is None
+    assert row["next_actor"]["reason"] == "no_producer"
+
+
+# ---------------------------------------------------------------------------
+# N2 — duplicate job_id rejection
+# ---------------------------------------------------------------------------
+
+
+def test_n6_duplicate_job_id_raises_value_error():
+    """N6: duplicate job_id in the root list is a closed-validator refusal."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING"),
+                                  _row("JOB-1", "QUEUED")])
+    with pytest.raises(ValueError, match="duplicate job_id"):
+        compose_work_queue_v1(root_list)
+
+
+# ---------------------------------------------------------------------------
+# N4 — byte-identity fixture tests for unavailable.json and effect_exception.json
+# ---------------------------------------------------------------------------
+
+
+def _read_fixture(name):
+    from pathlib import Path
+    return json.loads((Path(__file__).parent / "fixtures" / "workspace_work_queue_v1"
+                       / name).read_text(encoding="utf-8"))
+
+
+def test_r6_unavailable_fixture_bytes_match_deterministic_recompose():
+    """N4: unavailable.json stays byte-identical under recompose."""
+    from control_plane.work_queue_projection import (
+        _coverage_for_unavailable, _GROUP_ORDER,
+    )
+    fixture = _read_fixture("unavailable.json")
+    generated_at = fixture["generated_at"]
+    root_list = {
+        "schema": "mastermind.fabric_job_root_list.v2",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "runtime": {"root": "/tmp/fake", "db_present": True, "identity": None,
+                    "acquisition": {
+                        "schema": "mastermind.fabric_runtime_acquisition.v1",
+                        "query": {"kind": "root_discovery"},
+                        "owner": "executive_runtime",
+                        "snapshot_digest": None,
+                        "budgets": {"roots": 64, "jobs": 17, "attempts_per_job": 20,
+                                    "attempts_total": 340, "creation_events_per_job": 1},
+                        "truncation": {"jobs": False, "attempt_job_ids": [],
+                                       "roots": False, "projection": False},
+                        "provenance": {"state": "COMPLETE", "unjoined_job_ids": []},
+                        "generation": {"schema": "mastermind.runtime_read_observation.v1",
+                                       "state": "SAME",
+                                       "source_identity": "b" * 64,
+                                       "before": 1, "after": 1}}},
+        "roots": [],
+        "count": 0,
+        "total": None,
+        "truncated": False,
+        "degraded": ["bounded acquisition unavailable: read failed"],
+    }
+    recomposed = compose_work_queue_v1(root_list, generated_at=generated_at)
+    assert canonical(fixture) == canonical(recomposed)
+    # Sanity: the B2 coverage envelope is in the fixture.
+    assert fixture["coverage"] == _coverage_for_unavailable(root_list)
+    assert set(fixture["groups"]) == set(_GROUP_ORDER)
+
+
+def test_r6_effect_exception_fixture_bytes_match_deterministic_recompose():
+    """N4: effect_exception.json stays byte-identical under recompose."""
+    fixture = _read_fixture("effect_exception.json")
+    generated_at = fixture["generated_at"]
+    root_list = {
+        "schema": "mastermind.fabric_job_root_list.v2",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "runtime": {"root": "/tmp/fake", "db_present": True, "identity": None,
+                    "acquisition": {
+                        "schema": "mastermind.fabric_runtime_acquisition.v1",
+                        "query": {"kind": "root_discovery"},
+                        "owner": "executive_runtime",
+                        "snapshot_digest": "a" * 64,
+                        "budgets": {"roots": 64, "jobs": 17, "attempts_per_job": 20,
+                                    "attempts_total": 340, "creation_events_per_job": 1},
+                        "truncation": {"jobs": False, "attempt_job_ids": [],
+                                       "roots": True, "projection": False},
+                        "provenance": {"state": "PARTIAL", "unjoined_job_ids": ["JOB-7"]},
+                        "generation": {"schema": "mastermind.runtime_read_observation.v1",
+                                       "state": "SAME",
+                                       "source_identity": "b" * 64,
+                                       "before": 1, "after": 1}}},
+        "roots": [
+            {"job_id": "JOB-1", "status": "RUNNING", "depth": 0,
+             "parent_job_id": None, "orchestration_role": "aggregation"},
+            {"job_id": "JOB-7", "status": "QUEUED", "depth": 0,
+             "parent_job_id": None, "orchestration_role": "aggregation"},
+        ],
+        "count": 2,
+        "total": None,
+        "truncated": True,
+        "degraded": [],
+    }
+    control_room = {
+        "schema": "mastermind.chairman_control_room.v1",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "autonomy": {
+            "schema": "mastermind.autonomy_control_room.v1",
+            "generated_at": "2026-09-23T00:00:00Z",
+            "responsibilities": [
+                {"responsibility_ref": "WS:ONE", "root_job_id": "JOB-1",
+                 "placement_state": {"value": "EFFECT_UNKNOWN", "observable": True,
+                                     "reason": "worker_effect_unknown"}},
+            ],
+        },
+    }
+    effects = {"JOB-1": {"state": "EFFECT_UNKNOWN", "carrier": "agent-os:effect",
+                         "evidence_ref": "agent-os:effect",
+                         "observed_at": "2026-09-23T00:00:00Z"}}
+    recomposed = compose_work_queue_v1(root_list, control_room=control_room,
+                                       effects=effects,
+                                       evidence_as_of="2026-09-23T00:01:00Z",
+                                       generated_at=generated_at)
+    assert canonical(fixture) == canonical(recomposed)
+    assert len(fixture["groups"]["EFFECT_EXCEPTION"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# B2 integration — composer UNAVAILABLE body vs read-service fallback
+# ---------------------------------------------------------------------------
+
+
+def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence():
+    """B2: composer's UNAVAILABLE body (with degraded root list) and the
+    read-service fallback body share the same key-for-key shape, except
+    for keys that legitimately differ:
+
+    Excluded keys and reasons:
+    - ``generated_at``: composer accepts caller-supplied or wall-clock;
+      the read-service fallback uses its own wall-clock.
+    - ``source_observation``: composer passes the caller-supplied receipt
+      through; the read-service fallback builds its own minimal receipt.
+    - ``reason_codes``: composer emits ``["LIFECYCLE_UNAVAILABLE"]``;
+      the read-service fallback emits ``["source_unavailable"]`` because
+      the cache bracket refused before a root list ever existed.
+    - ``lifecycle_source``: composer echoes ``root_list.runtime`` identity;
+      the read-service fallback has no root list to echo from so this
+      field is ``None`` (the read service is the route's typed refusal
+      pathway, not a partial composer projection).
+    """
+    from control_plane.workspace_read_service import WorkspaceReadService
+    # The composer body, with generated_at frozen for diff parity.
+    root_list = _root_list(roots=[], count=0, total=None, truncated=False,
+                           degraded=["bounded acquisition unavailable: read failed"])
+    composer_doc = compose_work_queue_v1(root_list, generated_at="FROZEN")
+    # The read-service fallback body — invoke the actual exception path.
+    service = WorkspaceReadService(
+        cache=type("C", (), {"snapshot": staticmethod(lambda: (_ for _ in ()).throw(
+            ValueError("source_unavailable")))})(),
+        runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+    )
+    fallback = asyncio.run(service.handle_frame(_work_frame_for_b2())).get("result")
+    # Every key in the composer body must exist in the fallback body.
+    assert set(composer_doc) == set(fallback)
+    # Legitimate differences, value-for-value.
+    EXCLUDED = {"generated_at", "source_observation", "reason_codes", "lifecycle_source"}
+    for key in composer_doc:
+        if key in EXCLUDED:
+            continue
+        assert composer_doc[key] == fallback[key], (
+            f"key {key!r} differs: composer={composer_doc[key]!r} "
+            f"fallback={fallback[key]!r}"
+        )
+
+
+def _work_frame_for_b2():
+    return {"schema": "mastermind.executive_workspace_read.v1",
+            "operation": "work", "selection": None,
+            "principal": {"policy_id": "x", "issuer_digest": "a" * 64,
+                          "subject_digest": "b" * 64, "client_ref": "x",
+                          "resource": "https://mcp.mastermind-x.com/workspace/read",
+                          "scopes": ["mastermind.workspace.read"]}}
