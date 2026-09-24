@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from brain import improvement_cognition as C
 
 
-DIGEST = "sha256:" + "a" * 64
+def _digest(value):
+    raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
 def report():
-    return {
-        "digest": DIGEST,
+    item = {
         "execution_authority_granted": False,
         "jobs_created": 0,
         "independent_discovery_proven": False,
@@ -36,17 +40,19 @@ def report():
             "falsifier": "No accepted owner exposes the needed context for the same subject.",
         }],
     }
+    item["digest"] = _digest(item)
+    return item
 
 
 def patch_reasoner(monkeypatch, reasoner):
     from brain import cli_bridge
-    monkeypatch.setattr(cli_bridge, "reason_sync", reasoner)
+    monkeypatch.setattr(cli_bridge, "reason_private_ephemeral_sync", reasoner)
 
 
 def response(*, action="READ_ONLY_RESEARCH", evidence=None):
     return {
         "schema": C.DRAFT_SCHEMA,
-        "evidence_digest": DIGEST,
+        "evidence_digest": report()["digest"],
         "proposals": [{
             "proposal_id": "PROP.REUSE.001",
             "problem": "The consumer may not expose context that already exists.",
@@ -81,11 +87,8 @@ def test_draft_uses_one_no_tools_no_log_turn_and_keeps_advisory_boundary(monkeyp
     assert len(calls) == 1
     prompt, kwargs = calls[0]
     assert "target_answer_disclosed" in prompt
-    assert kwargs["arm"] is False
-    assert kwargs["allowed_tools"] == []
-    assert kwargs["add_dirs"] == []
+    assert kwargs["role"] == "deep"
     assert kwargs["max_turns"] == 1
-    assert kwargs["log_run"] is False
     assert kwargs["cwd"]
     assert not Path(kwargs["cwd"]).exists()
     assert draft["execution_authority_granted"] is False
@@ -174,7 +177,7 @@ def test_evaluation_packet_exposes_only_opaque_derived_refs(monkeypatch):
     assert packet["requires_independent_judge"] is True
     assert packet["same_model_self_grade_is_acceptance"] is False
     assert "PROP.REUSE.001" not in encoded
-    assert DIGEST not in encoded
+    assert report()["digest"] not in encoded
     assert "The consumer may not expose context" not in encoded
     assert "Which current owner" not in encoded
 
@@ -212,6 +215,100 @@ def test_evaluation_packet_refuses_authority_flag_tampering(monkeypatch):
     draft["execution_authority_granted"] = True
     with pytest.raises(ValueError, match="invalid_draft_authority"):
         C.evaluation_packet(draft)
+
+
+def test_stale_or_modified_report_digest_is_refused():
+    item = report()
+    item["opportunities"][0]["next_evidence"] = "tampered after digest"
+    with pytest.raises(ValueError, match="discovery_digest_mismatch"):
+        C.draft_proposals(item)
+
+
+def test_private_ephemeral_sdk_has_zero_settings_tools_and_native_nonpersistence(monkeypatch, tmp_path):
+    from brain import cli_bridge as cb
+
+    captured = {}
+
+    class FakeOptions:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    async def fake_query(*, prompt, options):
+        assert prompt == "private evidence"
+        assert options is not None
+        yield SimpleNamespace(
+            result='{"ok":true}',
+            total_cost_usd=0.0,
+            session_id="ephemeral-provider-id",
+            usage={"input_tokens": 1, "output_tokens": 1},
+        )
+
+    monkeypatch.setattr(cb, "_Options", FakeOptions)
+    monkeypatch.setattr(cb, "_sdk_query", fake_query)
+    monkeypatch.setattr(cb, "_subscription_env", lambda env_name=None: {})
+
+    result = asyncio.run(cb._via_sdk(
+        "private evidence", "model-x", "deep", None, None,
+        [], [], 1, str(tmp_path), "default", {}, None, False,
+        private_ephemeral=True,
+    ))
+
+    assert result["ok"] is True
+    assert result["tools_used"] == []
+    assert captured["allowed_tools"] == []
+    assert captured["add_dirs"] == []
+    assert captured["setting_sources"] == []
+    assert captured["permission_mode"] == "dontAsk"
+    assert captured["max_turns"] == 1
+    assert captured["extra_args"] == {
+        "safe-mode": None,
+        "no-chrome": None,
+        "no-session-persistence": None,
+        "strict-mcp-config": None,
+    }
+
+
+def test_private_ephemeral_sdk_failure_never_falls_through_to_subprocess(monkeypatch, tmp_path):
+    from brain import cli_bridge as cb
+    from brain import key_rotor
+
+    async def broken_sdk(*args, **kwargs):
+        raise RuntimeError("sdk private failure")
+
+    async def forbidden_subprocess(*args, **kwargs):
+        raise AssertionError("private evidence must never reach subprocess fallback")
+
+    monkeypatch.setattr(cb, "_SDK", True)
+    monkeypatch.setattr(cb, "cli_path", lambda: "/fake/claude")
+    monkeypatch.setattr(cb, "_via_sdk", broken_sdk)
+    monkeypatch.setattr(cb, "_via_subprocess", forbidden_subprocess)
+    monkeypatch.setattr(key_rotor, "candidates", lambda: [])
+    monkeypatch.setattr(cb, "_cfg", lambda: {
+        "backend": "cli",
+        "roles": {"deep": "model-x"},
+        "reasoning": {"permission_mode": "default", "max_turns": 1},
+    })
+
+    result = asyncio.run(cb._reason(
+        "private evidence",
+        role="deep",
+        allowed_tools=[],
+        add_dirs=[],
+        max_turns=1,
+        cwd=str(tmp_path),
+        arm=False,
+        resume=None,
+        mcp_servers={},
+        log_run=False,
+        _backend_override="cli",
+        _private_ephemeral=True,
+    ))
+
+    assert result["ok"] is False
+    assert result["backend"] == "none"
+    assert "sdk private failure" in result["error"]
 
 
 @pytest.mark.parametrize("field,value", [
