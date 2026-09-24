@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
+import subprocess
 
 import pytest
 
@@ -314,3 +316,62 @@ def test_shell_invalidation_omits_empty_binding_and_has_no_literal_policy() -> N
     assert "0:0:400:1" not in block
     assert "stat -f" not in block
     assert "/bin/rm" not in block
+
+
+
+def _run_shell_invalidation_delegate(
+    tmp_path: Path, *, workspace_binding_class: str, worker_gid: int
+) -> list[str]:
+    script = Path("ops/executive_os/provision-worker-auth.sh").read_text(encoding="utf-8")
+    function = "invalidate_readiness_receipt() {" + script.split(
+        "invalidate_readiness_receipt() {", 1
+    )[1].split("\n}\n\nprepare_explicit_replacement()", 1)[0] + "\n}\n"
+    receipt = tmp_path / "provider-readiness.json"
+    receipt.write_text("{}\n", encoding="utf-8")
+    argv_log = tmp_path / "argv.txt"
+    python_stub = tmp_path / "python-stub.sh"
+    python_stub.write_text(
+        "#!/bin/bash\nprintf '%s\\n' \"$@\" > " + shlex.quote(str(argv_log)) + "\nexit 0\n",
+        encoding="utf-8",
+    )
+    python_stub.chmod(0o755)
+    harness = function + "\n" + "\n".join(
+        [
+            f"READINESS_RECEIPT={shlex.quote(str(receipt))}",
+            f"WORKSPACE_BINDING_CLASS={shlex.quote(workspace_binding_class)}",
+            f"WORKER_GID={worker_gid}",
+            f"PYTHON_BINARY={shlex.quote(str(python_stub))}",
+            f"SCRIPT_DIR={shlex.quote(str(tmp_path))}",
+            "invalidate_readiness_receipt",
+        ]
+    ) + "\n"
+    completed = subprocess.run(
+        ["/bin/bash", "-c", harness], capture_output=True, text=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+    return argv_log.read_text(encoding="utf-8").splitlines()
+
+
+def test_shell_legacy_company_invalidation_omits_binding_argument(tmp_path: Path) -> None:
+    argv = _run_shell_invalidation_delegate(
+        tmp_path,
+        workspace_binding_class="",
+        worker_gid=readiness.WORKER_GID,
+    )
+    assert argv[:4] == ["-I", "-S", "-B", str(tmp_path / "provider_readiness.py")]
+    assert argv[4:6] == ["invalidate", "--receipt"]
+    assert "--workspace-binding-class" not in argv
+    assert argv[-2:] == ["--worker-gid", str(readiness.WORKER_GID)]
+
+
+def test_shell_personal_pro_invalidation_passes_explicit_class_and_gid(tmp_path: Path) -> None:
+    personal_gid = _personal_slot_gids()[0]
+    argv = _run_shell_invalidation_delegate(
+        tmp_path,
+        workspace_binding_class=readiness.PERSONAL_PRO_WORKER_BINDING_CLASS,
+        worker_gid=personal_gid,
+    )
+    class_index = argv.index("--workspace-binding-class")
+    assert argv[class_index + 1] == readiness.PERSONAL_PRO_WORKER_BINDING_CLASS
+    gid_index = argv.index("--worker-gid")
+    assert argv[gid_index + 1] == str(personal_gid)
