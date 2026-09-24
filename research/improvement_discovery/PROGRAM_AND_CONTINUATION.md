@@ -204,6 +204,40 @@ hint only, never execution, acceptance, live custody or a complete duplicate cen
 - The previous #946 head's hosted checks concluded green. That is historical evidence,
   not CI qualification of this new candidate. Independent review remains a release gate.
 
+### Independent review and real deployment-shape correction
+
+Native Codex review `5300579222` of source `3ecd2360aa86f4954ed6ad1b4eeaedf9083180e9`
+returned two P1 defects: Git-only source binding fails in the real archive deployment
+(4090557588), and null/list candidate rows could falsely certify coverage (4090557594).
+Both were accepted and repaired in `327477bc04f0568869c1cd91eaeb61edaf09968b`.
+Seven defect-specific regression cases failed first; the final 267-test set passed.
+The first review wave was explicitly stopped in #946 comment 5808891520, and its
+temporary observer was disabled. That review is not acceptance of the repaired head.
+
+The repaired adapter consumes the SAME `.deployed_git_sha` artifact used by the
+existing deployer and health owner; it creates no discovery marker. Archive release
+identity takes precedence over stale retained Git metadata. The observed file hash
+is separate evidence: the marker is not a cryptographic release-file manifest.
+Source checkouts still require an exact Git blob match. A source-contract test binds
+the existing marker name without booting the whole application just to read identity.
+Malformed candidate values now mark the sample incomplete and are never counted as
+covered. Actual candidate semantics beyond row existence remain outside this metric.
+
+Read-only live qualification established a healthy running service at the observed
+release, and September-23 owner output from its existing scheduled loop. The apparent
+July-27 server file was outside the systemd live-data bind mount. Preserve both the
+initial path observation and `CURRENT_OWNER_PATH_RECONCILIATION_2026-09-24.json`;
+never repeat the incorrect inference that the service's reflection is July-stale.
+`CURRENT_SERVICE_OWNER_EVALUATION_2026-09-24.json` then feeds the actual service GET
+response through the candidate locally: it stays UNASSESSED with verification/hold,
+because the current legacy wire has no completeness/denominator metadata. Current
+API availability does not certify a complete sample. Nothing remote was modified.
+
+The existing browser proof now also uses a Git-archive-shaped root without `.git`,
+with the incumbent release marker. The default owner-to-Agenda/API/page path, stale
+and malformed cases, and four desktop/mobile dark/light cases pass on repaired code.
+This is still synthetic domain input plus real code, not candidate deployment proof.
+
 ### Next exact capability
 
 Publish and independently review this exact source increment on #946, qualify its

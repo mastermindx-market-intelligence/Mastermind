@@ -46,7 +46,15 @@ def main() -> None:
             from brain import improvement_discovery_nw
             now = datetime.now(timezone.utc).isoformat()
             asof = date.fromisoformat(now[:10])
-            patch.setattr(agenda, "_ROOT", ROOT)  # real committed contract identity
+            # Production is a Git archive. The same existing deploy marker must
+            # qualify the default read without adding .git or a discovery marker.
+            import subprocess
+            release_root = root / "release"; (release_root / "brain").mkdir(parents=True)
+            (release_root / "brain/nw_reflection.py").write_bytes((ROOT / "brain/nw_reflection.py").read_bytes())
+            release_sha = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
+            (release_root / ".deployed_git_sha").write_text(release_sha + "\n")
+            assert not (release_root / ".git").exists()
+            patch.setattr(agenda, "_ROOT", release_root)
             patch.setattr(nw_reflection, "_ROOT", root)
             owner_path = root / "owner-latest.json"
             patch.setattr(nw_reflection, "_LATEST", owner_path)
@@ -60,7 +68,7 @@ def main() -> None:
                 "generated_at": now, "coverage": nw_reflection.coverage(), "nudges": [],
                 "private_note": "PRIVATE_OWNER_PROOF_SENTINEL"}
             owner_path.write_text(json.dumps(owner_snapshot))  # synthetic owner fixture only
-            revision, contract_digest = improvement_discovery_nw._source_identity(ROOT)
+            revision, contract_digest = improvement_discovery_nw._source_identity(release_root)
             expected = improvement_discovery_nw.evaluate_owner_snapshot(owner_snapshot,
                 source_revision=revision, contract_sha256=contract_digest, observed_at=now)
             report = agenda.build(asof, cio_rep={})  # no injected discovery bundle or projection
@@ -139,6 +147,7 @@ def main() -> None:
         receipt = {
             "scope": "LOCAL_SYNTHETIC_OWNER_INPUTS_REAL_OWNER_AND_AGENDA_CODE" if owner_case else "LOCAL_ISOLATED_REAL_CODE_AND_PINNED_SOURCE_SNAPSHOT",
             "language": "EN", "automatic_owner_input": owner_case,
+            "archive_root_without_git": owner_case,
             "stale_and_malformed_owner_rechecked": owner_case,
             "production_proven": False, "independent_discovery_proven": False,
             "other_portfolio_agentos_sources": "ISOLATED_NOT_EVALUATED",
