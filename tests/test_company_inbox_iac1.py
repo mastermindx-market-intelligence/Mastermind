@@ -2415,6 +2415,35 @@ def test_binding_generation_rollover_refuses_before_answer_available(
     )
     assert "ANSWER_AVAILABLE" not in {event.event_type for event in events}
 
+    # The detail edge refuses the same rolled binding before any body is
+    # attached — directly (typed, zero effect) and through the real gateway.
+    events_before_read = len(events)
+    with pytest.raises(ConsultationRefusal) as read_excinfo:
+        _run_dispatcher(
+            rolled_dispatcher,
+            "company.consultation",
+            {
+                "schema": COMPANY_CONSULTATION_SCHEMA,
+                "operation": "read",
+                "semantic": {"consultation_ref": consultation_id},
+            },
+        )
+    assert read_excinfo.value.code == "STALE_BINDING"
+    assert read_excinfo.value.effect == "NONE"
+    through_gateway = _run(
+        rolled_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert through_gateway["ok"] is False
+    assert through_gateway["error"]["code"] == "EFFECT_UNKNOWN"
+    assert "UNTRUSTED" not in json.dumps(through_gateway)
+    assert len(
+        runtime.events.list_events(
+            aggregate_type="consultation", aggregate_id=consultation_id
+        )
+    ) == events_before_read
+
 
 def test_stable_invocation_retry_after_clock_advance_creates_no_second_intent_or_wake(
     tmp_path: Path,
@@ -2471,33 +2500,6 @@ def test_stable_invocation_retry_after_clock_advance_creates_no_second_intent_or
             ),
         )
     )
-    if not replay_envelope["ok"]:
-        replay_dispatcher = _make_dispatcher(
-            runtime,
-            fixture_repo,
-            requester=requester,
-            recipient=recipient,
-            clock_value=advanced_clock,
-            packets=shared_carrier,
-            invocations=_StaticInvocations(
-                _default_invocation(
-                    invocation_id=invocation_id,
-                    issued_at=advanced_clock,
-                )
-            ),
-        )
-        try:
-            _run_dispatcher(
-                replay_dispatcher,
-                "company.consult",
-                _dispatch_consult_envelope(
-                    question="Stable invocation question?",
-                    evidence_refs=[],
-                    artifact_revisions=[fixture_revision],
-                ),
-            )
-        except Exception:
-            pass
     assert replay_envelope["ok"] is True
     assert replay_envelope["data"]["state"] == "ALREADY_INTENDED"
     assert replay_envelope["data"]["consultation_ref"] == consultation_id
@@ -4189,10 +4191,7 @@ def test_accepted_answer_with_lost_carrier_write_is_reconciliation_required(
     assert read_envelope["ok"] is True
     data = read_envelope["data"]
     assert data["answer"] is None
-    assert data["blocker"] in {
-        "CARRIER_UNAVAILABLE",
-        "CARRIER_INTEGRITY",
-    }
+    assert data["blocker"] == "CARRIER_UNAVAILABLE"
 
 
 def test_known_same_packet_readback_returns_without_second_write(

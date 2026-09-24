@@ -275,21 +275,6 @@ def _intent_ids_on_connection(connection: Any) -> list[str]:
     return [str(row[0]) for row in rows]
 
 
-def _intent_event_for(
-    runtime: Runtime, consultation_id: str
-) -> Any | None:
-    """Compatibility seam. Opens its own read context — only used outside
-    the balanced read context (e.g. inside ``company_inbox_row``)."""
-    with runtime.store.read() as connection:
-        return _intent_event_for_connection(connection, consultation_id)
-
-
-def _events_for(runtime: Runtime, consultation_id: str) -> list[Any]:
-    """Compatibility seam. Opens its own read context."""
-    with runtime.store.read() as connection:
-        return _events_for_connection(connection, consultation_id)
-
-
 def _obligation_id_for(
     runtime: Runtime,
     connection: Any,

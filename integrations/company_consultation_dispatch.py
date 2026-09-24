@@ -1342,6 +1342,19 @@ class RuntimeConsultationDispatcher:
                 "NOT_A_PARTY",
                 detail="caller is neither requester nor recipient Runtime Attempt",
             )
+        # The detail edge revalidates the recipient's RuntimeBinding exactly as
+        # the reply edge does: a rolled binding reads nothing. The requester leg
+        # has no persisted binding on the INTENT (only the recipient's is
+        # admitted), so requester detail access is bound by exact actor only.
+        if _caller_matches_actor(self.caller, recipient_ref) and not (
+            _caller_matches_binding(
+                self.caller, intent.payload.get("recipient_binding") or {}
+            )
+        ):
+            raise ConsultationRefusal(
+                "STALE_BINDING",
+                detail="caller RuntimeBinding does not match persisted recipient_binding",
+            )
 
         row = company_inbox_row(
             self.runtime,
@@ -1541,36 +1554,6 @@ def _build_question_frame(
         "fingerprint": "",
     }
     return build_consultation(raw)
-
-
-def _rebuild_question_frame_from_intent(
-    intent_payload: Mapping[str, Any], carrier_frame: Mapping[str, Any]
-) -> dict[str, Any]:
-    raw: dict[str, Any] = {
-        "schema": str(intent_payload["consultation_schema"]),
-        "message_key": intent_payload["message_key"],
-        "consultation_id": intent_payload["consultation_id"],
-        "purpose": "QUESTION",
-        "requester_actor_ref": dict(intent_payload["requester_actor_ref"]),
-        "recipient_actor_ref": dict(intent_payload["recipient_actor_ref"]),
-        "recipient_peer_ref": intent_payload["recipient_peer_ref"],
-        "recipient_binding": dict(intent_payload["recipient_binding"]),
-        "correlation": dict(intent_payload["correlation"]),
-        "question": carrier_frame["question"],
-        "answer": None,
-        "evidence_refs": list(carrier_frame.get("evidence_refs", [])),
-        "artifact_revisions": list(intent_payload["artifact_revisions"]),
-        "valid_until": intent_payload["valid_until"],
-        "deadline_ms": int(intent_payload["deadline_ms"]),
-        "response_budget": dict(intent_payload["response_budget"]),
-        "supersedes_message_key": None,
-        "receipts": {key: None for key in RECEIPT_KEYS},
-        "fingerprint": "",
-    }
-    try:
-        return build_consultation(raw)
-    except Exception:
-        raise
 
 
 def _build_answer_frame(
