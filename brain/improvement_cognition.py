@@ -105,26 +105,20 @@ def _evidence_packet(report: Any) -> dict:
             "user_job": _text(expectation.get("user_job")),
             "consumer": _text(expectation.get("consumer")),
             "expected_capability": _text(expectation.get("requirement")),
-            "next_evidence": _text(raw.get("next_evidence")),
             "evidence_ids": sorted(set(refs)),
         })
 
-    safe_hypotheses: list[dict] = []
+    # Upstream deterministic hypotheses remain part of the verified report binding but are
+    # deliberately NOT disclosed to the proposal model. They are evaluation scaffolds, not
+    # evidence, and exposing them would turn an independence canary into paraphrase.
     for raw in hypotheses:
         if not isinstance(raw, dict):
             raise ValueError("invalid_hypothesis")
-        safe_hypotheses.append({
-            "kind": _text(raw.get("kind"), limit=80),
-            "question": _text(raw.get("question")),
-            "discriminating_check": _text(raw.get("discriminating_check")),
-            "falsifier": _text(raw.get("falsifier")),
-        })
 
     return {
         "schema": PACKET_SCHEMA,
         "source_report_digest": digest,
         "opportunities": safe_opportunities,
-        "deterministic_scaffolds": safe_hypotheses,
         "allowed_next_actions": sorted(ALLOWED_NEXT_ACTIONS),
         "evidence_ids": sorted(evidence_ids),
         "authority": "ADVISORY_ONLY",
