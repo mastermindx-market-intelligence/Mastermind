@@ -26,8 +26,8 @@
     },
     "minimax": {
       "adapter_id": "codex-cli",
-      "enabled": true,
-      "autonomous_allowed": true
+      "enabled": false,
+      "autonomous_allowed": false
     }
   },
   "model_aliases": {
@@ -43,11 +43,11 @@
     "coo.sealed.minimax": {
       "provider_alias": "minimax",
       "execution_profile_id": "sealed.worker.write.no-extensions.v1",
-      "model": "gpt-5.6-sol",
+      "model": "MiniMax-M3",
       "effort": "xhigh",
       "cost_class": "small",
       "capabilities": ["code", "planning", "research", "review", "tests"],
-      "worker_eligible": true
+      "worker_eligible": false
     },
     "frontier.orchestrator": {
       "provider_alias": "codex",
