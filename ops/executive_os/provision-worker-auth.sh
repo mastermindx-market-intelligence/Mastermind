@@ -650,10 +650,14 @@ if [ "$VERIFY_READY" = "true" ]; then
   else
     reuse_status=$?
   fi
-  [ "$reuse_status" -eq 3 ] || {
+  [ "$reuse_status" -eq 3 ] || [ "$reuse_status" -eq 4 ] || {
     /bin/echo "existing provider readiness receipt is stale or invalid; fail closed" >&2
     exit 65
   }
+  refresh_expired="false"
+  if [ "$reuse_status" -eq 4 ]; then
+    refresh_expired="true"
+  fi
 
   IDENTITY_RESULT="$(/usr/bin/mktemp /private/tmp/mastermind-provider-identity.XXXXXX)"
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
@@ -667,13 +671,18 @@ if [ "$VERIFY_READY" = "true" ]; then
     exit 65
   fi
 
+  refresh_flag=""
+  if [ "$refresh_expired" = "true" ]; then
+    refresh_flag="--refresh-expired"
+  fi
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" reserve \
       --receipt "$READINESS_RECEIPT" --auth "$AUTH_PATH" \
       --binary "$INSTALLED_CODEX_BINARY" --identity-json "$IDENTITY_RESULT" \
       --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
-      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" >/dev/null 2>&1; then
+      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
+      $refresh_flag >/dev/null 2>&1; then
     /bin/echo "provider canary reservation failed; no canary spent" >&2
     exit 65
   fi
