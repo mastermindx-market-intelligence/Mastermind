@@ -354,3 +354,59 @@ def test_deployed_marker_name_stays_with_existing_health_owner():
              if isinstance(node, ast.Assign) and len(node.targets) == 1
              and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "_DEPLOY_MARKER"}
     assert O._DEPLOY_MARKER == names["_DEPLOY_MARKER"]
+
+
+@pytest.fixture
+def nudge_store(owner, monkeypatch):
+    monkeypatch.setattr(N, "_NUDGE_STATE", owner / "nudge_state.json")
+    monkeypatch.setattr(N, "_LATEST", owner / "latest.json")
+    return owner
+
+
+def test_review_mixed_incomplete_coverage_never_creates_ranked_item(nudge_store, monkeypatch):
+    from brain import improvement_agenda as A
+    L._LEDGER.write_text("\n".join(json.dumps({"subject": s, "status": "open"})
+                                   for s in ("AAA", "BBB", "CCC", "DDD", "EEE")))
+    (nudge_store / "data/brain/outcome_ledger.jsonl").write_text("")
+    monkeypatch.setattr(C, "context", lambda: {
+        "candidate_context": {"AAA": {}, "BBB": None, "CCC": []}})
+    cov = N.coverage()
+    assert cov["inputs_complete"] is False and cov["coverage_rate"] == 0.2
+    nudges = N.derive_nudges([], cov, {}, "2026-09-24")
+    monkeypatch.setattr(N, "latest", lambda: {"coverage": cov, "nudges": nudges})
+    assert not any(n["code"] == "coverage_below_half" for n in nudges)
+    assert not any(item["id"] == "nw:coverage_below_half"
+                   for item in A._from_nw_reflection(date(2026, 9, 24)))
+
+
+@pytest.mark.parametrize("complete", [False, None, "true", 1, "MISSING"])
+def test_review_unattested_coverage_cannot_create_nudge(nudge_store, complete):
+    cov = {"state": "ok", "coverage_rate": 0.2, "open_theses_n": 5,
+           "resolved_recent_n": 0, "with_context_row_n": 1}
+    if complete != "MISSING":
+        cov["inputs_complete"] = complete
+    assert N.derive_nudges([], cov, {}, "2026-09-24") == []
+
+
+@pytest.mark.parametrize("rate", [0.1, 1.0])
+def test_review_incomplete_coverage_neither_refreshes_nor_resolves(nudge_store, rate):
+    cov = {"state": "ok", "coverage_rate": 0.2, "open_theses_n": 5,
+           "resolved_recent_n": 0, "with_context_row_n": 1, "inputs_complete": True}
+    assert N.derive_nudges([], cov, {}, "2026-09-23")[0]["code"] == "coverage_below_half"
+    before = json.loads(N._NUDGE_STATE.read_text())["codes"]["coverage_below_half"]
+    cov.update(inputs_complete=False, coverage_rate=rate)
+    emitted = N.derive_nudges([], cov, {"state": "ok", "current_streak": {
+        "status": "stale", "runs": 3}}, "2026-09-24")
+    after = json.loads(N._NUDGE_STATE.read_text())["codes"]["coverage_below_half"]
+    assert not any(n["code"] == "coverage_below_half" for n in emitted)
+    assert any(n["code"] == "context_stale_streak" for n in emitted)
+    assert after == before
+
+
+def test_review_complete_coverage_can_still_emit_and_resolve(nudge_store):
+    cov = {"state": "ok", "coverage_rate": 0.2, "open_theses_n": 5,
+           "resolved_recent_n": 0, "with_context_row_n": 1, "inputs_complete": True}
+    assert N.derive_nudges([], cov, {}, "2026-09-23")[0]["code"] == "coverage_below_half"
+    cov.update(coverage_rate=1.0, with_context_row_n=5)
+    assert N.derive_nudges([], cov, {}, "2026-09-24") == []
+    assert json.loads(N._NUDGE_STATE.read_text())["codes"]["coverage_below_half"]["status"] == "resolved"
