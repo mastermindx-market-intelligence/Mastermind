@@ -25,8 +25,8 @@ def test_acceptance_corpus_is_closed_and_explicitly_inert():
     assert doc["is_production_authority"] is False
 
     cases = doc["cases"]
-    assert len(cases) == 28
-    assert [row["id"] for row in cases] == [f"M{i:02d}" for i in range(1, 29)]
+    assert len(cases) == 31
+    assert [row["id"] for row in cases] == [f"M{i:02d}" for i in range(1, 32)]
     assert len({row["id"] for row in cases}) == len(cases)
     assert all(set(row) == {"id", "class", "scenario", "expected"} for row in cases)
     assert {row["class"] for row in cases} == {
@@ -187,3 +187,18 @@ def test_session_falsifier_is_optional_and_never_trusts_model_or_mcp_environment
     assert by_id["M26"]["expected"] == "REFUSE_MCP_SESSION_ENV_AUTHORITY"
     assert by_id["M27"]["expected"] == "CAPABILITY_UNAVAILABLE_NO_AUTHORITY_FALLBACK"
     assert by_id["M28"]["expected"] == "REFUSE_SESSION_HARDENING_UNPROVEN"
+
+
+def test_mandate_projection_reuses_mission_workspace_v3_without_faking_claude_runtime_binding():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "Primary organizational input: the existing Mission Workspace v3 projection." in text
+    assert "Do not make the mandate reducer reacquire Control Room, Fabric, Runtime or Agent OS independently." in text
+    assert "read_state.state=CURRENT" in text
+    assert "owner observation `SAME`" in text
+    assert "it does not expose a dedicated `current_coo_target` RuntimeBinding" in text
+    assert "Do not fabricate a Claude RuntimeBinding inside the mandate reducer." in text
+
+    by_id = {row["id"]: row for row in _fixture()["cases"]}
+    assert by_id["M29"]["expected"] == "MISSION_V3_IS_PRIMARY_ORGANIZATIONAL_INPUT"
+    assert by_id["M30"]["expected"] == "REFUSE_UNQUALIFIED_MISSION_STATE"
+    assert by_id["M31"]["expected"] == "MISSION_BOUND_WITH_SESSION_HARDENING_DEFERRED"
