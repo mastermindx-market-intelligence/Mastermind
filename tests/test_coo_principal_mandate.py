@@ -255,7 +255,9 @@ def test_owner_observation_must_be_same_for_modifying_mandate():
     [
         ({"root_state": "CONFLICT"}, "mission_root_conflict"),
         ({"root_ambiguous": True}, "mission_root_conflict"),
-        ({"source_generation_state": "CONFLICT"}, "source_generation_conflict"),
+        ({"source_generation_state": "CONFLICT"}, "source_generation_not_current"),
+        ({"source_generation_state": "STALE"}, "source_generation_not_current"),
+        ({"source_generation_state": "UNKNOWN"}, "source_generation_not_current"),
     ],
 )
 def test_root_or_generation_conflict_refuses_modifying_mandate(changes, reason):
