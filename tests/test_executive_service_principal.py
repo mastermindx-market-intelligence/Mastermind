@@ -301,19 +301,22 @@ def test_read_only_ceiling_refuses_write_authority_and_foreign_task_kinds():
 # ---------------------------------------------------------------------------
 
 
-def test_authority_is_refused_independently_of_actor(tmp_path: Path):
-    """The service principal's actor is provenance, not privilege."""
+def test_service_actor_is_bound_and_cannot_expand_authority(tmp_path: Path):
+    """Enrollment binds actor identity; the bound actor still gains no write power."""
 
     runtime = Runtime.at(tmp_path / "runtime")
-    for actor in (_principal().actor, "svc-other-actor"):
-        envelope = copy.deepcopy(_derived()["envelope"])
-        envelope["actor"] = actor
-        envelope["intent_id"] = f"svc-esp-{actor.replace('-', '').replace('_', '')}"
-        envelope["execution_contract"] = {"requested_authorities": ["MERGE"]}
-        # The SINK's service ceiling refuses the write authority before the
-        # downstream policy is ever consulted; the actor value changes nothing.
-        with pytest.raises(CeoIntentError, match="READ/RESEARCH only"):
-            submit_intent(runtime, envelope)
+
+    exact = copy.deepcopy(_derived()["envelope"])
+    exact["execution_contract"] = {"requested_authorities": ["MERGE"]}
+    with pytest.raises(CeoIntentError, match="READ/RESEARCH only"):
+        submit_intent(runtime, exact)
+
+    mismatched = copy.deepcopy(_derived()["envelope"])
+    mismatched["actor"] = "svc-other-actor"
+    mismatched["intent_id"] = "svc-esp-otheractor"
+    with pytest.raises(CeoIntentError, match="does not match the reviewed principal"):
+        submit_intent(runtime, mismatched)
+
     assert runtime.jobs.list_jobs() == []
 
     # the caller cannot name its own identity or authority, structurally
@@ -410,16 +413,16 @@ def test_a1_intent_id_depends_only_on_principal_and_operation_key():
 
     # The quoted sink predicates this law relies on are still where we cite them.
     assert "find_event_by_command_id(command_id)" in _source_window(
-        "control_plane/ceo_intent.py", 1098, 1108
+        "control_plane/ceo_intent.py", 1118, 1130
     )
     assert "if fingerprint is not None and recorded != fingerprint:" in _source_window(
-        "control_plane/ceo_intent.py", 902, 910
+        "control_plane/ceo_intent.py", 924, 932
     )
     assert 'return f"{COMMAND_ID_PREFIX}{intent_id}"' in _source_window(
-        "control_plane/ceo_intent.py", 757, 764
+        "control_plane/ceo_intent.py", 780, 786
     )
     pins = admission_status()["identity"]["conflict_predicates"]
-    assert {pin["line"] for pin in pins} == {"L1103", "L906", "L761"}
+    assert {pin["line"] for pin in pins} == {"L1125", "L928", "L783"}
     for pin in pins:
         assert pin["file"] == "control_plane/ceo_intent.py"
 
@@ -708,15 +711,15 @@ def test_service_schema_is_durably_carried_with_typed_evidence(tmp_path: Path):
     #     in added production source, and a source-line citation is not an
     #     identity.
     windows = {
-        "L633": _source_window("control_plane/ceo_intent.py", 628, 640),
-        "L578": _source_window("control_plane/ceo_intent.py", 570, 600),
-        "L855": _source_window("control_plane/ceo_intent.py", 850, 866),
-        "L1158": _source_window("control_plane/ceo_intent.py", 1152, 1166),
+        "L640": _source_window("control_plane/ceo_intent.py", 635, 645),
+        "L585": _source_window("control_plane/ceo_intent.py", 580, 610),
+        "L877": _source_window("control_plane/ceo_intent.py", 872, 885),
+        "L1180": _source_window("control_plane/ceo_intent.py", 1174, 1190),
     }
-    assert "_SERVICE_REQUIRED_KEYS" in windows["L633"]
-    assert "def _require_service_ceiling" in windows["L578"]
-    assert 'value["principal_id"] = intent["principal_id"]' in windows["L855"]
-    assert 'owner_seat="coo"' in windows["L1158"]
+    assert "_SERVICE_REQUIRED_KEYS" in windows["L640"]
+    assert "def _require_service_ceiling" in windows["L585"]
+    assert 'value["principal_id"] = intent["principal_id"]' in windows["L877"]
+    assert 'owner_seat="coo"' in windows["L1180"]
     for predicate in status["predicates"]:
         assert predicate["line"] in windows, predicate
         assert predicate["file"] == "control_plane/ceo_intent.py"
