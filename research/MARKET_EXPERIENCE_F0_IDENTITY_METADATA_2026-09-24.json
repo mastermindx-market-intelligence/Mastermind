@@ -1,0 +1,173 @@
+{
+  "commit": "b9d23ca4bce4308fa7466c4e0f5d318168a50f6f",
+  "inputs": [
+    {
+      "bytes": 16762,
+      "generated_at_timezone_explicit": false,
+      "git_blob": "3feb53cda83bda2d84e03f262b6effa7a68bf73a",
+      "owner_fields": {
+        "authority": {
+          "consumers": [
+            "gmi.identity_resolution/v1"
+          ],
+          "identity_authority": "canonical_exact_identity",
+          "ranking_authority": "none",
+          "signal_authority": "none",
+          "trade_authority": "none"
+        },
+        "cik_map_snapshot": "2026-09-21",
+        "coverage": {
+          "resolved": 708,
+          "total": 718,
+          "unresolved": 10,
+          "unresolved_names": [
+            "ANGPY",
+            "B",
+            "BLD",
+            "CBOE",
+            "EA",
+            "GATO",
+            "IMPUY",
+            "MAG",
+            "RHHBY",
+            "WBS"
+          ]
+        },
+        "generated_at": "2026-09-21T03:19:29",
+        "row_counts": {
+          "issuer_master": 1213,
+          "issuer_migrations": 3,
+          "security_master": 2380,
+          "security_migrations": 1,
+          "vendor_alias_rows_readable": 6035,
+          "vendor_aliases": 6035
+        },
+        "symbol_directory_snapshot": "2026-09-21"
+      },
+      "path": "data/reference/_receipt.json",
+      "sha256": "90ae02a71577b5aaf62783afd5c7b16e08bbccb1a31b2dc90491f3ddaf8d4a20",
+      "status": "read",
+      "top_level_keys": [
+        "authority",
+        "china_hk_admission",
+        "cik_map_snapshot",
+        "code_version",
+        "coverage",
+        "dataset_ids",
+        "generated_at",
+        "identity_exceptions",
+        "inputs",
+        "issuer",
+        "listing_continuity",
+        "notes",
+        "pending_transition_refusals",
+        "producer",
+        "rename_events",
+        "resurrection_refusals",
+        "row_counts",
+        "security",
+        "seed_counts",
+        "symbol_directory_snapshot",
+        "undated_renames",
+        "unregistered_rename_duplicates",
+        "us_gmi_admission",
+        "vendor_alias_prunes"
+      ]
+    },
+    {
+      "bytes": 79307,
+      "columns": [
+        "security_id",
+        "issuer_id",
+        "issuer_state",
+        "issuer_cik",
+        "issuer_evidence_snapshot",
+        "listing_key",
+        "country",
+        "mic",
+        "inception_code",
+        "effective_at",
+        "ingested_at",
+        "security_state",
+        "superseded_by"
+      ],
+      "git_blob": "0a5cfdcb0b84f90049bcac9318012ef94df628c2",
+      "path": "data/reference/security_master.parquet",
+      "rows": 2380,
+      "sha256": "e79801b08c975530edcc3f9a34e46f66aec21e4635bebe8830458a10b619f286",
+      "status": "read"
+    },
+    {
+      "bytes": 41999,
+      "columns": [
+        "vendor",
+        "vendor_symbol",
+        "security_id",
+        "valid_from",
+        "valid_to",
+        "ingested_at"
+      ],
+      "git_blob": "14023d574d7f31c7e52d759c3a830e6178e0b42b",
+      "path": "data/reference/vendor_aliases.parquet",
+      "rows": 6035,
+      "sha256": "a556c88c42ab007fee1b7d3b8ce2e47d79c9124200cf88c7047f457e8cfea426",
+      "status": "read"
+    },
+    {
+      "bytes": 13424,
+      "columns": [
+        "snapshot_date",
+        "suite",
+        "basket_id",
+        "ticker",
+        "added",
+        "removed",
+        "name_zh",
+        "members_sha",
+        "source_shape"
+      ],
+      "git_blob": "34d49c0fc422594b60314af40d2efe335799bef5",
+      "path": "data/baskets/membership_history.parquet",
+      "rows": 3114,
+      "scope_note": "US thematic baskets, not demonstrated historical S&P 500 constituents",
+      "sha256": "e6b4146eaf4fad7be58d90b22424f83d9e7f24d16d8c493234f336ef7dec0559",
+      "snapshot_count": 3,
+      "snapshot_max": "2026-09-04",
+      "snapshot_min": "2026-08-13",
+      "source_shapes": [
+        "membership"
+      ],
+      "status": "read",
+      "suites": [
+        "baskets"
+      ]
+    },
+    {
+      "bytes": 12725,
+      "columns": [
+        "name",
+        "sector",
+        "symbol"
+      ],
+      "git_blob": "bc91e6cd0879695fbd33c9233c95728a255e9ddd",
+      "path": "data/breadth/constituents.parquet",
+      "rows": 503,
+      "sha256": "c6164db37521667ec55d0a5ce88654954d60042a2f102d5a914171224260f6ce",
+      "status": "read"
+    }
+  ],
+  "observed_at": "2026-09-24T15:01:57.094472+00:00",
+  "repository": "mastermindx-market-intelligence/macro",
+  "scope": "METADATA_ONLY_NO_COHORT_ADMISSION",
+  "price_or_fundamental_value_columns_decoded": false,
+  "membership_metadata_columns_decoded": ["snapshot_date", "suite", "source_shape"],
+  "stock_pilot_admitted": false,
+  "training_eligible": false,
+  "unproven": [
+    "historical S&P 500 membership",
+    "issuer-period cohort",
+    "exact source publication/acquisition clocks",
+    "ML and redistribution rights",
+    "earnings event manifest"
+  ]
+}

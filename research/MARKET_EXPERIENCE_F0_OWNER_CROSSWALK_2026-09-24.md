@@ -127,3 +127,59 @@ Macro #7936's ci-gate and main authority checks passed at its existing head. The
 ci-authority/codex/merge-queue-pilot failure explicitly reports inactive_base_context for base main;
 that is not an Agent OS validation failure. Required-check membership and release acceptance must
 still be resolved through the existing release owner. No gate is bypassed and no merge is claimed.
+
+## Real-input CPI source component (subsequent F0 evidence)
+
+See MARKET_EXPERIENCE_F0_CPI_PROTOCOL_2026-09-24.md,
+MARKET_EXPERIENCE_F0_CPI_RECEIPT_2026-09-24.json and
+MARKET_EXPERIENCE_F0_CPI_FINDINGS_2026-09-24.md. This extends, not replaces,
+the synthetic temporal-contract evidence above. Source pin for this component is
+Macro b9d23ca4bce4308fa7466c4e0f5d318168a50f6f. The existing collector manifest
+and exact CPI parquet bytes were verified; the native release-target owner
+normalized 292553 real rows without loss and passed six fixed vintage/cutoff
+structural checks. No new source intake, source store, product or learner.
+
+Coverage must show observation periods separately from source-vintage periods:
+1947-2026 observations here coexist with 1997-2026 vintage dates. This does not
+establish 1947 operational knowledge, intraday availability or stock-universe
+coverage. The collector manifest does not establish ML rights. Training and
+promotion remain disabled; the overall stock pilot is still not admitted.
+
+## Metadata-only identity/universe boundary (same F0 continuation)
+
+Receipt: MARKET_EXPERIENCE_F0_IDENTITY_METADATA_2026-09-24.json, derived from
+five exact existing owner artifacts at Macro b9d23ca4bce4308fa7466c4e0f5d318168a50f6f.
+Host process 23815 read immutable Git bytes, captured SHA-256/Git blob identities,
+read parquet footers, and decoded only membership snapshot_date/suite/source_shape.
+No price/fundamental value columns, earnings bodies or stock outcomes were decoded.
+No cohort selection, registration or production-data admission occurred.
+
+| Existing source | Observed metadata | Consequence for the pilot |
+|---|---|---|
+| data/reference/_receipt.json | generated_at=2026-09-21T03:19:29, no explicit timezone; directory/CIK snapshot 2026-09-21 | Preserve the literal timestamp. Do not invent UTC or historical acquisition. Row-level clocks require their own native checks; this does not invalidate the entire identity spine. |
+| data/reference/security_master.parquet | 2380 rows; stable security/issuer/listing IDs and effective_at/ingested_at columns | Identity substrate exists; row count is not historical index membership or issuer coverage. |
+| data/reference/vendor_aliases.parquet | 6035 rows; vendor, security_id, valid_from/to, ingested_at | Resolve with the native historical-mode reader; current catalog aliases must not supply historical naming. |
+| data/baskets/membership_history.parquet | 3114 rows; three snapshots from 2026-08-13 through 2026-09-04; suite=baskets | These are US thematic baskets, not S&P 500 constituents. They cannot substantiate a five-year index-membership universe. |
+| data/breadth/constituents.parquet | 503 rows; columns name/sector/symbol only | This artifact alone has no historical membership or known-at dates. Do not back-apply it to a five-year universe. |
+
+Native owner law: engine/theme_graph/identity_resolution.py at this pin (blob
+8eefa1c2f5e5d3514f6487bf869f154ce2751011) forbids current-catalog vendor spaces
+from serving as historical naming evidence. engine/basket_membership_pit.py
+(blob 595d57405a36d445584ce4abfc2aee679f535d4c) explicitly labels fallback to
+current memberships pit=False for dates before its history. These are useful
+existing safeguards to consume, not new bugs or justification for a parallel store.
+
+Falsified assumption: an available security master plus a current constituent list
+already supplies the proposed historical pilot universe. It does not. This is a
+bounded finding about the inspected sources, NOT proof that no suitable historical
+membership dataset exists anywhere in the estate. The next recovery belongs to
+the existing Data OS/universe owner: produce a source-bound historical membership
+manifest and permitted-use evidence, or leave those issuer-periods uncovered.
+Never silently switch to a survivor-only or current-member backtest.
+
+Reproduce the metadata receipt by reading the five listed paths with
+`git show <pinned-commit>:<path>`, checking SHA-256/Git blob, and using
+`pyarrow.parquet.ParquetFile` footer counts/schema. Decode only the three declared
+membership metadata columns for snapshot range/count. No source writer is involved.
+The receipt's coverage block (708/718 resolved) is the producer's own named
+coverage population, NOT the 2380-row master denominator or a 500-issuer score.
