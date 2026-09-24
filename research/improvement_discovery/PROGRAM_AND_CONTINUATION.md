@@ -302,3 +302,44 @@ hosted CI, then qualify current-base release through the existing owner. Actual
 model-generated alternatives, prospective evaluation, a bounded admitted evidence
 sprint, production-path usefulness and outcome learning remain the parent mission.
 Do not apply the older chat-local GMI patch over this newer default owner-feed code.
+
+## Consumer-parity and persisted-input closure (2026-09-24)
+
+Review 5300894640 at 9699643df0 found two additional real boundaries, not a
+repeat of the prior fixed bug: coverage normalized keys the actual candidate
+reader does not normalize, and old persisted nudges bypassed the fixed producer.
+Review child STOP: 5809392776; its observer source was disabled before repair.
+
+Fifteen cases failed before the repair and two positive controls passed. The
+owner now accepts only canonical exact candidate keys, and its shared nudge
+validity predicate is reused at ALL three identified influence consumers:
+ranked Agenda, directive drafting, and outgoing feedback. A complete flag alone
+is insufficient: scope, statuses, positive denominator, coherent rate/counts,
+existing clear threshold, generation/as-of clocks and the existing stale budget
+must agree. Empty demand is not evidence that an earlier gap was repaired.
+Unrelated nudges survive, and no stored finding or prior directive is deleted.
+
+New data and epistemic safeguards do not introduce another queue, threshold
+owner, clock, graph, strategy, ranking formula or model/provider invocation.
+The neighboring PR #821 was inspected and does not own these added consumer
+paths; it owns portfolio-learning persistence. #775's page is untouched.
+
+Source repair: 37b07ee313469582b104d8875a99b9240e52b894. Non-force current-base
+composition: 7cd94c4371ab6b5c5c9bb9a3a709051652ec73c0, importing protected
+294b4c00ed668b497edb834be8108f14bc1bee8a without changing owned source blobs.
+No relevant procedure/contract invalidator appeared relative to pin 4fe4d25e.
+450 combined local tests pass; 308 are the focused owner/discovery/Agenda set.
+Four EN Chromium owner/default-Agenda cases were rerun at the composed source,
+including archive-shaped source identity and negative stale/malformed input.
+This is local source/consumer proof with synthetic inputs, not production.
+
+Proof: research/evidence/improvement_discovery/CONSUMER_VALIDITY_PROOF_2026-09-24.json.
+Preserve the same carrier and exact-head review/CI hold. Next required result is
+independent acceptance of the complete producer-to-consumer repair and hosted
+qualification. Actual autonomous model ideas, admitted evidence sprints,
+production consumption and outcome learning remain unfinished obligations.
+
+The next cognition integration must NOT stuff private hypotheses into the existing
+public-mirrored mastermind_ai._build_review prose. Reuse the current admitted
+Chairman Cognition/result owners. Advisor #900 and Web-Sol #933/#936 keep their
+existing scopes and are not silently treated as live discovery infrastructure.

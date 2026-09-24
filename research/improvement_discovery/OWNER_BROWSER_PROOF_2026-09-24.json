@@ -38,10 +38,10 @@
   ],
   "code_hashes": {
     "app/static/agenda.html": "4bb8f8966d28ec00bf3dbcb887418a1ef4b55ffa015caa48453f497c7d3aa11a",
-    "brain/improvement_agenda.py": "0df5ba6f83e1fb37aa302e6569eb239178faa18bcb8392175731ca94f9ccffeb",
+    "brain/improvement_agenda.py": "22f9e0d264f31d73c7fed92b78abaf307dce9911ff57936e9741f09616e81c87",
     "brain/improvement_discovery.py": "aae158a56005ce29f0e39fea5f7c7c1572cb750e15042b32fa374b553005575d",
     "brain/improvement_discovery_nw.py": "f3b3cef8d20da33caabf4f23bc3abb19791c20456cbfa995482d339f997f3e02",
-    "brain/nw_reflection.py": "0ed29fb520e0b43b73ae054279dbab5696bc5e352c61a7f03f0d729c7f491d31",
+    "brain/nw_reflection.py": "0a8121aa8a18f79a6ab4616a1f8dfbd6103af6d1d129158ddabedc15e1a4f97e",
     "research/improvement_discovery/prove_agenda_browser.py": "8ba21fe9881494cc2de035f0039cac3babf612b92cf44dba5d200de570370039"
   },
   "independent_discovery_proven": false,
@@ -49,6 +49,6 @@
   "other_portfolio_agentos_sources": "ISOLATED_NOT_EVALUATED",
   "production_proven": false,
   "scope": "LOCAL_SYNTHETIC_OWNER_INPUTS_REAL_OWNER_AND_AGENDA_CODE",
-  "source_report_digest": "sha256:1dd58c5cf87966683c136d7e038b489b669911befddc72a932e80bd515fffb94",
+  "source_report_digest": "sha256:67ead1d5cb822be9d8e08facdce5a44645ef6b76477544b6c477938e5d86376f",
   "stale_and_malformed_owner_rechecked": true
 }
