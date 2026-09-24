@@ -477,7 +477,7 @@ class TestPaperRuntimeAdmission(unittest.TestCase):
             receipt = svc._verify_paper_runtime(
                 home, expected_sha=PAPER_BRIDGE_FIXTURE_SHA
             )
-            self.assertEqual(receipt["generation"], "v2")
+            self.assertEqual(receipt["generation"], svc.PAPER_RUNTIME_REL.name)
 
     def test_bridge_hash_drift_refuses(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -498,7 +498,7 @@ class TestPaperRuntimeAdmission(unittest.TestCase):
             _seed_paper_runtime(home)
             receipt_path = home / svc.PAPER_RUNTIME_REL / "RUNTIME.json"
             receipt = json.loads(receipt_path.read_text())
-            receipt["generation"] = "v3"
+            receipt["generation"] = "wrong-generation"
             receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
             receipt_path.chmod(0o600)
             with self.assertRaisesRegex(SystemExit, "required generation"):
@@ -570,7 +570,7 @@ class TestBuildConfig(unittest.TestCase):
             self.assertNotIn("branch", config["gitPublish"])
             self.assertNotIn("remote", config["gitPublish"])
             self.assertNotIn("credential", config["gitPublish"])
-            paper_runtime = home / ".local" / "share" / "mastermind-paper" / "runtime" / "v2"
+            paper_runtime = home / svc.PAPER_RUNTIME_REL
             self.assertEqual(
                 config["paperDesign"],
                 {
