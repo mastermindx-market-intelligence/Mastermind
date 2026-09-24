@@ -3,23 +3,23 @@
 This module closes one narrow gap between Web-session observation and the
 existing Capacity placement/commitment path. It does not discover ChatGPT
 tools, grant authority, mutate Capacity, create RuntimeBindings, select a
-provider, or perform a retry/failover. It consumes a point-in-time, exact
-session-bound capability receipt produced by an accepted surface/tool observer
-and determines whether the already-selected attended Web CEO may cross the
-pre-START placement-commitment boundary.
+provider, or perform a retry/failover. It consumes a point-in-time capability
+receipt bound to the exact current RuntimeBinding and effective-action scope
+produced by accepted owners, then determines whether the already-selected
+attended Web CEO may cross the pre-START placement-commitment boundary.
 
 The important asymmetry is deliberate:
 
 * an absent required capability may exclude a PRE_START/effect=NONE candidate;
 * an unknown capability never widens authority or causes automatic rebinding;
 * schema presence alone never proves a positive capability; a successful
-  current-generation no-effect serviceability probe is required;
+  current-action-scope no-effect serviceability probe is required;
 * after START, or while an effect is unknown, the current binding stays sticky.
 
 The real effectful consumer is still the existing Capacity-C2 commitment
 contract. The guarded commitment helper simply refuses to call that owner
-unless this preflight is READY and bound to the exact selected worker/quota
-identity.
+unless this preflight is READY and bound to the selected worker/quota, current
+RuntimeBinding, and current effective-action scope.
 """
 from __future__ import annotations
 
@@ -52,6 +52,7 @@ _RECEIPT_KEYS = frozenset(
         "session_ref",
         "binding_ref",
         "binding_generation",
+        "action_scope_ref",
         "observed_at_ms",
         "expires_at_ms",
         "schema_complete",
@@ -208,6 +209,7 @@ class ActionServiceabilityFact:
     session_ref: str
     binding_ref: str
     binding_generation: int
+    action_scope_ref: str
     observed_at_ms: int
     expires_at_ms: int
     serviceable: bool
@@ -221,6 +223,10 @@ class ActionServiceabilityFact:
         _positive_int(
             self.binding_generation,
             code="SERVICEABILITY_BINDING_GENERATION_INVALID",
+        )
+        _token(
+            self.action_scope_ref,
+            code="SERVICEABILITY_ACTION_SCOPE_REF_INVALID",
         )
         observed = _positive_int(
             self.observed_at_ms,
@@ -246,6 +252,7 @@ class ActionServiceabilityFact:
             "session_ref": self.session_ref,
             "binding_ref": self.binding_ref,
             "binding_generation": self.binding_generation,
+            "action_scope_ref": self.action_scope_ref,
             "observed_at_ms": self.observed_at_ms,
             "expires_at_ms": self.expires_at_ms,
             "serviceable": self.serviceable,
@@ -380,12 +387,15 @@ class CapabilityObservation:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class WebCeoSessionCapabilityReceipt:
-    """Exact-session point-in-time effective-tool evidence.
+    """Exact-action-scope point-in-time effective-tool evidence.
 
-    schema_complete means the source supplied a complete effective tool schema
-    for the exact observed session generation. Only such a receipt may prove
-    absence; a failed/no-effect probe can prove presence or uncertainty but
-    cannot prove that an unobserved tool is absent.
+    ``action_scope_ref`` is an opaque provider/host observation scope that must
+    change whenever the effective action set can change. On ChatGPT it must be
+    no broader than the message-scoped app/action selection. ``session_ref`` or
+    RuntimeBinding generation alone cannot prove that surface. ``schema_complete``
+    therefore applies only to this exact action scope. A failed/no-effect probe
+    can prove presence or uncertainty but cannot prove that an unobserved tool
+    is absent.
     """
 
     worker_id: str
@@ -393,6 +403,7 @@ class WebCeoSessionCapabilityReceipt:
     session_ref: str
     binding_ref: str
     binding_generation: int
+    action_scope_ref: str
     observed_at_ms: int
     expires_at_ms: int
     schema_complete: bool
@@ -408,6 +419,7 @@ class WebCeoSessionCapabilityReceipt:
         _token(self.session_ref, code="SESSION_REF_INVALID")
         _token(self.binding_ref, code="BINDING_REF_INVALID")
         _positive_int(self.binding_generation, code="BINDING_GENERATION_INVALID")
+        _token(self.action_scope_ref, code="ACTION_SCOPE_REF_INVALID")
         observed = _positive_int(self.observed_at_ms, code="OBSERVED_AT_INVALID")
         expires = _positive_int(self.expires_at_ms, code="EXPIRES_AT_INVALID")
         if expires < observed or expires - observed > MAX_RECEIPT_TTL_MS:
@@ -468,6 +480,7 @@ class WebCeoSessionCapabilityReceipt:
             "session_ref": self.session_ref,
             "binding_ref": self.binding_ref,
             "binding_generation": self.binding_generation,
+            "action_scope_ref": self.action_scope_ref,
             "observed_at_ms": self.observed_at_ms,
             "expires_at_ms": self.expires_at_ms,
             "schema_complete": self.schema_complete,
@@ -499,19 +512,22 @@ def build_receipt_from_effective_tool_schema(
     session_ref: str,
     binding_ref: str,
     binding_generation: int,
+    action_scope_ref: str,
     observed_at_ms: int,
     expires_at_ms: int,
     action_serviceability: Sequence[ActionServiceabilityFact] | None = None,
 ) -> WebCeoSessionCapabilityReceipt:
-    """Compose one short-lived exact-session capability receipt.
+    """Compose one short-lived exact-action-scope capability receipt.
 
     Existing owners supply the exact effective action descriptors, the reviewed
-    closed capability contracts, and no-effect serviceability facts. This pure
-    compositor verifies their identity/generation/schema/TTL intersection and
-    emits only bounded digests plus closed capability observations. It owns no
-    registry, lifecycle, permission, retry, or provider discovery.
+    closed capability contracts, one opaque action-surface scope, and no-effect
+    serviceability facts. This pure compositor verifies their
+    identity/generation/action-scope/schema/TTL intersection and emits only
+    bounded digests plus closed capability observations. It owns no registry,
+    lifecycle, permission, retry, or provider discovery.
     """
 
+    _token(action_scope_ref, code="ACTION_SCOPE_REF_INVALID")
     effective = _normalize_tool_descriptors(effective_tools)
     contracts = _normalize_capability_contracts(capability_contracts)
     if type(schema_complete) is not bool:
@@ -563,6 +579,7 @@ def build_receipt_from_effective_tool_schema(
             fact.session_ref != session_ref
             or fact.binding_ref != binding_ref
             or fact.binding_generation != binding_generation
+            or fact.action_scope_ref != action_scope_ref
         ):
             raise WebCeoSessionCapabilityError(
                 "SERVICEABILITY_FACT_BINDING_MISMATCH"
@@ -686,6 +703,7 @@ def build_receipt_from_effective_tool_schema(
         session_ref=session_ref,
         binding_ref=binding_ref,
         binding_generation=binding_generation,
+        action_scope_ref=action_scope_ref,
         observed_at_ms=observed_at_ms,
         expires_at_ms=expires_at_ms,
         schema_complete=schema_complete,
@@ -719,6 +737,31 @@ class CurrentSessionBindingFacts:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class CurrentActionSurfaceFacts:
+    """Current effective-action observation scope from the existing surface owner.
+
+    This is a transient action-time fact, not another RuntimeBinding or
+    capability registry. The owner must rotate ``action_scope_ref`` whenever
+    the effective action set can change; on ChatGPT it must be no broader than
+    the message-scoped app/action selection.
+    """
+
+    session_ref: str
+    binding_ref: str
+    binding_generation: int
+    action_scope_ref: str
+
+    def __post_init__(self) -> None:
+        _token(self.session_ref, code="ACTION_SURFACE_SESSION_REF_INVALID")
+        _token(self.binding_ref, code="ACTION_SURFACE_BINDING_REF_INVALID")
+        _positive_int(
+            self.binding_generation,
+            code="ACTION_SURFACE_BINDING_GENERATION_INVALID",
+        )
+        _token(self.action_scope_ref, code="ACTION_SURFACE_REF_INVALID")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class WebCeoCapabilityPreflightDecision:
     """Machine-readable assessment; never effect authority by itself."""
 
@@ -729,6 +772,7 @@ class WebCeoCapabilityPreflightDecision:
     session_ref: str
     binding_ref: str
     binding_generation: int
+    action_scope_ref: str
     capability_contract_digest: str
     required_capabilities: tuple[str, ...]
     proven_capabilities: tuple[str, ...]
@@ -751,6 +795,7 @@ class WebCeoCapabilityPreflightDecision:
         _token(self.session_ref, code="SESSION_REF_INVALID")
         _token(self.binding_ref, code="BINDING_REF_INVALID")
         _positive_int(self.binding_generation, code="BINDING_GENERATION_INVALID")
+        _token(self.action_scope_ref, code="ACTION_SCOPE_REF_INVALID")
         for digest_value, code in (
             (self.capability_contract_digest, "CAPABILITY_CONTRACT_DIGEST_INVALID"),
             (self.evidence_digest, "EVIDENCE_DIGEST_INVALID"),
@@ -840,6 +885,7 @@ class WebCeoCapabilityPreflightDecision:
             "session_ref": self.session_ref,
             "binding_ref": self.binding_ref,
             "binding_generation": self.binding_generation,
+            "action_scope_ref": self.action_scope_ref,
             "capability_contract_digest": self.capability_contract_digest,
             "required_capabilities": list(self.required_capabilities),
             "proven_capabilities": list(self.proven_capabilities),
@@ -891,6 +937,7 @@ def validate_session_capability_receipt(
         session_ref=raw["session_ref"],
         binding_ref=raw["binding_ref"],
         binding_generation=raw["binding_generation"],
+        action_scope_ref=raw["action_scope_ref"],
         observed_at_ms=raw["observed_at_ms"],
         expires_at_ms=raw["expires_at_ms"],
         schema_complete=raw["schema_complete"],
@@ -933,6 +980,7 @@ def _decision(
         session_ref=receipt.session_ref,
         binding_ref=receipt.binding_ref,
         binding_generation=receipt.binding_generation,
+        action_scope_ref=receipt.action_scope_ref,
         capability_contract_digest=receipt.capability_contract_digest,
         required_capabilities=required,
         proven_capabilities=proven,
@@ -954,6 +1002,7 @@ def assess_web_ceo_session_capabilities(
     expected_session_ref: str,
     expected_binding_ref: str,
     expected_binding_generation: int,
+    expected_action_scope_ref: str,
     expected_capability_contract_digest: str,
     expected_observer_evidence_digest: str,
     expected_serviceability_evidence_digest: str,
@@ -981,6 +1030,7 @@ def assess_web_ceo_session_capabilities(
         expected_binding_generation,
         code="EXPECTED_BINDING_GENERATION_INVALID",
     )
+    _token(expected_action_scope_ref, code="EXPECTED_ACTION_SCOPE_REF_INVALID")
     if (
         not isinstance(expected_capability_contract_digest, str)
         or _DIGEST_RE.fullmatch(expected_capability_contract_digest) is None
@@ -1040,6 +1090,7 @@ def assess_web_ceo_session_capabilities(
         or receipt.session_ref != expected_session_ref
         or receipt.binding_ref != expected_binding_ref
         or receipt.binding_generation != expected_binding_generation
+        or receipt.action_scope_ref != expected_action_scope_ref
         or receipt.capability_contract_digest
         != expected_capability_contract_digest
         or receipt.observer_evidence_digest
@@ -1156,6 +1207,7 @@ def build_guarded_commitment_plan_from_selection_decision(
     validated_target_facts: Any,
     capability_receipt: WebCeoSessionCapabilityReceipt,
     current_binding: CurrentSessionBindingFacts,
+    current_action_surface: CurrentActionSurfaceFacts,
     principal_action_demand: c1.PrincipalActionDemandReceipt,
     current_principal_action_facts: c1.PrincipalActionOwnerFacts,
     expected_capability_contract_digest: str,
@@ -1171,6 +1223,15 @@ def build_guarded_commitment_plan_from_selection_decision(
         raise WebCeoSessionCapabilityError("PLACEMENT_SELECTION_INVALID")
     if not isinstance(current_binding, CurrentSessionBindingFacts):
         raise WebCeoSessionCapabilityError("CURRENT_BINDING_INVALID")
+    if not isinstance(current_action_surface, CurrentActionSurfaceFacts):
+        raise WebCeoSessionCapabilityError("CURRENT_ACTION_SURFACE_INVALID")
+    if (
+        current_action_surface.session_ref != current_binding.session_ref
+        or current_action_surface.binding_ref != current_binding.binding_ref
+        or current_action_surface.binding_generation
+        != current_binding.binding_generation
+    ):
+        raise WebCeoSessionCapabilityError("ACTION_SURFACE_BINDING_MISMATCH")
     required_capabilities, receiver_binding_mode = _placement_action_requirements(
         placement_selection,
         principal_action_demand=principal_action_demand,
@@ -1197,6 +1258,7 @@ def build_guarded_commitment_plan_from_selection_decision(
         expected_session_ref=current_binding.session_ref,
         expected_binding_ref=current_binding.binding_ref,
         expected_binding_generation=current_binding.binding_generation,
+        expected_action_scope_ref=current_action_surface.action_scope_ref,
         expected_capability_contract_digest=expected_capability_contract_digest,
         expected_observer_evidence_digest=expected_observer_evidence_digest,
         expected_serviceability_evidence_digest=(
@@ -1223,6 +1285,7 @@ __all__ = [
     "CapabilityObservation",
     "CapabilityObservationState",
     "CapabilityProofClass",
+    "CurrentActionSurfaceFacts",
     "CurrentSessionBindingFacts",
     "EffectiveToolDescriptor",
     "KNOWN_EFFECTIVE_CAPABILITIES",

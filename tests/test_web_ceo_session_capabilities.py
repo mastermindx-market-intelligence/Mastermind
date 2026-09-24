@@ -23,6 +23,7 @@ EXPIRES_AT_MS = 1_789_870_120_000
 NOW_MS = 1_789_870_060_000
 OBSERVER_DIGEST = "e" * 64
 WORKER_ROUTE_DIGEST = "b" * 64
+ACTION_SCOPE_REF = "web-message-scope-42"
 
 
 def _source(owner: SourceOwner, ref: str) -> SourceRef:
@@ -217,6 +218,7 @@ def _serviceability_fact(
     session_ref: str = "websol-c3-session-17",
     binding_ref: str = "runtimebinding-websol-c3-17",
     binding_generation: int = 7,
+    action_scope_ref: str = ACTION_SCOPE_REF,
     observed_at_ms: int = OBSERVED_AT_MS,
     expires_at_ms: int = EXPIRES_AT_MS,
 ) -> wcap.ActionServiceabilityFact:
@@ -225,6 +227,7 @@ def _serviceability_fact(
         session_ref=session_ref,
         binding_ref=binding_ref,
         binding_generation=binding_generation,
+        action_scope_ref=action_scope_ref,
         observed_at_ms=observed_at_ms,
         expires_at_ms=expires_at_ms,
         serviceable=serviceable,
@@ -251,6 +254,7 @@ def _receipt(
     session_ref: str = "websol-c3-session-17",
     binding_ref: str = "runtimebinding-websol-c3-17",
     binding_generation: int = 7,
+    action_scope_ref: str = ACTION_SCOPE_REF,
     observed_at_ms: int = OBSERVED_AT_MS,
     expires_at_ms: int = EXPIRES_AT_MS,
     schema_complete: bool = True,
@@ -268,6 +272,7 @@ def _receipt(
                 session_ref=session_ref,
                 binding_ref=binding_ref,
                 binding_generation=binding_generation,
+                action_scope_ref=action_scope_ref,
                 observed_at_ms=observed_at_ms,
                 expires_at_ms=expires_at_ms,
             )
@@ -284,6 +289,7 @@ def _receipt(
         session_ref=session_ref,
         binding_ref=binding_ref,
         binding_generation=binding_generation,
+        action_scope_ref=action_scope_ref,
         observed_at_ms=observed_at_ms,
         expires_at_ms=expires_at_ms,
         action_serviceability=probes,
@@ -307,6 +313,21 @@ def _binding(
     )
 
 
+def _action_surface(
+    *,
+    session_ref: str = "websol-c3-session-17",
+    binding_ref: str = "runtimebinding-websol-c3-17",
+    binding_generation: int = 7,
+    action_scope_ref: str = ACTION_SCOPE_REF,
+) -> wcap.CurrentActionSurfaceFacts:
+    return wcap.CurrentActionSurfaceFacts(
+        session_ref=session_ref,
+        binding_ref=binding_ref,
+        binding_generation=binding_generation,
+        action_scope_ref=action_scope_ref,
+    )
+
+
 def _assess(
     receipt: wcap.WebCeoSessionCapabilityReceipt,
     *,
@@ -317,6 +338,7 @@ def _assess(
         wcap.ReceiverBindingMode.CAPACITY_SELECTABLE
     ),
     binding: wcap.CurrentSessionBindingFacts | None = None,
+    action_surface: wcap.CurrentActionSurfaceFacts | None = None,
     expected_contract_digest: str | None = None,
     expected_observer_digest: str | None = None,
     expected_serviceability_digest: str | None = None,
@@ -325,6 +347,11 @@ def _assess(
     effect_state: EffectState = EffectState.NONE,
 ) -> wcap.WebCeoCapabilityPreflightDecision:
     current = binding or _binding()
+    current_surface = action_surface or _action_surface(
+        session_ref=current.session_ref,
+        binding_ref=current.binding_ref,
+        binding_generation=current.binding_generation,
+    )
     return wcap.assess_web_ceo_session_capabilities(
         receipt=receipt,
         required_capabilities=required,
@@ -334,6 +361,7 @@ def _assess(
         expected_session_ref=current.session_ref,
         expected_binding_ref=current.binding_ref,
         expected_binding_generation=current.binding_generation,
+        expected_action_scope_ref=current_surface.action_scope_ref,
         expected_capability_contract_digest=(
             expected_contract_digest or receipt.capability_contract_digest
         ),
@@ -357,6 +385,7 @@ def _guard(
     principal_action_demand: c1.PrincipalActionDemandReceipt | None = None,
     current_principal_action_facts: c1.PrincipalActionOwnerFacts | None = None,
     binding: wcap.CurrentSessionBindingFacts | None = None,
+    action_surface: wcap.CurrentActionSurfaceFacts | None = None,
     expected_contract_digest: str | None = None,
     expected_observer_digest: str | None = None,
     expected_serviceability_digest: str | None = None,
@@ -381,13 +410,20 @@ def _guard(
             ),
         )
     )
+    current_binding = binding or _binding()
+    current_surface = action_surface or _action_surface(
+        session_ref=current_binding.session_ref,
+        binding_ref=current_binding.binding_ref,
+        binding_generation=current_binding.binding_generation,
+    )
     return wcap.build_guarded_commitment_plan_from_selection_decision(
         source_root_job_id="job-source-1",
         expected_source_root_revision=7,
         placement_selection=bound_selection,
         validated_target_facts=_target_facts(),
         capability_receipt=receipt,
-        current_binding=binding or _binding(),
+        current_binding=current_binding,
+        current_action_surface=current_surface,
         principal_action_demand=action_demand,
         current_principal_action_facts=current_action_facts,
         expected_capability_contract_digest=(
@@ -425,6 +461,7 @@ def test_v2_schema_and_guard_signature_are_pinned() -> None:
         wcap.build_guarded_commitment_plan_from_selection_decision
     ).parameters
     assert "current_binding" in guard_parameters
+    assert "current_action_surface" in guard_parameters
     assert "principal_action_demand" in guard_parameters
     assert "current_principal_action_facts" in guard_parameters
     assert "expected_principal_action_demand_digest" not in guard_parameters
@@ -1152,6 +1189,7 @@ def test_complete_schema_receipt_requires_full_closed_vocabulary() -> None:
             session_ref="websol-c3-session-17",
             binding_ref="runtimebinding-websol-c3-17",
             binding_generation=7,
+            action_scope_ref=ACTION_SCOPE_REF,
             observed_at_ms=OBSERVED_AT_MS,
             expires_at_ms=EXPIRES_AT_MS,
             schema_complete=True,
@@ -1180,6 +1218,7 @@ def test_incomplete_schema_cannot_claim_absence() -> None:
             session_ref="websol-c3-session-17",
             binding_ref="runtimebinding-websol-c3-17",
             binding_generation=7,
+            action_scope_ref=ACTION_SCOPE_REF,
             observed_at_ms=OBSERVED_AT_MS,
             expires_at_ms=EXPIRES_AT_MS,
             schema_complete=False,
@@ -1234,6 +1273,7 @@ def test_hand_built_ready_with_empty_proven_partition_is_refused() -> None:
             session_ref="websol-c3-session-17",
             binding_ref="runtimebinding-websol-c3-17",
             binding_generation=7,
+            action_scope_ref=ACTION_SCOPE_REF,
             capability_contract_digest="b" * 64,
             required_capabilities=("executive_submit",),
             proven_capabilities=(),
@@ -1258,6 +1298,7 @@ def test_decision_partition_must_be_disjoint_and_complete() -> None:
             session_ref="websol-c3-session-17",
             binding_ref="runtimebinding-websol-c3-17",
             binding_generation=7,
+            action_scope_ref=ACTION_SCOPE_REF,
             capability_contract_digest="b" * 64,
             required_capabilities=("executive_submit",),
             proven_capabilities=("executive_submit",),
@@ -1507,6 +1548,7 @@ def test_capability_contracts_must_cover_entire_closed_vocabulary() -> None:
             session_ref="websol-c3-session-17",
             binding_ref="runtimebinding-websol-c3-17",
             binding_generation=7,
+            action_scope_ref=ACTION_SCOPE_REF,
             observed_at_ms=OBSERVED_AT_MS,
             expires_at_ms=EXPIRES_AT_MS,
             action_serviceability=(),
@@ -1572,6 +1614,8 @@ def test_guarded_c2_plan_does_not_persist_private_session_or_tool_coordinates() 
 
     assert "websol-c3-session-17" not in rendered
     assert "runtimebinding-websol-c3-17" not in rendered
+    assert ACTION_SCOPE_REF not in rendered
+    assert "action_scope_ref" not in wire
     assert receipt.tool_schema_digest not in rendered
     assert receipt.observer_evidence_digest not in rendered
     assert receipt.capability_contract_digest not in rendered
@@ -1620,6 +1664,7 @@ def test_observer_evidence_digest_is_bound_into_receipt_digest() -> None:
         session_ref=receipt.session_ref,
         binding_ref=receipt.binding_ref,
         binding_generation=receipt.binding_generation,
+        action_scope_ref=receipt.action_scope_ref,
         observed_at_ms=receipt.observed_at_ms,
         expires_at_ms=receipt.expires_at_ms,
         schema_complete=receipt.schema_complete,
@@ -1630,3 +1675,77 @@ def test_observer_evidence_digest_is_bound_into_receipt_digest() -> None:
         observations=receipt.observations,
     )
     assert changed.evidence_digest != receipt.evidence_digest
+
+
+def test_serviceability_fact_from_different_action_scope_refuses_receipt() -> None:
+    contracts = _contracts()
+    probes = tuple(
+        _serviceability_fact(
+            action,
+            action_scope_ref=(
+                "web-message-scope-previous"
+                if index == 0
+                else ACTION_SCOPE_REF
+            ),
+        )
+        for index, action in enumerate(_all_actions(contracts))
+    )
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="SERVICEABILITY_FACT_BINDING_MISMATCH",
+    ):
+        _receipt(contracts=contracts, serviceability=probes)
+
+
+def test_same_session_binding_but_changed_action_scope_requires_reconciliation() -> None:
+    receipt = _receipt()
+    preflight = _assess(
+        receipt,
+        required=frozenset({"executive_submit"}),
+        action_surface=_action_surface(
+            action_scope_ref="web-message-scope-43"
+        ),
+    )
+    assert preflight.state is wcap.PreflightState.RECONCILIATION_REQUIRED
+    assert preflight.rebind_allowed is False
+
+
+def test_action_surface_binding_must_match_current_runtime_binding() -> None:
+    receipt = _receipt()
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="ACTION_SURFACE_BINDING_MISMATCH",
+    ):
+        _guard(
+            receipt,
+            action_surface=_action_surface(binding_generation=8),
+        )
+
+
+def test_guard_refuses_action_scope_rollover_before_c2(monkeypatch) -> None:
+    receipt = _receipt()
+    called = {"count": 0}
+
+    def _unexpected_c2(**kwargs):
+        called["count"] += 1
+        raise AssertionError("unguarded C2 call")
+
+    monkeypatch.setattr(
+        c2,
+        "build_commitment_plan_from_selection_decision",
+        _unexpected_c2,
+    )
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="CAPABILITY_PREFLIGHT_NOT_READY",
+    ):
+        _guard(
+            receipt,
+            selection=_selection(
+                required_capabilities=frozenset({"executive_submit"})
+            ),
+            action_surface=_action_surface(
+                action_scope_ref="web-message-scope-43"
+            ),
+        )
+    assert called["count"] == 0
