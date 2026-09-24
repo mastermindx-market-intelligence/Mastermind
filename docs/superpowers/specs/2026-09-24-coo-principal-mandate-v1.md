@@ -342,12 +342,31 @@ Add a pure `control_plane/coo_principal_mandate.py`-class owner (exact file name
 
 It performs no I/O, persistence, OAuth verification, Runtime mutation, placement, GitHub action or provider call.
 
-The projection must distinguish:
+**Primary organizational input: the existing Mission Workspace v3 projection.** Do not make the mandate reducer reacquire Control Room, Fabric, Runtime or Agent OS independently. Mission Workspace v3 already joins the current workstream/program, root identity, Fabric state/results, owner-observation currentness, accountable/owed seats, transport/effect posture and source evidence.
 
+For a modifying COO mandate, require the supplied Mission Workspace v3 document to be fully qualified for the selected mission:
+- exact `program.work_ref`;
+- `read_state.state=CURRENT`;
+- owner observation `SAME` where the v3 owner contract requires it;
+- no root/source-generation conflict;
+- no `EFFECT_UNKNOWN` or reconciliation-required posture for the intended effect;
+- accountable/owed-seat facts consistent with the requested COO action.
+
+Separately consume exact already-owner-qualified facts that Mission Workspace does **not** own:
+- installed OAuth/COO principal-binding digest;
+- reviewed rich-principal capability-profile/package digest;
+- current source/Workspace/Workbench lease or grant digest when a source effect is requested;
+- mission release/economic/authority references from their current owners.
+
+If Mission Workspace is PARTIAL/HISTORICAL/UNAVAILABLE or its owner observation is not qualified, the mandate projection must preserve that degradation. It may return read/recommend context, but it cannot manufacture modifying authority.
+
+The projection must distinguish:
 - immutable mission/authority identity used for admission;
 - current dynamic mission/runtime/effect/capability state used to decide whether an action is safe now.
 
 Dynamic state is **not** a durable grant and must not be copied into a new authority store.
+
+**Current gap:** Mission Workspace v3 projects `current_worker`, `current_sol_target` and `owed_turn`, but it does not expose a dedicated `current_coo_target` RuntimeBinding. `SessionTarget`/generic `RuntimeBinding` already support `reasoning_surface=claude`, while the current `runtime_binding_projection.py` provider mapping is Codex-specific. Do not fabricate a Claude RuntimeBinding inside the mandate reducer. The first production level remains `COO_PRINCIPAL_MISSION_BOUND`; exact provider-session binding is the separate F0 hardening wave.
 
 ### P2-B — additive principal admission through the existing sink
 
