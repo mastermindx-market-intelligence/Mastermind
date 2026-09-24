@@ -5,13 +5,19 @@ the requester or the recipient. The projection is read-only — never writes
 to the store, never claims a clock, never broadens the existing wake rules
 that ``control_plane.consultation_runtime`` already enforces.
 
+The projection holds ONE read context for the whole call so the
+sqlite connection is opened and closed exactly once per
+``company_inbox_row`` / ``project_company_inbox`` invocation. The wake
+ledger read reuses that connection.
+
 Schema: ``mastermind.company_inbox.v1``.
 """
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
+from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from control_plane.consultation_runtime import ConsultationRuntime
@@ -32,6 +38,8 @@ _VALID_STATES = frozenset(
     }
 )
 
+_OBLIGATION_STATUS_VALUES = frozenset(status.value for status in ObligationStatus)
+
 
 def _actor_digest(actor_ref: Any) -> str:
     return hashlib.sha256(
@@ -49,78 +57,96 @@ def _consultations(runtime: Runtime) -> ConsultationRuntime:
     return ConsultationRuntime(runtime, repository_root=runtime.store.root)
 
 
-def _question_item_from_intent(intent_event: Any) -> dict[str, Any]:
-    consultations = _consultations(runtime=intent_event.payload.get("__runtime__"))
-    return consultations._intent_from_event(intent_event)  # noqa: SLF001
+def _wake_state_value(
+    runtime: Runtime,
+    connection: Any,
+    question_item: Mapping[str, Any],
+) -> tuple[str | None, str | None]:
+    """Return ``(ObligationStatus.value | None, blocker | None)`` from the ledger.
 
-
-def _wake_state(
-    runtime: Runtime, question_item: Mapping[str, Any]
-) -> tuple[str, str | None]:
-    """Return ``(state, blocker)`` from the canonical Wake state."""
+    Reads the canonical wake state via the runtime's
+    ``_exact_wake_evidence_on_connection`` (re-using the caller's read
+    context — never opens its own). A runtime ``StateConflict`` on the
+    ledger read surfaces ``RECONCILIATION_REQUIRED`` (the same mapping
+    ``consultation_projection`` uses); any other failure returns
+    ``(None, "WAKE_STATE_UNAVAILABLE")``.
+    """
     consultations = _consultations(runtime)
     try:
-        state = consultations._canonical_wake_state(question_item).value
+        _, status = consultations._exact_wake_evidence_on_connection(
+            question_item, connection
+        )
     except StateConflict:
-        return ("RECONCILIATION_REQUIRED", "WAKE_STATE_UNAVAILABLE")
+        # The runtime refused to evaluate the canonical wake evidence (e.g.
+        # an attempt record bound to a different RuntimeBinding). Mirror
+        # ``consultation_runtime.consultation_projection``: surface the
+        # real ``ObligationStatus.RECONCILIATION_REQUIRED`` member.
+        return (
+            ObligationStatus.RECONCILIATION_REQUIRED.value,
+            "WAKE_STATE_UNAVAILABLE",
+        )
     except Exception:
-        return ("RECONCILIATION_REQUIRED", "WAKE_STATE_UNAVAILABLE")
-
+        return (None, "WAKE_STATE_UNAVAILABLE")
+    state = status.value
     if state in {"TARGET_ACKNOWLEDGED", "SOURCE_RESOLVED"}:
         return (state, None)
-    if state == ObligationStatus.NOT_SEEN.value:
-        return (state, "NOT_SEEN")
     return (state, state)
+
+
+def _is_expired(intent_event: Any, now: str) -> bool:
+    valid_until = intent_event.payload.get("valid_until")
+    if not isinstance(valid_until, str):
+        return False
+    try:
+        now_instant = datetime.fromisoformat(now.replace("Z", "+00:00"))
+        valid_instant = datetime.fromisoformat(valid_until.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return now_instant > valid_instant
 
 
 def _state_for(
     runtime: Runtime,
+    connection: Any,
     *,
     intent_event: Any,
     events: list[Any],
     now: str,
-) -> tuple[str, str | None]:
-    event_types = {event.event_type for event in events}
-    valid_until = intent_event.payload.get("valid_until")
-    is_expired = False
-    if isinstance(valid_until, str):
-        try:
-            from datetime import datetime
+) -> tuple[str, str | None, str | None]:
+    """Return ``(state, blocker, wake_state)`` for the projected row.
 
-            now_instant = datetime.fromisoformat(now.replace("Z", "+00:00"))
-            valid_instant = datetime.fromisoformat(valid_until.replace("Z", "+00:00"))
-            is_expired = now_instant > valid_instant
-        except ValueError:
-            is_expired = False
+    ``state`` is the lifecycle state derived from the persisted events.
+    ``wake_state`` is the canonical ``ObligationStatus.value`` read from
+    the ledger (or ``None`` when unreadable). Every branch consults the
+    ledger — there is no fast path that copies ``state`` into ``wake_state``.
+    """
+    event_types = {event.event_type for event in events}
+    is_expired = _is_expired(intent_event, now)
+
+    question_item = _consultations(runtime)._intent_from_event(intent_event)
+    wake_state, wake_blocker = _wake_state_value(runtime, connection, question_item)
 
     if "CONSUMED_BY_REQUESTER" in event_types:
-        return ("CONSUMED", None)
+        return ("CONSUMED", None, wake_state)
     if is_expired:
-        return ("EXPIRED", None)
+        return ("EXPIRED", None, wake_state)
     if "ANSWER_AVAILABLE" in event_types:
-        return ("ANSWER_AVAILABLE", None)
-
-    payload_with_runtime = dict(intent_event.payload)
-    payload_with_runtime["__runtime__"] = runtime
-    intent_event_with_runtime = _event_with_payload(intent_event, payload_with_runtime)
-    question_item = _consultations(runtime)._intent_from_event(intent_event_with_runtime)  # noqa: SLF001
-    wake_state, blocker = _wake_state(runtime, question_item)
+        return ("ANSWER_AVAILABLE", None, wake_state)
     if wake_state == "TARGET_ACKNOWLEDGED":
-        return ("QUESTION_DELIVERED", None)
+        return ("QUESTION_DELIVERED", None, wake_state)
     if wake_state == "RECONCILIATION_REQUIRED":
-        return ("RECONCILIATION_REQUIRED", blocker or "WAKE_STATE_UNAVAILABLE")
-    return ("QUESTION_PENDING_WAKE", blocker or wake_state)
-
-
-def _event_with_payload(event: Any, payload: dict[str, Any]) -> Any:
-    from dataclasses import replace
-
-    if hasattr(event, "payload"):
-        try:
-            return replace(event, payload=payload)
-        except Exception:
-            return event
-    return event
+        return (
+            "RECONCILIATION_REQUIRED",
+            wake_blocker or "WAKE_STATE_UNAVAILABLE",
+            wake_state,
+        )
+    if wake_state is None:
+        return (
+            "QUESTION_PENDING_WAKE",
+            wake_blocker or "WAKE_STATE_UNAVAILABLE",
+            wake_state,
+        )
+    return ("QUESTION_PENDING_WAKE", wake_blocker or wake_state, wake_state)
 
 
 def _owed_turn(state: str, role: str | None) -> str | None:
@@ -152,8 +178,24 @@ def _events_for(runtime: Runtime, consultation_id: str) -> list[Any]:
     )
 
 
+def _obligation_id_for(
+    runtime: Runtime,
+    connection: Any,
+    question_item: Mapping[str, Any],
+) -> str | None:
+    """Return the canonical obligation id, or ``None`` when unreadable."""
+    try:
+        obligation_id, _status = _consultations(
+            runtime
+        )._exact_wake_evidence_on_connection(question_item, connection)
+    except Exception:
+        return None
+    return obligation_id
+
+
 def _row_for_actor(
     runtime: Runtime,
+    connection: Any,
     intent_event: Any,
     *,
     actor_worker_id: str,
@@ -170,8 +212,8 @@ def _row_for_actor(
 
     consultation_id = str(intent_event.aggregate_id)
     events = _events_for(runtime, consultation_id)
-    state, blocker = _state_for(
-        runtime, intent_event=intent_event, events=events, now=now
+    state, blocker, wake_state = _state_for(
+        runtime, connection, intent_event=intent_event, events=events, now=now
     )
     owed = _owed_turn(state, role)
 
@@ -197,18 +239,8 @@ def _row_for_actor(
             }
         )
 
-    obligation_id = None
-    try:
-        payload_with_runtime = dict(payload)
-        payload_with_runtime["__runtime__"] = runtime
-        intent_with_runtime = _event_with_payload(intent_event, payload_with_runtime)
-        consultations = _consultations(runtime)
-        obligation_id, _status = consultations._exact_wake_evidence_on_connection(  # noqa: SLF001
-            consultations._intent_from_event(intent_with_runtime),  # noqa: SLF001
-            _connection_for(runtime),
-        )
-    except Exception:
-        obligation_id = None
+    question_item = _consultations(runtime)._intent_from_event(intent_event)
+    obligation_id = _obligation_id_for(runtime, connection, question_item)
 
     return {
         "schema": COMPANY_INBOX_SCHEMA,
@@ -224,20 +256,13 @@ def _row_for_actor(
         "question_digest": str(payload.get("question_digest", "")),
         "evidence_revision_digest": str(payload.get("artifact_revision_digest", "")),
         "state": state,
-        "wake_state": state,
+        "wake_state": wake_state,
         "deadline": str(payload.get("valid_until", "")),
         "blocker": blocker,
         "owed_turn": owed,
         "obligation_id": obligation_id,
         "evidence_refs": evidence_refs,
     }
-
-
-def _connection_for(runtime: Runtime):
-    """Return an open read connection for the projection's internal wake lookup."""
-    ctx = runtime.store.read()
-    connection = ctx.__enter__()
-    return connection
 
 
 def company_inbox_row(
@@ -259,9 +284,14 @@ def company_inbox_row(
             blocker="NO_INTENT",
         )
     try:
-        row = _row_for_actor(
-            runtime, intent_event, actor_worker_id=actor_worker_id, now=now
-        )
+        with runtime.store.read() as connection:
+            row = _row_for_actor(
+                runtime,
+                connection,
+                intent_event,
+                actor_worker_id=actor_worker_id,
+                now=now,
+            )
     except Exception:
         return _typed_row(
             consultation_ref=consultation_id,
@@ -299,18 +329,26 @@ def project_company_inbox(
             continue
         seen_ids.add(cid)
         consultation_ids.append(cid)
-    for cid in sorted(consultation_ids):
-        intent = _intent_event_for(runtime, cid)
-        if intent is None:
-            continue
-        try:
-            row = _row_for_actor(
-                runtime, intent, actor_worker_id=actor_worker_id, now=now
-            )
-        except Exception:
-            continue
-        if row is not None:
-            rows.append(row)
+    try:
+        with runtime.store.read() as connection:
+            for cid in sorted(consultation_ids):
+                intent = _intent_event_for(runtime, cid)
+                if intent is None:
+                    continue
+                try:
+                    row = _row_for_actor(
+                        runtime,
+                        connection,
+                        intent,
+                        actor_worker_id=actor_worker_id,
+                        now=now,
+                    )
+                except Exception:
+                    continue
+                if row is not None:
+                    rows.append(row)
+    except Exception:
+        rows = []
     return {
         "schema": COMPANY_INBOX_SCHEMA,
         "actor_worker_id_digest": _actor_digest({"worker_id": actor_worker_id}),
@@ -320,7 +358,10 @@ def project_company_inbox(
 
 
 def _typed_row(
-    *, consultation_ref: str, state: str, blocker: str | None
+    *,
+    consultation_ref: str,
+    state: str,
+    blocker: str | None,
 ) -> dict[str, Any]:
     return {
         "schema": COMPANY_INBOX_SCHEMA,
@@ -332,7 +373,7 @@ def _typed_row(
         "question_digest": "",
         "evidence_revision_digest": "",
         "state": state,
-        "wake_state": state,
+        "wake_state": None,
         "deadline": "",
         "blocker": blocker,
         "owed_turn": None,

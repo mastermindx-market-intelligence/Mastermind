@@ -8,14 +8,14 @@ recipient's actor ref + ``recipient_binding``.
 """
 from __future__ import annotations
 
-import copy
 import dataclasses
 import datetime as dt
 import hashlib
 import json
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_SCHEMA,
@@ -44,22 +44,46 @@ from integrations.mastermind_company_mcp.consultation import (
 _DEFAULT_DEADLINE_MS = 60_000
 _VALID_UNTIL_OFFSET = dt.timedelta(hours=24)
 _INBOX_SCHEMA = "mastermind.company_inbox.v1"
+_CONSULTATION_REF_RE = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
+_REPLY_SEMANTIC_KEYS = frozenset(
+    {"consultation_ref", "answer", "supersedes_message_key", "evidence_refs"}
+)
+_READ_SEMANTIC_KEYS = frozenset({"consultation_ref"})
+_ANSWER_PAYLOAD_BUDGET_BYTES = 32768
+_ACKNOWLEDGED_WAKE_STATES = frozenset(
+    {"TARGET_ACKNOWLEDGED", "SOURCE_RESOLVED"}
+)
 
 
-# Process-scoped cache that mirrors the ANSWER frame minted by the recipient
-# dispatcher so the requester dispatcher can replay ``consumed_by_requester``
-# against the exact frame the runtime already admitted. The runtime itself
-# persists only the answer digests, so this in-process side-channel is the
-# only way to re-construct the deterministic answer frame downstream.
-_ANSWER_FRAME_CACHE: dict[str, dict[str, Any]] = {}
+class AnswerFrameCarrier(Protocol):
+    """In-process carrier for the deterministic ANSWER frame.
+
+    The recipient dispatcher puts the exact admitted ANSWER frame into the
+    carrier; the requester dispatcher reads it to drive
+    ``consumed_by_requester``. The carrier holds ``frame`` only after the
+    runtime has actually admitted ``ANSWER_AVAILABLE`` for the
+    ``consultation_id`` — never before.
+    """
+
+    def put(self, consultation_id: str, frame: Mapping[str, Any]) -> None:
+        ...
+
+    def get(self, consultation_id: str) -> Mapping[str, Any] | None:
+        ...
 
 
-def _answer_frame_cache_get(key: str) -> dict[str, Any] | None:
-    return _ANSWER_FRAME_CACHE.get(key)
+class InMemoryAnswerFrameCarrier:
+    """Hermetic in-process ``AnswerFrameCarrier`` used by tests."""
 
+    def __init__(self) -> None:
+        self._frames: dict[str, dict[str, Any]] = {}
 
-def _answer_frame_cache_put(key: str, frame: dict[str, Any]) -> None:
-    _ANSWER_FRAME_CACHE[key] = frame
+    def put(self, consultation_id: str, frame: Mapping[str, Any]) -> None:
+        self._frames[consultation_id] = dict(frame)
+
+    def get(self, consultation_id: str) -> Mapping[str, Any] | None:
+        frame = self._frames.get(consultation_id)
+        return dict(frame) if frame is not None else None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -125,9 +149,15 @@ def _mint_request_identity(
     caller: CallerIdentity,
     peer_ref: str,
     semantic_fingerprint: str,
-    issued_at: str,
 ) -> str:
-    """Deterministic program-scoped consultation identity input."""
+    """Deterministic program-scoped consultation identity input.
+
+    The hash binds only the semantic identity inputs (caller worker +
+    attempt + peer + semantic fingerprint). ``issued_at`` and
+    ``valid_until`` are admitted as inert payload fields but never enter
+    the hash — an advancing gateway clock cannot mint a new
+    consultation_id for the same question.
+    """
     payload = {
         "actor": {
             "worker_id": caller.worker_id,
@@ -136,7 +166,6 @@ def _mint_request_identity(
         },
         "peer_ref": peer_ref,
         "semantic_fingerprint": semantic_fingerprint,
-        "issued_at": issued_at,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -162,6 +191,55 @@ def _typed_refusal(code: str, message: str) -> dict[str, Any]:
     }
 
 
+def _validate_reply_semantic(semantic: Mapping[str, Any]) -> str | None:
+    """Return an ``INVALID_REQUEST`` message or ``None`` if valid."""
+    if set(semantic) != _REPLY_SEMANTIC_KEYS:
+        return (
+            "semantic must carry exactly "
+            "{consultation_ref, answer, supersedes_message_key, evidence_refs}"
+        )
+    consultation_ref = semantic.get("consultation_ref")
+    if not isinstance(consultation_ref, str):
+        return "consultation_ref must be a string"
+    if _CONSULTATION_REF_RE.fullmatch(consultation_ref) is None:
+        return (
+            "consultation_ref must match ^consult-[0-9a-f]{32}$"
+        )
+    answer = semantic.get("answer")
+    supersedes = semantic.get("supersedes_message_key")
+    evidence_refs = semantic.get("evidence_refs")
+    if not isinstance(answer, str):
+        return "answer must be a string"
+    if supersedes is not None and not isinstance(supersedes, str):
+        return "supersedes_message_key must be a string or null"
+    if not isinstance(evidence_refs, list) or any(
+        not isinstance(item, str) for item in evidence_refs
+    ):
+        return "evidence_refs must be a list of strings"
+    canonical = canonical_consultation_json(
+        {"text": answer, "evidence_refs": list(evidence_refs)}
+    )
+    if len(canonical.encode("utf-8")) > _ANSWER_PAYLOAD_BUDGET_BYTES:
+        return (
+            f"answer canonical JSON exceeds { _ANSWER_PAYLOAD_BUDGET_BYTES } bytes"
+        )
+    return None
+
+
+def _validate_read_semantic(semantic: Mapping[str, Any]) -> str | None:
+    """Return an ``INVALID_REQUEST`` message or ``None`` if valid."""
+    if set(semantic) != _READ_SEMANTIC_KEYS:
+        return "semantic must carry exactly {consultation_ref}"
+    consultation_ref = semantic.get("consultation_ref")
+    if not isinstance(consultation_ref, str):
+        return "consultation_ref must be a string"
+    if _CONSULTATION_REF_RE.fullmatch(consultation_ref) is None:
+        return (
+            "consultation_ref must match ^consult-[0-9a-f]{32}$"
+        )
+    return None
+
+
 class RuntimeConsultationDispatcher:
     """Async gateway dispatcher; delegates durable effects to ConsultationRuntime."""
 
@@ -172,6 +250,7 @@ class RuntimeConsultationDispatcher:
         repository_root: Path,
         caller: CallerIdentity,
         recipients: RecipientResolver,
+        answer_frames: AnswerFrameCarrier,
         _clock: ClockFn | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
@@ -180,6 +259,7 @@ class RuntimeConsultationDispatcher:
         self.repository_root = Path(repository_root).resolve()
         self.caller = caller
         self.recipients = recipients
+        self.answer_frames = answer_frames
         self._clock = _clock or utc_now_iso
         self._consultations = ConsultationRuntime(
             runtime, repository_root=self.repository_root, _clock=self._clock
@@ -229,13 +309,30 @@ class RuntimeConsultationDispatcher:
 
         try:
             recipient = self.recipients(peer_ref)
+            recipient_actor_ref = _normalized_actor_ref(recipient.actor_ref)
+            normalized_recipient_binding = dict(recipient.recipient_binding)
         except NoSuchRecipient as exc:
             return {
                 "ok": True,
                 "result": _typed_refusal("NOT_A_PARTY", str(exc)),
             }
+        except (KeyError, TypeError, ValueError) as exc:
+            return {
+                "ok": True,
+                "result": _typed_refusal(
+                    "INTERNAL_ERROR",
+                    f"recipient binding normalization failed: {exc}",
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001 — generic typed refusal
+            return {
+                "ok": True,
+                "result": _typed_refusal(
+                    "INTERNAL_ERROR",
+                    f"recipient resolution failed: {exc}",
+                ),
+            }
 
-        recipient_actor_ref = _normalized_actor_ref(recipient.actor_ref)
         if recipient_actor_ref["worker_id"] == self.caller.worker_id:
             return {
                 "ok": True,
@@ -260,7 +357,6 @@ class RuntimeConsultationDispatcher:
             caller=self.caller,
             peer_ref=peer_ref,
             semantic_fingerprint=sem_fingerprint,
-            issued_at=issued_at,
         )
         consultation_id, message_key = _build_deterministic_ids(identity_hash)
 
@@ -288,7 +384,7 @@ class RuntimeConsultationDispatcher:
             "requester_actor_ref": requester_actor_ref,
             "recipient_actor_ref": recipient_actor_ref,
             "recipient_peer_ref": peer_ref,
-            "recipient_binding": dict(recipient.recipient_binding),
+            "recipient_binding": normalized_recipient_binding,
             "correlation": {
                 "parent_fingerprint": "0" * 64,
                 "request_message_key": message_key,
@@ -306,14 +402,13 @@ class RuntimeConsultationDispatcher:
                 "max_answers": 1,
                 "max_evidence_reads": 4,
                 "max_forward_hops": 0,
-                "max_payload_bytes": 32768,
+                "max_payload_bytes": _ANSWER_PAYLOAD_BUDGET_BYTES,
             },
             "supersedes_message_key": None,
             "receipts": {key: None for key in RECEIPT_KEYS},
             "fingerprint": "",
         }
         question_frame = build_consultation(raw_question_frame)
-        _ANSWER_FRAME_CACHE.pop(consultation_id, None)
 
         carrier_ref = f"company-mcp://{consultation_id}"
 
@@ -325,6 +420,13 @@ class RuntimeConsultationDispatcher:
                 observed_at=issued_at,
                 repository_root=self.repository_root,
             )
+        except ConsultationConflict as exc:
+            return {
+                "ok": True,
+                "result": _typed_refusal(
+                    "CONFLICT", str(exc) or "intent refused"
+                ),
+            }
         except StateConflict as exc:
             return {
                 "ok": True,
@@ -333,7 +435,27 @@ class RuntimeConsultationDispatcher:
                 ),
             }
 
-        wake_state = self._consultations.resolve_restart(question_frame)
+        try:
+            wake_state = self._consultations.resolve_restart(question_frame)
+        except StateConflict:
+            return {
+                "ok": True,
+                "result": {
+                    "consultation_ref": consultation_id,
+                    "consultation_id": consultation_id,
+                    "wake_state": "RECONCILIATION_REQUIRED",
+                    "deadline": valid_until,
+                    "intended": intent_result.inserted,
+                    "is_already_intended": not intent_result.inserted,
+                    "state": (
+                        "ALREADY_INTENDED"
+                        if not intent_result.inserted
+                        else "INTENDED"
+                    ),
+                    "carrier_ref": carrier_ref,
+                    "blocker": "WAKE_STATE_UNAVAILABLE",
+                },
+            }
         return {
             "ok": True,
             "result": {
@@ -353,16 +475,23 @@ class RuntimeConsultationDispatcher:
     async def _dispatch_reply(
         self, request: Mapping[str, Any]
     ) -> dict[str, Any]:
-        semantic = dict(request.get("semantic", {}))
-        consultation_ref = semantic.get("consultation_ref")
-        if not isinstance(consultation_ref, str):
+        raw_semantic = request.get("semantic")
+        if not isinstance(raw_semantic, Mapping):
             return {
                 "ok": True,
                 "result": _typed_refusal(
-                    "INVALID_REQUEST", "consultation_ref required"
+                    "INVALID_REQUEST", "semantic mapping required"
                 ),
             }
+        semantic = dict(raw_semantic)
+        invalid = _validate_reply_semantic(semantic)
+        if invalid is not None:
+            return {
+                "ok": True,
+                "result": _typed_refusal("INVALID_REQUEST", invalid),
+            }
 
+        consultation_ref = semantic["consultation_ref"]
         intent = _lookup_intent(self.runtime, consultation_ref)
         if intent is None:
             return {
@@ -390,7 +519,37 @@ class RuntimeConsultationDispatcher:
             evidence_refs=list(semantic.get("evidence_refs", [])),
             supersedes=semantic.get("supersedes_message_key"),
         )
-        _answer_frame_cache_put(consultation_ref, answer_frame)
+
+        try:
+            question_item = self._consultations._intent_from_event(intent)
+            pre_wake_state = self._consultations._canonical_wake_state(
+                question_item
+            ).value
+        except ConsultationConflict as exc:
+            return {
+                "ok": True,
+                "result": _typed_refusal(
+                    "CONFLICT",
+                    str(exc) or "wake state CONFLICT",
+                ),
+            }
+        except StateConflict as exc:
+            return {
+                "ok": True,
+                "result": _typed_refusal(
+                    "WAKE_NOT_ACKNOWLEDGED",
+                    str(exc) or "wake state unavailable",
+                ),
+            }
+
+        if pre_wake_state not in _ACKNOWLEDGED_WAKE_STATES:
+            return {
+                "ok": True,
+                "result": _typed_refusal(
+                    "WAKE_NOT_ACKNOWLEDGED",
+                    "answer requires canonical TARGET_ACKNOWLEDGED Wake evidence",
+                ),
+            }
 
         try:
             answer = self._consultations.answer_available(
@@ -405,9 +564,9 @@ class RuntimeConsultationDispatcher:
             }
         except StateConflict as exc:
             message = str(exc)
-            # Only map the canonical runtime conflict "answer requires canonical
-            # TARGET_ACKNOWLEDGED Wake evidence…"; every other StateConflict
-            # is a generic INVALID_REQUEST.
+            # Runtime backstop: a TARGET_ACKNOWLEDGED race after the
+            # pre-check returned acknowledged is still WAKE_NOT_ACKNOWLEDGED.
+            # Any other StateConflict is a deterministic CONFLICT.
             if "TARGET_ACKNOWLEDGED" in message:
                 return {
                     "ok": True,
@@ -419,22 +578,51 @@ class RuntimeConsultationDispatcher:
             return {
                 "ok": True,
                 "result": _typed_refusal(
-                    "INVALID_REQUEST", message or "answer refused"
+                    "CONFLICT", message or "answer refused"
                 ),
             }
+
+        event = answer.event
+        event_type = getattr(event, "event_type", "")
+        payload_fact = (
+            event.payload.get("fact") if hasattr(event, "payload") else None
+        )
+        if event_type == "ANSWER_REFUSED" or payload_fact == "ANSWER_REFUSED":
+            return {
+                "ok": True,
+                "result": _typed_refusal(
+                    "CONFLICT",
+                    str(
+                        event.payload.get(
+                            "conflict", "answer replay conflict"
+                        )
+                    )
+                    if hasattr(event, "payload")
+                    else "answer replay conflict",
+                ),
+            }
+
+        # Admitted only: cache the exact admitted frame for the requester
+        # dispatcher to replay ``consumed_by_requester``.
+        if (
+            event_type == "ANSWER_AVAILABLE"
+            and payload_fact == "ANSWER_AVAILABLE"
+            and not bool(event.payload.get("historical", False))
+        ):
+            self.answer_frames.put(consultation_ref, answer_frame)
 
         return {
             "ok": True,
             "result": {
                 "consultation_ref": consultation_ref,
                 "state": "ANSWER_AVAILABLE",
-                "answer_fingerprint": answer.event.payload.get(
+                "answer_fingerprint": event.payload.get(
                     "answer_fingerprint", ""
                 ),
-                "semantic_answer_digest": answer.event.payload.get(
+                "semantic_answer_digest": event.payload.get(
                     "semantic_answer_digest", ""
                 ),
-                "historical": bool(answer.event.payload.get("historical", False)),
+                "historical": bool(event.payload.get("historical", False)),
                 "inserted": answer.inserted,
             },
         }
@@ -442,16 +630,23 @@ class RuntimeConsultationDispatcher:
     async def _dispatch_read(
         self, request: Mapping[str, Any]
     ) -> dict[str, Any]:
-        semantic = dict(request.get("semantic", {}))
-        consultation_ref = semantic.get("consultation_ref")
-        if not isinstance(consultation_ref, str):
+        raw_semantic = request.get("semantic")
+        if not isinstance(raw_semantic, Mapping):
             return {
                 "ok": True,
                 "result": _typed_refusal(
-                    "INVALID_REQUEST", "consultation_ref required"
+                    "INVALID_REQUEST", "semantic mapping required"
                 ),
             }
+        semantic = dict(raw_semantic)
+        invalid = _validate_read_semantic(semantic)
+        if invalid is not None:
+            return {
+                "ok": True,
+                "result": _typed_refusal("INVALID_REQUEST", invalid),
+            }
 
+        consultation_ref = semantic["consultation_ref"]
         intent = _lookup_intent(self.runtime, consultation_ref)
         if intent is None:
             return {
@@ -487,54 +682,71 @@ class RuntimeConsultationDispatcher:
             )
         )
 
-        row = company_inbox_row(
-            self.runtime, consultation_ref, self.caller.worker_id, self._clock()
-        )
-        state = row.get("state", "RECONCILIATION_REQUIRED")
-
         consumed_event = _first_event(
             self.runtime, consultation_ref, "CONSUMED_BY_REQUESTER"
         )
 
         if (
             role == "REQUESTER"
-            and state == "ANSWER_AVAILABLE"
             and consumed_event is None
+            and self._has_answer_available(consultation_ref)
         ):
-            answer_frame = _answer_frame_cache_get(consultation_ref)
+            answer_frame = self.answer_frames.get(consultation_ref)
             if (
-                answer_frame is not None
-                and intent_attempt == self.caller.attempt_id
+                answer_frame is None
+                or intent_attempt != self.caller.attempt_id
             ):
-                try:
-                    self._consultations.consumed_by_requester(
-                        answer_frame,
-                        requester_attempt_id=self.caller.attempt_id,
-                        observed_at=self._clock(),
-                    )
-                except ConsultationConflict as exc:
-                    return {
-                        "ok": True,
-                        "result": _typed_refusal(
-                            "CONFLICT", str(exc) or "consumption refused"
-                        ),
-                    }
-                except StateConflict as exc:
-                    return {
-                        "ok": True,
-                        "result": _typed_refusal(
-                            "INVALID_REQUEST",
-                            str(exc) or "consumption refused",
-                        ),
-                    }
+                # No admit-only frame available; never consume and never
+                # append a CONSUMED_BY_REQUESTER event. Surface a typed
+                # blocker with zero effect.
                 row = company_inbox_row(
                     self.runtime,
                     consultation_ref,
                     self.caller.worker_id,
                     self._clock(),
                 )
+                row = dict(row)
+                row["state"] = "ANSWER_AVAILABLE"
+                row["wake_state"] = (
+                    row.get("wake_state") or "TARGET_ACKNOWLEDGED"
+                )
+                row["blocker"] = "ANSWER_FRAME_UNAVAILABLE"
+                row["owed_turn"] = "REQUESTER"
+                return {"ok": True, "result": row}
+            try:
+                self._consultations.consumed_by_requester(
+                    answer_frame,
+                    requester_attempt_id=self.caller.attempt_id,
+                    observed_at=self._clock(),
+                )
+            except ConsultationConflict as exc:
+                return {
+                    "ok": True,
+                    "result": _typed_refusal(
+                        "CONFLICT", str(exc) or "consumption refused"
+                    ),
+                }
+            except StateConflict as exc:
+                return {
+                    "ok": True,
+                    "result": _typed_refusal(
+                        "CONFLICT",
+                        str(exc) or "consumption refused",
+                    ),
+                }
 
+        row = company_inbox_row(
+            self.runtime, consultation_ref, self.caller.worker_id, self._clock()
+        )
         return {"ok": True, "result": row}
+
+    def _has_answer_available(self, consultation_ref: str) -> bool:
+        for event in self.runtime.events.list_events(
+            aggregate_type="consultation", aggregate_id=consultation_ref
+        ):
+            if event.event_type == "ANSWER_AVAILABLE":
+                return True
+        return False
 
     def inbox_projection(self, actor_worker_id: str) -> dict[str, Any]:
         """Return the full inbox projection for an actor. Read-only."""
@@ -545,11 +757,26 @@ class RuntimeConsultationDispatcher:
 
 def _normalized_actor_ref(actor_ref: Mapping[str, Any]) -> dict[str, str]:
     actor = dict(actor_ref)
+    job_id = actor.get("job_id")
+    attempt_id = actor.get("attempt_id")
+    worker_id = actor.get("worker_id")
+    if not (
+        isinstance(job_id, str)
+        and isinstance(attempt_id, str)
+        and isinstance(worker_id, str)
+    ):
+        raise KeyError(
+            "recipient actor_ref requires job_id, attempt_id, worker_id"
+        )
+    if not (job_id and attempt_id and worker_id):
+        raise KeyError(
+            "recipient actor_ref requires non-empty job_id, attempt_id, worker_id"
+        )
     return {
         "kind": str(actor.get("kind", "worker_attempt")),
-        "job_id": str(actor["job_id"]),
-        "attempt_id": str(actor["attempt_id"]),
-        "worker_id": str(actor["worker_id"]),
+        "job_id": job_id,
+        "attempt_id": attempt_id,
+        "worker_id": worker_id,
     }
 
 
@@ -561,8 +788,8 @@ def _correlation_digests(
     requester: Mapping[str, Any], recipient: Mapping[str, Any]
 ) -> tuple[str, str]:
     return (
-        _sha64(copy.deepcopy(dict(requester))),
-        _sha64(copy.deepcopy(dict(recipient))),
+        _sha64(dict(requester)),
+        _sha64(dict(recipient)),
     )
 
 
@@ -591,25 +818,31 @@ def _first_event(
 def _intent_question_frame(intent: Any) -> dict[str, Any]:
     """Rehydrate a QUESTION frame from the persisted INTENT event payload."""
     payload = intent.payload
+    artifact_revisions = payload.get("artifact_revisions")
+    if not isinstance(artifact_revisions, list):
+        artifact_revisions = []
+    response_budget = payload.get("response_budget")
+    if not isinstance(response_budget, Mapping):
+        response_budget = {}
     return {
         "schema": str(payload["consultation_schema"]),
         "message_key": payload["message_key"],
         "consultation_id": payload["consultation_id"],
         "purpose": "QUESTION",
-        "requester_actor_ref": copy.deepcopy(payload["requester_actor_ref"]),
-        "recipient_actor_ref": copy.deepcopy(payload["recipient_actor_ref"]),
+        "requester_actor_ref": dict(payload["requester_actor_ref"]),
+        "recipient_actor_ref": dict(payload["recipient_actor_ref"]),
         "recipient_peer_ref": payload["recipient_peer_ref"],
-        "recipient_binding": copy.deepcopy(payload["recipient_binding"]),
-        "correlation": copy.deepcopy(payload["correlation"]),
+        "recipient_binding": dict(payload["recipient_binding"]),
+        "correlation": dict(payload["correlation"]),
         "question": "?",
         "answer": None,
         "evidence_refs": [],
-        "artifact_revisions": copy.deepcopy(payload["artifact_revisions"]),
+        "artifact_revisions": list(artifact_revisions),
         "valid_until": payload["valid_until"],
         "deadline_ms": int(payload["deadline_ms"]),
-        "response_budget": copy.deepcopy(payload["response_budget"]),
+        "response_budget": dict(response_budget),
         "supersedes_message_key": None,
-        "receipts": {},
+        "receipts": {key: None for key in RECEIPT_KEYS},
         "fingerprint": payload["semantic_fingerprint"],
     }
 
@@ -645,12 +878,12 @@ def _build_answer_frame(
         "message_key": message_key,
         "consultation_id": question_frame["consultation_id"],
         "purpose": "ANSWER",
-        "requester_actor_ref": copy.deepcopy(dict(question_frame["requester_actor_ref"])),
-        "recipient_actor_ref": copy.deepcopy(dict(question_frame["recipient_actor_ref"])),
+        "requester_actor_ref": dict(question_frame["requester_actor_ref"]),
+        "recipient_actor_ref": dict(question_frame["recipient_actor_ref"]),
         "recipient_peer_ref": question_frame["recipient_peer_ref"],
-        "recipient_binding": copy.deepcopy(dict(question_frame["recipient_binding"])),
+        "recipient_binding": dict(question_frame["recipient_binding"]),
         "correlation": {
-            **copy.deepcopy(dict(question_frame["correlation"])),
+            **dict(question_frame["correlation"]),
             "request_message_key": question_frame["message_key"],
         },
         "question": None,
@@ -669,7 +902,9 @@ def _build_answer_frame(
 
 
 __all__ = [
+    "AnswerFrameCarrier",
     "CallerIdentity",
+    "InMemoryAnswerFrameCarrier",
     "NoSuchRecipient",
     "RecipientBinding",
     "RecipientResolver",

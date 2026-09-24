@@ -21,7 +21,6 @@ import pytest
 
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_SCHEMA,
-    RECEIPT_KEYS,
     build_consultation,
 )
 from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
@@ -31,7 +30,7 @@ from control_plane.company_inbox_projection import (
     project_company_inbox,
 )
 from control_plane.consultation_runtime import ConsultationRuntime
-from control_plane.executive_runtime import Runtime
+from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.operator_harness_contract import (
     AuthRealmFact,
     AuthRealmRequirement,
@@ -50,7 +49,9 @@ from integrations.mastermind_company_mcp.consultation import (
     CompanyConsultationGateway,
 )
 from integrations.company_consultation_dispatch import (
+    AnswerFrameCarrier,
     CallerIdentity,
+    InMemoryAnswerFrameCarrier,
     RecipientBinding,
     RuntimeConsultationDispatcher,
 )
@@ -574,6 +575,7 @@ def _make_dispatcher(
     requester: tuple,
     recipient: tuple,
     clock_value: str = "2026-09-14T00:00:00Z",
+    answer_frames: AnswerFrameCarrier | None = None,
 ) -> RuntimeConsultationDispatcher:
     caller = CallerIdentity(
         worker_id=requester[2],
@@ -587,6 +589,7 @@ def _make_dispatcher(
         repository_root=repository_root,
         caller=caller,
         recipients=_recipient_resolver(recipient),
+        answer_frames=answer_frames or InMemoryAnswerFrameCarrier(),
         _clock=_ManualClock(clock_value),
     )
 
@@ -805,12 +808,14 @@ def test_a_b_a_journey_with_full_credit_and_consumption(tmp_path: Path) -> None:
     consultations = _consultations(runtime, tmp_path / "journey")
     requester, recipient, _third, _root = _workers(runtime)
     fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-repo-journey")
+    shared_carrier = InMemoryAnswerFrameCarrier()
 
     a_dispatcher = _make_dispatcher(
         runtime,
         fixture_repo,
         requester=requester,
         recipient=recipient,
+        answer_frames=shared_carrier,
     )
     a_gateway = _gateway_with_dispatcher(a_dispatcher)
     b_dispatcher = _make_dispatcher(
@@ -818,6 +823,7 @@ def test_a_b_a_journey_with_full_credit_and_consumption(tmp_path: Path) -> None:
         fixture_repo,
         requester=recipient,
         recipient=requester,
+        answer_frames=shared_carrier,
     )
     b_gateway = _gateway_with_dispatcher(b_dispatcher)
 
@@ -1075,18 +1081,34 @@ def test_non_party_worker_c_reads_returns_not_a_party(tmp_path: Path) -> None:
 
 
 def test_session_rotation_observes_existing_runtime_rule(tmp_path: Path) -> None:
-    """Case (e): rotated requester attempt — record existing runtime rule."""
+    """Case (e): rotated requester attempt — record existing runtime rule.
+
+    Drives ``ConsultationRuntime.consumed_by_requester`` directly with the
+    rotated attempt so the dispatcher-level short-circuit (it bails on
+    the attempt mismatch before reaching the runtime rule) cannot mask
+    the canonical runtime check at
+    ``control_plane/consultation_runtime.py:684``.
+    """
     runtime = _runtime_at(tmp_path / "rotation")
     consultations = _consultations(runtime, tmp_path / "rotation")
     requester, recipient, _third, _root = _workers(runtime)
     fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-repo-rotation")
 
     a_dispatcher = _make_dispatcher(
-        runtime, fixture_repo, requester=requester, recipient=recipient
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        answer_frames=InMemoryAnswerFrameCarrier(),
     )
     a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    shared_carrier = a_dispatcher.answer_frames
     b_dispatcher = _make_dispatcher(
-        runtime, fixture_repo, requester=recipient, recipient=requester
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        answer_frames=shared_carrier,
     )
     b_gateway = _gateway_with_dispatcher(b_dispatcher)
 
@@ -1117,62 +1139,82 @@ def test_session_rotation_observes_existing_runtime_rule(tmp_path: Path) -> None
     )
     assert reply_envelope["ok"] is True
 
+    # Consume the exact admitted ANSWER frame the recipient dispatcher put on
+    # the shared carrier (only after the runtime admitted ANSWER_AVAILABLE),
+    # so the rotated caller presents the frame the runtime already holds.
+    answer_frame = shared_carrier.get(consultation_id)
+    assert answer_frame is not None
+
     # Build a rotated attempt for the requester: same worker, new attempt, new binding.
     rotated_attempt = (
         "ATT-ROTATED-" + hashlib.sha256(b"rotated-attempt").hexdigest()[:16]
     )
-    rotated_binding = _binding(f"rotated-{rotated_attempt}", 1)
+
+    # Call ``consumed_by_requester`` directly with the rotated attempt; the
+    # runtime at ``control_plane/consultation_runtime.py:684`` requires the
+    # exact attempt_id recorded on the INTENT and raises StateConflict.
+    with pytest.raises(StateConflict) as excinfo:
+        consultations.consumed_by_requester(
+            answer_frame,
+            requester_attempt_id=rotated_attempt,
+            observed_at="2026-09-14T00:01:00Z",
+        )
+    assert "requester actor is not the Runtime Attempt" in str(excinfo.value)
+
+    # Dispatcher-level typed refusal still applies — keeps the rotation
+    # path fully exercised without depending on the substring.
     rotated_caller = CallerIdentity(
         worker_id=requester[2],
         attempt_id=rotated_attempt,
         reasoning_surface="codex",
-        binding=rotated_binding,
+        binding=_binding(f"rotated-{rotated_attempt}", 1),
     )
     rotated_dispatcher = RuntimeConsultationDispatcher(
         runtime=runtime,
         repository_root=tmp_path / "rotation",
         caller=rotated_caller,
         recipients=_recipient_resolver(recipient),
+        answer_frames=shared_carrier,
         _clock=_ManualClock("2026-09-14T00:01:00Z"),
     )
     rotated_gateway = _gateway_with_dispatcher(rotated_dispatcher)
-
-    # The rotated dispatcher reads.
     rotated_read = _run(
         rotated_gateway.call(
             "company.consultation", {"consultation_ref": consultation_id}
         )
     )
+    # The rotated dispatcher bails on the attempt mismatch with zero effect.
     assert rotated_read["ok"] is True
-    # The runtime refuses consumption by a rotated attempt: it expects the
-    # exact attempt_id recorded on the INTENT. The dispatcher's consumption
-    # attempt raises StateConflict; the dispatcher surfaces a typed refusal.
-    # Either the rotation is refused, or no consumption event is appended.
-    state = rotated_read["data"].get("state")
-    code = rotated_read["data"].get("code")
-    if code is not None:
-        assert code == "INVALID_REQUEST"
-    else:
-        # No new consumption event was appended for the rotated attempt.
-        events = runtime.events.list_events(
-            aggregate_type="consultation", aggregate_id=consultation_id
-        )
-        assert sum(
-            1 for event in events if event.event_type == "CONSUMED_BY_REQUESTER"
-        ) == 0
+    row = rotated_read["data"]
+    assert row.get("state") in {"ANSWER_AVAILABLE", "CONSUMED"}
+    assert row.get("blocker") == "ANSWER_FRAME_UNAVAILABLE"
+    events = runtime.events.list_events(
+        aggregate_type="consultation", aggregate_id=consultation_id
+    )
+    assert sum(
+        1 for event in events if event.event_type == "CONSUMED_BY_REQUESTER"
+    ) == 0
 
     print(
         "RUNTIME_RULES_OBSERVED: rotated_attempt consumption refused at "
         "control_plane/consultation_runtime.py:684 "
-        "(requester actor attempt_id mismatch); state="
-        f"{state} code={code}"
+        "(requester actor attempt_id mismatch); "
+        f"raised={type(excinfo.value).__name__}"
     )
 
 
 def test_corrupt_wake_ledger_path_surfaces_reconciliation_required(
     tmp_path: Path,
 ) -> None:
-    """Case (f): wake state unavailable → RECONCILIATION_REQUIRED."""
+    """Case (f): corrupt the wake ledger lineage → RECONCILIATION_REQUIRED.
+
+    Appends a canonical WAKE_REQUESTED plus a binding-mismatched
+    DELIVERY_ATTEMPT via WakeLedgerRepository so the canonical wake
+    evidence no longer validates against the current RuntimeBinding. The
+    runtime then refuses to evaluate the obligation and the projection
+    must surface RECONCILIATION_REQUIRED + WAKE_STATE_UNAVAILABLE
+    (no disjunctive asserts).
+    """
     runtime = _runtime_at(tmp_path / "corrupt")
     requester, recipient, _third, _root = _workers(runtime)
     fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-repo-corrupt")
@@ -1195,11 +1237,117 @@ def test_corrupt_wake_ledger_path_surfaces_reconciliation_required(
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
 
+    from control_plane.dialogue_source_resolution import (
+        ConsultationSourceIdentity,
+    )
+    from control_plane.session_targets import (
+        RuntimeBinding,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import (
+        LedgerPhase,
+        attempt_record,
+        make_delivery_attempt,
+        requested_record,
+    )
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        ConsultationWakeExtension,
+    )
+
+    intent_payload = next(
+        event.payload
+        for event in runtime.events.list_events(
+            aggregate_type="consultation", aggregate_id=consultation_id
+        )
+        if event.event_type == "INTENT"
+    )
+    with runtime.store.read() as connection:
+        root_row = connection.execute(
+            "SELECT j.root_job_id FROM attempts a JOIN jobs j ON j.job_id=a.job_id "
+            "WHERE a.attempt_id=?",
+            (intent_payload["recipient_actor_ref"]["attempt_id"],),
+        ).fetchone()
+    identity = ConsultationSourceIdentity.create(
+        consultation_id=intent_payload["consultation_id"],
+        message_key=intent_payload["message_key"],
+        semantic_fingerprint=intent_payload["semantic_fingerprint"],
+        root_job_id=root_row["root_job_id"],
+        requester_job_id=intent_payload["requester_actor_ref"]["job_id"],
+        requester_attempt_id=intent_payload["requester_actor_ref"]["attempt_id"],
+        recipient_job_id=intent_payload["recipient_actor_ref"]["job_id"],
+        recipient_attempt_id=intent_payload["recipient_actor_ref"]["attempt_id"],
+        binding_id=str(intent_payload["recipient_binding"]["binding_id"]),
+        binding_generation=int(intent_payload["recipient_binding"]["binding_generation"]),
+    )
+    extension = ConsultationWakeExtension(
+        repository=WakeLedgerRepository(runtime),
+        requester_job_id=identity.requester_job_id,
+        requester_attempt_id=identity.requester_attempt_id,
+        root_job_id=identity.root_job_id,
+        recipient_job_id=identity.recipient_job_id,
+        recipient_attempt_id=identity.recipient_attempt_id,
+        consultation_id=identity.consultation_id,
+        message_key=identity.message_key,
+        semantic_fingerprint=identity.semantic_fingerprint,
+        current_binding=RuntimeBinding(
+            session_alias="CONSULTATION-RECIPIENT",
+            binding_id=str(intent_payload["recipient_binding"]["binding_id"]),
+            binding_generation=int(intent_payload["recipient_binding"]["binding_generation"]),
+            native_handle="thread-recipient-1",
+            reasoning_surface="codex",
+        ),
+    )
+    obligation = extension.obligation()
+    target = SessionTarget(
+        session_alias="CONSULTATION-RECIPIENT",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=True,
+    )
+    mismatched_binding_obj = RuntimeBinding(
+        session_alias="CONSULTATION-RECIPIENT",
+        binding_id="bind-mismatched-corrupt",
+        binding_generation=99,
+        native_handle="thread-mismatched",
+        reasoning_surface="codex",
+    )
+    route = route_obligation(
+        obligation,
+        SessionTargetRegistry(
+            schema="mastermind.wake_session_targets.v2",
+            lifecycle_authority="executive_os",
+            production_armed=False,
+            policy_version="fixture-v1",
+            default_alias_by_seat={"coo": target.session_alias},
+            workstream_alias_by_seat={},
+            root_job_bindings={obligation.root_job_id: {"coo": target.session_alias}},
+            targets={target.session_alias: target},
+        ),
+        binding=mismatched_binding_obj,
+    )
+    WakeLedgerRepository(runtime).append_records_atomic(
+        [
+            (requested_record(obligation), None),
+            (
+                attempt_record(
+                    make_delivery_attempt(obligation, route, attempt_n=1),
+                    LedgerPhase.DELIVERY_ATTEMPT,
+                ),
+                None,
+            ),
+        ]
+    )
+
     row = company_inbox_row(
         runtime, consultation_id, requester[2], "2026-09-14T00:01:00Z"
     )
-    assert row["state"] in {"QUESTION_PENDING_WAKE", "RECONCILIATION_REQUIRED"}
-    assert row["blocker"] in {"NOT_SEEN", "WAKE_STATE_UNAVAILABLE"}
+    assert row["state"] == "RECONCILIATION_REQUIRED"
+    assert row["blocker"] == "WAKE_STATE_UNAVAILABLE"
 
 
 def test_inbox_rows_carry_only_digests_never_text(tmp_path: Path) -> None:
@@ -1245,8 +1393,12 @@ def test_inbox_rows_carry_only_digests_never_text(tmp_path: Path) -> None:
 
 
 def test_frozen_company_consultation_mcp_tests_stay_green() -> None:
-    """Case (h): the frozen-surface tests remain importable and intact."""
-    import tests.test_company_consultation_mcp as frozen
+    """Case (h): the frozen-surface tool-schema digest is unchanged."""
+    from tests.test_company_consultation_mcp import (
+        COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST as EXECUTIVE_COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+    )
 
-    assert hasattr(frozen, "_gateway")
-    assert hasattr(frozen, "_peer")
+    assert (
+        COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
+        == EXECUTIVE_COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
+    )
