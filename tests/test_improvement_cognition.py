@@ -74,7 +74,8 @@ def test_draft_uses_one_no_tools_no_log_turn_and_keeps_advisory_boundary(monkeyp
             "model": "fake-model",
         }
 
-    patch_reasoner(monkeypatch, reasoner)\n    draft = C.draft_proposals(report())
+    patch_reasoner(monkeypatch, reasoner)
+    draft = C.draft_proposals(report())
 
     assert len(calls) == 1
     prompt, kwargs = calls[0]
@@ -100,7 +101,8 @@ def test_effectful_next_action_is_refused(monkeypatch, action):
     def reasoner(prompt, **kwargs):
         return {"ok": True, "text": json.dumps(response(action=action)), "tools_used": []}
 
-    patch_reasoner(monkeypatch, reasoner)\n    with pytest.raises(ValueError, match="effectful_next_action_refused"):
+    patch_reasoner(monkeypatch, reasoner)
+    with pytest.raises(ValueError, match="effectful_next_action_refused"):
         C.draft_proposals(report())
 
 
@@ -112,7 +114,8 @@ def test_unknown_evidence_reference_is_refused(monkeypatch):
             "tools_used": [],
         }
 
-    patch_reasoner(monkeypatch, reasoner)\n    with pytest.raises(ValueError, match="uncited_or_unknown_evidence"):
+    patch_reasoner(monkeypatch, reasoner)
+    with pytest.raises(ValueError, match="uncited_or_unknown_evidence"):
         C.draft_proposals(report())
 
 
@@ -124,7 +127,8 @@ def test_provider_tool_use_is_refused_even_when_json_is_valid(monkeypatch):
             "tools_used": ["Read"],
         }
 
-    patch_reasoner(monkeypatch, reasoner)\n    with pytest.raises(ValueError, match="proposal_provider_tool_proof_required"):
+    patch_reasoner(monkeypatch, reasoner)
+    with pytest.raises(ValueError, match="proposal_provider_tool_proof_required"):
         C.draft_proposals(report())
 
 
@@ -136,7 +140,8 @@ def test_output_must_be_plain_json_not_wrapped_text(monkeypatch):
             "tools_used": [],
         }
 
-    patch_reasoner(monkeypatch, reasoner)\n    with pytest.raises(ValueError, match="provider_json_required"):
+    patch_reasoner(monkeypatch, reasoner)
+    with pytest.raises(ValueError, match="provider_json_required"):
         C.draft_proposals(report())
 
 
@@ -154,7 +159,8 @@ def test_evaluation_packet_exposes_ids_and_digest_not_private_prose(monkeypatch)
     def reasoner(prompt, **kwargs):
         return {"ok": True, "text": json.dumps(response()), "tools_used": []}
 
-    patch_reasoner(monkeypatch, reasoner)\n    draft = C.draft_proposals(report())
+    patch_reasoner(monkeypatch, reasoner)
+    draft = C.draft_proposals(report())
     packet = C.evaluation_packet(draft)
     encoded = json.dumps(packet, sort_keys=True)
     assert packet["proposal_ids"] == ["PROP.REUSE.001"]
