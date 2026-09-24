@@ -13,7 +13,6 @@ from control_plane.coo_principal_mandate import (
     NewEffectGate,
     PrincipalFact,
     ReleaseClass,
-    SessionAssurance,
     project_coo_principal_mandate,
 )
 
@@ -340,7 +339,7 @@ def test_release_and_capability_evidence_are_projected_without_claiming_gate_com
     assert "deploy_allowed" not in result["release"]
 
 
-def test_current_mission_does_not_fabricate_a_current_coo_runtime_binding():
+def test_current_mission_does_not_fabricate_or_accept_stronger_session_assurance():
     result = project_coo_principal_mandate(
         principal=principal(),
         authority=authority(),
@@ -351,14 +350,13 @@ def test_current_mission_does_not_fabricate_a_current_coo_runtime_binding():
         "current_coo_target": None,
     }
 
-    stronger = project_coo_principal_mandate(
-        principal=principal(),
-        authority=authority(),
-        mission_workspace=mission_doc(),
-        session_assurance=SessionAssurance.PROVIDER_SESSION_BOUND,
-    )
-    assert stronger["continuity"]["session_assurance"] == "COO_PRINCIPAL_PROVIDER_SESSION_BOUND"
-    assert stronger["continuity"]["current_coo_target"] is None
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        project_coo_principal_mandate(
+            principal=principal(),
+            authority=authority(),
+            mission_workspace=mission_doc(),
+            session_assurance="COO_PRINCIPAL_PROVIDER_SESSION_BOUND",
+        )
 
 
 def test_mission_workspace_v3_shape_is_not_silently_downgraded_or_upgraded():
