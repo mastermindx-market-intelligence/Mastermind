@@ -410,3 +410,86 @@ def test_review_complete_coverage_can_still_emit_and_resolve(nudge_store):
     cov.update(coverage_rate=1.0, with_context_row_n=5)
     assert N.derive_nudges([], cov, {}, "2026-09-24") == []
     assert json.loads(N._NUDGE_STATE.read_text())["codes"]["coverage_below_half"]["status"] == "resolved"
+
+
+@pytest.mark.parametrize("key", ["aaa", " AAA", "AAA ", " AaA ", "AAA\t"])
+def test_review_coverage_key_matches_real_candidate_lookup(owner, monkeypatch, key):
+    monkeypatch.setattr(C, "context", lambda: {"candidate_context": {key: {"marker": "available"}}})
+    assert C.candidate("AAA") == {}
+    cov = N.coverage()
+    assert cov["inputs_complete"] is False
+    assert cov["input_status"]["context"] == "MALFORMED"
+    assert cov["with_context_row_n"] == 0
+
+
+def test_review_canonical_key_preserves_real_consumer_coverage(owner, monkeypatch):
+    monkeypatch.setattr(C, "context", lambda: {"candidate_context": {"AAA": {"marker": "available"}}})
+    assert C.candidate("aaa") == {"marker": "available"}
+    cov = N.coverage()
+    assert cov["inputs_complete"] is True
+    assert cov["with_context_row_n"] == 1
+
+
+@pytest.fixture
+def persisted_coverage_report(nudge_store, monkeypatch):
+    monkeypatch.setattr(C, "context", lambda: {"candidate_context": {"AAA": {"marker": "available"}}})
+    cov = N.coverage()
+    return {"schema": N.SCHEMA, "asof": "2026-09-24", "coverage": cov, "nudges": [
+        {"code": "coverage_below_half", "kind": "coverage_gap", "severity": "medium",
+         "detail": "one of three subjects covered", "first_seen": "2026-09-23", "builds_seen": 1},
+        {"code": "graph_conflicts_absent", "kind": "contract_drift", "severity": "high",
+         "detail": "independent field gap", "first_seen": "2026-09-23", "builds_seen": 1}]}
+
+
+@pytest.mark.parametrize("bad", [False, None, "true", 1, "MISSING", "BAD_STATUS", "ZERO_SAMPLE", "BAD_RATE"])
+def test_review_persisted_coverage_is_revalidated_before_agenda(persisted_coverage_report, bad):
+    from brain import improvement_agenda as A
+    rep = persisted_coverage_report
+    cov = rep["coverage"]
+    if bad == "MISSING":
+        cov.pop("inputs_complete")
+    elif bad == "BAD_STATUS":
+        cov["input_status"]["context"] = "MALFORMED"
+    elif bad == "ZERO_SAMPLE":
+        cov.update(subjects_n=0, with_context_row_n=0, coverage_rate=None)
+    elif bad == "BAD_RATE":
+        cov["coverage_rate"] = 1.0
+    else:
+        cov["inputs_complete"] = bad
+    N._LATEST.write_text(json.dumps(rep))
+    codes = {item["id"] for item in A._from_nw_reflection(date(2026, 9, 24))}
+    assert "nw:coverage_below_half" not in codes
+    assert "nw:graph_conflicts_absent" in codes
+
+
+def test_review_valid_persisted_coverage_still_reaches_agenda(persisted_coverage_report):
+    from brain import improvement_agenda as A
+    N._LATEST.write_text(json.dumps(persisted_coverage_report))
+    assert "nw:coverage_below_half" in {row["id"] for row in A._from_nw_reflection(date(2026, 9, 24))}
+
+
+def test_review_invalid_persisted_coverage_cannot_author_directive(persisted_coverage_report, monkeypatch):
+    from brain import mastermind_ai as M
+    persisted_coverage_report["coverage"]["inputs_complete"] = False
+    N._LATEST.write_text(json.dumps(persisted_coverage_report))
+    monkeypatch.setattr(M, "directives", lambda limit: [])
+    monkeypatch.setattr(M, "settings", lambda: {"directives_max_open": 10})
+    calls = []
+    def record(text, source=None):
+        calls.append(source)
+        return {"ok": True, "directive": {"id": str(len(calls)), "text": text}}
+    monkeypatch.setattr(M, "add_directive", record)
+    result = M.draft_directives_from_nudges()
+    assert result["ok"] is True
+    assert "nudge:coverage_below_half" not in calls
+    assert "nudge:graph_conflicts_absent" in calls
+
+
+def test_review_invalid_persisted_coverage_not_republished(persisted_coverage_report, monkeypatch):
+    from bridge import nw_feedback as F
+    persisted_coverage_report["coverage"]["inputs_complete"] = False
+    N._LATEST.write_text(json.dumps(persisted_coverage_report))
+    monkeypatch.setattr(F, "_reflection_path", lambda: N._LATEST)
+    codes = {row["code"] for row in F._nudges_block()}
+    assert "coverage_below_half" not in codes
+    assert "graph_conflicts_absent" in codes
