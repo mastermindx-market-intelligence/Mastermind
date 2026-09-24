@@ -28,8 +28,8 @@ WHAT THIS IS NOT
   ``mastermind.executive_service_intent.v1`` is carried by the EXISTING sink
   (``control_plane/ceo_intent.py``): the envelope is exact-keyed, READ/RESEARCH
   only under a sink-local ceiling, stamped with typed service evidence in
-  ``event.payload["provenance"]`` (``ceo_intent.py:L855``), and seated explicitly
-  on ``coo`` (``ceo_intent.py:L1158``).  :func:`admission_status` reports
+  ``event.payload["provenance"]`` (``ceo_intent.py:L877``), and seated explicitly
+  on ``coo`` (``ceo_intent.py:L1180``).  :func:`admission_status` reports
   ``ADMITTED``, and :func:`submit` is therefore a thin passthrough that mutates
   ONLY through :func:`control_plane.ceo_intent.submit_intent` - one sink, no
   second writer, no dispatch, no queue of our own.
@@ -49,7 +49,7 @@ The intent id is a domain-separated hash of EXACTLY ``SCHEMA`` +
 operation keeps one intent id and one durable command id, so a later envelope for
 the same operation (a changed objective, a changed grounding SHA) is adjudicated
 by the sink's existing whole-envelope conflict predicate
-(``ceo_intent.py:L906``, raising ``CeoIntentConflict``) instead of minting a
+(``ceo_intent.py:L928``, raising ``CeoIntentConflict``) instead of minting a
 second Job.  A different ``operation_key`` is a different operation and
 legitimately gets its own Job.
 
@@ -551,7 +551,7 @@ def _intent_id(principal: ServicePrincipal, normalized: Mapping[str, Any]) -> st
     grounding SHAs.  A repeat of the same logical operation therefore reuses ONE
     intent id and ONE durable command id, and any changed envelope under that id
     is refused by the sink's existing whole-envelope conflict predicate
-    (``ceo_intent.py:L906``, raising ``CeoIntentConflict``) instead of silently
+    (``ceo_intent.py:L928``, raising ``CeoIntentConflict``) instead of silently
     creating a second Job.  A different ``operation_key`` is a different
     operation and legitimately gets its own Job.
     """
@@ -828,7 +828,7 @@ def admission_status() -> dict[str, Any]:
         "predicates": (
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L633",
+                "line": "L640",
                 "what": (
                     "validate_intent admits the third, strict service schema through "
                     "the same exact-key-set fence: _SERVICE_REQUIRED_KEYS = the v1 keys "
@@ -837,7 +837,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L578",
+                "line": "L585",
                 "what": (
                     "_require_service_ceiling refuses any requested authority outside "
                     "{READ, RESEARCH}, any allowed_write_paths, and any authority_level "
@@ -847,7 +847,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L855",
+                "line": "L877",
                 "what": (
                     "_provenance() stamps the typed service evidence (principal_id, "
                     "task_kind, requested_authorities, effective_authorities, "
@@ -857,7 +857,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1158",
+                "line": "L1180",
                 "what": (
                     "the service branch of submit_intent passes EXPLICIT "
                     "owner_seat='coo' / escalation_target='coo' and no orchestration "
@@ -874,7 +874,7 @@ def admission_status() -> dict[str, Any]:
             "conflict_predicates": (
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1103",
+                    "line": "L1125",
                     "what": (
                         "submit_intent looks the derived command id up in the durable "
                         "event log first, so a reused intent id reconciles instead of "
@@ -883,7 +883,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L906",
+                    "line": "L928",
                     "what": (
                         "_receipt_from_event raises CeoIntentConflict when the reused "
                         "intent id was already accepted under a DIFFERENT whole-envelope "
@@ -893,7 +893,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L761",
+                    "line": "L783",
                     "what": "command_id_for() derives the durable command id from the intent id",
                 },
             ),
