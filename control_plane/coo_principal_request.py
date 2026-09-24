@@ -18,7 +18,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from control_plane import ceo_request
+from control_plane import ceo_intent, ceo_request
 
 
 REQUEST_REF_PREFIX = "req-coo-"
@@ -115,8 +115,11 @@ def principal_request_ref(normalized_request: Mapping[str, Any]) -> str:
     material = (work_ref + "\n" + operation_key).encode("utf-8")
     digest = hashlib.sha256(_REQUEST_REF_DOMAIN + material).hexdigest()
     request_ref = REQUEST_REF_PREFIX + digest[:32]
-    if REQUEST_REF_RE.fullmatch(request_ref) is None:
-        raise RuntimeError("derived COO request_ref is invalid")
+    if (
+        REQUEST_REF_RE.fullmatch(request_ref) is None
+        or ceo_request.AUTOMATED_REQUEST_REF_RE.fullmatch(request_ref) is None
+    ):
+        raise RuntimeError("derived COO request_ref is not CeoIngress-compatible")
     return request_ref
 
 
@@ -129,8 +132,11 @@ def principal_intent_id(request_ref: str) -> str:
         _INTENT_ID_DOMAIN + request_ref.encode("ascii")
     ).hexdigest()
     intent_id = INTENT_ID_PREFIX + digest[:32]
-    if INTENT_ID_RE.fullmatch(intent_id) is None:
-        raise RuntimeError("derived COO intent_id is invalid")
+    if (
+        INTENT_ID_RE.fullmatch(intent_id) is None
+        or ceo_intent.INTENT_ID_RE.fullmatch(intent_id) is None
+    ):
+        raise RuntimeError("derived COO intent_id is not sink-compatible")
     return intent_id
 
 
