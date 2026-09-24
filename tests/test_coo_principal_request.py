@@ -7,6 +7,8 @@ import pytest
 from control_plane import ceo_intent, ceo_request
 from control_plane.coo_principal_request import (
     CooPrincipalRequestError,
+    CooPrincipalRequestInternalError,
+    CooPrincipalRequestInvalid,
     INTENT_ID_RE,
     REQUEST_REF_RE,
     normalize_principal_request,
@@ -208,3 +210,25 @@ def test_identity_does_not_depend_on_token_session_or_clock_fields():
         with pytest.raises(CooPrincipalRequestError):
             principal_request_ref(mutated)
     assert principal_request_ref(normalized) == request_ref
+
+
+def test_error_boundary_preserves_caller_vs_internal_policy_failure(monkeypatch):
+    with pytest.raises(CooPrincipalRequestInvalid) as caller:
+        normalize_principal_request(
+            research_request(workstream="WS:OTHER"),
+            expected_work_ref=WORK_REF,
+        )
+    assert caller.value.caller_fault is True
+
+    def broken(_payload):
+        raise ceo_request.CeoRequestInternalError("internal policy detail must not leak")
+
+    monkeypatch.setattr(ceo_request, "normalize_high_level_request", broken)
+    with pytest.raises(CooPrincipalRequestInternalError) as internal:
+        normalize_principal_request(
+            research_request(),
+            expected_work_ref=WORK_REF,
+        )
+    assert internal.value.caller_fault is False
+    assert str(internal.value) == "COO request policy is internally inconsistent"
+    assert "internal policy detail" not in str(internal.value)
