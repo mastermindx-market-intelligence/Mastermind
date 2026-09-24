@@ -179,7 +179,7 @@ def test_session_falsifier_is_optional_and_never_trusts_model_or_mcp_environment
     assert "COO_PRINCIPAL_MISSION_BOUND" in text
     assert "COO_PRINCIPAL_PROVIDER_SESSION_BOUND" in text
     assert "COO_PRINCIPAL_CRYPTOGRAPHIC_SESSION_BOUND" in text
-    assert "differed from the identifier delivered to hooks/Bash" in text
+    assert "different from the identifier delivered to hooks/Bash" in text
 
     by_id = {row["id"]: row for row in _fixture()["cases"]}
     assert by_id["M24"]["expected"] == "REFUSE_MODEL_SESSION_ASSERTION"
