@@ -200,3 +200,136 @@ def test_closed_or_merged_pr_is_out_of_open_estate():
 def test_validation_rejects_inconsistent_open_merged_state():
     with pytest.raises(LifecycleInputError):
         assess_pr_lifecycle(facts(merged=True))
+
+
+
+def test_keep_open_reinforces_only_known_active_work():
+    result = assess_pr_lifecycle(
+        facts(
+            work_state=WorkState.ACTIVE,
+            explicit_disposition=ExplicitDisposition.KEEP_OPEN,
+        )
+    )
+
+    assert result.verdict is LifecycleVerdict.KEEP_ACTIVE
+    assert result.issues == (
+        LifecycleIssue.EXPLICIT_KEEP_OPEN,
+        LifecycleIssue.ACTIVE_WORK,
+    )
+
+
+def test_keep_open_reinforces_complete_gate():
+    result = assess_pr_lifecycle(
+        facts(
+            work_state=WorkState.GATED,
+            explicit_disposition=ExplicitDisposition.KEEP_OPEN,
+            owner="ceo-sol",
+            gate="exact review",
+            release_condition="accepted current-head review",
+        )
+    )
+
+    assert result.verdict is LifecycleVerdict.KEEP_GATED
+    assert result.issues == (
+        LifecycleIssue.EXPLICIT_KEEP_OPEN,
+        LifecycleIssue.ACTIVE_HOLD_OR_GATE,
+    )
+
+
+@pytest.mark.parametrize("work_state", [WorkState.TERMINAL, WorkState.NONE])
+def test_keep_open_cannot_revive_terminal_or_absent_work(work_state):
+    result = assess_pr_lifecycle(
+        facts(
+            work_state=work_state,
+            explicit_disposition=ExplicitDisposition.KEEP_OPEN,
+        )
+    )
+
+    assert result.verdict is LifecycleVerdict.RECONCILE_REQUIRED
+    assert result.issues == (
+        LifecycleIssue.EXPLICIT_KEEP_OPEN,
+        LifecycleIssue.KEEP_OPEN_CONTRADICTS_WORK_STATE,
+    )
+
+
+def test_keep_open_cannot_hide_unknown_work_state():
+    result = assess_pr_lifecycle(
+        facts(
+            work_state=WorkState.UNKNOWN,
+            explicit_disposition=ExplicitDisposition.KEEP_OPEN,
+            days_since_update=0,
+        )
+    )
+
+    assert result.verdict is LifecycleVerdict.RECONCILE_REQUIRED
+    assert result.issues == (
+        LifecycleIssue.CURRENT_WORK_STATE_UNKNOWN,
+        LifecycleIssue.EXPLICIT_KEEP_OPEN,
+    )
+
+
+def test_unknown_pr_state_has_distinct_issue():
+    result = assess_pr_lifecycle(
+        facts(state=PullRequestState.UNKNOWN, days_since_update=0)
+    )
+
+    assert result.verdict is LifecycleVerdict.RECONCILE_REQUIRED
+    assert result.issues == (LifecycleIssue.PR_STATE_UNKNOWN,)
+
+
+def test_known_terminal_work_with_unknown_integration_has_distinct_issue():
+    result = assess_pr_lifecycle(
+        facts(
+            work_state=WorkState.TERMINAL,
+            integration_state=IntegrationState.UNKNOWN,
+            preservation_state=PreservationState.PRESERVED,
+            days_since_update=0,
+        )
+    )
+
+    assert result.verdict is LifecycleVerdict.RECONCILE_REQUIRED
+    assert result.issues == (LifecycleIssue.INTEGRATION_STATE_UNKNOWN,)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("owner", "token=github_pat_example"),
+        ("gate", "authorization: Bearer-secret"),
+        ("release_condition", "password=not-a-real-password"),
+    ],
+)
+def test_free_text_rejects_secret_shaped_material(field, value):
+    with pytest.raises(LifecycleInputError, match="secret-shaped material"):
+        assess_pr_lifecycle(facts(**{field: value}))
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"repository": "not-a-repository"},
+        {"number": 0},
+        {"number": True},
+        {"merged": 1},
+        {"draft": 1},
+        {"state": "OPEN"},
+        {"work_state": "ACTIVE"},
+        {"explicit_disposition": "NONE"},
+        {"integration_state": "UNKNOWN"},
+        {"preservation_state": "UNKNOWN"},
+        {"source_coverage": "COMPLETE"},
+        {"prior_effect_state": "NONE"},
+        {"owner": ""},
+        {"gate": "   "},
+        {"release_condition": ""},
+        {"days_since_update": -1},
+    ],
+)
+def test_validation_rejects_malformed_fact_shapes(overrides):
+    with pytest.raises(LifecycleInputError):
+        assess_pr_lifecycle(facts(**overrides))
+
+
+def test_validation_rejects_unbounded_free_text():
+    with pytest.raises(LifecycleInputError, match="exceeds 512 characters"):
+        assess_pr_lifecycle(facts(gate="x" * 513))
