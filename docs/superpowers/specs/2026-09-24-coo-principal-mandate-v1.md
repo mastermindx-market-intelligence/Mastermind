@@ -395,6 +395,72 @@ Require `workstream` for a COO root/successor-root submission and require exact 
 
 A COO request identity should be separately namespaced from CEO/MCP/Slack identities and bind the logical operation to its mission, e.g. a trusted derivation over `work_ref + operation_key`. It must not depend on token lifetime, OAuth JTI, Claude transcript, provider session, clock or model output.
 
+### P2-B.1 — `submit_principal_intent` public request and receipt
+
+The first COO modifying tool must reuse the existing high-level request normalization law rather than exposing low-level Job fields.
+
+Public caller fields:
+
+```text
+required
+  operation_key
+  objective
+  department
+  priority
+  execution_profile
+  workstream
+
+optional
+  allowed_write_paths
+  validation
+  attempt_limit
+```
+
+Additional COO rules:
+- `workstream` is required and must equal the exact selected Mission Workspace `program.work_ref`;
+- `execution_profile` remains the existing `research_only | bounded_code_change` worker-root vocabulary;
+- `attempt_limit` is restricted to the current strict-v2 COO root ceiling (1..2, default 2), even though the older shared normalizer accepts up to 3 for other historical paths;
+- the caller cannot supply `actor`, `seat`, schema, principal/mission binding, authority level, requested authorities, branch, worktree, Job/root id, provider/model/account/host/realm, release class, raw argv, credential, service, dispatch or session fields.
+
+This narrow submission schema does **not** narrow Fable's organizational autonomy. It only defines how Fable asks Executive to create one bounded organizational work episode. Rich principal source/design/browser/Slack actions use their separately reviewed direct capability owners.
+
+Trusted code derives:
+- `seat=coo`;
+- principal-binding digest;
+- mission authority ref/generation;
+- namespaced request/intent identity;
+- actor/provenance;
+- grounding;
+- worker authorities from the existing execution profile;
+- branch/worktree/validation argv;
+- host execution binding and concrete placement inputs through existing owners.
+
+The accepted receipt is a new role-neutral/principal receipt schema, not a renamed CEO receipt. It should minimally report:
+
+```text
+schema
+request_ref
+intent_id
+fingerprint
+job_id
+status
+accepted
+duplicate
+dispatched = false
+principal { seat, principal_binding_digest, work_ref, authority_generation_digest }
+grounding
+created_at_ms
+```
+
+Every principal identity field is server-derived and secret-free. `dispatched=false` remains load-bearing: admission is not Worker START.
+
+Identity law:
+- same `work_ref + operation_key + immutable principal/mission authority identity + same semantic request` -> same accepted Job/duplicate receipt;
+- same logical request identity with changed semantic payload -> conflict;
+- same `operation_key` under a different work_ref -> different namespaced principal request;
+- CEO request identities and COO principal request identities never collide;
+- OAuth token issue/expiry/JTI, provider session, Claude session id and current dynamic posture do not participate in durable logical request identity.
+
 ### P2-C — role-correct ingress on the existing CeoIngress/service
 
 Add a separately versioned principal submit/status frame to the existing CeoIngress contract. Public model input still contains only the normalized high-level request fields. The authenticated App derives the COO seat/principal/mission authority context server-side and carries only the closed trusted projection into the local ingress.
