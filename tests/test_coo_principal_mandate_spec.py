@@ -25,8 +25,8 @@ def test_acceptance_corpus_is_closed_and_explicitly_inert():
     assert doc["is_production_authority"] is False
 
     cases = doc["cases"]
-    assert len(cases) == 20
-    assert [row["id"] for row in cases] == [f"M{i:02d}" for i in range(1, 21)]
+    assert len(cases) == 23
+    assert [row["id"] for row in cases] == [f"M{i:02d}" for i in range(1, 24)]
     assert len({row["id"] for row in cases}) == len(cases)
     assert all(set(row) == {"id", "class", "scenario", "expected"} for row in cases)
     assert {row["class"] for row in cases} == {
@@ -152,3 +152,19 @@ def test_spec_separates_fable_coo_oauth_scope_from_ceo_submit_scope():
     assert "must not inherit `mastermind.executive.intent.submit`" in text
     assert "mastermind.executive.coo.act" in text
     assert "a token carrying the COO action scope must not pass the CEO submit route or vice versa" in text
+
+
+def test_implementation_packet_preserves_one_sink_one_service_and_replay_identity():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "Implementation packet — preserve one mutation sink and one installed service" in text
+    assert "extend the **existing `ceo_intent.submit_intent` mutation sink**" in text
+    assert "Do not fingerprint current dynamic mandate/runtime state." in text
+    assert "one installed process, two static role surfaces" in text
+    assert "Do not replace the current CEO MCP profile and do not run a second Executive daemon." in text
+    assert "Do **not** add `submit_coo_ruling` until its exact canonical effect owner is identified." in text
+    assert "Do not add `OPEN_PR`, `PUSH_BRANCH` or `MERGE` to `executive_worker_policy`" in text
+
+    by_id = {row["id"]: row for row in _fixture()["cases"]}
+    assert by_id["M21"]["expected"] == "REFUSE_CROSS_SEAT_SCOPE"
+    assert by_id["M22"]["expected"] == "ONE_SERVICE_DISTINCT_ROLE_SURFACES"
+    assert by_id["M23"]["expected"] == "REPLAY_PRESERVES_ACCEPTED_EFFECT"
