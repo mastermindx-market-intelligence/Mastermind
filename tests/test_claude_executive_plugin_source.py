@@ -111,3 +111,12 @@ def test_no_executable_component_claims_current_coo_mutation():
         "AUTONOMOUS_SOURCE_RELEASE_WITH_GATES",
     ):
         assert forbidden not in executable_instructions
+
+
+def test_desktop_connector_parity_remains_an_explicit_unproven_gate():
+    text = README.read_text(encoding="utf-8")
+    assert "Surface parity boundary" in text
+    assert "Claude Code user-scope registration path" in text
+    assert "Claude Desktop Executive connector availability remains **UNPROVEN**" in text
+    assert "do not add an ad-hoc second connector" in text
+    assert "one surface's success is not inherited by the other" in text
