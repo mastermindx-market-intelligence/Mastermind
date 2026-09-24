@@ -836,23 +836,29 @@ def derive_work_producers_v1(control_room: Any) -> dict[str, Any]:
       would still defeat the freshness window.  ``evidence_as_of``
       stays ``autonomy.generated_at`` so the composer can anchor
       every row's freshness window against the render clock.
-    - A card is eligible only when ``root_job_id`` is a non-empty
-      string, ``runtime_root_state == "RESOLVED"``,
+    - A card is eligible when the root gate passes (``root_job_id``
+      is a non-empty string, ``runtime_root_state == "RESOLVED"``,
       ``root_job_ambiguous is False``, ``freshness == "current"``,
-      ``is_actionable is True``,
-      ``validity.card`` is a Mapping with ``valid_for_ms`` an int
-      (not ``None``), and ``validity.card.sources`` is a non-empty
-      list whose every entry has a parseable ``observed_at``.
-      ``placement_state.value == "EFFECT_UNKNOWN"`` cards are
-      EXEMPT from ``is_actionable`` and ``valid_for_ms`` (the
-      projection itself de-presents EFFECT_UNKNOWN cards; an
-      exception must never be hidden by an eligibility gate) but
-      still require RESOLVED + unambiguous + a parseable source
-      ``observed_at``.  Anything else records a per-card skip
-      token: ``unresolved_root``, ``ambiguous_root``,
+      ``validity.card`` is a Mapping with a non-empty ``sources``
+      list whose every entry has a parseable ``observed_at``)
+      AND either (a) it carries a non-EFFECT_UNKNOWN placement
+      value with the full content gate (``is_actionable is True``
+      AND ``valid_for_ms`` is ``int``) OR (b) it carries
+      ``placement_state.value == "EFFECT_UNKNOWN"``.  WQ-PROD-1
+      round 3: the EFFECT_UNKNOWN exemption is EFFECTS-ONLY — when
+      the full content gate fails on an EFFECT_UNKNOWN card, the
+      card stays (the effects carrier is still informed) but
+      ``accountability`` and ``placement`` are forced to ``None``
+      with skip reason ``exempt_card_not_actionable`` or
+      ``exempt_card_unqualified_validity`` so the can't-produce
+      fact surfaces in the skip trail.  Anything else records a
+      per-card skip token: ``unresolved_root``, ``ambiguous_root``,
       ``freshness_<value>``, ``not_actionable``,
       ``unqualified_validity``, ``no_source_observations``,
-      ``effect_unknown_without_source``, ``missing_responsibility_ref``.
+      ``effect_unknown_without_source``,
+      ``exempt_card_not_actionable``,
+      ``exempt_card_unqualified_validity``,
+      ``missing_responsibility_ref``.
     - Accountability emits ``SOL`` only when
       ``owed_turn.seat == "ceo"`` AND
       ``owed_turn.reason`` ∈ {``blocker_targets_seat``,
@@ -864,14 +870,25 @@ def derive_work_producers_v1(control_room: Any) -> dict[str, Any]:
       accountability row + skip token ``owed_<seat>_<reason>``.
       (The previous ``coo → WORKER`` mapping is dropped — the
       contract has no COO actor.)
-    - Effects (``placement_state.value == "EFFECT_UNKNOWN"``) are
-      exempt from the ``is_actionable`` / ``valid_for_ms`` gates
-      but still require RESOLVED + unambiguous + a parseable
-      source ``observed_at``; otherwise skip token
-      ``effect_unknown_without_source``.  Stale effects still stick
-      in the composer — R4 carrier rule unchanged.
-    - Placement (``WAITING_CAPACITY``) follows the same eligibility
-      as accountability minus the owed-turn condition.
+    - WQ-PROD-1 round 3: the EFFECT_UNKNOWN exemption is
+      EFFECTS-ONLY.  Effects
+      (``placement_state.value == "EFFECT_UNKNOWN"``) are exempt
+      from the ``is_actionable`` / ``valid_for_ms`` gates but
+      still require RESOLVED + unambiguous + a parseable source
+      ``observed_at``; otherwise skip token
+      ``effect_unknown_without_source``.  When the full gate
+      FAILS on an EFFECT_UNKNOWN card, ``accountability`` and
+      ``placement`` are forced to ``None`` with skip reason
+      ``exempt_card_not_actionable`` or
+      ``exempt_card_unqualified_validity`` — the card stays
+      for effects but cannot leak accountability/placement
+      values from evidence it declared not actionable.  Stale
+      effects still stick in the composer — R4 carrier rule
+      unchanged.
+    - Placement (``WAITING_CAPACITY``) follows the same
+      eligibility as accountability minus the owed-turn
+      condition.  WQ-PROD-1 round 3: a gate-failing
+      EFFECT_UNKNOWN card is forbidden from emitting placement.
     - ``evidence_ref`` is ``validity.card.proof_ref`` when a
       non-empty string, else ``responsibility_ref`` (proof_ref is
       content-addressed over the card's sources; see
@@ -1048,16 +1065,33 @@ def _evaluate_card(
     proof_ref = card_validity.get("proof_ref") if is_validity_mapping else None
     sources = card_validity.get("sources") if is_validity_mapping else None
 
-    # B1: EFFECT_UNKNOWN cards are exempted from ``is_actionable`` and
-    # ``valid_for_ms`` gates — the projection itself de-presents
-    # EFFECT_UNKNOWN cards; an exception must never be hidden by an
-    # eligibility gate.  Every other producer (accountability,
-    # placement) is subject to the full gate.
+    # WQ-PROD-1 round 3: compute the full content gate
+    # (``is_actionable is True`` AND ``valid_for_ms`` is ``int``) ONCE
+    # so the EFFECT_UNKNOWN exemption can take a real effect.
+    # - Non-EFFECT_UNKNOWN cards: full gate MUST pass, else the card
+    #   is dropped with ``not_actionable`` or ``unqualified_validity``.
+    # - EFFECT_UNKNOWN cards: full gate is OPTIONAL — when it FAILS,
+    #   the effects producer is still allowed to emit (the projection
+    #   itself de-presents EFFECT_UNKNOWN cards; an exception must
+    #   never be hidden by an eligibility gate), but ``accountability``
+    #   and ``placement`` are FORCED to ``None`` with skip reason
+    #   ``exempt_card_not_actionable`` or
+    #   ``exempt_card_unqualified_validity``.  When the gate PASSES,
+    #   the EFFECT_UNKNOWN exemption is a no-op (the card is fully
+    #   eligible for every producer).
+    full_gate_ok = (raw.get("is_actionable") is True
+                    and isinstance(valid_for_ms, int))
     if not is_effect_unknown:
-        if raw.get("is_actionable") is not True:
-            return None, "not_actionable"
-        if not isinstance(valid_for_ms, int):
+        if not full_gate_ok:
+            if raw.get("is_actionable") is not True:
+                return None, "not_actionable"
             return None, "unqualified_validity"
+    exempt_skip_reason: str | None = None
+    if is_effect_unknown and not full_gate_ok:
+        if raw.get("is_actionable") is not True:
+            exempt_skip_reason = "exempt_card_not_actionable"
+        else:
+            exempt_skip_reason = "exempt_card_unqualified_validity"
 
     if not isinstance(sources, list) or not sources:
         return None, ("effect_unknown_without_source" if is_effect_unknown
@@ -1083,13 +1117,23 @@ def _evaluate_card(
     oldest_observed = min(parsed_observed)
     evidence_ref = proof_ref if isinstance(proof_ref, str) and proof_ref else responsibility_ref
 
-    # Owed turn → accountability.
+    # Owed turn → accountability.  WQ-PROD-1 round 3: when an
+    # EFFECT_UNKNOWN card failed the full gate (``exempt_skip_reason``
+    # set above), accountability is FORCED to ``None`` regardless of
+    # the owed_turn seat/reason — the projection itself declared the
+    # card not actionable (or its validity unqualified), so the
+    # accountability row would otherwise leak a value from evidence
+    # the projection refuses to act on.  The exempt skip reason takes
+    # precedence over the ``owed_<seat>_<reason>`` token so the skip
+    # trail surfaces the real cause.
     owed_turn = raw.get("owed_turn")
     seat = owed_turn.get("seat") if isinstance(owed_turn, Mapping) else None
     reason = owed_turn.get("reason") if isinstance(owed_turn, Mapping) else None
     accountability_value: str | None = None
     accountability_skip_reason: str | None = None
-    if seat == "ceo" and reason in _VALID_OWED_TURN_REASONS:
+    if exempt_skip_reason is not None:
+        accountability_skip_reason = exempt_skip_reason
+    elif seat == "ceo" and reason in _VALID_OWED_TURN_REASONS:
         accountability_value = "SOL"
     elif seat == "worker" and reason in _VALID_OWED_TURN_REASONS:
         accountability_value = "WORKER"
@@ -1098,8 +1142,14 @@ def _evaluate_card(
         reason_token = reason if isinstance(reason, str) else "missing"
         accountability_skip_reason = f"owed_{seat_token}_{reason_token}"
 
+    # Placement (``WAITING_CAPACITY``).  WQ-PROD-1 round 3: a
+    # gate-failing EFFECT_UNKNOWN card is forbidden from emitting
+    # placement — the full gate applies to placement as to
+    # accountability.  When the gate passes the EFFECT_UNKNOWN
+    # exemption is a no-op and the WAITING_CAPACITY row emits as
+    # before.
     placement_value_emitted: str | None = None
-    if placement_value == "WAITING_CAPACITY":
+    if exempt_skip_reason is None and placement_value == "WAITING_CAPACITY":
         placement_value_emitted = "WAITING"
 
     effects_carrier: str | None = None
@@ -1152,7 +1202,13 @@ def _resolve_root(
         if view["accountability_skip_reason"]:
             skip_tokens.append(f"{root_job_id}:{view['accountability_skip_reason']}")
 
-    # Accountability conflict.
+    # Accountability conflict.  WQ-PROD-1 round 3: when distinct
+    # non-None values agree, source the row's ``next_actor``,
+    # ``evidence_ref`` and ``observed_at`` from the FIRST view that
+    # actually carries the value — never ``views[0]`` unconditionally
+    # (a preceding view may have ``accountability=None`` because its
+    # owed_turn did not qualify, leaving the agreeing value on a later
+    # view).  Carrier and evidence MUST come from the same card.
     distinct_acc = sorted({v["accountability"] for v in views
                            if v["accountability"] is not None})
     acc_row: dict[str, Any] | None = None
@@ -1162,28 +1218,41 @@ def _resolve_root(
     elif len(distinct_acc) > 1:
         skip_tokens.append(f"{root_job_id}:conflict_accountability")
     else:
-        first = views[0]
-        if first["accountability"] is not None:
-            acc_row = {
-                "next_actor": first["accountability"],
-                "evidence_ref": first["evidence_ref"],
-                "observed_at": first["observed_at"],
-            }
+        acc_view = next(v for v in views if v["accountability"] is not None)
+        acc_row = {
+            "next_actor": acc_view["accountability"],
+            "evidence_ref": acc_view["evidence_ref"],
+            "observed_at": acc_view["observed_at"],
+        }
 
     # Placement conflict — agreement counts only when both sides agree.
+    # WQ-PROD-1 round 3: source the row's ``state``/``evidence_ref``/
+    # ``observed_at`` from the FIRST view that actually carries
+    # placement (semantically the all-or-conflict branch already keeps
+    # ``views[0]`` in the agreeing case — but the rule is "first view
+    # that carries the value" for symmetry with accountability/effects).
     placement_present = [v["placement"] is not None for v in views]
     pl_row: dict[str, Any] | None = None
     if any(placement_present) and not all(placement_present):
         skip_tokens.append(f"{root_job_id}:conflict_placement")
     elif all(placement_present):
-        first = views[0]
+        pl_view = next(v for v in views if v["placement"] is not None)
         pl_row = {
-            "state": first["placement"],
-            "evidence_ref": first["evidence_ref"],
-            "observed_at": first["observed_at"],
+            "state": pl_view["placement"],
+            "evidence_ref": pl_view["evidence_ref"],
+            "observed_at": pl_view["observed_at"],
         }
 
-    # Effects conflict — agreement requires the same carrier.
+    # Effects conflict — agreement requires the same carrier.  WQ-PROD-1
+    # round 3: source ``carrier``/``evidence_ref``/``observed_at``
+    # from the FIRST view that actually carries the effects value —
+    # never ``views[0]`` unconditionally.  The autonomy projection
+    # sorts actionable cards before EFFECT_UNKNOWN cards; with a
+    # non-EFFECT card sorted first, ``views[0]["effects"]`` is None
+    # and the old code emitted a row with ``carrier=None``, which
+    # :func:`_validate_effects` then refused as ``"effects row
+    # carrier invalid"`` — turning the WHOLE work read into
+    # ``projection_refused``.
     distinct_eff = sorted({v["effects"] for v in views
                            if v["effects"] is not None})
     eff_row: dict[str, Any] | None = None
@@ -1192,12 +1261,12 @@ def _resolve_root(
     elif len(distinct_eff) > 1:
         skip_tokens.append(f"{root_job_id}:conflict_effects")
     else:
-        first = views[0]
+        eff_view = next(v for v in views if v["effects"] is not None)
         eff_row = {
             "state": "EFFECT_UNKNOWN",
-            "carrier": first["effects"],
-            "evidence_ref": first["evidence_ref"],
-            "observed_at": first["observed_at"],
+            "carrier": eff_view["effects"],
+            "evidence_ref": eff_view["evidence_ref"],
+            "observed_at": eff_view["observed_at"],
         }
 
     # Agreeing duplicates → one ``duplicate_card`` token per root.
