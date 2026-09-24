@@ -43,7 +43,6 @@ async function reconstructCompat(client,receipt,gateway){let offset=0;const chun
     assert.ok(page.next_offset>offset);offset=page.next_offset;
   }assert.fail('compat result did not finish paging');
 }
-
 test('catalog exposes exactly one narrow read-only paging tool',async t=>{
   const {connect}=await setup(t),a=await connect();const tools=(await a.client.listTools()).tools;
   const pages=tools.filter(x=>x.name==='studio_output_page');assert.equal(pages.length,1);
@@ -100,7 +99,6 @@ test('projection failure never becomes a backend failure or repeats an effect',a
   assert.equal(gateway.stats().backend.spawns,1);
 });
 
-
 test('frozen app snapshot can page through existing read_file without backend replay',async t=>{
   const {gateway,connect}=await setup(t),a=await connect();
   const cmd='compat-'+('z'.repeat(50000));
@@ -145,3 +143,4 @@ test('reserved frozen compat path refuses malformed receipt locally',async t=>{
   assert.equal(out.isError,true);assert.equal(body(out).status,'OUTPUT_PAGE_ARGUMENT_INVALID');
   assert.equal(gateway.stats().requests.backendOps,before);
 });
+
