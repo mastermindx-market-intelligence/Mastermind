@@ -249,8 +249,8 @@ def test_private_ephemeral_sdk_has_zero_settings_tools_and_native_nonpersistence
             usage={"input_tokens": 1, "output_tokens": 1},
         )
 
-    monkeypatch.setattr(cb, "_Options", FakeOptions)
-    monkeypatch.setattr(cb, "_sdk_query", fake_query)
+    monkeypatch.setattr(cb, "_Options", FakeOptions, raising=False)
+    monkeypatch.setattr(cb, "_sdk_query", fake_query, raising=False)
     monkeypatch.setattr(cb, "_subscription_env", lambda env_name=None: {})
 
     result = asyncio.run(cb._via_sdk(
