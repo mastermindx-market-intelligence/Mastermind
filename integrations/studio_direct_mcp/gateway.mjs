@@ -99,9 +99,23 @@ import {
   resolveGitPublishConfig,
   toolResult as gitToolResult,
 } from './git-publish.mjs';
+import {
+  PAPER_DESIGN_TOOLS,
+  PAPER_DESIGN_TOOL_NAMES,
+  createPaperDesigner,
+  paperToolResult,
+  resolvePaperDesignConfig,
+} from './paper-design.mjs';
+import {
+  STUDIO_FLEET_STATUS_TOOL,
+  createFleetStatus,
+  fleetStatusErrorResult,
+  fleetStatusToolResult,
+  resolveFleetStatusConfig,
+} from './fleet-status.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.5';
+export const GATEWAY_VERSION = '0.1.8';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -185,6 +199,10 @@ const KNOWN_READONLY_TOOL_NAMES = new Set([
   'list_directory',
   'get_file_info',
   'list_allowed_directories',
+  'paper_inspect',
+  'paper_catalog',
+  'paper_read',
+  'studio_fleet_status',
 ]);
 
 /**
@@ -350,6 +368,8 @@ export function resolveConfig(partial = {}) {
   }
 
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
+  cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
+  cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
 
   return cfg;
 }
@@ -606,35 +626,85 @@ function handleStudioPing(session) {
  * Tool metadata proxying
  * ------------------------------------------------------------------ */
 
-/**
- * The backend ships accurate annotations for every tool it registers
- * (readOnlyHint true for read_file / list_directory / get_file_info / ... and
- * destructiveHint true for write_file / edit_block / start_process /
- * kill_process / ...), so they are forwarded byte-for-byte. This only fills a
- * gap, and fills it conservatively: a tool that arrives with no annotations at
- * all is declared mutating and destructive, never read-only.
+/** Reviewed effect floors for existing backend capabilities, not permissions.
+ * Missing hints are explicit and conservative. Upstream labels cannot turn a
+ * known write, arbitrary shell command, or external request into a harmless read.
+ * Authorization and actual execution remain with their existing owners.
  */
+const MUTATING_BACKEND_TOOL_NAMES = new Set([
+  'set_config_value', 'write_file', 'write_pdf', 'create_directory', 'move_file',
+  'edit_block', 'start_process', 'interact_with_process', 'force_terminate',
+  'kill_process', 'give_feedback_to_desktop_commander', 'stop_search',
+]);
+const DESTRUCTIVE_BACKEND_TOOL_NAMES = new Set([
+  'set_config_value', 'write_file', 'write_pdf', 'move_file', 'edit_block',
+  'start_process', 'interact_with_process', 'force_terminate', 'kill_process',
+]);
+// Known 0.2.50 capabilities: [openWorldHint, idempotentHint]. These are
+// reviewed metadata defaults, not grants or assertions about future versions.
+// Local readers are closed-world even when the upstream hint is omitted.
+// Handle creation/consumption, arbitrary commands, moves, overwrites and process
+// termination stay non-idempotent. Read idempotence does not promise stable data
+// or authorize retry after an unknown effect. Ordinary logging is not the job.
+const REVIEWED_BACKEND_EFFECT_PROFILES = Object.freeze(Object.fromEntries(
+  Object.entries({
+    get_config: [false, true],
+    set_config_value: [false, true],
+    read_file: [true, true],
+    read_multiple_files: [false, true],
+    write_file: [false, false],
+    write_pdf: [false, false],
+    create_directory: [false, true],
+    list_directory: [false, true],
+    move_file: [false, false],
+    start_search: [false, false],
+    get_more_search_results: [false, false],
+    stop_search: [false, true],
+    list_searches: [false, true],
+    get_file_info: [false, true],
+    edit_block: [false, false],
+    start_process: [true, false],
+    read_process_output: [false, false],
+    interact_with_process: [true, false],
+    force_terminate: [false, false],
+    list_sessions: [false, true],
+    list_processes: [false, true],
+    kill_process: [false, false],
+    get_usage_stats: [false, true],
+    get_recent_tool_calls: [false, true],
+    give_feedback_to_desktop_commander: [true, false],
+    get_prompts: [false, true],
+  }).map(([name, [openWorldHint, idempotentHint]]) =>
+    [name, Object.freeze({openWorldHint, idempotentHint})]),
+));
+
 function conservativeAnnotations(tool) {
-  const existing = tool && typeof tool === 'object' ? tool.annotations : undefined;
-  if (existing && typeof existing === 'object') {
-    // Trust the backend, but never let an absent readOnlyHint default to true.
-    if (typeof existing.readOnlyHint !== 'boolean') {
-      return { ...existing, readOnlyHint: false, destructiveHint: true };
-    }
-    return existing;
-  }
+  const raw = tool?.annotations;
+  const existing = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const booleanOr = (key, fallback) =>
+    typeof existing[key] === 'boolean' ? existing[key] : fallback;
+  const profile = Object.hasOwn(REVIEWED_BACKEND_EFFECT_PROFILES, tool?.name)
+    ? REVIEWED_BACKEND_EFFECT_PROFILES[tool.name] : undefined;
+  const readOnlyHint = !MUTATING_BACKEND_TOOL_NAMES.has(tool?.name)
+    && booleanOr('readOnlyHint', false);
   return {
-    title: typeof tool?.title === 'string' ? tool.title : tool?.name,
-    readOnlyHint: false,
-    destructiveHint: true,
-    idempotentHint: false,
-    openWorldHint: true,
+    ...existing,
+    ...(Object.keys(existing).length === 0
+      ? {title: typeof tool?.title === 'string' ? tool.title : tool?.name} : {}),
+    readOnlyHint,
+    destructiveHint: typeof existing.readOnlyHint !== 'boolean'
+      || DESTRUCTIVE_BACKEND_TOOL_NAMES.has(tool?.name)
+      || booleanOr('destructiveHint', !readOnlyHint),
+    idempotentHint: profile?.idempotentHint !== false
+      && booleanOr('idempotentHint', profile?.idempotentHint ?? false),
+    openWorldHint: profile?.openWorldHint === true
+      || booleanOr('openWorldHint', profile?.openWorldHint ?? true),
   };
 }
 
 const NEUTRAL_BACKEND_TOOL_DESCRIPTIONS = Object.freeze({
   get_config: 'Returns Desktop Commander configuration, access bounds, runtime metadata, and client information.',
-  set_config_value: 'Updates one supported Desktop Commander configuration value.',
+  set_config_value: "Updates one Desktop Commander setting, including filesystem access bounds, blocked commands, or the default shell. Security-related changes affect later tool calls and do not override operating-system permissions.",
   read_file: 'Reads one allowed local file or supported URL, with bounded paging for supported formats.',
   read_multiple_files: 'Reads multiple allowed local files and returns contents or per-file errors.',
   write_file: 'Creates, replaces, or appends content in one allowed local file.',
@@ -649,16 +719,16 @@ const NEUTRAL_BACKEND_TOOL_DESCRIPTIONS = Object.freeze({
   get_file_info: 'Returns metadata for an allowed local file or directory.',
   list_allowed_directories: 'Returns the local filesystem directories allowed for file operations.',
   edit_block: 'Applies an exact text or supported document-block replacement in one allowed local file.',
-  start_process: 'Starts a local terminal process for a caller-supplied command and returns initial output with process state.',
+  start_process: "Runs a caller-supplied shell command on the connected computer with the host user's permissions. Commands may change files, launch programs, or access the network; file-tool directory limits are not a shell sandbox. This is a direct host-command capability, not a work-submission or agent-handoff interface. Nested agent instructions, large worker handoffs, and opaque/repackaged payloads are outside its declared purpose. Returns output and process state.",
   read_process_output: 'Reads bounded output from an existing terminal process.',
-  interact_with_process: 'Sends input to an existing terminal process and returns subsequent output with process state.',
+  interact_with_process: "Sends input to an existing terminal process and returns output and process state. The input may execute commands, modify files, or access the network with that process's permissions. This is direct terminal interaction, not a work-submission or agent-handoff interface. Nested agent instructions, large worker handoffs, and opaque/repackaged payloads are outside its declared purpose.",
   force_terminate: 'Terminates an existing terminal session by process identifier.',
   list_sessions: 'Lists terminal sessions owned by the Desktop Commander runtime.',
   list_processes: 'Lists operating-system processes visible to the Desktop Commander runtime.',
   kill_process: 'Terminates a running operating-system process by process identifier.',
   get_usage_stats: 'Returns Desktop Commander usage and performance statistics.',
-  get_recent_tool_calls: 'Returns recent locally retained Desktop Commander tool-call metadata and bounded outputs.',
-  give_feedback_to_desktop_commander: 'Opens the Desktop Commander feedback form in the local browser.',
+  get_recent_tool_calls: "Returns locally retained tool-call metadata, arguments, and bounded outputs, which may contain sensitive user data.",
+  give_feedback_to_desktop_commander: "Opens the Desktop Commander feedback form in the local browser and sends usage statistics, platform information, and a client identifier to the feedback service. Survey answers are entered in the form.",
   get_prompts: 'Returns one Desktop Commander onboarding prompt by identifier.',
   search_files: 'Searches allowed local directories for files matching a bounded query.',
 });
@@ -820,6 +890,10 @@ class GatewaySession {
     this.transport = null;
     this.server = null;
     this.gitPublisher = cfg.gitPublish ? createGitPublisher(cfg.gitPublish) : null;
+    this.paperDesigner = cfg.paperDesign ? createPaperDesigner(cfg.paperDesign) : null;
+    this.fleetStatus = cfg.fleetStatus
+      ? createFleetStatus({ enabled: true, ...cfg.fleetStatus })
+      : null;
     this.owner?.sessions.add(this);
   }
 
@@ -921,11 +995,14 @@ class GatewaySession {
         capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
-          'studio_ping, studio_output_page, and configured studio_git_* tools are gateway-owned. ' +
+          'studio_ping, studio_output_page, configured studio_fleet_status, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
           'studio_output_page reads retained output without repeating the original action. ' +
-          'Frozen app snapshots may read the same retained receipt through existing read_file using the ' +
-          'studio-output://receipt/<receipt_id> compat path and byte offset from next_offset; ' +
-          'all remaining tools are proxied to the backend.',
+          'Frozen app snapshots may read the same retained receipt through existing read_file using the studio-output://receipt/<receipt_id> compatibility path and byte offset from next_offset; this path stays gateway-local and never replays the source tool. ' +
+          'Paper design tools use the host-pinned guarded Paper adapter; Desktop Commander is not on their dispatch path. ' +
+          'start_process and interact_with_process represent direct terminal effects rather than work-submission or agent-handoff transport. ' +
+          'Nested agent instructions, worker handoffs, and opaque/repackaged payloads are outside their declared scope. ' +
+          'A platform safety refusal is a terminal observation for the refused logical call; transformed replay by encoding, splitting, rewording, or rerouting is outside this server\'s supported behavior. ' +
+          'All remaining tools are proxied to the backend.',
       },
     );
 
@@ -938,8 +1015,14 @@ class GatewaySession {
         });
         const tools = sanitizeToolList(result.tools);
         const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
+        if (session.fleetStatus) {
+          localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
+        }
         if (session.gitPublisher) {
           localTools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
+        }
+        if (session.paperDesigner) {
+          localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
         }
         const backendNames = new Set(tools.map((tool) => tool.name));
         for (const localTool of localTools) {
@@ -1023,6 +1106,42 @@ class GatewaySession {
         classification: CLASSIFICATION.OK,
       });
       return result;
+    }
+
+    if (this.fleetStatus && name === STUDIO_FLEET_STATUS_TOOL.name) {
+      this.bumpTool(name);
+      try {
+        const data = await this.fleetStatus.status();
+        log('info', 'tool_call', {
+          sid: this.tag, tool: name, durationMs: Date.now() - started,
+          classification: CLASSIFICATION.OK,
+        });
+        return fleetStatusToolResult(data, false);
+      } catch (error) {
+        log('info', 'tool_call', {
+          sid: this.tag, tool: name, durationMs: Date.now() - started,
+          classification: CLASSIFICATION.TOOL_ERROR,
+        });
+        return fleetStatusErrorResult(error);
+      }
+    }
+
+    if (this.paperDesigner && PAPER_DESIGN_TOOL_NAMES.has(name)) {
+      return this.withBackendSlot(async () => {
+        this.bumpTool(name);
+        const result = await this.paperDesigner.call(name, request?.params?.arguments ?? {});
+        if (result.effectUnknown) {
+          this.taint('Paper design mutation effect unknown');
+        }
+        log(result.isError ? 'warn' : 'info', 'tool_call', {
+          sid: this.tag,
+          tool: name,
+          durationMs: Date.now() - started,
+          classification: result.isError ? CLASSIFICATION.TOOL_ERROR : CLASSIFICATION.OK,
+          effect: result.effectUnknown ? 'EFFECT_UNKNOWN' : undefined,
+        });
+        return paperToolResult(result.value, result.isError);
+      }, { kind: 'tools/call', tool: name, started });
     }
 
     if (this.gitPublisher &&
