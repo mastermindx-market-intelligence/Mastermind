@@ -1,21 +1,22 @@
-"""Pure COO principal mandate projection over already-qualified owner facts.
+"""Pure COO principal mandate projection over Mission Workspace v3.
 
-This module owns no authority, lifecycle, identity, queue, session registry, OAuth
-verification, source lease, provider placement, retry or persistence state. It
-reduces immutable facts supplied by their existing canonical owners into the
-read-only mastermind.coo_principal_mandate.v1 projection used by rich principal
-clients such as Fable.
+This module is production-inert. It owns no authority, lifecycle, identity,
+queue, session registry, OAuth verification, source lease, provider placement,
+retry, clock, I/O, or persistence state.
 
-The projection separates organizational decision posture from technical
-capability exposure. Exact tool, MCP, plugin and source capability still belongs
-to the existing target owners at action time.
+Mission Workspace v3 is the primary organizational input. Additional facts are
+already-qualified outputs from the existing OAuth/principal-binding, mission
+authority, rich-principal capability, source grant, and economic owners.
 """
 from __future__ import annotations
 
 import dataclasses
 import enum
 import re
+from collections.abc import Mapping
 from typing import Any
+
+from control_plane import mission_workspace as mw
 
 
 SCHEMA = "mastermind.coo_principal_mandate.v1"
@@ -40,20 +41,6 @@ RESERVED_BOUNDARIES = (
 )
 
 
-class Seat(str, enum.Enum):
-    CHAIRMAN = "chairman"
-    CEO = "ceo"
-    COO = "coo"
-    WORKER = "worker"
-    NONE = "none"
-
-
-class EffectState(str, enum.Enum):
-    NONE = "none"
-    APPLIED = "applied"
-    EFFECT_UNKNOWN = "effect_unknown"
-
-
 class ReleaseClass(str, enum.Enum):
     AUTONOMOUS_SOURCE_RELEASE_WITH_GATES = "AUTONOMOUS_SOURCE_RELEASE_WITH_GATES"
     RESERVED_RELEASE = "RESERVED_RELEASE"
@@ -62,15 +49,18 @@ class ReleaseClass(str, enum.Enum):
 class DecisionPosture(str, enum.Enum):
     DECIDE_CONTINUE = "DECIDE_CONTINUE"
     DO_NOT_MICROMANAGE_WORKER = "DO_NOT_MICROMANAGE_WORKER"
-    RECOMMEND_ONLY_FOR_OWED_TURN = "RECOMMEND_ONLY_FOR_OWED_TURN"
     CONTINUE_PATH_DISJOINT = "CONTINUE_PATH_DISJOINT"
+    READ_RECOMMEND_ONLY = "READ_RECOMMEND_ONLY"
     RECONCILE_REQUIRED = "RECONCILE_REQUIRED"
 
 
 class NewEffectGate(str, enum.Enum):
     OPEN = "OPEN"
+    FENCED_UNQUALIFIED_MISSION = "FENCED_UNQUALIFIED_MISSION"
     FENCED_EFFECT_UNKNOWN = "FENCED_EFFECT_UNKNOWN"
+    FENCED_RECONCILIATION_REQUIRED = "FENCED_RECONCILIATION_REQUIRED"
     FENCED_SOURCE_OR_LEASE_CONFLICT = "FENCED_SOURCE_OR_LEASE_CONFLICT"
+    FENCED_NOT_COO_ACCOUNTABLE = "FENCED_NOT_COO_ACCOUNTABLE"
 
 
 class SessionAssurance(str, enum.Enum):
@@ -91,10 +81,10 @@ def _digest(value: object, *, field: str) -> str:
     return value
 
 
-def _optional_ref(value: object, *, field: str) -> str | None:
+def _optional_digest(value: object, *, field: str) -> str | None:
     if value is None:
         return None
-    return _text(value, field=field)
+    return _digest(value, field=field)
 
 
 def _scope_tuple(value: object) -> tuple[str, ...]:
@@ -133,111 +123,274 @@ class PrincipalFact:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class MissionAuthorityFact:
+class AuthorityFact:
     work_ref: str
     mission_authority_ref: str
     authority_generation_digest: str
-    accountable_seat: Seat
-    owed_seat: Seat
-    release_class: ReleaseClass
     outcome_ref: str
     proof_contract_ref: str
-    capability_profile_ref: str
-    source_grant_ref: str | None
-    economic_envelope_ref: str | None
+    release_class: ReleaseClass
+    capability_profile_digest: str
+    source_grant_digest: str | None
+    economic_envelope_digest: str | None
+    live_source_or_lease_conflict: bool = False
 
     def __post_init__(self) -> None:
         _text(self.work_ref, field="work_ref", pattern=_WORK_REF_RE)
         _text(self.mission_authority_ref, field="mission_authority_ref")
         _digest(self.authority_generation_digest, field="authority_generation_digest")
-        if not isinstance(self.accountable_seat, Seat):
-            raise TypeError("accountable_seat must be Seat")
-        if not isinstance(self.owed_seat, Seat):
-            raise TypeError("owed_seat must be Seat")
-        if not isinstance(self.release_class, ReleaseClass):
-            raise TypeError("release_class must be ReleaseClass")
         _text(self.outcome_ref, field="outcome_ref")
         _text(self.proof_contract_ref, field="proof_contract_ref")
-        _text(self.capability_profile_ref, field="capability_profile_ref")
-        _optional_ref(self.source_grant_ref, field="source_grant_ref")
-        _optional_ref(self.economic_envelope_ref, field="economic_envelope_ref")
+        if not isinstance(self.release_class, ReleaseClass):
+            raise TypeError("release_class must be ReleaseClass")
+        _digest(self.capability_profile_digest, field="capability_profile_digest")
+        _optional_digest(self.source_grant_digest, field="source_grant_digest")
+        _optional_digest(self.economic_envelope_digest, field="economic_envelope_digest")
+        if type(self.live_source_or_lease_conflict) is not bool:
+            raise TypeError("live_source_or_lease_conflict must be bool")
+
+
+def _mapping(value: object, *, field: str, keys: frozenset[str]) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != keys:
+        raise ValueError(f"{field} does not match the Mission Workspace v3 contract")
+    return value
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class SafetyFact:
-    effect_state: EffectState
-    live_source_or_lease_conflict: bool
-    runtime_binding_ref: str | None = None
-    session_assurance: SessionAssurance = SessionAssurance.MISSION_BOUND
+class _MissionState:
+    work_ref: str | None
+    root_job_id: str | None
+    read_state: str | None
+    owner_observation_state: str | None
+    source_generation_state: str | None
+    runtime_root_state: str | None
+    root_job_ambiguous: bool | None
+    accountable_seat: str | None
+    owed_seat: str | None
+    owed_reason: str | None
+    posture: str | None
+    posture_rule: str | None
+    dispatch_state: str | None
+    qualified: bool
+    effect_unknown: bool
+    reconciliation_required: bool
+    reason_codes: tuple[str, ...]
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.effect_state, EffectState):
-            raise TypeError("effect_state must be EffectState")
-        if type(self.live_source_or_lease_conflict) is not bool:
-            raise TypeError("live_source_or_lease_conflict must be bool")
-        _optional_ref(self.runtime_binding_ref, field="runtime_binding_ref")
-        if not isinstance(self.session_assurance, SessionAssurance):
-            raise TypeError("session_assurance must be SessionAssurance")
+
+def _mission_state(document: object, *, expected_work_ref: str) -> _MissionState:
+    top = _mapping(document, field="mission_workspace", keys=mw.OUTPUT_KEYS_V3)
+    if top.get("schema") != mw.SCHEMA_V3:
+        raise ValueError("mission_workspace must use mastermind.mission_workspace.v3")
+
+    read_state = _mapping(
+        top.get("read_state"), field="mission_workspace.read_state", keys=mw.READ_STATE_KEYS
+    )
+    source = _mapping(
+        top.get("source"), field="mission_workspace.source", keys=mw.SOURCE_KEYS_V2
+    )
+    owner_observation = _mapping(
+        source.get("owner_observation"),
+        field="mission_workspace.source.owner_observation",
+        keys=mw.OWNER_OBSERVATION_KEYS,
+    )
+    program = _mapping(
+        top.get("program"), field="mission_workspace.program", keys=mw.PROGRAM_KEYS
+    )
+    mission = _mapping(
+        top.get("mission"), field="mission_workspace.mission", keys=mw.MISSION_KEYS
+    )
+    principal = _mapping(
+        top.get("principal"), field="mission_workspace.principal", keys=mw.PRINCIPAL_KEYS
+    )
+    transport = _mapping(
+        top.get("transport"), field="mission_workspace.transport", keys=mw.TRANSPORT_KEYS
+    )
+    posture = _mapping(
+        top.get("posture"), field="mission_workspace.posture", keys=mw.POSTURE_KEYS
+    )
+
+    source_generation = source.get("source_generation")
+    if not isinstance(source_generation, Mapping) or set(source_generation) != {
+        "state",
+        "version",
+        "generation",
+    }:
+        raise ValueError("mission_workspace.source.source_generation is invalid")
+
+    owed = principal.get("owed_turn")
+    if owed is not None:
+        owed = _mapping(
+            owed, field="mission_workspace.principal.owed_turn", keys=mw.OWED_TURN_KEYS
+        )
+
+    work_ref = program.get("work_ref") if isinstance(program.get("work_ref"), str) else None
+    root_job_id = (
+        mission.get("root_job_id") if isinstance(mission.get("root_job_id"), str) else None
+    )
+    selected_read_state = (
+        read_state.get("state") if isinstance(read_state.get("state"), str) else None
+    )
+    observation_state = (
+        owner_observation.get("state")
+        if isinstance(owner_observation.get("state"), str)
+        else None
+    )
+    generation_state = (
+        source_generation.get("state")
+        if isinstance(source_generation.get("state"), str)
+        else None
+    )
+    root_state = (
+        mission.get("runtime_root_state")
+        if isinstance(mission.get("runtime_root_state"), str)
+        else None
+    )
+    root_ambiguous = (
+        mission.get("root_job_ambiguous")
+        if type(mission.get("root_job_ambiguous")) is bool
+        else None
+    )
+    accountable = (
+        principal.get("accountable_seat")
+        if isinstance(principal.get("accountable_seat"), str)
+        else None
+    )
+    owed_seat = owed.get("seat") if isinstance(owed, Mapping) and isinstance(owed.get("seat"), str) else None
+    owed_reason = (
+        owed.get("reason")
+        if isinstance(owed, Mapping) and isinstance(owed.get("reason"), str)
+        else None
+    )
+    posture_value = (
+        posture.get("value") if isinstance(posture.get("value"), str) else None
+    )
+    posture_rule = (
+        posture.get("rule") if isinstance(posture.get("rule"), str) else None
+    )
+    dispatch_state = (
+        transport.get("dispatch_state")
+        if isinstance(transport.get("dispatch_state"), str)
+        else None
+    )
+
+    reasons: list[str] = []
+    if work_ref != expected_work_ref:
+        reasons.append("mission_work_ref_mismatch")
+    if selected_read_state != "CURRENT":
+        reasons.append("mission_read_state_not_current")
+    if observation_state != "SAME":
+        reasons.append("owner_observation_not_same")
+    if root_state == "CONFLICT" or root_ambiguous is True:
+        reasons.append("mission_root_conflict")
+    if generation_state == "CONFLICT":
+        reasons.append("source_generation_conflict")
+    if root_job_id is None:
+        reasons.append("mission_root_unresolved")
+
+    effect_unknown = (
+        posture_value == "EFFECT_UNKNOWN" or dispatch_state == "EFFECT_UNKNOWN"
+    )
+    reconciliation_required = (
+        posture_value == "RECONCILIATION_REQUIRED"
+        or dispatch_state == "RUNTIME_BINDING_RECONCILIATION_REQUIRED"
+    )
+
+    return _MissionState(
+        work_ref=work_ref,
+        root_job_id=root_job_id,
+        read_state=selected_read_state,
+        owner_observation_state=observation_state,
+        source_generation_state=generation_state,
+        runtime_root_state=root_state,
+        root_job_ambiguous=root_ambiguous,
+        accountable_seat=accountable,
+        owed_seat=owed_seat,
+        owed_reason=owed_reason,
+        posture=posture_value,
+        posture_rule=posture_rule,
+        dispatch_state=dispatch_state,
+        qualified=not reasons,
+        effect_unknown=effect_unknown,
+        reconciliation_required=reconciliation_required,
+        reason_codes=tuple(sorted(set(reasons))),
+    )
 
 
-def _effect_gate(safety: SafetyFact) -> tuple[NewEffectGate, tuple[str, ...]]:
-    if safety.effect_state is EffectState.EFFECT_UNKNOWN:
+def _effect_gate(
+    state: _MissionState,
+    authority: AuthorityFact,
+) -> tuple[NewEffectGate, tuple[str, ...]]:
+    if not state.qualified:
+        return NewEffectGate.FENCED_UNQUALIFIED_MISSION, state.reason_codes
+    if state.effect_unknown:
         return NewEffectGate.FENCED_EFFECT_UNKNOWN, ("effect_unknown",)
-    if safety.live_source_or_lease_conflict:
+    if state.reconciliation_required:
+        return (
+            NewEffectGate.FENCED_RECONCILIATION_REQUIRED,
+            ("reconciliation_required",),
+        )
+    if authority.live_source_or_lease_conflict:
         return (
             NewEffectGate.FENCED_SOURCE_OR_LEASE_CONFLICT,
             ("live_source_or_lease_conflict",),
         )
+    if state.accountable_seat != "coo":
+        return NewEffectGate.FENCED_NOT_COO_ACCOUNTABLE, ("coo_not_accountable_seat",)
     return NewEffectGate.OPEN, ()
 
 
 def _decision_posture(
-    mission: MissionAuthorityFact,
+    state: _MissionState,
     gate: NewEffectGate,
 ) -> tuple[DecisionPosture, tuple[str, ...]]:
-    if mission.accountable_seat is not Seat.COO:
-        return DecisionPosture.RECOMMEND_ONLY_FOR_OWED_TURN, (
-            "coo_not_accountable_seat",
-        )
-    if gate is not NewEffectGate.OPEN:
+    if gate in {
+        NewEffectGate.FENCED_EFFECT_UNKNOWN,
+        NewEffectGate.FENCED_RECONCILIATION_REQUIRED,
+        NewEffectGate.FENCED_SOURCE_OR_LEASE_CONFLICT,
+    }:
         return DecisionPosture.RECONCILE_REQUIRED, ("new_effects_fenced",)
-    if mission.owed_seat is Seat.COO:
+    if gate is not NewEffectGate.OPEN:
+        return DecisionPosture.READ_RECOMMEND_ONLY, ("modifying_mandate_unqualified",)
+    if state.owed_seat == "coo":
         return DecisionPosture.DECIDE_CONTINUE, ()
-    if mission.owed_seat is Seat.WORKER:
+    if state.owed_seat == "worker":
         return DecisionPosture.DO_NOT_MICROMANAGE_WORKER, ()
-    if mission.owed_seat in {Seat.CEO, Seat.CHAIRMAN}:
+    if state.owed_seat in {"ceo", "chairman"}:
         return DecisionPosture.CONTINUE_PATH_DISJOINT, (
-            f"{mission.owed_seat.value}_turn_reserved",
+            f"{state.owed_seat}_turn_reserved",
         )
-    return DecisionPosture.DECIDE_CONTINUE, ()
+    return DecisionPosture.CONTINUE_PATH_DISJOINT, ("owed_turn_unknown",)
 
 
 def project_coo_principal_mandate(
     *,
     principal: PrincipalFact,
-    mission: MissionAuthorityFact,
-    safety: SafetyFact,
+    authority: AuthorityFact,
+    mission_workspace: Mapping[str, Any],
+    session_assurance: SessionAssurance = SessionAssurance.MISSION_BOUND,
 ) -> dict[str, Any]:
-    """Return one deterministic read-only COO mandate projection.
+    """Return one deterministic read-only COO principal mandate projection.
 
-    The caller must supply facts already qualified by their canonical owners.
-    This reducer authenticates nothing and grants nothing.
+    The App must build principal and authority from their existing canonical
+    owners. This reducer authenticates nothing, persists nothing, and grants
+    nothing merely because a caller can construct a similarly shaped object.
     """
 
     if not isinstance(principal, PrincipalFact):
         raise TypeError("principal must be PrincipalFact")
-    if not isinstance(mission, MissionAuthorityFact):
-        raise TypeError("mission must be MissionAuthorityFact")
-    if not isinstance(safety, SafetyFact):
-        raise TypeError("safety must be SafetyFact")
+    if not isinstance(authority, AuthorityFact):
+        raise TypeError("authority must be AuthorityFact")
+    if not isinstance(session_assurance, SessionAssurance):
+        raise TypeError("session_assurance must be SessionAssurance")
 
-    gate, gate_reasons = _effect_gate(safety)
-    posture, posture_reasons = _decision_posture(mission, gate)
-    reason_codes = tuple(sorted(set(gate_reasons + posture_reasons)))
+    state = _mission_state(mission_workspace, expected_work_ref=authority.work_ref)
+    gate, gate_reasons = _effect_gate(state, authority)
+    decision, decision_reasons = _decision_posture(state, gate)
+    reasons = sorted(set(state.reason_codes + gate_reasons + decision_reasons))
 
     return {
         "schema": SCHEMA,
-        "seat": Seat.COO.value,
+        "seat": "coo",
         "principal": {
             "policy_id": principal.policy_id,
             "issuer_digest": principal.issuer_digest,
@@ -248,46 +401,52 @@ def project_coo_principal_mandate(
             "principal_binding_digest": principal.principal_binding_digest,
         },
         "mission": {
-            "work_ref": mission.work_ref,
-            "mission_authority_ref": mission.mission_authority_ref,
-            "authority_generation_digest": mission.authority_generation_digest,
-            "accountable_seat": mission.accountable_seat.value,
-            "owed_seat": mission.owed_seat.value,
-            "outcome_ref": mission.outcome_ref,
-            "proof_contract_ref": mission.proof_contract_ref,
+            "work_ref": state.work_ref,
+            "root_job_id": state.root_job_id,
+            "mission_authority_ref": authority.mission_authority_ref,
+            "authority_generation_digest": authority.authority_generation_digest,
+            "outcome_ref": authority.outcome_ref,
+            "proof_contract_ref": authority.proof_contract_ref,
+            "read_state": state.read_state,
+            "owner_observation_state": state.owner_observation_state,
+            "source_generation_state": state.source_generation_state,
+            "runtime_root_state": state.runtime_root_state,
+            "accountable_seat": state.accountable_seat,
+            "owed_turn": {
+                "seat": state.owed_seat,
+                "reason": state.owed_reason,
+            },
+            "source_posture": {
+                "value": state.posture,
+                "rule": state.posture_rule,
+                "dispatch_state": state.dispatch_state,
+            },
         },
         "capability": {
-            "capability_profile_ref": mission.capability_profile_ref,
-            "source_grant_ref": mission.source_grant_ref,
-            "economic_envelope_ref": mission.economic_envelope_ref,
+            "capability_profile_digest": authority.capability_profile_digest,
+            "source_grant_digest": authority.source_grant_digest,
+            "economic_envelope_digest": authority.economic_envelope_digest,
         },
-        "release": {
-            "release_class": mission.release_class.value,
-        },
+        "release": {"release_class": authority.release_class.value},
         "continuity": {
-            "effect_state": safety.effect_state.value,
-            "live_source_or_lease_conflict": safety.live_source_or_lease_conflict,
-            "runtime_binding_ref": safety.runtime_binding_ref,
-            "session_assurance": safety.session_assurance.value,
+            "session_assurance": session_assurance.value,
+            "current_coo_target": None,
         },
-        "decision_posture": posture.value,
+        "decision_posture": decision.value,
         "new_effect_gate": gate.value,
         "reserved_boundaries": list(RESERVED_BOUNDARIES),
-        "reason_codes": list(reason_codes),
+        "reason_codes": reasons,
     }
 
 
 __all__ = [
     "SCHEMA",
     "RESERVED_BOUNDARIES",
+    "AuthorityFact",
     "DecisionPosture",
-    "EffectState",
-    "MissionAuthorityFact",
     "NewEffectGate",
     "PrincipalFact",
     "ReleaseClass",
-    "SafetyFact",
-    "Seat",
     "SessionAssurance",
     "project_coo_principal_mandate",
 ]
