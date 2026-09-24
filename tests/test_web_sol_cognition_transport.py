@@ -70,17 +70,18 @@ def _result_schema() -> dict:
 
 def _assignment() -> dict:
     schema = _result_schema()
+    continuation = {
+        "schema_version": "mastermind.web_sol_continuation/v1",
+        "workstream": "WS:TARGET",
+        "agentos_source_sha": "2" * 40,
+        "next_action": "Analyze the bounded evidence and return the exact result envelope.",
+        "blockers": [],
+        "do_not_redo": ["DONE-1"],
+        "evidence": [],
+    }
     return {
-        "continuation": {
-            "schema_version": "mastermind.web_sol_continuation/v1",
-            "workstream": "WS:TARGET",
-            "agentos_source_sha": "2" * 40,
-            "next_action": "Analyze the bounded evidence and return the exact result envelope.",
-            "blockers": [],
-            "do_not_redo": ["DONE-1"],
-            "evidence": [],
-        },
-        "continuation_digest": "3" * 64,
+        "continuation": continuation,
+        "continuation_digest": _digest(continuation),
         "effect_contract": {
             "allowed_write_paths": [],
             "external_effects_allowed": False,
