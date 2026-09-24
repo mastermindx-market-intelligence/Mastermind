@@ -274,6 +274,28 @@ def test_submit_payload_rejects_private_transport_fields_inside_assignment() -> 
         _submit(assignment=assignment)
 
 
+def test_submit_payload_consumes_canonical_commission_ref_validation() -> None:
+    assignment = _assignment()
+    assignment["source"]["commission_ref"]["repository"] = "not/a/repo/shape"
+    with pytest.raises(WebSolCognitionTransportError, match="commission_ref"):
+        _submit(assignment=assignment)
+
+    assignment = _assignment()
+    assignment["source"]["commission_ref"]["path"] = "../escape.md"
+    with pytest.raises(WebSolCognitionTransportError, match="commission_ref"):
+        _submit(assignment=assignment)
+
+
+def test_transport_identity_width_does_not_exceed_browser_result_boundary() -> None:
+    with pytest.raises(WebSolCognitionTransportError, match="job_id"):
+        _submit(job_id="J" * 129)
+
+    assignment = _assignment()
+    assignment["job"]["plan_step_id"] = "S" * 129
+    with pytest.raises(WebSolCognitionTransportError, match="plan_step_id"):
+        _submit(assignment=assignment)
+
+
 def test_submit_payload_enforces_assignment_budget() -> None:
     assignment = _assignment()
     assignment["job"]["objective"] = "x" * MAX_ASSIGNMENT_BYTES
