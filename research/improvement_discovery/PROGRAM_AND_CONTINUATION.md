@@ -146,6 +146,76 @@ affected conclusions through existing correction owners.
 - Malformed input: fixed non-echoing error; no private payload in the public projection.
 - Research field/path presence: structural coverage only, not semantic/production proof.
 
+## Slice 2 - automatic owner evidence, not autonomous ideation
+
+Source implementation: `b2c318963c15f78e7e44829e32462608917fa469`, on the
+same #946 branch and workspace. The current turn remains inside the original
+Chairman-authorized improvement mission. Protected procedure was re-pinned at
+`bab1291ba7163bf091354181066ab26cf8a0c0ea`; a bounded comparison through
+`0497e28864752e3ab70fa5aa2f1567bc3c9c6aca` found no material change to the loaded
+procedure, strategic/cognition law or affected owner and Agenda source.
+
+The first automatic feed is the existing `brain.nw_reflection.coverage()` owner.
+GMI `capability.v1` only describes priced-member aggregate eligibility; it is not
+an assessment of granular rerating research quality and must not be repurposed
+as one. This preserves the GMI ambition without inventing its missing evidence.
+
+The coverage owner now exposes its distinct-subject denominator, explicit sample
+(open theses plus the last 200 parsed outcome rows), input completeness and fixed
+input-status diagnostics. Missing, malformed or concurrently changed inputs cannot
+certify complete coverage. Legacy fields remain descriptive; no nudge thresholds,
+priority formulas, books, flags or trading authority were changed.
+
+`brain/improvement_discovery_nw.py` reads that existing owner's persisted report.
+Without an injected discovery bundle, the ordinary Agenda build now consumes this
+feed automatically, after existing ranking/readiness are frozen. It never invokes
+the owner's build/persist functions, starts another scheduler or mutates its nudge
+registry. Missing or invalid inputs remain unavailable. Old reports stay stale;
+reading one today does not change its observation vintage. The report's producer
+revision is not attested by the legacy wire and is explicitly left unproven.
+
+A populated, complete sample with uncovered subjects produces three deterministic
+hypothesis scaffolds: reuse/connect existing context; conduct bounded research after
+reuse/duplicate checks; or hold/narrow scope. Each names a discriminating observation
+and a falsifier. Partial evidence produces verification/hold, no-demand produces no
+new-work hypothesis, and stale/satisfied evidence produces none. These are useful
+inputs for the existing Chairman Cognition office, NOT LLM-generated insight,
+strategic selection, worker admission or proof of independent creativity.
+
+The existing CLI accepts the owner report and can render this internal brief. Public
+Agenda/API output still contains only fixed codes and counts, never the detailed
+hypotheses or private source prose. An existing nudge's Agenda ID is a navigation
+hint only, never execution, acceptance, live custody or a complete duplicate census.
+
+### Slice 2 proof and limits
+
+- `OWNER_INPUT_PROOF_2026-09-24.json`: 255 focused owner/discovery/Agenda/readiness/
+  nudge-feedback/Mastermind-AI tests, zero failures/errors/skips, with code hashes.
+- The actual local archived report dated 2026-07-21 was read without modification;
+  the new adapter returned HELD_SOURCE/STALE and zero hypotheses. This is a real
+  negative case, not a current production snapshot.
+- `OWNER_BROWSER_PROOF_2026-09-24.json`: four Chromium cases, desktop/mobile and
+  dark/light, passed using synthetic owner inputs but real coverage/latest/default
+  Agenda/writer/API/page code. No discovery bundle or public result was injected.
+  Subsequent stale and malformed owner fixtures were also checked. EN only; no new
+  UI/bilingual design or deployed-service acceptance is claimed.
+- Existing #775 owns the Agenda page. It remains untouched. Existing copy and
+  aggregate-only visibility do not meet the eventual rich hypothesis-review UI goal.
+- The previous #946 head's hosted checks concluded green. That is historical evidence,
+  not CI qualification of this new candidate. Independent review remains a release gate.
+
+### Next exact capability
+
+Publish and independently review this exact source increment on #946, qualify its
+required CI, and keep the source hold until those conditions clear. Reconcile the
+same Agent OS #7883 record rather than create a second continuity store. Then use
+one current deployed owner report to prove the default consumer path, and connect
+the bounded evidence/alternatives brief to the existing Chairman Cognition admission
+path. The next cognition proof must involve an actual model-generated competing
+hypothesis and an independently judged useful user task, not merely these templates.
+Prospective insight evaluation, GMI semantic research adequacy and a bounded Executive
+evidence sprint remain unfinished; no new provider or production authority is implied.
+
 ## Continuation and effect record
 
 Current source carrier is the custody-owned branch

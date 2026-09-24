@@ -1,0 +1,53 @@
+{
+  "actual_api_reader": "app.web.api_agenda -> brain.improvement_agenda.latest",
+  "automatic_owner_input": true,
+  "browser_checks": [
+    {
+      "no_horizontal_overflow": true,
+      "private_prose_excluded": true,
+      "screenshot": "agenda-owner-1440-dark.png",
+      "theme": "dark",
+      "visible_discovery": true,
+      "width": 1440
+    },
+    {
+      "no_horizontal_overflow": true,
+      "private_prose_excluded": true,
+      "screenshot": "agenda-owner-1440-light.png",
+      "theme": "light",
+      "visible_discovery": true,
+      "width": 1440
+    },
+    {
+      "no_horizontal_overflow": true,
+      "private_prose_excluded": true,
+      "screenshot": "agenda-owner-390-dark.png",
+      "theme": "dark",
+      "visible_discovery": true,
+      "width": 390
+    },
+    {
+      "no_horizontal_overflow": true,
+      "private_prose_excluded": true,
+      "screenshot": "agenda-owner-390-light.png",
+      "theme": "light",
+      "visible_discovery": true,
+      "width": 390
+    }
+  ],
+  "code_hashes": {
+    "app/static/agenda.html": "4bb8f8966d28ec00bf3dbcb887418a1ef4b55ffa015caa48453f497c7d3aa11a",
+    "brain/improvement_agenda.py": "0df5ba6f83e1fb37aa302e6569eb239178faa18bcb8392175731ca94f9ccffeb",
+    "brain/improvement_discovery.py": "aae158a56005ce29f0e39fea5f7c7c1572cb750e15042b32fa374b553005575d",
+    "brain/improvement_discovery_nw.py": "974bd5a81e0ba67ce7e254c47c5b81898f1e650e2ae9dc8cb5c3b420f847e06f",
+    "brain/nw_reflection.py": "4f079e9b339a69789d3d0b971452b7b3e721e355af09dc3924093109bd690979",
+    "research/improvement_discovery/prove_agenda_browser.py": "a4495c1aefd07ae35bd591763b0baddb90dc617566b18c9454de85a7b5ea1dd1"
+  },
+  "independent_discovery_proven": false,
+  "language": "EN",
+  "other_portfolio_agentos_sources": "ISOLATED_NOT_EVALUATED",
+  "production_proven": false,
+  "scope": "LOCAL_SYNTHETIC_OWNER_INPUTS_REAL_OWNER_AND_AGENDA_CODE",
+  "source_report_digest": "sha256:bc6e204e2d5c79fd1431ed08a9a03201586d74ed2210eb597e73583b8a89dfe6",
+  "stale_and_malformed_owner_rechecked": true
+}
