@@ -128,6 +128,7 @@ def _deadline_fields(
     observed_at: str | None = None,
     readiness_expires_at: str | None = None,
     now: datetime | None = None,
+    allow_expired_readiness: bool = False,
 ) -> tuple[str, str, str]:
     current = datetime.now(UTC) if now is None else now.astimezone(UTC)
     observed_text = now_iso() if observed_at is None else observed_at
@@ -148,7 +149,10 @@ def _deadline_fields(
         raise ReadinessError("receipt_timestamp_in_future")
     if readiness_expiry > maximum or readiness_expiry <= observed:
         raise ReadinessError("readiness_expiry_bounds_invalid")
-    if readiness_expiry <= current + MIN_ACCEPTANCE_MARGIN:
+    if (
+        not allow_expired_readiness
+        and readiness_expiry <= current + MIN_ACCEPTANCE_MARGIN
+    ):
         raise ReadinessError("readiness_expired_or_insufficient_margin")
     return observed_text, credential_expires_at, readiness_text
 
@@ -434,6 +438,7 @@ def validate_receipt_document(
     workspace_binding_class: str | None = None,
     worker_uid: int = WORKER_UID,
     worker_gid: int = WORKER_GID,
+    allow_expired_readiness: bool = False,
 ) -> None:
     if set(value) != _RECEIPT_FIELDS:
         raise ReadinessError("readiness_receipt_fields_malformed")
@@ -445,6 +450,7 @@ def validate_receipt_document(
         observed_at=value.get("observed_at"),
         credential_expires_at=value.get("credential_expires_at"),
         readiness_expires_at=value.get("readiness_expires_at"),
+        allow_expired_readiness=allow_expired_readiness,
     )
     if value.get("expected_credential_kind") not in EXPECTED_KINDS:
         raise ReadinessError("readiness_credential_kind_unknown")
@@ -486,6 +492,83 @@ def validate_receipt_document(
         raise ReadinessError("readiness_identity_binary_conflict")
     if safe_identity["credential_lstat"] != dict(auth_identity):
         raise ReadinessError("readiness_identity_credential_conflict")
+
+
+def classify_refresh_eligibility(
+    value: Mapping[str, Any],
+    *,
+    auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+    expected_kind: str,
+    workspace_binding_class: str,
+    worker_uid: int = WORKER_UID,
+    worker_gid: int = WORKER_GID,
+    new_credential_expires_at: str | None = None,
+) -> None:
+    """Return None if the document is refresh-eligible, else raise ReadinessError.
+
+    A document is refresh-eligible iff ALL hold:
+      a. validate_receipt_document(value, ..., allow_expired_readiness=True)
+         passes — historically passing composite receipt, unchanged current
+         auth + binary identity, matching kind and class.
+      b. value["expected_credential_kind"] == "device-auth" AND
+         expected_kind == "device-auth".  Service-account / personal-access-token
+         expiry must keep requiring credential rotation.
+      c. validate_receipt_document(value, ..., allow_expired_readiness=False)
+         raises exactly ReadinessError("readiness_expired_or_insufficient_margin").
+         If the strict call passes, the receipt is still live and must NOT be
+         refreshed.  If it raises anything else, the document is tampered or
+         otherwise ineligible.
+
+    Between (a) and (c) two further refusals fire so the credential deadline
+    can never be locally extended:
+      (i) the receipt's own credential_expires_at must still be valid at
+          refresh time with margin — only the readiness deadline may be
+          expired, never the credential deadline.
+      (ii) when a new credential deadline is provided, it must not be later
+           than the receipt's credential_expires_at — the same auth identity
+           cannot extend its own credential window.
+    """
+
+    if value.get("expected_credential_kind") != "device-auth" or expected_kind != "device-auth":
+        raise ReadinessError("refresh_requires_credential_rotation")
+    validate_receipt_document(
+        value,
+        auth_identity=auth_identity,
+        binary_identity=binary_identity,
+        expected_kind=expected_kind,
+        workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid,
+        worker_gid=worker_gid,
+        allow_expired_readiness=True,
+    )
+    receipt_credential_expiry = _timestamp(
+        value["credential_expires_at"], code="credential_expiry_malformed"
+    )
+    if receipt_credential_expiry <= datetime.now(UTC) + MIN_ACCEPTANCE_MARGIN:
+        raise ReadinessError("refresh_requires_credential_rotation")
+    if new_credential_expires_at is not None:
+        new_credential_expiry = _timestamp(
+            new_credential_expires_at, code="credential_expiry_malformed"
+        )
+        if new_credential_expiry > receipt_credential_expiry:
+            raise ReadinessError("refresh_requires_credential_rotation")
+    try:
+        validate_receipt_document(
+            value,
+            auth_identity=auth_identity,
+            binary_identity=binary_identity,
+            expected_kind=expected_kind,
+            workspace_binding_class=workspace_binding_class,
+            worker_uid=worker_uid,
+            worker_gid=worker_gid,
+            allow_expired_readiness=False,
+        )
+    except ReadinessError as exc:
+        if str(exc) == "readiness_expired_or_insufficient_margin":
+            return None
+        raise ReadinessError("refresh_not_eligible") from exc
+    raise ReadinessError("refresh_not_eligible")
 
 
 
@@ -837,6 +920,146 @@ def replace_reserved_receipt(
             temporary.unlink()
 
 
+def _superseded_sibling_path(path: Path, original_bytes: bytes) -> Path:
+    digest = hashlib.sha256(original_bytes).hexdigest()[:16]
+    return path.with_name(f"{path.name}.superseded-{digest}.json")
+
+
+def _persist_superseded_receipt(
+    superseded_path: Path,
+    original_bytes: bytes,
+    *,
+    workspace_binding_class: str | None,
+    worker_gid: int,
+) -> None:
+    """Write a byte-identical copy of the superseded live receipt as evidence.
+
+    Idempotent after a crash: if the sibling already exists with the same
+    bytes, accept it; if it exists with different bytes, refuse with
+    ``superseded_receipt_conflict`` and leave the live receipt untouched.
+    """
+
+    _validate_receipt_directory(superseded_path)
+    expected_uid, expected_gid, expected_mode = receipt_storage_contract(
+        workspace_binding_class=workspace_binding_class,
+        worker_gid=worker_gid,
+    )
+    if superseded_path.exists() or superseded_path.is_symlink():
+        try:
+            lstat_identity(
+                superseded_path,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+                expected_mode=expected_mode,
+            )
+        except ReadinessError as exc:
+            raise ReadinessError("superseded_receipt_conflict") from exc
+        existing = superseded_path.read_bytes()
+        if existing == original_bytes:
+            return
+        raise ReadinessError("superseded_receipt_conflict")
+    # Crash-safe write: stage to a sibling-local temp file, then atomically
+    # rename over the digest-named path.  A SIGINT/power loss before the
+    # rename leaves no partial file at the digest name, so the next retry
+    # can simply re-create it cleanly.  Because the destination name is a
+    # digest of the bytes being written, ``os.replace`` is idempotent and
+    # cannot clobber divergent evidence (a divergent file at that name was
+    # already refused by the exists-branch above).
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{superseded_path.name}.tmp-", dir=os.fspath(superseded_path.parent)
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, expected_mode)
+        os.fchown(descriptor, expected_uid, expected_gid)
+        view = memoryview(original_bytes)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise ReadinessError("readiness_receipt_short_write")
+            view = view[written:]
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        _assert_no_macos_acl(temporary)
+        os.replace(temporary, superseded_path)
+        _fsync_directory(superseded_path.parent)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
+
+
+def refresh_expired_receipt(
+    path: Path,
+    value: Mapping[str, Any],
+    *,
+    expected_identity: Mapping[str, Any],
+    workspace_binding_class: str | None = None,
+    worker_gid: int = WORKER_GID,
+) -> None:
+    """Replace an expired passing receipt with a fresh reservation, preserving evidence.
+
+    ``expected_identity`` is the lstat identity of the live receipt captured
+    BEFORE preservation; if it changes between supersede and replace, the
+    function refuses with ``receipt_changed_before_refresh``.
+    """
+
+    _validate_receipt_directory(path)
+    expected_uid, expected_gid, expected_mode = receipt_storage_contract(
+        workspace_binding_class=workspace_binding_class,
+        worker_gid=worker_gid,
+    )
+    if lstat_identity(
+        path,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+        expected_mode=expected_mode,
+    ) != dict(expected_identity):
+        raise ReadinessError("receipt_changed_before_refresh")
+    original_bytes = path.read_bytes()
+    superseded_path = _superseded_sibling_path(path, original_bytes)
+    _persist_superseded_receipt(
+        superseded_path,
+        original_bytes,
+        workspace_binding_class=workspace_binding_class,
+        worker_gid=worker_gid,
+    )
+    payload = (json.dumps(dict(value), sort_keys=True, indent=2) + "\n").encode("utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.refresh-", dir=os.fspath(path.parent)
+    )
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, expected_mode)
+        os.fchown(descriptor, expected_uid, expected_gid)
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise ReadinessError("readiness_receipt_short_write")
+            view = view[written:]
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        _assert_no_macos_acl(temporary)
+        if lstat_identity(
+            path,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+            expected_mode=expected_mode,
+        ) != dict(expected_identity):
+            raise ReadinessError("receipt_changed_before_refresh")
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Manage the Executive provider readiness receipt")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -865,6 +1088,11 @@ def _parser() -> argparse.ArgumentParser:
     reserve.add_argument("--credential-expires-at", required=True)
     reserve.add_argument("--worker-uid", type=int, default=WORKER_UID)
     reserve.add_argument("--worker-gid", type=int, default=WORKER_GID)
+    reserve.add_argument(
+        "--refresh-expired",
+        action="store_true",
+        help="Replace an expired passing device-auth receipt (must already exist).",
+    )
     finalize = sub.add_parser("finalize")
     finalize.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
     finalize.add_argument("--auth", type=Path, default=AUTH_PATH)
@@ -987,26 +1215,101 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "reuse":
             if not args.receipt.exists() and not args.receipt.is_symlink():
                 return 3
-            validate_receipt_file(
-                args.receipt,
-                auth_path=args.auth,
-                binary_path=args.binary,
-                expected_kind=args.expected_kind,
-                workspace_binding_class=args.workspace_binding_class,
-                credential_expires_at=args.credential_expires_at,
-                worker_uid=args.worker_uid,
-                worker_gid=args.worker_gid,
-            )
-            return 0
-        if args.command == "reserve":
-            receipt = compose_reservation(
-                identity=_read_json(args.identity_json),
-                auth_identity=current_auth_identity(
+            try:
+                validate_receipt_file(
+                    args.receipt,
+                    auth_path=args.auth,
+                    binary_path=args.binary,
+                    expected_kind=args.expected_kind,
+                    workspace_binding_class=args.workspace_binding_class,
+                    credential_expires_at=args.credential_expires_at,
+                    worker_uid=args.worker_uid,
+                    worker_gid=args.worker_gid,
+                )
+                return 0
+            except ReadinessError:
+                if not args.receipt.exists() and not args.receipt.is_symlink():
+                    raise
+                document = _read_protected_receipt(
+                    args.receipt,
+                    workspace_binding_class=args.workspace_binding_class,
+                    worker_gid=args.worker_gid,
+                )
+                auth_identity = current_auth_identity(
                     args.auth,
                     worker_uid=args.worker_uid,
                     worker_gid=args.worker_gid,
-                ),
-                binary_identity=current_binary_identity(args.binary),
+                )
+                binary_identity = current_binary_identity(args.binary)
+                classify_refresh_eligibility(
+                    document,
+                    auth_identity=auth_identity,
+                    binary_identity=binary_identity,
+                    expected_kind=args.expected_kind,
+                    workspace_binding_class=args.workspace_binding_class,
+                    worker_uid=args.worker_uid,
+                    worker_gid=args.worker_gid,
+                    new_credential_expires_at=args.credential_expires_at,
+                )
+                return 4
+        if args.command == "reserve":
+            identity_payload = _read_json(args.identity_json)
+            auth_identity = current_auth_identity(
+                args.auth,
+                worker_uid=args.worker_uid,
+                worker_gid=args.worker_gid,
+            )
+            binary_identity = current_binary_identity(args.binary)
+            if args.refresh_expired:
+                if not args.receipt.exists() and not args.receipt.is_symlink():
+                    raise ReadinessError("refresh_requires_existing_receipt")
+                expected_uid, expected_gid, expected_mode = receipt_storage_contract(
+                    workspace_binding_class=args.workspace_binding_class,
+                    worker_gid=args.worker_gid,
+                )
+                receipt_identity = lstat_identity(
+                    args.receipt,
+                    expected_uid=expected_uid,
+                    expected_gid=expected_gid,
+                    expected_mode=expected_mode,
+                )
+                document = _read_protected_receipt(
+                    args.receipt,
+                    workspace_binding_class=args.workspace_binding_class,
+                    worker_gid=args.worker_gid,
+                )
+                classify_refresh_eligibility(
+                    document,
+                    auth_identity=auth_identity,
+                    binary_identity=binary_identity,
+                    expected_kind=args.expected_kind,
+                    workspace_binding_class=args.workspace_binding_class,
+                    worker_uid=args.worker_uid,
+                    worker_gid=args.worker_gid,
+                    new_credential_expires_at=args.credential_expires_at,
+                )
+                receipt = compose_reservation(
+                    identity=identity_payload,
+                    auth_identity=auth_identity,
+                    binary_identity=binary_identity,
+                    expected_kind=args.expected_kind,
+                    workspace_binding_class=args.workspace_binding_class,
+                    credential_expires_at=args.credential_expires_at,
+                    worker_uid=args.worker_uid,
+                    worker_gid=args.worker_gid,
+                )
+                refresh_expired_receipt(
+                    args.receipt,
+                    receipt,
+                    expected_identity=receipt_identity,
+                    workspace_binding_class=args.workspace_binding_class,
+                    worker_gid=args.worker_gid,
+                )
+                return 0
+            receipt = compose_reservation(
+                identity=identity_payload,
+                auth_identity=auth_identity,
+                binary_identity=binary_identity,
                 expected_kind=args.expected_kind,
                 workspace_binding_class=args.workspace_binding_class,
                 credential_expires_at=args.credential_expires_at,
