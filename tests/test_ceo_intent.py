@@ -30,6 +30,7 @@ from control_plane.ceo_intent import (
     INTENT_SCHEMA_V2,
     RECEIPT_SCHEMA,
     RECEIPT_SCHEMA_SERVICE,
+    SERVICE_PRINCIPAL_BINDINGS,
     CeoIntentConflict,
     CeoIntentError,
     canonical_bytes,
@@ -818,6 +819,44 @@ def test_service_submission_does_not_dispatch(tmp_path: Path):
     assert job.current_attempt_id is None
     assert job.attempt_count == 0
     assert runtime.attempts.list_attempts() == []
+
+
+def test_service_sink_refuses_unreviewed_principal_before_job_or_event(tmp_path: Path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    probe = _service_intent(
+        tmp_path,
+        principal_id="svc-unregistered",
+        actor="svc-unregistered",
+        intent_id="svc-unregistered-op",
+    )
+    before_events = runtime.events.list_events()
+    with pytest.raises(CeoIntentError, match="not a reviewed service principal"):
+        _submit(runtime, probe, tmp_path)
+    assert runtime.jobs.list_jobs() == []
+    assert runtime.events.list_events() == before_events
+
+
+def test_service_sink_refuses_registered_principal_with_mismatched_actor_before_effect(
+    tmp_path: Path,
+):
+    runtime = Runtime.at(tmp_path / "runtime")
+    probe = _service_intent(
+        tmp_path,
+        principal_id="svc-site-maintenance",
+        actor="svc-other-actor",
+        intent_id="svc-mismatched-actor",
+    )
+    before_events = runtime.events.list_events()
+    with pytest.raises(CeoIntentError, match="does not match the reviewed principal"):
+        _submit(runtime, probe, tmp_path)
+    assert runtime.jobs.list_jobs() == []
+    assert runtime.events.list_events() == before_events
+
+
+def test_service_sink_closed_enrollment_contract_is_exact():
+    assert SERVICE_PRINCIPAL_BINDINGS == frozenset(
+        {("svc-site-maintenance", "svc-site-maintenance")}
+    )
 
 
 def test_service_schema_refuses_write_reserved_actor_and_closed_values(tmp_path: Path):
