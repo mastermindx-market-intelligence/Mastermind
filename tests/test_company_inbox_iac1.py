@@ -720,10 +720,13 @@ def _evidence_for(runtime, consultation_id):
     return by_type
 
 
-def _credit_wake_path(runtime, consultation_id):
-    """Append WAKE_REQUESTED/DELIVERY_ATTEMPT/DELIVERED/ACK records so the
-    obligation reaches TARGET_ACKNOWLEDGED — mirrors the runtime
-    test helper but reuses the persisted INTENT to derive the frame.
+def _deliver_and_ack_wake_path(runtime, consultation_id):
+    """TEST-ONLY delivery adapter — derives the obligation from the
+    persisted INTENT, asserts the production dispatcher already wrote
+    exactly one WAKE_REQUESTED, and appends only the delivery / ack
+    trail so the obligation reaches TARGET_ACKNOWLEDGED. This helper
+    does NOT manufacture the wake under test; that capability lives
+    only in ``RuntimeConsultationDispatcher._dispatch_consult``.
     """
     from control_plane.session_targets import RuntimeBinding
     from control_plane.dialogue_source_resolution import (
@@ -739,8 +742,8 @@ def _credit_wake_path(runtime, consultation_id):
         TrustedAckContext,
         ack_record,
         acknowledge,
+        ledger_command_id,
         make_delivery_attempt,
-        requested_record,
     )
     from integrations.slack_agent_dialogue.persisted_wake_carrier import (
         ConsultationWakeExtension,
@@ -794,6 +797,32 @@ def _credit_wake_path(runtime, consultation_id):
         ),
     )
     obligation = extension.obligation()
+
+    # The production dispatcher must already have created exactly one
+    # WAKE_REQUESTED for this obligation. Assert it; this helper never
+    # manufactures the wake under test.
+    repository = WakeLedgerRepository(runtime)
+    requested_command_id = ledger_command_id(
+        obligation.obligation_id, LedgerPhase.WAKE_REQUESTED
+    )
+    persisted_records = repository.list_records(obligation.obligation_id)
+    requested_records = tuple(
+        item
+        for item in persisted_records
+        if item.record.phase is LedgerPhase.WAKE_REQUESTED
+    )
+    if len(requested_records) != 1:
+        raise AssertionError(
+            "production dispatcher must have created exactly one "
+            f"WAKE_REQUESTED for {obligation.obligation_id}, "
+            f"found {len(requested_records)}"
+        )
+    if requested_records[0].record.command_id != requested_command_id:
+        raise AssertionError(
+            "WAKE_REQUESTED command_id does not match the obligation "
+            "the helper derived from the persisted INTENT"
+        )
+
     target = SessionTarget(
         session_alias="CONSULTATION-RECIPIENT",
         target_seat="coo",
@@ -818,11 +847,8 @@ def _credit_wake_path(runtime, consultation_id):
         binding=extension.current_binding,
     )
     attempt = make_delivery_attempt(obligation, route, attempt_n=1)
-    WakeLedgerRepository(runtime).append_records_atomic(
-        [
-            (requested_record(extension.obligation()), extension.obligation()),
-            (attempt_record(attempt, LedgerPhase.DELIVERY_ATTEMPT), None),
-        ]
+    repository.append_records_atomic(
+        [(attempt_record(attempt, LedgerPhase.DELIVERY_ATTEMPT), None)]
     )
     delivered = attempt_record(attempt, LedgerPhase.DELIVERED)
     ack = acknowledge(
@@ -839,7 +865,7 @@ def _credit_wake_path(runtime, consultation_id):
         claimed_obligation_ids=(obligation.obligation_id,),
         delivered_command_id=delivered.command_id,
     )
-    WakeLedgerRepository(runtime).append_records_atomic(
+    repository.append_records_atomic(
         [
             (delivered, obligation),
             (ack_record(obligation, ack), obligation),
@@ -945,7 +971,7 @@ def test_a_b_a_journey_with_full_credit_and_consumption(tmp_path: Path) -> None:
     consultation_id = consult_envelope["data"]["consultation_ref"]
     assert consultation_id.startswith("consult-")
 
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     a_inbox = project_company_inbox(
         runtime,
@@ -1280,7 +1306,7 @@ def test_session_rotation_observes_existing_runtime_rule(tmp_path: Path) -> None
         ))
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     reply_envelope = _run(
         b_gateway.call(
@@ -1641,7 +1667,7 @@ def test_detail_read_is_zero_write_before_and_after_answer(
     assert body_1["data"]["state"] == "QUESTION_PENDING_WAKE"
     assert body_2["data"]["state"] == "QUESTION_PENDING_WAKE"
 
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
     reply_envelope = _run(
         b_gateway.call(
             "company.reply",
@@ -1711,7 +1737,7 @@ def test_explicit_consumption_appends_once_and_retry_reconciles(
         ))
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
     reply_envelope = _run(
         b_gateway.call(
             "company.reply",
@@ -1811,7 +1837,7 @@ def test_parties_read_actual_question_and_answer_text(tmp_path: Path) -> None:
     assert b_read["data"]["question"]["text"] == question_text
     assert _evidence_for(runtime, consultation_id) == pre_events
 
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
     answer_text = "forty-two"
     reply_envelope = _run(
         b_gateway.call(
@@ -1899,7 +1925,7 @@ def test_fresh_dispatcher_reads_same_packets_from_injected_carrier_only(
         ))
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
     answer_text = "shared carrier answer"
     reply_envelope = _run(
         b_gateway.call(
@@ -1969,7 +1995,7 @@ def test_fresh_dispatcher_reads_same_packets_from_injected_carrier_only(
         )
     )
     consultation_id_2 = consult_envelope2["result"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id_2)
+    _deliver_and_ack_wake_path(runtime, consultation_id_2)
 
     # Inject an empty carrier into a NEW recipient dispatcher so it can't read
     # the question from the empty carrier.
@@ -2070,7 +2096,7 @@ def test_oversized_body_returns_digests_only(tmp_path: Path) -> None:
         ))
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     long_answer = "a" * 15_960
     reply_envelope = _run(
@@ -2150,7 +2176,7 @@ def test_same_worker_new_attempt_cannot_reply_after_ack(tmp_path: Path) -> None:
         ))
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     rotated_attempt = (
         "ATT-ROTATED-" + hashlib.sha256(b"rotated-attempt-reply").hexdigest()[:16]
@@ -2244,7 +2270,7 @@ def test_binding_generation_rollover_refuses_before_answer_available(
         ))
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     rolled_binding = dict(recipient[3])
     rolled_binding["binding_generation"] = int(
@@ -2330,7 +2356,7 @@ def test_stable_invocation_retry_after_clock_advance_creates_no_second_intent_or
     )
     consultation_id = first_envelope["data"]["consultation_ref"]
     assert first_envelope["data"]["state"] == "INTENDED"
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     replay_envelope = _run(
         _factory(advanced_clock, invocation_id).call(
@@ -2507,7 +2533,7 @@ def test_dispatcher_refusals_are_typed_zero_effect_and_gateway_reports_effect_un
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
 
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
     events_after_credit = _evidence_for(runtime, consultation_id)
 
     # Non-party reply (third as the recipient): NOT_A_PARTY.
@@ -2715,7 +2741,7 @@ def test_refused_second_answer_cannot_replace_accepted_one(tmp_path: Path) -> No
         ))
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     first_reply = _run(
         b_gateway.call(
@@ -2855,7 +2881,7 @@ def test_inbox_owed_turn_requires_exact_actor(tmp_path: Path) -> None:
         )
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     rotated_attempt = (
         "ATT-ROTATED-" + hashlib.sha256(b"iac1-r4b-actor-rotated").hexdigest()[:16]
@@ -2920,7 +2946,7 @@ def test_malformed_authorized_consultation_surfaces_degraded_row(
         )
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     # Second consultation: synthetic INTENT with a string ``recipient_actor_ref``.
     synthetic_id = (
@@ -3090,7 +3116,7 @@ def test_historical_only_answer_is_not_current(tmp_path: Path) -> None:
         )
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     with runtime.store.transaction() as connection:
         runtime.store.append_event(
@@ -3205,7 +3231,7 @@ def test_source_resolved_wake_state_is_not_consumption(tmp_path: Path) -> None:
     consultation_id = consult_envelope["data"]["consultation_ref"]
 
     # Drive the ledger into TARGET_ACKNOWLEDGED, then SOURCE_RESOLVED.
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     from control_plane.wake_ledger import (
         SourceReadHealth,
@@ -3609,7 +3635,7 @@ def test_tampered_answer_packet_is_not_exposed_on_detail(
         )
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
     reply_envelope = _run(
         b_gateway.call(
             "company.reply",
@@ -3684,7 +3710,7 @@ def test_valid_packets_render_with_body_status_available(
         )
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
     reply_envelope = _run(
         b_gateway.call(
             "company.reply",
@@ -3937,7 +3963,7 @@ def test_identical_reply_replay_does_not_write_carrier_twice(
         )
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     reply_args = {
         "consultation_ref": consultation_id,
@@ -4012,7 +4038,7 @@ def test_accepted_answer_with_lost_carrier_write_is_reconciliation_required(
         )
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     reply_args = {
         "consultation_ref": consultation_id,
@@ -4109,7 +4135,7 @@ def test_known_same_packet_readback_returns_without_second_write(
         )
     )
     consultation_id = consult_envelope["data"]["consultation_ref"]
-    _credit_wake_path(runtime, consultation_id)
+    _deliver_and_ack_wake_path(runtime, consultation_id)
 
     first_reply = _run(
         b_gateway.call(
