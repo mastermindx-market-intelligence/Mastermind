@@ -25,7 +25,9 @@ from control_plane.executive_privileged_action import (
 )
 from control_plane.executive_privileged_broker import (
     BrokerTrustError,
+    STATUS_RECONCILED_NOT_APPLIED,
     WIRE_RESPONSE_SCHEMA,
+    validate_reconciliation_record,
     validate_terminal_receipt,
 )
 
@@ -179,6 +181,40 @@ def _status_exit_code(response: dict[str, object], request_id: str) -> int:
             or (outcome == "SUCCEEDED") != (exit_code == 0)
         ):
             return 1
+        return 0
+    if status == STATUS_RECONCILED_NOT_APPLIED:
+        if frozenset(response) != frozenset(
+            {
+                "schema",
+                "ok",
+                "query",
+                "status",
+                "request_id",
+                "installed_release_sha",
+                "marker_release_sha",
+                "reconciliation",
+            }
+        ):
+            return 1
+        marker_release_sha = response.get("marker_release_sha")
+        if (
+            not isinstance(marker_release_sha, str)
+            or re.fullmatch(r"[0-9a-f]{40}", marker_release_sha) is None
+        ):
+            return 1
+        reconciliation = response.get("reconciliation")
+        if not isinstance(reconciliation, dict):
+            return 1
+        try:
+            validated_reconciliation = validate_reconciliation_record(
+                reconciliation, expected_request_id=request_id
+            )
+        except BrokerTrustError:
+            return 1
+        if validated_reconciliation.get("target_release_sha") != marker_release_sha:
+            return 1
+        # Exit 0 means the status retrieval is trusted.  The reconciliation
+        # record itself preserves that the original privileged effect was NOT_APPLIED.
         return 0
     if status == "EFFECT_UNKNOWN":
         return 75
