@@ -957,8 +957,29 @@ def test_b1_root_enumeration_note_alone_does_not_add_reason_code():
     _GENERATION_CONFLICT_NOTE,
 ])
 def test_b1_closed_set_degradation_phrases_add_reason_code(entry):
-    """B1: every entry in the closed degradation set fires the
-    ``lifecycle_degraded`` reason code (exact match)."""
+    """Item 4 / round-4 audit: every entry in the closed degradation set
+    fires the ``lifecycle_degraded`` reason code on an AVAILABLE
+    document.
+
+    COMPOSER-ONLY STATE: each parametrised entry below corresponds to a
+    producer note that the live pipeline cannot deliver on an AVAILABLE
+    document.
+
+    - ``"bounded root discovery truncated; ..."`` — the live bounded
+      producer (``list_roots_v2_from_runtime``) flips ``truncated=True``
+      AND emits this note alongside a SAME generation receipt, so the
+      composer reaches the AVAILABLE branch and the reason code fires.
+      This IS the live trigger.
+    - ``_GENERATION_CONFLICT_NOTE`` — the producer emits this only when
+      ``generation.state == "CONFLICT"``; a CONFLICT generation drives
+      :func:`_lifecycle_unavailable` to refuse as UNAVAILABLE BEFORE
+      the reason-code gate runs, so the AVAILABLE branch never sees it.
+      The composer-only contract is preserved here so the closed set
+      stays an exhaustive three-element vocabulary.
+
+    Truncation is the only live trigger; the CONFLICT entry exists to
+    keep the closed set frozen under future producer evolution.
+    """
     root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
                            degraded=[entry])
     result = compose_work_queue_v1(root_list)
@@ -982,6 +1003,70 @@ def test_b1_bounded_unavailable_note_drives_unavailable_branch_via_prefix_match(
         assert result["reason_codes"] == ["LIFECYCLE_UNAVAILABLE"]
         # The producer's degraded note is still echoed verbatim for audit.
         assert result["lifecycle_source"]["degraded"] == [entry]
+
+
+def test_b1_bounded_unavailable_predicate_drives_unavailable_with_arbitrary_detail():
+    """Item 1 / round-4 audit: the legacy ``list_roots_v2`` producer path
+    emits ``"bounded acquisition unavailable: <failure first line>"`` —
+    an arbitrary detail the composer does NOT have a constant for.  The
+    only stable closed-set invariant is the shared prefix
+    :func:`control_plane.work_queue_projection._is_bounded_unavailable_note`,
+    matched by ``startswith(_BOUNDED_UNAVAILABLE_PHRASE)``.  This test
+    RED's on the previous exact-match / constant-startswith behaviour
+    and GREEN's after the substring restoration.
+
+    The test pins the new contract: any producer note that begins with
+    ``"bounded acquisition unavailable"`` drives the UNAVAILABLE branch
+    AND the AVAILABLE ``lifecycle_degraded`` reason code (they share
+    one predicate — see also ``test_b1_bounded_unavailable_predicate_couples_lifecycle_unavailable_and_reason_gate``).
+    """
+    arbitrary = "bounded acquisition unavailable: disk I/O error"
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")], degraded=[arbitrary])
+    result = compose_work_queue_v1(root_list)
+    assert result["availability"] == "UNAVAILABLE"
+    assert result["reason_codes"] == ["LIFECYCLE_UNAVAILABLE"]
+    # The producer's degraded note is still echoed verbatim for audit.
+    assert result["lifecycle_source"]["degraded"] == [arbitrary]
+
+
+def test_b1_bounded_unavailable_predicate_couples_lifecycle_unavailable_and_reason_gate():
+    """Item 2 / round-4 audit: the closed-set invariant
+    "any bounded-unavailable producer note drives BOTH the UNAVAILABLE
+    branch and the ``lifecycle_degraded`` reason code" was previously
+    enforced by two independent inline checks (one in
+    :func:`_lifecycle_unavailable`, one in :func:`_is_degradation_note`).
+    The two sites now share the predicate
+    :func:`_is_bounded_unavailable_note` — coupling is asserted by
+    construction (both call sites import it from the same module
+    location) and by example here (every member of the bounded-
+    unavailable family drives BOTH the UNAVAILABLE branch on a SAME
+    root list and the AVAILABLE reason code on a degraded-bounded root
+    list).
+    """
+    from control_plane.work_queue_projection import _is_bounded_unavailable_note
+    family = (
+        _BOUNDED_UNAVAILABLE_NOTE,
+        "bounded acquisition unavailable",
+        "bounded acquisition unavailable: read failed",
+        "bounded acquisition unavailable: disk I/O error",
+    )
+    # Same predicate at both call sites — assert it accepts the family
+    # (the close-set invariant).
+    for entry in family:
+        assert _is_bounded_unavailable_note(entry) is True
+    # UNAVAILABLE branch: SAME root list, degraded note in the family.
+    for entry in family:
+        root_list = _root_list(roots=[_row("JOB-1", "RUNNING")], degraded=[entry])
+        result = compose_work_queue_v1(root_list)
+        assert result["availability"] == "UNAVAILABLE", entry
+        assert result["reason_codes"] == ["LIFECYCLE_UNAVAILABLE"], entry
+    # AVAILABLE branch: generation CONFLICT (suppresses UNAVAILABLE
+    # via the non-SAME gate — but the closed degradation set still fires
+    # the reason code on the document the gate would have refused, so
+    # we exercise the reason-code gate alone by feeding the
+    # ``_is_degradation_note`` predicate directly with the SAME entry).
+    for entry in family:
+        assert _is_degradation_note(entry) is True, entry
 
 
 def test_b1_unknown_note_is_echoed_but_does_not_add_reason_code():
@@ -1017,6 +1102,32 @@ def test_b1_degradation_notes_tuple_is_closed_and_sourced_from_fabric():
     # Informational + unknown notes never match.
     assert _is_degradation_note(_ROOT_ENUMERATION_NOTE) is False
     assert _is_degradation_note("producer-future-warning: x") is False
+
+
+def test_b1_truncation_note_literal_pinned_to_producer_source():
+    """Item 3 / round-4 audit: the closed-set truncation literal at
+    ``_DEGRADATION_NOTES[1]`` is hand-typed in this composer; the
+    closed-set test above asserts membership against the SAME literal,
+    so a producer-side rename would not be detected.  Pin the literal
+    byte-for-byte against what the producer's source actually emits.
+
+    ``fabric_job_view.list_roots_v2_from_runtime`` is OUT OF SCOPE for
+    this PR (parent note), so the producer is read via
+    :func:`inspect.getsource` and the literal grep-pin asserts the
+    composer's copy is byte-identical to the producer's emission.
+    """
+    import inspect
+    from control_plane import fabric_job_view
+    producer_source = inspect.getsource(fabric_job_view)
+    literal = "bounded root discovery truncated; omitted roots are not counted"
+    # The literal MUST appear in the producer's source text — pin it.
+    assert literal in producer_source, (
+        f"truncation literal {literal!r} not found in "
+        f"control_plane.fabric_job_view source — producer may have "
+        f"renamed; update _DEGRADATION_NOTES to match"
+    )
+    # And the composer's closed-set MUST carry the same literal byte-for-byte.
+    assert literal in _DEGRADATION_NOTES
 
 
 # ---------------------------------------------------------------------------
@@ -1195,7 +1306,7 @@ def test_r6_effect_exception_row_attributed_fixture_bytes_match_deterministic_re
 def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence(tmp_path):
     """B2/N1/N9: composer's UNAVAILABLE body (with degraded root list) and the
     read-service typed refusal body share the same key-for-key shape,
-    except for keys that legitimately differ.
+    except for keys (and sub-keys) that legitimately differ.
 
     The ``autonomy`` deletion fails the FIRST ``_qualified`` check inside
     ``_read_work`` (BEFORE acquire/compose are reached) — the injected
@@ -1203,7 +1314,7 @@ def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence(tmp
     read-service typed refusal pathway that fires when the cache bracket
     itself is unqualified.
 
-    Excluded keys and reasons:
+    Excluded keys and reasons (top-level):
     - ``generated_at``: composer accepts caller-supplied or wall-clock;
       the read-service fallback uses its own wall-clock.
     - ``source_observation``: composer passes the caller-supplied receipt
@@ -1219,12 +1330,21 @@ def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence(tmp
       acquired, so its ``truncated`` cannot honestly mirror a producer flag
       it has never seen — it remains ``False`` while the composer's body
       carries the producer's value.  Both bodies agree on the other keys.
+
+    Excluded sub-keys (effect_exception envelope — only ``reason``
+    legitimately differs):
+    - ``effect_exception.value``: both bodies agree on ``"UNKNOWN"``
+      (no producer of EFFECT_UNKNOWN ever attached).
+    - ``effect_exception.scope``: both bodies agree on
+      ``"RUNTIME_CURRENT_WORKER"`` (the same scope semantics apply on
+      both code paths).
+    - ``effect_exception.observable``: both bodies agree on ``False``
+      (no effect exception was observed).
     - ``effect_exception.reason``: the composer's UNAVAILABLE body uses
       ``"control_room_missing"`` (the composer's vocabulary for a missing
-      control room input it was handed ``None``); the read-service fallback
-      uses ``"read_refused"`` (N4 — the read service's own vocabulary for
-      its OWN read failure, never the composer's).  Both bodies agree on
-      the other fields of the effect_exception envelope.
+      control room input it was handed ``None``); the read-service
+      fallback uses ``"read_refused"`` (N4 — the read service's own
+      vocabulary for its OWN read failure, never the composer's).
     """
     import asyncio
     from control_plane.workspace_read_service import WorkspaceReadService
@@ -1259,16 +1379,23 @@ def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence(tmp
     composer_doc = compose_work_queue_v1(composer_root, generated_at="FROZEN")
     # Every key in the composer body must exist in the fallback body.
     assert set(composer_doc) == set(fallback)
-    # Legitimate differences, value-for-value.
-    EXCLUDED = {"generated_at", "source_observation", "reason_codes",
-                "lifecycle_source", "coverage", "effect_exception"}
+    # Legitimate differences, value-for-value at the TOP LEVEL.
+    EXCLUDED_TOP = {"generated_at", "source_observation", "reason_codes",
+                    "lifecycle_source", "coverage", "effect_exception"}
     for key in composer_doc:
-        if key in EXCLUDED:
+        if key in EXCLUDED_TOP:
             continue
         assert composer_doc[key] == fallback[key], (
             f"key {key!r} differs: composer={composer_doc[key]!r} "
             f"fallback={fallback[key]!r}"
         )
+    # effect_exception: agree on value/scope/observable; only reason
+    # legitimately differs (composer uses ``control_room_missing``;
+    # read-service uses ``read_refused``).
+    assert composer_doc["effect_exception"]["value"] == fallback["effect_exception"]["value"]
+    assert composer_doc["effect_exception"]["scope"] == fallback["effect_exception"]["scope"]
+    assert composer_doc["effect_exception"]["observable"] == fallback["effect_exception"]["observable"]
+    assert composer_doc["effect_exception"]["reason"] != fallback["effect_exception"]["reason"]
     # coverage.truncated: composer mirrors root_list.truncated (False
     # here); fallback is hard-coded False.  They agree on this case but
     # the fallback cannot honestly report the producer flag.

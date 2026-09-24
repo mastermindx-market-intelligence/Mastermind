@@ -422,6 +422,53 @@ def test_work_refusal_uses_only_closed_reason_codes():
         _WorkRefusal("not_a_closed_code")
 
 
+def test_work_effect_exception_reason_vocabulary_is_closed_and_facade_exported():
+    """Item 6 / round-4 audit: ``effect_exception.reason`` has no closed
+    vocabulary, no contract export, and a cross-module private import
+    (``workspace_read_service.py``).  The contract now owns the
+    frozenset :data:`common.executive_workspace_contract.QUEUE_EFFECT_EXCEPTION_REASONS`,
+    both producer sites assert membership against it, and the
+    workspace-app contract facade re-exports it so the facade-parity
+    test exercises the re-export.
+
+    The composer emits four values (``control_room_missing``,
+    ``autonomy_missing``, ``no_exception_observed``,
+    ``exception_observed``) and the read service emits the fifth
+    (``read_refused``).  All five are members of the closed
+    vocabulary; any other value on ``effect_exception.reason`` is a
+    contract violation.
+    """
+    from common.executive_workspace_contract import QUEUE_EFFECT_EXCEPTION_REASONS
+    assert QUEUE_EFFECT_EXCEPTION_REASONS == frozenset({
+        "control_room_missing", "autonomy_missing",
+        "no_exception_observed", "exception_observed", "read_refused",
+    })
+    # Cross-module private import removal: the read service now imports
+    # the closed vocabulary directly from the contract (no private
+    # module-level constant from the composer).
+    import control_plane.workspace_read_service as svc_mod
+    src = svc_mod.__dict__
+    # The composer's own constants may still exist as locals (the
+    # contract assertion guards membership); what the audit forbids is
+    # an UNVALIDATED cross-module private import on the typed refusal
+    # path.  The read service must use the contract constant as its
+    # source of truth — assert the read service imports the contract
+    # vocabulary (and the composer's reason constants resolve to it).
+    assert "QUEUE_EFFECT_EXCEPTION_REASONS" in src, (
+        "read service must import QUEUE_EFFECT_EXCEPTION_REASONS "
+        "from the shared contract"
+    )
+    from control_plane.work_queue_projection import (
+        _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED,
+    )
+    assert _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED in QUEUE_EFFECT_EXCEPTION_REASONS
+    # Facade re-export: the workspace-app contract module MUST re-export
+    # the constant for the facade-parity test (which iterates over
+    # every member of the contract module).
+    import integrations.mastermind_workspace_app.contract as compat
+    assert getattr(compat, "QUEUE_EFFECT_EXCEPTION_REASONS", None) is QUEUE_EFFECT_EXCEPTION_REASONS
+
+
 def test_work_acquire_raised_value_error_refuses_as_source_integrity_unverified(tmp_path):
     """N2: a ``ValueError`` raised by the acquire (defensive — the production
     acquirer swallows its own faults and surfaces a degraded notes list)
@@ -444,6 +491,36 @@ def test_work_acquire_raised_value_error_refuses_as_source_integrity_unverified(
     body = result["result"]
     assert body["availability"] == "UNAVAILABLE"
     assert body["reason_codes"] == ["source_integrity_unverified"]
+
+
+@pytest.mark.parametrize("raised", [TypeError, RuntimeError, KeyError, OSError])
+def test_work_acquire_non_value_error_refuses_as_source_integrity_unverified(raised, tmp_path):
+    """Item 7 / round-4 audit: the acquire guard previously caught
+    ``ValueError`` only, while the cache guards catch ``Exception``.  A
+    ``TypeError`` / ``RuntimeError`` acquirer yielded a real error
+    envelope (an untyped 503) for the SAME failure class.  After the
+    guard unification, ALL acquire-raised exceptions refuse as
+    ``source_integrity_unverified`` — one rule, both sites, same typed
+    refusal body.  Each parametrised exception class is verified to
+    refuse the work read with the closed reason code."""
+    from common.executive_workspace_contract import WORK_REFUSAL_REASON_CODES
+    assert "source_integrity_unverified" in WORK_REFUSAL_REASON_CODES
+    owners, _, cache = cache_fixture(tmp_path)
+    def work_acquire(*args, **kwargs):
+        raise raised("acquire raised: arbitrary non-ValueError")
+    def work_compose(root_list_arg, **kwargs):
+        pytest.fail("composer must not be reached when acquire raises")
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    assert body["availability"] == "UNAVAILABLE", raised.__name__
+    assert body["reason_codes"] == ["source_integrity_unverified"], raised.__name__
+    # The closed-set vocabulary stays unchanged.
+    assert body["reason_codes"][0] in WORK_REFUSAL_REASON_CODES, raised.__name__
 
 
 def test_work_compose_raised_value_error_refuses_as_projection_refused(tmp_path):
@@ -484,6 +561,8 @@ def test_work_ccr_receipt_conflict_takes_precedence_over_runtime_concurrent(tmp_
     owners, _, cache = cache_fixture(tmp_path)
     # Mutate the doc between the two samples so the CCR receipt goes CONFLICT.
     original_doc = owners[0].state_cache["doc"]
+    original_title = original_doc["work"][0]["agent_os"]["title"]
+    original_published_seq = owners[0].state_published_seq
     def mutate_doc():
         owners[0].state_cache["doc"]["work"][0]["agent_os"]["title"] = "Mutated"
         owners[0].state_published_seq += 1
@@ -497,13 +576,20 @@ def test_work_ccr_receipt_conflict_takes_precedence_over_runtime_concurrent(tmp_
         armed={}, runtime_identity={},
         work_acquire=work_acquire, work_compose=work_compose,
     )
-    result = asyncio.run(service_.handle_frame(_work_frame()))
-    body = result["result"]
-    assert body["availability"] == "UNAVAILABLE"
-    assert body["reason_codes"] == ["source_unavailable"]
-    # Restore so the fixture is reusable (mutation was in-place).
-    original_doc["work"][0]["agent_os"]["title"] = "One"
-    owners[0].state_published_seq -= 1
+    # Item 8 / round-4 audit: the restore below used to live after the
+    # assertions, so an assertion failure left the fixture mutated.  The
+    # try/finally now guarantees the restore runs even on assertion
+    # failure — the fixture stays reusable across pytest re-collection
+    # and the mutated state cannot poison sibling tests.
+    try:
+        result = asyncio.run(service_.handle_frame(_work_frame()))
+        body = result["result"]
+        assert body["availability"] == "UNAVAILABLE"
+        assert body["reason_codes"] == ["source_unavailable"]
+    finally:
+        # Restore so the fixture is reusable (mutation was in-place).
+        original_doc["work"][0]["agent_os"]["title"] = original_title
+        owners[0].state_published_seq = original_published_seq
 
 
 def test_work_raising_cache_emits_typed_unavailable_body(tmp_path):

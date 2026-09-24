@@ -26,6 +26,7 @@ from common.executive_workspace_contract import (
     OBSERVATION_SCHEMA,
     PROGRAMS_SCHEMA,
     PROJECTION_SCHEMA,
+    QUEUE_EFFECT_EXCEPTION_REASONS,
     RESULT_BODY_SCHEMA,
     RESULT_OBSERVATION_SCHEMA,
     WORK_REFUSAL_REASON_CODES,
@@ -404,12 +405,16 @@ class WorkspaceReadService:
         observation-state refusals raise ``_WorkRefusal("source_unavailable")``
         or ``_WorkRefusal("runtime_observation_not_same")``.
 
-        N2: an acquire-raised ``ValueError`` (defensive — the production
-        acquirer swallows its own faults and surfaces a degraded notes
-        list) becomes ``_WorkRefusal("source_integrity_unverified")`` —
-        the runtime could not return a well-formed root list.  A
-        compose-raised ``ValueError`` (the composer's closed-table
-        validator or evidence-freshness rejection) stays
+        N2: an acquire-raised exception of ANY kind (defensive — the
+        production acquirer swallows its own faults and surfaces a
+        degraded notes list) becomes
+        ``_WorkRefusal("source_integrity_unverified")`` — the runtime
+        could not return a well-formed root list.  The same
+        ``Exception`` guard the cache bracket uses, so a
+        ``TypeError`` / ``RuntimeError`` acquirer yields the SAME typed
+        refusal body as a ``ValueError`` acquirer.  A compose-raised
+        ``ValueError`` (the composer's closed-table validator or
+        evidence-freshness rejection) stays
         ``_WorkRefusal("projection_refused")``.  Anything else is a
         real error envelope — never a typed UNAVAILABLE body.
         """
@@ -443,13 +448,18 @@ class WorkspaceReadService:
                 armed=self.armed,
                 runtime_identity=self.runtime_identity,
             )
-        except ValueError:
+        except Exception:
             # N2: the production acquirer swallows its own faults and
             # surfaces a degraded notes list, so this branch is defensive
-            # only — if any acquirer does raise ``ValueError``, it is a
+            # only — if any acquirer raises ANY exception, it is a
             # source-integrity event (the runtime could not return a
             # well-formed root list), NOT a projection fault.  A
-            # projection fault comes from the composer below.
+            # projection fault comes from the composer below.  The same
+            # ``Exception`` guard the cache bracket uses
+            # (``self.cache.snapshot()`` raises ``Exception`` on failure)
+            # — one rule, both sites, so a ``TypeError`` /
+            # ``RuntimeError`` acquirer yields the SAME typed refusal
+            # body as a ``ValueError`` acquirer.
             raise _WorkRefusal("source_integrity_unverified") from None
         acquisition = root_list.get("runtime", {}).get("acquisition", {})
         generation = acquisition.get("generation")
@@ -828,6 +838,15 @@ class WorkspaceReadService:
             # composer's ``control_room_missing`` is its OWN vocabulary for
             # a missing control room input; the read service must not
             # mis-attribute its own failure to the composer's vocabulary.
+            # Closed-set guard: the read service's emitted ``reason`` MUST
+            # be a member of the contract's effect_exception vocabulary so
+            # the workspace read can never silently introduce a new reason.
+            assert _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED in QUEUE_EFFECT_EXCEPTION_REASONS, (
+                f"read-service emitted reason "
+                f"{_QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED!r} not in "
+                f"QUEUE_EFFECT_EXCEPTION_REASONS="
+                f"{sorted(QUEUE_EFFECT_EXCEPTION_REASONS)}"
+            )
             return {"ok": True, "result": {"schema": WORK_QUEUE_SCHEMA,
                 "availability": "UNAVAILABLE",
                 "generated_at": _wq_utc_now(),

@@ -27,6 +27,7 @@ from control_plane.fabric_job_view import (
     _GENERATION_CONFLICT_NOTE,
     _ROOT_ENUMERATION_NOTE,
 )
+from common.executive_workspace_contract import QUEUE_EFFECT_EXCEPTION_REASONS
 
 WORK_QUEUE_SCHEMA = "mastermind.workspace_work_queue.v1"
 _ROOT_LIST_SCHEMA = "mastermind.fabric_job_root_list.v2"
@@ -182,6 +183,12 @@ _REASON_LIFECYCLE_UNAVAILABLE = "LIFECYCLE_UNAVAILABLE"
 _REASON_EFFECT_NOT_ROW_ATTRIBUTED = "effect_not_row_attributed"
 #: N3: root-list degraded notes present on an AVAILABLE document.
 _REASON_LIFECYCLE_DEGRADED = "lifecycle_degraded"
+#: Shared prefix that distinguishes the producer's bounded-unavailable
+#: family.  Both :data:`fabric_job_view._BOUNDED_UNAVAILABLE_NOTE` and
+#: the legacy :func:`fabric_job_view.list_roots_v2` failure path
+#: (which appends the bounded first line of the underlying error after
+#: the colon) match by this prefix.  Used by the closed-set predicates
+#: below so the bounded-unavailable detection stays in ONE place.
 _BOUNDED_UNAVAILABLE_PHRASE = "bounded acquisition unavailable"
 
 #: Closed set of degraded-note phrases that warrant a ``lifecycle_degraded``
@@ -190,6 +197,10 @@ _BOUNDED_UNAVAILABLE_PHRASE = "bounded acquisition unavailable"
 #: re-types the strings.  ``_ROOT_ENUMERATION_NOTE`` is informational only —
 #: every bounded acquisition surfaces it, so it never contributes to the
 #: reason code (the producer's degraded list still echoes it verbatim).
+#: The bounded-unavailable note is matched by the shared prefix phrase
+#: (:func:`_is_bounded_unavailable_note`), not by exact equality on the
+#: constant — the producer's legacy path appends arbitrary detail after
+#: the colon.
 _DEGRADATION_NOTES: tuple[str, ...] = (
     _BOUNDED_UNAVAILABLE_NOTE,
     "bounded root discovery truncated; omitted roots are not counted",
@@ -197,21 +208,39 @@ _DEGRADATION_NOTES: tuple[str, ...] = (
 )
 
 
+def _is_bounded_unavailable_note(entry: Any) -> bool:
+    """One closed-set predicate for the bounded-unavailable producer family.
+
+    The producer's exact emission is
+    :data:`fabric_job_view._BOUNDED_UNAVAILABLE_NOTE`; the legacy
+    :func:`fabric_job_view.list_roots_v2` failure path appends an
+    arbitrary failure first line after the colon.  Both share the prefix
+    :data:`_BOUNDED_UNAVAILABLE_PHRASE` — that is the closed-set
+    invariant.  Used by BOTH :func:`_lifecycle_unavailable` (drives the
+    UNAVAILABLE branch) and :func:`_is_degradation_note` (drives the
+    ``lifecycle_degraded`` reason code on AVAILABLE) so the two sites
+    cannot drift.
+    """
+    return isinstance(entry, str) and entry.startswith(_BOUNDED_UNAVAILABLE_PHRASE)
+
+
 def _is_degradation_note(entry: Any) -> bool:
     """Closed-set predicate over the root list's ``degraded`` entries.
 
-    The bounded-unavailable note is matched by ``startswith`` because the
-    producer appends detail after a colon (``"...: read failed"``).  The
+    The bounded-unavailable family is matched by the shared prefix
+    :func:`_is_bounded_unavailable_note` (the producer appends detail
+    after the colon — anything from the canonical constant down to
+    ``"bounded acquisition unavailable: disk I/O error"`` counts).  The
     other two notes are matched exactly.  Anything else is informational
-    only and is echoed in ``lifecycle_source.degraded`` without contributing
-    a reason code.
+    only and is echoed in ``lifecycle_source.degraded`` without
+    contributing a reason code.
     """
+    if _is_bounded_unavailable_note(entry):
+        return True
     if not isinstance(entry, str):
         return False
     for phrase in _DEGRADATION_NOTES:
         if entry == phrase:
-            return True
-        if phrase is _BOUNDED_UNAVAILABLE_NOTE and entry.startswith(_BOUNDED_UNAVAILABLE_NOTE):
             return True
     return False
 
@@ -430,9 +459,11 @@ def _validate_effects(value: Any) -> Mapping[str, Mapping[str, Any]] | None:
 def _lifecycle_unavailable(root_list: Mapping[str, Any]) -> bool:
     """R1: refuse lifecycle when the Runtime is degraded or absent.
 
-    B1: the bounded-unavailable detection uses the imported closed-set
-    phrase and ``startswith`` matching against the producer's appended
-    detail (the producer may append ``": read failed"`` after the colon).
+    B1: the bounded-unavailable detection uses the SHARED predicate
+    :func:`_is_bounded_unavailable_note` — the same predicate the
+    reason-code gate (:func:`_is_degradation_note`) uses for the
+    ``lifecycle_degraded`` code on AVAILABLE documents.  One closed set,
+    one predicate, both sites.
     """
     runtime = root_list["runtime"]
     if runtime.get("db_present") is not True:
@@ -443,10 +474,7 @@ def _lifecycle_unavailable(root_list: Mapping[str, Any]) -> bool:
     if state != "SAME":
         return True
     degraded = root_list.get("degraded") or []
-    for entry in degraded:
-        if isinstance(entry, str) and entry.startswith(_BOUNDED_UNAVAILABLE_NOTE):
-            return True
-    return False
+    return any(_is_bounded_unavailable_note(entry) for entry in degraded)
 
 
 def _lifecycle_source(root_list: Mapping[str, Any]) -> dict[str, Any]:
@@ -508,32 +536,52 @@ def _queue_effect_exception(control_room: Any) -> dict[str, Any]:
 
     ``reason`` distinguishes "could not look" (control_room or autonomy
     absent) from "looked, found no exception" so the queue-level EFFECT_UNKNOWN
-    state is never confused with a healthy empty read.
+    state is never confused with a healthy empty read.  The emitted
+    ``reason`` is asserted against the closed
+    :data:`common.executive_workspace_contract.QUEUE_EFFECT_EXCEPTION_REASONS`
+    vocabulary so the composer can never silently introduce a new member.
     """
     if not isinstance(control_room, Mapping):
-        return {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
-                "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_CONTROL_ROOM_MISSING}
-    autonomy = control_room.get("autonomy")
-    if not isinstance(autonomy, Mapping) or autonomy.get("schema") != _AUTONOMY_SCHEMA:
-        return {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
-                "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING}
-    responsibilities = autonomy.get("responsibilities")
-    if not isinstance(responsibilities, list):
-        return {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
-                "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING}
-    for row in responsibilities:
-        if not isinstance(row, Mapping):
-            continue
-        placement = row.get("placement_state")
-        if isinstance(placement, Mapping) and placement.get("value") == "EFFECT_UNKNOWN":
-            return {
-                "value": "EFFECT_UNKNOWN",
-                "scope": "RUNTIME_CURRENT_WORKER",
-                "observable": True,
-                "reason": _QUEUE_EFFECT_EXCEPTION_REASON_EXCEPTION_OBSERVED,
-            }
-    return {"value": "NONE", "scope": "RUNTIME_CURRENT_WORKER",
-            "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_NO_EXCEPTION_OBSERVED}
+        result = {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                  "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_CONTROL_ROOM_MISSING}
+    else:
+        autonomy = control_room.get("autonomy")
+        if not isinstance(autonomy, Mapping) or autonomy.get("schema") != _AUTONOMY_SCHEMA:
+            result = {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                      "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING}
+        else:
+            responsibilities = autonomy.get("responsibilities")
+            if not isinstance(responsibilities, list):
+                result = {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                          "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING}
+            else:
+                observed = False
+                for row in responsibilities:
+                    if not isinstance(row, Mapping):
+                        continue
+                    placement = row.get("placement_state")
+                    if isinstance(placement, Mapping) and placement.get("value") == "EFFECT_UNKNOWN":
+                        observed = True
+                        break
+                if observed:
+                    result = {
+                        "value": "EFFECT_UNKNOWN",
+                        "scope": "RUNTIME_CURRENT_WORKER",
+                        "observable": True,
+                        "reason": _QUEUE_EFFECT_EXCEPTION_REASON_EXCEPTION_OBSERVED,
+                    }
+                else:
+                    result = {"value": "NONE", "scope": "RUNTIME_CURRENT_WORKER",
+                              "observable": False,
+                              "reason": _QUEUE_EFFECT_EXCEPTION_REASON_NO_EXCEPTION_OBSERVED}
+    # Closed-set guard: the composer's emitted ``reason`` MUST be a member
+    # of the contract's effect_exception reason vocabulary.
+    assert result["reason"] in QUEUE_EFFECT_EXCEPTION_REASONS, (
+        f"_queue_effect_exception emitted reason {result['reason']!r} "
+        f"not in QUEUE_EFFECT_EXCEPTION_REASONS="
+        f"{sorted(QUEUE_EFFECT_EXCEPTION_REASONS)}"
+    )
+    return result
 
 
 def _acceptance() -> dict[str, Any]:
