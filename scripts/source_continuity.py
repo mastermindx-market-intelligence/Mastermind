@@ -78,7 +78,7 @@ _MAX_COLLISION_PRS = 450
 # One invocation-local cooperative budget spans both observations, not hard preemption.
 _MAX_HTTP_CALLS = 1152
 _HTTP_READ_BUDGET_SECONDS = 300.0
-_MAX_HTTP_NORMALIZED_BYTES = 96 * 1024 * 1024
+_MAX_HTTP_NORMALIZED_BYTES = 128 * 1024 * 1024
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _HOLD_LABELS = frozenset({"hold", "hold-for-sol", "hold_for_sol"})

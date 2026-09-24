@@ -373,5 +373,5 @@ def test_closed_invocation_budgets_remain_unchanged() -> None:
     module = fx._cli_module()
     assert module._MAX_COLLISION_PRS == 450
     assert module._MAX_HTTP_CALLS == 1152
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0

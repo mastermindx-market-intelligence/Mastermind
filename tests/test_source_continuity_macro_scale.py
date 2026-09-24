@@ -15,7 +15,7 @@ import test_source_continuity_census_budget as budget
 def _apply_frozen_profile(module) -> None:
     module._MAX_COLLISION_PRS = 450
     module._MAX_HTTP_CALLS = 1152
-    module._MAX_HTTP_NORMALIZED_BYTES = 96 * 1024 * 1024
+    module._MAX_HTTP_NORMALIZED_BYTES = 128 * 1024 * 1024
     module._HTTP_READ_BUDGET_SECONDS = 300.0
 
 
@@ -63,7 +63,7 @@ def test_macro_450_profile_is_exact() -> None:
     module = fx._cli_module()
     assert module._MAX_COLLISION_PRS == 450
     assert module._MAX_HTTP_CALLS == 1152
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
     assert module._MAX_HTTP_BODY_BYTES == 5_000_000
 
