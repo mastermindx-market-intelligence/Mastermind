@@ -1333,7 +1333,7 @@ def test_source_work_does_not_fall_through_to_generic_studio_shell() -> None:
         "`TOOL_DEGRADED / EFFECT_NONE`",
         "it grants no retry",
         "not generic Studio shell and not Workbench itself",
-        "Never change account, plugin, connector, worker, device, or generic tool",
+        "Never rephrase the denied effect or change account, plugin, connector, worker, device, model, provider, or generic tool",
         "prefer the gateway-owned `studio_git_publish_status`",
     ):
         assert phrase in skill
