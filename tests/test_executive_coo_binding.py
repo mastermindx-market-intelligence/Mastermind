@@ -111,7 +111,6 @@ def test_token_instance_fields_do_not_change_durable_binding_identity():
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda row: row["binding"].__setitem__("client_ref", "f" * 64),
         lambda row: row["binding"].__setitem__("subject_digest", "e" * 64),
         lambda row: row["binding"].__setitem__("policy_id", "other-policy"),
         lambda row: row["binding"].__setitem__("resource", "https://other.example.com/mcp"),
@@ -125,6 +124,17 @@ def test_binding_contract_fails_closed_on_identity_or_shape_drift(mutate):
     mutate(row)
     with pytest.raises(ValueError, match="access_denied"):
         validate_coo_binding(row, policy())
+
+
+def test_installed_client_ref_may_rotate_but_only_exact_current_client_is_authorized():
+    rotated = binding(client_ref="f" * 64)
+    assert validate_coo_binding(rotated, policy()) == rotated
+
+    gate = coo_authorizer(policy=policy(), load_binding=lambda: rotated)
+    assert gate(principal(client_ref=CLIENT)) is False
+    assert gate.binding_digest(principal(client_ref=CLIENT)) is None
+    assert gate(principal(client_ref="f" * 64)) is True
+    assert isinstance(gate.binding_digest(principal(client_ref="f" * 64)), str)
 
 
 def test_unenrolled_or_wrong_client_principal_is_refused():
