@@ -96,6 +96,10 @@ keeps native agents disabled by default. The repository `.codex/config.toml` rem
 separate audited worker/portfolio configuration and does not select the attended project-delivery
 parent. If a pre-effect native fallback is explicitly admitted, the named parent profile caps it
 at one Sol/high child; Luna and Terra remain outside normal project-delivery sub-orchestration.
+This attended profile does not itself change the Executive `frontier.orchestrator` alias, its
+provider binary, or an existing RuntimeBinding. A production Astra parent requires the existing
+provider/binary-attestation owner to qualify an Astra-capable Codex generation and a real served-model
+canary before the route can move; profile presence alone is not production cutover evidence.
 
 Astra authors the bounded objective and acceptance evidence. **Capacity chooses provider/account/host placement**;
 Astra must not choose provider credentials, account numbers, provider homes, endpoints, worker

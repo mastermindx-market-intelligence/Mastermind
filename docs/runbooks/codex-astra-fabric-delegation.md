@@ -134,6 +134,20 @@ Wake/return must refuse a stale, neighboring, newest, or human-title-matched Cod
 exact parent cannot be resolved, keep the result durable/unconsumed and classify the journey partial;
 do not invent latest-tab routing or make the model poll for completion.
 
+### Current Executive-parent compatibility hold
+
+The named `mastermind-astra` profile above is an attended/manual client profile; it is not evidence
+that the current Executive-owned operator is already an Astra generation. On the 2026-09-24 Studio
+observation, the exact installed Executive provider binary remained Codex **0.147.0** and its
+`debug models` catalog did **not** expose `gpt-6-astra`. The separately installed attended Codex
+0.154.0/0.156.1 clients did expose that slug.
+
+Therefore this PR must not rewrite the existing Executive `frontier.orchestrator` alias to Astra or
+claim exact-parent Astra proof from profile presence. Production cutover requires the existing
+provider/binary-attestation owner to install and attest one reviewed Astra-capable Codex generation,
+prove `gpt-6-astra` with a real served-model canary under that exact generation, and only then move
+the existing routing/profile authority through its normal reviewed path.
+
 ## 6. External worker lane
 
 Astra never chooses the provider, account, provider home, endpoint, host, or worker identity.
@@ -181,7 +195,8 @@ worker/portfolio configuration; it is not the attended Astra parent profile.
 The first accepted vertical requires all of the following, separately evidenced:
 
 1. authenticated five-tool MCP read from a fresh Astra process;
-2. exact Executive-owned Astra RuntimeBinding/process-generation/native-handle proof;
+2. exact Executive-owned Astra RuntimeBinding/process-generation/native-handle proof from an
+   attested Astra-capable Codex generation with a real `gpt-6-astra` served-model canary;
 3. sealed external subscription-canary admission from current provider-realm + Capacity facts;
 4. one substantive external worker execution;
 5. independent review and any bounded repair/re-review through existing owners;

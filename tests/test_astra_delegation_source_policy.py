@@ -147,3 +147,22 @@ def test_astra_policy_contains_no_direct_provider_spawn_or_physical_assignment_c
     )
     for token in forbidden:
         assert token not in section
+
+
+def test_attended_astra_profile_does_not_claim_executive_parent_cutover():
+    section = _astra_section()
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    for phrase in (
+        "does not itself change the Executive `frontier.orchestrator` alias",
+        "provider/binary-attestation owner",
+        "profile presence alone is not production cutover evidence",
+    ):
+        assert phrase in section
+    for phrase in (
+        "Current Executive-parent compatibility hold",
+        "Codex **0.147.0**",
+        "did **not** expose `gpt-6-astra`",
+        "frontier.orchestrator",
+        "served-model canary",
+    ):
+        assert phrase in runbook
