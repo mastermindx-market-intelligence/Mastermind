@@ -15,7 +15,19 @@ from enum import Enum
 
 
 SCHEMA = "mastermind.github_pr_lifecycle_assessment.v1"
+STALE_RECONCILE_DAYS = 14
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
+_SECRET_PATTERNS = (
+    re.compile(r"github_pat_", re.IGNORECASE),
+    re.compile(r"\\bgh[pousr]_[A-Za-z0-9]", re.IGNORECASE),
+    re.compile(r"\\bxox[baprs]-", re.IGNORECASE),
+    re.compile(r"\\bsk-[A-Za-z0-9]", re.IGNORECASE),
+    re.compile(
+        r"\\b(?:authorization|bearer|password|token|secret|credential)\\s*[:=]\\s*\\S+",
+        re.IGNORECASE,
+    ),
+    re.compile(r"-----BEGIN", re.IGNORECASE),
+)
 
 
 class LifecycleInputError(ValueError):
@@ -80,6 +92,7 @@ class LifecycleVerdict(str, Enum):
 
 class LifecycleIssue(str, Enum):
     PR_NOT_OPEN = "PR_NOT_OPEN"
+    PR_STATE_UNKNOWN = "PR_STATE_UNKNOWN"
     SOURCE_COVERAGE_INCOMPLETE = "SOURCE_COVERAGE_INCOMPLETE"
     PRIOR_EFFECT_UNKNOWN = "PRIOR_EFFECT_UNKNOWN"
     ACTIVE_WORK = "ACTIVE_WORK"
@@ -89,10 +102,12 @@ class LifecycleIssue(str, Enum):
     EXPLICIT_KEEP_OPEN = "EXPLICIT_KEEP_OPEN"
     CURRENT_DELTA_ALREADY_INTEGRATED = "CURRENT_DELTA_ALREADY_INTEGRATED"
     CURRENT_DELTA_SUPERSEDED = "CURRENT_DELTA_SUPERSEDED"
+    INTEGRATION_STATE_UNKNOWN = "INTEGRATION_STATE_UNKNOWN"
     UNIQUE_OR_UNINTEGRATED_DELTA = "UNIQUE_OR_UNINTEGRATED_DELTA"
     PRESERVATION_UNPROVEN = "PRESERVATION_UNPROVEN"
     STALE_AGE_ONLY = "STALE_AGE_ONLY"
     CURRENT_WORK_STATE_UNKNOWN = "CURRENT_WORK_STATE_UNKNOWN"
+    KEEP_OPEN_CONTRADICTS_WORK_STATE = "KEEP_OPEN_CONTRADICTS_WORK_STATE"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -149,6 +164,11 @@ def _validate(facts: PullRequestLifecycleFacts) -> None:
     ):
         if value is not None and (type(value) is not str or not value.strip()):
             raise LifecycleInputError(f"{name} must be null or non-empty string")
+        if value is not None:
+            if len(value) > 512:
+                raise LifecycleInputError(f"{name} exceeds 512 characters")
+            if any(pattern.search(value) for pattern in _SECRET_PATTERNS):
+                raise LifecycleInputError(f"{name} contains secret-shaped material")
     if facts.days_since_update is not None:
         if type(facts.days_since_update) is not int or facts.days_since_update < 0:
             raise LifecycleInputError(
@@ -181,7 +201,7 @@ def assess_pr_lifecycle(facts: PullRequestLifecycleFacts) -> LifecycleAssessment
     if facts.state is PullRequestState.UNKNOWN:
         return _assessment(
             LifecycleVerdict.RECONCILE_REQUIRED,
-            LifecycleIssue.SOURCE_COVERAGE_INCOMPLETE,
+            LifecycleIssue.PR_STATE_UNKNOWN,
         )
 
     if facts.source_coverage is not SourceCoverage.COMPLETE:
@@ -196,12 +216,30 @@ def assess_pr_lifecycle(facts: PullRequestLifecycleFacts) -> LifecycleAssessment
             LifecycleIssue.PRIOR_EFFECT_UNKNOWN,
         )
 
+    if facts.work_state is WorkState.UNKNOWN:
+        issues = [LifecycleIssue.CURRENT_WORK_STATE_UNKNOWN]
+        if facts.explicit_disposition is ExplicitDisposition.KEEP_OPEN:
+            issues.append(LifecycleIssue.EXPLICIT_KEEP_OPEN)
+        if (
+            facts.days_since_update is not None
+            and facts.days_since_update >= STALE_RECONCILE_DAYS
+        ):
+            issues.append(LifecycleIssue.STALE_AGE_ONLY)
+        return _assessment(LifecycleVerdict.RECONCILE_REQUIRED, *issues)
+
     if facts.explicit_disposition is ExplicitDisposition.KEEP_OPEN:
+        if facts.work_state is WorkState.ACTIVE:
+            return _assessment(
+                LifecycleVerdict.KEEP_ACTIVE,
+                LifecycleIssue.EXPLICIT_KEEP_OPEN,
+                LifecycleIssue.ACTIVE_WORK,
+            )
         if facts.work_state is WorkState.GATED:
             if not (facts.owner and facts.gate and facts.release_condition):
                 return _assessment(
                     LifecycleVerdict.RECONCILE_REQUIRED,
                     LifecycleIssue.EXPLICIT_KEEP_OPEN,
+                    LifecycleIssue.ACTIVE_HOLD_OR_GATE,
                     LifecycleIssue.GATE_IDENTITY_INCOMPLETE,
                 )
             return _assessment(
@@ -210,9 +248,9 @@ def assess_pr_lifecycle(facts: PullRequestLifecycleFacts) -> LifecycleAssessment
                 LifecycleIssue.ACTIVE_HOLD_OR_GATE,
             )
         return _assessment(
-            LifecycleVerdict.KEEP_ACTIVE,
+            LifecycleVerdict.RECONCILE_REQUIRED,
             LifecycleIssue.EXPLICIT_KEEP_OPEN,
-            LifecycleIssue.ACTIVE_WORK,
+            LifecycleIssue.KEEP_OPEN_CONTRADICTS_WORK_STATE,
         )
 
     if facts.work_state is WorkState.ACTIVE:
@@ -229,12 +267,6 @@ def assess_pr_lifecycle(facts: PullRequestLifecycleFacts) -> LifecycleAssessment
             LifecycleVerdict.KEEP_GATED,
             LifecycleIssue.ACTIVE_HOLD_OR_GATE,
         )
-
-    if facts.work_state is WorkState.UNKNOWN:
-        issues = [LifecycleIssue.CURRENT_WORK_STATE_UNKNOWN]
-        if facts.days_since_update is not None and facts.days_since_update >= 14:
-            issues.append(LifecycleIssue.STALE_AGE_ONLY)
-        return _assessment(LifecycleVerdict.RECONCILE_REQUIRED, *issues)
 
     close_requested = facts.explicit_disposition in (
         ExplicitDisposition.CLOSE_UNMERGED,
@@ -280,8 +312,11 @@ def assess_pr_lifecycle(facts: PullRequestLifecycleFacts) -> LifecycleAssessment
         PreservationState.UNKNOWN,
     ):
         issues.append(LifecycleIssue.PRESERVATION_UNPROVEN)
-    if facts.days_since_update is not None and facts.days_since_update >= 14:
+    if facts.integration_state is IntegrationState.UNKNOWN:
+        issues.append(LifecycleIssue.INTEGRATION_STATE_UNKNOWN)
+    if (
+        facts.days_since_update is not None
+        and facts.days_since_update >= STALE_RECONCILE_DAYS
+    ):
         issues.append(LifecycleIssue.STALE_AGE_ONLY)
-    if not issues:
-        issues.append(LifecycleIssue.CURRENT_WORK_STATE_UNKNOWN)
     return _assessment(LifecycleVerdict.RECONCILE_REQUIRED, *issues)
