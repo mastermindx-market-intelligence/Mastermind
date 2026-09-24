@@ -591,16 +591,19 @@ recover_readiness_transaction_lock() {
 }
 
 invalidate_readiness_receipt() {
+  local receipt_binding_args
+  receipt_binding_args=()
+  if [ -n "$WORKSPACE_BINDING_CLASS" ]; then
+    receipt_binding_args=(--workspace-binding-class "$WORKSPACE_BINDING_CLASS")
+  fi
   if [ -e "$READINESS_RECEIPT" ] || [ -L "$READINESS_RECEIPT" ]; then
-    [ -f "$READINESS_RECEIPT" ] && [ ! -L "$READINESS_RECEIPT" ] \
-      && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$READINESS_RECEIPT")" = "0:0:400:1" ] || {
-        /bin/echo "existing provider readiness receipt is unsafe" >&2
-        exit 65
-      }
-    case "$(/usr/bin/stat -f '%Sp' "$READINESS_RECEIPT")" in
-      *+) /bin/echo "existing provider readiness receipt has an ACL" >&2; exit 65 ;;
-    esac
-    /bin/rm -f -- "$READINESS_RECEIPT"
+    if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" invalidate \
+        --receipt "$READINESS_RECEIPT" \
+        --worker-gid "$WORKER_GID" \
+        ${receipt_binding_args[@]+"${receipt_binding_args[@]}"} >/dev/null 2>&1; then
+      /bin/echo "existing provider readiness receipt is unsafe" >&2
+      exit 65
+    fi
   fi
 }
 
