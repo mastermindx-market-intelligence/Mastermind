@@ -189,6 +189,36 @@
       "class": "acceptance",
       "scenario": "Mission authority is current but Mission Workspace has no dedicated current_coo_target RuntimeBinding; Fable remains principal+mission bound and exact Claude session binding is not fabricated.",
       "expected": "MISSION_BOUND_WITH_SESSION_HARDENING_DEFERRED"
+    },
+    {
+      "id": "M32",
+      "class": "acceptance",
+      "scenario": "Fable submits one bounded principal intent using only operation_key, objective, department, priority, execution_profile, workstream and the existing bounded path/validation/attempt fields.",
+      "expected": "ACCEPT_HIGH_LEVEL_PRINCIPAL_REQUEST"
+    },
+    {
+      "id": "M33",
+      "class": "refuse",
+      "scenario": "Fable supplies actor, seat, raw authorities, provider, model, account, host, realm, branch, worktree, release class, dispatch, service, credential or session authority in the public principal request.",
+      "expected": "REFUSE_PRIVILEGED_CALLER_FIELDS"
+    },
+    {
+      "id": "M34",
+      "class": "refuse",
+      "scenario": "A COO principal request names a workstream different from the exact current Mission Workspace program.work_ref.",
+      "expected": "REFUSE_MISSION_IDENTITY_MISMATCH"
+    },
+    {
+      "id": "M35",
+      "class": "acceptance",
+      "scenario": "The same work_ref, operation_key, immutable principal/mission authority identity and semantic request is retried after a response loss.",
+      "expected": "RECONCILE_ONE_ACCEPTED_JOB"
+    },
+    {
+      "id": "M36",
+      "class": "refuse",
+      "scenario": "The same principal logical request identity is reused with changed semantic payload.",
+      "expected": "REFUSE_PRINCIPAL_REQUEST_CONFLICT"
     }
   ]
 }
