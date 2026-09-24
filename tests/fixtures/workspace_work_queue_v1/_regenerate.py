@@ -4,11 +4,22 @@ Run with::
 
     python3 -B tests/fixtures/workspace_work_queue_v1/_regenerate.py
 
-Four fixtures are produced:
+Five fixtures are produced:
 
-* ``available.json`` — a healthy ``AVAILABLE`` projection over four
-  representative rows (QUEUED, RUNNING, COMPLETED, FAILED) with no
-  producer evidence supplied.
+* ``available.json`` — a PRODUCTION-SHAPED healthy ``AVAILABLE`` projection
+  over four representative rows (QUEUED, RUNNING, COMPLETED, FAILED) with
+  no producer evidence supplied.  The root list carries the
+  ``_ROOT_ENUMERATION_NOTE`` (every bounded acquisition surfaces it),
+  PARTIAL provenance, and the producer's degraded list is echoed verbatim
+  in ``lifecycle_source.degraded``.  ``coverage.completeness == "PARTIAL"``
+  and ``reason_codes == []`` (the closed-set refactor — enumeration alone
+  does not contribute a reason code).  This is the shape the live route
+  actually emits on a healthy read.
+* ``available_complete_composer_only.json`` — a COMPOSER-ONLY happy path
+  where the producer marks the universe COMPLETE (no enumeration note,
+  full provenance, no truncation).  Carries ``reason_codes == []`` and
+  ``coverage.completeness == "COMPLETE"`` — distinguishes the composer-only
+  document from the production-shaped one.
 * ``unavailable.json`` — the composer's ``UNAVAILABLE`` branch over a
   degraded bounded acquisition (B2: ``coverage.completeness = "PARTIAL"``).
 * ``effect_exception.json`` — the REAL route path: queue-level
@@ -34,6 +45,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from control_plane.fabric_job_view import _BOUNDED_UNAVAILABLE_NOTE
 from control_plane.work_queue_projection import compose_work_queue_v1
 
 HERE = Path(__file__).parent
@@ -94,8 +106,55 @@ def _row(job_id, status, *, depth=0, role="aggregation"):
             "parent_job_id": None, "orchestration_role": role}
 
 
-# Available fixture: four deterministic rows exercising the lifecycle table.
+# Available fixture: PRODUCTION-SHAPED root list.  The live
+# ``list_roots_v2_from_runtime`` producer always appends
+# ``_ROOT_ENUMERATION_NOTE`` to ``degraded`` and reports PARTIAL
+# provenance (enumeration provenance is unjoined).  Echoes the
+# producer's degraded list verbatim into ``lifecycle_source.degraded``
+# but emits ``reason_codes == []`` — the enumeration note alone does not
+# fire ``lifecycle_degraded`` (B1 closed-set refactor).
 AVAILABLE_ROOT_LIST = {
+    "schema": "mastermind.fabric_job_root_list.v2",
+    "generated_at": GENERATED_AT,
+    "runtime": {"root": "/tmp/fake", "db_present": True, "identity": None,
+                "acquisition": {
+                    "schema": "mastermind.fabric_runtime_acquisition.v1",
+                    "query": {"kind": "root_discovery"},
+                    "owner": "executive_runtime",
+                    "snapshot_digest": SNAPSHOT_DIGEST,
+                    "budgets": {"roots": 64, "jobs": 17, "attempts_per_job": 20,
+                                "attempts_total": 340, "creation_events_per_job": 1},
+                    "truncation": {"jobs": False, "attempt_job_ids": [],
+                                   "roots": False, "projection": False},
+                    "provenance": {"state": "PARTIAL",
+                                   "unjoined_job_ids": ["JOB-3"]},
+                    "generation": {"schema": "mastermind.runtime_read_observation.v1",
+                                   "state": "SAME", "source_identity": SOURCE_IDENTITY,
+                                   "before": 1, "after": 1},
+                }},
+    "roots": [
+        _row("JOB-1", "QUEUED"),
+        _row("JOB-2", "RUNNING"),
+        _row("JOB-3", "COMPLETED"),
+        _row("JOB-4", "FAILED"),
+    ],
+    "count": 4,
+    "total": 4,
+    "truncated": False,
+    "degraded": [
+        "root enumeration provenance is unjoined; "
+        "creation provenance requires exact-root acquisition",
+    ],
+}
+
+# Available-complete fixture (COMPOSER-ONLY): the producer marks the
+# universe COMPLETE — no enumeration note, no PARTIAL provenance, no
+# truncation.  Renders ``coverage.completeness == "COMPLETE"`` with
+# ``reason_codes == []``.  This fixture is only achievable when the
+# producer's root list is hand-crafted (the live bounded acquisition
+# always surfaces the enumeration note), so it is labelled
+# composer-only and pinned by a dedicated byte-identity test.
+AVAILABLE_COMPLETE_ROOT_LIST = {
     "schema": "mastermind.fabric_job_root_list.v2",
     "generated_at": GENERATED_AT,
     "runtime": {"root": "/tmp/fake", "db_present": True, "identity": None,
@@ -124,7 +183,7 @@ UNAVAILABLE_ROOT_LIST = {
     "count": 0,
     "total": None,
     "truncated": False,
-    "degraded": ["bounded acquisition unavailable: read failed"],
+    "degraded": [_BOUNDED_UNAVAILABLE_NOTE],
 }
 
 # effect_exception fixture (B3 real path): control_room autonomy reports
@@ -178,6 +237,9 @@ def main():
     available = compose_work_queue_v1(AVAILABLE_ROOT_LIST,
                                        generated_at=GENERATED_AT)
     _dump("available.json", available)
+    available_complete = compose_work_queue_v1(AVAILABLE_COMPLETE_ROOT_LIST,
+                                                generated_at=GENERATED_AT)
+    _dump("available_complete_composer_only.json", available_complete)
     unavailable = compose_work_queue_v1(UNAVAILABLE_ROOT_LIST,
                                          generated_at=GENERATED_AT)
     _dump("unavailable.json", unavailable)

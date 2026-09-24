@@ -22,6 +22,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from control_plane.executive_runtime import JobStatus
+from control_plane.fabric_job_view import (
+    _BOUNDED_UNAVAILABLE_NOTE,
+    _GENERATION_CONFLICT_NOTE,
+    _ROOT_ENUMERATION_NOTE,
+)
 
 WORK_QUEUE_SCHEMA = "mastermind.workspace_work_queue.v1"
 _ROOT_LIST_SCHEMA = "mastermind.fabric_job_root_list.v2"
@@ -112,6 +117,12 @@ _QUEUE_EFFECT_EXCEPTION_REASON_CONTROL_ROOM_MISSING = "control_room_missing"
 _QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING = "autonomy_missing"
 _QUEUE_EFFECT_EXCEPTION_REASON_NO_EXCEPTION_OBSERVED = "no_exception_observed"
 _QUEUE_EFFECT_EXCEPTION_REASON_EXCEPTION_OBSERVED = "exception_observed"
+#: N4: emitted by the read service's typed refusal body when the CCR
+#: bracket itself refused before the composer could read autonomy — the
+#: composer's own vocabulary is preserved (``control_room_missing`` and
+#: ``autonomy_missing`` describe the composer's view of a missing or
+#: malformed control room document, not the read service's).
+_QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED = "read_refused"
 
 #: Root-list shape mirrors ``fabric_job_view.ROOT_LIST_KEYS``.
 _ROOT_LIST_KEYS: frozenset[str] = frozenset({
@@ -172,6 +183,37 @@ _REASON_EFFECT_NOT_ROW_ATTRIBUTED = "effect_not_row_attributed"
 #: N3: root-list degraded notes present on an AVAILABLE document.
 _REASON_LIFECYCLE_DEGRADED = "lifecycle_degraded"
 _BOUNDED_UNAVAILABLE_PHRASE = "bounded acquisition unavailable"
+
+#: Closed set of degraded-note phrases that warrant a ``lifecycle_degraded``
+#: reason code on an AVAILABLE document.  Sourced from
+#: :mod:`control_plane.fabric_job_view` constants so the composer never
+#: re-types the strings.  ``_ROOT_ENUMERATION_NOTE`` is informational only —
+#: every bounded acquisition surfaces it, so it never contributes to the
+#: reason code (the producer's degraded list still echoes it verbatim).
+_DEGRADATION_NOTES: tuple[str, ...] = (
+    _BOUNDED_UNAVAILABLE_NOTE,
+    "bounded root discovery truncated; omitted roots are not counted",
+    _GENERATION_CONFLICT_NOTE,
+)
+
+
+def _is_degradation_note(entry: Any) -> bool:
+    """Closed-set predicate over the root list's ``degraded`` entries.
+
+    The bounded-unavailable note is matched by ``startswith`` because the
+    producer appends detail after a colon (``"...: read failed"``).  The
+    other two notes are matched exactly.  Anything else is informational
+    only and is echoed in ``lifecycle_source.degraded`` without contributing
+    a reason code.
+    """
+    if not isinstance(entry, str):
+        return False
+    for phrase in _DEGRADATION_NOTES:
+        if entry == phrase:
+            return True
+        if phrase is _BOUNDED_UNAVAILABLE_NOTE and entry.startswith(_BOUNDED_UNAVAILABLE_NOTE):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +428,12 @@ def _validate_effects(value: Any) -> Mapping[str, Mapping[str, Any]] | None:
 
 
 def _lifecycle_unavailable(root_list: Mapping[str, Any]) -> bool:
-    """R1: refuse lifecycle when the Runtime is degraded or absent."""
+    """R1: refuse lifecycle when the Runtime is degraded or absent.
+
+    B1: the bounded-unavailable detection uses the imported closed-set
+    phrase and ``startswith`` matching against the producer's appended
+    detail (the producer may append ``": read failed"`` after the colon).
+    """
     runtime = root_list["runtime"]
     if runtime.get("db_present") is not True:
         return True
@@ -397,7 +444,7 @@ def _lifecycle_unavailable(root_list: Mapping[str, Any]) -> bool:
         return True
     degraded = root_list.get("degraded") or []
     for entry in degraded:
-        if isinstance(entry, str) and _BOUNDED_UNAVAILABLE_PHRASE in entry:
+        if isinstance(entry, str) and entry.startswith(_BOUNDED_UNAVAILABLE_NOTE):
             return True
     return False
 
@@ -799,13 +846,16 @@ def compose_work_queue_v1(
     # branch.  ``effect_not_row_attributed`` fires when the queue-level
     # EFFECT_UNKNOWN came from control_room.autonomy but no per-row
     # effects producer carried one.  ``lifecycle_degraded`` fires when
-    # the root list's degraded list is non-empty (the producer flagged
-    # the universe even though the read succeeded).
+    # at least one entry of the root list's degraded list matches a
+    # closed-set degradation phrase (bounded acquisition unavailable,
+    # bounded discovery truncation, generation CONFLICT).  Informational
+    # notes (e.g. ``_ROOT_ENUMERATION_NOTE``) are echoed verbatim in
+    # ``lifecycle_source.degraded`` but never contribute a reason code.
     reason_codes: list[str] = []
     if (effect_exception.get("value") == "EFFECT_UNKNOWN"
             and validated_effects is None):
         reason_codes.append(_REASON_EFFECT_NOT_ROW_ATTRIBUTED)
-    if validated_root.get("degraded"):
+    if any(_is_degradation_note(entry) for entry in validated_root.get("degraded") or []):
         reason_codes.append(_REASON_LIFECYCLE_DEGRADED)
     reason_codes.sort()
 
@@ -833,4 +883,9 @@ __all__ = [
     "COVERAGE_KEYS",
     "EVIDENCE_MAX_AGE_S",
     "compose_work_queue_v1",
+    "_DEGRADATION_NOTES",
+    "_is_degradation_note",
+    "_BOUNDED_UNAVAILABLE_NOTE",
+    "_GENERATION_CONFLICT_NOTE",
+    "_ROOT_ENUMERATION_NOTE",
 ]

@@ -12,13 +12,20 @@ import json
 import pytest
 
 from control_plane.executive_runtime import JobStatus
+from control_plane.fabric_job_view import (
+    _BOUNDED_UNAVAILABLE_NOTE,
+    _GENERATION_CONFLICT_NOTE,
+    _ROOT_ENUMERATION_NOTE,
+)
 from control_plane.work_queue_projection import (
     ACCEPTANCE_KEYS,
     COVERAGE_KEYS,
     OUTPUT_KEYS,
     ROW_KEYS,
     WORK_QUEUE_SCHEMA,
+    _DEGRADATION_NOTES,
     _GROUP_ORDER,
+    _is_degradation_note,
     _JOB_STATUS_GROUPS,
     compose_work_queue_v1,
 )
@@ -93,7 +100,7 @@ def test_r1_db_absent_renders_unavailable_with_empty_groups():
 
 def test_r1_degraded_bounded_acquisition_renders_unavailable():
     root_list = _root_list(roots=[_row("JOB-1", "QUEUED")],
-                           degraded=["bounded acquisition unavailable: read failed"])
+                           degraded=[_BOUNDED_UNAVAILABLE_NOTE])
     result = compose_work_queue_v1(root_list)
     assert result["availability"] == "UNAVAILABLE"
     assert result["reason_codes"] == ["LIFECYCLE_UNAVAILABLE"]
@@ -371,8 +378,11 @@ def test_r6_composing_twice_yields_byte_identical_canonical_json():
     assert canonical(first) == canonical(second)
 
 
-def test_r6_bytes_match_deterministic_fixture():
-    """Sanity-check the fixture compared to a recompose."""
+def test_r6_bytes_match_deterministic_production_shaped_fixture():
+    """N8: ``available.json`` is a PRODUCTION-SHAPED fixture (SAME
+    generation + ``_ROOT_ENUMERATION_NOTE`` in ``degraded`` + PARTIAL
+    provenance + ``total == 4`` as the producer would give).  Stays
+    byte-identical under recompose."""
     from pathlib import Path
     fixture_path = Path(__file__).parent / "fixtures" / "workspace_work_queue_v1" / "available.json"
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
@@ -384,9 +394,48 @@ def test_r6_bytes_match_deterministic_fixture():
                for row in fixture["groups"]["QUEUED"] + fixture["groups"]["RUNNING"]
                + fixture["groups"]["COMPLETED_NOT_ACCEPTED"] + fixture["groups"]["TERMINAL"]],
         total=4,
+        provenance_state="PARTIAL",
+        degraded=[_ROOT_ENUMERATION_NOTE],
+    )
+    # The fixture's PARTIAL provenance carries an unjoined job id; mirror it.
+    root_list["runtime"]["acquisition"]["provenance"]["unjoined_job_ids"] = ["JOB-3"]
+    recomposed = compose_work_queue_v1(root_list, generated_at=generated_at)
+    assert canonical(fixture) == canonical(recomposed)
+    # Sanity: the production-shaped fixture surfaces
+    # ``coverage.completeness == "PARTIAL"`` (PARTIAL provenance) and
+    # ``reason_codes == []`` (enumeration note alone never contributes).
+    assert fixture["coverage"]["completeness"] == "PARTIAL"
+    assert fixture["reason_codes"] == []
+    assert fixture["lifecycle_source"]["degraded"] == [_ROOT_ENUMERATION_NOTE]
+
+
+def test_r6_bytes_match_deterministic_available_complete_composer_only_fixture():
+    """N8: ``available_complete_composer_only.json`` is the COMPOSER-ONLY
+    COMPLETE-provenance fixture (no enumeration note, COMPLETE
+    provenance, full universe).  Achieved only when the root list is
+    hand-crafted; the live bounded acquisition always surfaces the
+    enumeration note.  Stays byte-identical under recompose."""
+    from pathlib import Path
+    fixture_path = (Path(__file__).parent / "fixtures" / "workspace_work_queue_v1"
+                    / "available_complete_composer_only.json")
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    generated_at = fixture["generated_at"]
+    root_list = _root_list(
+        roots=[_row(row["root_job_id"], row["lifecycle"]["status"],
+                    depth=row["lifecycle"]["depth"],
+                    role=row["lifecycle"]["orchestration_role"])
+               for row in fixture["groups"]["QUEUED"] + fixture["groups"]["RUNNING"]
+               + fixture["groups"]["COMPLETED_NOT_ACCEPTED"] + fixture["groups"]["TERMINAL"]],
+        total=4,
+        provenance_state="COMPLETE",
+        degraded=[],
     )
     recomposed = compose_work_queue_v1(root_list, generated_at=generated_at)
     assert canonical(fixture) == canonical(recomposed)
+    # Sanity: the composer-only fixture renders COMPLETE coverage.
+    assert fixture["coverage"]["completeness"] == "COMPLETE"
+    assert fixture["reason_codes"] == []
+    assert fixture["lifecycle_source"]["degraded"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +643,7 @@ def test_b1_prestart_capacity_unknown_without_placement():
 def test_b2_unavailable_coverage_never_claims_complete():
     """B2: degraded root list → UNAVAILABLE branch with PARTIAL coverage."""
     root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
-                           degraded=["bounded acquisition unavailable: read failed"])
+                           degraded=[_BOUNDED_UNAVAILABLE_NOTE])
     result = compose_work_queue_v1(root_list)
     assert result["availability"] == "UNAVAILABLE"
     assert result["coverage"] == {"count": 0, "total": None,
@@ -605,7 +654,7 @@ def test_b2_unavailable_truncated_root_list_reflects_truncated_in_coverage():
     """B2: even when the row set is empty the coverage reflects the root
     list's ``truncated`` flag — never silently coerced to False."""
     root_list = _root_list(roots=[], count=0, total=None, truncated=True,
-                           degraded=["bounded acquisition unavailable: read failed"])
+                           degraded=[_BOUNDED_UNAVAILABLE_NOTE])
     result = compose_work_queue_v1(root_list)
     assert result["availability"] == "UNAVAILABLE"
     assert result["coverage"]["truncated"] is True
@@ -622,7 +671,7 @@ def test_b2_composer_unavailable_body_is_key_stable():
     """
     from control_plane.work_queue_projection import OUTPUT_KEYS
     root_list = _root_list(roots=[], count=0, total=None, truncated=False,
-                           degraded=["bounded acquisition unavailable: read failed"])
+                           degraded=[_BOUNDED_UNAVAILABLE_NOTE])
     composer_body = compose_work_queue_v1(root_list, generated_at="FROZEN")
     assert set(composer_body) == OUTPUT_KEYS
     assert composer_body["availability"] == "UNAVAILABLE"
@@ -865,12 +914,15 @@ def test_n3_lifecycle_source_degraded_default_is_empty_list():
 
 def test_n3_available_document_appends_lifecycle_degraded_reason_when_degraded():
     """N3: a non-empty degraded list on an AVAILABLE document adds the
-    ``lifecycle_degraded`` reason code, sorted and deterministic."""
+    ``lifecycle_degraded`` reason code ONLY when the entry matches the
+    closed-set degradation phrase list; an unknown producer note never
+    contributes a reason code (N3 closed-set refactor)."""
     root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
                            degraded=["producer warning A"])
     result = compose_work_queue_v1(root_list)
     assert result["availability"] == "AVAILABLE"
-    assert "lifecycle_degraded" in result["reason_codes"]
+    assert "lifecycle_degraded" not in result["reason_codes"]
+    assert result["lifecycle_source"]["degraded"] == ["producer warning A"]
 
 
 def test_n3_no_lifecycle_degraded_reason_when_degraded_empty():
@@ -878,6 +930,93 @@ def test_n3_no_lifecycle_degraded_reason_when_degraded_empty():
     root_list = _root_list(roots=[_row("JOB-1", "RUNNING")])
     result = compose_work_queue_v1(root_list)
     assert "lifecycle_degraded" not in result["reason_codes"]
+
+
+# ---------------------------------------------------------------------------
+# B1 — lifecycle_degraded is gated on a closed set of degradation phrases;
+# the informational _ROOT_ENUMERATION_NOTE must never contribute a reason
+# code (every bounded acquisition surfaces it, so emitting a reason code
+# would render the channel non-diagnostic).
+# ---------------------------------------------------------------------------
+
+
+def test_b1_root_enumeration_note_alone_does_not_add_reason_code():
+    """B1: the informational ``_ROOT_ENUMERATION_NOTE`` is echoed in
+    ``lifecycle_source.degraded`` but never adds a ``lifecycle_degraded``
+    reason code on its own."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
+                           degraded=[_ROOT_ENUMERATION_NOTE])
+    result = compose_work_queue_v1(root_list)
+    assert result["availability"] == "AVAILABLE"
+    assert result["reason_codes"] == []
+    assert result["lifecycle_source"]["degraded"] == [_ROOT_ENUMERATION_NOTE]
+
+
+@pytest.mark.parametrize("entry", [
+    "bounded root discovery truncated; omitted roots are not counted",
+    _GENERATION_CONFLICT_NOTE,
+])
+def test_b1_closed_set_degradation_phrases_add_reason_code(entry):
+    """B1: every entry in the closed degradation set fires the
+    ``lifecycle_degraded`` reason code (exact match)."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
+                           degraded=[entry])
+    result = compose_work_queue_v1(root_list)
+    assert result["availability"] == "AVAILABLE"
+    assert result["reason_codes"] == ["lifecycle_degraded"]
+    # Producer's degraded note is still echoed verbatim for audit.
+    assert result["lifecycle_source"]["degraded"] == [entry]
+
+
+def test_b1_bounded_unavailable_note_drives_unavailable_branch_via_prefix_match():
+    """B1: the bounded-unavailable note is matched by ``startswith`` so
+    the producer's appended detail (e.g. ``": read failed"``) keeps the
+    UNAVAILABLE branch (the existing R1 behavior — the prefix phrase
+    belongs to the closed degradation set AND triggers UNAVAILABLE)."""
+    for entry in (_BOUNDED_UNAVAILABLE_NOTE,
+                  _BOUNDED_UNAVAILABLE_NOTE + ": read failed"):
+        root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
+                               degraded=[entry])
+        result = compose_work_queue_v1(root_list)
+        assert result["availability"] == "UNAVAILABLE"
+        assert result["reason_codes"] == ["LIFECYCLE_UNAVAILABLE"]
+        # The producer's degraded note is still echoed verbatim for audit.
+        assert result["lifecycle_source"]["degraded"] == [entry]
+
+
+def test_b1_unknown_note_is_echoed_but_does_not_add_reason_code():
+    """B1: an unknown degraded note is echoed verbatim in
+    ``lifecycle_source.degraded`` but contributes no reason code —
+    ``lifecycle_degraded`` is gated on a closed set of phrases, not on
+    ``degraded`` being non-empty."""
+    root_list = _root_list(roots=[_row("JOB-1", "RUNNING")],
+                           degraded=["producer-future-warning: x"])
+    result = compose_work_queue_v1(root_list)
+    assert result["availability"] == "AVAILABLE"
+    assert result["reason_codes"] == []
+    assert result["lifecycle_source"]["degraded"] == ["producer-future-warning: x"]
+
+
+def test_b1_degradation_notes_tuple_is_closed_and_sourced_from_fabric():
+    """B1: ``_DEGRADATION_NOTES`` is built from the imported
+    ``fabric_job_view`` constants — the composer never re-types the
+    producer's note strings."""
+    # All three phrases come from ``fabric_job_view``.
+    assert _BOUNDED_UNAVAILABLE_NOTE in _DEGRADATION_NOTES
+    assert _GENERATION_CONFLICT_NOTE in _DEGRADATION_NOTES
+    assert ("bounded root discovery truncated; omitted roots are not counted"
+            in _DEGRADATION_NOTES)
+    # The informational enumeration note is NEVER in the closed set.
+    assert _ROOT_ENUMERATION_NOTE not in _DEGRADATION_NOTES
+    # Predicate matches each phrase and startswith-matches the bounded note.
+    assert _is_degradation_note(_BOUNDED_UNAVAILABLE_NOTE) is True
+    assert _is_degradation_note(_BOUNDED_UNAVAILABLE_NOTE + ": read failed") is True
+    assert _is_degradation_note("bounded root discovery truncated; "
+                                "omitted roots are not counted") is True
+    assert _is_degradation_note(_GENERATION_CONFLICT_NOTE) is True
+    # Informational + unknown notes never match.
+    assert _is_degradation_note(_ROOT_ENUMERATION_NOTE) is False
+    assert _is_degradation_note("producer-future-warning: x") is False
 
 
 # ---------------------------------------------------------------------------
@@ -920,7 +1059,7 @@ def test_r6_unavailable_fixture_bytes_match_deterministic_recompose():
         "count": 0,
         "total": None,
         "truncated": False,
-        "degraded": ["bounded acquisition unavailable: read failed"],
+        "degraded": [_BOUNDED_UNAVAILABLE_NOTE],
     }
     recomposed = compose_work_queue_v1(root_list, generated_at=generated_at)
     assert canonical(fixture) == canonical(recomposed)
@@ -1054,9 +1193,15 @@ def test_r6_effect_exception_row_attributed_fixture_bytes_match_deterministic_re
 
 
 def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence(tmp_path):
-    """B2/N1: composer's UNAVAILABLE body (with degraded root list) and the
+    """B2/N1/N9: composer's UNAVAILABLE body (with degraded root list) and the
     read-service typed refusal body share the same key-for-key shape,
-    except for keys that legitimately differ:
+    except for keys that legitimately differ.
+
+    The ``autonomy`` deletion fails the FIRST ``_qualified`` check inside
+    ``_read_work`` (BEFORE acquire/compose are reached) — the injected
+    ``work_acquire`` is therefore never called.  This exercises the
+    read-service typed refusal pathway that fires when the cache bracket
+    itself is unqualified.
 
     Excluded keys and reasons:
     - ``generated_at``: composer accepts caller-supplied or wall-clock;
@@ -1074,6 +1219,12 @@ def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence(tmp
       acquired, so its ``truncated`` cannot honestly mirror a producer flag
       it has never seen — it remains ``False`` while the composer's body
       carries the producer's value.  Both bodies agree on the other keys.
+    - ``effect_exception.reason``: the composer's UNAVAILABLE body uses
+      ``"control_room_missing"`` (the composer's vocabulary for a missing
+      control room input it was handed ``None``); the read-service fallback
+      uses ``"read_refused"`` (N4 — the read service's own vocabulary for
+      its OWN read failure, never the composer's).  Both bodies agree on
+      the other fields of the effect_exception envelope.
     """
     import asyncio
     from control_plane.workspace_read_service import WorkspaceReadService
@@ -1081,10 +1232,14 @@ def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence(tmp
         cache_fixture, _work_frame, _root_list_payload,
     )
     owners, _, cache = cache_fixture(tmp_path)
-    # Strip autonomy so the second _qualified check fails AFTER snapshot
-    # succeeds — exercises the read-service typed refusal path.
+    # Strip autonomy so the FIRST ``_qualified`` check refuses (BEFORE
+    # the runtime acquisition — the injected ``work_acquire`` is never
+    # called).  Exercises the read-service typed refusal path that fires
+    # when the cache bracket itself is unqualified.
     del owners[0].state_cache["doc"]["autonomy"]
+    acquire_called = []
     def work_acquire(*args, **kwargs):
+        acquire_called.append(True)
         return _root_list_payload(rows=[])
     def work_compose(root_list_arg, **kwargs):
         from control_plane.work_queue_projection import compose_work_queue_v1
@@ -1096,15 +1251,17 @@ def test_b2_unavailable_bodies_match_in_keys_excluding_legitimate_divergence(tmp
         work_acquire=work_acquire, work_compose=work_compose,
     )
     fallback = asyncio.run(service.handle_frame(_work_frame())).get("result")
+    # N9: the FIRST ``_qualified`` check refused — acquire was never called.
+    assert acquire_called == []
     # The composer body, with generated_at frozen for diff parity.
     composer_root = _root_list(roots=[], count=0, total=None, truncated=False,
-                                degraded=["bounded acquisition unavailable: read failed"])
+                                degraded=[_BOUNDED_UNAVAILABLE_NOTE])
     composer_doc = compose_work_queue_v1(composer_root, generated_at="FROZEN")
     # Every key in the composer body must exist in the fallback body.
     assert set(composer_doc) == set(fallback)
     # Legitimate differences, value-for-value.
     EXCLUDED = {"generated_at", "source_observation", "reason_codes",
-                "lifecycle_source", "coverage"}
+                "lifecycle_source", "coverage", "effect_exception"}
     for key in composer_doc:
         if key in EXCLUDED:
             continue
@@ -1125,7 +1282,7 @@ def test_n1_composer_truncated_true_root_list_reflects_in_coverage():
     is the legitimate divergence from the read-service fallback's hard-
     coded ``truncated = False``."""
     root_list = _root_list(roots=[], count=0, total=None, truncated=True,
-                           degraded=["bounded acquisition unavailable: read failed"])
+                           degraded=[_BOUNDED_UNAVAILABLE_NOTE])
     result = compose_work_queue_v1(root_list)
     assert result["availability"] == "UNAVAILABLE"
     assert result["coverage"]["truncated"] is True
@@ -1157,12 +1314,3 @@ def test_n1_fallback_coverage_truncated_false_when_no_root_list_admitted(tmp_pat
     assert fallback["availability"] == "UNAVAILABLE"
     assert fallback["reason_codes"] == ["source_unavailable"]
     assert fallback["coverage"]["truncated"] is False
-
-
-def _work_frame_for_b2():
-    return {"schema": "mastermind.executive_workspace_read.v1",
-            "operation": "work", "selection": None,
-            "principal": {"policy_id": "x", "issuer_digest": "a" * 64,
-                          "subject_digest": "b" * 64, "client_ref": "x",
-                          "resource": "https://mcp.mastermind-x.com/workspace/read",
-                          "scopes": ["mastermind.workspace.read"]}}
