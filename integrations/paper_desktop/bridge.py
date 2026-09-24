@@ -25,7 +25,7 @@ ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
 PRIVATE_DIR_MODE = 0o700
-SUPPORTED_SERVER = ("paper-desktop", "0.5.11")
+SUPPORTED_SERVER = ("paper-desktop", "0.5.12")
 SUPPORTED_CATALOG_SHA256 = "ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570"
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
