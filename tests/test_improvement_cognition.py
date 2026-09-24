@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -85,6 +86,8 @@ def test_draft_uses_one_no_tools_no_log_turn_and_keeps_advisory_boundary(monkeyp
     assert kwargs["add_dirs"] == []
     assert kwargs["max_turns"] == 1
     assert kwargs["log_run"] is False
+    assert kwargs["cwd"]
+    assert not Path(kwargs["cwd"]).exists()
     assert draft["execution_authority_granted"] is False
     assert draft["ranking_authority_granted"] is False
     assert draft["self_evaluation_accepted"] is False
