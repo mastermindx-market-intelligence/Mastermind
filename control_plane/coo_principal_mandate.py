@@ -63,12 +63,6 @@ class NewEffectGate(str, enum.Enum):
     FENCED_NOT_COO_ACCOUNTABLE = "FENCED_NOT_COO_ACCOUNTABLE"
 
 
-class SessionAssurance(str, enum.Enum):
-    MISSION_BOUND = "COO_PRINCIPAL_MISSION_BOUND"
-    PROVIDER_SESSION_BOUND = "COO_PRINCIPAL_PROVIDER_SESSION_BOUND"
-    CRYPTOGRAPHIC_SESSION_BOUND = "COO_PRINCIPAL_CRYPTOGRAPHIC_SESSION_BOUND"
-
-
 def _text(value: object, *, field: str, pattern: re.Pattern[str] = _REF_RE) -> str:
     if type(value) is not str or pattern.fullmatch(value) is None:
         raise ValueError(f"{field} is invalid")
@@ -367,7 +361,6 @@ def project_coo_principal_mandate(
     principal: PrincipalFact,
     authority: AuthorityFact,
     mission_workspace: Mapping[str, Any],
-    session_assurance: SessionAssurance = SessionAssurance.MISSION_BOUND,
 ) -> dict[str, Any]:
     """Return one deterministic read-only COO principal mandate projection.
 
@@ -380,9 +373,6 @@ def project_coo_principal_mandate(
         raise TypeError("principal must be PrincipalFact")
     if not isinstance(authority, AuthorityFact):
         raise TypeError("authority must be AuthorityFact")
-    if not isinstance(session_assurance, SessionAssurance):
-        raise TypeError("session_assurance must be SessionAssurance")
-
     state = _mission_state(mission_workspace, expected_work_ref=authority.work_ref)
     gate, gate_reasons = _effect_gate(state, authority)
     decision, decision_reasons = _decision_posture(state, gate)
@@ -429,7 +419,7 @@ def project_coo_principal_mandate(
         },
         "release": {"release_class": authority.release_class.value},
         "continuity": {
-            "session_assurance": session_assurance.value,
+            "session_assurance": "COO_PRINCIPAL_MISSION_BOUND",
             "current_coo_target": None,
         },
         "decision_posture": decision.value,
@@ -447,6 +437,5 @@ __all__ = [
     "NewEffectGate",
     "PrincipalFact",
     "ReleaseClass",
-    "SessionAssurance",
     "project_coo_principal_mandate",
 ]
