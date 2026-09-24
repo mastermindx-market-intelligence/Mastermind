@@ -223,24 +223,23 @@ def _serviceability_fact(
     observed_at_ms: int = OBSERVED_AT_MS,
     expires_at_ms: int = EXPIRES_AT_MS,
 ) -> wcap.ActionServiceabilityFact:
+    surface_digest = action_surface_evidence_digest
+    if surface_digest is None:
+        surface_digest = _action_surface(
+            session_ref=session_ref,
+            binding_ref=binding_ref,
+            binding_generation=binding_generation,
+            action_scope_ref=action_scope_ref,
+            observed_at_ms=observed_at_ms,
+            expires_at_ms=expires_at_ms,
+        ).evidence_digest
     return wcap.ActionServiceabilityFact(
         tool=action,
         session_ref=session_ref,
         binding_ref=binding_ref,
         binding_generation=binding_generation,
         action_scope_ref=action_scope_ref,
-        action_surface_evidence_digest=(
-            action_surface_evidence_digest
-            or _action_surface(
-                session_ref=session_ref,
-                binding_ref=binding_ref,
-                binding_generation=binding_generation,
-                action_scope_ref=surface.action_scope_ref,
-                action_surface_evidence_digest=surface.evidence_digest,
-                observed_at_ms=observed_at_ms,
-                expires_at_ms=expires_at_ms,
-            ).evidence_digest
-        ),
+        action_surface_evidence_digest=surface_digest,
         observed_at_ms=observed_at_ms,
         expires_at_ms=expires_at_ms,
         serviceable=serviceable,
@@ -294,7 +293,8 @@ def _receipt(
                 session_ref=session_ref,
                 binding_ref=binding_ref,
                 binding_generation=binding_generation,
-                action_scope_ref=action_scope_ref,
+                action_scope_ref=surface.action_scope_ref,
+                action_surface_evidence_digest=surface.evidence_digest,
                 observed_at_ms=observed_at_ms,
                 expires_at_ms=expires_at_ms,
             )
