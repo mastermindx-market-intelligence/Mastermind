@@ -322,11 +322,17 @@ class ServicePrincipal:
 #: The CLOSED registry: exactly one reviewed principal.  There is no runtime,
 #: config, CLI, or environment way to add a second one - adding a principal is a
 #: code review, not an operation.
+_SINK_BINDING = ("svc-site-maintenance", "svc-site-maintenance")
+if ceo_intent.SERVICE_PRINCIPAL_BINDINGS != frozenset({_SINK_BINDING}):
+    raise RuntimeError(
+        "service principal emitter and canonical sink enrollment contract differ"
+    )
+
 REGISTRY: Mapping[str, ServicePrincipal] = MappingProxyType(
     {
-        "svc-site-maintenance": ServicePrincipal(
-            principal_id="svc-site-maintenance",
-            actor="svc-site-maintenance",
+        _SINK_BINDING[0]: ServicePrincipal(
+            principal_id=_SINK_BINDING[0],
+            actor=_SINK_BINDING[1],
             purpose=(
                 "VPS site/source-health READ/RESEARCH audits (no writes, no dispatch, "
                 "no provider or credential effect)"
