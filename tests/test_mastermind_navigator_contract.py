@@ -1300,7 +1300,7 @@ def test_source_work_does_not_fall_through_to_generic_studio_shell() -> None:
     local = by_class["local_machine_process"]
 
     assert project["generic_shell_fallback"] is False
-    assert project["platform_refusal_policy"] == "SAME_OPERATION_SAME_CARRIER_RECONCILIATION_NO_FAILOVER"
+    assert project["platform_refusal_policy"] == "ACTION_SCOPED_NO_RETRY_NO_FAILOVER_WITH_DISPATCH_RECONCILIATION"
     assert "already-authorized native builder or Executive Job/Attempt/Worker" in project["unsupported_effect_route"]
     assert any("Studio Direct generic shell" in item for item in project["forbidden_substitutions"])
     assert project["typed_git_publication_route"] == [
@@ -1309,11 +1309,19 @@ def test_source_work_does_not_fall_through_to_generic_studio_shell() -> None:
         "studio_git_push_current_branch",
     ]
     assert "same canonical mmx-workspace operation" in project["typed_git_route_conditions"]
+    assert project["typed_git_publication_owner"] == "Studio Direct typed Git publisher / canonical mmx-workspace"
+    assert project["typed_git_publication_tool_family"] == "studio-direct-typed-git"
+    assert project["platform_refusal_pre_dispatch_effect"] == "TOOL_DEGRADED / EFFECT_NONE"
+    assert project["platform_refusal_ambiguous_dispatch_effect"] == "EFFECT_UNKNOWN"
+    assert project["platform_refusal_retry_policy"] == "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL"
     assert "missing build or test capability" in project["typed_git_forbidden_substitutions"]
 
     assert local["generic_shell_scope"] == "GENUINE_BOUND_HOST_PROCESS_ONLY"
     assert local["selected_project_source_fallback"] is False
-    assert local["platform_refusal_policy"] == "SAME_OPERATION_SAME_CARRIER_RECONCILIATION_NO_FAILOVER"
+    assert local["platform_refusal_policy"] == "ACTION_SCOPED_NO_RETRY_NO_FAILOVER_WITH_DISPATCH_RECONCILIATION"
+    assert local["platform_refusal_pre_dispatch_effect"] == "TOOL_DEGRADED / EFFECT_NONE"
+    assert local["platform_refusal_ambiguous_dispatch_effect"] == "EFFECT_UNKNOWN"
+    assert local["platform_refusal_retry_policy"] == "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL"
     assert any("selected-project source" in item for item in local["forbidden_substitutions"])
 
     skill = (PACKAGE / "skills/navigate-mastermind-universe/SKILL.md").read_text(encoding="utf-8")
@@ -1322,6 +1330,9 @@ def test_source_work_does_not_fall_through_to_generic_studio_shell() -> None:
         "Do not synthesize the missing capability with Studio Direct",
         "genuine bound host/process operations",
         "freeze that logical operation on its carrier",
+        "`TOOL_DEGRADED / EFFECT_NONE`",
+        "it grants no retry",
+        "not generic Studio shell and not Workbench itself",
         "Never change account, plugin, connector, worker, device, or generic tool",
         "prefer the gateway-owned `studio_git_publish_status`",
     ):
@@ -1335,6 +1346,8 @@ def test_fresh_session_source_and_safety_refusal_cases_preserve_owner_boundaries
     source = cases["selected-source-work-no-generic-shell-fallback"]
     assert source["capability_class"] == "selected_project_action"
     assert source["expected_owner"] == "Workbench"
+    assert "Studio Direct typed Git publisher" in source["owner_native_action"]
+    assert "do not relabel that typed publisher as Workbench or generic shell" in source["owner_native_action"]
     assert source["expected_tool_family"] == "workbench"
     assert source["requested_action_class"] == "WRITE"
     assert source["expected_disposition"] == "NO_GENERIC_STUDIO_SHELL_FALLBACK"
@@ -1345,6 +1358,9 @@ def test_fresh_session_source_and_safety_refusal_cases_preserve_owner_boundaries
 
     refused = cases["platform-safety-refusal-preserves-carrier"]
     assert refused["capability_class"] == "selected_project_action"
-    assert refused["expected_disposition"] == "SAME_OPERATION_FREEZE_AND_RECONCILE_NO_FAILOVER"
+    assert refused["expected_disposition"] == "ACTION_SCOPED_REFUSAL_NO_RETRY_NO_FAILOVER"
     assert "Freeze the original logical operation on its carrier" in refused["owner_native_action"]
-    assert "Do not switch account, plugin, connector, worker, device, or generic tool" in refused["owner_native_action"]
+    assert "TOOL_DEGRADED / EFFECT_NONE" in refused["owner_native_action"]
+    assert "preserve EFFECT_UNKNOWN" in refused["owner_native_action"]
+    assert "do not retry" in refused["owner_native_action"].lower()
+    assert "Do not rephrase the denied effect or switch account, plugin, connector, worker, device, model, provider, or generic tool" in refused["owner_native_action"]
