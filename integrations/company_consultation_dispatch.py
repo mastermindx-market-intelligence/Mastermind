@@ -1109,6 +1109,15 @@ class RuntimeConsultationDispatcher:
             self.runtime, consultation_ref
         )
         if reserved is not None:
+            # A DIFFERENT second answer can never replace or be
+            # relabelled as the admitted one: refuse with zero effect.
+            if _semantic_answer_digest(answer_frame) != reserved.payload.get(
+                "semantic_answer_digest"
+            ):
+                raise ConsultationRefusal(
+                    "CONFLICT",
+                    detail="second answer differs from the admitted answer",
+                )
             packet = self.packets.get_answer(consultation_ref)
             validated = _validated_answer_frame(
                 intent.payload, reserved, packet

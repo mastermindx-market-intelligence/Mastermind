@@ -2675,13 +2675,11 @@ def test_dispatcher_refusals_are_typed_zero_effect_and_gateway_reports_effect_un
 
 
 def test_refused_second_answer_cannot_replace_accepted_one(tmp_path: Path) -> None:
-    """Second reply with different text → reconciled; accepted frame is unchanged.
+    """A second reply with DIFFERENT text is CONFLICT with zero effect.
 
-    Under the round-4C-1 packet-boundary rules, the carrier is the
-    single source of truth for an admitted ANSWER. A second reply
-    with different text reconciles to the first answer on the
-    carrier (no runtime write, no carrier rewrite); the first
-    ANSWER_AVAILABLE event and the first answer text survive.
+    The admitted ANSWER_AVAILABLE event and the first answer text survive;
+    only an identical reply reconciles (see
+    test_identical_reply_replay_does_not_write_carrier_twice).
     """
     runtime = _runtime_at(tmp_path / "refused-second")
     _consultations(runtime, tmp_path / "refused-second")
@@ -2732,26 +2730,24 @@ def test_refused_second_answer_cannot_replace_accepted_one(tmp_path: Path) -> No
     assert first_reply["ok"] is True
     first_fingerprint = first_reply["data"]["answer_fingerprint"]
 
-    second_reply = _run(
-        b_dispatcher(
-            "company.reply",
-            {
-                "schema": COMPANY_CONSULTATION_SCHEMA,
-                "operation": "reply",
-                "semantic": {
-                    "consultation_ref": consultation_id,
-                    "answer": "different second answer",
-                    "supersedes_message_key": None,
-                    "evidence_refs": [],
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run(
+            b_dispatcher(
+                "company.reply",
+                {
+                    "schema": COMPANY_CONSULTATION_SCHEMA,
+                    "operation": "reply",
+                    "semantic": {
+                        "consultation_ref": consultation_id,
+                        "answer": "different second answer",
+                        "supersedes_message_key": None,
+                        "evidence_refs": [],
+                    },
                 },
-            },
+            )
         )
-    )
-    assert second_reply["ok"] is True
-    assert second_reply["result"]["state"] == "ANSWER_AVAILABLE"
-    assert second_reply["result"]["inserted"] is False
-    assert second_reply["result"]["reconciled"] is True
-    assert second_reply["result"]["answer_fingerprint"] == first_fingerprint
+    assert excinfo.value.code == "CONFLICT"
+    assert excinfo.value.effect == "NONE"
 
     events = runtime.events.list_events(
         aggregate_type="consultation", aggregate_id=consultation_id
