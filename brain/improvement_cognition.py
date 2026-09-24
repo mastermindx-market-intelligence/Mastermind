@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable
+from typing import Any
 
 from control_plane.wake_events import canonical_json_bytes
 
@@ -197,12 +197,8 @@ def validate_draft(value: Any, *, packet: dict) -> dict:
     }
 
 
-def _draft_with_reasoner(
-    report: Any,
-    *,
-    reasoner: Callable[..., dict] | None,
-) -> dict:
-    """Private test seam around the exact public provider path."""
+def draft_proposals(report: Any) -> dict:
+    """Generate one private advisory draft through the incumbent audited provider bridge only."""
     packet = _evidence_packet(report)
     if not packet["opportunities"]:
         return {
@@ -214,15 +210,14 @@ def _draft_with_reasoner(
             "self_evaluation_accepted": False,
             "provider": None,
         }
-    if reasoner is None:
-        from brain import cli_bridge
-        reasoner = cli_bridge.reason_sync
+
+    from brain import cli_bridge
 
     # Claude's SDK loads project settings relative to cwd even with an empty tool list.
     # Use an empty ephemeral cwd so this turn is bound to the frozen packet rather than
     # repository CLAUDE.md/skills. Codex's prompt-only path independently re-isolates cwd.
     with tempfile.TemporaryDirectory(prefix="mastermind-improvement-cognition-") as isolated_cwd:
-        result = reasoner(
+        result = cli_bridge.reason_sync(
             _prompt(packet),
             role="deep",
             arm=False,
@@ -243,11 +238,6 @@ def _draft_with_reasoner(
         "model": result.get("model"),
     }
     return draft
-
-
-def draft_proposals(report: Any) -> dict:
-    """Generate one private advisory draft through the incumbent audited provider bridge only."""
-    return _draft_with_reasoner(report, reasoner=None)
 
 def evaluation_packet(draft: Any) -> dict:
     """Public-safe evaluation seam; keeps full hypothesis prose out of public stores."""
