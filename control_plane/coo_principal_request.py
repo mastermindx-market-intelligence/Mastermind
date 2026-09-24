@@ -105,6 +105,13 @@ def principal_request_ref(normalized_request: Mapping[str, Any]) -> str:
         raise CooPrincipalRequestError(
             "normalized request requires workstream and operation_key"
         )
+    canonical = normalize_principal_request(
+        dict(normalized_request), expected_work_ref=work_ref
+    )
+    if canonical != dict(normalized_request):
+        raise CooPrincipalRequestError(
+            "normalized request differs from the canonical COO request"
+        )
     material = (work_ref + "\n" + operation_key).encode("utf-8")
     digest = hashlib.sha256(_REQUEST_REF_DOMAIN + material).hexdigest()
     request_ref = REQUEST_REF_PREFIX + digest[:32]
