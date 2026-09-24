@@ -219,6 +219,7 @@ def _serviceability_fact(
     binding_ref: str = "runtimebinding-websol-c3-17",
     binding_generation: int = 7,
     action_scope_ref: str = ACTION_SCOPE_REF,
+    action_surface_evidence_digest: str | None = None,
     observed_at_ms: int = OBSERVED_AT_MS,
     expires_at_ms: int = EXPIRES_AT_MS,
 ) -> wcap.ActionServiceabilityFact:
@@ -228,6 +229,18 @@ def _serviceability_fact(
         binding_ref=binding_ref,
         binding_generation=binding_generation,
         action_scope_ref=action_scope_ref,
+        action_surface_evidence_digest=(
+            action_surface_evidence_digest
+            or _action_surface(
+                session_ref=session_ref,
+                binding_ref=binding_ref,
+                binding_generation=binding_generation,
+                action_scope_ref=surface.action_scope_ref,
+                action_surface_evidence_digest=surface.evidence_digest,
+                observed_at_ms=observed_at_ms,
+                expires_at_ms=expires_at_ms,
+            ).evidence_digest
+        ),
         observed_at_ms=observed_at_ms,
         expires_at_ms=expires_at_ms,
         serviceable=serviceable,
@@ -1895,3 +1908,35 @@ def test_current_owner_surface_allows_existing_guard_and_stays_private() -> None
     assert surface.action_scope_ref not in rendered
     assert surface.evidence_digest not in rendered
     assert surface.source.ref not in rendered
+
+
+def test_serviceability_from_prior_same_scope_surface_evidence_refuses_receipt() -> None:
+    contracts = _contracts()
+    prior_surface = _action_surface()
+    current_surface = _action_surface(
+        source=_source(
+            SourceOwner.SURFACE_BINDINGS,
+            "surface-bindings-web-message-scope-generation-2",
+        )
+    )
+    assert prior_surface.action_scope_ref == current_surface.action_scope_ref
+    assert prior_surface.evidence_digest != current_surface.evidence_digest
+
+    stale_probes = tuple(
+        _serviceability_fact(
+            action,
+            action_scope_ref=prior_surface.action_scope_ref,
+            action_surface_evidence_digest=prior_surface.evidence_digest,
+        )
+        for action in _all_actions(contracts)
+    )
+
+    with pytest.raises(
+        wcap.WebCeoSessionCapabilityError,
+        match="SERVICEABILITY_FACT_SURFACE_EVIDENCE_MISMATCH",
+    ):
+        _receipt(
+            contracts=contracts,
+            action_surface=current_surface,
+            serviceability=stale_probes,
+        )
