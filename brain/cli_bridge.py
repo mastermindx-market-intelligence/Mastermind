@@ -266,6 +266,46 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
     )
 
 
+async def reason_private_ephemeral(
+    prompt: str,
+    *,
+    role: str = "deep",
+    model: str | None = None,
+    cwd: str | None = None,
+    max_turns: int = 1,
+) -> dict:
+    """One private, no-tools, no-session reasoning turn through the incumbent provider owner.
+
+    This is deliberately narrower than reason(): callers cannot arm tools, add directories,
+    attach MCP, resume sessions, or enable Mastermind run/thinking logs. Claude may run only
+    through the Agent SDK with empty setting sources and explicit native non-persistence;
+    an SDK error fails closed instead of falling through to the ambient CLI subprocess.
+    """
+    if type(max_turns) is not int or max_turns != 1:
+        raise ValueError("private_ephemeral_requires_one_turn")
+    return await _reason(
+        prompt,
+        role=role,
+        model=model,
+        allowed_tools=[],
+        add_dirs=[],
+        max_turns=1,
+        cwd=cwd,
+        arm=False,
+        resume=None,
+        mcp_servers={},
+        log_run=False,
+        book=None,
+        seat="private-ephemeral",
+        record_book="system",
+        _private_ephemeral=True,
+    )
+
+
+def reason_private_ephemeral_sync(prompt: str, **kw) -> dict:
+    return asyncio.run(reason_private_ephemeral(prompt, **kw))
+
+
 async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   system: str | None = None, append_system: str | None = None,
                   allowed_tools: list[str] | None = None, add_dirs: list[str] | None = None,
@@ -277,7 +317,8 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   seat: str | None = None,
                   record_book: str | None = None,
                   _backend_override: str | None = None,
-                  _oauth_candidates: list[dict] | None = None) -> dict:
+                  _oauth_candidates: list[dict] | None = None,
+                  _private_ephemeral: bool = False) -> dict:
     """Internal dispatcher with explicit provider overrides for the shared pool."""
     selected_backend = _selected_backend(_backend_override)
     if selected_backend == "waterfall":
@@ -299,6 +340,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             book=book,
             seat=seat,
             record_book=record_book,
+            _private_ephemeral=_private_ephemeral,
         )
     if selected_backend == "codex":
         from brain import codex_bridge
@@ -391,6 +433,13 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     turns = max_turns or rc.get("max_turns", 1)
     workdir = cwd or str(_ROOT)
     base = {"model": mdl, "role": role, "armed": arm}
+    if _private_ephemeral:
+        if arm or resume is not None or tools != [] or dirs != [] or mcp_servers not in ({}, None):
+            return {**base, "ok": False, "backend": "none", "text": None,
+                    "error": "private ephemeral reasoning boundary violated"}
+        if turns != 1:
+            return {**base, "ok": False, "backend": "none", "text": None,
+                    "error": "private ephemeral reasoning requires one turn"}
 
     if not cli_path():
         return {**base, "ok": False, "backend": "none", "text": None,
@@ -443,6 +492,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
                     rc.get("permission_mode", "default"), mcp_servers, resume, arm,
                     run_id=_run_id, env_name=_env_name, thinking_out=_think_box,
+                    private_ephemeral=_private_ephemeral,
                 )
                 # THE CRUX: classify the result TEXT — org-disabled banners arrive as
                 # ok-looking results whose text contains the subscription-disabled message.
@@ -530,14 +580,19 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     except Exception:
                         pass
 
-                    if arm:
-                        # Armed requires SDK; no subprocess fallback
+                    if arm or _private_ephemeral:
+                        # Armed and private-ephemeral paths are SDK-only; never fall through
+                        # to the less-controlled subprocess after private evidence was supplied.
                         result = {**base, "ok": False, "backend": "none", "text": None,
-                                  "error": _sdk_exc_repr or "armed research needs the Agent SDK + a subscription credential"}
+                                  "error": _sdk_exc_repr or (
+                                      "private ephemeral reasoning requires the Agent SDK"
+                                      if _private_ephemeral
+                                      else "armed research needs the Agent SDK + a subscription credential"
+                                  )}
                         used_key_id = _key_id
                         break
 
-                    # Fall through to subprocess for non-armed, non-key-failure SDK errors.
+                    # Fall through to subprocess for ordinary non-armed, non-key-failure SDK errors.
                     # Discard the errored SDK call's partial thinking — the subprocess
                     # result it would ride with is a different generation (and the CLI
                     # JSON backend exposes no thinking blocks at all).
@@ -573,10 +628,14 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     break
 
         elif not _SDK:
-            # No SDK at all — subprocess only
-            if arm:
+            # Private evidence is never sent through the subprocess fallback.
+            if arm or _private_ephemeral:
                 result = {**base, "ok": False, "backend": "none", "text": None,
-                          "error": "armed research needs the Agent SDK + a subscription credential"}
+                          "error": (
+                              "private ephemeral reasoning requires the Agent SDK"
+                              if _private_ephemeral
+                              else "armed research needs the Agent SDK + a subscription credential"
+                          )}
                 used_key_id = _key_id
                 break
             result = await _via_subprocess(
@@ -728,7 +787,8 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
 async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm,
                    mcp_servers, resume, arm, run_id: str | None = None,
                    env_name: str | None = None,
-                   thinking_out: list | None = None) -> dict:
+                   thinking_out: list | None = None,
+                   private_ephemeral: bool = False) -> dict:
     """thinking_out: optional side-channel list; when provided, the turn's reasoning
     trace (a list of `mastermind.response_log.v1` thinking segments) is appended as ONE
     element. LEAK LAW (mirrors macro brain_gateway): thinking is LOG-ONLY — it rides
@@ -737,9 +797,28 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     # Claude Agent SDK intentionally loads no filesystem settings by default.  The regional PMs
     # may delegate only through this repository's reviewed, read-only `.claude/agents` profiles,
     # so opt into the project source explicitly (never user/local settings from the VPS account).
-    opts = _Options(model=mdl, allowed_tools=tools, add_dirs=dirs, cwd=workdir,
-                    max_turns=turns, permission_mode=perm, env=_subscription_env(env_name),
-                    setting_sources=["project"])
+    if private_ephemeral:
+        opts = _Options(
+            model=mdl,
+            allowed_tools=[],
+            add_dirs=[],
+            cwd=workdir,
+            max_turns=1,
+            permission_mode="dontAsk",
+            env=_subscription_env(env_name),
+            setting_sources=[],
+            extra_args={
+                "safe-mode": None,
+                "no-chrome": None,
+                "no-session-persistence": None,
+                "strict-mcp-config": None,
+            },
+        )
+        opts.mcp_servers = {}
+    else:
+        opts = _Options(model=mdl, allowed_tools=tools, add_dirs=dirs, cwd=workdir,
+                        max_turns=turns, permission_mode=perm, env=_subscription_env(env_name),
+                        setting_sources=["project"])
     if mcp_servers:
         opts.mcp_servers = mcp_servers
     if resume:
