@@ -44,7 +44,7 @@ from control_plane.consultation_runtime import (
 )
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.wake_events import utc_now_iso
-from control_plane.wake_ledger import requested_record
+from control_plane.wake_ledger import LedgerPhase, requested_record
 from control_plane.wake_persist import WakeLedgerRepository
 from integrations.mastermind_company_mcp.consultation import (
     validate_company_consult_dispatch_request,
@@ -81,6 +81,7 @@ REFUSAL_CODES = frozenset(
         "WAKE_NOT_ACKNOWLEDGED",
         "UNAVAILABLE",
         "BODY_OVER_BUDGET",
+        "EXPIRED",
     }
 )
 
@@ -297,6 +298,38 @@ def _parse_utc_seconds(value: str) -> dt.datetime:
 
 def _format_utc_seconds(value: dt.datetime) -> str:
     return value.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _is_expired(valid_until: str, observed_at: str) -> bool:
+    """Mirror of the runtime's expiry rule: expired iff strictly after
+    ``valid_until`` (a consult observed exactly at ``valid_until`` is
+    still valid)."""
+    return _parse_utc_seconds(observed_at) > _parse_utc_seconds(valid_until)
+
+
+def _wake_request_readback(
+    repository: WakeLedgerRepository, obligation_id: str
+) -> bool | None:
+    """Tri-state readback of the exact ``WAKE_REQUESTED`` on one ledger.
+
+    ``True`` = exactly one request record exists; ``False`` = the
+    ledger is readable and holds no request (proven absent); ``None``
+    = the readback is unavailable or conflicting, so neither presence
+    nor absence is proven.
+    """
+    try:
+        records = repository.list_records(obligation_id)
+    except Exception:
+        return None
+    requested = 0
+    for item in records:
+        if item.record.phase is LedgerPhase.WAKE_REQUESTED:
+            requested += 1
+    if requested == 1:
+        return True
+    if requested == 0:
+        return False
+    return None
 
 
 def _consultation_schema_for(surface: str) -> str:
@@ -602,9 +635,15 @@ class RuntimeConsultationDispatcher:
         packets: ConsultationPacketCarrier,
         invocations: InvocationContextSource,
         _clock: ClockFn | None = None,
+        _wake_repository: WakeLedgerRepository | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("runtime must be the existing Executive Runtime")
+        if _wake_repository is None:
+            _wake_repository = WakeLedgerRepository(runtime)
+        if not isinstance(_wake_repository, WakeLedgerRepository):
+            raise TypeError("_wake_repository must be WakeLedgerRepository")
+        self._wake_repository = _wake_repository
         self.runtime = runtime
         self.repository_root = Path(repository_root).resolve()
         self.caller = caller
@@ -746,6 +785,11 @@ class RuntimeConsultationDispatcher:
                 "INVOCATION_CONTEXT_UNAVAILABLE",
                 detail="invocations.current() returned None",
             )
+
+        # IAC-1 r4d-N1: the dispatcher's trusted clock, read once for
+        # the publication fence. The invocation's historic ``issued_at``
+        # is never "now".
+        now = self._clock()
 
         identity_hash = _mint_request_identity(
             caller=self.caller,
@@ -892,6 +936,32 @@ class RuntimeConsultationDispatcher:
                     detail="consultation_id reused with changed semantic payload",
                 )
             question_frame = candidate
+            # IAC-1 r4d-N1: a replay is bounded by the PERSISTED validity.
+            valid_until = str(persisted_payload.get("valid_until"))
+            if _is_expired(valid_until, now):
+                # Expired replay: no publication, no Wake origination.
+                # ``attention_requested`` reports only whether the exact
+                # request ALREADY exists (read-only readback).
+                return {
+                    "ok": True,
+                    "result": _committed_consult_result(
+                        consultation_id=consultation_id,
+                        valid_until=valid_until,
+                        carrier_ref=f"company-mcp://{consultation_id}",
+                        intent_inserted=False,
+                        attention_requested=self._existing_wake_request(
+                            existing_intent
+                        ),
+                        wake_state=None,
+                        blocker="EXPIRED",
+                    ),
+                }
+        elif _is_expired(valid_until, now):
+            # IAC-1 r4d-N1: first publication after validity elapsed is
+            # refused with zero effect (no intent(), no put, no Wake).
+            raise ConsultationRefusal(
+                "EXPIRED", detail="valid_until elapsed before publication"
+            )
 
         carrier_ref = f"company-mcp://{consultation_id}"
 
@@ -912,30 +982,55 @@ class RuntimeConsultationDispatcher:
                 "CONFLICT", detail=type(exc).__name__
             ) from exc
 
-        # Carrier put happens only after ``intent()`` returned (inserted
-        # or replayed). For a replay path, the carrier already holds
-        # the frame — skip the put so we don't clobber the original
-        # question text the original caller put on the carrier. The
-        # whole-semantic replay above already proved the carrier packet
-        # agrees with the rebuilt candidate frame.
-        if existing_intent is None or not carrier_holds_packet:
+        # IAC-1 r4d-N2: publication is authorized ONLY by the uniquely
+        # inserted INTENT. ``inserted=False`` (replay, or the loser of an
+        # insertion race) never publishes: it reads the carrier back and
+        # validates the packet against the persisted INTENT; a missing or
+        # invalid readback is a reconciliation barrier for the existing
+        # same-carrier recovery owner, never a licence to resend.
+        intent_event = _find_consultation_event(
+            self.runtime, consultation_id, "INTENT"
+        )
+        if intent_event is None:
+            raise ConsultationRefusal(
+                "CONFLICT", detail="INTENT missing after intent() returned"
+            )
+        if intent_result.inserted:
             try:
                 self.packets.put_question(consultation_id, question_frame)
-            except Exception as exc:
-                # INTENT is durable (inserted or replayed) but the body
-                # never reached the carrier. Per IAC-1 r4c2 the
-                # committed facts stand; the caller sees a
-                # CARRIER_RECONCILIATION_REQUIRED barrier and
-                # ``attention_requested=False`` so they never claim a
-                # wake exists when the body is lost.
+            except Exception:
+                # INTENT is durable but the body never (provably) reached
+                # the carrier. This call inserted the INTENT, so no Wake
+                # request can exist yet: ``attention_requested`` False is
+                # proven, not assumed.
                 return {
                     "ok": True,
                     "result": _committed_consult_result(
                         consultation_id=consultation_id,
                         valid_until=valid_until,
                         carrier_ref=carrier_ref,
-                        intent_inserted=intent_result.inserted,
+                        intent_inserted=True,
                         attention_requested=False,
+                        wake_state=None,
+                        blocker="CARRIER_RECONCILIATION_REQUIRED",
+                    ),
+                }
+        else:
+            try:
+                readback = self.packets.get_question(consultation_id)
+            except Exception:
+                readback = None
+            if _validated_question_frame(intent_event.payload, readback) is None:
+                return {
+                    "ok": True,
+                    "result": _committed_consult_result(
+                        consultation_id=consultation_id,
+                        valid_until=valid_until,
+                        carrier_ref=carrier_ref,
+                        intent_inserted=False,
+                        attention_requested=self._existing_wake_request(
+                            intent_event
+                        ),
                         wake_state=None,
                         blocker="CARRIER_RECONCILIATION_REQUIRED",
                     ),
@@ -948,50 +1043,14 @@ class RuntimeConsultationDispatcher:
         # existing WakeLedgerRepository. Any exception leaves the
         # committed INTENT durable and the caller sees a typed blocker
         # (no silent failure, no hidden retry).
-        attention_requested = False
+        repository = self._wake_repository
         try:
-            intent_event = _find_consultation_event(
-                self.runtime, consultation_id, "INTENT"
-            )
-            if intent_event is None:
-                raise StateConflict(
-                    "INTENT missing after intent() returned"
-                )
-            question_item = self._consultations._intent_from_event(
-                intent_event
-            )
-            with self.runtime.store.read() as connection:
-                binding = self._consultations._require_current_recipient(
-                    question_item, connection=connection
-                )
-                identity = (
-                    self._consultations
-                    ._consultation_source_identity_on_connection(
-                        question_item, connection
-                    )
-                )
-            obligation = ConsultationWakeExtension(
-                repository=WakeLedgerRepository(self.runtime),
-                requester_job_id=identity.requester_job_id,
-                requester_attempt_id=identity.requester_attempt_id,
-                root_job_id=identity.root_job_id,
-                recipient_job_id=identity.recipient_job_id,
-                recipient_attempt_id=identity.recipient_attempt_id,
-                consultation_id=identity.consultation_id,
-                message_key=identity.message_key,
-                semantic_fingerprint=identity.semantic_fingerprint,
-                current_binding=binding,
-            ).obligation()
-            record = requested_record(obligation)
-            WakeLedgerRepository(self.runtime).append_record(
-                record, obligation=obligation
-            )
-            attention_requested = True
+            obligation = self._wake_obligation(intent_event)
         except Exception:
-            # INTENT is durable but the wake could not be created.
-            # Never raise: the INTENT append is a known effect that
-            # must not be hidden. Return the committed facts with
-            # attention_requested=False and blocker WAKE_REQUEST_UNRESOLVED.
+            # The obligation could not even be derived, so no ledger
+            # readback is possible. Absence is proven only when THIS
+            # call inserted the INTENT (nothing could have requested a
+            # Wake before it); otherwise the state is unknown.
             return {
                 "ok": True,
                 "result": _committed_consult_result(
@@ -999,11 +1058,60 @@ class RuntimeConsultationDispatcher:
                     valid_until=valid_until,
                     carrier_ref=carrier_ref,
                     intent_inserted=intent_result.inserted,
-                    attention_requested=False,
+                    attention_requested=(
+                        False if intent_result.inserted else None
+                    ),
                     wake_state="RECONCILIATION_REQUIRED",
                     blocker="WAKE_REQUEST_UNRESOLVED",
                 ),
             }
+
+        # IAC-1 r4d-N1: second fence immediately before the request
+        # append. Validity elapsed between publication and request →
+        # no append; ``attention_requested`` is a read-only readback.
+        if _is_expired(valid_until, self._clock()):
+            return {
+                "ok": True,
+                "result": _committed_consult_result(
+                    consultation_id=consultation_id,
+                    valid_until=valid_until,
+                    carrier_ref=carrier_ref,
+                    intent_inserted=intent_result.inserted,
+                    attention_requested=_wake_request_readback(
+                        repository, obligation.obligation_id
+                    ),
+                    wake_state=None,
+                    blocker="EXPIRED",
+                ),
+            }
+
+        try:
+            repository.append_record(
+                requested_record(obligation), obligation=obligation
+            )
+            attention_requested: bool | None = True
+        except Exception:
+            # IAC-1 r4d-N3: a post-append failure is reconciled on the
+            # SAME ledger. True only if the exact request is visible,
+            # False only if proven absent, None (unknown) if the
+            # readback is unavailable or conflicting. Never raise: the
+            # INTENT append is a known effect that must not be hidden.
+            attention_requested = _wake_request_readback(
+                repository, obligation.obligation_id
+            )
+            if attention_requested is not True:
+                return {
+                    "ok": True,
+                    "result": _committed_consult_result(
+                        consultation_id=consultation_id,
+                        valid_until=valid_until,
+                        carrier_ref=carrier_ref,
+                        intent_inserted=intent_result.inserted,
+                        attention_requested=attention_requested,
+                        wake_state="RECONCILIATION_REQUIRED",
+                        blocker="WAKE_REQUEST_UNRESOLVED",
+                    ),
+                }
 
         try:
             wake_state = self._consultations.resolve_restart(question_frame)
@@ -1032,6 +1140,44 @@ class RuntimeConsultationDispatcher:
                 blocker=None,
             ),
         }
+
+    def _wake_obligation(self, intent_event: Any):
+        """Derive the canonical Wake obligation from the persisted INTENT
+        via the existing runtime owners (no caller-provided target)."""
+        question_item = self._consultations._intent_from_event(intent_event)
+        with self.runtime.store.read() as connection:
+            binding = self._consultations._require_current_recipient(
+                question_item, connection=connection
+            )
+            identity = (
+                self._consultations
+                ._consultation_source_identity_on_connection(
+                    question_item, connection
+                )
+            )
+        return ConsultationWakeExtension(
+            repository=self._wake_repository,
+            requester_job_id=identity.requester_job_id,
+            requester_attempt_id=identity.requester_attempt_id,
+            root_job_id=identity.root_job_id,
+            recipient_job_id=identity.recipient_job_id,
+            recipient_attempt_id=identity.recipient_attempt_id,
+            consultation_id=identity.consultation_id,
+            message_key=identity.message_key,
+            semantic_fingerprint=identity.semantic_fingerprint,
+            current_binding=binding,
+        ).obligation()
+
+    def _existing_wake_request(self, intent_event: Any) -> bool | None:
+        """Read-only tri-state: does the exact WAKE_REQUESTED already
+        exist for this persisted INTENT? Never appends."""
+        try:
+            obligation = self._wake_obligation(intent_event)
+        except Exception:
+            return None
+        return _wake_request_readback(
+            self._wake_repository, obligation.obligation_id
+        )
 
     # -- company.reply --
 
@@ -1440,7 +1586,7 @@ def _committed_consult_result(
     valid_until: str,
     carrier_ref: str,
     intent_inserted: bool,
-    attention_requested: bool,
+    attention_requested: bool | None,
     wake_state: str | None,
     blocker: str | None,
 ) -> dict[str, Any]:
@@ -1450,6 +1596,10 @@ def _committed_consult_result(
     (carrier write, wake creation, wake state read) failed. The
     ``blocker`` is the closed-set recovery label a caller or operator
     reads to understand which seam needs reconciliation.
+    ``attention_requested`` is tri-state: ``True`` = the exact
+    ``WAKE_REQUESTED`` record exists on the ledger, ``False`` = proven
+    absent, ``None`` = unknown (ledger readback unavailable or
+    conflicting; reconciliation required).
     """
     return {
         "schema": _INBOX_SCHEMA,

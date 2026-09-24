@@ -619,6 +619,8 @@ def _make_dispatcher(
     clock_value: str = "2026-09-14T00:00:00Z",
     packets: ConsultationPacketCarrier | None = None,
     invocations: InvocationContextSource | None = None,
+    clock: _ManualClock | None = None,
+    wake_repository: WakeLedgerRepository | None = None,
 ) -> RuntimeConsultationDispatcher:
     caller = CallerIdentity(
         job_id=requester[0],
@@ -634,7 +636,8 @@ def _make_dispatcher(
         recipients=_recipient_resolver(recipient),
         packets=packets or InMemoryConsultationPacketCarrier(),
         invocations=invocations or _StaticInvocations(_default_invocation()),
-        _clock=_ManualClock(clock_value),
+        _clock=clock or _ManualClock(clock_value),
+        _wake_repository=wake_repository,
     )
 
 
@@ -4735,3 +4738,642 @@ def test_wake_request_survives_dispatcher_restart(tmp_path: Path) -> None:
         "fresh dispatcher replaying the identical consult must leave "
         "exactly one WAKE_REQUESTED"
     )
+
+# ---------------------------------------------------------------------------
+# IAC-1 r4d — N1 expiry fence, N2 publication only from the uniquely
+# inserted INTENT, N3 tri-state Wake readback after a post-append failure
+# ---------------------------------------------------------------------------
+
+
+class _CountingQuestionCarrier(InMemoryConsultationPacketCarrier):
+    """Counting question carrier; optionally raises on ``put_question`` once."""
+
+    def __init__(self, raise_on_put_n: int | None = None) -> None:
+        super().__init__()
+        self.put_question_calls = 0
+        self.get_question_calls = 0
+        self._raise_on_put_n = raise_on_put_n
+        self._raised = False
+
+    def put_question(self, consultation_id, frame):
+        self.put_question_calls += 1
+        if (
+            self._raise_on_put_n is not None
+            and not self._raised
+            and self.put_question_calls == self._raise_on_put_n
+        ):
+            self._raised = True
+            raise RuntimeError("synthetic carrier write failure")
+        super().put_question(consultation_id, frame)
+
+    def get_question(self, consultation_id):
+        self.get_question_calls += 1
+        return super().get_question(consultation_id)
+
+
+class _ClockAdvancingQuestionCarrier(_CountingQuestionCarrier):
+    """TEST-ONLY carrier whose successful ``put_question`` advances the
+    dispatcher's shared clock (simulates validity elapsing between
+    publication and the Wake request)."""
+
+    def __init__(self, clock: _ManualClock, advance_to: str) -> None:
+        super().__init__()
+        self._clock = clock
+        self._advance_to = advance_to
+
+    def put_question(self, consultation_id, frame):
+        super().put_question(consultation_id, frame)
+        self._clock.value = self._advance_to
+
+
+class _RaceQuestionCarrier(_CountingQuestionCarrier):
+    """TEST-ONLY carrier: the first ``get_question`` runs a hook once
+    (used to interleave a competing consult between the loser's INTENT
+    lookup and its ``intent()`` call). Optionally hides the packet from
+    the loser's post-``intent()`` readback."""
+
+    def __init__(self, on_first_get, *, hide_readback_after_hook: bool = False):
+        super().__init__()
+        self._hook = on_first_get
+        self._hook_ran = False
+        self._hide = hide_readback_after_hook
+
+    def get_question(self, consultation_id):
+        if not self._hook_ran:
+            self._hook_ran = True
+            self._hook()
+            return None
+        if self._hide:
+            self.get_question_calls += 1
+            return None
+        return super().get_question(consultation_id)
+
+
+class _ThrowBeforeCommitRepository(WakeLedgerRepository):
+    """append_record raises without writing anything."""
+
+    def __init__(self, runtime, fail_times: int = 1) -> None:
+        super().__init__(runtime)
+        self.fail_times = fail_times
+        self.append_calls = 0
+
+    def append_record(self, record, *, obligation=None, actor="wake-ledger"):
+        self.append_calls += 1
+        if self.append_calls <= self.fail_times:
+            raise RuntimeError("synthetic pre-commit failure")
+        return super().append_record(record, obligation=obligation, actor=actor)
+
+
+class _ThrowAfterCommitRepository(WakeLedgerRepository):
+    """append_record commits the record, then raises."""
+
+    def __init__(self, runtime) -> None:
+        super().__init__(runtime)
+        self.append_calls = 0
+
+    def append_record(self, record, *, obligation=None, actor="wake-ledger"):
+        self.append_calls += 1
+        super().append_record(record, obligation=obligation, actor=actor)
+        raise RuntimeError("synthetic post-commit failure")
+
+
+class _UnreadableAfterCommitRepository(_ThrowAfterCommitRepository):
+    """append_record commits then raises; afterwards list_records raises."""
+
+    def list_records(self, obligation_id):
+        if self.append_calls:
+            raise RuntimeError("synthetic ledger readback failure")
+        return super().list_records(obligation_id)
+
+
+def _requested_count(runtime: Runtime, consultation_id: str) -> int:
+    obligation_id = _obligation_id_for_intent(runtime, consultation_id)
+    return sum(
+        1
+        for item in _wake_records(runtime, obligation_id)
+        if item.phase is LedgerPhase.WAKE_REQUESTED
+    )
+
+
+def _intent_count(runtime: Runtime, consultation_id: str) -> int:
+    return len(_evidence_for(runtime, consultation_id).get("INTENT", []))
+
+
+def _drive_sync(coroutine):
+    """Run a coroutine that never suspends, without a second event loop."""
+    try:
+        coroutine.send(None)
+    except StopIteration as stop:
+        return stop.value
+    raise AssertionError("coroutine suspended unexpectedly")
+
+
+# --- N1 ---
+
+
+def test_expired_first_consult_is_refused_with_zero_effect(tmp_path: Path) -> None:
+    runtime = _runtime_at(tmp_path / "n1-expired")
+    _consultations(runtime, tmp_path / "n1-expired")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-n1-expired")
+    carrier = _CountingQuestionCarrier()
+    invocations = _StaticInvocations(
+        _default_invocation(
+            invocation_id="iac1-r4d-n1-expired",
+            issued_at="2026-09-14T00:00:00Z",
+            valid_for_seconds=1,
+        )
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        clock_value="2026-09-14T00:00:02Z",
+        packets=carrier,
+        invocations=invocations,
+    )
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="Expired before publication?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    assert excinfo.value.code == "EXPIRED"
+    assert excinfo.value.effect == "NONE"
+    assert len(runtime.events.list_events(aggregate_type="consultation")) == 0
+    assert carrier.put_question_calls == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Expired before publication?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "EFFECT_UNKNOWN"
+    assert len(runtime.events.list_events(aggregate_type="consultation")) == 0
+    assert carrier.put_question_calls == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_exact_expiry_boundary_is_admitted(tmp_path: Path) -> None:
+    runtime = _runtime_at(tmp_path / "n1-boundary")
+    _consultations(runtime, tmp_path / "n1-boundary")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-n1-boundary")
+    carrier = _CountingQuestionCarrier()
+    invocations = _StaticInvocations(
+        _default_invocation(
+            invocation_id="iac1-r4d-n1-boundary",
+            issued_at="2026-09-14T00:00:00Z",
+            valid_for_seconds=1,
+        )
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        clock_value="2026-09-14T00:00:01Z",
+        packets=carrier,
+        invocations=invocations,
+    )
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="At the boundary?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["state"] == "INTENDED"
+    assert data["attention_requested"] is True
+    assert data["blocker"] is None
+    assert data["deadline"] == "2026-09-14T00:00:01Z"
+    assert carrier.put_question_calls == 1
+    assert carrier.get_question(consultation_id) is not None
+    assert _requested_count(runtime, consultation_id) == 1
+
+
+def test_expiry_between_publication_and_request_creates_no_wake(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "n1-between")
+    _consultations(runtime, tmp_path / "n1-between")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-n1-between")
+    clock = _ManualClock("2026-09-14T00:00:00Z")
+    carrier = _ClockAdvancingQuestionCarrier(clock, "2026-09-14T00:00:02Z")
+    invocations = _StaticInvocations(
+        _default_invocation(
+            invocation_id="iac1-r4d-n1-between",
+            issued_at="2026-09-14T00:00:00Z",
+            valid_for_seconds=1,
+        )
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+        clock=clock,
+    )
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Expires while publishing?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["state"] == "INTENDED"
+    assert data["attention_requested"] is False
+    assert data["blocker"] == "EXPIRED"
+    assert _intent_count(runtime, consultation_id) == 1
+    assert carrier.put_question_calls == 1
+    assert carrier.get_question(consultation_id) is not None
+    assert _requested_count(runtime, consultation_id) == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_expired_replay_cannot_originate_publication_or_wake(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "n1-replay")
+    _consultations(runtime, tmp_path / "n1-replay")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-n1-replay")
+    carrier = _CountingQuestionCarrier(raise_on_put_n=1)
+    invocations = _StaticInvocations(
+        _default_invocation(
+            invocation_id="iac1-r4d-n1-replay",
+            issued_at="2026-09-14T00:00:00Z",
+            valid_for_seconds=60,
+        )
+    )
+    args = _consult_args(
+        question="Expired replay?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    first_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        clock_value="2026-09-14T00:00:10Z",
+        packets=carrier,
+        invocations=invocations,
+    )
+    first = _run(_gateway_with_dispatcher(first_dispatcher).call("company.consult", args))
+    assert first["ok"] is True
+    consultation_id = first["data"]["consultation_ref"]
+    assert first["data"]["state"] == "INTENDED"
+    assert first["data"]["attention_requested"] is False
+    assert first["data"]["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert carrier.put_question_calls == 1
+    assert _requested_count(runtime, consultation_id) == 0
+
+    # Validity elapsed; identical retry from a fresh dispatcher instance.
+    late_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        clock_value="2026-09-14T00:01:01Z",
+        packets=carrier,
+        invocations=invocations,
+    )
+    replay = _run(_gateway_with_dispatcher(late_dispatcher).call("company.consult", args))
+    assert replay["ok"] is True
+    data = replay["data"]
+    assert data["consultation_ref"] == consultation_id
+    assert data["state"] == "ALREADY_INTENDED"
+    assert data["is_already_intended"] is True
+    assert data["blocker"] == "EXPIRED"
+    assert data["attention_requested"] is False
+    assert carrier.put_question_calls == 1
+    assert carrier.get_question(consultation_id) is None
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 0
+
+
+# --- N2 ---
+
+
+def test_uncertain_publication_is_never_blindly_retried(tmp_path: Path) -> None:
+    runtime = _runtime_at(tmp_path / "n2-uncertain")
+    _consultations(runtime, tmp_path / "n2-uncertain")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-n2-uncertain")
+    carrier = _CountingQuestionCarrier(raise_on_put_n=1)
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-r4d-n2-uncertain")
+    )
+    args = _consult_args(
+        question="Uncertain publication?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+
+    def _dispatcher():
+        return _make_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            packets=carrier,
+            invocations=invocations,
+        )
+
+    first = _run(_gateway_with_dispatcher(_dispatcher()).call("company.consult", args))
+    assert first["ok"] is True
+    consultation_id = first["data"]["consultation_ref"]
+    assert first["data"]["state"] == "INTENDED"
+    assert first["data"]["attention_requested"] is False
+    assert first["data"]["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert _intent_count(runtime, consultation_id) == 1
+    assert carrier.put_question_calls == 1
+    assert _requested_count(runtime, consultation_id) == 0
+
+    # Identical retry with the same clock: readback is None → no resend.
+    retry = _run(_gateway_with_dispatcher(_dispatcher()).call("company.consult", args))
+    assert retry["ok"] is True
+    data = retry["data"]
+    assert data["consultation_ref"] == consultation_id
+    assert data["state"] == "ALREADY_INTENDED"
+    assert data["attention_requested"] is False
+    assert data["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert carrier.put_question_calls == 1
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_known_exact_packet_reconciles_to_single_request(tmp_path: Path) -> None:
+    runtime = _runtime_at(tmp_path / "n2-known")
+    _consultations(runtime, tmp_path / "n2-known")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "fixture-n2-known")
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-r4d-n2-known")
+    )
+    args = _consult_args(
+        question="Known packet?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    first_carrier = _CountingQuestionCarrier()
+    first = _run(
+        _gateway_with_dispatcher(
+            _make_dispatcher(
+                runtime,
+                fixture_repo,
+                requester=requester,
+                recipient=recipient,
+                packets=first_carrier,
+                invocations=invocations,
+            )
+        ).call("company.consult", args)
+    )
+    assert first["ok"] is True
+    consultation_id = first["data"]["consultation_ref"]
+    assert first["data"]["attention_requested"] is True
+    assert first_carrier.put_question_calls == 1
+    assert _requested_count(runtime, consultation_id) == 1
+
+    # Simulated restart: a fresh carrier instance already holds the
+    # exact packet; a fresh dispatcher replays the identical consult.
+    restarted_carrier = _CountingQuestionCarrier()
+    restarted_carrier._questions[consultation_id] = dict(
+        first_carrier.get_question(consultation_id)
+    )
+    replay = _run(
+        _gateway_with_dispatcher(
+            _make_dispatcher(
+                runtime,
+                fixture_repo,
+                requester=requester,
+                recipient=recipient,
+                packets=restarted_carrier,
+                invocations=invocations,
+            )
+        ).call("company.consult", args)
+    )
+    assert replay["ok"] is True
+    data = replay["data"]
+    assert data["consultation_ref"] == consultation_id
+    assert data["state"] == "ALREADY_INTENDED"
+    assert data["attention_requested"] is True
+    assert data["wake_state"] == "PENDING_RETRYABLE"
+    assert data["blocker"] is None
+    assert restarted_carrier.put_question_calls == 0
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+
+
+@pytest.mark.parametrize("hide_readback", [False, True])
+def test_intent_insertion_race_loser_cannot_publish(
+    tmp_path: Path, hide_readback: bool
+) -> None:
+    """Two dispatcher instances with the SAME invocation context. The
+    loser's INTENT lookup observes no INTENT; the winner's whole consult
+    runs before the loser calls ``intent()`` (interleaved inside the
+    loser's carrier read). ``intent()`` returns ``inserted=False`` for
+    the loser, which may therefore never publish."""
+    runtime = _runtime_at(tmp_path / f"n2-race-{hide_readback}")
+    _consultations(runtime, tmp_path / f"n2-race-{hide_readback}")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / f"fixture-n2-race-{hide_readback}"
+    )
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-r4d-n2-race")
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Race?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    results: dict[str, Any] = {}
+
+    def _winner_consults() -> None:
+        winner = _make_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            packets=carrier,
+            invocations=invocations,
+        )
+        results["winner"] = _drive_sync(winner.__call__("company.consult", envelope))
+
+    carrier = _RaceQuestionCarrier(
+        _winner_consults, hide_readback_after_hook=hide_readback
+    )
+    loser = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    results["loser"] = _run_dispatcher(loser, "company.consult", envelope)
+
+    winner = results["winner"]["result"]
+    loser_result = results["loser"]["result"]
+    consultation_id = winner["consultation_ref"]
+    assert winner["state"] == "INTENDED"
+    assert winner["attention_requested"] is True
+    assert loser_result["consultation_ref"] == consultation_id
+    assert loser_result["state"] == "ALREADY_INTENDED"
+    assert loser_result["intended"] is False
+    assert carrier.put_question_calls == 1
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+    if hide_readback:
+        assert loser_result["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+        assert loser_result["attention_requested"] is True
+    else:
+        assert loser_result["blocker"] is None
+        assert loser_result["attention_requested"] is True
+
+
+# --- N3 ---
+
+
+def _n3_setup(tmp_path: Path, tag: str, repository_factory):
+    runtime = _runtime_at(tmp_path / f"n3-{tag}")
+    _consultations(runtime, tmp_path / f"n3-{tag}")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / f"fixture-n3-{tag}")
+    carrier = _CountingQuestionCarrier()
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id=f"iac1-r4d-n3-{tag}")
+    )
+    args = _consult_args(
+        question=f"N3 {tag}?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+
+    def _dispatcher(repository):
+        return _make_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            packets=carrier,
+            invocations=invocations,
+            wake_repository=repository,
+        )
+
+    return runtime, args, _dispatcher, repository_factory(runtime)
+
+
+def test_wake_append_failure_before_commit_reports_absent(tmp_path: Path) -> None:
+    runtime, args, dispatcher_for, repository = _n3_setup(
+        tmp_path, "before", _ThrowBeforeCommitRepository
+    )
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher_for(repository)).call("company.consult", args)
+    )
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["state"] == "INTENDED"
+    assert data["attention_requested"] is False
+    assert data["wake_state"] == "RECONCILIATION_REQUIRED"
+    assert data["blocker"] == "WAKE_REQUEST_UNRESOLVED"
+    assert repository.append_calls == 1
+    assert _requested_count(runtime, consultation_id) == 0
+
+    # Identical replay through a healthy repository creates exactly one.
+    replay = _run(
+        _gateway_with_dispatcher(dispatcher_for(None)).call("company.consult", args)
+    )
+    assert replay["ok"] is True
+    assert replay["data"]["state"] == "ALREADY_INTENDED"
+    assert replay["data"]["attention_requested"] is True
+    assert replay["data"]["blocker"] is None
+    assert _requested_count(runtime, consultation_id) == 1
+
+
+def test_wake_append_failure_after_commit_reports_existing_request(
+    tmp_path: Path,
+) -> None:
+    runtime, args, dispatcher_for, repository = _n3_setup(
+        tmp_path, "after", _ThrowAfterCommitRepository
+    )
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher_for(repository)).call("company.consult", args)
+    )
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["state"] == "INTENDED"
+    assert data["attention_requested"] is True
+    assert data["wake_state"] == "PENDING_RETRYABLE"
+    assert data["blocker"] is None
+    assert repository.append_calls == 1
+    assert _requested_count(runtime, consultation_id) == 1
+
+    replay = _run(
+        _gateway_with_dispatcher(dispatcher_for(None)).call("company.consult", args)
+    )
+    assert replay["ok"] is True
+    assert replay["data"]["state"] == "ALREADY_INTENDED"
+    assert replay["data"]["attention_requested"] is True
+    assert _requested_count(runtime, consultation_id) == 1
+
+
+def test_wake_commit_with_unreadable_ledger_reports_unknown(tmp_path: Path) -> None:
+    runtime, args, dispatcher_for, repository = _n3_setup(
+        tmp_path, "unreadable", _UnreadableAfterCommitRepository
+    )
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher_for(repository)).call("company.consult", args)
+    )
+    assert envelope["ok"] is True
+    data = envelope["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["state"] == "INTENDED"
+    assert data["attention_requested"] is None
+    assert data["wake_state"] == "RECONCILIATION_REQUIRED"
+    assert data["blocker"] == "WAKE_REQUEST_UNRESOLVED"
+    # The real ledger holds exactly one committed request.
+    assert _requested_count(runtime, consultation_id) == 1
+
+    # Identical replay with a readable repository: never duplicates,
+    # never hides.
+    replay = _run(
+        _gateway_with_dispatcher(dispatcher_for(None)).call("company.consult", args)
+    )
+    assert replay["ok"] is True
+    assert replay["data"]["state"] == "ALREADY_INTENDED"
+    assert replay["data"]["attention_requested"] is True
+    assert replay["data"]["blocker"] is None
+    assert _requested_count(runtime, consultation_id) == 1
