@@ -282,8 +282,8 @@ def _mission_state(document: object, *, expected_work_ref: str) -> _MissionState
         reasons.append("owner_observation_not_same")
     if root_state == "CONFLICT" or root_ambiguous is True:
         reasons.append("mission_root_conflict")
-    if generation_state == "CONFLICT":
-        reasons.append("source_generation_conflict")
+    if generation_state != "CURRENT":
+        reasons.append("source_generation_not_current")
     if root_job_id is None:
         reasons.append("mission_root_unresolved")
 
