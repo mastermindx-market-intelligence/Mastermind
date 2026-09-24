@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import dataclasses
 import hashlib
 import inspect
 import json
 import os
+import shutil
 import stat
 import tempfile
 from pathlib import Path
@@ -42,8 +44,10 @@ from integrations.executive_wake.registry import WakeDispatcherRegistry
 from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.slack_agent_dialogue.contract_v2 import (
     PARENT_SCHEMA_V2,
+    build_message_v2,
     build_parent_v2,
     parse_message_frame_v2,
+    render_message_v2,
     render_parent_v2,
 )
 from integrations.slack_agent_dialogue.engine import (
@@ -59,6 +63,7 @@ from integrations.slack_agent_dialogue.executive_terminal_return_projector impor
     ExecutiveTerminalReturnProjector,
     RuntimeTerminalReturnBindingResolver,
     TerminalReturnProjectionError,
+    _build_message,
 )
 from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
 from integrations.slack_agent_dialogue.persisted_wake_carrier import (
@@ -66,9 +71,11 @@ from integrations.slack_agent_dialogue.persisted_wake_carrier import (
 )
 from integrations.slack_agent_dialogue.service import (
     AgentDialogueService,
+    CONTROL_VERSION_V2,
     DialogueServiceError,
     EXACT_SEND_PROTOCOL,
     ServiceConfig,
+    call_service,
 )
 from integrations.slack_agent_dialogue.turn_observer import (
     DialogueTurnObserver,
@@ -214,6 +221,26 @@ def _bind_response(candidate: TerminalReturnCandidate) -> dict[str, object]:
     }
 
 
+def _read_response(
+    candidate: TerminalReturnCandidate,
+    messages: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "ok": True,
+        "result": {
+            "thread_ts": _binding(candidate).thread_ts,
+            "messages": messages,
+            "historical_messages": [],
+            "ineligible_count": 0,
+            "mutated_count": 0,
+        },
+    }
+
+
+def _empty_read_response(candidate: TerminalReturnCandidate) -> dict[str, object]:
+    return _read_response(candidate, [])
+
+
 async def _projected_message(candidate: TerminalReturnCandidate) -> dict[str, object]:
     """Exercise the real projector while replacing only the AF_UNIX boundary."""
 
@@ -225,6 +252,9 @@ async def _projected_message(candidate: TerminalReturnCandidate) -> dict[str, ob
         if request["operation"] == "bind_or_verify_relay_parent_thread":
             assert before_write is None
             return _bind_response(candidate)
+        if request["operation"] == "read_thread":
+            assert before_write is None
+            return _empty_read_response(candidate)
         assert request["operation"] == "send_message"
         if before_write is not None:
             marked = before_write()
@@ -310,6 +340,8 @@ def test_projector_candidate_keys_resolution_and_verifies_parent_before_send() -
             operations.append(operation)
             if operation == "bind_or_verify_relay_parent_thread":
                 return _bind_response(candidate)
+            if operation == "read_thread":
+                return _empty_read_response(candidate)
             message = request["args"]["message"]
             return {
                 "ok": True,
@@ -319,9 +351,6 @@ def test_projector_candidate_keys_resolution_and_verifies_parent_before_send() -
                     "fingerprint": message["fingerprint"],
                     "message_ts": "1787961600.000002",
                     "duplicate_timestamps": [],
-                    "thread_ts": _binding(candidate).thread_ts,
-                    "parent_author_user_id": BOT,
-                    "parent_fingerprint": "e" * 64,
                     "thread_ts": _binding(candidate).thread_ts,
                     "parent_author_user_id": BOT,
                     "parent_fingerprint": "e" * 64,
@@ -340,7 +369,11 @@ def test_projector_candidate_keys_resolution_and_verifies_parent_before_send() -
         assert receipt.thread_ts == _binding(candidate).thread_ts
         assert receipt.parent_author_user_id == BOT
         assert receipt.parent_fingerprint == "e" * 64
-        assert operations == ["bind_or_verify_relay_parent_thread", "send_message"]
+        assert operations == [
+            "bind_or_verify_relay_parent_thread",
+            "read_thread",
+            "send_message",
+        ]
 
     asyncio.run(scenario())
 
@@ -352,6 +385,8 @@ def test_projector_refuses_a_send_receipt_attested_to_a_different_parent() -> No
         async def service_call(_socket_path: Path, request):
             if request["operation"] == "bind_or_verify_relay_parent_thread":
                 return _bind_response(candidate)
+            if request["operation"] == "read_thread":
+                return _empty_read_response(candidate)
             message = request["args"]["message"]
             return {
                 "ok": True,
@@ -428,6 +463,8 @@ def test_projector_requires_relay_parent_attestation_before_send() -> None:
                         "parent_fingerprint": "e" * 64,
                     },
                 }
+            if operation == "read_thread":
+                return _empty_read_response(candidate)
             assert operation == "send_message"
             message = request["args"]["message"]
             return {
@@ -452,7 +489,11 @@ def test_projector_requires_relay_parent_attestation_before_send() -> None:
         receipt = await projector.project(candidate)
 
         assert receipt.action == "POSTED"
-        assert operations == ["bind_or_verify_relay_parent_thread", "send_message"]
+        assert operations == [
+            "bind_or_verify_relay_parent_thread",
+            "read_thread",
+            "send_message",
+        ]
 
     asyncio.run(scenario())
 
@@ -467,6 +508,8 @@ def test_projector_builds_one_deterministic_result_for_the_exact_trusted_binding
             calls.append((socket_path, request))
             if request["operation"] == "bind_or_verify_relay_parent_thread":
                 return _bind_response(candidate)
+            if request["operation"] == "read_thread":
+                return _empty_read_response(candidate)
             message = request["args"]["message"]
             return {
                 "ok": True,
@@ -492,8 +535,9 @@ def test_projector_builds_one_deterministic_result_for_the_exact_trusted_binding
         assert resolver.calls == 1
         assert receipt.action == "POSTED"
         assert receipt.message_key == candidate.message_key
-        assert len(calls) == 2
-        socket_path, request = calls[1]
+        assert len(calls) == 3
+        assert calls[1][1]["operation"] == "read_thread"
+        socket_path, request = calls[2]
         assert socket_path == Path("/tmp/mastermind-terminal-return.sock")
         assert request["version"] == "mastermind.agent_dialogue_control.v2"
         assert request["operation"] == "send_message"
@@ -560,6 +604,9 @@ def test_projector_exact_duplicate_returns_without_attempt_callback() -> None:
             if request["operation"] == "bind_or_verify_relay_parent_thread":
                 assert kwargs == {}
                 return _bind_response(candidate)
+            if request["operation"] == "read_thread":
+                assert kwargs == {}
+                return _empty_read_response(candidate)
             assert request["operation"] == "send_message"
             assert request["args"]["send_protocol"] == EXACT_SEND_PROTOCOL
             assert kwargs == {"before_write": before_write}
@@ -811,6 +858,8 @@ def test_projector_refuses_malformed_service_receipts_as_closed_errors(
         async def service_call(_socket_path, request):
             if request["operation"] == "bind_or_verify_relay_parent_thread":
                 return _bind_response(candidate)
+            if request["operation"] == "read_thread":
+                return _empty_read_response(candidate)
             message = request["args"]["message"]
             result = {
                 "action": "POSTED",
@@ -844,6 +893,8 @@ def test_projector_preserves_post_dispatch_effect_unknown() -> None:
         async def service_call(_socket_path, request):
             if request["operation"] == "bind_or_verify_relay_parent_thread":
                 return _bind_response(candidate)
+            if request["operation"] == "read_thread":
+                return _empty_read_response(candidate)
             raise DialogueServiceError("SEND_EFFECT_UNKNOWN")
 
         projector = ExecutiveTerminalReturnProjector(
@@ -865,6 +916,8 @@ def test_projector_preserves_known_zero_transport_unavailability() -> None:
         async def service_call(_socket_path, request):
             if request["operation"] == "bind_or_verify_relay_parent_thread":
                 return _bind_response(candidate)
+            if request["operation"] == "read_thread":
+                return _empty_read_response(candidate)
             raise DialogueServiceError("TRANSPORT_UNAVAILABLE")
 
         projector = ExecutiveTerminalReturnProjector(
@@ -911,7 +964,9 @@ def test_projector_reconciles_effect_unknown_by_read_without_a_second_send(
                 sent_message = request["args"]["message"]
                 raise DialogueServiceError("SEND_EFFECT_UNKNOWN")
             assert operation == "read_thread"
-            assert sent_message is not None
+            if sent_message is None:
+                # Pre-send read: nothing has been committed yet.
+                return _empty_read_response(candidate)
             return {
                 "ok": True,
                 "result": {
@@ -959,6 +1014,7 @@ def test_projector_reconciles_effect_unknown_by_read_without_a_second_send(
         assert recovered.parent_fingerprint == "e" * 64
         assert operations == [
             "bind_or_verify_relay_parent_thread",
+            "read_thread",
             "send_message",
             "bind_or_verify_relay_parent_thread",
             "read_thread",
@@ -1028,7 +1084,8 @@ def test_projector_reconcile_refuses_noncanonical_duplicate_timestamps() -> None
             if request["operation"] == "send_message":
                 projected_message = request["args"]["message"]
                 raise DialogueServiceError("SEND_EFFECT_UNKNOWN")
-            assert projected_message is not None
+            if projected_message is None:
+                return _empty_read_response(candidate)
             return {
                 "ok": True,
                 "result": {
@@ -1067,6 +1124,8 @@ def test_projector_callback_preserves_the_none_return_contract() -> None:
         async def service_call(_socket_path, request):
             if request["operation"] == "bind_or_verify_relay_parent_thread":
                 return _bind_response(candidate)
+            if request["operation"] == "read_thread":
+                return _empty_read_response(candidate)
             message = request["args"]["message"]
             return {
                 "ok": True,
@@ -1088,6 +1147,1268 @@ def test_projector_callback_preserves_the_none_return_contract() -> None:
             service_call=service_call,
         )
         assert await projector(candidate) is None
+
+    asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# Source-only repair: canonical C pull ``root_job_id`` locator + v1/v2
+# restart/rollback reconciliation across the existing Dialogue owner.
+# ---------------------------------------------------------------------------
+# These tests pin the integration seam that the read-only GLM review flagged
+# (F1 root locator absent; F2 version-pinning semantics unpinned) without
+# inventing a second ledger, retry queue, or per-host version store.  They
+# only exercise the existing projector, the existing engine predicate via the
+# real ``send_message`` -> ``read_thread`` path, and the existing closed
+# contract.  The repair carries the canonical candidate ``root_job_id`` into
+# every new v2 RESULT synopsis while leaving v1 byte-identical and refusing
+# tampered or version-mismatched persisted messages without any second send.
+
+
+def test_projector_v2_result_carries_canonical_root_job_id_locator() -> None:
+    """A new v2 message must carry the canonical candidate ``root_job_id``."""
+
+    candidate = _candidate()
+
+    message = asyncio.run(_projected_message_v2(candidate))
+    payload = json.loads(message["body"]["result"])
+
+    assert payload["root_job_id"] == candidate.root_job_id
+    assert payload["root_job_id"] == "JOB-001"
+
+
+def test_projector_v1_result_remains_byte_identical_after_root_locator_repair() -> None:
+    """A v1 message must be byte-identical after the v2 repair."""
+
+    candidate = _candidate()
+
+    message = asyncio.run(_projected_message(candidate))
+    payload = json.loads(message["body"]["result"])
+
+    assert "root_job_id" not in payload
+    assert payload["schema"] == "mastermind.executive_terminal_result_synopsis/v1"
+    assert message["body"]["result"] == _canonical_synopsis(
+        candidate,
+        outcome="PASS",
+        include_summary=True,
+    )
+
+
+async def _projected_message_v2(candidate: TerminalReturnCandidate) -> dict[str, object]:
+    """Variant of ``_projected_message`` that exercises the v2 synopsis path."""
+
+    captured: dict[str, object] = {}
+
+    async def service_call(_socket_path: Path, request, **kwargs):
+        before_write = kwargs.pop("before_write", None)
+        assert kwargs == {}
+        if request["operation"] == "bind_or_verify_relay_parent_thread":
+            assert before_write is None
+            return _bind_response(candidate)
+        if request["operation"] == "read_thread":
+            assert before_write is None
+            return _empty_read_response(candidate)
+        assert request["operation"] == "send_message"
+        message = request["args"]["message"]
+        captured["message"] = message
+        return {
+            "ok": True,
+            "result": {
+                "action": "POSTED",
+                "message_key": message["message_key"],
+                "fingerprint": message["fingerprint"],
+                "message_ts": "1787961600.000002",
+                "duplicate_timestamps": [],
+                "thread_ts": _binding(candidate).thread_ts,
+                "parent_author_user_id": BOT,
+                "parent_fingerprint": "e" * 64,
+            },
+        }
+
+    projector = ExecutiveTerminalReturnProjector(
+        _Resolver(_binding(candidate), expected_candidate=candidate),
+        socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+        service_call=service_call,
+        result_synopsis_version="v2",
+    )
+    await projector.project(candidate)
+    message = captured.get("message")
+    assert isinstance(message, dict)
+    return message
+
+
+def test_projector_v2_committed_rebuild_after_restart_is_byte_identical() -> None:
+    """A v2 message committed in one process must rebuild byte-identical after restart."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        first_message = await _projected_message_v2(candidate)
+
+        async def service_call(_socket_path: Path, request, **kwargs):
+            if request["operation"] == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            message = request["args"]["message"]
+            return {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787961600.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
+                },
+            }
+
+        # Simulated process restart: fresh projector, identical binding + version.
+        restarted_projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        rebuilt_message = restarted_projector._resolve(candidate)[2]
+        assert rebuilt_message["fingerprint"] == first_message["fingerprint"]
+        assert rebuilt_message["body"] == first_message["body"]
+        assert rebuilt_message["message_key"] == first_message["message_key"]
+
+    asyncio.run(scenario())
+
+
+def test_projector_v1_committed_rebuild_after_v2_host_rollback_is_byte_identical() -> None:
+    """A v1-committed message must rebuild byte-identical after a v2 host rolls back to v1."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        v1_first = await _projected_message(candidate)
+
+        # v2 host attempts to rebuild (cross-process restart): same binding.
+        async def service_call(_socket_path: Path, request, **kwargs):
+            if request["operation"] == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            message = request["args"]["message"]
+            return {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787961600.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
+                },
+            }
+
+        v2_projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        v2_message = v2_projector._resolve(candidate)[2]
+        # The v2 message carries root_job_id and has a different fingerprint.
+        assert json.loads(v2_message["body"]["result"])["root_job_id"] == "JOB-001"
+        assert v2_message["fingerprint"] != v1_first["fingerprint"]
+
+        # Rollback: same projector, v1 synopsis.  Rebuild must be byte-identical
+        # to the originally-committed v1 message.
+        v1_projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v1",
+        )
+        v1_rebuilt = v1_projector._resolve(candidate)[2]
+        assert v1_rebuilt["fingerprint"] == v1_first["fingerprint"]
+        assert v1_rebuilt["body"] == v1_first["body"]
+        assert "root_job_id" not in json.loads(v1_rebuilt["body"]["result"])
+
+    asyncio.run(scenario())
+
+
+def test_projector_v2_activation_and_reconcile_after_v1_committed_recovers_without_send() -> None:
+    """F2: a v2 host after a v1-committed message must reuse it, never resend.
+
+    The ``message_key`` derives only from the terminal evidence digest, so the
+    legacy v1 wire already holds the key.  Validation is against every
+    supported synopsis shape, so the persisted v1 message is recovered with
+    its original fingerprint even though a new message would carry the v2
+    synopsis.  Activation (``project``) must not submit the regenerated v2
+    body against it.
+    """
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        v1_committed = await _projected_message(candidate)
+        operations: list[str] = []
+        send_attempts = 0
+
+        async def service_call(_socket_path: Path, request, **kwargs):
+            nonlocal send_attempts
+            operation = request["operation"]
+            operations.append(operation)
+            if operation == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            if operation == "send_message":
+                send_attempts += 1
+                raise AssertionError(
+                    "a validated committed message must never be re-sent"
+                )
+            assert operation == "read_thread"
+            return _read_response(
+                candidate,
+                [
+                    {
+                        "message": v1_committed,
+                        "primary_ts": "1787961600.000002",
+                        "duplicate_timestamps": [],
+                    }
+                ],
+            )
+
+        projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        receipt = await projector.project(candidate)
+
+        # Activation completes without a write: the committed v1 identity is
+        # returned with its original fingerprint.
+        assert receipt.action == "DUPLICATE"
+        assert receipt.message_key == candidate.message_key
+        assert receipt.fingerprint == v1_committed["fingerprint"]
+        assert receipt.message_ts == "1787961600.000002"
+        assert receipt.duplicate_timestamps == ()
+        assert receipt.thread_ts == _binding(candidate).thread_ts
+
+        # A restart-equivalent fresh projector running v2 reconciles the same
+        # persisted v1 message to RECOVERED, still with the v1 fingerprint.
+        restarted = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        recovered = await restarted.reconcile(candidate)
+        assert recovered is not None
+        assert recovered.action == "RECOVERED"
+        assert recovered.message_key == candidate.message_key
+        assert recovered.fingerprint == v1_committed["fingerprint"]
+        assert recovered.message_ts == "1787961600.000002"
+
+        # Zero sends across activation, restart, and reconcile.
+        assert send_attempts == 0
+        assert "send_message" not in operations
+        assert operations == [
+            "bind_or_verify_relay_parent_thread",
+            "read_thread",
+            "bind_or_verify_relay_parent_thread",
+            "read_thread",
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_projector_v2_reconcile_after_v2_committed_recovers_same_message() -> None:
+    """A v2 reconcile after a v2-committed message must RECOVER by read, not resend."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        v2_first = await _projected_message_v2(candidate)
+        operations: list[str] = []
+
+        async def service_call(_socket_path: Path, request, **kwargs):
+            operation = request["operation"]
+            operations.append(operation)
+            if operation == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            assert operation == "read_thread"
+            return {
+                "ok": True,
+                "result": {
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "messages": [
+                        {
+                            "message": v2_first,
+                            "primary_ts": "1787961600.000002",
+                            "duplicate_timestamps": [],
+                        }
+                    ],
+                    "historical_messages": [],
+                    "ineligible_count": 0,
+                    "mutated_count": 0,
+                },
+            }
+
+        restarted = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        recovered = await restarted.reconcile(candidate)
+        assert recovered is not None
+        assert recovered.action == "RECOVERED"
+        assert recovered.message_key == candidate.message_key
+        assert recovered.fingerprint == v2_first["fingerprint"]
+        # No second send.
+        assert "send_message" not in operations
+
+    asyncio.run(scenario())
+
+
+def test_projector_v1_rebuild_after_v2_committed_keeps_v1_byte_identical() -> None:
+    """A v1 rebuild after v2-committed must yield the byte-identical v1 body."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        v2_committed = await _projected_message_v2(candidate)
+
+        async def service_call(_socket_path: Path, request, **kwargs):
+            if request["operation"] == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            message = request["args"]["message"]
+            return {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787961600.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "e" * 64,
+                },
+            }
+
+        # After restart with v1 selected, _resolve must produce a message whose
+        # body matches the canonical v1 synopsis.
+        v1_projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v1",
+        )
+        rebuilt = v1_projector._resolve(candidate)[2]
+        rebuilt_payload = json.loads(rebuilt["body"]["result"])
+        assert "root_job_id" not in rebuilt_payload
+        assert rebuilt_payload["schema"] == (
+            "mastermind.executive_terminal_result_synopsis/v1"
+        )
+        # The v2-committed message and the v1 rebuild must have different
+        # fingerprints (one carries root_job_id, the other doesn't) — that's
+        # the canonical evidence the repair changed the new v2.
+        assert rebuilt["fingerprint"] != v2_committed["fingerprint"]
+
+    asyncio.run(scenario())
+
+
+def test_projector_refuses_tampered_persisted_body_without_send() -> None:
+    """A tampered persisted body under the candidate key refuses with zero sends."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        committed = await _projected_message_v2(candidate)
+        tampered = dict(committed)
+        # Same key, foreign body: an external mutation of the persisted wire.
+        tampered["body"] = {
+            "status": "PASS",
+            "result": json.dumps(
+                {
+                    "schema": "mastermind.executive_terminal_result_synopsis/v1",
+                    "role": candidate.role,
+                    "outcome": "PASS",
+                    "result_envelope_digest": candidate.result_envelope_digest,
+                    "terminal_evidence_digest": "f" * 64,
+                    "artifact_receipt_digest": candidate.artifact_receipt_digest,
+                    "validation_receipt_digest": candidate.validation_receipt_digest,
+                    "effective_grant_digest": candidate.effective_grant_digest,
+                    "summary_sha256": hashlib.sha256(
+                        candidate.summary.encode("utf-8")
+                    ).hexdigest(),
+                },
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        }
+        operations: list[str] = []
+        send_attempts = 0
+
+        async def service_call(_socket_path: Path, request, **kwargs):
+            nonlocal send_attempts
+            operation = request["operation"]
+            operations.append(operation)
+            if operation == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            if operation == "send_message":
+                send_attempts += 1
+                raise AssertionError("tampered evidence must never trigger a send")
+            assert operation == "read_thread"
+            return _read_response(
+                candidate,
+                [
+                    {
+                        "message": tampered,
+                        "primary_ts": "1787961600.000002",
+                        "duplicate_timestamps": [],
+                    }
+                ],
+            )
+
+        projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        with pytest.raises(TerminalReturnProjectionError) as raised:
+            await projector.project(candidate)
+        assert raised.value.code == "EFFECT_UNKNOWN"
+
+        restarted = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        with pytest.raises(TerminalReturnProjectionError) as refused:
+            await restarted.reconcile(candidate)
+        assert refused.value.code == "EFFECT_UNKNOWN"
+        assert send_attempts == 0
+        assert "send_message" not in operations
+
+    asyncio.run(scenario())
+
+
+def test_projector_refuses_foreign_context_persisted_message_without_send() -> None:
+    """A persisted message from a foreign context refuses with zero sends."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        committed = await _projected_message_v2(candidate)
+        tampered = dict(committed)
+        tampered["actor_ref"] = {
+            "kind": "worker_attempt",
+            "job_id": "JOB-tampered",
+            "attempt_id": "ATT-tampered",
+            "worker_id": candidate.worker_id,
+        }
+        operations: list[str] = []
+        send_attempts = 0
+
+        async def service_call(_socket_path: Path, request, **kwargs):
+            nonlocal send_attempts
+            operation = request["operation"]
+            operations.append(operation)
+            if operation == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            if operation == "send_message":
+                send_attempts += 1
+                raise AssertionError("foreign-context evidence must never send")
+            assert operation == "read_thread"
+            return _read_response(
+                candidate,
+                [
+                    {
+                        "message": tampered,
+                        "primary_ts": "1787961600.000002",
+                        "duplicate_timestamps": [],
+                    }
+                ],
+            )
+
+        projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        with pytest.raises(TerminalReturnProjectionError) as raised:
+            await projector.project(candidate)
+        assert raised.value.code == "EFFECT_UNKNOWN"
+
+        restarted = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        with pytest.raises(TerminalReturnProjectionError) as refused:
+            await restarted.reconcile(candidate)
+        assert refused.value.code == "EFFECT_UNKNOWN"
+        assert send_attempts == 0
+        assert "send_message" not in operations
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "synopsis_version, include_root_job_id",
+    [("v1", False), ("v2", False), ("v2", True)],
+)
+@pytest.mark.parametrize("include_original", [False, True])
+@pytest.mark.parametrize("foreign_attempt", [False, True])
+def test_owner_seam_same_terminal_under_changed_key_refuses_without_send(
+    synopsis_version: str,
+    include_root_job_id: bool,
+    include_original: bool,
+    foreign_attempt: bool,
+) -> None:
+    """An alternate key cannot make the same terminal result uncommitted."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+            projector = _seam_projector(socket_path, candidate, version="v2")
+            context = projector._resolve(candidate)[0]
+            original = _build_message(
+                candidate,
+                context,
+                synopsis_version=synopsis_version,
+                include_root_job_id=include_root_job_id,
+            )
+            changed = copy.deepcopy(original)
+            changed["message_key"] = "asd-exec-result-" + "f" * 64
+            changed["fingerprint"] = ""
+            if foreign_attempt:
+                changed["actor_ref"]["attempt_id"] = "ATT-999"
+                changed["applies_to"]["attempt_id"] = "ATT-999"
+            changed = build_message_v2(changed)
+            assert changed["fingerprint"] != original["fingerprint"]
+            assert changed["body"] == original["body"]
+            if include_original:
+                client.add_reply(
+                    SlackMessage(
+                        ts="1787961600.000002",
+                        author_user_id=BOT,
+                        text=render_message_v2(original),
+                        thread_ts=_PARENT_TS,
+                    )
+                )
+            client.add_reply(
+                SlackMessage(
+                    ts="1787961600.000003",
+                    author_user_id=BOT,
+                    text=render_message_v2(changed),
+                    thread_ts=_PARENT_TS,
+                )
+            )
+            original_texts = tuple(
+                reply.text for reply in client.thread_messages[_PARENT_TS]
+            )
+            for version in ("v2", "v1"):
+                restarted = _seam_projector(socket_path, candidate, version=version)
+                for method in (restarted.reconcile, restarted.project):
+                    with pytest.raises(TerminalReturnProjectionError) as refused:
+                        await method(candidate)
+                    assert refused.value.code == "EFFECT_UNKNOWN"
+            assert client.post_call_count == 0
+            assert tuple(
+                reply.text for reply in client.thread_messages[_PARENT_TS]
+            ) == original_texts
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "synopsis_version, include_root_job_id",
+    [("v1", False), ("v2", False), ("v2", True)],
+)
+def test_owner_seam_unrelated_terminal_remains_valid(
+    synopsis_version: str,
+    include_root_job_id: bool,
+) -> None:
+    """A distinct attempt and terminal do not block this candidate's send."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+            projector = _seam_projector(socket_path, candidate, version="v2")
+            other = dataclasses.replace(
+                candidate,
+                attempt_id="ATT-999",
+                terminal_evidence_digest="f" * 64,
+                message_key="asd-exec-result-" + "f" * 64,
+                result_envelope_digest="1" * 64,
+            )
+            context = copy.deepcopy(projector._resolve(candidate)[0])
+            context["actor_ref"]["attempt_id"] = other.attempt_id
+            context["applies_to"]["attempt_id"] = other.attempt_id
+            prior = _build_message(
+                other,
+                context,
+                synopsis_version=synopsis_version,
+                include_root_job_id=include_root_job_id,
+            )
+            prior_text = render_message_v2(prior)
+            client.add_reply(
+                SlackMessage(
+                    ts="1787961600.000003",
+                    author_user_id=BOT,
+                    text=prior_text,
+                    thread_ts=_PARENT_TS,
+                )
+            )
+            assert await projector.reconcile(candidate) is None
+            receipt = await projector.project(candidate)
+            assert receipt.action == "POSTED"
+            assert client.post_call_count == 1
+            assert client.thread_messages[_PARENT_TS][0].text == prior_text
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_projector_refuses_duplicate_persisted_message_without_send() -> None:
+    """Two persisted entries under the candidate key refuse with zero sends."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        committed = await _projected_message_v2(candidate)
+        operations: list[str] = []
+        send_attempts = 0
+
+        async def service_call(_socket_path: Path, request, **kwargs):
+            nonlocal send_attempts
+            operation = request["operation"]
+            operations.append(operation)
+            if operation == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            if operation == "send_message":
+                send_attempts += 1
+                raise AssertionError("duplicate evidence must never trigger a send")
+            assert operation == "read_thread"
+            return _read_response(
+                candidate,
+                [
+                    {
+                        "message": committed,
+                        "primary_ts": "1787961600.000002",
+                        "duplicate_timestamps": [],
+                    },
+                    {
+                        "message": committed,
+                        "primary_ts": "1787961600.000003",
+                        "duplicate_timestamps": [],
+                    },
+                ],
+            )
+
+        projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        with pytest.raises(TerminalReturnProjectionError) as raised:
+            await projector.project(candidate)
+        assert raised.value.code == "EFFECT_UNKNOWN"
+
+        restarted = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        with pytest.raises(TerminalReturnProjectionError) as refused:
+            await restarted.reconcile(candidate)
+        assert refused.value.code == "EFFECT_UNKNOWN"
+        assert send_attempts == 0
+        assert "send_message" not in operations
+
+    asyncio.run(scenario())
+
+
+def test_projector_reconcile_returns_none_when_no_persisted_message_exists() -> None:
+    """A clean read with no matching persisted message returns None without send."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        operations: list[str] = []
+
+        async def service_call(_socket_path: Path, request, **kwargs):
+            operation = request["operation"]
+            operations.append(operation)
+            if operation == "bind_or_verify_relay_parent_thread":
+                return _bind_response(candidate)
+            assert operation == "read_thread"
+            return {
+                "ok": True,
+                "result": {
+                    "thread_ts": _binding(candidate).thread_ts,
+                    "messages": [],
+                    "historical_messages": [],
+                    "ineligible_count": 0,
+                    "mutated_count": 0,
+                },
+            }
+
+        projector = ExecutiveTerminalReturnProjector(
+            _Resolver(_binding(candidate), expected_candidate=candidate),
+            socket_path=Path("/tmp/mastermind-terminal-return.sock"),
+            service_call=service_call,
+            result_synopsis_version="v2",
+        )
+        recovered = await projector.reconcile(candidate)
+        assert recovered is None
+        # bind + read; no send.
+        assert operations == ["bind_or_verify_relay_parent_thread", "read_thread"]
+
+    asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# F2 owner-seam coverage: the actual ExecutiveTerminalReturnProjector over
+# the actual AF_UNIX Agent Dialogue service, the actual DialogueEngineV2
+# exact-send predicate, and a persisted InMemorySlack thread.  These are the
+# decisive positive cases: an immutable committed historical message (legacy
+# v1, pre-root-locator v2, or current root-locator v2) is reused across
+# activation, fresh-projector restart, and host version rollback with its
+# original body/key/fingerprint and zero replacement sends, while tampered,
+# duplicate, foreign, or unavailable evidence refuses.
+# ---------------------------------------------------------------------------
+
+_PARENT_TS = "1787961600.000001"
+
+
+def _seam_parent(client: InMemorySlackClient, candidate: TerminalReturnCandidate) -> None:
+    """Persist the canonical Relay-owned parent through the existing owner."""
+
+    binding = _binding(candidate)
+    parent = build_parent_v2(
+        {
+            "schema": PARENT_SCHEMA_V2,
+            "work_ref": binding.work_ref,
+            "commission_ref": binding.commission_ref,
+            "session_ref": binding.session_ref,
+            "operation_key": binding.operation_key,
+            "watch_mode": binding.watch_mode,
+            "allowed_sol_user_ids": [SOL],
+            "created_at": "2026-08-10T23:59:59Z",
+        }
+    )
+    client.add_parent(
+        SlackMessage(
+            ts=_PARENT_TS,
+            author_user_id=BOT,
+            text=render_parent_v2(parent),
+        )
+    )
+
+
+async def _owner_seam() -> tuple[Path, InMemorySlackClient, asyncio.Task, Path]:
+    """Start the real service/engine pair on one AF_UNIX socket.
+
+    The socket must live under a short AF_UNIX path (``/tmp``), mirroring the
+    replay test's socket root; pytest's per-test tmp dirs exceed the bound.
+    """
+
+    root = Path(tempfile.mkdtemp(prefix="mmx-f2-")).resolve()
+    socket_path = root / "dialogue-f2.sock"
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    policy = DialoguePolicy(
+        workspace_id=WORKSPACE,
+        channel_id=CHANNEL,
+        relay_bot_user_id=BOT,
+        allowed_sol_user_ids=(SOL,),
+        allowed_parent_user_ids=(SOL,),
+        poll_interval_seconds=0,
+        method_timeout_seconds=1,
+    )
+    authority = ExactV2AuthorityPolicy()
+    service = AgentDialogueService(
+        ServiceConfig(
+            socket_path=socket_path,
+            allowed_peer_uids=(os.geteuid(),),
+            request_timeout_seconds=1,
+        ),
+        DialogueEngine(policy, client, authority_policy=authority),
+        engine_v2=DialogueEngineV2(policy, client, authority_policy=authority),
+    )
+    task = asyncio.create_task(service.serve_forever())
+    await wait_for_service_start(task, socket_path)
+    return socket_path, client, task, root
+
+
+def _seam_projector(
+    socket_path: Path,
+    candidate: TerminalReturnCandidate,
+    *,
+    version: str = "v1",
+) -> ExecutiveTerminalReturnProjector:
+    return ExecutiveTerminalReturnProjector(
+        _Resolver(_binding(candidate), expected_candidate=candidate),
+        socket_path=socket_path,
+        result_synopsis_version=version,
+    )
+
+
+async def _stop_seam(task: asyncio.Task, root: Path) -> None:
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def test_owner_seam_v1_committed_survives_v2_activation_restart_and_v1_rollback() -> None:
+    """v1 commit -> v2 activation -> fresh v2 restart -> v1 rollback reuses it."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+
+            v1 = _seam_projector(socket_path, candidate, version="v1")
+            posted = await v1.project(candidate)
+            assert posted.action == "POSTED"
+            assert posted.message_key == candidate.message_key
+            assert client.post_call_count == 1
+            replies = client.thread_messages[_PARENT_TS]
+            assert len(replies) == 1
+            original = parse_message_frame_v2(replies[0].text)
+            original_fingerprint = original["fingerprint"]
+            original_text = replies[0].text
+            assert json.loads(original["body"]["result"])[
+                "schema"
+            ] == "mastermind.executive_terminal_result_synopsis/v1"
+
+            # v2 activation after the v1 commit must reuse, never resend.
+            v2 = _seam_projector(socket_path, candidate, version="v2")
+            receipt = await v2.project(candidate)
+            assert receipt.action == "DUPLICATE"
+            assert receipt.message_key == candidate.message_key
+            assert receipt.fingerprint == original_fingerprint
+            assert receipt.message_ts == replies[0].ts
+            assert receipt.thread_ts == _PARENT_TS
+
+            # Fresh-projector restart under v2 recovers the same identity.
+            restarted = _seam_projector(socket_path, candidate, version="v2")
+            recovered = await restarted.reconcile(candidate)
+            assert recovered is not None
+            assert recovered.action == "RECOVERED"
+            assert recovered.message_key == candidate.message_key
+            assert recovered.fingerprint == original_fingerprint
+            assert recovered.message_ts == replies[0].ts
+
+            # Host rollback to v1 still reuses the committed bytes.
+            rolled_back = _seam_projector(socket_path, candidate, version="v1")
+            rollback_receipt = await rolled_back.project(candidate)
+            assert rollback_receipt.action == "DUPLICATE"
+            assert rollback_receipt.fingerprint == original_fingerprint
+
+            # Zero replacement sends; persisted bytes untouched.
+            assert client.post_call_count == 1
+            final_replies = client.thread_messages[_PARENT_TS]
+            assert len(final_replies) == 1
+            assert final_replies[0].text == original_text
+            assert parse_message_frame_v2(final_replies[0].text) == original
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_owner_seam_pre_root_v2_committed_survives_v1_and_v2_hosts() -> None:
+    """A pre-root-locator v2 commit (lawful exact-send) is reused by both hosts."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+
+            # Commit the historical pre-locator v2 wire through the existing
+            # lawful service owner; the engine exact-send predicate runs.
+            v2 = _seam_projector(socket_path, candidate, version="v2")
+            context = v2._resolve(candidate)[0]
+            historical = _build_message(
+                candidate,
+                context,
+                synopsis_version="v2",
+                include_root_job_id=False,
+            )
+            sent = await call_service(
+                socket_path,
+                {
+                    "version": CONTROL_VERSION_V2,
+                    "operation": "send_message",
+                    "args": {
+                        "context": context,
+                        "thread_ts": _PARENT_TS,
+                        "message": historical,
+                        "send_protocol": EXACT_SEND_PROTOCOL,
+                    },
+                },
+            )
+            assert sent["ok"] is True, sent
+            assert sent["result"]["action"] == "POSTED"
+            assert client.post_call_count == 1
+            replies = client.thread_messages[_PARENT_TS]
+            assert len(replies) == 1
+            original = parse_message_frame_v2(replies[0].text)
+            original_fingerprint = original["fingerprint"]
+            assert original_fingerprint == historical["fingerprint"]
+            assert "root_job_id" not in json.loads(original["body"]["result"])
+
+            # v1 host activation: reuse the pre-root v2 message, no resend.
+            v1 = _seam_projector(socket_path, candidate, version="v1")
+            receipt = await v1.project(candidate)
+            assert receipt.action == "DUPLICATE"
+            assert receipt.fingerprint == original_fingerprint
+
+            # Fresh-projector restart under v2: same reuse, original bytes.
+            restarted = _seam_projector(socket_path, candidate, version="v2")
+            recovered = await restarted.reconcile(candidate)
+            assert recovered is not None
+            assert recovered.action == "RECOVERED"
+            assert recovered.fingerprint == original_fingerprint
+            again = await restarted.project(candidate)
+            assert again.action == "DUPLICATE"
+            assert again.fingerprint == original_fingerprint
+
+            assert client.post_call_count == 1
+            assert len(client.thread_messages[_PARENT_TS]) == 1
+            persisted = parse_message_frame_v2(
+                client.thread_messages[_PARENT_TS][0].text
+            )
+            assert persisted == original
+            assert "root_job_id" not in json.loads(persisted["body"]["result"])
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_owner_seam_root_v2_committed_survives_v1_host_and_v2_restart() -> None:
+    """A newly committed root-locator v2 message is reused by v1 and v2 hosts."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+
+            v2 = _seam_projector(socket_path, candidate, version="v2")
+            posted = await v2.project(candidate)
+            assert posted.action == "POSTED"
+            assert client.post_call_count == 1
+            replies = client.thread_messages[_PARENT_TS]
+            assert len(replies) == 1
+            original = parse_message_frame_v2(replies[0].text)
+            original_fingerprint = original["fingerprint"]
+            assert (
+                json.loads(original["body"]["result"])["root_job_id"] == "JOB-001"
+            )
+
+            # v1 host after the root-v2 commit: reuse, never replace.
+            v1 = _seam_projector(socket_path, candidate, version="v1")
+            receipt = await v1.project(candidate)
+            assert receipt.action == "DUPLICATE"
+            assert receipt.fingerprint == original_fingerprint
+
+            # v2 restart reconciles and re-activates on the same identity.
+            restarted = _seam_projector(socket_path, candidate, version="v2")
+            recovered = await restarted.reconcile(candidate)
+            assert recovered is not None
+            assert recovered.action == "RECOVERED"
+            assert recovered.fingerprint == original_fingerprint
+            again = await restarted.project(candidate)
+            assert again.action == "DUPLICATE"
+            assert again.fingerprint == original_fingerprint
+
+            assert client.post_call_count == 1
+            assert len(client.thread_messages[_PARENT_TS]) == 1
+            assert (
+                parse_message_frame_v2(client.thread_messages[_PARENT_TS][0].text)
+                == original
+            )
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_owner_seam_wrong_digest_persisted_message_refuses_without_send() -> None:
+    """A canonical persisted frame carrying wrong digests refuses with zero sends."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+            # Same terminal evidence digest -> same message_key, but every
+            # other committed digest differs: a well-formed wrong-digest wire.
+            wrong = dataclasses.replace(
+                candidate,
+                result_envelope_digest="f" * 64,
+                artifact_receipt_digest="e" * 64,
+                validation_receipt_digest="b" * 64,
+                effective_grant_digest="c" * 64,
+            )
+            v2 = _seam_projector(socket_path, candidate, version="v2")
+            context = v2._resolve(candidate)[0]
+            wrong_message = _build_message(wrong, context, synopsis_version="v1")
+            assert wrong_message["message_key"] == candidate.message_key
+            client.add_reply(
+                SlackMessage(
+                    ts="1787472100.000001",
+                    author_user_id=BOT,
+                    text=render_message_v2(wrong_message),
+                    thread_ts=_PARENT_TS,
+                )
+            )
+
+            with pytest.raises(TerminalReturnProjectionError) as raised:
+                await v2.project(candidate)
+            assert raised.value.code == "EFFECT_UNKNOWN"
+
+            restarted = _seam_projector(socket_path, candidate, version="v2")
+            with pytest.raises(TerminalReturnProjectionError) as refused:
+                await restarted.reconcile(candidate)
+            assert refused.value.code == "EFFECT_UNKNOWN"
+
+            assert client.post_call_count == 0
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_owner_seam_foreign_actor_persisted_message_refuses_without_send() -> None:
+    """A persisted frame from a foreign actor under the key refuses, zero sends."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+            v2 = _seam_projector(socket_path, candidate, version="v2")
+            context = v2._resolve(candidate)[0]
+            foreign_context = copy.deepcopy(context)
+            foreign_context["actor_ref"] = {
+                "kind": "worker_attempt",
+                "job_id": candidate.job_id,
+                "attempt_id": "ATT-999",
+                "worker_id": candidate.worker_id,
+            }
+            foreign_context["applies_to"]["attempt_id"] = "ATT-999"
+            foreign = _build_message(
+                candidate, foreign_context, synopsis_version="v1"
+            )
+            assert foreign["message_key"] == candidate.message_key
+            client.add_reply(
+                SlackMessage(
+                    ts="1787472100.000001",
+                    author_user_id=BOT,
+                    text=render_message_v2(foreign),
+                    thread_ts=_PARENT_TS,
+                )
+            )
+
+            with pytest.raises(TerminalReturnProjectionError) as raised:
+                await v2.project(candidate)
+            assert raised.value.code == "EFFECT_UNKNOWN"
+
+            restarted = _seam_projector(socket_path, candidate, version="v2")
+            with pytest.raises(TerminalReturnProjectionError) as refused:
+                await restarted.reconcile(candidate)
+            assert refused.value.code == "EFFECT_UNKNOWN"
+
+            assert client.post_call_count == 0
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_owner_seam_foreign_worker_persisted_message_refuses_without_send() -> None:
+    """A valid joined foreign worker frame refuses at the projector after reading."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+            v2 = _seam_projector(socket_path, candidate, version="v2")
+            context = v2._resolve(candidate)[0]
+            foreign_context = copy.deepcopy(context)
+            foreign_context["applies_to"] = {
+                "kind": "executive_attempt",
+                "job_id": candidate.job_id,
+                "attempt_id": candidate.attempt_id,
+                "worker_id": "worker-foreign",
+            }
+            foreign_context["actor_ref"]["worker_id"] = "worker-foreign"
+            foreign = _build_message(
+                candidate, foreign_context, synopsis_version="v1"
+            )
+            client.add_reply(
+                SlackMessage(
+                    ts="1787472100.000001",
+                    author_user_id=BOT,
+                    text=render_message_v2(foreign),
+                    thread_ts=_PARENT_TS,
+                )
+            )
+
+            with pytest.raises(TerminalReturnProjectionError) as raised:
+                await v2.project(candidate)
+            assert raised.value.code == "EFFECT_UNKNOWN"
+
+            restarted = _seam_projector(socket_path, candidate, version="v2")
+            with pytest.raises(TerminalReturnProjectionError) as refused:
+                await restarted.reconcile(candidate)
+            assert refused.value.code == "EFFECT_UNKNOWN"
+
+            assert client.post_call_count == 0
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_owner_seam_duplicate_persisted_replies_refuse_without_send() -> None:
+    """Two physical replies under one key refuse reconciliation, zero sends."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+            v2 = _seam_projector(socket_path, candidate, version="v2")
+            context = v2._resolve(candidate)[0]
+            committed = _build_message(candidate, context, synopsis_version="v1")
+            for ts in ("1787472100.000001", "1787472100.000002"):
+                client.add_reply(
+                    SlackMessage(
+                        ts=ts,
+                        author_user_id=BOT,
+                        text=render_message_v2(committed),
+                        thread_ts=_PARENT_TS,
+                    )
+                )
+
+            with pytest.raises(TerminalReturnProjectionError) as raised:
+                await v2.project(candidate)
+            assert raised.value.code == "EFFECT_UNKNOWN"
+
+            restarted = _seam_projector(socket_path, candidate, version="v2")
+            with pytest.raises(TerminalReturnProjectionError) as refused:
+                await restarted.reconcile(candidate)
+            assert refused.value.code == "EFFECT_UNKNOWN"
+
+            assert client.post_call_count == 0
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_owner_seam_mutated_persisted_reply_refuses_without_replacement_send() -> None:
+    """A physically mutated persisted reply refuses; the original send stands."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+            v1 = _seam_projector(socket_path, candidate, version="v1")
+            posted = await v1.project(candidate)
+            assert posted.action == "POSTED"
+            assert client.post_call_count == 1
+            reply_ts = client.thread_messages[_PARENT_TS][0].ts
+            original_text = client.thread_messages[_PARENT_TS][0].text
+
+            client.mutate_reply(
+                thread_ts=_PARENT_TS,
+                message_ts=reply_ts,
+                text=original_text + " tampered",
+            )
+
+            v2 = _seam_projector(socket_path, candidate, version="v2")
+            with pytest.raises(TerminalReturnProjectionError) as raised:
+                await v2.project(candidate)
+            assert raised.value.code == "EFFECT_UNKNOWN"
+
+            restarted = _seam_projector(socket_path, candidate, version="v2")
+            with pytest.raises(TerminalReturnProjectionError) as refused:
+                await restarted.reconcile(candidate)
+            assert refused.value.code == "EFFECT_UNKNOWN"
+
+            # Only the original lawful send; no replacement was attempted.
+            assert client.post_call_count == 1
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_owner_seam_incomplete_thread_history_refuses_without_send() -> None:
+    """An unavailable (incomplete) read refuses; absence of proof never sends."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+            client.thread_history_complete = False
+
+            v2 = _seam_projector(socket_path, candidate, version="v2")
+            with pytest.raises(TerminalReturnProjectionError) as raised:
+                await v2.project(candidate)
+            assert raised.value.code == "DIALOGUE_REFUSED"
+
+            restarted = _seam_projector(socket_path, candidate, version="v2")
+            with pytest.raises(TerminalReturnProjectionError) as refused:
+                await restarted.reconcile(candidate)
+            assert refused.value.code == "DIALOGUE_REFUSED"
+
+            assert client.post_call_count == 0
+        finally:
+            await _stop_seam(task, root)
+
+    asyncio.run(scenario())
+
+
+def test_owner_seam_genuine_send_effect_unknown_stays_absent_on_reconcile() -> None:
+    """A genuinely unknown send effect leaves absence; reconcile returns None."""
+
+    async def scenario() -> None:
+        candidate = _candidate()
+        socket_path, client, task, root = await _owner_seam()
+        try:
+            _seam_parent(client, candidate)
+            client.post_behaviors = ["unknown_no_commit"]
+
+            v1 = _seam_projector(socket_path, candidate, version="v1")
+            with pytest.raises(TerminalReturnProjectionError) as raised:
+                await v1.project(candidate)
+            assert raised.value.code == "EFFECT_UNKNOWN"
+            assert client.post_call_count == 1
+            assert client.thread_messages[_PARENT_TS] == []
+
+            # Absence during reconciliation is never a fresh dispatch.
+            restarted = _seam_projector(socket_path, candidate, version="v1")
+            assert await restarted.reconcile(candidate) is None
+            assert client.post_call_count == 1
+            assert client.thread_messages[_PARENT_TS] == []
+        finally:
+            await _stop_seam(task, root)
 
     asyncio.run(scenario())
 
@@ -1702,6 +3023,17 @@ def test_offline_web_ceo_aggregation_terminal_obligation_remains_delivered_pendi
                     "parent_fingerprint": "e" * 64,
                 },
             }
+        if request["operation"] == "read_thread":
+            return {
+                "ok": True,
+                "result": {
+                    "thread_ts": "1787961600.000001",
+                    "messages": [],
+                    "historical_messages": [],
+                    "ineligible_count": 0,
+                    "mutated_count": 0,
+                },
+            }
         if request["operation"] == "send_message":
             before_write = kwargs.pop("before_write")
             result = before_write()
@@ -1757,6 +3089,7 @@ def test_offline_web_ceo_aggregation_terminal_obligation_remains_delivered_pendi
     asyncio.run(project_once())
     assert operations == [
         "bind_or_verify_relay_parent_thread",
+        "read_thread",
         "send_message",
     ]
     terminal_events = [
@@ -1855,6 +3188,7 @@ def test_offline_web_ceo_aggregation_terminal_obligation_remains_delivered_pendi
     )
     assert operations == [
         "bind_or_verify_relay_parent_thread",
+        "read_thread",
         "send_message",
     ]
     reopened_event_ids = [

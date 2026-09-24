@@ -842,6 +842,21 @@ fi
   LANG=C.UTF-8 LC_ALL=C.UTF-8 \
   GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
   /usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now
+# A complete checkout cloned from a legitimate partial-clone source can retain
+# an empty pack .promisor sidecar even after remote removal/repack/prune. The
+# installed reader correctly refuses that marker, so normalize only after a
+# no-lazy-fetch zero-missing closure proof. Unsafe/non-empty marker evidence is
+# fail-closed and left untouched by the reviewed helper.
+/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 \
+  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/admin_checkout.py" normalize \
+    --checkout "$ADMIN_CHECKOUT" --expected-commit "$EXPECTED_SHA" >/dev/null || {
+  /bin/echo "administrative checkout promisor normalization refused" >&2
+  exit 65
+}
 /usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
 /bin/chmod -R go-rwx "$ADMIN_CHECKOUT"
 [ "$(/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \

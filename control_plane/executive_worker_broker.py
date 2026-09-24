@@ -173,6 +173,9 @@ _OHF_OPERATIONS = frozenset(
         "ohf-deliver-attention",
         "ohf-collect-turn",
         "ohf-observe-turn",
+        "ohf-observer-enroll",
+        "ohf-observer-status",
+        "ohf-observer-revoke",
         "ohf-interrupt",
         "ohf-stop",
         "ohf-cancel",
@@ -1311,6 +1314,8 @@ class ExecutiveWorkerBroker:
         sweeper: ResidualSweeper,
         *,
         adapter_id: str = "codex-cli",
+        validation_adapter: WorkerExecutionAdapter | None = None,
+        validation_adapter_id: str | None = None,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
@@ -1331,6 +1336,47 @@ class ExecutiveWorkerBroker:
             ) from exc
         self.adapter = adapter
         self.adapter_id = descriptor.adapter_id
+        if validation_adapter is None:
+            if validation_adapter_id not in (None, self.adapter_id):
+                raise WorkerBrokerError(
+                    "validation adapter identity was supplied without an adapter"
+                )
+            if self.adapter_id == "claude-code":
+                raise WorkerBrokerError(
+                    "Claude broker requires the reviewed common validation adapter"
+                )
+            validation_descriptor = descriptor
+            validation_adapter = adapter
+        else:
+            if not isinstance(validation_adapter_id, str) or not validation_adapter_id:
+                raise WorkerBrokerError(
+                    "validation adapter requires one exact reviewed identity"
+                )
+            try:
+                validation_descriptor = bind_reviewed_adapter(
+                    validation_adapter, validation_adapter_id
+                )
+            except AdapterBindingError as exc:
+                raise WorkerBrokerError(str(exc)) from exc
+            except Exception as exc:
+                raise WorkerBrokerError(
+                    f"validation adapter {validation_adapter_id!r} failed to bind"
+                ) from exc
+            if self.adapter_id == "codex-cli" and (
+                validation_adapter is not adapter
+                or validation_descriptor.adapter_id != self.adapter_id
+            ):
+                raise WorkerBrokerError(
+                    "Codex broker validation must remain on its primary reviewed adapter"
+                )
+            if self.adapter_id == "claude-code" and (
+                validation_descriptor.adapter_id != "codex-cli"
+            ):
+                raise WorkerBrokerError(
+                    "Claude broker validation requires the reviewed common Codex sandbox"
+                )
+        self.validation_adapter = validation_adapter
+        self.validation_adapter_id = validation_descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -1362,6 +1408,7 @@ class ExecutiveWorkerBroker:
                 ProcessGenerationRef,
                 ReconcileObservation,
                 BrowserReviewReceipt | None,
+                Any,  # Original bounded observer registry; no adapter/process.
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
@@ -1480,6 +1527,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
+        if operation in {"ohf-observer-enroll", "ohf-observer-status", "ohf-observer-revoke"}:
+            return await self._ohf_observer_lifecycle(operation, payload)
         if operation == "ohf-observe-turn":
             return await self._ohf_observe_turn(payload)
         if operation == "ohf-interrupt":
@@ -2125,6 +2174,65 @@ class ExecutiveWorkerBroker:
         finally:
             await self._operator_release_busy(state)
 
+    async def _ohf_observer_lifecycle(self, operation, payload):
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        if set(payload) != {"attempt", "epoch", "generation", "turn"} | binding_fields:
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        if any(not isinstance(v, str) or not 1 <= len(v) <= 256 for v in payload.values()):
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        binding = {name: payload[name] for name in binding_fields}
+        identity = (
+            payload["attempt"], payload["epoch"], payload["generation"], payload["turn"],
+        )
+        async with self._state_lock:
+            active = self._operator_run
+            same_active = active is not None and (
+                payload["attempt"] == active.epoch.attempt_id
+                and payload["epoch"] == active.epoch.session_epoch_id
+                and payload["generation"] == active.generation.process_generation_id
+            )
+            if not same_active:
+                if operation == "ohf-observer-enroll":
+                    raise BrokerStateError("UNKNOWN_GENERATION")
+                # Historical reconciliation uses the original registry already
+                # retained by the bounded terminal receipt owner. A different
+                # active run cannot replace or authorize this exact old binding.
+                terminal = self._operator_terminal.get(payload["generation"])
+                projection = terminal[3] if terminal is not None else None
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None,
+                            "turn_key": None, "grant_generation": None}
+                try:
+                    if operation == "ohf-observer-revoke":
+                        return projection.revoke_observer_by_binding(identity, **binding)
+                    return projection.observer_status_by_binding(identity, **binding)
+                except Exception as exc:
+                    code = getattr(exc, "code", None)
+                    raise BrokerStateError(
+                        code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
+                        else "GRANT_INVALIDATED"
+                    ) from None
+            state = active.adapter._generations.get(payload["generation"])
+            native = state.turns.get(payload["turn"]) if state else None
+            if not native:
+                raise BrokerStateError("TURN_NOT_BOUND")
+            key = TurnKey(payload["attempt"], payload["epoch"], payload["generation"],
+                          active.generation.generation_number, active.generation.worker_id,
+                          payload["turn"], native)
+            try:
+                if operation == "ohf-observer-enroll":
+                    turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
+                    result = active.adapter.mint_observer_grant(turn, binding=binding)
+                    return result
+                projection = getattr(active.adapter, "visible_turn_projection", None)
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None, "turn_key": None, "grant_generation": None}
+                method = projection.revoke_observer if operation == "ohf-observer-revoke" else projection.observer_status
+                return method(key, **binding)
+            except Exception as exc:
+                code = getattr(exc, "code", None)
+                raise BrokerStateError(code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"} else "GRANT_INVALIDATED") from None
+
     async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
         expected = {
             "attempt",
@@ -2135,7 +2243,9 @@ class ExecutiveWorkerBroker:
             "cursor",
             "max_items",
         }
-        if set(payload) != expected:
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        binding = {name: payload[name] for name in binding_fields if name in payload}
+        if set(payload) not in (expected, expected | binding_fields):
             raise BrokerStateError("ohf-observe-turn payload fields are invalid")
         identity_fields = (
             "attempt",
@@ -2171,6 +2281,9 @@ class ExecutiveWorkerBroker:
         if projection is None:
             self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
             raise BrokerStateError("UNKNOWN_GENERATION")
+        if not projection.check_observer_binding(payload["reader_grant"], binding):
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
         grant_key = projection.check_grant(payload["reader_grant"])
         if grant_key is None:
             self._observer_refusals.append((None, "READER_REVOKED"))
@@ -2483,10 +2596,14 @@ class ExecutiveWorkerBroker:
         artifact_receipt: BrowserReviewReceipt | None = None,
     ) -> None:
         async with self._state_lock:
+            projection = getattr(state.adapter, "visible_turn_projection", None)
+            if projection is not None:
+                projection.retire_generation(state.generation.process_generation_id)
             self._operator_terminal[state.generation.process_generation_id] = (
                 state.generation,
                 observation,
                 artifact_receipt,
+                projection,
             )
             self._operator_terminal.move_to_end(
                 state.generation.process_generation_id
@@ -2667,7 +2784,7 @@ class ExecutiveWorkerBroker:
                 generation.process_generation_id
             )
         if terminal_receipt is not None:
-            terminal_generation, terminal, artifact_receipt = terminal_receipt
+            terminal_generation, terminal, artifact_receipt, _projection = terminal_receipt
             if terminal_generation != generation:
                 raise BrokerProtocolError(
                     "operator terminal generation identity drifted"
@@ -2852,6 +2969,7 @@ class ExecutiveWorkerBroker:
                     self._active_run_id = spec.run_id
                 self._starting = False
         return {
+            "adapter_id": self.adapter_id,
             "process_ref": process_ref,
             "launch_attestation": attestation,
             "startup_sweep": self.startup_sweep,
@@ -2894,6 +3012,7 @@ class ExecutiveWorkerBroker:
                 if status_sweep is not None:
                     self.last_sweep = status_sweep
                 result: dict[str, Any] = {
+                    "adapter_id": self.adapter_id,
                     "broker_pid": os.getpid(),
                     "worker_uid": os.geteuid(),
                     "worker_gid": os.getegid(),
@@ -3069,7 +3188,7 @@ class ExecutiveWorkerBroker:
             adapter_error: Exception | None = None
             receipt: ValidationReceipt | None = None
             try:
-                receipt = await self.adapter.run_validation_argv(
+                receipt = await self.validation_adapter.run_validation_argv(
                     state.spec,
                     command,
                     timeout_seconds=timeout,
@@ -3691,7 +3810,7 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
 
 
 class RemoteCodexWorkerAdapter:
-    """Control-side Codex adapter facade backed by the distinct-UID broker."""
+    """Control-side fixed-identity adapter facade backed by the worker broker."""
 
     adapter_id = "codex-cli"
 
@@ -3721,6 +3840,8 @@ class RemoteCodexWorkerAdapter:
                 "validation_commands": commands,
             },
         )
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote broker adapter identity does not match facade")
         process_ref = _process_ref_from_json(result.get("process_ref"))
         if process_ref.run_id != spec.run_id:
             raise BrokerProtocolError("remote process run_id does not match LaunchSpec")
@@ -3897,6 +4018,12 @@ class RemoteCodexWorkerAdapter:
         )
         self._uid_sweeps[spec.run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
         return _validation_from_json(result.get("validation"))
+
+
+class RemoteClaudeWorkerAdapter(RemoteCodexWorkerAdapter):
+    """Control-side native Claude facade with immutable broker identity."""
+
+    adapter_id = "claude-code"
 
 
 class RemoteWorkerProcessController:
@@ -4092,6 +4219,7 @@ __all__ = [
     "PeerAuthorizationError",
     "PeerCredentials",
     "RemoteBrokerError",
+    "RemoteClaudeWorkerAdapter",
     "RemoteCodexWorkerAdapter",
     "RemoteWorkerProcessController",
     "UIDSweepReceipt",

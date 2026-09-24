@@ -25,6 +25,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import time
+from functools import partial
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -63,10 +64,26 @@ from integrations.mastermind_executive_app.gateway import (
     CeoIngressClient,
     build_read_gateway,
     CeoIngressReadGateway,
+    WebCeoCeoIngressReadGateway,
+    WebCeoV2CeoIngressReadGateway,
     make_jwt_authenticators,
 )
+from integrations.executive_mcp.web_ceo import (
+    build_web_ceo_read_gateway,
+    build_web_ceo_v2_read_gateway,
+    web_ceo_tool_names,
+    web_ceo_v2_tool_names,
+)
+from integrations.executive_mcp.web_ceo_v3 import web_ceo_v3_tool_names
+from integrations.mosyle_mdm.executive import WebCeoV3CeoIngressReadGateway
 
-__all__ = ["AppSettings", "create_app"]
+__all__ = [
+    "AppSettings",
+    "create_app",
+    "create_web_ceo_app",
+    "create_web_ceo_v2_app",
+    "create_web_ceo_v3_app",
+]
 
 _MAX_BODY_BYTES = 65536
 
@@ -330,13 +347,26 @@ class _RawPathFence:
         await self._read_gateway.aclose()
 
 
-def create_app(settings: AppSettings) -> Any:
-    """Build one stateless ASGI app instance from ``settings``.
+def _create_profile_app(
+    settings: AppSettings,
+    *,
+    read_tool_names: tuple[str, ...],
+    ingress_gateway_type: type[CeoIngressReadGateway],
+    read_gateway_builder: Callable[..., Any],
+    prereply_reverify: bool = False,
+) -> Any:
+    """Build one stateless ASGI app from one compile-time selected profile.
 
     A fresh instance is cheap and holds no state beyond ``settings`` itself
     (plus the two verified-at-construction :class:`JwtAuthenticator`s), so a
     restart never loses anything (§ Data/time/null: no app-local IDs, no
     session rows, no token cache, no job mirror, no result store).
+
+    ``prereply_reverify`` selects the static Web-CEO v2 law only: the same
+    company-read authenticator runs again after the read and before the reply,
+    and must verify the request to the exact same immutable
+    :class:`VerifiedPrincipal`.  Legacy profiles keep the historical single
+    before-invoke verifier call, byte for byte.
     """
 
     metadata_policy, metadata_path = _metadata_policy_and_path(settings.policies)
@@ -349,9 +379,11 @@ def create_app(settings: AppSettings) -> Any:
             connect_timeout=settings.connect_timeout, read_timeout=settings.read_timeout
         )
     if settings.read_from_ceo_ingress:
-        read_gateway = CeoIngressReadGateway(settings.ceo_ingress_socket_path, ceo_ingress_client)
+        read_gateway = ingress_gateway_type(
+            settings.ceo_ingress_socket_path, ceo_ingress_client
+        )
     else:
-        read_gateway = build_read_gateway(
+        read_gateway = read_gateway_builder(
             settings.mastermind_root,
             macro_root_flag=settings.macro_root_flag,
             runtime_root=settings.runtime_root,
@@ -359,7 +391,7 @@ def create_app(settings: AppSettings) -> Any:
 
     async def call_read_tool(request: Request) -> JSONResponse:
         tool_name = request.path_params["tool_name"]
-        if tool_name not in READ_TOOL_NAMES:
+        if tool_name not in read_tool_names:
             return JSONResponse(
                 {"ok": False, "error": {"code": "not_found", "message": f"unknown tool {tool_name!r}"}},
                 status_code=404,
@@ -370,10 +402,36 @@ def create_app(settings: AppSettings) -> Any:
         )
         if isinstance(principal_or_response, JSONResponse):
             return principal_or_response
+        principal = principal_or_response
         arguments = await _read_body_arguments(request)
         if isinstance(arguments, JSONResponse):
             return arguments
         envelope = await read_gateway.call(tool_name, arguments)
+        if prereply_reverify:
+            # Pre-reply reverify (static Web-CEO v2 only): the SAME
+            # company-read authenticator must still verify this request to
+            # the SAME immutable principal.  A real owner expiry, refusal, or
+            # changed principal discards the already-read data and denies
+            # closed; no synthetic root-ACL or revocation-policy claim is
+            # made here, and legacy profiles never enter this branch.
+            recheck_or_response = await _authenticate(
+                request, read_authenticator, clock=settings.clock,
+                submit_fallback=(submit_authenticator if settings.allow_submit_authorized_reads else None),
+            )
+            if isinstance(recheck_or_response, JSONResponse):
+                return recheck_or_response
+            if recheck_or_response != principal:
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "identity_unverified",
+                            "message": "read authorization did not re-verify to the "
+                            "same principal; response withheld",
+                        },
+                    },
+                    status_code=401,
+                )
         return JSONResponse(envelope, status_code=200)
 
     async def call_submit_tool(request: Request) -> JSONResponse:
@@ -457,4 +515,61 @@ def create_app(settings: AppSettings) -> Any:
         application,
         metadata_path=metadata_path,
         read_gateway=read_gateway,
+    )
+
+def create_app(settings: AppSettings) -> Any:
+    """Legacy BSC-E1 app; exact v1 read/tool surface remains frozen."""
+
+    return _create_profile_app(
+        settings,
+        read_tool_names=READ_TOOL_NAMES,
+        ingress_gateway_type=CeoIngressReadGateway,
+        read_gateway_builder=build_read_gateway,
+    )
+
+
+def create_web_ceo_app(settings: AppSettings) -> Any:
+    """Separately versioned Web-CEO app over the same auth/admission owners."""
+
+    read_names = tuple(
+        name for name in web_ceo_tool_names() if name != "submit_ceo_intent"
+    )
+    return _create_profile_app(
+        settings,
+        read_tool_names=read_names,
+        ingress_gateway_type=WebCeoCeoIngressReadGateway,
+        read_gateway_builder=build_web_ceo_read_gateway,
+    )
+
+
+def create_web_ceo_v2_app(settings: AppSettings) -> Any:
+    """Static Web-CEO v2 app (App-read v3, server 1.2.0, pre-reply reverify)."""
+
+    read_names = tuple(
+        name for name in web_ceo_v2_tool_names() if name != "submit_ceo_intent"
+    )
+    return _create_profile_app(
+        settings,
+        read_tool_names=read_names,
+        ingress_gateway_type=WebCeoV2CeoIngressReadGateway,
+        read_gateway_builder=build_web_ceo_v2_read_gateway,
+        prereply_reverify=True,
+    )
+
+
+def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any) -> Any:
+    """Installed Web-CEO v3: v2 Executive reads plus local MDM observation."""
+
+    if not settings.read_from_ceo_ingress:
+        raise ValueError("Web CEO v3 is installed-only")
+    read_names = tuple(
+        name for name in web_ceo_v3_tool_names() if name != "submit_ceo_intent"
+    )
+    gateway = partial(WebCeoV3CeoIngressReadGateway, mdm_reader=mdm_reader)
+    return _create_profile_app(
+        settings,
+        read_tool_names=read_names,
+        ingress_gateway_type=gateway,
+        read_gateway_builder=build_web_ceo_v2_read_gateway,
+        prereply_reverify=True,
     )

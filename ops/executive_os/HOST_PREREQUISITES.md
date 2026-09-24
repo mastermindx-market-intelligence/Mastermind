@@ -20,9 +20,9 @@ on its own instead of remembering that it was set up. This is a read-only
 observation, so it needs no install stage, no administrator password, and no
 service state change. Run it as the ordinary operator on Studio, M1, and any
 future host being enrolled — but you must say which **role** you are proving,
-because the two roles have different requirements.
+because the three profiles have different requirements.
 
-`--profile` is mandatory and has exactly two accepted values. There is no
+`--profile` is mandatory and has exactly three accepted values. There is no
 default, and the checker never infers the role from which services happen to
 be installed: a Studio whose Executive control plane has stopped looks exactly
 like a worker host that never had one, and guessing the weaker profile there
@@ -31,7 +31,8 @@ would turn a real outage into a pass.
 | Host | Command profile | What a `READY` proves |
 |---|---|---|
 | Studio (canonical Executive control host) | `executive-control-host/v1` | physical recovery **and** the installed Executive control, MCP, and sol-state-relay daemons running |
-| M1, future M6, any other home Mac | `home-mac-recovery-base/v1` | physical/local recovery of that Mac only |
+| Any home Mac, observation only | `home-mac-recovery-base/v1` | physical/local recovery of that Mac only |
+| Mac being admitted as a secondary fleet host | `fleet-secondary-host-preflight/v1` | physical/local recovery **and** proof that the central Executive control, MCP, and sol-state-relay daemons are not installed |
 
 On Studio:
 
@@ -41,13 +42,25 @@ On Studio:
   --profile executive-control-host/v1
 ```
 
-On M1, M6, or any other physical host being recovered or enrolled:
+For physical recovery observation only:
 
 ```bash
 /usr/bin/python3 -I -S -B \
   "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
   --profile home-mac-recovery-base/v1
 ```
+
+Before admitting a Mac into the secondary fleet-host enrollment lane:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
+  --profile fleet-secondary-host-preflight/v1
+```
+
+A `READY` secondary-host preflight is intentionally only permission to continue
+to the existing enrollment/qualification owners. It does **not** prove a Worker,
+provider realm, MH1 gateway, Studio Direct seat, credential, or Fabric route.
 
 It emits one canonical `mastermind.host_recovery_readiness/v1` JSON report on
 stdout and exits `0`. The report stamps the exact `profile` you named, and a
@@ -58,9 +71,25 @@ reference; any other value is refused without echoing it. A typed refusal exits
 `ARGUMENTS_INVALID` and an unrecognized one is `PROFILE_INVALID`, both refused
 before the host is observed at all. Reruns are free and create no effect.
 
-Both profiles collect the same fixed superset of observations with the same
+All profiles collect the same fixed superset of observations with the same
 fixed argv. The profile changes classification requirements only; it is never
 command authority and never widens what the checker reads.
+
+
+### `fleet-secondary-host-preflight/v1` is an anti-duplication gate, not enrollment acceptance
+
+Use this profile immediately before handing a physical Mac to the existing
+fleet/worker enrollment owners. It adds exactly one rule to the physical base:
+the three canonical central Executive services must be `NOT_INSTALLED`. A
+running, stopped, or disabled copy is `NOT_READY`, and unknown service state
+fails closed to `UNKNOWN`. Worker/provider services remain advisory because
+this profile neither installs nor qualifies them.
+
+This prevents a secondary Mac from becoming an accidental second Executive
+control plane while keeping host placement, Worker identity, provider capacity,
+MH1 transport, Studio Direct, credentials, and execution acceptance with their
+existing owners. Once enrollment starts, use the owning subsystem's acceptance
+proofs rather than treating this preflight as a permanent worker-health gate.
 
 ### `home-mac-recovery-base/v1` is not worker or fabric acceptance
 
@@ -96,18 +125,19 @@ the overall state:
 |---|---|---|
 | `REQUIRED` | yes | Unattended recovery depends on it. |
 | `REQUIRED_RUNNING` | yes | An already-installed critical system LaunchDaemon must be running. Control profile only. |
+| `REQUIRED_ABSENT` | yes | A central Executive LaunchDaemon must not be installed on a secondary pre-enrollment host. |
 | `OPTIONAL` | no | Reviewed as preferable, but it does not decide readiness. |
 | `DISARMED_EXPECTED` | no | The current gates intend this service to be absent or disabled. Control profile only. |
 | `ADVISORY` | no | Reported because the operator must know it. |
 
 Every physical predicate — platform, power policy, Remote Login, preboot
-unlock, disk headroom — carries the same requirement in both profiles. The only
+unlock, disk headroom — carries the same requirement in all profiles. The only
 difference is the Executive system LaunchDaemons:
 
-| Label group | `executive-control-host/v1` | `home-mac-recovery-base/v1` |
-|---|---|---|
-| control, MCP, sol-state-relay | `REQUIRED_RUNNING` | `ADVISORY` |
-| worker, backup, privileged broker | `DISARMED_EXPECTED` | `ADVISORY` |
+| Label group | `executive-control-host/v1` | `fleet-secondary-host-preflight/v1` | `home-mac-recovery-base/v1` |
+|---|---|---|---|
+| control, MCP, sol-state-relay | `REQUIRED_RUNNING` | `REQUIRED_ABSENT` | `ADVISORY` |
+| worker, backup, privileged broker | `DISARMED_EXPECTED` | `ADVISORY` | `ADVISORY` |
 
 Under the base profile those labels are reported with their truthful observed
 state (`DAEMON_NOT_INSTALLED`, `DAEMON_DISABLED`, `DAEMON_LOADED_NOT_RUNNING`,
@@ -745,8 +775,17 @@ CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
 ```
 
 A repeated request with the same id and identical content returns the stored
-receipt without re-executing. The same id with changed content refuses, and a
-stale in-flight marker returns `EFFECT_UNKNOWN` rather than retrying blindly.
+terminal receipt only when that original effect actually reached a terminal
+child result. The same id with changed content refuses. A stale in-flight marker
+returns `EFFECT_UNKNOWN` and is never retried blindly.
+
+For the separately reviewed marker-preserving reconciliation path, the broker may
+record `RECONCILED_NOT_APPLIED` only after it proves the exact original
+`verify_ready` request/marker identity and pre-effect readiness state while
+preserving the marker byte-for-byte. That classification is **not** a synthetic
+FAILED/SUCCEEDED child result. It means the requested business effect was proven
+not applied, and the original request id remains non-replayable. Any later
+readiness attempt requires a separately authorized new request id.
 
 To inspect an earlier request's outcome without resubmitting it, query its id
 over the same socket:
@@ -755,11 +794,15 @@ over the same socket:
 "$MMX_ADMIN" status --request-id "company-ready-$MERGE_SHA"
 ```
 
-This is observation only: it never re-executes the action, never creates or
-repairs a receipt/marker, and never retries. Exit `0` means the terminal
-receipt was retrieved (regardless of that receipt's own recorded outcome),
-`75` means only a stale in-flight marker exists (`EFFECT_UNKNOWN`), and `4`
-means neither exists yet (`NOT_FOUND`, which is not license to resubmit).
+This is a status-query only: it never re-executes the action, creates or repairs
+evidence, removes a marker, or retries. Exit `0` means a valid `TERMINAL`
+projection **or** a valid `RECONCILED_NOT_APPLIED` projection was retrieved;
+for the latter, exit `0` confirms successful status retrieval only and does not
+reinterpret the original privileged effect as success. Exit `75` means
+unresolved marker evidence remains (`EFFECT_UNKNOWN`), and `4` means neither
+terminal nor in-flight/reconciled evidence exists (`NOT_FOUND`, which is not
+license to resubmit). Malformed or mismatched reconciliation evidence is
+refused rather than downgraded to a clean state.
 
 ### Three isolated Personal Pro readiness slots
 
