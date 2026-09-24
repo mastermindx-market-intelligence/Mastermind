@@ -121,3 +121,22 @@ External rate observations and methods (2026-09-24):
 - https://lambda.ai/instances
 - https://alfred.stlouisfed.org/help/downloaddata
 - https://arxiv.org/abs/2309.17322 (Glasserman and Lin: LLM look-ahead/distraction analysis)
+
+## 9. F0 measured continuation
+
+The owner-field crosswalk and executable temporal-boundary findings are in
+`research/MARKET_EXPERIENCE_F0_OWNER_CROSSWALK_2026-09-24.md`; the exact measurement
+is `research/MARKET_EXPERIENCE_F0_PROBE_RECEIPT_2026-09-24.json`. Eight native owner
+boundary cases passed and 20 instrumentation tests passed. The metadata filter
+processed 63,000 explicitly synthetic rows in a median 0.045395 seconds across
+three passes; this is NOT a corpus, extraction, feature-engineering or training
+benchmark. The probe imports the verified native Data OS owner rather than
+reimplementing its time law. Production data admitted and model calls remain zero.
+
+F0 is PARTIAL: publication-first filtering does not prove operational possession,
+and it does not select a single authoritative revision. The first consumer adapter
+must compose existing Market Memory replay, dataset-vintage, identity and rights
+owners. Pilot membership/rights/source availability and real extraction costs remain
+unresolved; no existing sealed holdout is consumed. The crosswalk also records the
+exact old-date CI assertion and current action-scoped inspection refusals. Preserve
+those denied actions; do not treat model/tool switching as recovery permission.
