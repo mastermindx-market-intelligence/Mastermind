@@ -580,6 +580,27 @@ class BrowserResourcePort:
         classified = classify_action(self._store, identity)
         return self._reconcile_existing(start, identity, classified)
 
+    @staticmethod
+    def _reap_if_local_child(pid: int) -> None:
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            # After service restart the relay is no longer our child; OS process
+            # identity remains the recovery authority in that case.
+            return
+        except OSError:
+            return
+
+    @staticmethod
+    def _process_group_absent(pgid: int) -> bool:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        return False
+
     def _terminate_exact_process(
         self,
         process: ActionProcessRecord,
@@ -587,28 +608,34 @@ class BrowserResourcePort:
         timeout: float = 3.0,
     ) -> bool:
         if not self._process_matches(process):
-            return True
+            # The exact leader disappeared before this cleanup call. Never
+            # signal a recycled group identity without the leader preimage.
+            return self._process_group_absent(process.pgid)
         try:
             os.killpg(process.pgid, signal.SIGTERM)
         except ProcessLookupError:
             return True
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if not self._process_matches(process):
+            self._reap_if_local_child(process.pid)
+            if self._process_group_absent(process.pgid):
                 return True
             time.sleep(0.05)
-        if not self._process_matches(process):
-            return True
         try:
             os.killpg(process.pgid, signal.SIGKILL)
         except ProcessLookupError:
             return True
+        except PermissionError:
+            self._reap_if_local_child(process.pid)
+            return self._process_group_absent(process.pgid)
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:
-            if not self._process_matches(process):
+            self._reap_if_local_child(process.pid)
+            if self._process_group_absent(process.pgid):
                 return True
             time.sleep(0.05)
-        return not self._process_matches(process)
+        self._reap_if_local_child(process.pid)
+        return self._process_group_absent(process.pgid)
 
     def start_resource(
         self, caller: ActionCaller, start_ref: object

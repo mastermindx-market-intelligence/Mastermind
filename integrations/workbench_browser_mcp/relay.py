@@ -227,7 +227,6 @@ class McpStdioSession:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     close_fds=True,
-                    start_new_session=True,
                 )
                 initialize = self._rpc(
                     "initialize",
@@ -309,15 +308,17 @@ class McpStdioSession:
                 return
             cleanup_error: BaseException | None = None
             if process.poll() is None:
+                # The relay itself is the owner process-group leader. The MCP
+                # child intentionally remains in that same group so host-owner
+                # retirement can fence relay, Node and browser descendants with
+                # one exact process-group identity. Here we terminate only the
+                # direct child; external resource cleanup owns group fencing.
                 try:
-                    pgid = os.getpgid(process.pid)
-                    if pgid != process.pid:
-                        raise BrowserRelayError("MCP child process group identity changed")
-                    os.killpg(pgid, signal.SIGTERM)
+                    process.terminate()
                     try:
                         process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
-                        os.killpg(pgid, signal.SIGKILL)
+                        process.kill()
                         process.wait(timeout=2)
                 except ProcessLookupError:
                     pass
