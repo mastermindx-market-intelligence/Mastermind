@@ -110,7 +110,7 @@ def test_cross_carrier_write_failover_is_forbidden():
         "do not replay through Desktop Commander",
     ):
         assert phrase in connection
-    assert "current Chairman intent/delegated authority or accepted canonical placement" in connection
+    assert "current live Chairman intent/delegated authority or accepted canonical placement" in connection
     assert "Studio Direct absence never grants authority" in connection
 
 
