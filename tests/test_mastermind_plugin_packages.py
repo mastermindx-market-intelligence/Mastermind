@@ -697,6 +697,22 @@ def test_repository_documents_match_the_closed_contract() -> None:
         assert all(binding["app_id"] is None for binding in template["bindings"])
 
 
+def test_ceo_skill_package_facing_metadata_is_model_independent() -> None:
+    model_specific = re.compile(r"\bSol\b")
+    for skill in SOL_SKILLS:
+        text = _sol(skill)
+        assert text.startswith("---\n")
+        frontmatter, body = text[4:].split("\n---\n", 1)
+        description = next(
+            line.removeprefix("description:").strip()
+            for line in frontmatter.splitlines()
+            if line.startswith("description:")
+        )
+        heading = next(line.strip() for line in body.splitlines() if line.startswith("# "))
+        assert not model_specific.search(description), (skill, description)
+        assert not model_specific.search(heading), (skill, heading)
+
+
 @pytest.mark.parametrize("skill", SOL_SKILLS)
 def test_every_sol_skill_has_dynamic_current_source_gate(skill: str) -> None:
     text = _sol(skill)
