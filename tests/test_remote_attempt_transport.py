@@ -161,6 +161,34 @@ def test_launch_resolves_only_the_already_claimed_worker_and_host(tmp_path: Path
     ("host_ref", "worker_id"),
     [(HOST_B, WORKER), (HOST_A, "remote-codex-02")],
 )
+def test_resolution_is_runtime_read_only(tmp_path: Path) -> None:
+    runtime, job, lease = _claimed_runtime(tmp_path)
+
+    def counts():
+        with runtime.store.read() as connection:
+            return tuple(
+                connection.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
+                for table in (
+                    "workers",
+                    "worker_quota_classes",
+                    "jobs",
+                    "attempts",
+                    "events",
+                )
+            )
+
+    before = counts()
+    resolve_remote_attempt_transport(
+        runtime,
+        job_id=job.job_id,
+        attempt_id=lease.attempt.attempt_id,
+        binding_source=lambda host_ref, worker_id: _host_binding(
+            tmp_path, host_ref=host_ref, worker_id=worker_id
+        ),
+    )
+    assert counts() == before
+
+
 def test_root_binding_cannot_redirect_capacity_identity(
     tmp_path: Path, host_ref: str, worker_id: str
 ) -> None:
