@@ -2988,3 +2988,58 @@ def test_packet_support_adds_no_socket_or_arming(socket_root: Path) -> None:
         assert [name for name, _value in fake.calls] == ["status"]
 
     run(scenario())
+
+
+def test_rejected_packet_body_never_appears_in_any_error_payload(
+    socket_root: Path,
+) -> None:
+    """A rejected packet's text reaches no error code, payload or exception."""
+
+    async def rejected_exchange(srv, request: dict[str, object]) -> list[str]:
+        reader, writer = await asyncio.open_unix_connection(
+            str(srv.config.socket_path)
+        )
+        frames: list[str] = []
+        try:
+            writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+            await writer.drain()
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                frames.append(json.dumps(json.loads(line), sort_keys=True))
+        except Exception as exc:  # every raised text is part of the surface
+            frames.append(f"EXCEPTION:{exc}")
+        finally:
+            writer.close()
+            await writer.wait_closed()
+        return frames
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            over_ceiling = exact_packet_request_v2(
+                question=f"{UNTRUSTED_PACKET_MARKER} " + "q" * (MAX_FRAME_BYTES + 256),
+            )
+            wrong_thread = exact_packet_request_v2(
+                question=f"Should {UNTRUSTED_PACKET_MARKER} be admitted?",
+            )
+            wrong_thread["args"]["thread_ts"] = "1787471000.000099"
+            for request, expected_code in (
+                (over_ceiling, "PACKET_OVER_CEILING"),
+                (wrong_thread, "THREAD_CONTEXT_MISMATCH"),
+            ):
+                frames = await rejected_exchange(srv, request)
+                assert len(frames) == 1
+                payload = json.loads(frames[0])
+                assert payload == {"ok": False, "error": {"code": expected_code}}
+                assert UNTRUSTED_PACKET_MARKER not in "\n".join(frames)
+        finally:
+            await srv.close()
+        # Both refusals are pre-effect: no provider boundary was ever reached.
+        assert [name for name, _value in fake.calls] == [
+            "bind_or_verify_relay_parent_thread"
+        ]
+
+    run(scenario())
