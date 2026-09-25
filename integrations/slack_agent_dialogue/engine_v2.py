@@ -144,6 +144,7 @@ class _ClassifiedThreadHistory:
     lifecycle: ThreadRead
     consultation_packets: tuple[ReadConsultationPacket, ...]
     consultation_packet_count: int
+    consultation_packet_ineligible_count: int
     response_page_bytes: tuple[int, ...] | None
     response_byte_limit: int | None
 
@@ -934,6 +935,7 @@ class DialogueEngineV2:
         ] = {}
         ineligible_count = 0
         mutated_count = 0
+        consultation_packet_ineligible_count = 0
 
         for transport in page.messages:
             if transport.ts == thread_ts or transport.thread_ts != thread_ts:
@@ -947,13 +949,18 @@ class DialogueEngineV2:
                 raw_text = transport.created_text
 
             if raw_text.startswith(CONSULTATION_PACKET_DISCRIMINATOR):
+                # Packet physical-origin authority is checked before parsing.
+                # Unauthorized packet-shaped frames are definitive non-evidence:
+                # they cannot poison trusted history or satisfy packet
+                # read/dedup/reconciliation, and their accounting stays
+                # separate from lifecycle sender eligibility.
+                if transport.author_user_id != self.policy.relay_bot_user_id:
+                    consultation_packet_ineligible_count += 1
+                    continue
                 try:
                     packet = parse_consultation_packet(raw_text)
                 except DialogueContractError:
                     raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
-                if transport.author_user_id != self.policy.relay_bot_user_id:
-                    ineligible_count += 1
-                    continue
                 packet_entries.setdefault(packet["message_key"], []).append(
                     (transport, packet)
                 )
@@ -1040,6 +1047,7 @@ class DialogueEngineV2:
             consultation_packet_count=sum(
                 len(entries) for entries in packet_entries.values()
             ),
+            consultation_packet_ineligible_count=consultation_packet_ineligible_count,
             response_page_bytes=response_page_bytes,
             response_byte_limit=response_byte_limit,
         )

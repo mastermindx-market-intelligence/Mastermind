@@ -2616,3 +2616,167 @@ def test_v2_wait_amendment_available_requires_canonical_ref() -> None:
         "selected_option": None,
         "canonical_ref": canonical_ref,
     }
+
+
+# --- IAC-P1 canonical origin-authority repair ---
+
+UNTRUSTED_PACKET_AUTHOR = "U0UNTRUSTED"
+
+
+def test_v2_unauthorized_malformed_packet_is_non_evidence_for_ordinary_history() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    packet = consultation_packet(message_key="asd-consultation-origin-malformed-0001")
+    marker = "UNTRUSTED_PACKET_TAIL"
+    add_consultation_packet_reply(
+        client,
+        packet,
+        ts="1787471000.009901",
+        author=UNTRUSTED_PACKET_AUTHOR,
+        text=render_consultation_packet(packet) + " " + marker,
+    )
+    engine = make_engine(client)
+
+    classified = run(engine._classified_history(thread_ts=THREAD_TS, context=context()))
+
+    assert classified.consultation_packet_count == 0
+    assert classified.consultation_packet_ineligible_count == 1
+    assert classified.lifecycle.ineligible_count == 0
+    assert classified.lifecycle.messages == ()
+
+
+def test_v2_unauthorized_malformed_packet_is_non_evidence_for_packet_detail() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    packet = consultation_packet(message_key="asd-consultation-origin-malformed-0002")
+    add_consultation_packet_reply(
+        client,
+        packet,
+        ts="1787471000.009902",
+        author=UNTRUSTED_PACKET_AUTHOR,
+        text=render_consultation_packet(packet) + " UNTRUSTED_PACKET_TAIL",
+    )
+
+    observed = run(
+        make_engine(client).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            consultation_id=packet["consultation_id"],
+            purpose="QUESTION",
+        )
+    )
+
+    assert observed is None
+
+
+def test_v2_valid_unauthorized_packet_cannot_satisfy_read_dedup_or_recovery() -> None:
+    packet = consultation_packet(message_key="asd-consultation-origin-valid-0003")
+
+    readable = BoundedThreadClient()
+    readable.add_parent(parent_message())
+    add_consultation_packet_reply(
+        readable,
+        packet,
+        ts="1787471000.009903",
+        author=UNTRUSTED_PACKET_AUTHOR,
+    )
+    engine = make_engine(readable)
+    observed = run(
+        engine.read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            consultation_id=packet["consultation_id"],
+            purpose="QUESTION",
+        )
+    )
+    assert observed is None
+    receipt = run(
+        engine.send_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            packet=packet,
+        )
+    )
+    assert receipt.action == "POSTED"
+    assert receipt.message_ts != "1787471000.009903"
+    assert readable.post_call_count == 1
+
+    ambiguous = BoundedThreadClient()
+    ambiguous.add_parent(parent_message())
+    add_consultation_packet_reply(
+        ambiguous,
+        packet,
+        ts="1787471000.009904",
+        author=UNTRUSTED_PACKET_AUTHOR,
+    )
+    ambiguous.post_behaviors = ["unknown_no_commit"]
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(ambiguous).send_consultation_packet(
+                thread_ts=THREAD_TS,
+                context=context(),
+                packet=packet,
+            )
+        )
+    assert code(exc) == "SEND_EFFECT_UNKNOWN"
+    assert ambiguous.post_call_count == 1
+
+
+def test_v2_malformed_relay_packet_still_degrades_without_body_leak() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    packet = consultation_packet(message_key="asd-consultation-origin-relay-malformed-0004")
+    marker = "TRUSTED_PACKET_MALFORMED_MARKER"
+    add_consultation_packet_reply(
+        client,
+        packet,
+        ts="1787471000.009905",
+        author=BOT,
+        text=render_consultation_packet(packet) + " " + marker,
+    )
+    engine = make_engine(client)
+
+    with pytest.raises(DialogueEngineError) as history_exc:
+        run(engine.read_thread(thread_ts=THREAD_TS, context=context()))
+    assert code(history_exc) == "THREAD_MESSAGE_INVALID"
+    assert marker not in str(history_exc.value)
+
+    with pytest.raises(DialogueEngineError) as detail_exc:
+        run(
+            engine.read_consultation_packet(
+                thread_ts=THREAD_TS,
+                context=context(),
+                consultation_id=packet["consultation_id"],
+                purpose="QUESTION",
+            )
+        )
+    assert code(detail_exc) == "THREAD_MESSAGE_INVALID"
+    assert marker not in str(detail_exc.value)
+
+
+def test_v2_valid_relay_packet_remains_positive_control() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    packet = consultation_packet(message_key="asd-consultation-origin-relay-valid-0005")
+    add_consultation_packet_reply(
+        client,
+        packet,
+        ts="1787471000.009906",
+        author=BOT,
+    )
+    engine = make_engine(client)
+
+    observed = run(
+        engine.read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            consultation_id=packet["consultation_id"],
+            purpose="QUESTION",
+        )
+    )
+    classified = run(engine._classified_history(thread_ts=THREAD_TS, context=context()))
+
+    assert observed is not None
+    assert observed.packet == packet
+    assert classified.consultation_packet_count == 1
+    assert classified.consultation_packet_ineligible_count == 0
