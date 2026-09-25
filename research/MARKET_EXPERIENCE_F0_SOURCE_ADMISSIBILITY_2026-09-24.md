@@ -186,3 +186,66 @@ actual coverage bounds, missing-day/name diagnostics and the feed-specific entit
 In parallel, project metadata-only SEC event coverage by canonical issuer/date through the existing
 Company Intelligence contracts. Do not select the stock cohort until the historical-universe rights
 gate and canonical identity join are resolved.
+
+
+## Live substrate census after source admission ruling
+
+A bounded live read of the existing R2 `massive_stock_day` manifest returned HTTP 200. The object
+was last modified 2026-09-24T04:33:08Z and reported 21,603 published objects: 21,602 ticker stores
+plus the manifest. The embedded collector state reported:
+
+- coverage 2021-07-06 through 2026-09-22;
+- 1,361 processed weekdays;
+- zero maximum missing-weekday run across the full processed range;
+- zero recent maximum missing-weekday run over the trailing 90 business days;
+- SPY anchor 2021-07-06 through 2026-09-22 with 1,310 rows and max calendar gap 4 days.
+
+This is substantially stronger than a static code claim: it is a live owner manifest, but it remains
+a store-level receipt. It does not prove every one of 21,602 tickers has every eligible session.
+Per-security coverage and canonical identity remain the next audit.
+
+The existing Company Intelligence event-workspace marker is healthy but narrow:
+`event_workspace_manifest.v2`, generation `3be5e93e4bc42804dc816973`, generated
+2026-07-30T20:30:28Z, `event_count=5`, with canonical period aliases for AAPL, DHI, KBH, PHM and
+TOL. This proves the event contract is operational for a bounded issuer set; it does not provide the
+broad historical primary-source event population required by the Chairman's learning vision.
+
+The broader Earnings Intelligence health plane is genuinely broad and healthy for its current job:
+at Macro `3a29e6145ce53ca4551adef866a5f73e62c8c4ff`, health blob
+`6e4230c983fef1f12b8c682d1d540776d2ff038a` reports 54,834 rows, 4,472 issuers,
+54,527 canonical issuer-period rows and 2,937 QoQ-eligible issuers, with a valid transported
+generation and latest call date 2026-09-17. It also explicitly marks itself
+`is_context_only=true` and `display_only=true`.
+
+That distinction is load-bearing. The historical tier is the transported EquityDesk archive with a
+forward score overlay. The current rights register classifies EquityDesk / earnings-call score
+families as internal-only or not registered for model use. Therefore the broad earnings plane is
+valuable calibration/display context but **not** the training corpus for Market Experience.
+
+### Revised critical path
+
+The first learning loop is not blocked on compute. Its load-bearing missing substrate is now clear:
+
+1. **Price:** live Massive daily history is a viable licensed/model-usable candidate from its actual
+   stored floor, subject to per-security coverage and identity audit.
+2. **Issuer events:** the existing Company Intelligence contract is the correct owner and data
+   shape, but its production event population must be expanded historically from primary SEC
+   evidence rather than replaced with a new event system.
+3. **Universe:** historical S&P membership remains technically qualified but rights-gated. Do not
+   train on it or silently replace it with current survivors.
+4. **Expectations:** consensus remains absent until a licensed source exists.
+5. **Evaluation:** cohort and temporal splits remain frozen only after source/identity/rights
+   admission; development-visible source audits never become untouched holdouts.
+
+The smallest architecture-consistent implementation is therefore a historical **SEC reconstruction
+path inside the existing Company Intelligence owner**. It should backfill issuer events using
+canonical CIK/accession identity, SEC acceptance time as public availability, actual backfill
+acquisition time as operational observation, explicit `public_reconstruction` mode, immutable
+source/revision hashes and typed absence. It must never relabel reconstructed history as historical
+Mastermind possession.
+
+This does not authorize a source backfill in this F0 record. It defines the exact capability the
+existing owner must provide and the acceptance conditions for the first trainable slice.
+
+Receipt:
+`research/MARKET_EXPERIENCE_F0_LIVE_SUBSTRATE_RECEIPT_2026-09-24.json`.
