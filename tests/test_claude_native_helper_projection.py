@@ -225,7 +225,6 @@ def test_write_capable_native_helper_refuses_to_executive_child_boundary(profile
             helpers=_roster(),
             permission_mode="bypassPermissions",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
-        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
 
@@ -244,7 +243,6 @@ def test_missing_native_helper_grant_refuses(profile):
             helpers=_roster(),
             permission_mode="bypassPermissions",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
-        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
 
@@ -288,7 +286,6 @@ def test_duplicate_or_nondeterministic_roster_refuses(profile):
             helpers=(second, first),
             permission_mode="bypassPermissions",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
-        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
     with pytest.raises(
         ClaudeNativeHelperProjectionError,
@@ -299,7 +296,6 @@ def test_duplicate_or_nondeterministic_roster_refuses(profile):
             helpers=(first, first),
             permission_mode="bypassPermissions",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
-        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
 
@@ -313,5 +309,4 @@ def test_mcp_profile_requires_complete_observed_catalog(profile):
             helpers=_roster(),
             permission_mode="bypassPermissions",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
-        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
