@@ -2441,3 +2441,145 @@ def test_v1_engine_read_is_unchanged_by_packet_frames() -> None:
     assert packet_read.messages == plain_read.messages
     assert packet_read.ineligible_count == plain_read.ineligible_count == 0
     assert packet_read.mutated_count == plain_read.mutated_count == 0
+
+
+def test_read_consultation_packet_returns_the_validated_packet() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        ConsultationPacketReadOutcome,
+    )
+
+    client = setup_client()
+    packet = packet_value(message_key="asd-packet-read-0001")
+    add_packet_reply(client, packet, ts="1787471000.000070")
+    add_v2_reply(
+        client,
+        v2_message("ACK", message_key="asd-ack-v2-read-noise"),
+        author=BOT,
+        ts="1787471000.000071",
+    )
+
+    read = run(
+        make_engine(client).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-read-0001",
+        )
+    )
+
+    assert read.outcome is ConsultationPacketReadOutcome.PACKET
+    assert read.packet is not None
+    assert read.packet == packet
+    assert read.packet["fingerprint"] == packet["fingerprint"]
+
+
+def test_read_consultation_packet_absence_requires_mutation_complete_history() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        ConsultationPacketReadOutcome,
+    )
+
+    client = setup_client()
+    read = run(
+        make_engine(client).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-read-0002",
+        )
+    )
+
+    assert read.outcome is ConsultationPacketReadOutcome.ABSENT
+    assert read.packet is None
+
+    mutated = setup_client()
+    mutated.thread_mutation_evidence_complete = False
+    uncertain = run(
+        make_engine(mutated).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-read-0002",
+        )
+    )
+
+    assert uncertain.outcome is ConsultationPacketReadOutcome.UNCERTAIN
+    assert uncertain.packet is None
+
+
+def test_incomplete_history_is_uncertainty_not_absence() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        ConsultationPacketReadOutcome,
+    )
+
+    incomplete = setup_client()
+    incomplete.thread_history_complete = False
+    read = run(
+        make_engine(incomplete).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-read-0003",
+        )
+    )
+    assert read.outcome is ConsultationPacketReadOutcome.UNCERTAIN
+
+    class DownTransportClient(InMemorySlackClient):
+        async def fetch_thread(self, *, channel_id: str, thread_ts: str, limit: int):
+            raise RuntimeError("transport down")
+
+    down = DownTransportClient(relay_bot_user_id=BOT)
+    down.add_parent(parent_message())
+    transport_read = run(
+        make_engine(down).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-read-0003",
+        )
+    )
+    assert transport_read.outcome is ConsultationPacketReadOutcome.UNCERTAIN
+
+
+def test_invalid_packet_text_is_never_returned_as_a_body() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        ConsultationPacketReadOutcome,
+    )
+
+    client = setup_client()
+    rendered = render_consultation_packet(packet_value(message_key="asd-packet-read-0004"))
+    add_packet_reply(
+        client,
+        {},
+        ts="1787471000.000072",
+        text=rendered + " UNTRUSTED_PACKET_MARKER",
+    )
+
+    read = run(
+        make_engine(client).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-read-0004",
+        )
+    )
+
+    assert read.outcome is not ConsultationPacketReadOutcome.ABSENT
+    assert read.outcome is not ConsultationPacketReadOutcome.PACKET
+    assert read.packet is None
+    assert "UNTRUSTED_PACKET_MARKER" not in repr(read)
+
+
+def test_duplicate_packet_identity_is_uncertainty() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        ConsultationPacketReadOutcome,
+    )
+
+    client = setup_client()
+    packet = packet_value(message_key="asd-packet-read-0005")
+    add_packet_reply(client, packet, ts="1787471000.000073")
+    add_packet_reply(client, packet, ts="1787471000.000074")
+
+    read = run(
+        make_engine(client).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-read-0005",
+        )
+    )
+
+    assert read.outcome is ConsultationPacketReadOutcome.UNCERTAIN
+    assert read.packet is None

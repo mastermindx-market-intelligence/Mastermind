@@ -10,6 +10,7 @@ import asyncio
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
@@ -140,6 +141,35 @@ class DiscoveredDialogueParent:
 
     thread_ts: str
     parent: Mapping[str, Any]
+
+
+class ConsultationPacketReadOutcome(str, Enum):
+    """Closed outcome set for one bounded consultation-packet read."""
+
+    PACKET = "PACKET"
+    ABSENT = "ABSENT"
+    UNCERTAIN = "UNCERTAIN"
+
+
+@dataclass(frozen=True)
+class ConsultationPacketRead:
+    """Typed packet read: the one validated packet, an absence, or uncertainty.
+
+    ``reason`` carries a typed engine code only — never frame text, never any
+    transcript fragment — so callers distinguish outcomes by ``outcome``.
+    """
+
+    outcome: ConsultationPacketReadOutcome
+    packet: Mapping[str, Any] | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _PacketObservation:
+    """One packet-classified transport frame and its admitted frame, if any."""
+
+    ts: str
+    packet: Mapping[str, Any] | None
 
 
 @dataclass
@@ -877,6 +907,25 @@ class DialogueEngineV2:
     async def _history(
         self, *, thread_ts: str, context: DialogueContextV2
     ) -> ThreadRead:
+        read, _packets = await self._scan_thread(thread_ts=thread_ts, context=context)
+        return read
+
+    async def _scan_thread(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        collect_packets: bool = False,
+    ) -> tuple[ThreadRead, tuple[_PacketObservation, ...]]:
+        """One bounded thread walk producing the lifecycle read and packets.
+
+        This is the only history walk.  Packet frames are always counted;
+        ``collect_packets`` additionally admits each packet-classified frame
+        through ``parse_consultation_packet`` (``None`` when it fails), for
+        packet-only readers.  Collected packets never re-enter the lifecycle
+        result.
+        """
+
         if not isinstance(thread_ts, str) or _TS_RE.fullmatch(thread_ts) is None:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
         bound = await self.bind_or_verify_thread(context)
@@ -905,6 +954,7 @@ class DialogueEngineV2:
         ineligible_count = 0
         mutated_count = 0
         packet_count = 0
+        packets: list[_PacketObservation] = []
 
         for transport in page.messages:
             if transport.ts == thread_ts or transport.thread_ts != thread_ts:
@@ -924,6 +974,13 @@ class DialogueEngineV2:
                 # ordering, parent discovery, or key reconciliation.
                 if raw_text.startswith(CONSULTATION_PACKET_DISCRIMINATOR_V1):
                     packet_count += 1
+                    if collect_packets:
+                        packets.append(
+                            _PacketObservation(
+                                ts=transport.ts,
+                                packet=parse_consultation_packet(raw_text),
+                            )
+                        )
                 continue
 
             # Unknown Slack identities are transport-ineligible even when their
@@ -975,12 +1032,72 @@ class DialogueEngineV2:
             ineligible_count=ineligible_count,
             mutated_count=mutated_count,
             packet_count=packet_count,
-        )
+        ), tuple(packets)
 
     async def read_thread(
         self, *, thread_ts: str, context: DialogueContextV2
     ) -> ThreadRead:
         return await self._history(thread_ts=thread_ts, context=context)
+
+    async def read_consultation_packet(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        message_key: str,
+    ) -> ConsultationPacketRead:
+        """Return the one admitted packet, a typed absence, or an uncertainty.
+
+        Absence is only reachable when the bounded history walk completed and
+        was mutation-complete; every unreadable or unreconcilable history, a
+        duplicate packet identity, and a packet frame that carries the packet
+        discriminator but fails ``parse_consultation_packet`` are uncertainties.
+        No transcript, foreign frame, or rejected frame text is ever returned.
+        """
+
+        if (
+            not isinstance(message_key, str)
+            or MESSAGE_KEY_RE_V2.fullmatch(message_key) is None
+        ):
+            return ConsultationPacketRead(
+                outcome=ConsultationPacketReadOutcome.UNCERTAIN,
+                reason="THREAD_CONTEXT_MISMATCH",
+            )
+        try:
+            _read, packets = await self._scan_thread(
+                thread_ts=thread_ts,
+                context=context,
+                collect_packets=True,
+            )
+        except DialogueEngineError as exc:
+            return ConsultationPacketRead(
+                outcome=ConsultationPacketReadOutcome.UNCERTAIN,
+                reason=exc.code,
+            )
+        if any(observation.packet is None for observation in packets):
+            # Integrity outcome: a frame claimed packet identity but is not an
+            # admissible packet, so neither this packet nor absence is provable.
+            return ConsultationPacketRead(
+                outcome=ConsultationPacketReadOutcome.UNCERTAIN,
+                reason="CONSULTATION_PACKET_INVALID",
+            )
+        matches = [
+            observation
+            for observation in packets
+            if observation.packet is not None
+            and observation.packet["message_key"] == message_key
+        ]
+        if len(matches) > 1:
+            return ConsultationPacketRead(
+                outcome=ConsultationPacketReadOutcome.UNCERTAIN,
+                reason="PACKET_IDENTITY_AMBIGUOUS",
+            )
+        if not matches:
+            return ConsultationPacketRead(outcome=ConsultationPacketReadOutcome.ABSENT)
+        return ConsultationPacketRead(
+            outcome=ConsultationPacketReadOutcome.PACKET,
+            packet=matches[0].packet,
+        )
 
     @staticmethod
     def _find_key(
@@ -1362,6 +1479,8 @@ class DialogueEngineV2:
 
 
 __all__ = [
+    "ConsultationPacketRead",
+    "ConsultationPacketReadOutcome",
     "DialogueContextV2",
     "DialogueEngineV2",
     "DiscoveredDialogueParent",
