@@ -81,15 +81,32 @@ def test_carrier_decision_matrix_blocks_permission_bypass_and_unknown_effect():
     assert payload, "missing machine-readable carrier decision matrix"
     policy = json.loads(payload.group(1))
     assert policy["schema"] == "mastermind.paper_carrier_decision.v1"
-    cases = {
-        (row["studio_state"], row["rdc_independently_authorized"], row["effect_state"]): row["decision"]
-        for row in policy["cases"]
-    }
-    assert cases[("PAPER_ACTION_AVAILABLE", False, "NONE")] == "USE_STUDIO"
-    assert cases[("ACTION_ABSENT_OR_UNSERVICEABLE", True, "NONE")] == "RDC_ELIGIBLE_PRE_EFFECT"
-    assert cases[("ACTION_ABSENT_OR_UNSERVICEABLE", False, "NONE")] == "BLOCK_EXACT_CARRIER_GATE"
-    assert cases[("EXPLICIT_DENIAL", True, "NONE")] == "BLOCK_NO_FALLBACK"
-    assert cases[("ANY", True, "EFFECT_UNKNOWN")] == "BLOCK_RECONCILE_ORIGINAL_CARRIER"
+    assert policy["match_semantics"] == "FIRST_MATCH_WITH_ANY_WILDCARD"
+    assert policy["default_decision"] == "BLOCK_UNRECOGNIZED_STATE"
+
+    def decide(studio_state, rdc_authorized, effect_state):
+        values = {
+            "studio_state": studio_state,
+            "rdc_independently_authorized": rdc_authorized,
+            "effect_state": effect_state,
+        }
+        for row in policy["cases"]:
+            if all(row[key] == "ANY" or row[key] == values[key] for key in values):
+                return row["decision"]
+        return policy["default_decision"]
+
+    for rdc_authorized in (False, True):
+        assert decide("ANY_NEW_STUDIO_STATE", rdc_authorized, "EFFECT_UNKNOWN") == (
+            "BLOCK_RECONCILE_ORIGINAL_CARRIER"
+        )
+        assert decide("EXPLICIT_DENIAL", rdc_authorized, "NONE") == "BLOCK_NO_FALLBACK"
+
+    assert decide("PAPER_ACTION_AVAILABLE", False, "NONE") == "USE_STUDIO"
+    assert decide("PAPER_ACTION_AVAILABLE", True, "NONE") == "USE_STUDIO"
+    assert decide("ACTION_ABSENT_OR_UNSERVICEABLE", True, "NONE") == "RDC_ELIGIBLE_PRE_EFFECT"
+    assert decide("ACTION_ABSENT_OR_UNSERVICEABLE", False, "NONE") == "BLOCK_EXACT_CARRIER_GATE"
+    assert decide("UNRECOGNIZED_FUTURE_STATE", False, "NONE") == "BLOCK_UNRECOGNIZED_STATE"
+    assert decide("UNRECOGNIZED_FUTURE_STATE", True, "NONE") == "BLOCK_UNRECOGNIZED_STATE"
 
 
 def test_cross_carrier_write_failover_is_forbidden():

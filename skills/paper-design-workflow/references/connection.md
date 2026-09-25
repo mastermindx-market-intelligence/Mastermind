@@ -41,16 +41,24 @@ carrier/permission gate instead of using host access as a substitute for permiss
 ```json
 {
   "schema": "mastermind.paper_carrier_decision.v1",
+  "match_semantics": "FIRST_MATCH_WITH_ANY_WILDCARD",
+  "default_decision": "BLOCK_UNRECOGNIZED_STATE",
   "cases": [
-    {"studio_state":"PAPER_ACTION_AVAILABLE","rdc_independently_authorized":false,"effect_state":"NONE","decision":"USE_STUDIO"},
+    {"studio_state":"ANY","rdc_independently_authorized":"ANY","effect_state":"EFFECT_UNKNOWN","decision":"BLOCK_RECONCILE_ORIGINAL_CARRIER"},
+    {"studio_state":"EXPLICIT_DENIAL","rdc_independently_authorized":"ANY","effect_state":"NONE","decision":"BLOCK_NO_FALLBACK"},
+    {"studio_state":"PAPER_ACTION_AVAILABLE","rdc_independently_authorized":"ANY","effect_state":"NONE","decision":"USE_STUDIO"},
     {"studio_state":"ACTION_ABSENT_OR_UNSERVICEABLE","rdc_independently_authorized":true,"effect_state":"NONE","decision":"RDC_ELIGIBLE_PRE_EFFECT"},
-    {"studio_state":"ACTION_ABSENT_OR_UNSERVICEABLE","rdc_independently_authorized":false,"effect_state":"NONE","decision":"BLOCK_EXACT_CARRIER_GATE"},
-    {"studio_state":"EXPLICIT_DENIAL","rdc_independently_authorized":true,"effect_state":"NONE","decision":"BLOCK_NO_FALLBACK"},
-    {"studio_state":"ANY","rdc_independently_authorized":true,"effect_state":"EFFECT_UNKNOWN","decision":"BLOCK_RECONCILE_ORIGINAL_CARRIER"}
+    {"studio_state":"ACTION_ABSENT_OR_UNSERVICEABLE","rdc_independently_authorized":false,"effect_state":"NONE","decision":"BLOCK_EXACT_CARRIER_GATE"}
   ]
 }
 ```
 <!-- PAPER_CARRIER_DECISION_V1_END -->
+
+Evaluate the matrix top-to-bottom. `ANY` is a wildcard. `EFFECT_UNKNOWN` therefore blocks before
+all carrier-selection logic, and `EXPLICIT_DENIAL` blocks regardless of RDC authorization. If no
+row matches, `default_decision` applies and fails closed; an unrecognized future state never becomes
+implicit fallback authority.
+
 
 RDC remains valid for authorized host diagnosis/installation even when it is not authorized to edit
 Paper. It is **not** another Paper gateway.
