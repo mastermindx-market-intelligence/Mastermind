@@ -2328,7 +2328,10 @@ def test_packet_frame_is_never_parsed_as_a_v2_message() -> None:
 
     read = run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
 
-    assert read.packet_count == 1
+    # The frame keeps its shape (never parsed as a V2 message, no lifecycle
+    # effect) but is no longer credited as a packet: only the Relay bot is an
+    # authorized packet writer, so a foreign packet frame is refused unparsed.
+    assert read.packet_count == 0
     assert read.ineligible_count == 0
     assert len(read.messages) == 1
 
@@ -2907,3 +2910,130 @@ def test_status_contract_is_unchanged_by_packet_support() -> None:
     assert tuple(engine.status()) == tuple(expected)
     assert engine.status()["status"] == "DEVELOPMENT_UNARMED"
     assert engine.status()["production_armed"] is False
+
+
+# --- IAC-P1-B1-R: packet physical-origin authority and visible degradation ---
+
+UNTRUSTED = "U0UNTRUSTED"
+
+
+def test_unauthorized_origin_packet_is_never_read_as_a_packet() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        ConsultationPacketReadOutcome,
+    )
+
+    packet = packet_value(message_key="asd-packet-origin-0001")
+    # A Sol identity is a lifecycle sender, never a packet writer: only the
+    # Relay bot holds packet physical-origin authority.
+    for author in (UNTRUSTED, SOL1):
+        client = setup_client()
+        add_packet_reply(client, packet, author=author, ts="1787471000.000080")
+
+        read = run(
+            make_engine(client).read_consultation_packet(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message_key="asd-packet-origin-0001",
+            )
+        )
+
+        assert read.outcome is ConsultationPacketReadOutcome.UNCERTAIN
+        assert read.reason == "CONSULTATION_PACKET_UNAUTHORIZED_ORIGIN"
+        assert read.packet is None
+        assert packet["question"] not in repr(read)
+        assert packet["fingerprint"] not in repr(read)
+        assert author not in repr(read)
+
+
+def test_unauthorized_origin_packet_cannot_suppress_a_legitimate_send() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        PreparedMessageSend,
+        SendFrameKind,
+    )
+
+    untrusted_ts = "1787471000.000081"
+    client = setup_client()
+    packet = packet_value(message_key="asd-packet-origin-0002")
+    add_packet_reply(client, packet, author=UNTRUSTED, ts=untrusted_ts)
+    engine = make_engine(client)
+
+    prepared = run(
+        engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=packet,
+            frame_kind=SendFrameKind.CONSULTATION_PACKET,
+        )
+    )
+    assert isinstance(prepared, PreparedMessageSend)
+
+    receipt = run(
+        engine.commit_send_message(prepared, fingerprint=prepared.fingerprint)
+    )
+
+    assert receipt.action == "POSTED"
+    assert receipt.message_key == "asd-packet-origin-0002"
+    assert receipt.message_ts != untrusted_ts
+    assert client.post_call_count == 1
+
+
+def test_unauthorized_origin_packet_cannot_satisfy_post_effect_recovery() -> None:
+    from integrations.slack_agent_dialogue.engine import SlackEffectUnknown
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        PreparedMessageSend,
+        SendFrameKind,
+    )
+
+    class UnknownPostClient(InMemorySlackClient):
+        async def post_reply(self, *, channel_id: str, thread_ts: str, text: str):
+            self.post_call_count += 1
+            raise SlackEffectUnknown("reply lost before commit")
+
+    untrusted_ts = "1787471000.000082"
+    client = UnknownPostClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message())
+    packet = packet_value(message_key="asd-packet-origin-0003")
+    add_packet_reply(client, packet, author=UNTRUSTED, ts=untrusted_ts)
+    engine = make_engine(client)
+    prepared = run(
+        engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=packet,
+            frame_kind=SendFrameKind.CONSULTATION_PACKET,
+        )
+    )
+    assert isinstance(prepared, PreparedMessageSend)
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(engine.commit_send_message(prepared, fingerprint=prepared.fingerprint))
+
+    assert code(exc) == "SEND_EFFECT_UNKNOWN"
+    assert untrusted_ts not in str(exc.value)
+    assert client.post_call_count == 1
+
+
+def test_relay_authored_packet_is_read_normally() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        ConsultationPacketReadOutcome,
+    )
+
+    client = setup_client()
+    packet = packet_value(message_key="asd-packet-origin-positive-0004")
+    add_packet_reply(client, packet, author=BOT, ts="1787471000.000083")
+
+    read = run(
+        make_engine(client).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-origin-positive-0004",
+        )
+    )
+    thread_read = run(
+        make_engine(client).read_thread(thread_ts=THREAD_TS, context=context())
+    )
+
+    assert read.outcome is ConsultationPacketReadOutcome.PACKET
+    assert read.packet == packet
+    assert read.reason is None
+    assert thread_read.packet_count == 1

@@ -160,6 +160,12 @@ class ConsultationPacketReadOutcome(str, Enum):
     UNCERTAIN = "UNCERTAIN"
 
 
+# Typed ConsultationPacketRead reason for a packet-classified transport frame
+# whose physical author is not the Relay bot.  It is a reason on the read
+# result only — it is never raised — so ERROR_CODES stays closed.
+PACKET_ORIGIN_REFUSAL_REASON = "CONSULTATION_PACKET_UNAUTHORIZED_ORIGIN"
+
+
 @dataclass(frozen=True)
 class ConsultationPacketRead:
     """Typed packet read: the one validated packet, an absence, or uncertainty.
@@ -175,10 +181,16 @@ class ConsultationPacketRead:
 
 @dataclass(frozen=True)
 class _PacketObservation:
-    """One packet-classified transport frame and its admitted frame, if any."""
+    """One packet-classified transport frame and its admitted frame, if any.
+
+    ``refused_reason`` is a typed engine-side reason and is set only when the
+    frame was refused before any parsing (physical origin), in which case
+    ``packet`` is ``None``.  No frame text ever reaches this value.
+    """
 
     ts: str
     packet: Mapping[str, Any] | None
+    refused_reason: str | None = None
 
 
 @dataclass
@@ -977,11 +989,28 @@ class DialogueEngineV2:
                 raw_text = transport.created_text
 
             if not raw_text.startswith(MESSAGE_DISCRIMINATOR_V2):
-                # Exact closed classification: a consultation packet frame is
-                # only counted.  It is never parsed as a V2 message, never
-                # sender-screened, and never enters lifecycle interpretation,
-                # ordering, parent discovery, or key reconciliation.
+                # Exact closed classification, in the incumbent V2 branch's own
+                # order: discriminator, then physical-origin screen, then
+                # parse.  A consultation packet frame is never parsed as a V2
+                # message and never enters lifecycle interpretation, ordering,
+                # parent discovery, or key reconciliation.  The only authorized
+                # packet writer is the service's own verified Relay path;
+                # lifecycle sender eligibility (`allowed_sol_user_ids`) answers
+                # a different question and never admits a packet.  Canonical
+                # JSON integrity is not writer authority, so a foreign packet
+                # frame is refused before parsing (no foreign-writer parse) and
+                # is never credited as an existing send.
                 if raw_text.startswith(CONSULTATION_PACKET_DISCRIMINATOR_V1):
+                    if transport.author_user_id != self.policy.relay_bot_user_id:
+                        if collect_packets:
+                            packets.append(
+                                _PacketObservation(
+                                    ts=transport.ts,
+                                    packet=None,
+                                    refused_reason=PACKET_ORIGIN_REFUSAL_REASON,
+                                )
+                            )
+                        continue
                     packet_count += 1
                     if collect_packets:
                         packets.append(
@@ -1059,9 +1088,11 @@ class DialogueEngineV2:
 
         Absence is only reachable when the bounded history walk completed and
         was mutation-complete; every unreadable or unreconcilable history, a
-        duplicate packet identity, and a packet frame that carries the packet
-        discriminator but fails ``parse_consultation_packet`` are uncertainties.
-        No transcript, foreign frame, or rejected frame text is ever returned.
+        duplicate packet identity, a packet-classified frame refused on
+        physical origin, and a packet frame that carries the packet
+        discriminator but fails ``parse_consultation_packet`` are
+        uncertainties.  No transcript, foreign frame, or rejected frame text
+        is ever returned.
         """
 
         if (
@@ -1082,6 +1113,20 @@ class DialogueEngineV2:
             return ConsultationPacketRead(
                 outcome=ConsultationPacketReadOutcome.UNCERTAIN,
                 reason=exc.code,
+            )
+        refusals = [
+            observation.refused_reason
+            for observation in packets
+            if observation.refused_reason is not None
+        ]
+        if refusals:
+            # Origin authority: a packet-classified frame from any writer other
+            # than the Relay bot is never admitted, so what it carries is
+            # unknowable and neither this packet nor its absence is provable
+            # while such a frame is in bounded history.
+            return ConsultationPacketRead(
+                outcome=ConsultationPacketReadOutcome.UNCERTAIN,
+                reason=refusals[0],
             )
         if any(observation.packet is None for observation in packets):
             # Integrity outcome: a frame claimed packet identity but is not an
