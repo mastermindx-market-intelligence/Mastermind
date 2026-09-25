@@ -218,7 +218,20 @@ class _FakeAttemptFleet:
     def launch_attestation(self, ref: WorkerProcessRef):
         if ref != self.process_ref:
             raise AssertionError("wrong process")
-        return {"schema_version": "fixture"}
+        return {
+            "schema_version": "fixture",
+            "process_identity": {
+                "pid": ref.pid,
+                "pgid": ref.pgid,
+                "session_id": ref.session_id,
+                "start_identity": ref.process_start_identity,
+                "boot_id": ref.boot_session_id,
+                "effective_uid": ref.effective_uid,
+                "effective_gid": ref.effective_gid,
+                "real_uid": ref.real_uid,
+                "real_gid": ref.real_gid,
+            },
+        }
 
     def uid_sweep_receipt(self, subject):
         return {"reason": "fixture", "passed": True}
