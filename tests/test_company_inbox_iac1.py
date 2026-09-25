@@ -5985,3 +5985,112 @@ async def test_publication_uniqueness_survives_concurrent_await_interleaving(
     assert _requested_count(runtime, consultation_id) == 1
 
 
+@_sync_test
+async def test_no_late_wake_is_appended_after_consumption(tmp_path: Path) -> None:
+    """Once the requester has consumed, no straggling await may append a Wake.
+
+    The requester consumes at the carrier's ``after_put`` seam (before the
+    reply's own answer-attention step runs), and a straggling identical
+    reply is then replayed after consumption by a fresh dispatcher
+    instance. No answer-attention ``WAKE_REQUESTED`` may ever appear and
+    the whole wake ledger must be unchanged by the straggler.
+    """
+    runtime = _runtime_at(tmp_path / "late-wake")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "late-wake-repo")
+    carrier = _ConsumeDuringAnswerPutCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    consult = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="No late wake after consumption?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+
+    consumed: list[dict[str, Any]] = []
+
+    async def _consume_during_put(ref: str) -> None:
+        consumed.append(await a_dispatcher.consume_answer(ref))
+
+    carrier.after_put = _consume_during_put
+
+    reply = _run(
+        b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "consumed before attention",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply["ok"] is True
+    assert reply["data"]["state"] == "ANSWER_AVAILABLE"
+    assert reply["data"]["attention_requested"] is False
+    assert reply["data"]["blocker"] == "ANSWER_ALREADY_CONSUMED"
+    assert consumed == [
+        {
+            "consultation_ref": consultation_id,
+            "state": "CONSUMED",
+            "inserted": True,
+        }
+    ]
+    ledger_after_consume = WakeLedgerRepository(runtime).list_wake_events()
+    assert _answer_attention_requested_records(runtime) == ()
+
+    # Straggling identical reply AFTER consumption: reconciles, wakes nothing.
+    restarted_b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    straggler = _run(
+        _gateway_with_dispatcher(restarted_b_dispatcher).call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "consumed before attention",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert straggler["ok"] is True
+    assert straggler["data"]["state"] == "ANSWER_AVAILABLE"
+    assert straggler["data"]["reconciled"] is True
+    assert straggler["data"]["attention_requested"] is False
+    assert straggler["data"]["wake_state"] is None
+    assert straggler["data"]["blocker"] == "ANSWER_ALREADY_CONSUMED"
+    assert WakeLedgerRepository(runtime).list_wake_events() == ledger_after_consume
+    assert _answer_attention_requested_records(runtime) == ()
+    events = _evidence_for(runtime, consultation_id)
+    assert len(events.get("CONSUMED_BY_REQUESTER", [])) == 1
+
+
