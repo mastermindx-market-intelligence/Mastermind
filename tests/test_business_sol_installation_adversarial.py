@@ -37,7 +37,7 @@ def template() -> dict[str, object]:
     return {
         "schema": "mastermind.plugin_app_bindings_template.v1",
         "plugin": "mastermind-sol",
-        "plugin_version": "0.1.0",
+        "plugin_version": "0.2.0",
         "generated_file": ".app.json",
         "generated_by_wave": "BSC-U1",
         "bindings": [
@@ -129,10 +129,10 @@ def request() -> dict[str, object]:
         "workspace_role": "OWNER",
         "plugin": {
             "name": "mastermind-sol",
-            "version": "0.1.0",
+            "version": "0.2.0",
             "registry_id": PLUGIN_ID,
             "approved_registry_id_digest": digest_text(PLUGIN_ID),
-            "display_name": "Mastermind Sol",
+            "display_name": "Mastermind CEO",
             "scope": "WORKSPACE",
             "status": "ENABLED",
             "installation_policy": "INSTALLED_BY_DEFAULT",
@@ -241,7 +241,7 @@ def test_source_or_package_drift_refuses(field: str) -> None:
     ("field", "replacement"),
     [
         ("name", "other-plugin"),
-        ("version", "0.2.0"),
+        ("version", "0.3.0"),
         ("display_name", "Other Plugin"),
         ("scope", "USER"),
         ("status", "DISABLED"),
