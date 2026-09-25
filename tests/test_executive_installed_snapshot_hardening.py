@@ -2280,3 +2280,38 @@ def test_object_type_probe_shards_large_complete_sets_without_weakening():
     assert len(calls) == 2
     assert {object_id for call in calls for object_id in call} == set(expected)
     assert sum(len(call) for call in calls) == len(expected)
+
+def test_scoped_macro_seal_refuses_symlink_parent_before_descendant(
+    tmp_path: Path, monkeypatch,
+):
+    """A substituted directory symlink is rejected before any child lookup."""
+    from integrations.executive_mcp.installed import _scoped_worktree_path_sets
+
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "leaf.txt").write_text("outside\n", encoding="utf-8")
+    (root / "scope").symlink_to(outside, target_is_directory=True)
+
+    descendant = root / "scope" / "leaf.txt"
+    real_lstat = Path.lstat
+    observed: list[Path] = []
+
+    def guarded_lstat(path: Path):
+        observed.append(path)
+        if path == descendant:
+            raise AssertionError("scoped seal followed a substituted directory symlink")
+        return real_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", guarded_lstat)
+    with pytest.raises(OSError, match="directory topology differs"):
+        _scoped_worktree_path_sets(
+            root,
+            files={"scope/leaf.txt"},
+            directories={"scope"},
+            deadline=None,
+            label="Macro source",
+        )
+
+    assert descendant not in observed
