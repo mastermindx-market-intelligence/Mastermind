@@ -26,7 +26,10 @@ from integrations.slack_agent_dialogue.engine import (
     MessageReceipt,
     SlackMessage,
 )
-from integrations.slack_agent_dialogue.engine_v2 import PreparedMessageSend
+from integrations.slack_agent_dialogue.engine_v2 import (
+    PreparedMessageSend,
+    SendFrameKind,
+)
 from common.agent_dialogue_consultation_contract import (
     RECEIPT_KEYS,
     build_consultation,
@@ -134,7 +137,9 @@ class FakeV2Engine:
         )
         return {"action": "DUPLICATE", "message_key": message["message_key"]}
 
-    async def prepare_send_message(self, *, thread_ts: str, context, message):
+    async def prepare_send_message(
+        self, *, thread_ts: str, context, message, frame_kind=None
+    ):
         normalized = context.normalized()
         self.calls.append(
             (
@@ -143,6 +148,7 @@ class FakeV2Engine:
                     "thread_ts": thread_ts,
                     "context": normalized,
                     "message": dict(message),
+                    "frame_kind": frame_kind,
                 },
             )
         )
@@ -2599,5 +2605,194 @@ def test_packet_exact_send_fingerprint_is_read_from_its_own_argument(
             server.close()
             await server.wait_closed()
             path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_packet_exact_send_flows_through_ready_commit_with_its_own_frame_kind(
+    socket_root: Path,
+) -> None:
+    """The packet operation reaches the engine as CONSULTATION_PACKET, never as
+    a defaulted message frame."""
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_packet_request_v2()
+        packet = request["args"]["packet"]
+        try:
+            reader, writer = await asyncio.open_unix_connection(
+                str(srv.config.socket_path)
+            )
+            writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+            await writer.drain()
+            assert json.loads(await reader.readline()) == {
+                "ok": True,
+                "ready": {"fingerprint": packet["fingerprint"]},
+            }
+            writer.write(
+                json.dumps(
+                    {"commit": "COMMIT", "fingerprint": packet["fingerprint"]},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            assert json.loads(await reader.readline()) == {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": packet["message_key"],
+                    "fingerprint": packet["fingerprint"],
+                    "message_ts": "1787471000.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": THREAD_TS,
+                    "parent_author_user_id": BOT,
+                    "parent_fingerprint": "a" * 64,
+                },
+            }
+            writer.close()
+            await writer.wait_closed()
+            await task
+        finally:
+            await srv.close()
+        assert [
+            value for name, value in fake.calls if name == "prepare_send_message"
+        ] == [
+            {
+                "thread_ts": THREAD_TS,
+                "context": context_v2_dict(),
+                "message": packet,
+                "frame_kind": SendFrameKind.CONSULTATION_PACKET,
+            }
+        ]
+
+    run(scenario())
+
+
+def test_existing_send_message_exact_request_is_unchanged(socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            response = await call_service(
+                srv.config.socket_path, exact_send_request_v2()
+            )
+            assert response["ok"] is True
+            assert response["result"]["action"] == "POSTED"
+            drifted = exact_send_request_v2()
+            drifted["args"]["extra_key"] = "not expressible in a closed set"
+            refused = await call_service(srv.config.socket_path, drifted)
+            assert refused == {"ok": False, "error": {"code": "REQUEST_INVALID"}}
+        finally:
+            await srv.close()
+        assert [name for name, _value in fake.calls].count("commit_send_message") == 1
+
+    run(scenario())
+
+
+def test_packet_request_with_message_arg_is_invalid(socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            request = request_envelope_v2(
+                PACKET_OPERATION,
+                {
+                    "context": context_v2_dict(),
+                    "thread_ts": THREAD_TS,
+                    "message": v2_message_dict(),
+                    "send_protocol": EXACT_SEND_PROTOCOL,
+                },
+            )
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {"ok": False, "error": {"code": "REQUEST_INVALID"}}
+        finally:
+            await srv.close()
+        assert fake.calls == []
+
+    run(scenario())
+
+
+def test_packet_request_missing_send_protocol_is_invalid(socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            request = exact_packet_request_v2()
+            del request["args"]["send_protocol"]
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {"ok": False, "error": {"code": "REQUEST_INVALID"}}
+        finally:
+            await srv.close()
+        assert fake.calls == []
+
+    run(scenario())
+
+
+def test_unknown_operation_is_invalid(socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            request = request_envelope_v2(
+                "send_message_v3",
+                {
+                    "context": context_v2_dict(),
+                    "thread_ts": THREAD_TS,
+                    "packet": packet_value(),
+                    "send_protocol": EXACT_SEND_PROTOCOL,
+                },
+            )
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {"ok": False, "error": {"code": "REQUEST_INVALID"}}
+        finally:
+            await srv.close()
+        assert fake.calls == []
+
+    run(scenario())
+
+
+def test_v1_router_does_not_accept_the_packet_operation(socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            request = {
+                "version": CONTROL_VERSION,
+                "operation": PACKET_OPERATION,
+                "args": {
+                    "context": context_v2_dict(),
+                    "thread_ts": THREAD_TS,
+                    "packet": packet_value(),
+                    "send_protocol": EXACT_SEND_PROTOCOL,
+                },
+            }
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {"ok": False, "error": {"code": "REQUEST_INVALID"}}
+        finally:
+            await srv.close()
+        assert fake.calls == []
+
+    run(scenario())
+
+
+def test_v2_non_exact_router_does_not_accept_the_packet_operation(
+    socket_root: Path,
+) -> None:
+    """A packet request is exact-send only; it never becomes a plain send."""
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            request = exact_packet_request_v2()
+            request["args"]["send_protocol"] = "mastermind.some_other_protocol.v9"
+            response = await call_service(srv.config.socket_path, request)
+            assert response == {"ok": False, "error": {"code": "REQUEST_INVALID"}}
+        finally:
+            await srv.close()
+        assert fake.calls == []
 
     run(scenario())

@@ -34,6 +34,7 @@ from integrations.slack_agent_dialogue.engine_v2 import (
     DialogueContextV2,
     DialogueEngineV2,
     PreparedMessageSend,
+    SendFrameKind,
 )
 from integrations.slack_agent_dialogue.turn_runtime_primitives import (
     ActiveWaiterConflict,
@@ -47,10 +48,30 @@ EXACT_SEND_PROTOCOL = "mastermind.agent_dialogue_exact_send.v1"
 # ``_EXACT_SEND_FINGERPRINT_ARG_BY_OPERATION``; an operation added to this set
 # without teaching that mapping is refused, never silently unverified.
 EXACT_SEND_OPERATIONS = frozenset({"send_message", "send_consultation_packet"})
-_EXACT_SEND_FINGERPRINT_ARG_BY_OPERATION = MappingProxyType(
+# One closed contract per exact-send operation: its own exact argument key set,
+# the argument carrying the frame body (and its fingerprint), and the engine
+# frame kind it maps to. An operation inside EXACT_SEND_OPERATIONS without an
+# entry here is refused, never defaulted to the message kind.
+_EXACT_SEND_OPERATION_BODY_ARGUMENT = MappingProxyType(
     {
         "send_message": "message",
         "send_consultation_packet": "packet",
+    }
+)
+_EXACT_SEND_OPERATION_ARGUMENT_KEYS = MappingProxyType(
+    {
+        "send_message": frozenset(
+            {"context", "thread_ts", "message", "send_protocol"}
+        ),
+        "send_consultation_packet": frozenset(
+            {"context", "thread_ts", "packet", "send_protocol"}
+        ),
+    }
+)
+_EXACT_SEND_OPERATION_FRAME_KINDS = MappingProxyType(
+    {
+        "send_message": SendFrameKind.MESSAGE,
+        "send_consultation_packet": SendFrameKind.CONSULTATION_PACKET,
     }
 )
 RELAY_PARENT_ATTESTATION = "mastermind.agent_dialogue.relay_parent/v1"
@@ -525,10 +546,12 @@ class AgentDialogueService:
 
     @staticmethod
     def _is_exact_send_request(request: Any) -> bool:
+        operation = request.get("operation") if isinstance(request, dict) else None
         return (
             isinstance(request, dict)
             and request.get("version") == CONTROL_VERSION_V2
-            and request.get("operation") == "send_message"
+            and isinstance(operation, str)
+            and operation in EXACT_SEND_OPERATIONS
             and isinstance(request.get("args"), dict)
             and request["args"].get("send_protocol") == EXACT_SEND_PROTOCOL
         )
@@ -545,16 +568,23 @@ class AgentDialogueService:
         if engine is None:
             raise DialogueServiceError("REQUEST_INVALID")
         item = _exact_mapping(request, {"version", "operation", "args"})
-        if item["version"] != CONTROL_VERSION_V2 or item["operation"] != "send_message":
+        operation = item["operation"]
+        if (
+            item["version"] != CONTROL_VERSION_V2
+            or not isinstance(operation, str)
+            or operation not in EXACT_SEND_OPERATIONS
+        ):
             raise DialogueServiceError("REQUEST_INVALID")
-        values = _exact_mapping(
-            item["args"],
-            {"context", "thread_ts", "message", "send_protocol"},
-        )
+        argument_keys = _EXACT_SEND_OPERATION_ARGUMENT_KEYS.get(operation)
+        frame_kind = _EXACT_SEND_OPERATION_FRAME_KINDS.get(operation)
+        if argument_keys is None or frame_kind is None:
+            raise DialogueServiceError("REQUEST_INVALID")
+        values = _exact_mapping(item["args"], argument_keys)
+        body = values[_EXACT_SEND_OPERATION_BODY_ARGUMENT[operation]]
         if (
             values["send_protocol"] != EXACT_SEND_PROTOCOL
             or not isinstance(values["thread_ts"], str)
-            or not isinstance(values["message"], dict)
+            or not isinstance(body, dict)
         ):
             raise DialogueServiceError("REQUEST_INVALID")
         context = _context_v2(values["context"])
@@ -591,7 +621,8 @@ class AgentDialogueService:
         prepared = await engine.prepare_send_message(
             thread_ts=values["thread_ts"],
             context=context,
-            message=values["message"],
+            message=body,
+            frame_kind=frame_kind,
         )
         if isinstance(prepared, MessageReceipt):
             await self._send(
@@ -909,7 +940,7 @@ async def call_service(
         # Each exact-send operation carries its fingerprint in its own body
         # argument. An operation inside the closed set without a taught
         # argument is a client bug: refuse it rather than verify against None.
-        body_argument = _EXACT_SEND_FINGERPRINT_ARG_BY_OPERATION.get(
+        body_argument = _EXACT_SEND_OPERATION_BODY_ARGUMENT.get(
             exact_send_operation
         )
         if body_argument is None:
