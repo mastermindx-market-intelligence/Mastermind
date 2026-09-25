@@ -92,6 +92,7 @@ def test_empty_mcp_roster_compiles_cardless_read_only_agents(profile):
         source,
         helpers=_roster(),
         permission_mode="bypassPermissions",
+        execution_mode="noninteractive",
         supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
     )
     args = projection.cli_arguments()
@@ -102,8 +103,19 @@ def test_empty_mcp_roster_compiles_cardless_read_only_agents(profile):
         "Agent",
     )
     assert args[-2] == "--agents"
+    denied_index = args.index("--disallowedTools")
+    assert set(args[denied_index + 1 : -2]) >= {
+        "SendMessage",
+        "ListAgents",
+        "TaskCreate",
+        "TaskUpdate",
+    }
+    assert projection.execution_mode == "noninteractive"
+    assert projection.runtime_ceiling_seconds == source.native_helper.max_runtime_seconds
+    assert projection.external_runtime_enforcement_required is True
     assert projection.environment() == {
         "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
+        "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
         "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": str(
             source.native_helper.max_concurrent_helpers
         ),
@@ -137,6 +149,7 @@ def test_exact_mcp_grants_are_visible_and_ungranted_tools_are_denied(profile):
         source,
         helpers=_roster(),
         permission_mode="dontAsk",
+        execution_mode="noninteractive",
         supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         observed_tool_catalogs=catalogs,
     )
@@ -167,6 +180,7 @@ def test_cli_payload_is_canonical_and_has_no_worker_or_placement_selector(profil
         source,
         helpers=_roster(),
         permission_mode="dontAsk",
+        execution_mode="noninteractive",
         supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
     )
     payload = projection.cli_arguments()[-1]
@@ -193,6 +207,7 @@ def test_projection_retains_source_identity_and_stays_production_inert(profile):
         source,
         helpers=_roster(),
         permission_mode="bypassPermissions",
+        execution_mode="noninteractive",
         supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
     )
     assert projection.source_profile_id == source.profile_id
@@ -224,6 +239,7 @@ def test_write_capable_native_helper_refuses_to_executive_child_boundary(profile
             source,
             helpers=_roster(),
             permission_mode="bypassPermissions",
+            execution_mode="noninteractive",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
@@ -242,6 +258,7 @@ def test_missing_native_helper_grant_refuses(profile):
             source,
             helpers=_roster(),
             permission_mode="bypassPermissions",
+            execution_mode="noninteractive",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
@@ -256,7 +273,23 @@ def test_unverified_subagent_ceiling_refuses(profile):
             source,
             helpers=_roster(),
             permission_mode="bypassPermissions",
+            execution_mode="noninteractive",
             supports_subagent_capability_ceiling=ObservedTriState.UNKNOWN,
+        )
+
+
+def test_interactive_parent_session_refuses(profile):
+    source = dataclasses.replace(profile, mcp_server_grants=())
+    with pytest.raises(
+        ClaudeNativeHelperProjectionError,
+        match="noninteractive parent session",
+    ):
+        project_claude_native_helpers(
+            source,
+            helpers=_roster(),
+            permission_mode="bypassPermissions",
+            execution_mode="interactive",
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
 
@@ -270,6 +303,7 @@ def test_interactive_permission_mode_refuses(profile):
             source,
             helpers=_roster(),
             permission_mode="default",
+            execution_mode="noninteractive",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
@@ -285,6 +319,7 @@ def test_duplicate_or_nondeterministic_roster_refuses(profile):
             source,
             helpers=(second, first),
             permission_mode="bypassPermissions",
+            execution_mode="noninteractive",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
     with pytest.raises(
@@ -295,6 +330,7 @@ def test_duplicate_or_nondeterministic_roster_refuses(profile):
             source,
             helpers=(first, first),
             permission_mode="bypassPermissions",
+            execution_mode="noninteractive",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
@@ -308,5 +344,6 @@ def test_mcp_profile_requires_complete_observed_catalog(profile):
             profile,
             helpers=_roster(),
             permission_mode="bypassPermissions",
+            execution_mode="noninteractive",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
