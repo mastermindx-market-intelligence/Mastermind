@@ -734,7 +734,7 @@ class BrowserResourcePort:
                     "browser_ref": None,
                     "reconciled": False,
                 }
-            output_path.mkdir(mode=0o700)
+            output_path.mkdir(mode=stat.S_IRWXU)
             profile_path = self._profile_path(start)
 
             read_fd, write_fd = os.pipe()
