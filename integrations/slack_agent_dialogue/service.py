@@ -881,6 +881,39 @@ class AgentDialogueService:
                     context=_context_v2(values["context"]),
                 )
             )
+        if operation == "read_consultation_packet":
+            values = _exact_mapping(
+                args, {"context", "thread_ts", "message_key"}
+            )
+            if (
+                not isinstance(values["thread_ts"], str)
+                or not isinstance(values["message_key"], str)
+            ):
+                raise DialogueServiceError("REQUEST_INVALID")
+            context = _context_v2(values["context"])
+            parent = self.engine_result(
+                await engine.bind_or_verify_relay_parent_thread(context)
+            )
+            parent_fields = {
+                "thread_ts",
+                "parent_author_user_id",
+                "parent_fingerprint",
+            }
+            if (
+                not isinstance(parent, dict)
+                or set(parent) != parent_fields
+                or any(not isinstance(parent[field], str) for field in parent_fields)
+            ):
+                raise DialogueServiceError("INTERNAL_ERROR")
+            if parent["thread_ts"] != values["thread_ts"]:
+                raise DialogueServiceError("THREAD_CONTEXT_MISMATCH")
+            return self.engine_result(
+                await engine.read_consultation_packet(
+                    thread_ts=values["thread_ts"],
+                    context=context,
+                    message_key=values["message_key"],
+                )
+            )
         if operation == "wait_for_reply":
             values = _exact_mapping(
                 args,

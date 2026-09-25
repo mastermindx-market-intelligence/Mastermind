@@ -195,6 +195,37 @@ class FakeV2Engine:
         )
         return {"thread_ts": thread_ts, "messages": []}
 
+    async def read_consultation_packet(
+        self, *, thread_ts: str, context, message_key: str
+    ) -> dict[str, object]:
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "read_consultation_packet",
+                {
+                    "thread_ts": thread_ts,
+                    "context": normalized,
+                    "message_key": message_key,
+                },
+            )
+        )
+        if message_key.endswith("-absent"):
+            return {"outcome": "ABSENT", "packet": None, "reason": None}
+        if message_key.endswith("-uncertain"):
+            return {
+                "outcome": "UNCERTAIN",
+                "packet": None,
+                "reason": "THREAD_HISTORY_INCOMPLETE",
+            }
+        raw = raw_packet()
+        raw["message_key"] = message_key
+        raw["correlation"] = {
+            **raw["correlation"],
+            "request_message_key": message_key,
+        }
+        packet = build_consultation(raw)
+        return {"outcome": "PACKET", "packet": packet, "reason": None}
+
     async def wait_for_reply(
         self,
         *,
@@ -3043,3 +3074,155 @@ def test_rejected_packet_body_never_appears_in_any_error_payload(
         ]
 
     run(scenario())
+
+
+# --- P1-B2R: bounded read-only consultation packet service operation ---
+
+
+def test_v2_read_consultation_packet_returns_one_bounded_packet_outcome(
+    socket_root: Path,
+) -> None:
+    srv, fake = service_with_v2(socket_root)
+    key = "asd-packet-service-read-0001"
+    result = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "read_consultation_packet",
+                {
+                    "context": context_v2_dict(),
+                    "thread_ts": THREAD_TS,
+                    "message_key": key,
+                },
+            )
+        )
+    )
+    assert result["outcome"] == "PACKET"
+    assert result["packet"]["message_key"] == key
+    assert result["reason"] is None
+    assert "messages" not in result
+    assert [call[0] for call in fake.calls] == [
+        "bind_or_verify_relay_parent_thread",
+        "read_consultation_packet",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("suffix", "outcome", "reason"),
+    [
+        ("absent", "ABSENT", None),
+        ("uncertain", "UNCERTAIN", "THREAD_HISTORY_INCOMPLETE"),
+    ],
+)
+def test_v2_read_consultation_packet_preserves_absent_and_uncertain(
+    socket_root: Path, suffix: str, outcome: str, reason: str | None
+) -> None:
+    srv, _fake = service_with_v2(socket_root)
+    result = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "read_consultation_packet",
+                {
+                    "context": context_v2_dict(),
+                    "thread_ts": THREAD_TS,
+                    "message_key": f"asd-packet-service-read-{suffix}",
+                },
+            )
+        )
+    )
+    assert result == {"outcome": outcome, "packet": None, "reason": reason}
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"context": context_v2_dict(), "thread_ts": THREAD_TS},
+        {
+            "context": context_v2_dict(),
+            "thread_ts": THREAD_TS,
+            "message_key": "asd-packet-service-read-0002",
+            "extra": True,
+        },
+        {
+            "context": context_v2_dict(),
+            "thread_ts": 123,
+            "message_key": "asd-packet-service-read-0002",
+        },
+        {
+            "context": context_v2_dict(),
+            "thread_ts": THREAD_TS,
+            "message_key": 123,
+        },
+    ],
+)
+def test_v2_read_consultation_packet_keeps_exact_argument_fence(
+    socket_root: Path, args: dict[str, object]
+) -> None:
+    srv, fake = service_with_v2(socket_root)
+    with pytest.raises(DialogueServiceError) as exc:
+        run(srv._dispatch(request_envelope_v2("read_consultation_packet", args)))
+    assert exc.value.code == "REQUEST_INVALID"
+    assert fake.calls == []
+
+
+def test_v1_does_not_accept_read_consultation_packet(socket_root: Path) -> None:
+    srv, _client = service(socket_root)
+    with pytest.raises(DialogueServiceError) as exc:
+        run(
+            srv._dispatch(
+                request_envelope(
+                    "read_consultation_packet",
+                    {
+                        "context": context_dict(),
+                        "thread_ts": THREAD_TS,
+                        "message_key": "asd-packet-service-read-0003",
+                    },
+                )
+            )
+        )
+    assert exc.value.code == "REQUEST_INVALID"
+
+
+def test_v2_packet_read_requires_the_verified_relay_parent_thread(
+    socket_root: Path,
+) -> None:
+    srv, fake = service_with_v2(socket_root)
+    fake.relay_parent_thread_ts = "1787471000.000999"
+    with pytest.raises(DialogueServiceError) as exc:
+        run(
+            srv._dispatch(
+                request_envelope_v2(
+                    "read_consultation_packet",
+                    {
+                        "context": context_v2_dict(),
+                        "thread_ts": THREAD_TS,
+                        "message_key": "asd-packet-service-read-0004",
+                    },
+                )
+            )
+        )
+    assert exc.value.code == "THREAD_CONTEXT_MISMATCH"
+    assert [call[0] for call in fake.calls] == [
+        "bind_or_verify_relay_parent_thread"
+    ]
+
+
+def test_v2_packet_read_never_returns_transcript_or_raw_rejected_text(
+    socket_root: Path,
+) -> None:
+    srv, _fake = service_with_v2(socket_root)
+    result = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "read_consultation_packet",
+                {
+                    "context": context_v2_dict(),
+                    "thread_ts": THREAD_TS,
+                    "message_key": "asd-packet-service-read-uncertain",
+                },
+            )
+        )
+    )
+    encoded = json.dumps(result, sort_keys=True)
+    assert "messages" not in encoded
+    assert "UNTRUSTED_PACKET_MARKER" not in encoded
+    assert result["outcome"] == "UNCERTAIN"
