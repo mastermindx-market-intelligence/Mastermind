@@ -693,14 +693,15 @@ def test_response_budget_max_payload_bytes_is_clamped_under_the_wire_ceiling() -
 
 def test_worst_case_replies_page_plus_candidate_stays_under_max_response_bytes() -> None:
     candidate = worst_case_ceiling_frame()
-    candidate_bytes = len(
-        consultation_contract.render_consultation_packet(candidate).encode()
-    )
-    assert candidate_bytes <= INCUMBENT_MAX_FRAME_BYTES
+    charge = consultation_contract.reply_entry_page_bytes(candidate)
+    entry = real_page_entry_bytes(candidate)
+    assert charge >= entry
     page_ceiling_bytes = 64 * 1024
-    capacity = page_ceiling_bytes // candidate_bytes
+    capacity = page_ceiling_bytes // charge
     assert capacity >= 1
-    full_page = capacity * candidate_bytes
+    # The entries the page law admits, priced as real replies-page entries, still fit.
+    assert capacity * entry <= page_ceiling_bytes
+    full_page = capacity * charge
     assert full_page <= page_ceiling_bytes
     assert (
         consultation_contract.replies_page_has_room(
@@ -710,9 +711,94 @@ def test_worst_case_replies_page_plus_candidate_stays_under_max_response_bytes()
     )
     assert (
         consultation_contract.replies_page_has_room(
-            full_page - candidate_bytes,
+            full_page - charge,
             candidate,
             page_ceiling_bytes=page_ceiling_bytes,
+        )
+        is True
+    )
+
+
+# --- IAC-P1-B3: page capacity for the entry that carries a packet -------------
+
+import json
+
+
+def real_page_entry_bytes(frame: dict) -> int:
+    """Bytes of the smallest replies-page entry carrying this frame.
+
+    The incumbent parser accepts {"type","user","text","ts"} and nothing smaller;
+    the frame reaches the reader escaped a second time, as a JSON string.
+    """
+    entry = {
+        "type": "message",
+        "user": "U061F7EUR",
+        "text": consultation_contract.render_consultation_packet(frame),
+        "ts": "1700000000.000100",
+    }
+    return len(
+        json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
+
+
+def edited_page_entry_bytes(frame: dict) -> int:
+    """Bytes of a message_changed entry, whose previous_message stores the text twice."""
+    inner = {
+        "type": "message",
+        "user": "U061F7EUR",
+        "text": consultation_contract.render_consultation_packet(frame),
+        "ts": "1700000000.000100",
+    }
+    entry = {
+        "type": "message",
+        "subtype": "message_changed",
+        "message": inner,
+        "previous_message": inner,
+    }
+    return len(
+        json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
+
+
+def test_reply_page_charge_is_never_below_a_minimal_real_entry() -> None:
+    for frame in (worst_case_ceiling_frame(), build_consultation(packet_frame())):
+        entry = real_page_entry_bytes(frame)
+        charge = consultation_contract.reply_entry_page_bytes(frame)
+        assert charge >= entry
+
+
+def test_reply_page_charge_covers_an_edited_reply_stored_twice() -> None:
+    for frame in (worst_case_ceiling_frame(), build_consultation(packet_frame())):
+        entry = edited_page_entry_bytes(frame)
+        charge = consultation_contract.reply_entry_page_bytes(frame)
+        assert charge >= entry
+
+
+def test_replies_page_refuses_a_candidate_that_a_real_page_cannot_hold() -> None:
+    for frame in (worst_case_ceiling_frame(), build_consultation(packet_frame())):
+        entry = real_page_entry_bytes(frame)
+        assert (
+            consultation_contract.replies_page_has_room(
+                0, frame, page_ceiling_bytes=entry - 1
+            )
+            is False
+        )
+
+
+def test_replies_page_admitted_capacity_fits_the_read_ceiling() -> None:
+    read_ceiling = 64 * 1024
+    for frame in (worst_case_ceiling_frame(), build_consultation(packet_frame())):
+        charge = consultation_contract.reply_entry_page_bytes(frame)
+        entry = real_page_entry_bytes(frame)
+        capacity = read_ceiling // charge
+        assert capacity >= 1
+        assert capacity * entry <= read_ceiling
+
+
+def test_replies_page_still_admits_at_least_one_ceiling_frame() -> None:
+    assert (
+        consultation_contract.replies_page_has_room(
+            0, worst_case_ceiling_frame(), page_ceiling_bytes=64 * 1024
         )
         is True
     )

@@ -498,14 +498,50 @@ def clamp_response_budget(
     return clamped
 
 
+# A consultation packet reaches a reader as one JSON message object on a
+# conversations.replies page, never as the bare rendered frame.  The object adds
+# its own envelope, its "text" is a JSON string (so the frame is escaped a second
+# time), and a message_changed / message_deleted entry keeps `previous_message`,
+# storing the packet text twice.  Charging one bare frame per reply understates a
+# page by a factor that is not constant, so the page law charges a measured entry.
+# Envelope floor: the heaviest envelope the incumbent reply reader accepts around
+# one stored reply is the changed-entry shape
+# {"type","subtype":"message_changed","message":{...},"previous_message":{...}}
+# wrapped around two {"type","user","text","ts"} entries, measured for a
+# ceiling-sized packet text as 9533 total minus 2 * 4658 escaped-text bytes = 217.
+# The lightest accepted shape {"type","user","text","ts"} measures only 70 and is
+# dominated by this floor once the text itself is charged per stored copy.
+REPLY_ENTRY_ENVELOPE_BYTES = 217
+# message_changed / message_deleted entries carry previous_message, so one reply
+# can store its packet text twice on the same page; one stored copy per reply is
+# the under-charge this law replaces.
+REPLY_ENTRY_STORED_COPIES = 2
+
+
+def reply_entry_page_bytes(frame: Mapping[str, Any]) -> int:
+    """Page bytes one reply costs: its carrying envelope plus each stored text copy.
+
+    The escaping is the conservative direction (json.dumps default
+    ensure_ascii=True), because the defect being priced is under-charging.
+    """
+    escaped = len(
+        json.dumps(render_consultation_packet(frame), separators=(",", ":")).encode(
+            "utf-8"
+        )
+    )
+    return REPLY_ENTRY_ENVELOPE_BYTES + REPLY_ENTRY_STORED_COPIES * escaped
+
+
 def replies_page_has_room(
     current_page_bytes: int,
     candidate_frame: Mapping[str, Any],
     *,
     page_ceiling_bytes: int,
 ) -> bool:
-    candidate_bytes = len(render_consultation_packet(candidate_frame).encode("utf-8"))
-    return current_page_bytes + candidate_bytes <= page_ceiling_bytes
+    return (
+        current_page_bytes + reply_entry_page_bytes(candidate_frame)
+        <= page_ceiling_bytes
+    )
 
 
 def classify_duplicate(
@@ -547,6 +583,7 @@ __all__ = [
     "ConsultationPacketBudget",
     "ConsultationPacketOverCeiling",
     "parse_consultation_packet",
+    "reply_entry_page_bytes",
     "replies_page_has_room",
     "render_consultation_packet",
     "validate_consultation",
