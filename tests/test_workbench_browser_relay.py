@@ -13,6 +13,7 @@ from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_
 from integrations.workbench_browser_mcp.relay import (
     BrowserRelayError,
     BrowserRelayServer,
+    McpSessionReceipt,
     McpStdioSession,
     relay_request,
 )
@@ -115,6 +116,65 @@ def test_stdio_session_refuses_ungranted_tool(tmp_path):
             session.call("browser_evaluate", {})
     finally:
         session.close()
+
+
+class _PostDispatchFailureSession(McpStdioSession):
+    def __init__(self):
+        super().__init__(
+            argv=("/usr/bin/true",),
+            env={},
+            allowed_tools=frozenset({"browser_click"}),
+            expected_tool_schema_digest="d" * 64,
+        )
+        self.dispatched = False
+
+    def start(self):
+        self._receipt = McpSessionReceipt(
+            child_pid=1,
+            tool_schema_digest="d" * 64,
+            allowed_tools=("browser_click",),
+        )
+        return self._receipt
+
+    def call(self, tool, arguments):
+        assert tool == "browser_click"
+        assert arguments == {"target": "button"}
+        self.dispatched = True
+        raise BrowserRelayError("synthetic response lost after dispatch")
+
+    def close(self):
+        self._receipt = None
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets required")
+def test_relay_marks_post_dispatch_child_failure_effect_unknown(tmp_path):
+    socket_path = tmp_path / "relay-effect.sock"
+    session = _PostDispatchFailureSession()
+    relay = BrowserRelayServer(
+        resource_id="a" * 32,
+        socket_path=socket_path,
+        session=session,
+    )
+    thread = threading.Thread(target=relay.serve_forever, daemon=True)
+    thread.start()
+    relay.wait_ready(timeout=3)
+    result = relay_request(
+        socket_path,
+        {
+            "schema": "mastermind.workbench_browser_relay_request.v1",
+            "kind": "tool",
+            "request_id": "b" * 32,
+            "resource_id": "a" * 32,
+            "tool": "browser_click",
+            "arguments": {"target": "button"},
+        },
+        timeout=2,
+    )
+    relay.stop()
+    thread.join(timeout=3)
+    assert session.dispatched is True
+    assert result["ok"] is False
+    assert result["error"] == "EFFECT_UNKNOWN"
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets required")

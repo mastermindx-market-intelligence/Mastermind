@@ -456,7 +456,17 @@ class BrowserRelayServer:
             arguments = value.get("arguments")
             if type(tool) is not str or type(arguments) is not dict:
                 raise BrowserRelayError("relay tool request is invalid")
-            result = self._session.call(tool, arguments)
+            try:
+                result = self._session.call(tool, arguments)
+            except BrowserRelayError:
+                # Once the MCP child call begins, request bytes may already have
+                # crossed the browser-effect boundary. A missing/invalid reply
+                # can never be downgraded to a pre-dispatch refusal.
+                return self._response(
+                    request_id=request_id,
+                    ok=False,
+                    error="EFFECT_UNKNOWN",
+                )
             return self._response(
                 request_id=request_id,
                 ok=True,
