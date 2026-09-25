@@ -43,6 +43,7 @@ def _start(**overrides):
         profile_ref=None,
         issued_at_ms=1000,
         expires_at_ms=2000,
+        resource_expires_at_ms=8000,
     )
     values.update(overrides)
     return PreparedBrowserStart(**values)

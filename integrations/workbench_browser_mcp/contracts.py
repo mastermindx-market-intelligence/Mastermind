@@ -56,6 +56,7 @@ class PreparedBrowserStart:
     profile_ref: str | None
     issued_at_ms: int
     expires_at_ms: int
+    resource_expires_at_ms: int
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,14 @@ def validate_prepared_browser_start(
         if type(selected) is not int or selected < 0:
             raise BrowserContractError(f"{name} is invalid")
     _mode_profile(value.mode, value.profile_ref)
+    _time_window(
+        value.issued_at_ms,
+        value.resource_expires_at_ms,
+        now_ms=now_ms,
+        require_fresh=False,
+    )
+    if value.resource_expires_at_ms < value.expires_at_ms:
+        raise BrowserContractError("browser resource lifetime is shorter than start token")
     return value
 
 

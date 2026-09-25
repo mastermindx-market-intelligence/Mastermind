@@ -7,6 +7,9 @@ import shutil
 import socket
 import sys
 import tempfile
+import time
+
+import pytest
 
 from control_plane.codex_worker import ProcessInspector
 from integrations.workbench_action_mcp.action_artifacts import (
@@ -22,6 +25,8 @@ from integrations.workbench_browser_mcp.contracts import BrowserRefCodec
 from integrations.workbench_browser_mcp.resource_port import (
     BrowserHostConfig,
     BrowserResourcePort,
+    BrowserResourceRefused,
+    PersistentBrowserProfileGrant,
 )
 
 
@@ -229,6 +234,215 @@ def test_reconcile_before_start_is_not_applied_and_does_not_spawn(tmp_path: Path
             "reconciled": True,
         }
         assert list(relay_root.iterdir()) == []
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_browser_resource_lifetime_follows_owner_lease_not_start_token(tmp_path: Path):
+    fd, caller, port, relay_root = _port(tmp_path)
+    try:
+        start_ref = port.prepare_resource(
+            caller,
+            project_ref="project:browser",
+            mode="isolated",
+        )
+        start = port.codec.decode_start(start_ref, now_ms=2000)
+        assert start.expires_at_ms == 22_000
+
+        started = port.start_resource(caller, start_ref)
+        assert started["effect_state"] == "APPLIED"
+        browser = port.codec.decode_resource(
+            started["browser_ref"],
+            now_ms=22_001,
+        )
+        assert browser.expires_at_ms == 60_000
+
+        released = port.cleanup_resource(
+            started["browser_ref"],
+            owner_state="released",
+            effect_state="APPLIED",
+        )
+        assert released["released"] is True
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_cleanup_cannot_claim_release_when_process_identity_is_unavailable_but_group_lives(tmp_path: Path):
+    fd, caller, port, relay_root = _port(tmp_path)
+    browser_ref = None
+    original_inspector = port._inspector
+
+    class UnavailableInspector:
+        def inspect(self, _pid):
+            raise OSError("identity temporarily unavailable")
+
+    try:
+        start_ref = port.prepare_resource(
+            caller,
+            project_ref="project:browser",
+            mode="isolated",
+        )
+        started = port.start_resource(caller, start_ref)
+        browser_ref = started["browser_ref"]
+        browser = port.codec.decode_resource(browser_ref, now_ms=2000)
+
+        # The relay process group still exists, but process identity observation
+        # is unavailable. Cleanup must preserve uncertainty instead of deleting
+        # the socket and declaring the resource released.
+        os.killpg(browser.relay_pgid, 0)
+        port._inspector = UnavailableInspector()
+        receipt = port.cleanup_resource(
+            browser_ref,
+            owner_state="released",
+            effect_state="APPLIED",
+        )
+        assert receipt["released"] is False
+        assert receipt["cleanup_uncertain"] is True
+        os.killpg(browser.relay_pgid, 0)
+    finally:
+        port._inspector = original_inspector
+        if browser_ref is not None:
+            try:
+                port.cleanup_resource(
+                    browser_ref,
+                    owner_state="released",
+                    effect_state="APPLIED",
+                )
+            except Exception:
+                pass
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_persistent_profile_requires_typed_exclusive_owner_grant(tmp_path: Path):
+    fd, caller, port, relay_root = _port(tmp_path)
+    profile = _private(tmp_path / "profile")
+    try:
+        # A bare path is not enough to prove that this owner/generation holds
+        # the single-controller reservation for an authenticated profile.
+        port._profile_resolver = lambda _ref: profile
+        with pytest.raises(BrowserResourceRefused, match="PROFILE_GRANT_INVALID"):
+            port.prepare_resource(
+                caller,
+                project_ref="project:browser",
+                mode="persistent",
+                profile_ref="web-identity-01",
+            )
+
+        port._profile_resolver = lambda _ref: PersistentBrowserProfileGrant(
+            profile_ref="web-identity-01",
+            profile_dir=profile,
+            owner_ref="owner:browser",
+            operation_ref="operation:browser",
+            generation="generation:browser",
+            host_id="b" * 64,
+            exclusive=True,
+        )
+        start_ref = port.prepare_resource(
+            caller,
+            project_ref="project:browser",
+            mode="persistent",
+            profile_ref="web-identity-01",
+        )
+        start = port.codec.decode_start(start_ref, now_ms=2000)
+        assert start.profile_ref == "web-identity-01"
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_persistent_profile_grant_must_match_owner_operation_generation_and_host(tmp_path: Path):
+    fd, caller, port, relay_root = _port(tmp_path)
+    profile = _private(tmp_path / "profile")
+    base = dict(
+        profile_ref="web-identity-01",
+        profile_dir=profile,
+        owner_ref="owner:browser",
+        operation_ref="operation:browser",
+        generation="generation:browser",
+        host_id="b" * 64,
+        exclusive=True,
+    )
+    try:
+        for field, value in (
+            ("owner_ref", "owner:other"),
+            ("operation_ref", "operation:other"),
+            ("generation", "generation:other"),
+            ("host_id", "c" * 64),
+            ("exclusive", False),
+        ):
+            grant = PersistentBrowserProfileGrant(**{**base, field: value})
+            port._profile_resolver = lambda _ref, grant=grant: grant
+            with pytest.raises(BrowserResourceRefused, match="PROFILE_GRANT_MISMATCH"):
+                port.prepare_resource(
+                    caller,
+                    project_ref="project:browser",
+                    mode="persistent",
+                    profile_ref="web-identity-01",
+                )
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_pre_barrier_inspection_failure_terminates_owned_wrapper_and_is_not_applied(tmp_path: Path):
+    fd, caller, port, relay_root = _port(tmp_path)
+    pid_file = tmp_path / "spawned.pid"
+    script = tmp_path / "prebarrier-relay.py"
+    script.write_text(
+        r"""
+import argparse,os,time
+p=argparse.ArgumentParser()
+p.add_argument("--barrier-fd",type=int,required=True)
+p.add_argument("--pid-file",required=True)
+a=p.parse_args()
+open(a.pid_file,"w",encoding="utf-8").write(str(os.getpid()))
+os.read(a.barrier_fd,1)
+time.sleep(60)
+""",
+        encoding="utf-8",
+    )
+
+    def command_builder(*, config, prepared, barrier_fd, socket_path, output_dir, profile_dir):
+        return (
+            sys.executable,
+            str(script),
+            "--barrier-fd",
+            str(barrier_fd),
+            "--pid-file",
+            str(pid_file),
+        )
+
+    class FailingInspector:
+        def inspect(self, _pid):
+            for _ in range(100):
+                if pid_file.exists():
+                    break
+                time.sleep(0.01)
+            assert pid_file.exists()
+            raise OSError("synthetic inspection failure")
+
+    port._relay_command_builder = command_builder
+    port._inspector = FailingInspector()
+    try:
+        start_ref = port.prepare_resource(
+            caller,
+            project_ref="project:browser",
+            mode="isolated",
+        )
+        receipt = port.start_resource(caller, start_ref)
+        assert receipt["effect_state"] == "NOT_APPLIED"
+        assert receipt["browser_ref"] is None
+        for _ in range(50):
+            if pid_file.exists():
+                break
+            time.sleep(0.02)
+        assert pid_file.exists()
+        pid = int(pid_file.read_text(encoding="utf-8"))
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
     finally:
         os.close(fd)
         shutil.rmtree(relay_root, ignore_errors=True)

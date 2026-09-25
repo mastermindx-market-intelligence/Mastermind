@@ -60,7 +60,7 @@ class BrowserResourceRefused(RuntimeError):
 
 
 ResolveBinding = Callable[[ActionCaller, str], ProjectActionBinding | None]
-ProfileResolver = Callable[[str], Path | None]
+ProfileResolver = Callable[[str], "PersistentBrowserProfileGrant | None"]
 RelayRequester = Callable[..., dict[str, Any]]
 RelayCommandBuilder = Callable[..., Sequence[str]]
 
@@ -70,6 +70,19 @@ sys.path.insert(0,root)
 sys.argv=["mastermind-workbench-browser-relay",*sys.argv[2:]]
 runpy.run_module("integrations.workbench_browser_mcp.relay",run_name="__main__")
 """
+
+
+@dataclasses.dataclass(frozen=True)
+class PersistentBrowserProfileGrant:
+    """Existing profile-owner proof for one exclusive persistent controller."""
+
+    profile_ref: str
+    profile_dir: Path
+    owner_ref: str
+    operation_ref: str
+    generation: str
+    host_id: str
+    exclusive: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -265,10 +278,21 @@ class BrowserResourcePort:
         if start.profile_ref is None:
             raise BrowserResourceRefused("PROFILE_REF_INVALID")
         value = self._profile_resolver(start.profile_ref)
-        if not isinstance(value, Path) or not value.is_absolute():
-            raise BrowserResourceRefused("PROFILE_REFUSED")
-        _private_directory(value, "profile")
-        return value
+        if not isinstance(value, PersistentBrowserProfileGrant):
+            raise BrowserResourceRefused("PROFILE_GRANT_INVALID")
+        if (
+            value.profile_ref != start.profile_ref
+            or value.owner_ref != start.owner_ref
+            or value.operation_ref != start.operation_ref
+            or value.generation != start.generation
+            or value.host_id != start.host_id
+            or value.exclusive is not True
+        ):
+            raise BrowserResourceRefused("PROFILE_GRANT_MISMATCH")
+        if not isinstance(value.profile_dir, Path) or not value.profile_dir.is_absolute():
+            raise BrowserResourceRefused("PROFILE_GRANT_INVALID")
+        _private_directory(value.profile_dir, "profile")
+        return value.profile_dir
 
     def prepare_resource(
         self,
@@ -279,6 +303,10 @@ class BrowserResourcePort:
         profile_ref: str | None = None,
     ) -> str:
         binding = self._binding(caller, project_ref)
+        now_ms = self._now()
+        resource_expires_at_ms = binding.scope.expires_at_ms
+        if resource_expires_at_ms <= now_ms:
+            raise BrowserResourceRefused("BROWSER_LEASE_EXPIRED")
         if mode not in {BrowserMode.ISOLATED.value, BrowserMode.PERSISTENT.value}:
             raise BrowserResourceRefused("BROWSER_MODE_INVALID")
         if mode == BrowserMode.ISOLATED.value and profile_ref is not None:
@@ -307,14 +335,14 @@ class BrowserResourcePort:
                 boot_session_id=self._host.boot_session_id,
                 mode=mode,
                 profile_ref=profile_ref,
-                issued_at_ms=self._now(),
-                expires_at_ms=self._now() + 1,
+                issued_at_ms=now_ms,
+                expires_at_ms=min(now_ms + 1, resource_expires_at_ms),
+                resource_expires_at_ms=resource_expires_at_ms,
             )
             self._profile_path(candidate)
-        now_ms = self._now()
         expires_at_ms = min(
             now_ms + self._start_ttl_ms,
-            binding.scope.expires_at_ms,
+            resource_expires_at_ms,
             caller.expires_at * 1000,
         )
         if expires_at_ms <= now_ms:
@@ -341,6 +369,7 @@ class BrowserResourcePort:
             profile_ref=profile_ref,
             issued_at_ms=now_ms,
             expires_at_ms=expires_at_ms,
+            resource_expires_at_ms=resource_expires_at_ms,
         )
         return self._codec.encode_start(start)
 
@@ -482,7 +511,7 @@ class BrowserResourcePort:
             profile_ref=start.profile_ref,
             tool_schema_digest=self._config.expected_tool_schema_digest,
             issued_at_ms=max(start.issued_at_ms, process.recorded_at_ms),
-            expires_at_ms=start.expires_at_ms,
+            expires_at_ms=start.resource_expires_at_ms,
         )
         return self._codec.encode_resource(value)
 
@@ -579,6 +608,33 @@ class BrowserResourcePort:
         identity = self._identity(start, binding)
         classified = classify_action(self._store, identity)
         return self._reconcile_existing(start, identity, classified)
+
+    @staticmethod
+    def _terminate_unrecorded_prebarrier_process(
+        process: subprocess.Popen[bytes],
+        *,
+        timeout: float = 2.0,
+    ) -> bool:
+        """Retire the exact child before the launch barrier can create a browser.
+
+        This is intentionally narrower than normal process-group cleanup: before
+        the barrier is released, the relay wrapper has not been authorized to
+        start its MCP/browser child. The Popen handle is therefore sufficient to
+        identify the exact process created by this call.
+        """
+        try:
+            if process.poll() is not None:
+                process.wait(timeout=0)
+                return True
+            process.terminate()
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=1)
+            return process.poll() is not None
+        except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+            return process.poll() is not None
 
     @staticmethod
     def _reap_if_local_child(pid: int) -> None:
@@ -774,10 +830,15 @@ class BrowserResourcePort:
                     "reconciled": False,
                 }
             except BaseException:
-                clean = (
-                    process_record is not None
-                    and self._terminate_exact_process(process_record)
-                )
+                if process_record is not None:
+                    clean = self._terminate_exact_process(process_record)
+                elif process is not None and write_fd >= 0:
+                    # The launch barrier is still closed, so no browser resource
+                    # effect can have begun. Prove the exact wrapper absent and
+                    # record NOT_APPLIED rather than leaking a blocked process.
+                    clean = self._terminate_unrecorded_prebarrier_process(process)
+                else:
+                    clean = False
                 if clean:
                     finalize_action(
                         self._store,
@@ -842,58 +903,49 @@ class BrowserResourcePort:
                 "profile_deleted": False,
             }
 
-        try:
-            observed = self._inspector.inspect(browser.relay_pid)
-            matches = (
-                observed.start_identity == browser.relay_start_identity
-                and observed.pgid == browser.relay_pgid
-                and observed.session_id == browser.relay_session_id
-                and observed.effective_uid == os.geteuid()
-                and observed.real_uid == os.getuid()
-            )
-        except (ProcessIdentityError, OSError, ValueError):
-            matches = False
-
-        if matches:
-            record = ActionProcessRecord(
-                schema="mastermind.workbench_command_process.v1",
-                identity=ActionArtifactIdentity(
-                    action_id=browser.start_action_id,
-                    purpose=ACTION_PURPOSE_BROWSER_RESOURCE,
-                    subject_digest=browser.subject_digest,
-                    client_ref=browser.client_ref,
-                    resource=browser.resource,
-                    project_ref=browser.project_ref,
-                    context_ref=browser.context_ref,
-                    responsibility_ref=browser.responsibility_ref,
-                    operation_ref=browser.operation_ref,
-                    owner_ref=browser.owner_ref,
-                    generation=browser.generation,
-                    root_device=0,
-                    root_inode=0,
-                    store_device=0,
-                    store_inode=0,
-                    host_id=browser.host_id,
-                    boot_session_id=browser.boot_session_id,
-                    relative_path=f"browser:{browser.start_action_id}",
-                    source_identity=browser.tool_schema_digest,
-                ),
-                pid=browser.relay_pid,
-                process_start_identity=browser.relay_start_identity,
-                pgid=browser.relay_pgid,
-                session_id=browser.relay_session_id,
+        record = ActionProcessRecord(
+            schema="mastermind.workbench_command_process.v1",
+            identity=ActionArtifactIdentity(
+                action_id=browser.start_action_id,
+                purpose=ACTION_PURPOSE_BROWSER_RESOURCE,
+                subject_digest=browser.subject_digest,
+                client_ref=browser.client_ref,
+                resource=browser.resource,
+                project_ref=browser.project_ref,
+                context_ref=browser.context_ref,
+                responsibility_ref=browser.responsibility_ref,
+                operation_ref=browser.operation_ref,
+                owner_ref=browser.owner_ref,
+                generation=browser.generation,
+                root_device=0,
+                root_inode=0,
+                store_device=0,
+                store_inode=0,
                 host_id=browser.host_id,
                 boot_session_id=browser.boot_session_id,
-                recorded_at_ms=browser.issued_at_ms,
-            )
-            if not self._terminate_exact_process(record):
-                return {
-                    "status": "OK",
-                    "cleanup_action": "terminate_owned_process",
-                    "released": False,
-                    "profile_deleted": False,
-                    "cleanup_uncertain": True,
-                }
+                relative_path=f"browser:{browser.start_action_id}",
+                source_identity=browser.tool_schema_digest,
+            ),
+            pid=browser.relay_pid,
+            process_start_identity=browser.relay_start_identity,
+            pgid=browser.relay_pgid,
+            session_id=browser.relay_session_id,
+            host_id=browser.host_id,
+            boot_session_id=browser.boot_session_id,
+            recorded_at_ms=browser.issued_at_ms,
+        )
+        # Cleanup is conservative across service restarts and transient process
+        # observation failures. _terminate_exact_process never signals a group
+        # after the recorded leader identity changed; it reports success only
+        # when the exact group is proven absent.
+        if not self._terminate_exact_process(record):
+            return {
+                "status": "OK",
+                "cleanup_action": "terminate_owned_process",
+                "released": False,
+                "profile_deleted": False,
+                "cleanup_uncertain": True,
+            }
 
         socket_path = self._socket_path(browser.start_action_id)
         try:
@@ -920,6 +972,7 @@ class BrowserResourcePort:
 
 __all__ = [
     "BrowserHostConfig",
+    "PersistentBrowserProfileGrant",
     "BrowserResourcePort",
     "BrowserResourceRefused",
     "default_relay_command",
