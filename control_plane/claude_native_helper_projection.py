@@ -100,10 +100,19 @@ class ClaudeNativeHelperProjection:
         """Provider-native width/depth controls translated from the source grant."""
 
         return {
+            # Non-interactive Claude otherwise registers provider built-ins in
+            # addition to the exact session roster.  Remove them so the
+            # Executive-admitted roster is the whole available agent set.
+            "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
             "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": str(
                 self._max_concurrent_helpers
             ),
             "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": str(self._max_depth),
+            # A per-invocation Agent(model=...) normally outranks --agents.
+            # FORCE without a model value pins every native helper to the
+            # already-admitted main-conversation model and prevents the parent
+            # from widening/changing that choice during a spawn.
+            "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
         }
 
 
@@ -240,10 +249,15 @@ def project_claude_native_helpers(
             "description": description,
             "prompt": prompt,
             "model": "inherit",
+            "permissionMode": permission_mode,
             "maxTurns": item.max_turns,
             "tools": list(tools),
             "disallowedTools": list(denied),
             "mcpServers": child_mcp.get("mcpServers", []),
+            # Keep the child synchronous and prevent ambient project/user
+            # CLAUDE.md text from silently widening the reviewed child prompt.
+            "background": False,
+            "omitClaudeMd": True,
         }
 
     payload = json.dumps(
