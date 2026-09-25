@@ -623,6 +623,7 @@ def _make_dispatcher(
     invocations: InvocationContextSource | None = None,
     clock: _ManualClock | None = None,
     wake_repository: WakeLedgerRepository | None = None,
+    monotonic: Any = None,
 ) -> RuntimeConsultationDispatcher:
     caller = CallerIdentity(
         job_id=requester[0],
@@ -640,6 +641,7 @@ def _make_dispatcher(
         invocations=invocations or _StaticInvocations(_default_invocation()),
         _clock=clock or _ManualClock(clock_value),
         _wake_repository=wake_repository,
+        _monotonic=monotonic,
     )
 
 
@@ -7099,3 +7101,320 @@ async def test_advertised_budget_never_exceeds_the_expansion_aware_clamp(
     ).rendered_bytes
     assert advertised == (_WIRE_CEILING_BYTES - lean_overhead) // 2
     assert advertised < _WIRE_CEILING_BYTES
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1-C-C — the COMMIT boundary (Sol 5831002086)
+# ---------------------------------------------------------------------------
+
+
+class _ServiceSendEffectUnknown(Exception):
+    """The Relay service reported ``SEND_EFFECT_UNKNOWN`` for one send."""
+
+
+class _StepMonotonic:
+    """TEST-ONLY monotonic clock that returns scripted readings in order,
+    repeating the last one once the script is exhausted."""
+
+    def __init__(self, *readings: float) -> None:
+        self._readings = list(readings)
+        self._index = 0
+
+    def __call__(self) -> float:
+        reading = self._readings[min(self._index, len(self._readings) - 1)]
+        self._index += 1
+        return reading
+
+
+class _CommitBoundaryCarrier(InMemoryConsultationPacketCarrier):
+    """TEST-ONLY carrier for the COMMIT-boundary slice.
+
+    Counts every ``put_*`` and every keyed read and records the exact
+    ``message_key`` each used. The commit awaits can be armed to raise —
+    the carrier port's only way to report a provider timeout or a
+    service ``SEND_EFFECT_UNKNOWN`` — optionally after the body was
+    already stored (the service committed but reported unknown).
+    """
+
+    def __init__(
+        self,
+        *,
+        fail_question_put: type[Exception] | None = None,
+        fail_answer_put: type[Exception] | None = None,
+        question_put_commits_first: bool = False,
+        answer_put_commits_first: bool = False,
+    ) -> None:
+        super().__init__()
+        self.put_question_calls = 0
+        self.put_answer_calls = 0
+        self.get_question_calls = 0
+        self.get_answer_calls = 0
+        self.put_question_keys: list[str] = []
+        self.put_answer_keys: list[str] = []
+        self.get_question_keys: list[str] = []
+        self.get_answer_keys: list[str] = []
+        self._fail_question_put = fail_question_put
+        self._fail_answer_put = fail_answer_put
+        self._question_put_commits_first = question_put_commits_first
+        self._answer_put_commits_first = answer_put_commits_first
+
+    async def put_question(self, consultation_id, frame):
+        self.put_question_calls += 1
+        self.put_question_keys.append(str(frame.get("message_key", "")))
+        if self._fail_question_put is not None:
+            if self._question_put_commits_first:
+                await super().put_question(consultation_id, frame)
+            raise self._fail_question_put(
+                "simulated carrier commit failure"
+            )
+        await super().put_question(consultation_id, frame)
+
+    async def put_answer(self, consultation_id, frame):
+        self.put_answer_calls += 1
+        self.put_answer_keys.append(str(frame.get("message_key", "")))
+        if self._fail_answer_put is not None:
+            if self._answer_put_commits_first:
+                await super().put_answer(consultation_id, frame)
+            raise self._fail_answer_put("simulated carrier commit failure")
+        await super().put_answer(consultation_id, frame)
+
+    async def get_question(self, consultation_id, *, message_key):
+        self.get_question_calls += 1
+        self.get_question_keys.append(str(message_key))
+        return await super().get_question(
+            consultation_id, message_key=message_key
+        )
+
+    async def get_answer(self, consultation_id, *, message_key):
+        self.get_answer_calls += 1
+        self.get_answer_keys.append(str(message_key))
+        return await super().get_answer(
+            consultation_id, message_key=message_key
+        )
+
+
+def _cc_consult_pieces(tmp_path: Path, name: str, carrier, invocations, monotonic=None):
+    runtime = _runtime_at(tmp_path / name)
+    _consultations(runtime, tmp_path / name)
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / f"{name}-repo")
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+        monotonic=monotonic,
+    )
+    return (
+        runtime,
+        dispatcher,
+        fixture_repo,
+        fixture_revision,
+        requester,
+        recipient,
+    )
+
+
+@_sync_test
+async def test_timeout_strictly_before_commit_is_a_clean_refusal_with_no_effect(
+    tmp_path: Path,
+) -> None:
+    """IAC-P1-C-C: a timeout that fires strictly BEFORE the
+    ``put_question`` await is entered is a known no-provider-effect
+    refusal — a clean typed code, zero carrier contact of any kind, no
+    reconciliation read, no Wake."""
+    carrier = _CommitBoundaryCarrier()
+    invocations = _StaticInvocations(_default_invocation(deadline_ms=60_000))
+    runtime, dispatcher, _fixture_repo, fixture_revision, _requester, _recipient = (
+        _cc_consult_pieces(
+            tmp_path,
+            "cc-preentry",
+            carrier,
+            invocations,
+            monotonic=_StepMonotonic(0.0, 1_000.0),  # 1_000_000 ms >> 60_000
+        )
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Timeout before commit?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(dispatcher, "company.consult", envelope)
+    assert excinfo.value.code == "TIMEOUT_BEFORE_COMMIT"
+    assert excinfo.value.effect == "NONE"
+    assert carrier.put_question_calls == 0
+    assert carrier.put_answer_calls == 0
+    # The only carrier contact is the landed pre-commit exact-key read
+    # every consult performs before intent; the boundary adds no
+    # reconciliation read on this side.
+    assert carrier.get_question_calls == 1
+    assert carrier.get_answer_calls == 0
+    intents = [
+        event
+        for event in runtime.events.list_events(aggregate_type="consultation")
+        if event.event_type == "INTENT"
+    ]
+    assert len(intents) == 1
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+@_sync_test
+async def test_timeout_awaiting_commit_reconciles_exactly_once_on_the_same_key(
+    tmp_path: Path,
+) -> None:
+    """IAC-P1-C-C: a timeout raised WHILE awaiting the ``put_question``
+    commit is carrier effect-unknown — exactly one same-key read
+    reconciliation with the exact persisted INTENT message_key, and no
+    resend."""
+    carrier = _CommitBoundaryCarrier(fail_question_put=TimeoutError)
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-p1-cc-awaiting")
+    )
+    runtime, dispatcher, _fixture_repo, fixture_revision, _requester, _recipient = (
+        _cc_consult_pieces(tmp_path, "cc-awaiting", carrier, invocations)
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Timeout while awaiting the commit?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    result = _run_dispatcher(dispatcher, "company.consult", envelope)["result"]
+    consultation_id = result["consultation_ref"]
+    assert result["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert carrier.put_question_calls == 1
+    # Exactly one reconciliation read: the landed pre-commit exact-key
+    # read plus exactly one same-key read after the uncertain commit.
+    assert carrier.get_question_calls == 2
+    assert carrier.get_question_keys == carrier.put_question_keys * 2
+    assert carrier.get_question_keys[-1] == carrier.put_question_keys[0]
+    assert carrier.get_question_keys == [
+        _intent_message_key(runtime, consultation_id)
+    ] * 2
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+@_sync_test
+async def test_uncertain_commit_never_resends(tmp_path: Path) -> None:
+    """IAC-P1-C-C: an ANSWER commit whose await raised is effect-unknown —
+    the dispatcher reconciles the same key once and never resends the
+    answer, not even on an identical replay."""
+    carrier = _CommitBoundaryCarrier(fail_answer_put=TimeoutError)
+    invocations = _StaticInvocations(_default_invocation())
+    (
+        runtime,
+        a_dispatcher,
+        fixture_repo,
+        fixture_revision,
+        requester,
+        recipient,
+    ) = _cc_consult_pieces(tmp_path, "cc-uncertain-answer", carrier, invocations)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Uncertain answer commit?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    consult = _run_dispatcher(a_dispatcher, "company.consult", envelope)
+    assert consult["ok"] is True
+    consultation_id = consult["result"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    reply_request = {
+        "semantic": {
+            "consultation_ref": consultation_id,
+            "answer": "uncertain commit answer",
+            "supersedes_message_key": None,
+            "evidence_refs": [],
+        }
+    }
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(b_dispatcher, "company.reply", reply_request)
+    assert excinfo.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+    assert carrier.put_answer_calls == 1
+    assert carrier.get_answer_calls == 1
+    assert carrier.get_answer_keys == carrier.put_answer_keys
+
+    # An identical replay through a fresh dispatcher must not resend.
+    b_replay = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    with pytest.raises(ConsultationRefusal) as replay_excinfo:
+        _run_dispatcher(b_replay, "company.reply", reply_request)
+    assert replay_excinfo.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+    assert carrier.put_answer_calls == 1
+    assert carrier.put_question_calls == 1
+
+
+@_sync_test
+async def test_service_send_effect_unknown_does_not_trigger_a_second_send(
+    tmp_path: Path,
+) -> None:
+    """IAC-P1-C-C: a service-returned ``SEND_EFFECT_UNKNOWN`` has already
+    used the Relay engine's reconciliation path — the dispatcher never
+    sends again of any kind; a replay reconciles the stored packet."""
+    carrier = _CommitBoundaryCarrier(
+        fail_question_put=_ServiceSendEffectUnknown,
+        question_put_commits_first=True,
+    )
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-p1-cc-effect-unknown")
+    )
+    (
+        runtime,
+        dispatcher,
+        fixture_repo,
+        fixture_revision,
+        requester,
+        recipient,
+    ) = _cc_consult_pieces(
+        tmp_path, "cc-send-effect-unknown", carrier, invocations
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Send effect unknown?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    first = _run_dispatcher(dispatcher, "company.consult", envelope)
+    assert first["ok"] is True
+    consultation_id = first["result"]["consultation_ref"]
+    assert first["result"]["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert carrier.put_question_calls == 1
+    # Landed pre-commit exact-key read + exactly one same-key
+    # reconciliation read after the service's effect-unknown send.
+    assert carrier.get_question_calls == 2
+    assert carrier.get_question_keys[-1] == carrier.put_question_keys[0]
+
+    replay = _run_dispatcher(
+        _make_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            packets=carrier,
+            invocations=invocations,
+        ),
+        "company.consult",
+        envelope,
+    )
+    assert replay["ok"] is True
+    assert replay["result"]["consultation_ref"] == consultation_id
+    assert replay["result"]["blocker"] is None
+    assert replay["result"]["attention_requested"] is True
+    assert carrier.put_question_calls == 1
+    assert _intent_count(runtime, consultation_id) == 1

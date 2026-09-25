@@ -21,6 +21,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
@@ -90,6 +91,7 @@ REFUSAL_CODES = frozenset(
         "WAKE_NOT_ACKNOWLEDGED",
         "UNAVAILABLE",
         "BODY_OVER_BUDGET",
+        "TIMEOUT_BEFORE_COMMIT",
         "EXPIRED",
     }
 )
@@ -685,6 +687,7 @@ class RuntimeConsultationDispatcher:
         invocations: InvocationContextSource,
         _clock: ClockFn | None = None,
         _wake_repository: WakeLedgerRepository | None = None,
+        _monotonic: Callable[[], float] | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("runtime must be the existing Executive Runtime")
@@ -700,8 +703,24 @@ class RuntimeConsultationDispatcher:
         self.packets = packets
         self.invocations = invocations
         self._clock = _clock or utc_now_iso
+        self._monotonic = _monotonic or time.monotonic
         self._consultations = ConsultationRuntime(
             runtime, repository_root=self.repository_root, _clock=self._clock
+        )
+
+    def _commit_deadline_exhausted(
+        self, started_monotonic: float, deadline_ms: int
+    ) -> bool:
+        """IAC-P1-C-C: the timeout half of the pre-entry refusal class.
+
+        The owner-issued ``InvocationContext.deadline_ms`` is the only
+        timeout source this dispatcher owns. Measured from dispatch
+        entry, an exhausted deadline at the commit site means the
+        ``put_question``/``put_answer`` await was never entered, so the
+        carrier provider has no effect to be uncertain about.
+        """
+        return (self._monotonic() - started_monotonic) * 1000.0 >= float(
+            deadline_ms
         )
 
     async def __call__(
@@ -798,6 +817,10 @@ class RuntimeConsultationDispatcher:
     async def _dispatch_consult(
         self, request: Mapping[str, Any]
     ) -> dict[str, Any]:
+        # IAC-P1-C-C: the COMMIT-boundary clock starts at dispatch entry.
+        # The pre-entry timeout side of the boundary is measured against
+        # the owner-issued ``deadline_ms`` from this reading.
+        started_monotonic = self._monotonic()
         try:
             validated = validate_company_consult_dispatch_request(dict(request))
         except Exception as exc:
@@ -1080,6 +1103,23 @@ class RuntimeConsultationDispatcher:
                 "CONFLICT", detail="INTENT missing after intent() returned"
             )
         if intent_result.inserted:
+            # IAC-P1-C-C (Sol 5831002086): the COMMIT boundary is the
+            # ``put_question`` await below. A timeout that fires strictly
+            # BEFORE it is entered is a known no-provider-effect refusal:
+            # clean, no uncertainty, no reconciliation. A timeout or error
+            # raised WHILE awaiting it is carrier effect-unknown and is
+            # handled by the single same-key read reconciliation inside
+            # the handler. The two sides are deliberately never merged.
+            if self._commit_deadline_exhausted(
+                started_monotonic, ctx.deadline_ms
+            ):
+                raise ConsultationRefusal(
+                    "TIMEOUT_BEFORE_COMMIT",
+                    detail=(
+                        "invocation deadline exhausted before the carrier "
+                        "write was entered"
+                    ),
+                )
             try:
                 await self.packets.put_question(consultation_id, question_frame)
             except Exception:
@@ -1091,6 +1131,18 @@ class RuntimeConsultationDispatcher:
                 # ``attention_requested`` therefore comes from the same
                 # ledger readback (True / proven-absent False / unknown
                 # None), never a hardcoded False. No resend.
+                #
+                # IAC-P1-C-C: effect unknown — reconcile exactly once on
+                # the exact persisted message key, then stop. The read is
+                # evidence for the existing same-carrier recovery owner;
+                # its outcome never licenses a resend, and the uncertain
+                # barrier below stands whether it reads a body or not.
+                try:
+                    await self.packets.get_question(
+                        consultation_id, message_key=message_key
+                    )
+                except Exception:
+                    pass
                 return {
                     "ok": True,
                     "result": _committed_consult_result(
@@ -1553,9 +1605,23 @@ class RuntimeConsultationDispatcher:
             event_type == "ANSWER_AVAILABLE"
             and payload_fact == "ANSWER_AVAILABLE"
         ):
+            # IAC-P1-C-C: the COMMIT boundary is the ``put_answer`` await.
+            # A failure raised WHILE awaiting it is carrier effect-unknown:
+            # exactly one same-key read reconciliation with the exact
+            # message key the admitted frame persists under, then the
+            # existing uncertain barrier — never a resend of any kind.
+            # (The reply leg carries no owner-issued ``deadline_ms``, so
+            # there is no pre-entry timeout side to check here.)
             try:
                 await self.packets.put_answer(consultation_ref, answer_frame)
             except Exception as exc:
+                try:
+                    await self.packets.get_answer(
+                        consultation_ref,
+                        message_key=str(answer_frame.get("message_key", "")),
+                    )
+                except Exception:
+                    pass
                 raise ConsultationRefusal(
                     "CARRIER_RECONCILIATION_REQUIRED",
                     detail="runtime event admitted but carrier write failed",
