@@ -24,6 +24,8 @@ Build one governed path by which ChatGPT Web Sol can use a private/local browser
 | Mastermind local browser MCP gateway | `NOT_BUILT` |
 | Disposable remote browser actuation from ChatGPT | `NOT_BUILT` |
 | Existing Web-Sol tab exposed remotely through MCP | `NOT_BUILT` |
+| Persistent authenticated Chrome profile | `NOT_BUILT / F0 contract only` |
+| Approved admin-site auth workflow | `NOT_BUILT` |
 | Managed Chairman-seat remote actuation | `PARTIAL / HELD_BY_P0B` |
 | End-to-end real Web Sol browser autonomy | `NOT_BUILT` |
 
@@ -49,10 +51,12 @@ BRA-F0
   +--> BRA-T0 --+
   |             |
   +--> BRA-O1 --+--> BRA-A1 --> BRA-W1 --> BRA-S1 --> BRA-PROD
-  |                                               ^
-  +-----------------------------------------------|
-                                                  |
-P0B managed-seat proof -----------------------> BRA-M1
+  |             |                                  ^
+  |             +--> BRA-P1 -----------------------|
+  |                                                ^
+  +------------------------------------------------|
+                                                   |
+P0B managed-seat proof ------------------------> BRA-M1
 ```
 
 BRA-T0 and BRA-O1 may start independently after F0 protection if their source paths are disjoint. BRA-A1 depends on both. BRA-W1 depends on tunnel/gateway proof but is read-only. BRA-S1 uses Web-Sol semantic source law and does not inherit generic browser authority. BRA-M1 is separately held by P0B exact managed-seat capability.
@@ -70,7 +74,7 @@ BRA-T0 and BRA-O1 may start independently after F0 protection if their source pa
 
 **Non-goals:** zero extension/native-host/MCP runtime change; zero tunnel creation; zero browser/profile effect; zero Executive/RuntimeBinding/Agent OS mutation.
 
-**Acceptance:** exact four-path delta; static regressions fail if the existing durable effect owner/owner-native command lineage or closed target-class navigation/network policy disappears; hosted repository/security checks; independent source-law review; Draft/HOLD until Sol release adjudication.
+**Acceptance:** exact four-path delta, hosted repository/security checks, independent source-law review, Draft/HOLD until Sol release adjudication.
 
 ## BRA-T0 — Secure MCP Tunnel + local gateway transport falsifier
 
@@ -98,9 +102,9 @@ BRA-T0 and BRA-O1 may start independently after F0 protection if their source pa
 
 **Allowed:** status, bounded snapshot, optional screenshot on the synthetic test page.
 
-**Forbidden:** click/fill/navigation in O1; Chairman/ChatGPT seat targets; cookies/storage/network secrets; arbitrary HTML export. BRA-O1 cannot navigate, open a popup/new browsing context, invoke generic network inspection or trigger page modification.
+**Forbidden:** click/fill/navigation in O1; Chairman/ChatGPT seat targets; cookies/storage/network secrets; arbitrary HTML export.
 
-**Proof:** synthetic local page, exact target generation, restart/no-hidden-state tests, secret-shaped content suppression, and zero navigation/network calls.
+**Proof:** synthetic local page, exact target generation, restart/no-hidden-state tests, secret-shaped content suppression.
 
 ## BRA-A1 — one generic modifying actuation vertical
 
@@ -108,13 +112,34 @@ BRA-T0 and BRA-O1 may start independently after F0 protection if their source pa
 
 **First action set:** keep minimal; a combined structured operation may perform one exact fill+click synthetic interaction, or expose `browser_fill` and `browser_click` if the contract remains simpler and independently safe.
 
-**Durable command lineage:** the existing Attempt-local Operator Harness effect owner commits `INTENT` and supplies one owner-minted `operation_command_id` bound to current Attempt authority, exact target/generation/`navigation_epoch`, action digest, schema/app/policy generation, deadline and precondition digest. Immediately before mutation it rereads authority, target and prior effect. The gateway never owns this lineage.
+**Existing durable effect owner:** Executive OS immutable Event plane, `operator_operation`, owner-minted `OperationId.command_id`. BROWSER_ACTION-equivalent is future additive work, not implemented by F0. Extend the existing OHF/Executive owner; do not add a browser journal, gateway state, second registry, queue or retry service.
 
-**Target/network policy:** `DISPOSABLE_SYNTHETIC_ORIGIN_V1` permits only the exact owner-attested synthetic origin/scheme/address/port. Refuse cross-origin or scheme-changing redirects, off-origin subframes/subresources/fetch/WebSockets, DNS rebinding, unapproved private/loopback/link-local reach, popups/new windows, downloads/uploads, credential-bearing URLs and local/browser-internal/opaque schemes. A successful navigation advances the epoch only after same-policy proof; ambiguity leaves it unresolved.
+**First-target policy:** no model-visible browser_navigate. The resource owner creates and loads the exact synthetic page before issuing the bound action reference. It fixes the exact literal `http://127.0.0.1:<leased-port>`; no model URL/port/host/proxy/allowlist choice. Enforce the complete closed law §6 at the resource/process/network boundary, not only Playwright allowedOrigins. O1 cannot navigate, and W1 cannot gain generic ChatGPT navigation or network inspection.
 
-**Effect semantics:** `INTENT -> APPLIED_VERIFIED | NO_EFFECT | REFUSED`, or `INTENT -> EFFECT_UNKNOWN -> RECONCILED(resolution=...)`. Inject transport/browser failure after dispatch and prove unresolved uncertainty blocks every resend/failover. Matching same-command replay is read-only evidence with zero second effect; changed replay refuses.
+**Implementation and proof order:**
+
+1. Bind the law §5 owner-native action reference to actual Attempt/worker/epoch/process/target, action/arguments, app/schema/network policy, grant, deadline, precondition and normalized effect identity. Qualify the existing resource policy without widening its scope.
+2. Commit INTENT in BEGIN IMMEDIATE, then apply the fresh authority/target/policy/prior-effect fence and existing-owner single issuance before at most one native adapter dispatch. Prove concurrent duplicate delivery cannot dispatch twice, including after an owner/gateway restart.
+3. Verify the exact postcondition before APPLIED_VERIFIED. Preserve common `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN` separately from response status and RECONCILED lineage. Driver success alone cannot complete the effect or an Executive Job.
+4. Prove same-action replay returns prior evidence, changed-action replay conflicts, and missing terminal evidence remains unknown through gateway restart, tunnel disconnect, expired permission or evidence-retention loss. Same-command read-only reconciliation never grants a second effect or account/host/target failover.
+5. Exercise the admitted negative controls: wrong generation; conflicting prior action; redirect/frame/popup/subresource escape; alternative port/DNS/private/public/local-scheme reach; downloads/uploads/clipboard/credential surfaces; stale navigation epoch. A1 has no navigation; later permitted navigation must invalidate earlier handles/preconditions/references before fresh owner qualification.
+6. Return the real ChatGPT -> accepted transport -> canonical owner -> exact synthetic browser -> validated effect receipt, with failure/cleanup evidence. Bind receipt and parent consumption through existing owners. This future proof is not supplied by static F0 tests.
+
+The current four-path repair adds no runtime implementation. Future BRA-A1 work requires its own bounded commission, exact changed-path/consumer closure, current source/resource/permission/effect gates and independent proof; no child inherits START here.
 
 **No Chairman seat. No ChatGPT prompt submission.**
+
+## BRA-P1 — persistent authenticated browser profile
+
+**Gate:** BRA-F0 protected; exact browser-resource/Fleet/credential owner collision census complete. P1 reuses the existing browser engine and credential owners; it creates no second profile registry, credential store, queue, retry plane or host scheduler.
+
+**Observable mission:** enroll one dedicated automation Chrome profile on a stable home host, perform an attended first login to one approved non-critical web identity, then prove restart persistence and remote Web-CEO control without copying or attaching to the user's default Chrome profile. The profile remains owner-fixed and one active mutating controller owns it at a time.
+
+**Identity contract:** bind `home_host_id`, `profile_generation`, `browser_process_generation`, `web_identity_ref`, exact tab/document fingerprint, network-policy generation and navigation epoch. An existing human Chrome window is an attended enrollment or recovery surface only; it is not production target identity.
+
+**Authentication contract:** publish typed non-secret readiness using `READY | LOGIN_REQUIRED | MFA_REQUIRED | HUMAN_CHALLENGE_REQUIRED | PROFILE_LOCKED | PROFILE_IN_USE | HOST_OFFLINE | STALE_GENERATION`. Approved credential use/save belongs to the existing credential-owning helper, and the model receives only a non-secret outcome. Do not expose cookies, storage-state exports, password-manager values, OTPs, recovery material or raw credential fields. BRA-P1 does not automate CAPTCHA solving or bypass a provider challenge.
+
+**Proof:** restart persistence; wrong-profile and stale-generation refusal; profile-in-use serialization; host-offline and login-required reporting; wrong-origin refusal; credential-helper no-secret receipt; browser restart without profile-state copy; cross-profile isolation; attended MFA/human-challenge return. Only after those pass may an approved admin site such as Auth0 be enrolled under its own origin/action policy.
 
 ## BRA-W1 — exact existing Web-Sol read/foreground through MCP
 
@@ -203,3 +228,5 @@ For ordinary new implementation use `RECEIVER_BINDING_MODE: CAPACITY_SELECTABLE`
 ## Final stop condition
 
 This plan ends only when BRA-PROD proves one real supported Sol workflow or a current official platform/vendor boundary makes that end-state impossible. External impossibility must be recorded as a typed blocker with the exact missing capability; do not fabricate completion or silently substitute GUI scripting.
+
+These source-law tests prove documentation consistency, not runtime enforcement. F0 acceptance protects records only; BRA-T0/O1/A1 and all later real browser, tunnel, permission and production effects remain separately admitted.

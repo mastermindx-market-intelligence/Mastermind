@@ -28,6 +28,14 @@ Reuse its policy concepts for generic web automation: pinned Playwright MCP, tar
 
 Do not reuse its fresh isolated browser identity as if it were a persistent Chairman managed-browser seat.
 
+### Persistent authenticated browser profile
+
+Use a dedicated automation Chrome profile on a stable home host when a workflow needs retained login state across CEO sessions. The preferred first implementation reuses the existing guarded browser-resource/Playwright engine with a persistent, owner-fixed profile directory rather than attaching DevTools to the user's default Chrome profile. The same profile may be shown headed for attended enrollment or recovery, but exactly one active mutating controller may own it.
+
+The profile owner, Fleet and credential owner remain separate: browser state persistence does not create host placement, credential or lifecycle authority. The browser resource binds `profile_generation`, `browser_process_generation`, web-identity reference and navigation epoch; it never exposes cookie database bytes, storage-state export or password-manager values to the model. Login readiness is reported as typed non-secret state. A credential-owning helper may use an explicitly approved login without returning the credential. MFA/passkey or an anti-bot challenge remains an attended boundary; the browser controller does not automate CAPTCHA solving.
+
+An existing human Chrome window is an attended enrollment or recovery surface, not production target identity. This keeps first-login intervention available without making window order, profile titles, screen coordinates or the user's default Chrome directory a durable automation coordinate.
+
 ### Business Sol MCP/App architecture
 
 Reuse existing authentication, app-surface and capability-policy patterns. The browser gateway is one bounded app capability, not a super-MCP aggregating all company powers.
@@ -81,17 +89,16 @@ Each request identifies a target through trusted host/runtime context or an opaq
 
 ### Generic actuation
 
-Candidate operations for `DISPOSABLE_AUTOMATION_BROWSER` and later other explicitly eligible non-ChatGPT targets:
+BRA-A1 exposes no model-visible browser_navigate. Its exact page is owner-created and owner-loaded before references are minted. The first interaction is the admitted synthetic click/fill operation; the following broader list is a future capability inventory, not an A1 grant:
 
 - `browser_click`
 - `browser_fill`
-- `browser_navigate`
 - `browser_scroll`
 - `browser_wait`
 - `browser_resize`
 - `browser_focus_tab`
 
-Selectors should be structured/semantic and constrained by the underlying adapter. No generic script evaluator exists. `browser_navigate` is available only to a target class whose reviewed closed origin/network policy expressly grants it.
+Selectors should be structured/semantic and constrained by the underlying adapter. No generic script evaluator exists. Generic navigation remains held for a later policy generation. No generic tool on this surface may target a ChatGPT conversation or persistent managed seat to bypass its existing owner.
 
 For modifying operations the response contains an effect classification and postcondition evidence digest. A response that cannot establish the postcondition is not promoted to `APPLIED_VERIFIED` merely because the driver returned success.
 
@@ -143,90 +150,48 @@ ChatGPT app
 
 If more than one host appears eligible and there is no canonical exact target, the request refuses as ambiguous rather than choosing one.
 
-## Durable effect owner and command lineage
-
-The existing Attempt-local Operator Harness `operator_operation` Event plane,
-under Executive OS's current Attempt lease/fence, is the durable effect owner
-for modifying browser work. BRA extends that existing owner with a bounded
-browser operation kind; it does not add a gateway table, replay cache or browser
-ledger. No new Event type or effect store is introduced.
-
-Before dispatch, the owner mints one existing owner-native `OperationId` and
-projects it to the closed browser command as `operation_command_id`.
-The gateway never mints or owns `operation_command_id`. It may only verify that the opaque
-value and bound request facts match the owner-issued envelope.
-
-The owner commits `INTENT` before the adapter call and then rereads the current
-Attempt authority, exact target/generation/navigation epoch, policy generation,
-deadline, precondition digest and prior effect immediately before mutation.
-Only a clean current reread permits one dispatch. Browser, tunnel and gateway
-receipts return as evidence to the same owner.
-
-Normal terminal history is `INTENT -> APPLIED_VERIFIED`, `INTENT -> NO_EFFECT`
-or `INTENT -> REFUSED`. A post-dispatch ambiguity is
-`INTENT -> EFFECT_UNKNOWN -> RECONCILED(resolution=...)`; it never becomes a
-fresh APPLIED event after the unknown edge. Matching replay reads the existing
-history and produces zero second effect. Reuse of the command ID with any
-different normalized payload, target, generation or policy is a conflict and
-refuses.
-
 ## State machine for one modifying browser operation
 
-```text
-OWNER_INTENT_COMMITTED(operation_command_id)
--> ACTION_TIME_AUTHORITY_TARGET_PRIOR_EFFECT_REREAD
--> PRECONDITION_VERIFIED
--> EFFECT_DISPATCHED_ONCE
--> POSTCONDITION_VERIFIED
--> APPLIED_VERIFIED
+BRA-A1 reuses the Executive OS immutable Event plane, `operator_operation`, and owner-minted `OperationId.command_id`. The required minimal BROWSER_ACTION-equivalent extension is future implementation, not an already-supported OHF operation. The stateless gateway does not create another journal, registry or issuance owner. The authoritative action bindings and replay table are [law §5](../../EXECUTIVE_BROWSER_ACTUATION_LAW.md#5-effect-law).
 
-before EFFECT_DISPATCHED_ONCE failure -> NO_EFFECT | REFUSED
-unknown after EFFECT_DISPATCHED_ONCE -> EFFECT_UNKNOWN
-EFFECT_UNKNOWN + same-command read proof -> RECONCILED(resolution=...)
+```text
+OWNER_VALIDATES_ACTION_AND_PRIOR_EFFECT
+-> OPERATOR_OPERATION_INTENT_COMMITTED_IN_BEGIN_IMMEDIATE
+-> REREAD_CURRENT_AUTHORITY_TARGET_POLICY_AND_PRIOR_EFFECT
+-> EXISTING_OWNER_AT_MOST_ONCE_ISSUANCE
+-> ONE_NATIVE_ADAPTER_DISPATCH
+-> POSTCONDITION_VERIFIED => OPERATOR_OPERATION_APPLIED
+
+possible dispatch with missing terminal proof => OPERATOR_OPERATION_EFFECT_UNKNOWN
+same-command canonical postcondition => OPERATOR_OPERATION_RECONCILED
 ```
 
-There is no generic retry state. Unresolved `EFFECT_UNKNOWN` blocks another
-dispatch, another gateway/host and another target. Reconciliation is an explicit
-read-only operation against the same owner-minted command and exact target.
-Matching replay returns prior evidence only; changed replay conflicts.
+The current Attempt, worker, held writer, process/target generation, policy and precondition must all be freshly checked immediately before issuance. Only the original owner-native new-issuance result can dispatch; duplicate invocation or INTENT replay is not another issuance. Reconciled evidence never authorizes a second dispatch. Changed action/target/policy/precondition conflicts. Unknown effects survive gateway/tunnel/browser restart and block replacement commands and every resend or cross-target/session/account/host/tunnel/gateway failover.
 
-## Closed navigation and network policy
+Common effect_state is `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN`. Browser `REFUSED` and proven `NO_EFFECT` map to NOT_APPLIED only with authoritative no-effect evidence; `APPLIED_VERIFIED` maps to APPLIED only with exact canonical postcondition; missing terminal evidence after possible dispatch maps to EFFECT_UNKNOWN. `RECONCILED` is lineage, not a fourth common state. A late refusal or an expired execution grant does not erase the historical effect. Gateway, browser and tunnel receipts are evidence only; the existing owner validates and persists consequential truth. BRA-S1 requires its own existing semantic owner; BRA-M1 cannot inherit this disposable-target owner.
 
-Observation and actuation have separate policies. BRA-O1 cannot navigate.
-BRA-A1's first policy generation, `DISPOSABLE_SYNTHETIC_ORIGIN_V1`, contains one
-owner-attested exact synthetic origin/scheme/address/port allowlist and a policy
-digest. Calls cannot widen it.
+## First-vertical confinement
 
-The policy verifies the full redirect chain, resolved address before every
-connection/redirect, same-origin subframes/subresources/fetch/workers/WebSockets,
-and current navigation epoch. It refuses cross-origin/scheme redirects, DNS
-rebinding, unapproved private/loopback/link-local reach, popups/new windows,
-downloads/uploads, credential-bearing URLs, local/browser-internal/opaque
-schemes, and network evidence outside the exact disposable target. An
-owner-attested literal loopback fixture is the only V1 private-address
-exception.
+[Law §6](../../EXECUTIVE_BROWSER_ACTUATION_LAW.md#61-first-vertical-target-policy) fixes BRA-A1 to the exact owner-derived `http://127.0.0.1:<leased-port>` and one already-loaded synthetic page. The resource/process/network boundary must enforce it; Playwright allowedOrigins alone is defense in depth, not the security boundary. The model cannot choose a URL, host, port, scheme, DNS target, proxy, path root or policy. O1 cannot navigate; W1 never gains generic navigation/network inspection against ChatGPT.
 
-A navigation invalidates prior observation before dispatch and advances
-`navigation_epoch` only after a verified same-policy postcondition. An ambiguous
-navigation leaves effect and epoch unresolved. BRA-W1 receives no generic
-navigation, console or network-inspection tools against ChatGPT.
+Other loopback ports, IPv6, hostnames/DNS, private/link-local/public reach and DNS rebinding refuse. So do cross-origin redirects, frames, popups, new windows, subresources, service workers and WebSockets; local/browser-internal schemes; downloads, uploads, file chooser, clipboard transfer, auth challenges and credential-bearing URLs; unrestricted console/network payloads, headers/bodies and proxy changes. A returned observation cannot substitute for enforced egress policy.
 
-Any broader origin, scheme, subresource, redirect, private-network, popup,
-download/upload or evidence scope requires a separately reviewed policy generation and real canary. It cannot arrive as a child implementation default.
+A later navigation capability needs separately reviewed policy and a real canary. Each permitted navigation increments the target/navigation epoch, invalidates element handles/preconditions/capability references and requires fresh exact-target/policy evidence before a next action. This design does not create that later capability.
 
 ## Evidence model
 
 A browser receipt should be content-minimized and bind:
 
 - schema/version;
-- operation key/fingerprint;
+- owner-minted `OperationId.command_id` and normalized operation fingerprint;
 - target class;
 - opaque exact target fingerprint/generation;
 - requested semantic action;
 - issued/observed times and bounded deadline;
-- effect classification;
+- response status separately from `effect_state`;
 - before/after observation digests or allowlisted facts;
-- capability/app/tunnel generation needed for diagnostics;
+- exact Attempt/worker/session-epoch/process/target generation and action/schema/network-policy/precondition bindings from law §5, exposed only where the existing evidence policy permits;
+- capability/app/tunnel generation needed for diagnostics (tunnel identity remains evidence only);
 - reason code.
 
 Never include cookies, tokens, provider handles, raw profile paths, raw browser argv, private URLs carrying secrets, transcript text or arbitrary page HTML.
@@ -294,3 +259,5 @@ The user should not need to reason about Chrome tab IDs, extension ports, tunnel
 ## Completion
 
 Architecture is source-only until the implementation DAG produces real proof. The first implementation target is a disposable browser and synthetic page. No Chairman seat or production ChatGPT session is needed to prove the tunnel/gateway/effect contract.
+
+These source-law tests prove documentation consistency, not runtime enforcement. The browser extension, Event admission, atomic issuance, confinement, real postcondition, and restart behavior remain future implementation and production-proof obligations.

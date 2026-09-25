@@ -38,7 +38,7 @@ A browser tool result grants none of those authorities.
 
 ## 3. Target classes are closed
 
-V1 recognizes exactly three conceptual target classes.
+V1 recognizes exactly four conceptual target classes.
 
 ### `DISPOSABLE_AUTOMATION_BROWSER`
 
@@ -50,9 +50,19 @@ An exact ChatGPT conversation already identified by the Web-Sol extension/native
 
 Generic browser actuation must not be used to smuggle ChatGPT prompt submission, model/mode selection, successor creation, continuation bootstrap, account switching, recovery, semantic ACK or RuntimeBinding succession around the separately versioned Web-Sol semantic protocol.
 
+### `PERSISTENT_AUTHENTICATED_BROWSER_PROFILE`
+
+A dedicated automation Chrome profile retained on one stable home host for one approved web identity. It is not the user's default Chrome profile, and the system must not copy the user's default Chrome profile, cookie database, storage-state export, or Application Support tree to create it. The admitted controller may use a reviewed persistent Playwright/browser-resource profile or a profile-specific extension/native bridge, but raw CDP/DevTools, undocumented remote-debug attachment, and model-visible cookie/storage APIs remain forbidden.
+
+Existing Fleet/browser-resource owners bind `home_host_id`, `profile_generation`, `browser_process_generation`, `web_identity_ref`, and one active mutating controller. Each action additionally binds the exact tab/document target fingerprint and navigation epoch. Chrome's profile lock is last-resort evidence, not company authority. The production path refuses newest-tab, title, window-order, or screen-coordinate targeting.
+
+Login state is readiness, not a credential or execution grant. The closed readiness vocabulary is `READY | LOGIN_REQUIRED | MFA_REQUIRED | HUMAN_CHALLENGE_REQUIRED | PROFILE_LOCKED | PROFILE_IN_USE | HOST_OFFLINE | STALE_GENERATION`. Credential use/save belongs to the existing credential-owning helper; the model receives only a non-secret outcome. Initial enrollment, OS unlock, MFA/passkey approval, or an anti-bot challenge may require attended human action. BRA does not automate CAPTCHA solving or bypass a provider challenge.
+
+An existing human Chrome window is an attended enrollment or recovery surface, not production target identity. It may help a human establish or recover the dedicated profile, but its cookies/profile directory are never copied into the automation resource and its current window/tab geometry never becomes the durable selector.
+
 ### `CHAIRMAN_MANAGED_BROWSER_SEAT`
 
-A persistent GoLogin/Multilogin Chairman seat. This class remains held until the existing P0B/MAS-115 program independently proves a supported exact attachment/ownership/foreground path on the required disposable and seat canaries. BRA supplies no GUI-scripting, newest-window, title-matching or undocumented remote-debug fallback.
+A persistent GoLogin/Multilogin Chairman seat. This class remains held until the existing P0B/MAS-115 program independently proves a supported exact attachment/ownership/foreground path on the required disposable and seat canaries. It remains distinct from the dedicated `PERSISTENT_AUTHENTICATED_BROWSER_PROFILE`; BRA supplies no GUI-scripting, newest-window, title-matching or undocumented remote-debug fallback.
 
 Unknown target classes refuse before effect.
 
@@ -66,7 +76,7 @@ Observation on Chairman/ChatGPT surfaces must never expose cookies, local/sessio
 
 ### `mastermind.browser_actuation.v1`
 
-Bounded generic web interaction for eligible non-ChatGPT semantic targets. Candidate primitives include click, fill, navigate, scroll, wait, resize and tab focus.
+Bounded generic web interaction for eligible non-ChatGPT semantic targets. The first BRA-A1 slice permits only its separately admitted synthetic click/fill interaction on an owner-loaded page. Navigation, scroll, resize and tab-management capabilities are later possibilities, not A1 grants. The exact first-vertical policy is in §6; no model-visible generic navigation is admitted by F0.
 
 It never exposes arbitrary JavaScript, shell, filesystem access, raw CDP/DevTools, browser extension management, cookie/storage APIs, password managers, arbitrary upload paths or browser-profile mutation.
 
@@ -76,84 +86,80 @@ ChatGPT-specific modifying semantics remain separately versioned and separately 
 
 A generic browser primitive is never authority-equivalent to a semantic Web-Sol action.
 
-## 5. Effect law and durable owner-native command lineage
+## 5. Effect law
 
-The existing **Attempt-local Operator Harness effect owner** on Executive OS's
-`operator_operation` Event plane owns durable effect truth for every modifying
-browser operation. Executive OS continues to own Attempt authority and lifecycle.
-The MCP edge, Secure MCP Tunnel, local gateway, target adapter and browser receipt
-remain evidence carriers only. BRA adds no gateway ledger, retry table or second
-effect owner.
+This section resolves reviews [5125853519](https://github.com/mastermindx-market-intelligence/Mastermind/pull/473#pullrequestreview-5125853519) and [5126242660](https://github.com/mastermindx-market-intelligence/Mastermind/pull/473#pullrequestreview-5126242660) at the architecture layer. It does not implement their future runtime extension or authorize an invocation.
 
-Before any modifying dispatch, that existing owner mints one owner-native
-`OperationId`. The model-facing command calls this opaque value
-`operation_command_id`; it is the required `action_ref`, not a tunnel/MCP/browser
-correlation ID. The owner binds it to all of:
+### 5.1 BRA-A1 existing owner
 
-- current Attempt ID, lease/fence and authority generation;
-- stable logical operation fingerprint and normalized action-argument digest;
-- exact target class, opaque target identity, target generation and
-  `navigation_epoch`;
-- semantic action plus capability, schema, app and target-policy generations;
-- issue/expiry window or equivalent bounded deadline;
-- precondition/observation digest sufficient to prove target identity.
+The first `DISPOSABLE_AUTOMATION_BROWSER` is a subordinate resource of one already-admitted Operator Harness Attempt/process generation. Its modifying-effect owner is fixed below.
 
-The required pre-dispatch order is closed:
+| Property | Required value |
+|---|---|
+| Durable owner | Executive OS immutable Event plane |
+| Aggregate type | `operator_operation` |
+| Aggregate identity | owner-minted OperationId.command_id |
+| Browser operation kind | future additive BROWSER_ACTION-equivalent; NOT_IMPLEMENTED_BY_F0 |
+| Gateway and browser receipts | EVIDENCE_ONLY |
+| Gateway durable effect store | FORBIDDEN |
 
-1. the existing effect owner commits `INTENT` before any adapter call;
-2. immediately before mutation, that owner rereads current authority, exact target, and prior effect for the same
-   `operation_command_id`;
-3. any lease/fence, authority, target, generation, policy, deadline,
-   precondition or prior-effect mismatch refuses before effect;
-4. only that owner may dispatch the bound action exactly once;
-5. postcondition evidence is returned to that owner for a terminal or
-   reconciled owner-local history.
+The existing receipt family is `OPERATOR_OPERATION_INTENT`, `OPERATOR_OPERATION_APPLIED`, `OPERATOR_OPERATION_REFUSED`, `OPERATOR_OPERATION_EFFECT_UNKNOWN`, and `OPERATOR_OPERATION_RECONCILED`. BRA-A1 must extend the existing OHF/Executive operation contract by the smallest closed versioned browser-action kind; current start/resume/begin-turn operations must not be mislabeled as already accepting browser actuation. No sidecar table, app-local operation registry, retry journal or gateway ledger is created.
 
-Closed conceptual outcomes remain:
+This selection is Attempt-local, not a universal owner for every target. BRA-W1 remains at its existing observation/foreground contract. BRA-S1 must name its own existing semantic effect owner before any ChatGPT effect. BRA-M1 does not inherit this Attempt-local owner for a persistent managed seat whose ownership is still unproved.
 
-```text
-NO_EFFECT
-APPLIED_VERIFIED
-EFFECT_UNKNOWN
-REFUSED
-```
+### 5.2 Owner-minted action reference and issuance
 
-Closed owner-local histories are:
+The owner-minted browser action reference binds all of the following, using existing identity and permission owners rather than caller assertions:
+
+- `attempt_id`, `worker_id`, `session_epoch_id`, `process_generation_id`;
+- exact browser resource `target_fingerprint` and `target_generation`;
+- `action_version` and `normalized_arguments`;
+- `capability_generation`, `app_generation`, `tool_schema_generation`;
+- `network_policy_generation` and `network_policy_digest`;
+- `issued_at`, `deadline`, `precondition_digest`;
+- `principal` and `authority_policy_hash`;
+- `logical_operation_key` and `normalized_effect_digest`.
+
+The caller cannot mint or substitute this reference, choose another target, or upgrade its authority by copying the expected values. The following is documentation of required ordering, not a new wire/state-machine implementation:
 
 ```text
-INTENT -> APPLIED_VERIFIED
-INTENT -> NO_EFFECT
-INTENT -> REFUSED
-INTENT -> EFFECT_UNKNOWN -> RECONCILED
+OWNER_VALIDATES_ACTION_AND_PRIOR_EFFECT
+-> OPERATOR_OPERATION_INTENT_COMMITTED_IN_BEGIN_IMMEDIATE
+-> REREAD_ATTEMPT_AUTHORITY_WRITER_GENERATION_TARGET_POLICY_PRIOR_EFFECT
+-> EXISTING_OWNER_AT_MOST_ONCE_ISSUANCE
+-> ONE_NATIVE_ADAPTER_DISPATCH
+-> OWNER_VALIDATES_POSTCONDITION_AND_APPENDS_RECEIPT
 ```
 
-The histories reuse the existing owner-native `OPERATOR_OPERATION_INTENT`,
-`OPERATOR_OPERATION_APPLIED`, `OPERATOR_OPERATION_EFFECT_UNKNOWN` and
-`OPERATOR_OPERATION_RECONCILED` Events. `APPLIED_VERIFIED` is the browser outcome carried by existing `OPERATOR_OPERATION_APPLIED`
-only after the bound postcondition is proven; normalized `NO_EFFECT` and
-`REFUSED` remain payload outcomes on that same Event plane. No browser Event
-store or parallel operation ledger is created.
+The durable INTENT must commit in the existing Executive transaction before any modifying dispatch. Its immediate post-commit, pre-dispatch fence revalidates the current Attempt grant, held writer, process/target generation, exact target, policy and prior effect. The existing owner must discriminate a new issuance from reconciliation of an existing command. Re-entering an existing INTENT never grants another dispatch. Concurrent matching requests cannot both issue. A stateless gateway restart does not create a fresh issuance right. The later implementation must prove that actual owner-native behavior, not merely log this diagram.
 
-`RECONCILED` records a closed resolution such as `APPLIED_VERIFIED`,
-`NO_EFFECT` or `REFUSED`; it never appends a fresh `APPLIED_VERIFIED` after the
-unknown edge. A timeout, disconnect, browser crash, tunnel loss or local gateway
-loss after an effect may have started is `EFFECT_UNKNOWN` unless same-command
-read-only evidence closes that history.
+### 5.3 Replay and reconciliation
 
-`EFFECT_UNKNOWN`:
+| Condition | Owner disposition | Second dispatch |
+|---|---|---|
+| Same action with terminal receipt | RETURN_EXISTING_EVIDENCE | ZERO |
+| Changed action, target, policy or precondition | CONFLICT_BEFORE_EFFECT | ZERO |
+| INTENT with possible dispatch and no terminal proof | EFFECT_UNKNOWN | ZERO |
+| Unresolved EFFECT_UNKNOWN | READ_ONLY_SAME_COMMAND_RECONCILIATION | ZERO |
+| Positive canonical postcondition | APPEND_RECONCILED_TO_SAME_COMMAND | ZERO |
+| Missing evidence or retention loss | EFFECT_UNKNOWN | ZERO |
 
-- keeps the same logical operation, `operation_command_id`, Attempt, exact target
-  and carrier binding;
-- permits read-only reconciliation only against that same command and target;
-- blocks blind retry;
-- blocks target/session/account failover;
-- blocks every resend and receiver/host/gateway change until reconciled;
-- does not imply Executive failure or completion.
+`EFFECT_UNKNOWN` keeps the same logical operation/carrier binding, permits read-only reconciliation only, blocks blind retry, and blocks target/session/account failover. It also blocks host, tunnel and gateway failover, a second dispatch under another gateway, and a replacement operation that would repeat the uncertain action. A changed payload conflicts, rather than spending the old key on changed work. Restart cannot reset the Executive Event history. A `RECONCILED` receipt resolves, or explicitly cannot resolve, the original owner-native command; it does not authorize compensation, replay or another operation. Compensation needs its own later explicit grant.
 
-Matching replay is evidence-only: the owner returns the existing sanitized
-history/receipt and performs no second browser effect. Changed replay is a conflict and refuses before adapter I/O. A gateway receipt is evidence only; tunnel and browser receipts are likewise
-evidence only. None can grant retry, completion, RuntimeBinding, Executive
-authority or a new action target.
+An absent target, expired execution permission, lost receipt or timeout cannot manufacture proof that an effect never occurred. Historical effect lookup remains under its own current read permission; neither reading historical evidence nor finding a completed command renews execution authority.
+
+### 5.4 Response status and common effect truth
+
+Common effect truth remains exactly `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN`. Browser response statuses are distinct:
+
+| Response status | effect_state | Evidence requirement |
+|---|---|---|
+| REFUSED | NOT_APPLIED | authoritative proof of no dispatch/effect |
+| NO_EFFECT | NOT_APPLIED | authoritative proof of no effect |
+| APPLIED_VERIFIED | APPLIED | exact canonical postcondition |
+| AMBIGUOUS_AFTER_POSSIBLE_DISPATCH | EFFECT_UNKNOWN | missing authoritative terminal proof |
+
+REFUSED here describes refusal before any possible effect of this action; a late refusal of a repeat request cannot downgrade an earlier unknown effect. RECONCILED is a receipt/lineage status, not a fourth effect_state. Its evidence may resolve the same command to an existing common state or preserve uncertainty. Driver success without the required postcondition is not APPLIED. A transport timeout, browser crash, gateway loss or tunnel disconnect after dispatch might have started remains EFFECT_UNKNOWN until authoritative evidence resolves that same action. None of these receipts implies Executive completion, retry permission or RuntimeBinding succession.
 
 ## 6. Exact-target law
 
@@ -167,51 +173,44 @@ When exactness is required, target selection may not use:
 - model-selected account/profile/project;
 - remembered prior-session UI state.
 
-A missing, stale, duplicate, conflicting or unresolvable exact target refuses before effect.
+A missing, stale, duplicate, conflicting or unresolvable exact target refuses before effect. For `PERSISTENT_AUTHENTICATED_BROWSER_PROFILE`, exact target evidence includes the owner-bound stable home host, `profile_generation`, `browser_process_generation`, web-identity reference, exact tab/document fingerprint, policy generation, and navigation epoch. A currently visible existing human Chrome window can be used only as an attended enrollment or recovery surface; it is not production target identity and does not replace those facts.
 
-## 6A. Closed navigation and network policy
+### 6.1 First-vertical target policy
 
-Observation and actuation use separate closed target-policy generations.
-`BRA-O1` cannot navigate, open a new browsing context, issue a generic network
-inspection call or cause a modifying page action. `BRA-A1` may navigate only
-under `DISPOSABLE_SYNTHETIC_ORIGIN_V1`, an owner-attested policy containing an
-exact disposable synthetic origin allowlist, allowed scheme, resolved
-host/address/port, action set and policy digest. The caller cannot supply or
-expand that policy.
+BRA-A1 uses one synthetic page loaded by the browser-resource owner before minting any capability/action reference. This table is a documentation selection, not model-supplied policy or loadable runtime configuration.
 
-For `DISPOSABLE_SYNTHETIC_ORIGIN_V1`:
+| Boundary | Required disposition |
+|---|---|
+| A1 target | owner-created and owner-loaded synthetic page before reference minting |
+| A1 allowed origin | http://127.0.0.1:<leased-port> selected by the owner |
+| A1 model-visible browser_navigate | FORBIDDEN |
+| O1 navigation | FORBIDDEN |
+| W1 generic navigation and network inspection | FORBIDDEN |
+| Model-selected scheme, host, port, proxy, DNS, path root or allowlist | FORBIDDEN |
+| Enforcement boundary | resource/process/network boundary |
+| Playwright allowedOrigins alone | DEFENSE_IN_DEPTH_NOT_SECURITY_BOUNDARY |
 
-- every requested URL and every URL in a redirect chain must stay on the exact
-  attested origin and scheme; cross-origin or scheme-changing redirects refuse;
-- main frames, subframes and subresources, fetch/XHR, workers and WebSockets are
-  confined to that exact origin; popups, new windows and external opener targets
-  refuse;
-- DNS rebinding is refused by checking the resolved address at admission and
-  again before each connect/redirect; a hostname may not resolve outside its
-  attested address set;
-- any other private, loopback, or link-local destination refuses. The sole
-  exception is an exact owner-attested loopback synthetic origin whose literal
-  address and ephemeral port are already in the policy;
-- credential-bearing URLs and userinfo refuse. Query/fragment values are allowed
-  only when the exact owner-minted URL set classifies them as non-secret;
-- downloads and uploads refuse, including file chooser, drag/drop and arbitrary
-  upload-path flows;
-- browser/local/opaque schemes are closed: `file:` / `data:` / `chrome:`,
-  `chrome-extension:`, `javascript:`, `blob:` and unreviewed `about:` targets
-  refuse;
-- console/network evidence remains bounded, sanitized and unavailable to
-  Chairman/ChatGPT target classes.
+The literal owner-derived origin is exact, including the leased port. It is not a pattern allowing arbitrary loopback. The first observation sees only an already-created, exact target; neither O1 nor a generic W1 tool can load a different page. A1's mutation is confined to the already-loaded page under the admitted resource policy. Missing enforcement or unproven target/resource ownership refuses the later canary rather than broadening browser reach.
 
-A navigation invalidates the prior observation and target precondition before
-dispatch. Only a successful same-policy postcondition advances
-`navigation_epoch`; ambiguous navigation leaves the effect/epoch unresolved and
-requires same-command reconciliation. Every subsequent read or actuation
-requires fresh exact-target and postcondition evidence bound to the new epoch.
+### 6.2 Closed egress and local-surface refusals
 
-BRA-W1 receives no generic navigation or network-inspection authority against
-ChatGPT. A broader origin, scheme, redirect, subresource, popup, download,
-upload, private-network or evidence policy requires a separately versioned
-source-law review and canary; implementation convenience cannot widen V1.
+All destinations and capabilities outside the exact admitted origin/action are refused. In particular:
+
+| Destination or capability family | Disposition |
+|---|---|
+| other loopback ports; IPv6; hostnames/DNS; private; link-local; public; DNS rebinding | REFUSED |
+| cross-origin redirects; frames; popups; new windows; subresources | REFUSED |
+| service workers; WebSockets | REFUSED |
+| file:; data:; blob:; javascript:; about:; chrome:; chrome-extension:; devtools: | REFUSED |
+| downloads; uploads; file chooser; clipboard transfer | REFUSED |
+| auth challenges; credential-bearing URLs; proxy/network setting changes | REFUSED |
+| model-selected raw URL; arbitrary fetch; unrestricted console/network payloads; secret headers/bodies | REFUSED |
+
+Equivalent browser-internal/local schemes are also refused. The allowlist is enforced at the resource/process/network boundary; adapter interception and Playwright origin settings are defense in depth only. No public browser tool can weaken the resource policy, request an exception, choose a proxy or install a new allowlist. Returning a safe-looking screenshot cannot prove egress confinement.
+
+### 6.3 Later navigation is a different admitted policy
+
+Broader company/public origins or any later model-visible navigation require a separately reviewed policy generation and real canary. Any later permitted navigation increments the canonical navigation/target epoch and invalidates prior element handles, preconditions and capability references. The existing target owner must supply fresh exact-target and policy evidence before another action. A1 does not gain navigation merely because a later contract may define it. BRA-W1 never receives generic navigation/network inspection against ChatGPT.
 
 ## 7. Local gateway boundary
 
@@ -300,3 +299,5 @@ The program remains below `PROVEN_LIVE` until a real supported path proves all o
 10. one approved real Sol workflow succeeds through the production path.
 
 Green source CI, tunnel connection, MCP discovery, Chrome focus, or a disposable-browser canary alone is not final production acceptance.
+
+These source-law tests prove documentation consistency, not runtime enforcement. A passing F0 test suite or this owner selection does not commit an Executive Event, connect a tunnel, start a browser or authorize any child.
