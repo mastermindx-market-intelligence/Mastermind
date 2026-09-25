@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -154,6 +155,8 @@ def test_relay_marks_post_dispatch_child_failure_effect_unknown(tmp_path):
         resource_id="a" * 32,
         socket_path=socket_path,
         session=session,
+        owner_pid=os.getpid(),
+        parent_pid=os.getppid(),
     )
     thread = threading.Thread(target=relay.serve_forever, daemon=True)
     thread.start()
@@ -177,6 +180,110 @@ def test_relay_marks_post_dispatch_child_failure_effect_unknown(tmp_path):
     assert result["error"] == "EFFECT_UNKNOWN"
 
 
+class _CountingSession(McpStdioSession):
+    def __init__(self):
+        super().__init__(
+            argv=("/usr/bin/true",),
+            env={},
+            allowed_tools=frozenset({"browser_click"}),
+            expected_tool_schema_digest="d" * 64,
+        )
+        self.calls = 0
+
+    def start(self):
+        self._receipt = McpSessionReceipt(
+            child_pid=os.getpid(),
+            tool_schema_digest="d" * 64,
+            allowed_tools=("browser_click",),
+        )
+        return self._receipt
+
+    def call(self, tool, arguments):
+        assert tool == "browser_click"
+        assert arguments == {"target": "button"}
+        self.calls += 1
+        return {
+            "content": [{"type": "text", "text": "AUTHORIZED"}],
+            "isError": False,
+        }
+
+    def close(self):
+        self._receipt = None
+
+
+@pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX")
+    or (sys.platform != "darwin" and not sys.platform.startswith("linux")),
+    reason="Unix peer-PID credentials required",
+)
+def test_relay_refuses_same_uid_sibling_before_browser_dispatch(tmp_path):
+    socket_path = tmp_path / "relay-peer-pid.sock"
+    session = _CountingSession()
+    relay = BrowserRelayServer(
+        resource_id="a" * 32,
+        socket_path=socket_path,
+        session=session,
+        owner_pid=os.getpid(),
+        parent_pid=os.getppid(),
+    )
+    thread = threading.Thread(target=relay.serve_forever, daemon=True)
+    thread.start()
+    relay.wait_ready(timeout=3)
+
+    bypass_request = {
+        "schema": "mastermind.workbench_browser_relay_request.v1",
+        "kind": "tool",
+        "request_id": "b" * 32,
+        "resource_id": "a" * 32,
+        "tool": "browser_click",
+        "arguments": {"target": "button"},
+    }
+    child_program = r"""
+import json,socket,sys
+path=sys.argv[1]
+request=json.loads(sys.argv[2])
+client=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+client.settimeout(2)
+client.connect(path)
+client.sendall(json.dumps(request,separators=(",",":")).encode()+b"\n")
+data=b""
+while b"\n" not in data:
+    part=client.recv(65536)
+    if not part:
+        break
+    data += part
+client.close()
+print(data.split(b"\n",1)[0].decode())
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", child_program, str(socket_path), json.dumps(bypass_request)],
+        capture_output=True,
+        text=True,
+        timeout=3,
+        check=True,
+    )
+    refused = json.loads(completed.stdout)
+    assert refused["ok"] is False
+    assert refused["error"] == "REQUEST_REFUSED"
+    assert session.calls == 0
+
+    authorized = relay_request(
+        socket_path,
+        {
+            **bypass_request,
+            "request_id": "c" * 32,
+        },
+        timeout=2,
+    )
+    assert authorized["ok"] is True
+    assert authorized["result"]["isError"] is False
+    assert session.calls == 1
+
+    relay.stop()
+    thread.join(timeout=3)
+    assert not thread.is_alive()
+
+
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets required")
 def test_relay_routes_by_resource_identity_without_session_registry(tmp_path):
     socket_path = tmp_path / "relay.sock"
@@ -190,6 +297,8 @@ def test_relay_routes_by_resource_identity_without_session_registry(tmp_path):
         resource_id="a" * 32,
         socket_path=socket_path,
         session=session,
+        owner_pid=os.getpid(),
+        parent_pid=os.getppid(),
     )
     thread = threading.Thread(target=relay.serve_forever, daemon=True)
     thread.start()
@@ -257,6 +366,8 @@ def test_relay_refuses_preexisting_socket_path(tmp_path):
         resource_id="a" * 32,
         socket_path=socket_path,
         session=session,
+        owner_pid=os.getpid(),
+        parent_pid=os.getppid(),
     )
     with pytest.raises(BrowserRelayError, match="exists"):
         relay.serve_forever()
@@ -277,6 +388,8 @@ def test_relay_self_retires_at_authoritative_lease_expiry(tmp_path):
         resource_id="a" * 32,
         socket_path=socket_path,
         session=session,
+        owner_pid=os.getpid(),
+        parent_pid=os.getppid(),
         expires_at_ms=2000,
         clock_ms=lambda: now["value"],
     )
@@ -309,6 +422,7 @@ def test_relay_self_retires_when_workbench_parent_disappears(
         resource_id="a" * 32,
         socket_path=socket_path,
         session=session,
+        owner_pid=os.getpid(),
         parent_pid=4242,
     )
     thread = threading.Thread(target=relay.serve_forever, daemon=True)

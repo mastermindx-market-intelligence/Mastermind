@@ -18,7 +18,9 @@ import select
 import signal
 import socket
 import stat
+import struct
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -73,6 +75,49 @@ def _strict_json(raw: bytes) -> Any:
         raise
     except Exception as error:
         raise BrowserRelayError("invalid JSON") from error
+
+
+def _unix_peer_pid(connection: socket.socket) -> int:
+    """Return the exact connecting Unix peer PID or fail closed.
+
+    The Browser relay is an internal capability boundary between one Workbench
+    owner process and one Playwright child. Socket mode 0600 limits the UID,
+    while this PID check prevents sibling same-UID sessions/workers from
+    bypassing BrowserActionPort and its durable action/effect owner.
+    """
+
+    try:
+        if sys.platform == "darwin":
+            # Darwin <sys/un.h>: SOL_LOCAL=0, LOCAL_PEERPID=2. Python does not
+            # currently expose these constants, so keep the reviewed numeric
+            # ABI local to this platform branch.
+            raw = connection.getsockopt(0, 2, struct.calcsize("i"))
+            if len(raw) != struct.calcsize("i"):
+                raise BrowserRelayError("relay peer identity is unavailable")
+            peer_pid = struct.unpack("i", raw)[0]
+        elif sys.platform.startswith("linux"):
+            peercred = getattr(socket, "SO_PEERCRED", None)
+            if type(peercred) is not int:
+                raise BrowserRelayError("relay peer identity is unavailable")
+            raw = connection.getsockopt(
+                socket.SOL_SOCKET,
+                peercred,
+                struct.calcsize("3i"),
+            )
+            if len(raw) != struct.calcsize("3i"):
+                raise BrowserRelayError("relay peer identity is unavailable")
+            peer_pid, peer_uid, peer_gid = struct.unpack("3i", raw)
+            if peer_uid != os.geteuid() or peer_gid != os.getegid():
+                raise BrowserRelayError("relay peer principal changed")
+        else:
+            raise BrowserRelayError("relay peer identity is unsupported")
+    except BrowserRelayError:
+        raise
+    except (OSError, TypeError, ValueError, struct.error) as error:
+        raise BrowserRelayError("relay peer identity is unavailable") from error
+    if type(peer_pid) is not int or peer_pid <= 1:
+        raise BrowserRelayError("relay peer identity is invalid")
+    return peer_pid
 
 
 class McpStdioSession:
@@ -348,8 +393,9 @@ class BrowserRelayServer:
         resource_id: str,
         socket_path: Path,
         session: McpStdioSession,
+        owner_pid: int,
+        parent_pid: int,
         expires_at_ms: int | None = None,
-        parent_pid: int | None = None,
         clock_ms: Callable[[], int] | None = None,
     ) -> None:
         if type(resource_id) is not str or _HEX32.fullmatch(resource_id) is None:
@@ -368,9 +414,9 @@ class BrowserRelayServer:
             type(expires_at_ms) is not int or not 0 <= expires_at_ms < 2**63
         ):
             raise BrowserRelayError("relay lease expiry is invalid")
-        if parent_pid is not None and (
-            type(parent_pid) is not int or parent_pid <= 1
-        ):
+        if type(owner_pid) is not int or owner_pid <= 1:
+            raise BrowserRelayError("relay owner identity is invalid")
+        if type(parent_pid) is not int or parent_pid <= 1:
             raise BrowserRelayError("relay parent identity is invalid")
         if clock_ms is not None and not callable(clock_ms):
             raise BrowserRelayError("relay clock is invalid")
@@ -378,6 +424,7 @@ class BrowserRelayServer:
         self._socket_path = socket_path
         self._session = session
         self._expires_at_ms = expires_at_ms
+        self._owner_pid = owner_pid
         self._parent_pid = parent_pid
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
         self._stop = threading.Event()
@@ -416,7 +463,7 @@ class BrowserRelayServer:
             now_ms = self._clock_ms()
             if type(now_ms) is not int or now_ms < 0 or now_ms >= self._expires_at_ms:
                 return True
-        if self._parent_pid is not None and os.getppid() != self._parent_pid:
+        if os.getppid() != self._parent_pid:
             return True
         return False
 
@@ -551,6 +598,8 @@ class BrowserRelayServer:
                     connection.settimeout(5)
                     request_id = "0" * 32
                     try:
+                        if _unix_peer_pid(connection) != self._owner_pid:
+                            raise BrowserRelayError("relay peer process changed")
                         value = self._read_request(connection)
                         if type(value) is dict and type(value.get("request_id")) is str:
                             request_id = value["request_id"]
@@ -739,12 +788,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         allowed_tools=ALLOWED_BROWSER_TOOLS,
         expected_tool_schema_digest=WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
     )
+    owner_pid = os.getppid()
     relay = BrowserRelayServer(
         resource_id=args.resource_id,
         socket_path=socket_path,
         session=session,
+        owner_pid=owner_pid,
+        parent_pid=owner_pid,
         expires_at_ms=args.expires_at_ms,
-        parent_pid=os.getppid(),
     )
     previous: dict[int, Any] = {}
 
