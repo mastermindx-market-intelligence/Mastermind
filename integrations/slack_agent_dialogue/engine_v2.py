@@ -1129,20 +1129,11 @@ class DialogueEngineV2:
                 outcome=ConsultationPacketReadOutcome.UNCERTAIN,
                 reason=exc.code,
             )
-        refusals = [
-            observation.refused_reason
-            for observation in packets
-            if observation.refused_reason is not None
-        ]
-        if refusals:
-            # Origin authority: a packet-classified frame from any writer other
-            # than the Relay bot is never admitted, so what it carries is
-            # unknowable and neither this packet nor its absence is provable
-            # while such a frame is in bounded history.
-            return ConsultationPacketRead(
-                outcome=ConsultationPacketReadOutcome.UNCERTAIN,
-                reason=refusals[0],
-            )
+        # Physical-origin refusal is definitive non-evidence, not ambiguity:
+        # a foreign writer cannot create an admitted packet. Keep refusal
+        # accounting on ThreadRead, but resolve PACKET/ABSENT only over
+        # Relay-authored admitted observations so unauthorized noise cannot
+        # poison a complete trusted history.
         # An admitted observation always carries a canonically parsed packet:
         # a discriminator-bearing authorized frame that fails
         # ``parse_consultation_packet`` raised ``THREAD_MESSAGE_INVALID`` in

@@ -2918,33 +2918,61 @@ def test_status_contract_is_unchanged_by_packet_support() -> None:
 UNTRUSTED = "U0UNTRUSTED"
 
 
-def test_unauthorized_origin_packet_is_never_read_as_a_packet() -> None:
+def test_unauthorized_origin_packet_is_definitive_non_evidence() -> None:
     from integrations.slack_agent_dialogue.engine_v2 import (
         ConsultationPacketReadOutcome,
     )
 
     packet = packet_value(message_key="asd-packet-origin-0001")
-    # A Sol identity is a lifecycle sender, never a packet writer: only the
-    # Relay bot holds packet physical-origin authority.
     for author in (UNTRUSTED, SOL1):
         client = setup_client()
         add_packet_reply(client, packet, author=author, ts="1787471000.000080")
+        engine = make_engine(client)
 
         read = run(
-            make_engine(client).read_consultation_packet(
+            engine.read_consultation_packet(
                 thread_ts=THREAD_TS,
                 context=context(),
-                message_key="asd-packet-origin-0001",
+                message_key=packet["message_key"],
             )
         )
+        history = run(engine.read_thread(thread_ts=THREAD_TS, context=context()))
 
-        assert read.outcome is ConsultationPacketReadOutcome.UNCERTAIN
-        assert read.reason == "CONSULTATION_PACKET_UNAUTHORIZED_ORIGIN"
+        assert read.outcome is ConsultationPacketReadOutcome.ABSENT
+        assert read.reason is None
         assert read.packet is None
+        assert history.packet_count == 0
+        assert history.packet_ineligible_count == 1
         assert packet["question"] not in repr(read)
         assert packet["fingerprint"] not in repr(read)
         assert author not in repr(read)
 
+
+def test_unauthorized_origin_noise_cannot_poison_authorized_packet_read() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        ConsultationPacketReadOutcome,
+    )
+
+    packet = packet_value(message_key="asd-packet-origin-poison-0009")
+    client = setup_client()
+    add_packet_reply(client, packet, author=UNTRUSTED, ts="1787471000.000089")
+    add_packet_reply(client, packet, author=BOT, ts="1787471000.000090")
+    engine = make_engine(client)
+
+    read = run(
+        engine.read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key=packet["message_key"],
+        )
+    )
+    history = run(engine.read_thread(thread_ts=THREAD_TS, context=context()))
+
+    assert read.outcome is ConsultationPacketReadOutcome.PACKET
+    assert read.packet == packet
+    assert read.reason is None
+    assert history.packet_count == 1
+    assert history.packet_ineligible_count == 1
 
 def test_unauthorized_origin_packet_cannot_suppress_a_legitimate_send() -> None:
     from integrations.slack_agent_dialogue.engine_v2 import (
