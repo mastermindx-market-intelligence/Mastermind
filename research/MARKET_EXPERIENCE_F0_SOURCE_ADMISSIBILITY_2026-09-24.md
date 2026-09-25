@@ -249,3 +249,41 @@ existing owner must provide and the acceptance conditions for the first trainabl
 
 Receipt:
 `research/MARKET_EXPERIENCE_F0_LIVE_SUBSTRATE_RECEIPT_2026-09-24.json`.
+
+
+## SEC foundation correction: reuse before build
+
+A fresh current-main audit found that the broad SEC event anchor and part of the historical revision
+path already exist. This narrows the prior "historical SEC reconstruction" implementation proposal.
+
+At Macro `836379db84f9e34354f54e2fb26cd2065d186034`:
+
+- `data/edgar/earnings_8k_dates.parquet` contains 98,975 exact Item-2.02 rows across
+  1,314 CIKs, 2004-08-24 through 2026-07-02;
+- 1,143 CIKs span at least eight years;
+- all 98,975 rows have parseable SEC acceptance times;
+- the per-CIK manifest has 1,315 `ok` entries and zero recorded missing older-file shards.
+
+But the committed store is the **legacy** five-column shape. It lacks `accession`, `form` and
+`report_date`, while the current collector already specifies those fields and the canonical
+`(cik, accession)` dedup. Exact revision-aware reconstruction therefore requires a migration or
+source reconciliation through the incumbent collector owner, not a new event-source system.
+
+The current Company Intelligence refresh path also already carries historical revisions for its
+registered issuer set with separate SEC availability and current observation clocks. Source comments
+preserve the August 2026 production incident in which an incorrectly unbounded discovery run
+published roughly 170 historical homebuilder events before timeout; subsequent code bounded
+first-ever discovery and canonicalized the forward boundary. This is evidence to **reuse the
+revision chain and avoid another unbounded backfill**, not permission to reproduce the incident.
+
+Revised next build:
+
+1. migrate/reconcile the broad SEC anchor to canonical accession/form/report-date identity;
+2. use one permanently development-visible issuer to prove keyed anchor → exact SEC release bytes →
+   existing Company Intelligence workspace in a non-publishing sandbox;
+3. label the consumer-side result as `public_reconstruction` and retain current acquisition time;
+4. only then broaden coverage under the existing owner and rights rules.
+
+Evidence:
+`research/MARKET_EXPERIENCE_F0_SEC_FOUNDATION_CENSUS_2026-09-24.md` and
+`research/MARKET_EXPERIENCE_F0_SEC_ANCHOR_RECEIPT_2026-09-24.json`.
