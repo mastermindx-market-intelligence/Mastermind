@@ -4,7 +4,7 @@
 
 **Goal:** Qualify exact-session, fresh, stable selector evidence without actuating a browser or granting action authority.
 
-**Architecture:** One production-inert pure JavaScript leaf inside the incumbent Web-Sol extension directory. The existing #836 owner may integrate it after current source/protocol/release gates; this task leaves all existing runtime and application files untouched.
+**Architecture:** Three production-inert pure JavaScript leaves inside the incumbent Web-Sol extension directory: picker observation, same-family effort transition planning, and post-transition readback qualification. The existing #836 owner may integrate them after current source/protocol/release gates; this plan leaves all existing runtime and application files untouched.
 
 **Tech Stack:** JavaScript, Web Crypto SHA-256, Node built-in test runner; no added dependencies.
 
@@ -12,8 +12,8 @@
 
 ## Global constraints
 
-- Source basis: protected 63555e1f9405c79405fc30682aa502a68d8abf80; one installed mmx-workspace allocation for mastermind-os-frontier-company-convergence-20260925-sol-001, lane web.
-- Source ceiling: this plan, its spec, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_picker_core.js`, `tests/web_sol_reasoning_mode_core.test.cjs`, and `tests/web_sol_reasoning_mode_picker_core.test.cjs`.
+- Branch base: 63555e1f9405c79405fc30682aa502a68d8abf80. Current protected procedure/source pin: 87777e2e4705abe2cc4175738e0f3bd68134b66a; its one-commit delta is Paper-design/Skillpack-index-only and path-disjoint from this candidate. One installed mmx-workspace allocation for mastermind-os-frontier-company-convergence-20260925-sol-001, lane web.
+- Source ceiling: this plan, its spec, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_picker_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_transition_core.js`, `tests/web_sol_reasoning_mode_core.test.cjs`, `tests/web_sol_reasoning_mode_picker_core.test.cjs`, and `tests/web_sol_reasoning_mode_transition_core.test.cjs`.
 - No manifest/background/content/native-host/router/app modification, no production browser call, no mode selection, no provider turn, no lifecycle or custody transfer.
 - Reuse RuntimeBinding id/generation/fingerprint and document_epoch; no identity registry or stored mode state.
 - Lifetime ceiling is 30,000 ms for candidate observation evidence only, never a provider/session time limit.
@@ -62,13 +62,33 @@ Produces: one frozen sanitized `mastermind.web_sol_mode_picker_observation/v1` w
 - [x] Run both mode-core suites plus the incumbent three census suites; run syntax and diff checks.
 - [x] Commit/push only the six scoped paths on the existing operation branch and refresh Draft #989/readback. No Ready/merge/install/live mode effect.
 
+## Task 3 — same-family effort transition planner
+
+Create `reasoning_mode_transition_core.js` and its Node tests. This remains a pure, production-inert semantic planner. It does not open a picker, mutate DOM, click/type/focus, send a turn, call Chrome/native APIs, persist state, or grant permission. It consumes only the sanitized output from Task 2 plus one closed requested family/effort.
+
+For the first canary, support **same-family effort transitions only**:
+- `SOL -> SOL` or `LATEST -> LATEST`;
+- target effort `EXTRA_HIGH` or `PRO`;
+- requested family change is a typed `MODE_FAMILY_CHANGE_UNSUPPORTED` refusal rather than a hidden family-selection primitive.
+
+The slider target is derived from the observed bounded ARIA range and the closed effort index mapping. A transition is `MODE_TRANSITION_READY` only when the picker observation is `MODE_PICKER_OBSERVED`, exactly one family/effort control is present, controls are enabled, the requested effort exists within the current slider range, and current selected family matches the request. If the requested effort is already selected, return `MODE_TRANSITION_NO_CHANGE` with no mutation plan. All other states fail closed.
+
+Every result is immutable and contains only semantic fields: current/requested family+effort, original selector-state digest, transition kind, target slider value where applicable, and fixed booleans `action_authorized=false`, `browser_mutation_performed=false`, `readback_required=true`, `capability_reprobe_required=true`, `served_model=null`. A READY plan is not a send/mutation permit: the eventual #836 owner must revalidate current exact RuntimeBinding/document/effect state immediately before any selector action and must perform post-action readback through Task 1.
+
+- [x] Write failing tests for the absent transition planner and the primary Pro→Extra High same-family case.
+- [x] Run the focused test and record RED from missing implementation.
+- [x] Implement strict closed-shape input validation and minimal semantic planning.
+- [x] Add adverse tests for family changes, disabled/unavailable/ambiguous picker state, unsupported target effort/range, already-selected no-op, tampered/extra observation fields, immutable/no-authority output, and source-level absence of browser mutation/transport primitives.
+- [x] Run all three mode suites plus incumbent census suites; run syntax, diff and exact eight-file scope checks.
+- [ ] Commit/push only this bounded delta on the existing #989 branch; keep Draft and refresh exact-head review/CI metadata without claiming integration or production proof.
+
 ## Held integration task — not granted by this leaf
 
 The next source owner is #836 for actual DOM normalization, native bridge wiring and mode actuation. Consume this leaf only after #836 current custody and its merge conflict are reconciled, and the closed mode action is reviewed under the browser/context-rotation laws. Authenticate the observation producer, fence exact RuntimeBinding/document generations and mode effect identity, and prove no-send selector canaries before a turn is allowed. The #890 capability producer/consumer and #936/#953/#958 read-only limitations remain explicit dependencies. Do not edit these carriers from this workspace.
 
 ## Completion evidence for this task
 
-Exact source commit, six-path PR scope, observed RED/GREEN test receipts, incumbent regression receipts, no manifest change and published draft readback. Classification can be BUILT_NOT_PROVEN only; this task does not satisfy the parent production vertical. Continue through the parent checkpoint #600/5829163043 without replaying prior archaeology.
+Exact source commit, eight-path PR scope, observed RED/GREEN test receipts, incumbent regression receipts, no manifest change and published draft readback. Classification can be BUILT_NOT_PROVEN only; this task does not satisfy the parent production vertical. Continue through the parent checkpoint #600/5829163043 without replaying prior archaeology.
 
 ## Observed execution evidence
 
@@ -77,3 +97,5 @@ Initial RED: Node process 46432 asserted the absent API (0 pass / 1 fail). Initi
 Task 2 RED: process 59316, absent observer API, 0 pass / 1 fail. First implementation GREEN: process 63862, 19 pass / 0 fail. Combined exact candidate regression: process 65212, 159 pass / 0 fail across both mode leaves plus the three incumbent census suites; corrected exact-scope verification process 70098 again passed 159/159, both mode JS files passed `node --check`, `git diff --check` exited 0, and the six-file PR scope matched exactly. Task-2 source/docs commit `1d6058dc48783d67753f5b538b4832280dc44273` and push action `ceb76a776687867358c81c6ec93668c960826fd89a636ca518af724b88ef9f37` returned APPLIED with equal local/remote head and clean workspace. The live `web_sol_census.py` invocation for current managed bindings was action-scoped refused before dispatch; it was not retried or moved to another carrier. #966 source is now protected/DO_NOT_REDO; #386 retains the OAuth/live-reader runtime gate and its existing dirty carrier.
 
 Direct implementation reason: CRITICAL_PATH_SHORTCUT for frozen, provider-free source leaves that unlock incumbent integration without displacing #836; no Fable or unqualified worker was spawned. This is source evidence, not independent review, CI, live browser proof or production acceptance. Publication and readback receipts are maintained on the existing parent checkpoint #600/5829163043. No source writer is released by this document.
+
+Task 3 RED: process 24091, absent transition API, 0 pass / 1 fail. Focused GREEN: process 25616, 24 pass / 0 fail. Combined bounded gate: process 26615, 183 pass / 0 fail across three mode suites plus the three incumbent census suites; all three mode source files passed `node --check`, `git diff --check` passed, and exact eight-file candidate scope matched. Current protected re-pin is `87777e2e4705abe2cc4175738e0f3bd68134b66a`; its only movement from the prior pin is Paper-design/Skillpack-index source and is path-disjoint from this candidate. Prior #989 CI success at `b6ef7381...` is historical once Task 3 publishes; full repository acceptance for the new head remains owed to hosted CI.
