@@ -2014,11 +2014,30 @@ class InstalledBootPacketCollector:
             if packet_source_sha != pre_source_sha or packet_macro_sha != pre_macro_sha:
                 raise GatewayError("backend_unavailable", "installed boot-packet SHA binding differs")
 
-            post_source_sha, post_macro_sha, post_source_seal, post_macro_seal = (
-                self._generation_pair(
-                    live_env, deadline=deadline, macro_plan=materialization_plan
+            try:
+                post_source_sha, post_macro_sha, post_source_seal, post_macro_seal = (
+                    self._generation_pair(
+                        live_env, deadline=deadline, macro_plan=materialization_plan
+                    )
                 )
-            )
+            except GatewayError as exc:
+                source_drift_messages = {
+                    "installed Mastermind source SHA changed",
+                    "installed Mastermind source HEAD changed",
+                    "installed Macro source SHA changed",
+                    "installed Macro source HEAD changed",
+                    "installed Macro source worktree path set differs",
+                    "installed Macro source worktree bytes differ",
+                }
+                if (
+                    exc.code == "backend_unavailable"
+                    and exc.message in source_drift_messages
+                ):
+                    raise GatewayError(
+                        "backend_unavailable",
+                        "installed source changed during boot-packet read",
+                    ) from exc
+                raise
             if (
                 post_source_sha != pre_source_sha
                 or post_macro_sha != pre_macro_sha
