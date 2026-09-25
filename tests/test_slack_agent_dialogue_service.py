@@ -27,6 +27,11 @@ from integrations.slack_agent_dialogue.engine import (
     SlackMessage,
 )
 from integrations.slack_agent_dialogue.engine_v2 import PreparedMessageSend
+from common.agent_dialogue_consultation_contract import (
+    RECEIPT_KEYS,
+    build_consultation,
+    render_consultation_packet,
+)
 from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
 from integrations.slack_agent_dialogue.service import (
     AF_UNIX_PATH_MAX_BYTES,
@@ -37,6 +42,7 @@ from integrations.slack_agent_dialogue.service import (
     ServiceConfig,
     call_service,
 )
+from integrations.slack_agent_dialogue.service import DEFAULT_MAX_RESPONSE_BYTES
 
 REPO = "mastermindx-market-intelligence/Mastermind"
 BOT = "U0BST4WG996"
@@ -2270,5 +2276,328 @@ def test_v2_oversize_request_refuses_before_dispatch(socket_root: Path) -> None:
             await writer.wait_closed()
         finally:
             await srv.close()
+
+    run(scenario())
+
+
+# --- IAC-P1-B2: one closed operation set carries the packet over exact-send --
+
+
+PACKET_OPERATION = "send_consultation_packet"
+UNTRUSTED_PACKET_MARKER = "UNTRUSTED_PACKET_MARKER"
+
+
+def packet_worker_ref(job: str = "JOB-200", attempt: str = "ATT-100") -> dict[str, str]:
+    return {
+        "kind": "worker_attempt",
+        "job_id": job,
+        "attempt_id": attempt,
+        "worker_id": f"codex-{attempt.lower()}",
+    }
+
+
+def raw_packet(**overrides) -> dict[str, object]:
+    consultation_id = "consult-" + "a1" * 16
+    message_key = "asd-packet-service-0001"
+    value: dict[str, object] = {
+        "schema": "mastermind.agent_dialogue_consultation.v1",
+        "message_key": message_key,
+        "consultation_id": consultation_id,
+        "purpose": "QUESTION",
+        "requester_actor_ref": packet_worker_ref(),
+        "recipient_actor_ref": packet_worker_ref(job="JOB-200", attempt="ATT-200"),
+        "recipient_peer_ref": "peer-" + "a1" * 16,
+        "recipient_binding": {
+            "binding_id": "bind-" + "a1" * 20,
+            "binding_generation": 1,
+            "reasoning_surface": "codex",
+        },
+        "correlation": {
+            "parent_fingerprint": "a" * 64,
+            "request_message_key": message_key,
+            "consultation_id": consultation_id,
+            "requester_actor_digest": "b" * 64,
+            "recipient_actor_digest": "c" * 64,
+        },
+        "question": "Which bounded packet frame should be admitted?",
+        "answer": None,
+        "evidence_refs": [],
+        "artifact_revisions": [
+            {
+                "repository": REPO,
+                "path": "integrations/slack_agent_dialogue/service.py",
+                "commit": "1" * 40,
+                "content_sha256": "2" * 64,
+            }
+        ],
+        "valid_until": "2026-09-14T00:00:00Z",
+        "deadline_ms": 60000,
+        "response_budget": {
+            "max_answers": 1,
+            "max_evidence_reads": 2,
+            "max_forward_hops": 0,
+            "max_payload_bytes": 32768,
+        },
+        "supersedes_message_key": None,
+        "receipts": {key: None for key in RECEIPT_KEYS},
+        "fingerprint": "",
+    }
+    value.update(overrides)
+    return value
+
+
+def packet_value(**overrides) -> dict[str, object]:
+    return build_consultation(raw_packet(**overrides))
+
+
+def packet_rendered_bytes(frame: dict[str, object]) -> int:
+    return len(render_consultation_packet(frame).encode("utf-8"))
+
+
+def packet_scaled_to_ceiling(pad: int) -> dict[str, object]:
+    """Return a valid packet whose rendered size is moved by ``pad`` bytes."""
+
+    probe = packet_value(question="q")
+    deficit = pad - packet_rendered_bytes(probe)
+    scaled = packet_value(question="q" * (1 + deficit))
+    assert packet_rendered_bytes(scaled) == pad
+    return scaled
+
+
+def exact_packet_request_v2(**overrides) -> dict[str, object]:
+    frame = packet_value(**overrides)
+    return request_envelope_v2(
+        PACKET_OPERATION,
+        {
+            "context": context_v2_dict(),
+            "thread_ts": THREAD_TS,
+            "packet": frame,
+            "send_protocol": EXACT_SEND_PROTOCOL,
+        },
+    )
+
+
+async def fake_exact_send_peer(
+    path: Path,
+    request: dict[str, object],
+    *,
+    fingerprint: str,
+    after_commit,
+) -> asyncio.AbstractServer:
+    """Play the service side of READY/COMMIT, then hand control to the probe."""
+
+    async def handler(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        assert json.loads(await reader.readline()) == request
+        writer.write(
+            json.dumps(
+                {"ok": True, "ready": {"fingerprint": fingerprint}},
+                separators=(",", ":"),
+            ).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        assert json.loads(await reader.readline()) == {
+            "commit": "COMMIT",
+            "fingerprint": fingerprint,
+        }
+        await after_commit(reader, writer)
+
+    return await asyncio.start_unix_server(handler, path)
+
+
+def test_packet_post_commit_timeout_is_send_effect_unknown(socket_root: Path) -> None:
+    async def scenario() -> None:
+        path = socket_root / "packet-post-commit-timeout.sock"
+        request = exact_packet_request_v2()
+        fingerprint = request["args"]["packet"]["fingerprint"]
+        commit_seen = asyncio.Event()
+        release = asyncio.Event()
+
+        async def hold_reply_silent(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            commit_seen.set()
+            await release.wait()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await fake_exact_send_peer(
+            path, request, fingerprint=fingerprint, after_commit=hold_reply_silent
+        )
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+            await asyncio.wait_for(commit_seen.wait(), timeout=1)
+        finally:
+            release.set()
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_packet_post_commit_incomplete_read_is_send_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "packet-post-commit-eof.sock"
+        request = exact_packet_request_v2()
+        fingerprint = request["args"]["packet"]["fingerprint"]
+
+        async def vanish(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            writer.close()
+            await writer.wait_closed()
+
+        server = await fake_exact_send_peer(
+            path, request, fingerprint=fingerprint, after_commit=vanish
+        )
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_packet_oversized_response_after_commit_is_send_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "packet-post-commit-oversized.sock"
+        request = exact_packet_request_v2()
+        fingerprint = request["args"]["packet"]["fingerprint"]
+        release = asyncio.Event()
+
+        async def flood(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            # No drain: the client stops reading at its stream limit, so a
+            # flow-control wait here would deadlock the peer.
+            writer.write(b"x" * (DEFAULT_MAX_RESPONSE_BYTES + 1024))
+            await release.wait()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await fake_exact_send_peer(
+            path, request, fingerprint=fingerprint, after_commit=flood
+        )
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+        finally:
+            release.set()
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_packet_unparseable_frame_after_commit_is_send_effect_unknown(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "packet-post-commit-unparseable.sock"
+        request = exact_packet_request_v2()
+        fingerprint = request["args"]["packet"]["fingerprint"]
+        release = asyncio.Event()
+
+        async def emit_garbage(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            writer.write(b"not-json\n")
+            await writer.drain()
+            await release.wait()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await fake_exact_send_peer(
+            path, request, fingerprint=fingerprint, after_commit=emit_garbage
+        )
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SEND_EFFECT_UNKNOWN"
+        finally:
+            release.set()
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_non_exact_operation_ambiguity_is_still_service_unavailable(
+    socket_root: Path,
+) -> None:
+    """Operations outside the closed exact-send set keep the weaker code."""
+
+    async def scenario() -> None:
+        path = socket_root / "non-exact-ambiguity.sock"
+        request = request_envelope_v2(
+            "read_thread",
+            {"context": context_v2_dict(), "thread_ts": THREAD_TS},
+        )
+        received = asyncio.Event()
+
+        async def close_without_response(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            await reader.readline()
+            received.set()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(close_without_response, path)
+        try:
+            with pytest.raises(DialogueServiceError) as exc:
+                await call_service(path, request, timeout_seconds=1)
+            assert exc.value.code == "SERVICE_UNAVAILABLE"
+            await asyncio.wait_for(received.wait(), timeout=1)
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_packet_exact_send_fingerprint_is_read_from_its_own_argument(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        path = socket_root / "packet-fingerprint-own-argument.sock"
+        request = exact_packet_request_v2()
+        fingerprint = request["args"]["packet"]["fingerprint"]
+
+        async def finish(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            writer.write(b'{"ok":true,"result":{"action":"POSTED"}}\n')
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await fake_exact_send_peer(
+            path, request, fingerprint=fingerprint, after_commit=finish
+        )
+        try:
+            response = await call_service(path, request, timeout_seconds=1)
+            assert response == {"ok": True, "result": {"action": "POSTED"}}
+        finally:
+            server.close()
+            await server.wait_closed()
+            path.unlink(missing_ok=True)
 
     run(scenario())

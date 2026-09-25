@@ -19,6 +19,7 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
 
 from integrations.slack_agent_dialogue.engine import (
@@ -41,6 +42,17 @@ from integrations.slack_agent_dialogue.turn_runtime_primitives import (
 CONTROL_VERSION = "mastermind.agent_dialogue_control.v1"
 CONTROL_VERSION_V2 = "mastermind.agent_dialogue_control.v2"
 EXACT_SEND_PROTOCOL = "mastermind.agent_dialogue_exact_send.v1"
+# The exact-send law (one READY/COMMIT flight, one failure law) is closed over
+# this operation set. Every member must also appear in
+# ``_EXACT_SEND_FINGERPRINT_ARG_BY_OPERATION``; an operation added to this set
+# without teaching that mapping is refused, never silently unverified.
+EXACT_SEND_OPERATIONS = frozenset({"send_message", "send_consultation_packet"})
+_EXACT_SEND_FINGERPRINT_ARG_BY_OPERATION = MappingProxyType(
+    {
+        "send_message": "message",
+        "send_consultation_packet": "packet",
+    }
+)
 RELAY_PARENT_ATTESTATION = "mastermind.agent_dialogue.relay_parent/v1"
 DEFAULT_MAX_REQUEST_BYTES = 32 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024
@@ -880,22 +892,36 @@ async def call_service(
     if not isinstance(request_snapshot, dict):
         raise DialogueServiceError("REQUEST_INVALID")
     args = request_snapshot.get("args")
+    operation = request_snapshot.get("operation")
+    exact_send_operation = (
+        operation
+        if isinstance(operation, str) and operation in EXACT_SEND_OPERATIONS
+        else None
+    )
     exact_send = (
         request_snapshot.get("version") == CONTROL_VERSION_V2
-        and request_snapshot.get("operation") == "send_message"
+        and exact_send_operation is not None
         and isinstance(args, Mapping)
         and args.get("send_protocol") == EXACT_SEND_PROTOCOL
     )
     exact_send_fingerprint = None
     if exact_send:
-        message = args.get("message")
+        # Each exact-send operation carries its fingerprint in its own body
+        # argument. An operation inside the closed set without a taught
+        # argument is a client bug: refuse it rather than verify against None.
+        body_argument = _EXACT_SEND_FINGERPRINT_ARG_BY_OPERATION.get(
+            exact_send_operation
+        )
+        if body_argument is None:
+            raise DialogueServiceError("REQUEST_INVALID")
+        body = args.get(body_argument)
         exact_send_fingerprint = (
-            message.get("fingerprint") if isinstance(message, Mapping) else None
+            body.get("fingerprint") if isinstance(body, Mapping) else None
         )
     send_effect_code = (
         "SEND_EFFECT_UNKNOWN"
         if request_snapshot.get("version") == CONTROL_VERSION_V2
-        and request_snapshot.get("operation") == "send_message"
+        and exact_send_operation is not None
         else "SERVICE_UNAVAILABLE"
     )
     try:
