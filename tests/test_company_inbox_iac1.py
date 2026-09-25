@@ -5894,3 +5894,94 @@ async def test_consume_during_answer_put_does_not_lose_the_answer(
     assert _answer_attention_requested_records(runtime) == ()
 
 
+@_sync_test
+async def test_publication_uniqueness_survives_concurrent_await_interleaving(
+    tmp_path: Path,
+) -> None:
+    """Two concurrent identical consults publish exactly one packet.
+
+    The second identical consult runs from inside the first consult's
+    ``put_question`` await window on one shared carrier. Exactly one
+    ``put_question``, one INTENT event and one ``WAKE_REQUESTED`` may
+    exist afterwards, whichever call appended them.
+    """
+    runtime = _runtime_at(tmp_path / "concurrent-consult")
+    _consultations(runtime, tmp_path / "concurrent-consult")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "concurrent-consult-repo"
+    )
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-p1a-item3")
+    )
+    args = _consult_args(
+        question="Concurrent identical consults?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    concurrent_results: list[dict[str, Any]] = []
+
+    class _InterleavedConsultCarrier(_CountingQuestionCarrier):
+        """Runs a second identical consult concurrently from inside the
+        first consult's ``put_question`` await window."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self._interleaved = False
+
+        async def put_question(self, consultation_id, frame):
+            await super().put_question(consultation_id, frame)
+            if not self._interleaved:
+                self._interleaved = True
+                other = _make_dispatcher(
+                    runtime,
+                    fixture_repo,
+                    requester=requester,
+                    recipient=recipient,
+                    packets=self,
+                    invocations=invocations,
+                )
+                concurrent_results.append(
+                    _drive_sync(
+                        other.__call__(
+                            "company.consult",
+                            _dispatch_consult_envelope(
+                                question="Concurrent identical consults?",
+                                evidence_refs=[],
+                                artifact_revisions=[fixture_revision],
+                            ),
+                        )
+                    )
+                )
+
+    carrier = _InterleavedConsultCarrier()
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    first = _run(
+        _gateway_with_dispatcher(a_dispatcher).call("company.consult", args)
+    )
+    assert first["ok"] is True
+    consultation_id = first["data"]["consultation_ref"]
+    assert first["data"]["state"] == "INTENDED"
+
+    # Exactly one consult ran concurrently and it resolved to the same
+    # consultation identity (deterministic id under the shared caller +
+    # invocation).
+    assert len(concurrent_results) == 1
+    concurrent = concurrent_results[0]
+    assert concurrent["ok"] is True
+    assert concurrent["result"]["consultation_ref"] == consultation_id
+    assert concurrent["result"]["state"] == "ALREADY_INTENDED"
+
+    # Publication uniqueness under the interleaving.
+    assert carrier.put_question_calls == 1
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+
+
