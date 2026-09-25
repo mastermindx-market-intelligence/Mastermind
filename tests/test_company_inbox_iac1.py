@@ -7393,7 +7393,12 @@ async def test_service_send_effect_unknown_does_not_trigger_a_second_send(
     first = _run_dispatcher(dispatcher, "company.consult", envelope)
     assert first["ok"] is True
     consultation_id = first["result"]["consultation_ref"]
-    assert first["result"]["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    # IAC-P1-C-C-R: the committed-first send's validated same-key
+    # readback continues to the owed Wake, so the first call now
+    # completes the publication instead of stopping at the barrier.
+    assert first["result"]["blocker"] is None
+    assert first["result"]["attention_requested"] is True
+    assert _requested_count(runtime, consultation_id) == 1
     assert carrier.put_question_calls == 1
     # Landed pre-commit exact-key read + exactly one same-key
     # reconciliation read after the service's effect-unknown send.
@@ -7418,3 +7423,334 @@ async def test_service_send_effect_unknown_does_not_trigger_a_second_send(
     assert replay["result"]["attention_requested"] is True
     assert carrier.put_question_calls == 1
     assert _intent_count(runtime, consultation_id) == 1
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1-C-C-R — the owed post-publication continuation (Sol 5831215122)
+# ---------------------------------------------------------------------------
+
+
+class _UncertainReconciliationReadCarrier(_CommitBoundaryCarrier):
+    """TEST-ONLY carrier: the commit landed but the same-key
+    reconciliation readback is UNCERTAIN — the read raises even though
+    the body is physically stored. Read failures arm per packet kind."""
+
+    def __init__(
+        self,
+        *,
+        fail_question_read: type[Exception] | None = None,
+        fail_answer_read: type[Exception] | None = None,
+        **kwargs,
+    ) -> None:
+        self._fail_question_read = fail_question_read
+        self._fail_answer_read = fail_answer_read
+        super().__init__(**kwargs)
+
+    async def get_question(self, consultation_id, *, message_key):
+        if (
+            self._fail_question_read is not None
+            and self.put_question_calls >= 1
+        ):
+            self.get_question_calls += 1
+            self.get_question_keys.append(str(message_key))
+            raise self._fail_question_read("simulated uncertain carrier read")
+        return await super().get_question(
+            consultation_id, message_key=message_key
+        )
+
+    async def get_answer(self, consultation_id, *, message_key):
+        if self._fail_answer_read is not None and self.put_answer_calls >= 1:
+            self.get_answer_calls += 1
+            self.get_answer_keys.append(str(message_key))
+            raise self._fail_answer_read("simulated uncertain carrier read")
+        return await super().get_answer(
+            consultation_id, message_key=message_key
+        )
+
+
+def _wake_requested_total(runtime: Runtime) -> int:
+    """Every WAKE_REQUESTED record on the ledger, all obligations."""
+    return sum(
+        1
+        for item in WakeLedgerRepository(runtime).list_wake_events()
+        if item.record.phase is LedgerPhase.WAKE_REQUESTED
+    )
+
+
+@_sync_test
+async def test_lost_question_return_with_validated_readback_creates_exactly_one_owed_wake(
+    tmp_path: Path,
+) -> None:
+    """IAC-P1-C-C-R: a lost ``put_question`` return whose exactly-one
+    same-key readback VALIDATES is a committed publication — the
+    dispatcher continues from that already-committed fact and creates
+    exactly the one owed WAKE_REQUESTED in the same call. No resend, no
+    second obligation, no loop."""
+    carrier = _CommitBoundaryCarrier(
+        fail_question_put=_ServiceSendEffectUnknown,
+        question_put_commits_first=True,
+    )
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-p1-ccr-validated-wake")
+    )
+    (
+        runtime,
+        dispatcher,
+        _fixture_repo,
+        fixture_revision,
+        _requester,
+        _recipient,
+    ) = _cc_consult_pieces(
+        tmp_path, "ccr-validated-wake", carrier, invocations
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Validated readback owes the wake?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    result = _run_dispatcher(dispatcher, "company.consult", envelope)["result"]
+    consultation_id = result["consultation_ref"]
+
+    # The publication completed: the carrier packet validated and the
+    # owed Wake was created by this very call.
+    assert result["blocker"] is None
+    assert result["attention_requested"] is True
+    assert result["wake_state"] == "PENDING_RETRYABLE"
+    # Exactly one send; exactly one post-put reconciliation read on the
+    # same exact key, counted separately from the pre-publication read.
+    assert carrier.put_question_calls == 1
+    assert carrier.put_question_keys == [
+        _intent_message_key(runtime, consultation_id)
+    ]
+    assert carrier.get_question_calls == 2
+    assert carrier.get_question_keys[-1] == carrier.put_question_keys[0]
+    # Exactly one INTENT and exactly one WAKE_REQUESTED — not deferred
+    # to a replay, not duplicated.
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+    assert _wake_requested_total(runtime) == 1
+    # The production Wake sits exactly where the standard delivery
+    # adapter finds it, and that adapter finds exactly one.
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    assert _requested_count(runtime, consultation_id) == 1
+
+
+@_sync_test
+async def test_lost_question_return_with_uncertain_readback_preserves_carrier_reconciliation_required(
+    tmp_path: Path,
+) -> None:
+    """IAC-P1-C-C-R: a lost ``put_question`` return whose same-key
+    reconciliation read RAISES is UNCERTAIN — the
+    ``CARRIER_RECONCILIATION_REQUIRED`` barrier stands, no Wake is
+    created from the unproven read, and nothing is resent."""
+    carrier = _UncertainReconciliationReadCarrier(
+        fail_question_put=_ServiceSendEffectUnknown,
+        question_put_commits_first=True,
+        fail_question_read=TimeoutError,
+    )
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-p1-ccr-uncertain-question")
+    )
+    (
+        runtime,
+        dispatcher,
+        _fixture_repo,
+        fixture_revision,
+        _requester,
+        _recipient,
+    ) = _cc_consult_pieces(
+        tmp_path, "ccr-uncertain-question", carrier, invocations
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Uncertain readback keeps the barrier?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    result = _run_dispatcher(dispatcher, "company.consult", envelope)["result"]
+    consultation_id = result["consultation_ref"]
+
+    assert result["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert carrier.put_question_calls == 1
+    assert carrier.get_question_calls == 2
+    assert carrier.get_question_keys[-1] == carrier.put_question_keys[0]
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 0
+    assert _wake_requested_total(runtime) == 0
+
+
+@_sync_test
+async def test_uncertain_question_readback_is_never_reported_as_absent(
+    tmp_path: Path,
+) -> None:
+    """IAC-P1-C-C-R: an UNCERTAIN reconciliation read is not an absence
+    finding. The packet is physically on the carrier, so no resolved or
+    resolved-absent state may be reported from the failed read: the
+    barrier stands and the committed INTENT stays the reported fact."""
+    carrier = _UncertainReconciliationReadCarrier(
+        fail_question_put=_ServiceSendEffectUnknown,
+        question_put_commits_first=True,
+        fail_question_read=TimeoutError,
+    )
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-p1-ccr-not-absent")
+    )
+    (
+        runtime,
+        dispatcher,
+        _fixture_repo,
+        fixture_revision,
+        _requester,
+        _recipient,
+    ) = _cc_consult_pieces(tmp_path, "ccr-not-absent", carrier, invocations)
+    envelope = _dispatch_consult_envelope(
+        question="Uncertain is not absent?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    result = _run_dispatcher(dispatcher, "company.consult", envelope)["result"]
+    consultation_id = result["consultation_ref"]
+
+    # Effect uncertainty is preserved, not resolved into an absence.
+    assert result["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert result["state"] == "INTENDED"
+    assert result["wake_state"] is None
+    message_key = _intent_message_key(runtime, consultation_id)
+    # The failed read was uncertain, not empty: the exact packet IS on
+    # the carrier, so an absence report would be false.
+    carrier._fail_question_read = None
+    stored = await carrier.get_question(
+        consultation_id, message_key=message_key
+    )
+    assert stored is not None
+    assert stored["message_key"] == message_key
+    assert _wake_requested_total(runtime) == 0
+
+
+@_sync_test
+async def test_lost_answer_return_with_validated_readback_requests_requester_attention_once(
+    tmp_path: Path,
+) -> None:
+    """IAC-P1-C-C-R: a lost ``put_answer`` return whose exactly-one
+    same-key readback VALIDATES is a committed answer — the dispatcher
+    continues to the owed requester-answer attention exactly once and
+    returns the committed answer state. A service
+    ``SEND_EFFECT_UNKNOWN`` never authorizes a second send."""
+    carrier = _CommitBoundaryCarrier(
+        fail_answer_put=_ServiceSendEffectUnknown,
+        answer_put_commits_first=True,
+    )
+    invocations = _StaticInvocations(_default_invocation())
+    (
+        runtime,
+        a_dispatcher,
+        fixture_repo,
+        fixture_revision,
+        requester,
+        recipient,
+    ) = _cc_consult_pieces(
+        tmp_path, "ccr-answer-attention", carrier, invocations
+    )
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Validated answer readback attends the requester?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    consult = _run_dispatcher(a_dispatcher, "company.consult", envelope)
+    assert consult["result"]["blocker"] is None
+    consultation_id = consult["result"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    reply_request = {
+        "semantic": {
+            "consultation_ref": consultation_id,
+            "answer": "validated readback answer",
+            "supersedes_message_key": None,
+            "evidence_refs": [],
+        }
+    }
+    result = _run_dispatcher(b_dispatcher, "company.reply", reply_request)[
+        "result"
+    ]
+
+    # The committed answer state, with the owed requester attention.
+    assert result["state"] == "ANSWER_AVAILABLE"
+    assert result["blocker"] is None
+    assert result["attention_requested"] is True
+    assert result["inserted"] is True
+    # Exactly one send and exactly one same-key reconciliation read.
+    assert carrier.put_answer_calls == 1
+    assert carrier.get_answer_calls == 1
+    assert carrier.get_answer_keys == carrier.put_answer_keys
+    # Exactly one requester-directed answer attention next to the
+    # consult's own single WAKE_REQUESTED.
+    assert _wake_requested_total(runtime) == 2
+    # An identical replay reconciles: no second send, no second attention.
+    replay = _run_dispatcher(b_dispatcher, "company.reply", reply_request)[
+        "result"
+    ]
+    assert replay["blocker"] is None
+    assert replay["attention_requested"] is True
+    assert carrier.put_answer_calls == 1
+    assert _wake_requested_total(runtime) == 2
+
+
+@_sync_test
+async def test_lost_answer_return_with_absent_readback_still_refuses_carrier_reconciliation_required(
+    tmp_path: Path,
+) -> None:
+    """IAC-P1-C-C-R: a lost ``put_answer`` return whose same-key readback
+    is cleanly ABSENT is not a committed answer — the existing
+    ``CARRIER_RECONCILIATION_REQUIRED`` refusal survives unchanged and no
+    requester attention is manufactured from the missing body."""
+    carrier = _CommitBoundaryCarrier(fail_answer_put=TimeoutError)
+    invocations = _StaticInvocations(_default_invocation())
+    (
+        runtime,
+        a_dispatcher,
+        fixture_repo,
+        fixture_revision,
+        requester,
+        recipient,
+    ) = _cc_consult_pieces(
+        tmp_path, "ccr-answer-absent", carrier, invocations
+    )
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Absent answer readback still refuses?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    consult = _run_dispatcher(a_dispatcher, "company.consult", envelope)
+    consultation_id = consult["result"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    reply_request = {
+        "semantic": {
+            "consultation_ref": consultation_id,
+            "answer": "absent readback answer",
+            "supersedes_message_key": None,
+            "evidence_refs": [],
+        }
+    }
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(b_dispatcher, "company.reply", reply_request)
+    assert excinfo.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+    assert carrier.put_answer_calls == 1
+    assert carrier.get_answer_calls == 1
+    assert carrier.get_answer_keys == carrier.put_answer_keys
+    # Only the consult's own WAKE_REQUESTED exists: the refusal created
+    # no requester attention from the absent body.
+    assert _wake_requested_total(runtime) == 1

@@ -1137,26 +1137,53 @@ class RuntimeConsultationDispatcher:
                 # evidence for the existing same-carrier recovery owner;
                 # its outcome never licenses a resend, and the uncertain
                 # barrier below stands whether it reads a body or not.
+                #
+                # IAC-P1-C-C-R (Sol 5831215122): the read is triaged, not
+                # discarded. A readback that VALIDATES against the
+                # persisted INTENT proves the COMMIT happened: continue
+                # from that already-committed fact to the owed Wake below
+                # — exactly one obligation, still no resend. An UNCERTAIN
+                # read is never relabelled as a proven-absent body and
+                # never completes the publication; absent, uncertain and
+                # integrity-mismatched readbacks all keep the barrier.
                 try:
-                    await self.packets.get_question(
+                    reconciled = await self.packets.get_question(
                         consultation_id, message_key=message_key
                     )
                 except Exception:
-                    pass
-                return {
-                    "ok": True,
-                    "result": _committed_consult_result(
-                        consultation_id=consultation_id,
-                        valid_until=valid_until,
-                        carrier_ref=carrier_ref,
-                        intent_inserted=True,
-                        attention_requested=self._existing_wake_request(
-                            intent_event
+                    # UNCERTAIN: neither the body nor its absence is
+                    # proven. Not an absence finding.
+                    reconciled = None
+                # IAC-P1-C-C-R (Sol 5831215122): a readback that VALIDATES
+                # against the persisted INTENT proves the COMMIT happened,
+                # so the owed Wake is created below — unless an identical
+                # concurrent call already recorded the single request, in
+                # which case the C-C readback barrier stands with that
+                # request reported. Absent, uncertain and
+                # integrity-mismatched readbacks keep the barrier too; an
+                # UNCERTAIN read is never relabelled as a proven-absent
+                # body and never completes the publication.
+                if _validated_question_frame(
+                    intent_event.payload, reconciled
+                ) is None or self._existing_wake_request(intent_event) is True:
+                    return {
+                        "ok": True,
+                        "result": _committed_consult_result(
+                            consultation_id=consultation_id,
+                            valid_until=valid_until,
+                            carrier_ref=carrier_ref,
+                            intent_inserted=True,
+                            attention_requested=self._existing_wake_request(
+                                intent_event
+                            ),
+                            wake_state=None,
+                            blocker="CARRIER_RECONCILIATION_REQUIRED",
                         ),
-                        wake_state=None,
-                        blocker="CARRIER_RECONCILIATION_REQUIRED",
-                    ),
-                }
+                    }
+                # Validated exact readback and no existing request: the
+                # packet IS on the carrier under the persisted message
+                # key and the owed Wake is still owed. Fall through to
+                # the single Wake creation below — never a second send.
         else:
             try:
                 readback = await self.packets.get_question(
@@ -1615,17 +1642,35 @@ class RuntimeConsultationDispatcher:
             try:
                 await self.packets.put_answer(consultation_ref, answer_frame)
             except Exception as exc:
+                # IAC-P1-C-C-R (Sol 5831215122): reconcile the same key
+                # exactly once and triage the read. A readback that
+                # VALIDATES against the persisted INTENT and the admitted
+                # ANSWER_AVAILABLE event proves the COMMIT happened —
+                # continue to the owed requester-answer attention below
+                # and return the committed answer state, never a second
+                # send. An UNCERTAIN read is never relabelled as a
+                # proven-absent body: absent, uncertain and
+                # integrity-mismatched readbacks keep the existing
+                # CARRIER_RECONCILIATION_REQUIRED refusal unchanged.
                 try:
-                    await self.packets.get_answer(
+                    reconciled = await self.packets.get_answer(
                         consultation_ref,
                         message_key=str(answer_frame.get("message_key", "")),
                     )
                 except Exception:
-                    pass
-                raise ConsultationRefusal(
-                    "CARRIER_RECONCILIATION_REQUIRED",
-                    detail="runtime event admitted but carrier write failed",
-                ) from exc
+                    # UNCERTAIN: neither the body nor its absence is
+                    # proven. Not an absence finding.
+                    reconciled = None
+                if _validated_answer_frame(
+                    intent.payload, event, reconciled
+                ) is None:
+                    raise ConsultationRefusal(
+                        "CARRIER_RECONCILIATION_REQUIRED",
+                        detail="runtime event admitted but carrier write failed",
+                    ) from exc
+                # Validated exact readback: the ANSWER frame IS on the
+                # carrier under the admitted message key. Fall through to
+                # ``_request_answer_attention`` exactly once.
 
         attention_requested, wake_state, blocker = (
             self._request_answer_attention(answer_frame, intent)
