@@ -27,11 +27,29 @@ Screenshots remain native MCP image blocks. The Web caller cannot provide an
 arbitrary host path, Paper endpoint, account or credential.
 
 Studio Direct is the existing Web gateway/auth/transport owner; Paper does not get a
-second public gateway. Remote Desktop Commander remains an authorized local-ops and
-diagnostic carrier and supplied the original native proof, but is no longer the
-normal product path once a Studio Direct seat is Paper-enabled. Do not expose the raw
-unauthenticated Paper port through a public tunnel, add another OAuth service, or put
-design tools into Executive OS's bounded CEO-admission API.
+second public gateway. It is the preferred attended-Web carrier when the Paper tool
+family is actually exposed. Remote Desktop Commander is also a direct-host client of the
+**same guarded bridge**, but Studio Direct absence grants it no authority. RDC may be
+selected for a Paper effect only when the current Chairman assignment/delegation or
+accepted canonical placement independently authorizes that exact host carrier and
+Paper action, current host permission is observed, no explicit denial applies, and no
+conflicting or unknown Paper effect exists. Otherwise the session stops at the exact
+carrier gate. This is not a second gateway, auth plane, write authority, or permission
+fallback. The current protected `private_service.py` runtime/schema/SHA pins, not folder recency
+or an old installation receipt, determine the exact bridge that Desktop Commander may
+invoke. Do not expose the raw unauthenticated Paper port through a public tunnel, add
+another OAuth service, or put design tools into Executive OS's bounded CEO-admission API.
+
+Capability discovery is action-specific. A session that sees Studio Direct filesystem/
+process tools but has not checked for `paper_inspect`, `paper_catalog`, `paper_read`
+and `paper_edit` has **not** established Paper unavailability. Likewise, source may
+define an action such as `paper_prepare` while a particular installed ChatGPT plugin
+generation does not expose it; that is a publication/surface drift for that action, not
+evidence that current-file Paper reads or edits are impossible. Before the first edit,
+a proven pre-dispatch technical absence may make an **independently authorized** RDC
+carrier eligible; the absence itself never supplies permission. After edit dispatch,
+timeout/lost response remains `EFFECT_UNKNOWN` on the original carrier and forbids
+cross-carrier replay.
 
 No MCP tool is disguised as read-only to bypass client write permissions.
 `paper_edit` is explicitly modifying/destructive/non-idempotent; it exists only
@@ -182,6 +200,11 @@ and user journey. Fable is not required for a census or routine MCP calls. Budge
 one catalog discovery per workflow and deliberate screenshots at meaningful changes;
 no idle loops. Every guarded edit currently costs three Paper tool calls (pre-read,
 edit, post-read); plan this explicitly on the 100-call Free tier.
+
+For a Paper-canvas assignment, an HTML prototype or review package may support reasoning but cannot
+replace the required Paper effect while either lawful Paper route remains unprobed. If both routes
+are genuinely blocked, label the artifact `NOT_APPLIED_TO_PAPER` and preserve the exact carrier/
+permission/file-transition gate instead of reporting the canvas as updated.
 
 ## Figma migration
 

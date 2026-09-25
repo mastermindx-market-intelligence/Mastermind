@@ -96,6 +96,10 @@ from scripts.ohf.redaction import redact_evidence, redact_evidence_text
 
 SCHEMA_VERSION = 5
 
+WORK_DEPENDENCY_MANIFEST_SCHEMA = "mastermind.work_dependency_manifest/v1"
+_COO_PLAN_ADMISSION_SCHEMA_V1 = "mastermind.coo_plan_admission/v1"
+_COO_PLAN_ADMISSION_SCHEMA_V2 = "mastermind.coo_plan_admission/v2"
+
 
 def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
     value_parts = value.split("/")
@@ -265,6 +269,9 @@ COO_CYCLE_BLOCK_REASONS = frozenset(
         "state_conflict",
     }
 )
+_COO_DISPATCH_EFFECT_SCHEMA = "mastermind.coo_dispatch_effect/v1"
+_COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE = "COO_DISPATCH_EFFECT_UNKNOWN"
+_COO_DISPATCH_RECONCILED_EVENT_TYPE = "COO_DISPATCH_RECONCILED"
 _ESCALATION_RANK = {"coo": 0, "ceo": 1, "chairman": 2}
 _COST_CLASS_RANK = {"small": 0, "default": 1, "frontier": 2}
 _MAX_JOB_DEPTH = 64
@@ -6347,6 +6354,93 @@ def _validated_coo_cycle_block_event(
     return dict(payload)
 
 
+
+def _validated_coo_dispatch_effect_event(
+    connection: sqlite3.Connection,
+    event_row: sqlite3.Row,
+    *,
+    expected_root_id: str,
+) -> dict[str, Any]:
+    """Validate one immutable COO dispatch ambiguity/reconciliation receipt."""
+
+    event_type = str(event_row["event_type"])
+    phase_by_type = {
+        _COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE: "EFFECT_UNKNOWN",
+        _COO_DISPATCH_RECONCILED_EVENT_TYPE: "RECONCILED",
+    }
+    phase = phase_by_type.get(event_type)
+    if (
+        phase is None
+        or event_row["aggregate_type"] != "job"
+        or event_row["aggregate_id"] != expected_root_id
+        or event_row["job_id"] != expected_root_id
+        or event_row["actor"] != "coo"
+        or not isinstance(event_row["command_id"], str)
+        or _COMMAND_ID_RE.fullmatch(event_row["command_id"]) is None
+        or type(event_row["event_id"]) is not int
+        or event_row["event_id"] <= 0
+    ):
+        raise StateConflict("COO dispatch effect Event identity is malformed")
+
+    payload = _strict_canonical_json_loads(
+        str(event_row["payload_json"]), name=f"{event_type} payload"
+    )
+    expected_keys = {
+        "schema_version",
+        "root_job_id",
+        "selected_job_id",
+        "dispatch_command_id",
+        "attempt_id",
+        "phase",
+        "command_id",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_keys:
+        raise StateConflict("COO dispatch effect payload is not the closed wire")
+
+    selected_id = payload.get("selected_job_id")
+    dispatch_command = payload.get("dispatch_command_id")
+    attempt_id = payload.get("attempt_id")
+    suffix = ":effect-unknown" if phase == "EFFECT_UNKNOWN" else ":reconciled"
+    if (
+        payload.get("schema_version") != _COO_DISPATCH_EFFECT_SCHEMA
+        or payload.get("root_job_id") != expected_root_id
+        or not isinstance(selected_id, str)
+        or not selected_id
+        or not isinstance(dispatch_command, str)
+        or _COMMAND_ID_RE.fullmatch(dispatch_command) is None
+        or not isinstance(attempt_id, str)
+        or not attempt_id
+        or payload.get("phase") != phase
+        or payload.get("command_id") != event_row["command_id"]
+        or event_row["command_id"] != f"{dispatch_command}{suffix}"
+        or event_row["attempt_id"] != attempt_id
+    ):
+        raise StateConflict("COO dispatch effect payload identity drifted")
+
+    root = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (expected_root_id,)
+    ).fetchone()
+    selected = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (selected_id,)
+    ).fetchone()
+    claim = connection.execute(
+        "SELECT * FROM events WHERE command_id=?", (dispatch_command,)
+    ).fetchone()
+    if (
+        root is None
+        or selected is None
+        or root["root_job_id"] != expected_root_id
+        or root["orchestration_role"] != "aggregation"
+        or selected["root_job_id"] != expected_root_id
+        or claim is None
+        or claim["event_type"] != "JOB_CLAIMED"
+        or claim["job_id"] != selected_id
+        or claim["attempt_id"] != attempt_id
+    ):
+        raise StateConflict("COO dispatch effect claim binding drifted")
+    return dict(payload)
+
+
 def _validate_tx9_requeue_event(
     connection: sqlite3.Connection,
     event_row: sqlite3.Row,
@@ -7998,6 +8092,215 @@ def _validated_orchestration_child_terminal_payload(
     return terminal
 
 
+
+_WORK_DEPENDENCY_REVISION_KEYS = frozenset(
+    {
+        "ordinal",
+        "plan_step_id",
+        "current_job_id",
+        "current_attempt_id",
+        "current_result_digest",
+        "current_raw_result_digest",
+        "effective_grant_digest",
+        "artifact_receipt_digest",
+        "validation_receipt_digest",
+        "placement_snapshot_digest",
+        "execution_principal_snapshot_digest",
+        "repair_round",
+        "review_required",
+        "qualifying_review_job_id",
+        "qualifying_review_attempt_id",
+        "qualifying_review_result_digest",
+        "qualifying_review_effective_grant_digest",
+        "qualifying_review_principal_snapshot_digest",
+    }
+)
+
+
+def _validate_work_dependency_manifest(
+    value: Any,
+    *,
+    root_job_id: str,
+    plan_attempt_id: str,
+    plan_digest: str,
+    plan_step_id: str,
+) -> dict[str, Any]:
+    """Validate one closed, digest-bound dependency snapshot."""
+
+    expected_keys = {
+        "schema_version",
+        "root_job_id",
+        "plan_attempt_id",
+        "plan_digest",
+        "plan_step_id",
+        "prerequisite_step_ids",
+        "revisions",
+        "dependency_manifest_digest",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise StateConflict("work dependency manifest is not the closed wire")
+    manifest = dict(value)
+    prerequisites = manifest.get("prerequisite_step_ids")
+    revisions = manifest.get("revisions")
+    manifest_digest = manifest.get("dependency_manifest_digest")
+    if (
+        manifest.get("schema_version") != WORK_DEPENDENCY_MANIFEST_SCHEMA
+        or manifest.get("root_job_id") != root_job_id
+        or manifest.get("plan_attempt_id") != plan_attempt_id
+        or manifest.get("plan_digest") != plan_digest
+        or manifest.get("plan_step_id") != plan_step_id
+        or not isinstance(root_job_id, str)
+        or _COMMAND_ID_RE.fullmatch(root_job_id) is None
+        or not isinstance(plan_attempt_id, str)
+        or _COMMAND_ID_RE.fullmatch(plan_attempt_id) is None
+        or not isinstance(plan_step_id, str)
+        or _COMMAND_ID_RE.fullmatch(plan_step_id) is None
+        or not isinstance(plan_digest, str)
+        or _DIGEST_RE.fullmatch(plan_digest) is None
+        or not isinstance(prerequisites, list)
+        or len(prerequisites) > 7
+        or any(
+            not isinstance(item, str) or _COMMAND_ID_RE.fullmatch(item) is None
+            for item in prerequisites
+        )
+        or len(prerequisites) != len(set(prerequisites))
+        or not isinstance(revisions, list)
+        or len(revisions) != len(prerequisites)
+        or not isinstance(manifest_digest, str)
+        or _DIGEST_RE.fullmatch(manifest_digest) is None
+    ):
+        raise StateConflict("work dependency manifest identity is invalid")
+
+    digest_fields = {
+        "current_result_digest",
+        "current_raw_result_digest",
+        "effective_grant_digest",
+        "artifact_receipt_digest",
+        "validation_receipt_digest",
+        "placement_snapshot_digest",
+        "execution_principal_snapshot_digest",
+    }
+    review_digest_fields = {
+        "qualifying_review_result_digest",
+        "qualifying_review_effective_grant_digest",
+        "qualifying_review_principal_snapshot_digest",
+    }
+    for prerequisite, revision in zip(prerequisites, revisions, strict=True):
+        if not isinstance(revision, Mapping) or set(revision) != _WORK_DEPENDENCY_REVISION_KEYS:
+            raise StateConflict("work dependency revision is not the closed wire")
+        if (
+            type(revision.get("ordinal")) is not int
+            or int(revision["ordinal"]) < 0
+            or revision.get("plan_step_id") != prerequisite
+            or not isinstance(revision.get("current_job_id"), str)
+            or _COMMAND_ID_RE.fullmatch(str(revision["current_job_id"])) is None
+            or not isinstance(revision.get("current_attempt_id"), str)
+            or _COMMAND_ID_RE.fullmatch(str(revision["current_attempt_id"])) is None
+            or type(revision.get("repair_round")) is not int
+            or int(revision["repair_round"]) < 0
+            or type(revision.get("review_required")) is not bool
+            or any(
+                not isinstance(revision.get(field), str)
+                or _DIGEST_RE.fullmatch(str(revision[field])) is None
+                for field in digest_fields
+            )
+        ):
+            raise StateConflict("work dependency revision identity is invalid")
+        review_values = [
+            revision.get("qualifying_review_job_id"),
+            revision.get("qualifying_review_attempt_id"),
+            *(revision.get(field) for field in review_digest_fields),
+        ]
+        all_null = all(item is None for item in review_values)
+        all_present = all(isinstance(item, str) for item in review_values)
+        if not (all_null or all_present):
+            raise StateConflict("work dependency review evidence is partial")
+        if bool(revision["review_required"]) is not all_present:
+            raise StateConflict("work dependency review requirement drifted")
+        if all_present and (
+            _COMMAND_ID_RE.fullmatch(str(revision["qualifying_review_job_id"])) is None
+            or _COMMAND_ID_RE.fullmatch(
+                str(revision["qualifying_review_attempt_id"])
+            )
+            is None
+            or any(
+                _DIGEST_RE.fullmatch(str(revision[field])) is None
+                for field in review_digest_fields
+            )
+        ):
+            raise StateConflict("work dependency review evidence is invalid")
+
+    digest_input = dict(manifest)
+    digest_input.pop("dependency_manifest_digest")
+    if orchestration_digest(digest_input) != manifest_digest:
+        raise StateConflict("work dependency manifest digest drifted")
+    return manifest
+
+
+def _work_dependency_manifest(
+    connection: sqlite3.Connection,
+    *,
+    root_row: sqlite3.Row,
+    admission: dict[str, Any],
+    plan_body: dict[str, Any],
+    plan_step_id: str,
+) -> dict[str, Any]:
+    """Derive the canonical accepted-revision snapshot for one V3 work step."""
+
+    if (
+        plan_body.get("schema_version") != "mastermind.execution_plan/v3"
+        or admission.get("schema_version") != _COO_PLAN_ADMISSION_SCHEMA_V2
+        or admission.get("root_job_id") != root_row["job_id"]
+        or admission.get("plan_attempt_id") != plan_body.get("plan_attempt_id")
+        or admission.get("plan_digest") is None
+    ):
+        raise StateConflict("work dependency manifest requires an admitted V3 plan")
+    steps = [
+        step for step in plan_body.get("steps", [])
+        if isinstance(step, Mapping) and step.get("step_id") == plan_step_id
+    ]
+    reservations = [
+        item for item in admission.get("steps", [])
+        if isinstance(item, Mapping) and item.get("plan_step_id") == plan_step_id
+    ]
+    if len(steps) != 1 or len(reservations) != 1:
+        raise StateConflict("work dependency manifest step is not exactly admitted")
+    step = steps[0]
+    reservation = reservations[0]
+    prerequisites = step.get("prerequisite_step_ids")
+    if (
+        not isinstance(prerequisites, list)
+        or reservation.get("prerequisite_step_ids") != prerequisites
+    ):
+        raise StateConflict("work dependency prerequisites drifted from admission")
+    revisions = [
+        _accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=plan_body,
+            plan_step_id=str(prerequisite),
+        )
+        for prerequisite in prerequisites
+    ]
+    manifest: dict[str, Any] = {
+        "schema_version": WORK_DEPENDENCY_MANIFEST_SCHEMA,
+        "root_job_id": str(root_row["job_id"]),
+        "plan_attempt_id": str(admission["plan_attempt_id"]),
+        "plan_digest": str(admission["plan_digest"]),
+        "plan_step_id": plan_step_id,
+        "prerequisite_step_ids": list(prerequisites),
+        "revisions": revisions,
+    }
+    manifest["dependency_manifest_digest"] = orchestration_digest(manifest)
+    return _validate_work_dependency_manifest(
+        manifest,
+        root_job_id=str(root_row["job_id"]),
+        plan_attempt_id=str(admission["plan_attempt_id"]),
+        plan_digest=str(admission["plan_digest"]),
+        plan_step_id=plan_step_id,
+    )
+
 def _validated_plan_admission(
     connection: sqlite3.Connection, root_row: sqlite3.Row
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -8028,7 +8331,13 @@ def _validated_plan_admission(
         "command_id",
         "reservation_digest",
     }
-    if not isinstance(admission, dict) or set(admission) != keys:
+    admission_schema = admission.get("schema_version") if isinstance(admission, dict) else None
+    if (
+        not isinstance(admission, dict)
+        or set(admission) != keys
+        or admission_schema
+        not in {_COO_PLAN_ADMISSION_SCHEMA_V1, _COO_PLAN_ADMISSION_SCHEMA_V2}
+    ):
         raise StateConflict("COO plan admission is not the closed wire")
     digest_input = dict(admission)
     reservation_digest = digest_input.pop("reservation_digest", None)
@@ -8037,8 +8346,7 @@ def _validated_plan_admission(
         f"coo-cycle:{root_row['job_id']}:admit-plan:{admission.get('plan_attempt_id')}"
     )
     if (
-        admission.get("schema_version") != "mastermind.coo_plan_admission/v1"
-        or admission.get("root_job_id") != root_row["job_id"]
+        admission.get("root_job_id") != root_row["job_id"]
         or admission.get("policy_sha") != policy.policy_sha256
         or event["actor"] != "coo"
         or event["aggregate_type"] != "job"
@@ -8109,6 +8417,13 @@ def _validated_plan_admission(
     except Exception as exc:
         raise StateConflict(f"sealed plan result is invalid: {exc}") from exc
     plan_body = dict(envelope["role_result"])
+    expected_admission_schema = (
+        _COO_PLAN_ADMISSION_SCHEMA_V2
+        if plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+        else _COO_PLAN_ADMISSION_SCHEMA_V1
+    )
+    if admission_schema != expected_admission_schema:
+        raise StateConflict("COO plan admission schema does not match its typed plan")
     if (
         result_digest(plan_body) != seal["role_result_digest"]
         or admission["plan_digest"] != seal["role_result_digest"]
@@ -8135,10 +8450,8 @@ def _validated_plan_admission(
         )
         requirements.append(required)
         expected_member_command = f"{expected_command}:member:{ordinal}"
-        if (
-            not isinstance(reserved, dict)
-            or set(reserved)
-            != {
+        if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V1:
+            expected_step_keys = {
                 "ordinal",
                 "plan_step_id",
                 "step_slots",
@@ -8146,26 +8459,71 @@ def _validated_plan_admission(
                 "work_job_id",
                 "member_command_id",
             }
+            member_job_id = reserved.get("work_job_id") if isinstance(reserved, dict) else None
+            member_command_id = (
+                reserved.get("member_command_id") if isinstance(reserved, dict) else None
+            )
+            dependency_manifest = None
+            prerequisite_step_ids: list[str] = []
+        else:
+            expected_step_keys = {
+                "ordinal",
+                "plan_step_id",
+                "step_slots",
+                "review_required",
+                "prerequisite_step_ids",
+                "initial_work_job_id",
+                "initial_work_command_id",
+            }
+            prerequisite_step_ids = list(step["prerequisite_step_ids"])
+            member_job_id = (
+                reserved.get("initial_work_job_id") if isinstance(reserved, dict) else None
+            )
+            member_command_id = (
+                reserved.get("initial_work_command_id") if isinstance(reserved, dict) else None
+            )
+            dependency_manifest = None
+        if (
+            not isinstance(reserved, dict)
+            or set(reserved) != expected_step_keys
             or reserved["ordinal"] != ordinal
             or reserved["plan_step_id"] != step["step_id"]
             or reserved["review_required"] is not required
             or reserved["step_slots"]
             != policy.reserved_step_slots(review_required=required)
-            or reserved["member_command_id"] != expected_member_command
         ):
             raise StateConflict("COO plan admission reservation arithmetic drifted")
-        member = connection.execute(
-            "SELECT * FROM jobs WHERE job_id=?", (reserved["work_job_id"],)
-        ).fetchone()
-        member_event = connection.execute(
-            "SELECT * FROM events WHERE command_id=?", (expected_member_command,)
-        ).fetchone()
+        if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V1:
+            if member_command_id != expected_member_command:
+                raise StateConflict("COO plan admission member command drifted")
+        else:
+            if reserved["prerequisite_step_ids"] != prerequisite_step_ids:
+                raise StateConflict("COO plan admission prerequisites drifted")
+            if prerequisite_step_ids:
+                if member_job_id is not None or member_command_id is not None:
+                    raise StateConflict(
+                        "dependent V3 reservation cannot materialize initial work"
+                    )
+            elif (
+                not isinstance(member_job_id, str)
+                or member_command_id != expected_member_command
+            ):
+                raise StateConflict("initial V3 work reservation is incomplete")
         expected_validation_ids = (
             root_validation_ids if "RUN_TESTS" in step["requested_authorities"] else []
         )
         expected_validation_argv = root_validations if expected_validation_ids else []
         if step["validation_ids"] != expected_validation_ids:
             raise StateConflict("typed plan changed the mandatory root validation set")
+        if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V2 and prerequisite_step_ids:
+            continue
+
+        member = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (member_job_id,)
+        ).fetchone()
+        member_event = connection.execute(
+            "SELECT * FROM events WHERE command_id=?", (member_command_id,)
+        ).fetchone()
         if member is not None:
             member_role, member_provenance, _ = _decode_orchestration_job_fields(member)
             member_authorities = _strict_canonical_json_loads(
@@ -8205,13 +8563,21 @@ def _validated_plan_admission(
             or not isinstance(member_constraints, dict)
             or member_constraints.get("cost_class") != step["cost_class"]
             or not isinstance(member_provenance, dict)
-            or member_provenance.get("command_id") != expected_member_command
+            or member_provenance.get("command_id") != member_command_id
             or member_provenance.get("source_digest") != admission["plan_digest"]
             or member_event is None
             or member_event["event_type"] != "JOB_CREATED"
             or member_event["job_id"] != member["job_id"]
         ):
             raise StateConflict("COO plan admission member manifest drifted")
+        if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V2:
+            dependency_manifest = _work_dependency_manifest(
+                connection,
+                root_row=root_row,
+                admission=admission,
+                plan_body=plan_body,
+                plan_step_id=str(step["step_id"]),
+            )
         _reconcile_cycle_child_creation(
             connection,
             event_row=member_event,
@@ -8224,12 +8590,13 @@ def _validated_plan_admission(
             cost_class=str(step["cost_class"]),
             attempt_limit=int(step["attempt_limit"]),
             review_required=required,
-            command_id=expected_member_command,
+            command_id=str(member_command_id),
             plan_attempt_id=str(admission["plan_attempt_id"]),
             plan_digest=str(admission["plan_digest"]),
             plan_step_id=str(step["step_id"]),
             repair_round=0,
             placement=step.get("placement"),
+            dependency_manifest=dependency_manifest,
         )
     try:
         expected_total = policy.reserved_children_total(tuple(requirements))
@@ -8238,7 +8605,6 @@ def _validated_plan_admission(
     if admission["reserved_children_total"] != expected_total:
         raise StateConflict("COO plan admission total reservation drifted")
     return admission, plan_body
-
 
 def _review_attempt_is_independent(
     connection: sqlite3.Connection,
@@ -8613,7 +8979,23 @@ def _current_orchestration_tree_material_for_dispatch(
             ],
             key=lambda row: (int(row["repair_round"]), str(row["job_id"])),
         )
-        if not revisions or revisions[0]["orchestration_role"] != "work":
+        reviews = [
+            row
+            for row in children
+            if row["orchestration_role"] == "review" and row["plan_step_id"] == step_id
+        ]
+        if not revisions:
+            deferred_v3 = bool(
+                admission.get("schema_version") == _COO_PLAN_ADMISSION_SCHEMA_V2
+                and plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+                and step.get("prerequisite_step_ids")
+                and reservation.get("initial_work_job_id") is None
+                and reservation.get("initial_work_command_id") is None
+            )
+            if deferred_v3 and not reviews:
+                continue
+            raise StateConflict("admitted step lost its initial work revision")
+        if revisions[0]["orchestration_role"] != "work":
             raise StateConflict("admitted step lost its initial work revision")
         for index, revision in enumerate(revisions):
             if (
@@ -8628,11 +9010,6 @@ def _current_orchestration_tree_material_for_dispatch(
                 )
             ):
                 raise StateConflict("dispatch lineage is forked or skipped")
-        reviews = [
-            row
-            for row in children
-            if row["orchestration_role"] == "review" and row["plan_step_id"] == step_id
-        ]
         for revision in revisions:
             if (
                 len(
@@ -8667,6 +9044,317 @@ def _current_orchestration_tree_material_for_dispatch(
     ):
         raise StateConflict("dispatch tree contains an unexpected child")
     return result
+
+
+def _accepted_current_step_revision(
+    connection: sqlite3.Connection,
+    *,
+    root_row: sqlite3.Row,
+    admission: dict[str, Any],
+    plan_body: dict[str, Any],
+    plan_step_id: str,
+) -> dict[str, Any]:
+    """Return the canonical accepted current revision for one plan step.
+
+    Consumes ``_validated_role_completion_material`` and
+    ``_review_attempt_is_independent`` along with reservation/review limits.
+    Produces the exact current-revision fields consumed by aggregation.
+
+    Raises StateConflict when:
+      - the step has no initial work revision;
+      - revision lineage is non-contiguous or forked;
+      - revision exceeds its review ceiling;
+      - step consumed another step's slot budget;
+      - an unresolved independent reject is present;
+      - a required independent approval is missing.
+    """
+
+    reservation_by_step = {
+        str(item["plan_step_id"]): item for item in admission["steps"]
+    }
+    reservation = reservation_by_step[plan_step_id]
+
+    children = connection.execute(
+        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY job_id",
+        (root_row["job_id"],),
+    ).fetchall()
+
+    policy = CooCyclePolicy.load()
+    revisions = [
+        row
+        for row in children
+        if row["orchestration_role"] in {"work", "repair"}
+        and str(row["plan_step_id"]) == plan_step_id
+    ]
+    revisions.sort(key=lambda row: (int(row["repair_round"]), str(row["job_id"])))
+
+    if not revisions or revisions[0]["orchestration_role"] != "work":
+        raise StateConflict("plan step has no initial work revision")
+
+    for index, revision in enumerate(revisions):
+        if (
+            int(revision["repair_round"]) != index
+            or revision["plan_attempt_id"] != admission["plan_attempt_id"]
+            or revision["plan_digest"] != admission["plan_digest"]
+            or (index == 0 and revision["supersedes_job_id"] is not None)
+            or (
+                index > 0
+                and revision["supersedes_job_id"] != revisions[index - 1]["job_id"]
+            )
+        ):
+            raise StateConflict("plan-step revision lineage is forked or skipped")
+
+    review_rows = [
+        row
+        for row in children
+        if row["orchestration_role"] == "review"
+        and str(row["plan_step_id"]) == plan_step_id
+    ]
+
+    for revision in revisions:
+        if (
+            len(
+                [
+                    row
+                    for row in review_rows
+                    if str(row["reviews_job_id"]) == str(revision["job_id"])
+                ]
+            )
+            > policy.max_review_attempts_per_job
+        ):
+            raise StateConflict("revision exceeds its review Job record ceiling")
+
+    used_slots = len(revisions) + len(review_rows)
+    if used_slots > int(reservation["step_slots"]):
+        raise StateConflict("plan step consumed another step's reserved slot")
+
+    if not reservation["review_required"] and (len(revisions) != 1 or review_rows):
+        raise StateConflict(
+            "unreviewed plan step cannot consume review/repair slots"
+        )
+
+    current = revisions[-1]
+    current_attempt, current_seal, current_terminal, current_result_digest = (
+        _validated_role_completion_material(
+            connection,
+            job_row=current,
+            expected_role=str(current["orchestration_role"]),
+            root_job_id=str(root_row["job_id"]),
+        )
+    )
+
+    qualifying: tuple[sqlite3.Row, sqlite3.Row, dict[str, Any], str] | None = None
+    current_independent_reject = False
+
+    for review in review_rows:
+        attempt_id = review["current_attempt_id"]
+        if review["status"] != JobStatus.COMPLETED.value:
+            continue
+        review_attempt, review_seal, _review_terminal, review_digest = (
+            _validated_role_completion_material(
+                connection,
+                job_row=review,
+                expected_role="review",
+                root_job_id=str(root_row["job_id"]),
+            )
+        )
+        body = review_seal["result_envelope"]["role_result"]
+        independent = _review_attempt_is_independent(
+            connection,
+            review_attempt_id=str(review_attempt["attempt_id"]),
+            reviewed_attempt_id=str(body["reviewed_attempt_id"]),
+        )
+        exact_target = bool(
+            str(review["reviews_job_id"]) == str(current["job_id"])
+            and body.get("reviewed_job_id") == current["job_id"]
+            and body.get("reviewed_attempt_id") == current_attempt["attempt_id"]
+            and body.get("reviewed_result_digest") == current_result_digest
+            and body.get("repair_round") == current["repair_round"]
+        )
+        if (
+            exact_target
+            and independent
+            and body.get("verdict") == "approve"
+            and qualifying is None
+        ):
+            qualifying = (review, review_attempt, review_seal, review_digest)
+        elif exact_target and independent and body.get("verdict") == "reject":
+            current_independent_reject = True
+
+    if current_independent_reject:
+        raise StateConflict(
+            "current revision has an unresolved independent reject verdict"
+        )
+    if reservation["review_required"] and qualifying is None:
+        raise StateConflict(
+            "current revision lacks a qualifying independent approval"
+        )
+
+    if qualifying is None:
+        qualifying_fields: dict[str, Any] = {
+            "qualifying_review_job_id": None,
+            "qualifying_review_attempt_id": None,
+            "qualifying_review_result_digest": None,
+            "qualifying_review_effective_grant_digest": None,
+            "qualifying_review_principal_snapshot_digest": None,
+        }
+    else:
+        review, review_attempt, _review_seal, review_digest = qualifying
+        qualifying_fields = {
+            "qualifying_review_job_id": str(review["job_id"]),
+            "qualifying_review_attempt_id": str(review_attempt["attempt_id"]),
+            "qualifying_review_result_digest": review_digest,
+            "qualifying_review_effective_grant_digest": str(
+                review_attempt["effective_grant_digest"]
+            ),
+            "qualifying_review_principal_snapshot_digest": str(
+                review_attempt["execution_principal_snapshot_digest"]
+            ),
+        }
+
+    # Determine ordinal from plan_body
+    ordinal = next(
+        i for i, step in enumerate(plan_body["steps"])
+        if str(step["step_id"]) == plan_step_id
+    )
+
+    return {
+        "ordinal": ordinal,
+        "plan_step_id": plan_step_id,
+        "current_job_id": str(current["job_id"]),
+        "current_attempt_id": str(current_attempt["attempt_id"]),
+        "current_result_digest": current_result_digest,
+        "current_raw_result_digest": str(
+            current_seal["raw_result_observation_digest"]
+        ),
+        "effective_grant_digest": str(
+            current_attempt["effective_grant_digest"]
+        ),
+        "artifact_receipt_digest": str(
+            current_terminal["artifact_receipt_digest"]
+        ),
+        "validation_receipt_digest": str(
+            current_terminal["validation_receipt_digest"]
+        ),
+        "placement_snapshot_digest": str(
+            current_attempt["placement_snapshot_digest"]
+        ),
+        "execution_principal_snapshot_digest": str(
+            current_attempt["execution_principal_snapshot_digest"]
+        ),
+        "repair_round": int(current["repair_round"]),
+        "review_required": bool(reservation["review_required"]),
+        **qualifying_fields,
+    }
+
+
+def _validated_job_dependency_manifest(
+    connection: sqlite3.Connection,
+    *,
+    job_row: sqlite3.Row,
+) -> dict[str, Any] | None:
+    """Load the immutable V3 dependency snapshot for one work Job."""
+
+    role, provenance, _ = _decode_orchestration_job_fields(job_row)
+    if role != "work":
+        return None
+    if (
+        not isinstance(provenance, Mapping)
+        or provenance.get("creator") != "coo_cycle"
+        or provenance.get("job_id") != job_row["job_id"]
+        or provenance.get("root_job_id") != job_row["root_job_id"]
+        or provenance.get("role") != "work"
+        or not isinstance(provenance.get("command_id"), str)
+        or _COMMAND_ID_RE.fullmatch(str(provenance["command_id"])) is None
+    ):
+        raise StateConflict("work dependency creation provenance is invalid")
+
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?",
+        (job_row["root_job_id"],),
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("work dependency root is unavailable")
+    admission, plan_body = _validated_plan_admission(connection, root_row)
+
+    rows = connection.execute(
+        """
+        SELECT * FROM events
+        WHERE event_type='JOB_CREATED' AND job_id=? AND command_id=?
+        ORDER BY event_id
+        """,
+        (job_row["job_id"], provenance["command_id"]),
+    ).fetchall()
+    if len(rows) != 1:
+        raise StateConflict("work dependency creation receipt is not unique")
+    event = rows[0]
+    if (
+        event["actor"] != "coo"
+        or event["aggregate_type"] != "job"
+        or event["aggregate_id"] != job_row["job_id"]
+    ):
+        raise StateConflict("work dependency creation receipt identity is invalid")
+    payload = _strict_canonical_json_loads(
+        str(event["payload_json"]),
+        name="work dependency JOB_CREATED payload",
+    )
+
+    is_v3 = plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+    has_manifest = "dependency_manifest" in payload
+    has_digest = "dependency_manifest_digest" in payload
+    if not is_v3:
+        if has_manifest or has_digest:
+            raise StateConflict("legacy work unexpectedly carries dependency evidence")
+        return None
+    if admission.get("schema_version") != _COO_PLAN_ADMISSION_SCHEMA_V2:
+        raise StateConflict("V3 work dependency admission is not V2")
+    if not has_manifest or not has_digest:
+        raise StateConflict("V3 work is missing immutable dependency evidence")
+
+    manifest = _validate_work_dependency_manifest(
+        payload["dependency_manifest"],
+        root_job_id=str(job_row["root_job_id"]),
+        plan_attempt_id=str(job_row["plan_attempt_id"]),
+        plan_digest=str(job_row["plan_digest"]),
+        plan_step_id=str(job_row["plan_step_id"]),
+    )
+    if payload["dependency_manifest_digest"] != manifest["dependency_manifest_digest"]:
+        raise StateConflict("work dependency manifest digest evidence drifted")
+    return manifest
+
+
+def _assert_dependency_manifest_current(
+    connection: sqlite3.Connection,
+    *,
+    job_row: sqlite3.Row,
+) -> None:
+    """Refuse a V3 work claim when its accepted prerequisite snapshot drifted."""
+
+    persisted = _validated_job_dependency_manifest(connection, job_row=job_row)
+    if persisted is None:
+        return
+
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?",
+        (job_row["root_job_id"],),
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("work dependency manifest is no longer current: root missing")
+    try:
+        admission, plan_body = _validated_plan_admission(connection, root_row)
+        current = _work_dependency_manifest(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=plan_body,
+            plan_step_id=str(job_row["plan_step_id"]),
+        )
+    except StateConflict as exc:
+        raise StateConflict(
+            f"work dependency manifest is no longer current: {exc}"
+        ) from exc
+    if current != persisted:
+        raise StateConflict("work dependency manifest is no longer current")
 
 
 def _current_orchestration_tree_material(
@@ -8709,18 +9397,21 @@ def _current_orchestration_tree_material(
         or plan_rows[0]["current_attempt_id"] != admission["plan_attempt_id"]
     ):
         raise StateConflict("orchestration tree planner identity drifted")
-    policy = CooCyclePolicy.load()
     if len(children) > int(admission["reserved_children_total"]):
         raise StateConflict("orchestration tree exceeds its total reservation")
 
     revisions_out: list[dict[str, Any]] = []
     history_out: list[dict[str, Any]] = []
-    reservation_by_step = {
-        str(item["plan_step_id"]): item for item in admission["steps"]
-    }
-    for ordinal, step in enumerate(plan_body["steps"]):
+
+    for step in plan_body["steps"]:
         step_id = str(step["step_id"])
-        reservation = reservation_by_step[step_id]
+        current_revision = _accepted_current_step_revision(
+            connection,
+            root_row=root_row,
+            admission=admission,
+            plan_body=plan_body,
+            plan_step_id=step_id,
+        )
         revisions = [
             row
             for row in children
@@ -8728,44 +9419,11 @@ def _current_orchestration_tree_material(
             and row["plan_step_id"] == step_id
         ]
         revisions.sort(key=lambda row: (int(row["repair_round"]), str(row["job_id"])))
-        if not revisions or revisions[0]["orchestration_role"] != "work":
-            raise StateConflict("plan step has no initial work revision")
-        for index, revision in enumerate(revisions):
-            if (
-                int(revision["repair_round"]) != index
-                or revision["plan_attempt_id"] != admission["plan_attempt_id"]
-                or revision["plan_digest"] != admission["plan_digest"]
-                or (index == 0 and revision["supersedes_job_id"] is not None)
-                or (
-                    index > 0
-                    and revision["supersedes_job_id"] != revisions[index - 1]["job_id"]
-                )
-            ):
-                raise StateConflict("plan-step revision lineage is forked or skipped")
         review_rows = [
             row
             for row in children
             if row["orchestration_role"] == "review" and row["plan_step_id"] == step_id
         ]
-        for revision in revisions:
-            if (
-                len(
-                    [
-                        row
-                        for row in review_rows
-                        if row["reviews_job_id"] == revision["job_id"]
-                    ]
-                )
-                > policy.max_review_attempts_per_job
-            ):
-                raise StateConflict("revision exceeds its review Job record ceiling")
-        used_slots = len(revisions) + len(review_rows)
-        if used_slots > int(reservation["step_slots"]):
-            raise StateConflict("plan step consumed another step's reserved slot")
-        if not reservation["review_required"] and (len(revisions) != 1 or review_rows):
-            raise StateConflict(
-                "unreviewed plan step cannot consume review/repair slots"
-            )
         for revision in revisions[:-1]:
             attempt, _seal, _terminal, result_digest = (
                 _validated_role_completion_material(
@@ -8786,21 +9444,9 @@ def _current_orchestration_tree_material(
                     "independent": None,
                 }
             )
-        current = revisions[-1]
-        current_attempt, current_seal, current_terminal, current_result_digest = (
-            _validated_role_completion_material(
-                connection,
-                job_row=current,
-                expected_role=str(current["orchestration_role"]),
-                root_job_id=str(root_row["job_id"]),
-            )
-        )
-        current_reviews = sorted(
-            [row for row in review_rows if row["reviews_job_id"] == current["job_id"]],
-            key=lambda row: str(row["job_id"]),
-        )
-        qualifying: tuple[sqlite3.Row, sqlite3.Row, dict[str, Any], str] | None = None
-        current_independent_reject = False
+        selected_job = current_revision["qualifying_review_job_id"]
+        selected_attempt = current_revision["qualifying_review_attempt_id"]
+        selected_digest = current_revision["qualifying_review_result_digest"]
         for review in review_rows:
             attempt_id = review["current_attempt_id"]
             if review["status"] != JobStatus.COMPLETED.value:
@@ -8824,99 +9470,31 @@ def _current_orchestration_tree_material(
                     root_job_id=str(root_row["job_id"]),
                 )
             )
+            if (
+                str(review["job_id"]) == selected_job
+                and str(review_attempt["attempt_id"]) == selected_attempt
+                and review_digest == selected_digest
+            ):
+                continue
             body = review_seal["result_envelope"]["role_result"]
             independent = _review_attempt_is_independent(
                 connection,
                 review_attempt_id=str(review_attempt["attempt_id"]),
                 reviewed_attempt_id=str(body["reviewed_attempt_id"]),
             )
-            exact_target = bool(
-                review["reviews_job_id"] == current["job_id"]
-                and body.get("reviewed_job_id") == current["job_id"]
-                and body.get("reviewed_attempt_id") == current_attempt["attempt_id"]
-                and body.get("reviewed_result_digest") == current_result_digest
-                and body.get("repair_round") == current["repair_round"]
+            history_out.append(
+                {
+                    "kind": "review",
+                    "job_id": str(review["job_id"]),
+                    "attempt_id": str(review_attempt["attempt_id"]),
+                    "status": "COMPLETED",
+                    "verdict": body.get("verdict"),
+                    "result_digest": review_digest,
+                    "independent": bool(independent),
+                }
             )
-            if (
-                exact_target
-                and independent
-                and body.get("verdict") == "approve"
-                and qualifying is None
-            ):
-                qualifying = (review, review_attempt, review_seal, review_digest)
-            else:
-                if exact_target and independent and body.get("verdict") == "reject":
-                    current_independent_reject = True
-                history_out.append(
-                    {
-                        "kind": "review",
-                        "job_id": str(review["job_id"]),
-                        "attempt_id": str(review_attempt["attempt_id"]),
-                        "status": "COMPLETED",
-                        "verdict": body.get("verdict"),
-                        "result_digest": review_digest,
-                        "independent": bool(independent),
-                    }
-                )
-        if current_independent_reject:
-            raise StateConflict(
-                "current revision has an unresolved independent reject verdict"
-            )
-        if reservation["review_required"] and qualifying is None:
-            raise StateConflict(
-                "current revision lacks a qualifying independent approval"
-            )
-        if qualifying is None:
-            qualifying_fields: dict[str, Any] = {
-                "qualifying_review_job_id": None,
-                "qualifying_review_attempt_id": None,
-                "qualifying_review_result_digest": None,
-                "qualifying_review_effective_grant_digest": None,
-                "qualifying_review_principal_snapshot_digest": None,
-            }
-        else:
-            review, review_attempt, _review_seal, review_digest = qualifying
-            qualifying_fields = {
-                "qualifying_review_job_id": str(review["job_id"]),
-                "qualifying_review_attempt_id": str(review_attempt["attempt_id"]),
-                "qualifying_review_result_digest": review_digest,
-                "qualifying_review_effective_grant_digest": str(
-                    review_attempt["effective_grant_digest"]
-                ),
-                "qualifying_review_principal_snapshot_digest": str(
-                    review_attempt["execution_principal_snapshot_digest"]
-                ),
-            }
-        revisions_out.append(
-            {
-                "ordinal": ordinal,
-                "plan_step_id": step_id,
-                "current_job_id": str(current["job_id"]),
-                "current_attempt_id": str(current_attempt["attempt_id"]),
-                "current_result_digest": current_result_digest,
-                "current_raw_result_digest": str(
-                    current_seal["raw_result_observation_digest"]
-                ),
-                "effective_grant_digest": str(
-                    current_attempt["effective_grant_digest"]
-                ),
-                "artifact_receipt_digest": str(
-                    current_terminal["artifact_receipt_digest"]
-                ),
-                "validation_receipt_digest": str(
-                    current_terminal["validation_receipt_digest"]
-                ),
-                "placement_snapshot_digest": str(
-                    current_attempt["placement_snapshot_digest"]
-                ),
-                "execution_principal_snapshot_digest": str(
-                    current_attempt["execution_principal_snapshot_digest"]
-                ),
-                "repair_round": int(current["repair_round"]),
-                "review_required": bool(reservation["review_required"]),
-                **qualifying_fields,
-            }
-        )
+        revisions_out.append(current_revision)
+
     history_out.sort(
         key=lambda item: (
             str(item["job_id"]),
@@ -9425,6 +10003,7 @@ def _insert_cycle_child(
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
     placement: dict[str, Any] | None = None,
+    dependency_manifest: Mapping[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
 
@@ -9512,6 +10091,17 @@ def _insert_cycle_child(
     job_id = f"JOB-{max(numbers, default=0) + 1:03d}"
     timestamp = store.now_ms()
     evidence = dict(creation_evidence or {})
+    manifest = None
+    if dependency_manifest is not None:
+        if role != "work":
+            raise StateConflict("only V3 work may carry a dependency manifest")
+        manifest = _validate_work_dependency_manifest(
+            dependency_manifest,
+            root_job_id=str(root_row["job_id"]),
+            plan_attempt_id=plan_attempt_id,
+            plan_digest=plan_digest,
+            plan_step_id=plan_step_id,
+        )
     expected_evidence_keys = {
         "review": {"reviewed_result_digest"},
         "repair": {
@@ -9619,6 +10209,16 @@ def _insert_cycle_child(
             "plan_step_id": plan_step_id,
             "repair_round": repair_round,
             "supersedes_job_id": supersedes_job_id,
+            **(
+                {
+                    "dependency_manifest": manifest,
+                    "dependency_manifest_digest": manifest[
+                        "dependency_manifest_digest"
+                    ],
+                }
+                if manifest is not None
+                else {}
+            ),
             **evidence,
         },
         command_id=command_id,
@@ -9653,6 +10253,7 @@ def _reconcile_cycle_child_creation(
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
     placement: dict[str, Any] | None = None,
+    dependency_manifest: Mapping[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Reconcile one immutable child creation without consulting mutable phase state."""
 
@@ -9701,6 +10302,17 @@ def _reconcile_cycle_child_creation(
         str(row["constraints_json"]), name="cycle child constraints"
     )
     evidence = dict(creation_evidence or {})
+    manifest = None
+    if dependency_manifest is not None:
+        if role != "work":
+            raise StateConflict("only V3 work may carry a dependency manifest")
+        manifest = _validate_work_dependency_manifest(
+            dependency_manifest,
+            root_job_id=str(root_row["job_id"]),
+            plan_attempt_id=plan_attempt_id,
+            plan_digest=plan_digest,
+            plan_step_id=plan_step_id,
+        )
     source_id = provenance_source_id or str(root_row["job_id"])
     source_digest = provenance_source_digest or plan_digest
     expected_payload: dict[str, Any] = {
@@ -9720,6 +10332,16 @@ def _reconcile_cycle_child_creation(
         "plan_step_id": plan_step_id,
         "repair_round": repair_round,
         "supersedes_job_id": supersedes_job_id,
+        **(
+            {
+                "dependency_manifest": manifest,
+                "dependency_manifest_digest": manifest[
+                    "dependency_manifest_digest"
+                ],
+            }
+            if manifest is not None
+            else {}
+        ),
         **evidence,
     }
     payload = _strict_canonical_json_loads(
@@ -11082,8 +11704,15 @@ class JobRegistry:
                 admission, _plan = _validated_plan_admission(connection, root)
                 reconciled: list[Job] = []
                 for step in admission["steps"]:
+                    job_id = (
+                        step.get("work_job_id")
+                        if admission["schema_version"] == _COO_PLAN_ADMISSION_SCHEMA_V1
+                        else step.get("initial_work_job_id")
+                    )
+                    if job_id is None:
+                        continue
                     member = connection.execute(
-                        "SELECT * FROM jobs WHERE job_id=?", (step["work_job_id"],)
+                        "SELECT * FROM jobs WHERE job_id=?", (job_id,)
                     ).fetchone()
                     if member is None:
                         raise StateConflict("plan-admission replay lost a batch member")
@@ -11169,10 +11798,14 @@ class JobRegistry:
                 )
                 for step in plan_body["steps"]
             )
-            if plan_body["schema_version"] == "mastermind.execution_plan/v2":
+            is_v3 = plan_body["schema_version"] == "mastermind.execution_plan/v3"
+            if plan_body["schema_version"] in {
+                "mastermind.execution_plan/v2",
+                "mastermind.execution_plan/v3",
+            }:
                 if any("placement" not in step for step in plan_body["steps"]):
                     raise StateConflict(
-                        "v2 plan work steps require an exact placement"
+                        "v2/v3 plan work steps require an exact placement"
                     )
                 for step in plan_body["steps"]:
                     placement = step.get("placement")
@@ -11182,7 +11815,7 @@ class JobRegistry:
                         != {"provider_realm", "quota_class"}
                     ):
                         raise StateConflict(
-                            "v2 plan step placement is invalid"
+                            "v2/v3 plan step placement is invalid"
                         )
             try:
                 reserved_total = policy.reserved_children_total(requirements)
@@ -11202,7 +11835,26 @@ class JobRegistry:
                         "plan step validation IDs do not equal the reviewed root set"
                     )
                 member_command = f"{command_id}:member:{ordinal}"
-                timestamp = _finite_fresh_effect(self.store, connection, str(root["job_id"]))
+                if is_v3:
+                    reservation_steps.append(
+                        {
+                            "ordinal": ordinal,
+                            "plan_step_id": str(step["step_id"]),
+                            "step_slots": policy.reserved_step_slots(
+                                review_required=requirements[ordinal]
+                            ),
+                            "review_required": requirements[ordinal],
+                            "prerequisite_step_ids": list(
+                                step["prerequisite_step_ids"]
+                            ),
+                            "initial_work_job_id": None,
+                            "initial_work_command_id": None,
+                        }
+                    )
+                    continue
+                timestamp = _finite_fresh_effect(
+                    self.store, connection, str(root["job_id"])
+                )
                 member = _insert_cycle_child(
                     connection,
                     self.store,
@@ -11236,7 +11888,11 @@ class JobRegistry:
                     }
                 )
             admission: dict[str, Any] = {
-                "schema_version": "mastermind.coo_plan_admission/v1",
+                "schema_version": (
+                    _COO_PLAN_ADMISSION_SCHEMA_V2
+                    if is_v3
+                    else _COO_PLAN_ADMISSION_SCHEMA_V1
+                ),
                 "root_job_id": root_token,
                 "policy_sha": policy.policy_sha256,
                 "plan_attempt_id": str(plan_attempt["attempt_id"]),
@@ -11245,6 +11901,49 @@ class JobRegistry:
                 "reserved_children_total": reserved_total,
                 "command_id": command_id,
             }
+            if is_v3:
+                for ordinal, step in enumerate(plan_body["steps"]):
+                    if step["prerequisite_step_ids"]:
+                        continue
+                    member_command = f"{command_id}:member:{ordinal}"
+                    manifest = _work_dependency_manifest(
+                        connection,
+                        root_row=root,
+                        admission=admission,
+                        plan_body=plan_body,
+                        plan_step_id=str(step["step_id"]),
+                    )
+                    has_tests = "RUN_TESTS" in step["requested_authorities"]
+                    timestamp = _finite_fresh_effect(
+                        self.store, connection, str(root["job_id"])
+                    )
+                    member = _insert_cycle_child(
+                        connection,
+                        self.store,
+                        root_row=root,
+                        role="work",
+                        objective=str(step["objective"]),
+                        requested_authorities=list(step["requested_authorities"]),
+                        allowed_write_paths=list(step["allowed_write_paths"]),
+                        validation_commands=root_validations if has_tests else [],
+                        cost_class=str(step["cost_class"]),
+                        attempt_limit=int(step["attempt_limit"]),
+                        review_required=requirements[ordinal],
+                        command_id=member_command,
+                        plan_attempt_id=str(plan_attempt["attempt_id"]),
+                        plan_digest=plan_digest,
+                        plan_step_id=str(step["step_id"]),
+                        repair_round=0,
+                        placement=step.get("placement"),
+                        dependency_manifest=manifest,
+                    )
+                    created_ids.append(str(member["job_id"]))
+                    reservation_steps[ordinal]["initial_work_job_id"] = str(
+                        member["job_id"]
+                    )
+                    reservation_steps[ordinal]["initial_work_command_id"] = (
+                        member_command
+                    )
             admission["reservation_digest"] = orchestration_digest(admission)
             self.store.append_event(
                 connection,
@@ -11260,6 +11959,202 @@ class JobRegistry:
             )
             _validated_plan_admission(connection, root)
         return [self.get_job(job_id) for job_id in created_ids if self.get_job(job_id)]
+
+
+    def project_cycle_work_dependency_manifest(
+        self,
+        root_job_id: str,
+        plan_step_id: str,
+    ) -> dict[str, Any]:
+        """Project one ready deferred V3 step without minting authority."""
+
+        root_token = str(root_job_id or "").strip()
+        step_token = str(plan_step_id or "").strip()
+        with self.store.read() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            if root is None:
+                raise StateConflict("deferred work root does not exist")
+            admission, plan_body = _validated_plan_admission(connection, root)
+            step = next(
+                (
+                    item
+                    for item in plan_body["steps"]
+                    if item["step_id"] == step_token
+                ),
+                None,
+            )
+            if (
+                admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
+                or plan_body["schema_version"] != "mastermind.execution_plan/v3"
+                or step is None
+                or not step["prerequisite_step_ids"]
+            ):
+                raise StateConflict("dependency projection requires a deferred V3 step")
+            existing = connection.execute(
+                """
+                SELECT 1 FROM jobs
+                WHERE root_job_id=? AND plan_step_id=?
+                  AND orchestration_role IN ('work','repair')
+                LIMIT 1
+                """,
+                (root_token, step_token),
+            ).fetchone()
+            if existing is not None:
+                raise StateConflict("deferred V3 step already has a work revision")
+            return _work_dependency_manifest(
+                connection,
+                root_row=root,
+                admission=admission,
+                plan_body=plan_body,
+                plan_step_id=step_token,
+            )
+
+    def create_cycle_work(
+        self,
+        root_job_id: str,
+        plan_step_id: str,
+        *,
+        dependency_manifest: Mapping[str, Any],
+        command_id: str,
+    ) -> Job:
+        """Create/reconcile one dependency-ready reserved V3 work Job."""
+
+        root_token = str(root_job_id or "").strip()
+        step_token = str(plan_step_id or "").strip()
+        created_id: str | None = None
+        with self.store.transaction() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            if root is None:
+                raise StateConflict("deferred work root does not exist")
+            admission, plan_body = _validated_plan_admission(connection, root)
+            step = next(
+                (
+                    item
+                    for item in plan_body["steps"]
+                    if item["step_id"] == step_token
+                ),
+                None,
+            )
+            reservation = next(
+                (
+                    item
+                    for item in admission["steps"]
+                    if item["plan_step_id"] == step_token
+                ),
+                None,
+            )
+            if (
+                admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
+                or plan_body["schema_version"] != "mastermind.execution_plan/v3"
+                or step is None
+                or reservation is None
+                or not step["prerequisite_step_ids"]
+                or reservation["initial_work_job_id"] is not None
+                or reservation["initial_work_command_id"] is not None
+            ):
+                raise StateConflict("work creation requires one deferred V3 reservation")
+            expected_manifest = _work_dependency_manifest(
+                connection,
+                root_row=root,
+                admission=admission,
+                plan_body=plan_body,
+                plan_step_id=step_token,
+            )
+            supplied_manifest = _validate_work_dependency_manifest(
+                dependency_manifest,
+                root_job_id=root_token,
+                plan_attempt_id=str(admission["plan_attempt_id"]),
+                plan_digest=str(admission["plan_digest"]),
+                plan_step_id=step_token,
+            )
+            if supplied_manifest != expected_manifest:
+                raise StateConflict("work dependency manifest is no longer current")
+            expected_command = (
+                f"coo-cycle:{root_token}:create-work:{step_token}:"
+                f"{expected_manifest['dependency_manifest_digest']}"
+            )
+            if command_id != expected_command:
+                raise StateConflict("work creation command_id is not deterministic")
+            root_validations = _strict_canonical_json_loads(
+                str(root["validation_commands_json"]), name="root validations"
+            )
+            has_tests = "RUN_TESTS" in step["requested_authorities"]
+            validations = root_validations if has_tests else []
+            existing_command = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (command_id,)
+            ).fetchone()
+            if existing_command is not None:
+                row = _reconcile_cycle_child_creation(
+                    connection,
+                    event_row=existing_command,
+                    root_row=root,
+                    role="work",
+                    objective=str(step["objective"]),
+                    requested_authorities=list(step["requested_authorities"]),
+                    allowed_write_paths=list(step["allowed_write_paths"]),
+                    validation_commands=validations,
+                    cost_class=str(step["cost_class"]),
+                    attempt_limit=int(step["attempt_limit"]),
+                    review_required=bool(reservation["review_required"]),
+                    command_id=command_id,
+                    plan_attempt_id=str(admission["plan_attempt_id"]),
+                    plan_digest=str(admission["plan_digest"]),
+                    plan_step_id=step_token,
+                    repair_round=0,
+                    placement=step.get("placement"),
+                    dependency_manifest=expected_manifest,
+                )
+                return _job_from_row(row)
+            _assert_cycle_root_open_for_child_mutation(connection, root)
+            existing_step_rows = connection.execute(
+                """
+                SELECT * FROM jobs
+                WHERE root_job_id=? AND plan_step_id=?
+                  AND orchestration_role IN ('work','repair','review')
+                ORDER BY job_id
+                """,
+                (root_token, step_token),
+            ).fetchall()
+            if existing_step_rows:
+                raise StateConflict("deferred V3 step already consumed a reserved slot")
+            child_count = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE parent_job_id=?", (root_token,)
+                ).fetchone()[0]
+            )
+            if (
+                int(reservation["step_slots"]) < 1
+                or child_count + 1 > int(admission["reserved_children_total"])
+            ):
+                raise StateConflict("deferred work exceeds its reserved slot capacity")
+            row = _insert_cycle_child(
+                connection,
+                self.store,
+                root_row=root,
+                role="work",
+                objective=str(step["objective"]),
+                requested_authorities=list(step["requested_authorities"]),
+                allowed_write_paths=list(step["allowed_write_paths"]),
+                validation_commands=validations,
+                cost_class=str(step["cost_class"]),
+                attempt_limit=int(step["attempt_limit"]),
+                review_required=bool(reservation["review_required"]),
+                command_id=command_id,
+                plan_attempt_id=str(admission["plan_attempt_id"]),
+                plan_digest=str(admission["plan_digest"]),
+                plan_step_id=step_token,
+                repair_round=0,
+                placement=step.get("placement"),
+                dependency_manifest=expected_manifest,
+            )
+            created_id = str(row["job_id"])
+        result = self.get_job(str(created_id))
+        assert result is not None
+        return result
 
     def create_cycle_review(
         self,
@@ -12016,6 +12911,207 @@ class JobRegistry:
             return CooRetryMutationOutcome(
                 action="BLOCKED", command_id=block_command, receipt=payload
             )
+
+    def record_cycle_dispatch_effect_unknown(
+        self,
+        root_job_id: str,
+        *,
+        selected_job_id: str,
+        dispatch_command_id: str,
+    ) -> dict[str, Any]:
+        """Persist one exact lost-return marker after a durable COO claim."""
+
+        root_token = str(root_job_id or "").strip()
+        selected_token = str(selected_job_id or "").strip()
+        dispatch_token = str(dispatch_command_id or "").strip()
+        marker_command = f"{dispatch_token}:effect-unknown"
+        with self.store.transaction() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            selected = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (selected_token,)
+            ).fetchone()
+            claim = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (dispatch_token,)
+            ).fetchone()
+            if (
+                root is None
+                or selected is None
+                or root["root_job_id"] != root_token
+                or root["orchestration_role"] != "aggregation"
+                or selected["root_job_id"] != root_token
+                or claim is None
+                or claim["event_type"] != "JOB_CLAIMED"
+                or claim["job_id"] != selected_token
+                or claim["attempt_id"] is None
+                or selected["current_attempt_id"] != claim["attempt_id"]
+            ):
+                raise StateConflict(
+                    "ambiguous COO dispatch is not bound to the current durable claim"
+                )
+
+            existing = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (marker_command,)
+            ).fetchone()
+            if existing is not None:
+                return _validated_coo_dispatch_effect_event(
+                    connection, existing, expected_root_id=root_token
+                )
+
+            unknown_rows = connection.execute(
+                "SELECT * FROM events WHERE event_type=? AND job_id=? ORDER BY event_id",
+                (_COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE, root_token),
+            ).fetchall()
+            for row in unknown_rows:
+                prior = _validated_coo_dispatch_effect_event(
+                    connection, row, expected_root_id=root_token
+                )
+                resolved = connection.execute(
+                    "SELECT * FROM events WHERE command_id=?",
+                    (f"{prior['dispatch_command_id']}:reconciled",),
+                ).fetchone()
+                if resolved is None:
+                    raise StateConflict(
+                        "another COO dispatch effect remains unresolved"
+                    )
+                _validated_coo_dispatch_effect_event(
+                    connection, resolved, expected_root_id=root_token
+                )
+
+            payload = {
+                "schema_version": _COO_DISPATCH_EFFECT_SCHEMA,
+                "root_job_id": root_token,
+                "selected_job_id": selected_token,
+                "dispatch_command_id": dispatch_token,
+                "attempt_id": str(claim["attempt_id"]),
+                "phase": "EFFECT_UNKNOWN",
+                "command_id": marker_command,
+            }
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=root_token,
+                event_type=_COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE,
+                command_id=marker_command,
+                actor="coo",
+                job_id=root_token,
+                attempt_id=str(claim["attempt_id"]),
+                payload=payload,
+                timestamp_ms=_finite_fresh_effect(
+                    self.store, connection, root_token
+                ),
+            )
+            return payload
+
+    def pending_cycle_dispatch_effect_unknown(
+        self, root_job_id: str
+    ) -> dict[str, Any] | None:
+        """Return the sole unresolved lost-return marker for one COO root."""
+
+        root_token = str(root_job_id or "").strip()
+        with self.store.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM events WHERE event_type=? AND job_id=? ORDER BY event_id",
+                (_COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE, root_token),
+            ).fetchall()
+            unresolved: list[dict[str, Any]] = []
+            for row in rows:
+                payload = _validated_coo_dispatch_effect_event(
+                    connection, row, expected_root_id=root_token
+                )
+                resolved = connection.execute(
+                    "SELECT * FROM events WHERE command_id=?",
+                    (f"{payload['dispatch_command_id']}:reconciled",),
+                ).fetchone()
+                if resolved is None:
+                    unresolved.append(payload)
+                    continue
+                resolution = _validated_coo_dispatch_effect_event(
+                    connection, resolved, expected_root_id=root_token
+                )
+                if (
+                    resolution["selected_job_id"] != payload["selected_job_id"]
+                    or resolution["attempt_id"] != payload["attempt_id"]
+                    or resolution["dispatch_command_id"]
+                    != payload["dispatch_command_id"]
+                ):
+                    raise StateConflict(
+                        "COO dispatch reconciliation does not match ambiguity"
+                    )
+            if len(unresolved) > 1:
+                raise StateConflict(
+                    "COO root has multiple unresolved dispatch effects"
+                )
+            return unresolved[0] if unresolved else None
+
+    def reconcile_cycle_dispatch_effect(
+        self,
+        root_job_id: str,
+        *,
+        selected_job_id: str,
+        dispatch_command_id: str,
+        receipt: OrchestrationDispatchOutcome,
+    ) -> dict[str, Any]:
+        """Close one ambiguity only after exact-command replay returns its claim."""
+
+        root_token = str(root_job_id or "").strip()
+        selected_token = str(selected_job_id or "").strip()
+        dispatch_token = str(dispatch_command_id or "").strip()
+        marker_command = f"{dispatch_token}:effect-unknown"
+        resolution_command = f"{dispatch_token}:reconciled"
+        with self.store.transaction() as connection:
+            marker = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (marker_command,)
+            ).fetchone()
+            if marker is None:
+                raise StateConflict("COO dispatch ambiguity marker is unavailable")
+            pending = _validated_coo_dispatch_effect_event(
+                connection, marker, expected_root_id=root_token
+            )
+            if (
+                pending["selected_job_id"] != selected_token
+                or pending["dispatch_command_id"] != dispatch_token
+                or receipt.job_id != selected_token
+                or receipt.command_id != dispatch_token
+                or receipt.attempt.attempt_id != pending["attempt_id"]
+            ):
+                raise StateConflict(
+                    "COO dispatch reconciliation receipt differs from original claim"
+                )
+
+            existing = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (resolution_command,)
+            ).fetchone()
+            if existing is not None:
+                return _validated_coo_dispatch_effect_event(
+                    connection, existing, expected_root_id=root_token
+                )
+
+            payload = {
+                "schema_version": _COO_DISPATCH_EFFECT_SCHEMA,
+                "root_job_id": root_token,
+                "selected_job_id": selected_token,
+                "dispatch_command_id": dispatch_token,
+                "attempt_id": pending["attempt_id"],
+                "phase": "RECONCILED",
+                "command_id": resolution_command,
+            }
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=root_token,
+                event_type=_COO_DISPATCH_RECONCILED_EVENT_TYPE,
+                command_id=resolution_command,
+                actor="coo",
+                job_id=root_token,
+                attempt_id=pending["attempt_id"],
+                payload=payload,
+                timestamp_ms=_finite_fresh_effect(
+                    self.store, connection, root_token
+                ),
+            )
+            return payload
 
     def validated_cycle_block(
         self, root_job_id: str
@@ -13447,6 +14543,11 @@ class AttemptRegistry:
 
         if exact_target is not None:
             _validate_exact_worker_target_selection(connection, exact_target, job_row, capacity, authority_policy_hash)
+        if orchestration_role == "work":
+            _assert_dependency_manifest_current(
+                connection,
+                job_row=job_row,
+            )
         job_id = str(job_row["job_id"])
         attempt_id = f"ATT-{uuid4().hex}"
         lease_token = secrets.token_urlsafe(32)

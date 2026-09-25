@@ -38,6 +38,10 @@ Resolve exact names/IDs before broad search where possible:
 * Executive intent/Job if runtime work exists.
 
 Then identify the canonical owner for each fact. Do not use title similarity to invent WS ↔ MAS ↔ runtime mappings.
+Historical ownership is not current liveness. Resolve the accountable role separately from the current
+receiver, live execution/source lease and pending effects using ACTIVE_EXECUTION's recovery procedure.
+The active assigned session retains the recovery action until a real successor accepts; a dead chat,
+stale claim or unavailable incumbent does not justify ending with only "the owner must act".
 
 If the semantic registry lacks a lawful parent, report the gap. Do not create an approximate workstream merely to make the portfolio neat.
 

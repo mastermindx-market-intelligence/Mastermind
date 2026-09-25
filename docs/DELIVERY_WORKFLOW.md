@@ -32,8 +32,9 @@ worktree and move only the task's deliberate edits there.
 
 ## Complete a change
 
-1. Run the smallest relevant test set while iterating, then the repository CI
-   gate before handoff.
+1. Run the smallest relevant local test set while iterating. Publish a truthful candidate
+   and request review with those results while hosted checks are pending; full required CI
+   remains a merge/release gate, not a prerequisite to handing off a reviewable candidate.
 2. Review `git diff --check`, `git status`, and the staged diff. Never stage
    `.env*`, credentials, logs, caches, runtime `data/`, or backup archives.
 3. Commit a scoped change, push the branch, and open a PR:
@@ -43,16 +44,29 @@ worktree and move only the task's deliberate edits there.
    gh pr create --fill
    ```
 
-4. Wait for required checks. If checks fail or the work is incomplete, mark the
-   PR draft and stop; do not merge or deploy.
-5. Merge through GitHub:
+4. CI blocks merge/release, not independent useful work. If checks fail or work is
+   incomplete, keep the PR draft and release held; diagnose the failure and repair it within
+   the assigned scope. While checks are queued/running, continue the highest-leverage safe
+   independent implementation, tests, review or integration preparation. Do not duplicate an
+   incumbent worker or mutate its frozen review candidate merely to appear busy.
+5. Offload the wait to one existing Class-E or Class-T observer through the current
+   process/CI owner. Bind repository, PR, exact head SHA and workflow run IDs; retain the
+   process/run handle and return location in the existing checkpoint. Reuse an observer rather
+   than creating one per check or chat. No merge/deploy action belongs in the observer.
+   Consume only the matching candidate's results; a changed head invalidates stale observations.
+   Queued CI is not a failing build, and do not push empty/rebase-only commits to restart CI.
+   Without a usable observer, continue useful foreground work and check once at the next real
+   integration boundary. Never claim a background Web turn or automatic wake that does not exist.
+6. After required exact-candidate checks and review pass, and merge is authorized, merge
+   through GitHub. A status query is not permission to merge; preserve current head/concurrency
+   checks and never use an admin bypass:
 
    ```bash
-   gh pr checks --watch
+   gh pr checks --required
    gh pr merge --squash --delete-branch
    ```
 
-6. Resolve the merge commit from GitHub and deploy that exact commit:
+7. Resolve the merge commit from GitHub and deploy that exact commit:
 
    ```bash
    git fetch origin master
