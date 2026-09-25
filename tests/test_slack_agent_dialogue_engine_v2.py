@@ -2885,3 +2885,25 @@ def test_same_identity_different_fingerprint_still_conflicts() -> None:
         assert client.post_call_count == 1
 
     run(scenario())
+
+
+def test_status_contract_is_unchanged_by_packet_support() -> None:
+    engine = make_engine(setup_client())
+
+    expected = {
+        "schema": "mastermind.agent_dialogue_status.v2",
+        "status": "DEVELOPMENT_UNARMED",
+        "workspace_id": "T0BRD2AQXQV",
+        "channel_id": "C0BRUL9F2V7",
+        "relay_bot_user_id": "U0BST4WG996",
+        "sol_sender_count": 2,
+        "method_timeout_seconds": 10.0,
+        "persistent_state": False,
+        "production_token_installed": False,
+        "production_armed": False,
+    }
+
+    assert engine.status() == expected
+    assert tuple(engine.status()) == tuple(expected)
+    assert engine.status()["status"] == "DEVELOPMENT_UNARMED"
+    assert engine.status()["production_armed"] is False
