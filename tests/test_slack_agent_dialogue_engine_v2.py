@@ -2705,3 +2705,183 @@ def test_packet_post_commit_ambiguity_is_send_effect_unknown() -> None:
         )
     )
     assert read.packet == clean_packet
+
+
+def test_same_key_different_frame_kind_does_not_coalesce() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import SendFrameKind
+
+    class HeldPostClient(InMemorySlackClient):
+        def __init__(self) -> None:
+            super().__init__(relay_bot_user_id=BOT)
+            self.post_entered = asyncio.Event()
+            self.release_post = asyncio.Event()
+
+        async def post_reply(self, *, channel_id: str, thread_ts: str, text: str):
+            self.post_entered.set()
+            await self.release_post.wait()
+            return await super().post_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+            )
+
+    async def scenario() -> None:
+        client = HeldPostClient()
+        client.add_parent(parent_message())
+        engine = make_engine(client)
+        shared_key = "asd-shared-key-frame-kind-01"
+        message = v2_message("ACK", message_key=shared_key)
+        packet = packet_value(message_key=shared_key)
+        message_prepared = await engine.prepare_send_message(
+            thread_ts=THREAD_TS, context=context(), message=message
+        )
+        packet_prepared = await engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=packet,
+            frame_kind=SendFrameKind.CONSULTATION_PACKET,
+        )
+
+        first_task = asyncio.create_task(
+            engine.commit_send_message(
+                message_prepared, fingerprint=message_prepared.fingerprint
+            )
+        )
+        await asyncio.wait_for(client.post_entered.wait(), timeout=1)
+        second_task = asyncio.create_task(
+            engine.commit_send_message(
+                packet_prepared, fingerprint=packet_prepared.fingerprint
+            )
+        )
+        await asyncio.sleep(0)
+        client.release_post.set()
+
+        message_receipt, packet_receipt = await asyncio.gather(
+            first_task, second_task
+        )
+        assert message_receipt.action == "POSTED"
+        assert packet_receipt.action == "POSTED"
+        assert message_receipt.message_key == shared_key
+        assert packet_receipt.message_key == shared_key
+        assert client.post_call_count == 2
+
+    run(scenario())
+
+
+def test_same_frame_kind_same_key_still_coalesces_to_one_send() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import SendFrameKind
+
+    class HeldPostClient(InMemorySlackClient):
+        def __init__(self) -> None:
+            super().__init__(relay_bot_user_id=BOT)
+            self.post_entered = asyncio.Event()
+            self.release_post = asyncio.Event()
+
+        async def post_reply(self, *, channel_id: str, thread_ts: str, text: str):
+            self.post_entered.set()
+            await self.release_post.wait()
+            return await super().post_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+            )
+
+    async def scenario() -> None:
+        client = HeldPostClient()
+        client.add_parent(parent_message())
+        engine = make_engine(client)
+        packet = packet_value(message_key="asd-packet-singleflight-001")
+        first = await engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=packet,
+            frame_kind=SendFrameKind.CONSULTATION_PACKET,
+        )
+        second = await engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=packet,
+            frame_kind=SendFrameKind.CONSULTATION_PACKET,
+        )
+
+        first_task = asyncio.create_task(
+            engine.commit_send_message(first, fingerprint=first.fingerprint)
+        )
+        await asyncio.wait_for(client.post_entered.wait(), timeout=1)
+        second_task = asyncio.create_task(
+            engine.commit_send_message(second, fingerprint=second.fingerprint)
+        )
+        await asyncio.sleep(0)
+        client.release_post.set()
+
+        first_receipt, second_receipt = await asyncio.gather(first_task, second_task)
+        assert first_receipt == second_receipt
+        assert first_receipt.action == "POSTED"
+        assert client.post_call_count == 1
+
+    run(scenario())
+
+
+def test_same_identity_different_fingerprint_still_conflicts() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import SendFrameKind
+
+    class HeldPostClient(InMemorySlackClient):
+        def __init__(self) -> None:
+            super().__init__(relay_bot_user_id=BOT)
+            self.post_entered = asyncio.Event()
+            self.release_post = asyncio.Event()
+
+        async def post_reply(self, *, channel_id: str, thread_ts: str, text: str):
+            self.post_entered.set()
+            await self.release_post.wait()
+            return await super().post_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+            )
+
+    async def scenario() -> None:
+        client = HeldPostClient()
+        client.add_parent(parent_message())
+        engine = make_engine(client)
+        shared_key = "asd-packet-flight-conflict-01"
+        first_packet = packet_value(
+            message_key=shared_key, question="First bounded packet question?"
+        )
+        second_packet = build_consultation(
+            raw_packet(shared_key, question="Second bounded packet question?")
+        )
+        assert second_packet["fingerprint"] != first_packet["fingerprint"]
+        first = await engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=first_packet,
+            frame_kind=SendFrameKind.CONSULTATION_PACKET,
+        )
+        second = await engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=second_packet,
+            frame_kind=SendFrameKind.CONSULTATION_PACKET,
+        )
+
+        first_task = asyncio.create_task(
+            engine.commit_send_message(first, fingerprint=first.fingerprint)
+        )
+        await asyncio.wait_for(client.post_entered.wait(), timeout=1)
+
+        with pytest.raises(DialogueEngineError) as exc:
+            await asyncio.wait_for(
+                engine.commit_send_message(
+                    second, fingerprint=second.fingerprint
+                ),
+                timeout=0.1,
+            )
+        assert code(exc) == "MESSAGE_KEY_CONFLICT"
+        assert client.post_call_count == 0
+
+        client.release_post.set()
+        assert (await first_task).action == "POSTED"
+        assert client.post_call_count == 1
+
+    run(scenario())
