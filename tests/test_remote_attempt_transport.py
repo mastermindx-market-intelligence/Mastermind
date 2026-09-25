@@ -353,10 +353,6 @@ def test_launch_resolves_only_the_already_claimed_worker_and_host(tmp_path: Path
     }
 
 
-@pytest.mark.parametrize(
-    ("host_ref", "worker_id"),
-    [(HOST_B, WORKER), (HOST_A, "remote-codex-02")],
-)
 def test_resolution_is_runtime_read_only(tmp_path: Path) -> None:
     runtime, job, lease = _claimed_runtime(tmp_path)
 
@@ -423,6 +419,10 @@ def test_resolution_refuses_noncanonical_caller_identity(
     assert raised.value.code == "INVALID_INPUT"
 
 
+@pytest.mark.parametrize(
+    ("host_ref", "worker_id"),
+    [(HOST_B, WORKER), (HOST_A, "remote-codex-02")],
+)
 def test_root_binding_cannot_redirect_capacity_identity(
     tmp_path: Path, host_ref: str, worker_id: str
 ) -> None:
