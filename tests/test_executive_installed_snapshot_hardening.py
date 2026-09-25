@@ -1525,6 +1525,15 @@ def test_clean_snapshot_uses_buffered_type_only_object_probes(tmp_path: Path):
         not any("objectsize" in argument for argument in command)
         for command in probes
     )
+    connectivity = [
+        command for command in commands
+        if command[:2] == ("git", "fsck")
+    ]
+    assert len(connectivity) == 1
+    assert "--connectivity-only" in connectivity[0]
+    assert "--no-dangling" in connectivity[0]
+    assert "--no-reflogs" in connectivity[0]
+    assert "--no-progress" in connectivity[0]
 
 
 def test_macro_materialization_plan_reuses_verified_tree(tmp_path: Path):
@@ -1952,8 +1961,8 @@ def test_clean_snapshot_overlap_still_refuses_untracked_ignored_and_empty(
             include_seal=True, snapshot_capture=captures,
         )
 
-    assert len(state["inventories"]) == 1
-    leaves, directories, _worktree_seal = state["inventories"][0]
+    assert state["inventories"]
+    leaves, directories, _worktree_seal = state["inventories"][-1]
     assert leaves["untracked.txt"] == "regular"
     assert leaves["ignored/payload.txt"] == "regular"
     assert "empty" in directories
@@ -2188,3 +2197,123 @@ def test_installed_collector_refuses_live_macro_mutation_made_during_child(
     assert materialized_roots[0] != macro
     assert not materialized_roots[0].exists()
     assert consumed.read_text(encoding="utf-8").endswith("mutated\n")
+
+
+def test_verified_snapshot_generation_matches_full_seal_and_refuses_namespace_drift(
+    tmp_path: Path,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+        _snapshot_generation_from_verified_snapshot,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    macro, _macro_sha = _macro_sparse_fixture(tmp_path)
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    captures = []
+    observed = _clean_git_snapshot(
+        macro,
+        runner=_default_packet_runner,
+        env=env,
+        label="Macro source",
+        content_scope="macro_brief",
+        include_seal=True,
+        snapshot_capture=captures,
+    )
+    assert isinstance(observed, tuple)
+    assert len(captures) == 1
+    snapshot = captures[0]
+
+    assert _snapshot_generation_from_verified_snapshot(
+        snapshot,
+        runner=_default_packet_runner,
+        env=env,
+        label="Macro source",
+        deadline=None,
+    ) == (snapshot.head, snapshot.generation_seal)
+
+    (macro / "unexpected.tmp").write_text("untracked\n", encoding="utf-8")
+    with pytest.raises(GatewayError, match="worktree path set differs"):
+        _snapshot_generation_from_verified_snapshot(
+            snapshot,
+            runner=_default_packet_runner,
+            env=env,
+            label="Macro source",
+            deadline=None,
+        )
+
+
+def test_installed_collector_reuses_verified_macro_paths_after_child(
+    tmp_path: Path, monkeypatch,
+):
+    import json
+    from integrations.executive_mcp import installed
+    from integrations.executive_mcp.installed import (
+        InstalledBootPacketCollector,
+        _default_packet_runner,
+    )
+
+    source_parent = tmp_path / "source-parent-post-seal"
+    source_parent.mkdir()
+    repo, _tracked = _clean_repo(source_parent)
+    macro, macro_sha = _macro_sparse_fixture(tmp_path)
+    code = tmp_path / "immutable-release-post-seal"
+    (code / "scripts").mkdir(parents=True)
+    python = tmp_path / "python-post-seal"
+    python.write_text("fixture", encoding="utf-8")
+    source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    canonical_macro = macro.resolve()
+    full_macro_walks = 0
+    original_worktree_path_sets = installed._worktree_path_sets
+
+    def counted_worktree_path_sets(path, **kwargs):
+        nonlocal full_macro_walks
+        if Path(path).resolve() == canonical_macro:
+            full_macro_walks += 1
+        return original_worktree_path_sets(path, **kwargs)
+
+    monkeypatch.setattr(installed, "_worktree_path_sets", counted_worktree_path_sets)
+
+    def runner(argv, **kwargs):
+        argv_s = tuple(str(item) for item in argv)
+        if argv_s[0] == "git":
+            return _default_packet_runner(argv, **kwargs)
+        child_macro = Path(argv_s[argv_s.index("--macro-root") + 1]).resolve()
+        return {
+            "code": 0,
+            "stdout": json.dumps({
+                "schema": "mastermind.ceo_boot_packet.v1",
+                "mastermind": {"root": str(repo), "sha": source_sha, "branch": "HEAD"},
+                "macro": {
+                    "root": str(child_macro),
+                    "sha": macro_sha,
+                    "resolved_via": "flag",
+                    "candidates_tried": [],
+                },
+            }),
+            "stderr": "",
+            "timed_out": False,
+            "limit_exceeded": False,
+            "invalid_utf8": False,
+        }
+
+    collector = InstalledBootPacketCollector(
+        source_root=repo,
+        macro_root=macro,
+        code_root=code,
+        python_executable=python,
+        runner=runner,
+        expected_source_sha=source_sha,
+    )
+    packet = collector(
+        repo_root=repo,
+        macro_root_flag=str(macro),
+        now=None,
+        timeout=8.0,
+    )
+
+    assert full_macro_walks == 1
+    assert packet["mastermind"]["sha"] == source_sha
+    assert packet["macro"]["sha"] == macro_sha
