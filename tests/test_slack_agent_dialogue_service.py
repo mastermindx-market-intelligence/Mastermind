@@ -26,7 +26,13 @@ from integrations.slack_agent_dialogue.engine import (
     MessageReceipt,
     SlackMessage,
 )
+from integrations.slack_agent_dialogue.contract_v2 import (
+    PARENT_SCHEMA_V2,
+    build_parent_v2,
+    render_parent_v2,
+)
 from integrations.slack_agent_dialogue.engine_v2 import (
+    DialogueEngineV2,
     PreparedMessageSend,
     SendFrameKind,
 )
@@ -3226,3 +3232,307 @@ def test_v2_packet_read_never_returns_transcript_or_raw_rejected_text(
     assert "messages" not in encoded
     assert "UNTRUSTED_PACKET_MARKER" not in encoded
     assert result["outcome"] == "UNCERTAIN"
+
+
+# --- IAC-P1-B2-0: the incumbent public read_thread result shape ------------
+
+PUBLIC_THREAD_READ_KEYS = {
+    "thread_ts",
+    "messages",
+    "historical_messages",
+    "ineligible_count",
+    "mutated_count",
+}
+
+V2_PARENT_OPERATION_KEY = "worker-presence-dialogue-service-20260827-001"
+UNTRUSTED_PACKET_WRITER = "U0WRONG001"
+
+
+class _AlwaysWithinCommissionPolicy:
+    def minimum_authority(self, *, request, option) -> str:
+        return "WITHIN_COMMISSION"
+
+    def allows_continuation(self, *, request, reply) -> bool:
+        return True
+
+
+def v2_parent_frame() -> SlackMessage:
+    return SlackMessage(
+        ts=THREAD_TS,
+        author_user_id=SOL,
+        text=render_parent_v2(
+            build_parent_v2(
+                {
+                    "schema": PARENT_SCHEMA_V2,
+                    "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+                    "commission_ref": commission(),
+                    "session_ref": "asd-session-fable0001",
+                    "operation_key": V2_PARENT_OPERATION_KEY,
+                    "watch_mode": "turn_watch_v1",
+                    "allowed_sol_user_ids": [SOL],
+                    "created_at": "2026-08-27T13:00:00Z",
+                }
+            )
+        ),
+    )
+
+
+def real_v2_client_and_service(
+    socket_root: Path,
+) -> tuple[AgentDialogueService, DialogueEngineV2, InMemorySlackClient]:
+    """A real ``DialogueEngineV2`` behind the service, built the engine_v2 way."""
+
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(v2_parent_frame())
+    engine, _client = engine_and_client()
+    engine_v2 = DialogueEngineV2(
+        DialoguePolicy(
+            workspace_id="T0BRD2AQXQV",
+            channel_id="C0BRUL9F2V7",
+            relay_bot_user_id=BOT,
+            allowed_sol_user_ids=(SOL,),
+            allowed_parent_user_ids=(SOL,),
+            poll_interval_seconds=0,
+        ),
+        client,
+        authority_policy=_AlwaysWithinCommissionPolicy(),
+        sleep=asyncio.sleep,
+    )
+    service = AgentDialogueService(
+        ServiceConfig(
+            socket_path=socket_root / "dialogue.sock",
+            allowed_peer_uids=(os.geteuid(),),
+            request_timeout_seconds=1,
+        ),
+        engine,
+        engine_v2=engine_v2,
+    )
+    return service, engine_v2, client
+
+
+def packet_frame_with_key(message_key: str) -> dict[str, object]:
+    return packet_value(
+        message_key=message_key,
+        correlation={
+            **raw_packet()["correlation"],
+            "request_message_key": message_key,
+        },
+    )
+
+
+def v2_read_thread_request() -> dict[str, object]:
+    return request_envelope_v2(
+        "read_thread", {"context": context_v2_dict(), "thread_ts": THREAD_TS}
+    )
+
+
+class _PacketAccountingDouble:
+    """Engine double whose non-read results carry packet accounting too."""
+
+    async def bind_or_verify_thread(self, context) -> dict[str, object]:
+        return {"thread_ts": THREAD_TS, "packet_count": 3}
+
+    async def read_thread(self, *, thread_ts: str, context) -> dict[str, object]:
+        return {
+            "thread_ts": thread_ts,
+            "messages": [],
+            "historical_messages": [],
+            "ineligible_count": 0,
+            "mutated_count": 0,
+            "packet_count": 1,
+            "packet_ineligible_count": 0,
+        }
+
+
+class _StagedReadDouble:
+    """Engine double returning one staged read_thread value verbatim."""
+
+    def __init__(self, staged: object) -> None:
+        self.staged = staged
+
+    async def read_thread(self, *, thread_ts: str, context) -> object:
+        return self.staged
+
+
+def test_v1_public_read_thread_omits_packet_accounting(socket_root: Path) -> None:
+    srv, _client = service(socket_root)
+
+    read = run(
+        srv._dispatch(
+            request_envelope(
+                "read_thread", {"context": context_dict(), "thread_ts": THREAD_TS}
+            )
+        )
+    )
+
+    assert set(read) == PUBLIC_THREAD_READ_KEYS
+
+
+def test_v2_public_read_thread_omits_packet_accounting(socket_root: Path) -> None:
+    srv, _engine_v2, _client = real_v2_client_and_service(socket_root)
+
+    read = run(srv._dispatch(v2_read_thread_request()))
+
+    assert set(read) == PUBLIC_THREAD_READ_KEYS
+
+
+def test_v2_public_read_thread_with_authorized_packet_omits_packet_accounting(
+    socket_root: Path,
+) -> None:
+    service, engine_v2, client = real_v2_client_and_service(socket_root)
+    packet = packet_frame_with_key("asd-packet-svc-public-0001")
+    client.add_reply(
+        SlackMessage(
+            ts="1787471000.000002",
+            author_user_id=BOT,
+            text=render_consultation_packet(packet),
+            thread_ts=THREAD_TS,
+        )
+    )
+    internal = run(
+        engine_v2.read_thread(
+            thread_ts=THREAD_TS,
+            context=service_module._context_v2(context_v2_dict()),
+        )
+    )
+    assert internal.packet_count == 1
+
+    read = run(service._dispatch(v2_read_thread_request()))
+
+    assert set(read) == PUBLIC_THREAD_READ_KEYS
+    assert read["ineligible_count"] == 0
+    assert read["messages"] == []
+
+
+def test_v2_public_read_thread_with_unauthorized_packet_omits_packet_accounting(
+    socket_root: Path,
+) -> None:
+    service, engine_v2, client = real_v2_client_and_service(socket_root)
+    packet = packet_frame_with_key("asd-packet-svc-public-0002")
+    client.add_reply(
+        SlackMessage(
+            ts="1787471000.000003",
+            author_user_id=UNTRUSTED_PACKET_WRITER,
+            text=render_consultation_packet(packet),
+            thread_ts=THREAD_TS,
+        )
+    )
+    internal = run(
+        engine_v2.read_thread(
+            thread_ts=THREAD_TS,
+            context=service_module._context_v2(context_v2_dict()),
+        )
+    )
+    assert internal.packet_ineligible_count == 1
+    assert internal.ineligible_count == 0
+
+    read = run(service._dispatch(v2_read_thread_request()))
+
+    assert set(read) == PUBLIC_THREAD_READ_KEYS
+    assert read["ineligible_count"] == 0
+
+
+def test_packet_accounting_is_stripped_only_from_read_thread(socket_root: Path) -> None:
+    srv = AgentDialogueService(
+        ServiceConfig(
+            socket_path=socket_root / "dialogue.sock",
+            allowed_peer_uids=(os.geteuid(),),
+            request_timeout_seconds=1,
+        ),
+        _PacketAccountingDouble(),
+    )
+
+    bound = run(
+        srv._dispatch(request_envelope("bind_or_verify_thread", {"context": context_dict()}))
+    )
+    assert bound == {"thread_ts": THREAD_TS, "packet_count": 3}
+
+    read = run(
+        srv._dispatch(
+            request_envelope(
+                "read_thread", {"context": context_dict(), "thread_ts": THREAD_TS}
+            )
+        )
+    )
+    assert set(read) == PUBLIC_THREAD_READ_KEYS
+
+
+def test_public_read_thread_preserves_unrelated_result_keys(socket_root: Path) -> None:
+    staged = {
+        "thread_ts": THREAD_TS,
+        "messages": [],
+        "historical_messages": [],
+        "ineligible_count": 0,
+        "mutated_count": 0,
+        "packet_count": 2,
+        "future_field": 1,
+    }
+    srv = AgentDialogueService(
+        ServiceConfig(
+            socket_path=socket_root / "dialogue.sock",
+            allowed_peer_uids=(os.geteuid(),),
+            request_timeout_seconds=1,
+        ),
+        _StagedReadDouble(staged),
+    )
+
+    read = run(
+        srv._dispatch(
+            request_envelope(
+                "read_thread", {"context": context_dict(), "thread_ts": THREAD_TS}
+            )
+        )
+    )
+    assert read == {
+        "thread_ts": THREAD_TS,
+        "messages": [],
+        "historical_messages": [],
+        "ineligible_count": 0,
+        "mutated_count": 0,
+        "future_field": 1,
+    }
+    assert "packet_count" not in read
+    assert read["future_field"] == 1
+
+    non_dict = AgentDialogueService(
+        ServiceConfig(
+            socket_path=socket_root / "dialogue.sock",
+            allowed_peer_uids=(os.geteuid(),),
+            request_timeout_seconds=1,
+        ),
+        _StagedReadDouble(["not", "a", "map"]),
+    )
+    passthrough = run(
+        non_dict._dispatch(
+            request_envelope(
+                "read_thread", {"context": context_dict(), "thread_ts": THREAD_TS}
+            )
+        )
+    )
+    assert passthrough == ["not", "a", "map"]
+
+
+def test_malformed_relay_authored_packet_still_refuses_before_a_public_result(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, _engine_v2, client = real_v2_client_and_service(socket_root)
+        client.add_reply(
+            SlackMessage(
+                ts="1787471000.000004",
+                author_user_id=BOT,
+                text=render_consultation_packet(
+                    packet_frame_with_key("asd-packet-svc-public-0003")
+                )
+                + " UNTRUSTED_PACKET_TAIL",
+                thread_ts=THREAD_TS,
+            )
+        )
+        await srv.start()
+        try:
+            response = await call_service(srv.config.socket_path, v2_read_thread_request())
+        finally:
+            await srv.close()
+        assert response == {"ok": False, "error": {"code": "THREAD_MESSAGE_INVALID"}}
+
+    run(scenario())

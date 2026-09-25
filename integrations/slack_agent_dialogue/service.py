@@ -301,6 +301,29 @@ def _context_v2(value: Any) -> DialogueContextV2:
     return context
 
 
+_PACKET_ACCOUNTING_FIELDS = ("packet_count", "packet_ineligible_count")
+
+
+def _public_thread_read(result: Any) -> Any:
+    """Project a read_thread result onto the incumbent public response shape.
+
+    Packet accounting belongs to the P1 consultation packet wire.  The public
+    ``read_thread`` response shape is a lifecycle contract that existing
+    consumers validate by exact key set, and a lifecycle consumer must not have
+    to learn packet-internal accounting merely because P1 added a packet wire.
+    Only the packet accounting keys are removed; every other key of whatever
+    the engine returned is preserved exactly.
+    """
+    if not isinstance(result, dict):
+        return result
+    if not any(field in result for field in _PACKET_ACCOUNTING_FIELDS):
+        return result
+    projected = dict(result)
+    for field in _PACKET_ACCOUNTING_FIELDS:
+        projected.pop(field, None)
+    return projected
+
+
 class AgentDialogueService:
     """Peer-authorized one-request-at-a-time service over injected engines."""
 
@@ -785,10 +808,12 @@ class AgentDialogueService:
             values = _exact_mapping(args, {"context", "thread_ts"})
             if not isinstance(values["thread_ts"], str):
                 raise DialogueServiceError("REQUEST_INVALID")
-            return self.engine_result(
-                await self.engine.read_thread(
-                    thread_ts=values["thread_ts"],
-                    context=_context(values["context"]),
+            return _public_thread_read(
+                self.engine_result(
+                    await self.engine.read_thread(
+                        thread_ts=values["thread_ts"],
+                        context=_context(values["context"]),
+                    )
                 )
             )
         if operation == "wait_for_reply":
@@ -875,10 +900,12 @@ class AgentDialogueService:
             values = _exact_mapping(args, {"context", "thread_ts"})
             if not isinstance(values["thread_ts"], str):
                 raise DialogueServiceError("REQUEST_INVALID")
-            return self.engine_result(
-                await engine.read_thread(
-                    thread_ts=values["thread_ts"],
-                    context=_context_v2(values["context"]),
+            return _public_thread_read(
+                self.engine_result(
+                    await engine.read_thread(
+                        thread_ts=values["thread_ts"],
+                        context=_context_v2(values["context"]),
+                    )
                 )
             )
         if operation == "read_consultation_packet":
