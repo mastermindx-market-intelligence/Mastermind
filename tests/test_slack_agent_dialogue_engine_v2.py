@@ -3042,6 +3042,80 @@ def test_packet_origin_refusal_does_not_touch_lifecycle_counters() -> None:
     assert refused_read.messages == plain_read.messages
 
 
+def test_malformed_packet_from_authorized_writer_degrades_ordinary_read_thread() -> None:
+    client = setup_client()
+    rendered = render_consultation_packet(
+        packet_value(message_key="asd-packet-malformed-0005")
+    )
+    add_packet_reply(
+        client,
+        {},
+        author=BOT,
+        ts="1787471000.000086",
+        text=rendered + " UNTRUSTED_PACKET_TAIL",
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
+
+    assert code(exc) == "THREAD_MESSAGE_INVALID"
+    assert "UNTRUSTED_PACKET_TAIL" not in str(exc.value)
+
+
+def test_malformed_packet_from_unauthorized_writer_is_refused_not_parsed() -> None:
+    client = setup_client()
+    rendered = render_consultation_packet(
+        packet_value(message_key="asd-packet-malformed-0006")
+    )
+    add_packet_reply(
+        client,
+        {},
+        author=UNTRUSTED,
+        ts="1787471000.000087",
+        text=rendered + " UNTRUSTED_PACKET_TAIL",
+    )
+
+    read = run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
+
+    # The origin screen runs first, so a foreign writer cannot make a read
+    # raise by posting malformed packet-shaped text; the frame is refused
+    # unparsed and counted as a packet refusal, never as a healthy packet.
+    assert read.packet_count == 0
+    assert read.packet_ineligible_count == 1
+    assert read.ineligible_count == 0
+
+
+def test_malformed_packet_detail_read_is_uncertain_not_absent() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        ConsultationPacketReadOutcome,
+    )
+
+    client = setup_client()
+    rendered = render_consultation_packet(
+        packet_value(message_key="asd-packet-malformed-0007")
+    )
+    add_packet_reply(
+        client,
+        {},
+        author=BOT,
+        ts="1787471000.000088",
+        text=rendered + " UNTRUSTED_PACKET_TAIL",
+    )
+
+    read = run(
+        make_engine(client).read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-malformed-0007",
+        )
+    )
+
+    assert read.outcome is ConsultationPacketReadOutcome.UNCERTAIN
+    assert read.reason == "THREAD_MESSAGE_INVALID"
+    assert read.packet is None
+    assert "UNTRUSTED_PACKET_TAIL" not in repr(read)
+
+
 def test_relay_authored_packet_is_read_normally() -> None:
     from integrations.slack_agent_dialogue.engine_v2 import (
         ConsultationPacketReadOutcome,

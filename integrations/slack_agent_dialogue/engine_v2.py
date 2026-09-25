@@ -940,10 +940,15 @@ class DialogueEngineV2:
     ) -> tuple[ThreadRead, tuple[_PacketObservation, ...]]:
         """One bounded thread walk producing the lifecycle read and packets.
 
-        This is the only history walk.  Packet frames are always counted;
-        ``collect_packets`` additionally admits each packet-classified frame
-        through ``parse_consultation_packet`` (``None`` when it fails), for
-        packet-only readers.  Collected packets never re-enter the lifecycle
+        This is the only history walk.  A packet-classified frame is screened
+        on physical origin first — only the Relay bot is an authorized packet
+        writer — and a refused frame is never parsed, is counted in
+        ``packet_ineligible_count``, and never satisfies a packet read.  An
+        authorized packet frame is parsed on every read and one that fails
+        ``parse_consultation_packet`` raises ``THREAD_MESSAGE_INVALID``, so no
+        consumer can mistake malformed evidence for a healthy count.
+        ``collect_packets`` additionally returns each admitted packet for
+        packet-only readers; collected packets never re-enter the lifecycle
         result.
         """
 
@@ -1013,13 +1018,20 @@ class DialogueEngineV2:
                                 )
                             )
                         continue
+                    # Authorized origin: the frame is parsed on every read, so
+                    # malformed evidence can never pass as a healthy count for
+                    # any consumer.  A discriminator-bearing frame that fails
+                    # ``parse_consultation_packet`` is the same typed failure
+                    # as a malformed V2 frame; the rejected frame's text is
+                    # carried only by the raised code, never by a message,
+                    # counter, reason, log, or digest.
+                    packet = parse_consultation_packet(raw_text)
+                    if packet is None:
+                        raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
                     packet_count += 1
                     if collect_packets:
                         packets.append(
-                            _PacketObservation(
-                                ts=transport.ts,
-                                packet=parse_consultation_packet(raw_text),
-                            )
+                            _PacketObservation(ts=transport.ts, packet=packet)
                         )
                 continue
 
@@ -1131,13 +1143,11 @@ class DialogueEngineV2:
                 outcome=ConsultationPacketReadOutcome.UNCERTAIN,
                 reason=refusals[0],
             )
-        if any(observation.packet is None for observation in packets):
-            # Integrity outcome: a frame claimed packet identity but is not an
-            # admissible packet, so neither this packet nor absence is provable.
-            return ConsultationPacketRead(
-                outcome=ConsultationPacketReadOutcome.UNCERTAIN,
-                reason="CONSULTATION_PACKET_INVALID",
-            )
+        # An admitted observation always carries a canonically parsed packet:
+        # a discriminator-bearing authorized frame that fails
+        # ``parse_consultation_packet`` raised ``THREAD_MESSAGE_INVALID`` in
+        # the scan above and surfaces here as that uncertainty, and a refused
+        # frame was returned before this point.
         matches = [
             observation
             for observation in packets
