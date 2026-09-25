@@ -6094,3 +6094,72 @@ async def test_no_late_wake_is_appended_after_consumption(tmp_path: Path) -> Non
     assert len(events.get("CONSUMED_BY_REQUESTER", [])) == 1
 
 
+@_sync_test
+async def test_replay_after_restart_is_idempotent_under_await(
+    tmp_path: Path,
+) -> None:
+    """A fresh dispatcher sharing the carrier replays without new effects.
+
+    After the first consult committed INTENT + packet + WAKE_REQUESTED,
+    a fresh dispatcher instance (the restart) replays the identical
+    consult against the same carrier: no second ``put_question``, still
+    exactly one INTENT and one ``WAKE_REQUESTED``.
+    """
+    runtime = _runtime_at(tmp_path / "restart-replay")
+    _consultations(runtime, tmp_path / "restart-replay")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "restart-replay-repo"
+    )
+    carrier = _CountingQuestionCarrier()
+    invocations = _StaticInvocations(
+        _default_invocation(invocation_id="iac1-p1a-item5")
+    )
+    args = _consult_args(
+        question="Restart replay under await?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    first = _run(
+        _gateway_with_dispatcher(a_dispatcher).call("company.consult", args)
+    )
+    assert first["ok"] is True
+    consultation_id = first["data"]["consultation_ref"]
+    assert first["data"]["state"] == "INTENDED"
+    assert first["data"]["attention_requested"] is True
+    assert carrier.put_question_calls == 1
+    assert _requested_count(runtime, consultation_id) == 1
+
+    # The restart: a fresh dispatcher instance sharing the SAME carrier.
+    restarted_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    replay = _run(
+        _gateway_with_dispatcher(restarted_dispatcher).call(
+            "company.consult", args
+        )
+    )
+    assert replay["ok"] is True
+    data = replay["data"]
+    assert data["consultation_ref"] == consultation_id
+    assert data["state"] == "ALREADY_INTENDED"
+    assert data["attention_requested"] is True
+    assert data["blocker"] is None
+
+    # Idempotent under await: no second publication, no second request.
+    assert carrier.put_question_calls == 1
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
