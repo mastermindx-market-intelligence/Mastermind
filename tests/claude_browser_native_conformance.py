@@ -330,7 +330,10 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
         agent = projection.agents()["browser-tester"]
         helper_args = list(projection.cli_arguments())
         if case in {"child-generated-deny", "child-explicit-deny"}:
-            helper_args.insert(helper_args.index("--agents"), "mcp__fixtureBrowser__browser_fill_form")
+            helper_args.insert(
+                helper_args.index("--disallowedTools"),
+                "mcp__fixtureBrowser__browser_fill_form",
+            )
             assert "mcp__fixtureBrowser__browser_fill_form" in agent["disallowedTools"]
         args += ["--tools", "Agent", *helper_args,
                  "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
