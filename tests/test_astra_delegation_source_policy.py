@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AGENTS = ROOT / "AGENTS.md"
 CODEX_CONFIG = ROOT / ".codex" / "config.toml"
 ASTRA_PROFILE = ROOT / "ops" / "codex_fabric" / "mastermind-astra.config.toml"
+L2_SOL_PROFILE = ROOT / "ops" / "codex_fabric" / "agents" / "l2-sol-ceo.toml"
 
 
 def _astra_section() -> str:
@@ -21,7 +22,9 @@ def test_astra_is_principal_and_external_fabric_is_default_execution_path():
         "existing five-tool Executive MCP",
         "external Fabric first",
         "final acceptance",
-        "Native Codex agents are explicit bounded fallback",
+        "l2_sol_ceo",
+        "SUSTAINED_ORCHESTRATION",
+        "Generic native Codex worker agents remain explicit bounded fallback",
         "GLM or Grok",
         "another Sol/Astra",
         "Luna and Terra are not normal",
@@ -44,18 +47,39 @@ def test_astra_policy_preserves_physical_routing_and_effect_boundaries():
         assert phrase in section
 
 
-def test_named_astra_parent_profile_is_frontier_and_native_fanout_is_disabled():
+def test_named_astra_parent_profile_exposes_only_one_native_l2_sol_ceo_lane():
     profile = tomllib.loads(ASTRA_PROFILE.read_text(encoding="utf-8"))
     assert profile["model"] == "gpt-6-astra"
     assert profile["model_reasoning_effort"] == "high"
     agents = profile["agents"]
-    assert agents["enabled"] is False
+    assert agents["enabled"] is True
     assert agents["max_concurrent_threads_per_session"] == 1
     assert agents["default_subagent_model"] == "gpt-5.6-sol"
     assert agents["default_subagent_reasoning_effort"] == "high"
+    l2 = agents["l2_sol_ceo"]
+    assert l2["config_file"] == "agents/l2-sol-ceo.toml"
+    assert "sustained orchestration" in l2["description"].lower()
     serialized = ASTRA_PROFILE.read_text(encoding="utf-8")
     assert "gpt-5.6-luna" not in serialized
     assert "gpt-5.6-terra" not in serialized
+
+
+def test_l2_sol_ceo_is_narrow_nonrecursive_executive_role():
+    profile = tomllib.loads(L2_SOL_PROFILE.read_text(encoding="utf-8"))
+    assert profile["name"] == "l2_sol_ceo"
+    assert profile["model"] == "gpt-5.6-sol"
+    assert profile["model_reasoning_effort"] == "high"
+    assert profile["agents"]["enabled"] is False
+    instructions = profile["developer_instructions"]
+    for phrase in (
+        "bounded Level-2 executive",
+        "External Fabric",
+        "SUSTAINED_ORCHESTRATION",
+        "Do not perform routine implementation",
+        "Do not spawn native child agents",
+        "Capacity chooses provider/account/host placement",
+    ):
+        assert phrase in instructions
 
 
 def test_repository_codex_config_remains_separate_worker_attestation_layer():
@@ -131,6 +155,9 @@ def test_runbook_preserves_exact_parent_and_capacity_ownership():
         "autonomous_allowed=false",
         "effect_unknown",
         "same request_ref",
+        "l2_sol_ceo",
+        "$CODEX_HOME/agents/l2-sol-ceo.toml",
+        "native multi-agent concurrency at one",
     )
     for phrase in required:
         assert phrase in text
