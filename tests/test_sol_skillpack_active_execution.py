@@ -57,7 +57,6 @@ def test_final_response_gate_is_closed_vocabulary_and_more_work_cannot_finalize(
         "ALL_SCOPED_LANES_BLOCKED",
         "PLATFORM_FAILURE",
         "DURABLE_EXECUTION_RUNNING",
-        "CONTEXT_ROTATION",
         "MORE_WORK_EXISTS",
     ):
         assert state in text
@@ -262,31 +261,53 @@ def test_companion_disagreement_preserves_incumbent_effects_and_source_pin():
     assert "explanatory notes, not a second closed routing taxonomy" in text
 
 
-def test_context_rotation_is_lawful_continuation_not_completion() -> None:
-    text = " ".join(_read(ACTIVE).split())
+# Adaptive attended-mode and recovery source contracts. These are procedural tests, not provider proof.
+def test_attended_mode_recommendation_is_task_and_capability_adaptive():
+    text = _section("Step 1B — Adapt attended reasoning mode to the current phase")
     for phrase in (
-        "`CONTEXT_ROTATION`",
+        "Sol owns the **mode recommendation**",
+        "Prefer **Pro**",
+        "Prefer **Extra High**",
+        "reversible task-fit defaults, not capability guarantees",
+        "Pro may expose a needed write action",
+        "Extra High is a recovery candidate, not a guarantee",
+        "One successful READ or WRITE",
+        "Do not alternate modes ceremonially",
+    ):
+        assert phrase in text
+
+
+def test_attended_mode_switch_never_grants_authority_or_bypasses_denial():
+    text = _section("Step 1B — Adapt attended reasoning mode to the current phase")
+    for phrase in (
+        "grants **no** authority, permission, admission, source custody, carrier transfer, retry",
+        "never bypasses a safety/permission denial",
+        "never clears `EFFECT_UNKNOWN`",
+        "separate from automated Executive/ModelRouter admission",
+        "`PRO_MODE_TASK_CLASS`",
+        "Text cannot self-switch",
+        "re-verify the exact capability needed",
+    ):
+        assert phrase in text
+
+
+def test_context_rotation_is_procedural_and_effect_fenced():
+    text = _section("Step 7A — Preserve operational continuity before interruption")
+    for phrase in (
         "exact surface is `ROTATION_REQUIRED`",
-        "modifying effects are reconciled",
-        "compact durable continuation",
-        "parent mission remains active",
-        "not success, completion, or acceptance",
-        "verified semantic phase boundary",
-        "before another high-context phase",
-        "durable capability progress and decision quality",
-        "not turn length, token volume, tool-call count, or wall-clock duration",
-    ):
-        assert phrase in text, f"ACTIVE_EXECUTION omits context-rotation boundary: {phrase}"
-
-
-def test_proactive_phase_rotation_reuses_the_closed_context_rotation_gate() -> None:
-    text = " ".join(
-        _section("Step 7A — Preserve operational continuity before interruption").split()
-    )
-    for phrase in (
-        "only when the exact surface is `ROTATION_REQUIRED`",
         "all modifying effects are reconciled",
-        "a compact durable continuation exists",
-        "one lawful successor can recover the same responsibility",
+        "compact durable continuation exists",
+        "`CONTEXT_ROTATION` is a procedural transition, not a finalization classification",
+        "`EFFECT_UNKNOWN` blocks receiver change and context rotation",
     ):
-        assert phrase in text, f"proactive rotation path omits closed gate: {phrase}"
+        assert phrase in text
+
+
+def test_final_gate_projects_platform_and_ui_recovery_without_new_lifecycle_states():
+    text = _section("Step 8 — Final-response gate")
+    assert "`PLATFORM_FAILURE` is a blocker reason, not a finalization classification" in text
+    assert "`MODE_SWITCH` and `FRESH_CHAT`" in text
+    assert "are human-control/recovery reasons, not lifecycle states" in text
+    assert "`CHECKPOINTED_CONTINUATION`" in text
+    assert "`NOT_CANONICALLY_PERSISTED`" in text
+    assert "genuine `EXACT_HUMAN_GATE` or `EFFECT_UNKNOWN`" in text

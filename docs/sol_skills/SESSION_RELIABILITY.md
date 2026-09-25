@@ -31,6 +31,7 @@ SESSION_HEALTH
 CURRENT_PHASE
 LAST_DURABLE_CHECKPOINT
 CURRENT_TOOL_OR_PROCESS_IDENTITY
+CURRENT_SELECTED_MODE_AND_CAPABILITY_EVIDENCE
 UNRESOLVED EFFECTS
 CUMULATIVE_RAW_OUTPUT_ESTIMATE
 EXACT_NEXT_ACTION
@@ -56,8 +57,10 @@ Any one of:
 - unstable connector latency, browser behavior, or provider surface.
 
 Action: start no new modifying effect until current effects are clear; update the compact continuation;
-finish only the bounded read/reconciliation already in flight; reduce output; allow at most one clean
-retry when no effect is uncertain.
+finish only the bounded read/reconciliation already in flight; reduce output; allow at most one bounded
+recovery when no effect is uncertain. That recovery may include a user-visible mode change such as
+Extra High when task fit and current capability evidence justify it. Mode recovery is not context
+rotation, permission, carrier transfer, or proof of failure cause.
 
 ### `ROTATION_REQUIRED`
 
@@ -65,7 +68,8 @@ Any one of:
 
 - two consecutive terminal generation failures with no successful intervening turn;
 - one resume failure immediately after an unresolved tool timeout, connector taint, or `EFFECT_UNKNOWN`;
-- the exact surface cannot safely continue;
+- the exact surface cannot safely continue, including a `Thinking failed` event in an already
+  heavy/unstable conversation where continuing would be unsafe;
 - the Chairman explicitly retires the conversation.
 
 Action: stop tool execution in that conversation; never keep issuing `Continue`; preserve exact PID,
@@ -148,6 +152,7 @@ UNRESOLVED EFFECTS / PIDS / REQUEST REFS
 CURRENT WORKSPACE / BRANCH / PR
 WHAT MUST NOT BE REDONE
 EXACT NEXT ACTION
+RECOMMENDED NEXT MODE + REASON (when material)
 ACCEPTANCE AND STOP CONDITION
 ```
 
@@ -158,6 +163,12 @@ OS; implementation evidence stays in GitHub; Executive OS remains lifecycle auth
 Planned retirement requires an already-durable continuation before the predecessor is abandoned.
 A checkpoint never transfers source custody, leases, RuntimeBinding, or a STARTed operation.
 
+If persistence fails, do not loop on checkpoint writes. Emit one copyable
+`NOT_CANONICALLY_PERSISTED` frontier with the last durable ref, unresolved effects/uncertainties,
+DO_NOT_REDO, exact next action, and recommended next mode when material. Classify the boundary under
+`EXACT_HUMAN_GATE` or `EFFECT_UNKNOWN`; never call this a verified checkpoint. A successor must
+reconcile and persist the frontier before using it as durable truth.
+
 ## Failure triage
 
 ### Failure inside one tool call
@@ -166,7 +177,10 @@ Treat it as a tool/host boundary. Reconcile exact PID, action, carrier, and effe
 
 ### First terminal generation failure after a completed tool call
 
-Classify `ROTATION_SUSPECTED`. Ensure no unresolved effect remains and make at most one clean retry.
+If context pressure is low and effects are reconciled, classify `ROTATION_SUSPECTED` and make at most
+one bounded recovery; a relevant mode change may be part of that recovery. If the conversation is
+already heavy/unstable enough that continuing is unsafe, classify `ROTATION_REQUIRED` from surface
+unsafety instead. In neither case does `Thinking failed` itself prove context exhaustion.
 
 ### Second consecutive terminal generation failure
 
@@ -196,9 +210,11 @@ private tool payloads, and company-confidential evidence not required by support
 8. load current protected procedure and minimum fresh canonical state;
 9. continue the exact next action without redoing completed work.
 
-`CONTEXT_ROTATION` is a continuation boundary, not success, completion, or acceptance. The parent
-mission remains active. One successor/no blind retry/effect fencing from the context-rotation law
-continue to govern.
+`CONTEXT_ROTATION` is a procedural continuation transition, not a finalization/lifecycle state,
+success, completion, or acceptance. The parent mission remains active. A durable turn boundary uses
+`CHECKPOINTED_CONTINUATION` when its gates are satisfied; a mode-selector/fresh-chat control can be a
+human-gate reason, not a new lifecycle enum. One successor/no blind retry/effect fencing from the
+context-rotation law continue to govern.
 
 ## K6 pass criteria
 
@@ -208,7 +224,8 @@ A session-reliability continuation passes when:
 - every timeout preserves PID/action identity and is reconciled once;
 - no tainted connector generation receives additional work;
 - no `EFFECT_UNKNOWN` changes carrier or gets replayed;
-- a single failure is not mislabeled as proven context exhaustion;
+- a single low-pressure failure may receive only one bounded recovery and is not mislabeled as proven context exhaustion;
+- a mode switch never grants permission, custody, retry authority, or effect clearance;
 - a repeated terminal failure rotates instead of receiving more `Continue` prompts;
 - a fresh successor recovers the exact next action without raw transcript rehydration;
 - deliberate repository edits and accepted effects are neither lost nor duplicated;

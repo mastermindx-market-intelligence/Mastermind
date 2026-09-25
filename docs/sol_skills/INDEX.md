@@ -90,13 +90,16 @@ Produces a current-state model, disagreement ledger and exact next action.
 Mandatory after current-state recovery for substantial continuing or modifying CEO work in the
 active session. It keeps Sol on the highest-leverage unblocked critical-path dependency, prevents
 status/artifact substitution and repeated tool rediscovery, and applies the final-response gate.
+For attended ChatGPT work it also owns task/capability-based Pro versus Extra High recommendations;
+this does not change automated ModelRouter/Executive reasoning-mode admission or runtime authority.
 
 ### `SESSION_RELIABILITY.md`
-Mandatory companion whenever a session expects more than three tool calls, starts or continues a host process,
-performs multi-source archaeology, resumes after any generation/tool failure, or is expected to run longer than
-one material phase. It bounds output at source, reconciles timeout/taint by exact identity, checkpoints before
-context pressure, and rotates through the existing context-rotation owner without creating another lifecycle,
-memory, retry, session, or transport plane.
+Mandatory companion whenever a session expects more than three tool calls, starts or continues a host
+process, performs multi-source archaeology, resumes after any generation/tool failure, or is expected
+to run longer than one material phase. It bounds output at source, reconciles timeout/taint by exact
+identity, checkpoints before context pressure, distinguishes bounded mode recovery from context
+rotation, and preserves a compact recovery frontier without creating another lifecycle, memory, retry,
+session, or transport plane.
 
 ### `WEB_CEO_DELEGATION.md`
 Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires
@@ -135,8 +138,8 @@ Use when sources disagree, a modifying response is ambiguous, transport reconnec
 stale, a duplicate appears, or a projection may be false-green.
 
 ### `CLOSEOUT.md`
-Use after accepted implementation/production proof to update the correct durable homes and
-leave the exact next action recoverable by a new session.
+Use after a material ruling, accepted implementation/production proof, verified `CHECKPOINTED_CONTINUATION`, or substantive operator handoff to update the correct durable homes
+and leave the exact mission-completion state and next action recoverable by a new session.
 
 ### `BOOTSTRAP_KERNEL.md`
 The compact text intended for Shared Project instructions. It is constitutional boot logic,
@@ -225,10 +228,20 @@ specific law.
 23. Forward execution. After current-source recovery, keep advancing the highest-leverage unblocked
     dependency in the Chairman-authorized scope. A genuine blocker freezes that lane, not the whole
     turn, while another useful independent lane remains. Supporting artifacts do not substitute for
-    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`; durable
-    work may outlive the turn only through a production-proven external owner with a real return path.
+    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`.
+    ACTIVE_EXECUTION alone defines the verified CHECKPOINTED_CONTINUATION exception: mission
+    incomplete, current checkpoint readback, justified boundary and exact next action, without
+    transferring custody or inventing a wake. Durable execution after a turn still requires a
+    production-proven external owner with a real return path.
 
 ## Modification handshake
+
+Apply gates to the specific next action, not every possible future action. Repository-only source
+work does not require a healthy Executive runtime unless that action actually invokes or depends on
+Executive authority. A later deployment or reciprocal-dialogue gate does not freeze independent
+permitted source work. No new permission is created by this scoping rule: the applicable current
+assignment, source custody, protected procedure, resource permission and effect fences remain mandatory.
+Use ACTIVE_EXECUTION's start/recovery defaults; do not add a second Slack claim or human approval.
 
 Before any modifying CEO action, all applicable gates must be true:
 

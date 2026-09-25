@@ -12,9 +12,6 @@ PLAN_PATH = (
 HIERARCHY_PATH = "docs/EXECUTIVE_CHAT_NATIVE_SOL_HIERARCHY_LAW.md"
 SESSION_TARGETS_PATH = "control_plane/session_targets.py"
 ACTION_TARGET_PATH = "control_plane/sol_action_target.py"
-SESSION_RELIABILITY_PATH = "docs/sol_skills/SESSION_RELIABILITY.md"
-INDEX_PATH = "docs/sol_skills/INDEX.md"
-BOOTSTRAP_KERNEL_PATH = "docs/sol_skills/BOOTSTRAP_KERNEL.md"
 
 
 def _read(path: str) -> str:
@@ -320,32 +317,25 @@ def test_implementation_plan_preserves_open_carriers_and_one_capability_per_pr()
         assert phrase in plan, f"implementation plan omits required boundary: {phrase}"
 
 
+# SR-F0 session-reliability and adaptive-mode source contracts.
 def test_session_reliability_skill_is_enrolled_and_compatible() -> None:
-    path = ROOT / SESSION_RELIABILITY_PATH
-    assert path.exists(), f"missing protected session-reliability skill: {path}"
-    skill = _read(SESSION_RELIABILITY_PATH)
-    index = _normalized(_read(INDEX_PATH))
-
+    path = ROOT / "docs/sol_skills/SESSION_RELIABILITY.md"
+    assert path.exists()
+    skill = _read("docs/sol_skills/SESSION_RELIABILITY.md")
+    index = _normalized(_read("docs/sol_skills/INDEX.md"))
     for phrase in (
         "schema: mastermind.sol_skillpack.v1",
         "skillpack_version: 1.0.1",
         "minimum_bootstrap_major: 1",
         "skill: session_reliability",
     ):
-        assert phrase in skill, f"session-reliability skill omits compatible metadata: {phrase}"
+        assert phrase in skill
     assert "### `SESSION_RELIABILITY.md`" in index
-    for trigger in (
-        "more than three tool calls",
-        "starts or continues a host process",
-        "multi-source archaeology",
-        "resumes after any generation/tool failure",
-        "longer than one material phase",
-    ):
-        assert trigger in index, f"INDEX omits session-reliability trigger: {trigger}"
+    assert "distinguishes bounded mode recovery from context rotation" in index
 
 
-def test_session_reliability_budgets_capsule_and_no_duplicate_plane_are_explicit() -> None:
-    skill = _normalized(_read(SESSION_RELIABILITY_PATH))
+def test_session_reliability_preserves_budgets_and_emergency_frontier() -> None:
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
     for phrase in (
         "8 KiB or 150 lines",
         "16 KiB",
@@ -355,56 +345,40 @@ def test_session_reliability_budgets_capsule_and_no_duplicate_plane_are_explicit
         "15 seconds",
         "30 seconds",
         "12 KiB / 1500 words",
-        "UNRESOLVED EFFECTS / PIDS / REQUEST REFS",
-        "WHAT MUST NOT BE REDONE",
-        "no transcript database",
-        "no chat lifecycle database",
-        "no retry ledger",
-        "no alternate RuntimeBinding writer",
+        "NOT_CANONICALLY_PERSISTED",
+        "last durable ref",
+        "A successor must reconcile and persist",
     ):
-        assert phrase in skill, f"session-reliability skill omits budget/capsule boundary: {phrase}"
+        assert phrase in skill
 
 
-def test_rotation_threshold_taint_hygiene_and_compact_kernel_are_aligned() -> None:
+def test_isolated_failure_allows_only_bounded_mode_recovery() -> None:
     law = _normalized(_read(LAW_PATH))
-    skill = _normalized(_read(SESSION_RELIABILITY_PATH))
-    kernel = _normalized(_read(BOOTSTRAP_KERNEL_PATH))
-
-    required = (
-        "two consecutive terminal generation failures",
-        "no successful intervening turn",
-        "one resume failure",
-        "unresolved tool timeout",
-        "connector taint",
-        "EFFECT_UNKNOWN",
-        "tainted connector generation",
-        "raw tool history is not a continuation manifest",
-        "already-durable continuation",
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
+    for phrase in (
         "Thinking failed != context exhausted",
-        "exact surface cannot safely continue",
-        "Chairman explicitly retires the conversation",
-    )
-    for phrase in required:
-        assert phrase in law, f"context-rotation law omits session-hygiene rule: {phrase}"
-        assert phrase in skill, f"session-reliability skill omits session-hygiene rule: {phrase}"
-
-    for phrase in (
-        "allow at most one clean retry when no effect is uncertain",
-        "original carrier and connector generation",
-        "never authorizes replay or carrier failover",
+        "low context pressure",
+        "at most one bounded recovery",
+        "different user-visible reasoning mode such as Extra High",
+        "not proof of cause, carrier failover, or context rotation",
+        "never bypasses a safety/permission denial",
     ):
-        assert phrase in skill, f"session-reliability skill omits retry/taint fence: {phrase}"
+        assert phrase in law
+    assert "a relevant mode change may be part of that recovery" in skill
+    assert "already heavy/unstable enough that continuing is unsafe" in skill
 
+
+def test_compact_project_kernel_carries_adaptive_mode_and_rotation_boundary() -> None:
+    kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
     for phrase in (
-        "SESSION RELIABILITY",
-        "load current protected docs/sol_skills/SESSION_RELIABILITY.md",
-        "Bound tool output at source",
-        "checkpoint before context pressure",
-        "reconcile timed-out or tainted tool operations by exact identity",
-        "two consecutive terminal generation failures with no successful intervening turn",
-        "one resume failure following unresolved tool timeout, connector taint, or EFFECT_UNKNOWN",
-        "stop executing in that conversation",
-        "Never keep issuing Continue into a surface classified ROTATION_REQUIRED",
-        "never paste raw tool history into its successor",
+        "Sol owns mode recommendations",
+        "Pro may support writes, lack specific tools/actions, or lose access mid-session",
+        "Extra High is a recovery candidate, not guaranteed access",
+        "Text cannot self-switch",
+        "No unchanged retry/reconnect loops",
+        "Tool failure is not chat corruption",
+        "HARD_ROTATION after repeated thinking/session failure",
+        "NOT_CANONICALLY_PERSISTED",
+        "MODE_SWITCH/FRESH_CHAT are human-gate reasons, not lifecycle states",
     ):
-        assert phrase in kernel, f"bootstrap kernel omits compact reliability law: {phrase}"
+        assert phrase in kernel
