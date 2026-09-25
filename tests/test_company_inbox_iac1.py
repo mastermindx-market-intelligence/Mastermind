@@ -1451,7 +1451,10 @@ async def test_session_rotation_observes_existing_runtime_rule(tmp_path: Path) -
     )
     assert reply_envelope["ok"] is True
 
-    answer_frame = await shared_carrier.get_answer(consultation_id)
+    answer_frame = await shared_carrier.get_answer(
+        consultation_id,
+        message_key=_reserved_answer_message_key(runtime, consultation_id),
+    )
     assert answer_frame is not None
 
     rotated_attempt = (
@@ -3492,8 +3495,10 @@ class _TamperedQuestionCarrier(InMemoryConsultationPacketCarrier):
         # Consume the consult call but keep the original frame.
         await super().put_question(consultation_id, frame)
 
-    async def get_question(self, consultation_id):
-        frame = await super().get_question(consultation_id)
+    async def get_question(self, consultation_id, *, message_key):
+        frame = await super().get_question(
+            consultation_id, message_key=message_key
+        )
         if frame is None:
             return None
         tampered = dict(frame)
@@ -3516,16 +3521,24 @@ class _ForeignQuestionCarrier(InMemoryConsultationPacketCarrier):
         self,
         foreign_consultation_id: str,
         frame: Mapping[str, Any],
+        *,
+        message_key: str | None = None,
     ) -> None:
         self._foreign_id = foreign_consultation_id
-        # Stash the foreign frame under the real consultation_id key so
-        # the dispatcher's get_question returns it.
-        await super().put_question(foreign_consultation_id, frame)
+        # Stash the foreign frame under the target consultation's exact
+        # message_key so the dispatcher's get_question returns it.
+        await super().put_question(
+            foreign_consultation_id, frame, message_key=message_key
+        )
 
-    async def get_question(self, consultation_id):
+    async def get_question(self, consultation_id, *, message_key):
         if self._foreign_id is not None and self._foreign_id == consultation_id:
-            return await super().get_question(consultation_id)
-        frame = await super().get_question(consultation_id)
+            return await super().get_question(
+                consultation_id, message_key=message_key
+            )
+        frame = await super().get_question(
+            consultation_id, message_key=message_key
+        )
         return frame
 
 
@@ -3542,8 +3555,10 @@ class _TamperedAnswerCarrier(InMemoryConsultationPacketCarrier):
         super().__init__()
         self._marker = marker
 
-    async def get_answer(self, consultation_id):
-        frame = await super().get_answer(consultation_id)
+    async def get_answer(self, consultation_id, *, message_key):
+        frame = await super().get_answer(
+            consultation_id, message_key=message_key
+        )
         if frame is None:
             return None
         tampered = dict(frame)
@@ -3685,17 +3700,27 @@ async def test_foreign_consultation_packet_is_not_exposed_on_detail(
     foreign_consultation_id = foreign_envelope["data"]["consultation_ref"]
     assert foreign_consultation_id != first_consultation_id
 
-    real_first_frame = await first_carrier.get_question(first_consultation_id)
+    real_first_frame = await first_carrier.get_question(
+        first_consultation_id,
+        message_key=_intent_message_key(runtime, first_consultation_id),
+    )
     assert real_first_frame is not None
-    foreign_frame = await foreign_carrier.get_question(foreign_consultation_id)
+    foreign_frame = await foreign_carrier.get_question(
+        foreign_consultation_id,
+        message_key=_intent_message_key(runtime, foreign_consultation_id),
+    )
     assert foreign_frame is not None
 
     # Build a FOREIGN carrier that returns the FOREIGN frame when asked
     # for the FIRST consultation. ``install_foreign`` stashes the frame
-    # under the real consultation_id so the dispatcher's get_question
-    # returns it for that ref.
+    # under the real consultation's exact message_key so the dispatcher's
+    # get_question returns it for that ref.
     cross_carrier = _ForeignQuestionCarrier()
-    await cross_carrier.install_foreign(first_consultation_id, foreign_frame)
+    await cross_carrier.install_foreign(
+        first_consultation_id,
+        foreign_frame,
+        message_key=real_first_frame["message_key"],
+    )
     await cross_carrier.put_question(foreign_consultation_id, dict(real_first_frame))
 
     cross_dispatcher = _make_dispatcher(
@@ -3914,7 +3939,9 @@ async def test_replay_with_changed_evidence_refs_alone_conflicts(
     )
     consultation_id = original_envelope["data"]["consultation_ref"]
     assert original_envelope["data"]["state"] == "INTENDED"
-    original_question_frame = await shared_carrier.get_question(consultation_id)
+    original_question_frame = await shared_carrier.get_question(
+        consultation_id, message_key=_intent_message_key(runtime, consultation_id)
+    )
     assert original_question_frame is not None
 
     repository = WakeLedgerRepository(runtime)
@@ -3948,7 +3975,9 @@ async def test_replay_with_changed_evidence_refs_alone_conflicts(
 
     # Carrier question packet is unchanged — the dispatcher refused
     # before any put_question could overwrite it.
-    after_question_frame = await shared_carrier.get_question(consultation_id)
+    after_question_frame = await shared_carrier.get_question(
+        consultation_id, message_key=_intent_message_key(runtime, consultation_id)
+    )
     assert after_question_frame == original_question_frame
 
     # Zero new wake records.
@@ -4051,9 +4080,11 @@ class _CountingAnswerCarrier(InMemoryConsultationPacketCarrier):
             raise RuntimeError("synthetic carrier write failure")
         await super().put_answer(consultation_id, frame)
 
-    async def get_answer(self, consultation_id):
+    async def get_answer(self, consultation_id, *, message_key):
         self.get_answer_calls += 1
-        return await super().get_answer(consultation_id)
+        return await super().get_answer(
+            consultation_id, message_key=message_key
+        )
 
 
 def test_identical_reply_replay_does_not_write_carrier_twice(
@@ -4295,10 +4326,15 @@ async def test_known_same_packet_readback_returns_without_second_write(
     # identical reply must reconcile without any runtime or carrier
     # writes.
     counting_carrier = _CountingAnswerCarrier()
-    admitted_packet = await shared_carrier.get_answer(consultation_id)
+    admitted_packet = await shared_carrier.get_answer(
+        consultation_id,
+        message_key=_reserved_answer_message_key(runtime, consultation_id),
+    )
     assert admitted_packet is not None
     await counting_carrier.put_answer(consultation_id, dict(admitted_packet))
-    admitted_question = await shared_carrier.get_question(consultation_id)
+    admitted_question = await shared_carrier.get_question(
+        consultation_id, message_key=_intent_message_key(runtime, consultation_id)
+    )
     assert admitted_question is not None
     await counting_carrier.put_question(consultation_id, dict(admitted_question))
     puts_before = counting_carrier.put_answer_calls
@@ -4797,9 +4833,11 @@ class _CountingQuestionCarrier(InMemoryConsultationPacketCarrier):
             raise RuntimeError("synthetic carrier write failure")
         await super().put_question(consultation_id, frame)
 
-    async def get_question(self, consultation_id):
+    async def get_question(self, consultation_id, *, message_key):
         self.get_question_calls += 1
-        return await super().get_question(consultation_id)
+        return await super().get_question(
+            consultation_id, message_key=message_key
+        )
 
 
 class _ClockAdvancingQuestionCarrier(_CountingQuestionCarrier):
@@ -4829,7 +4867,7 @@ class _RaceQuestionCarrier(_CountingQuestionCarrier):
         self._hook_ran = False
         self._hide = hide_readback_after_hook
 
-    async def get_question(self, consultation_id):
+    async def get_question(self, consultation_id, *, message_key):
         if not self._hook_ran:
             self._hook_ran = True
             self._hook()
@@ -4837,7 +4875,9 @@ class _RaceQuestionCarrier(_CountingQuestionCarrier):
         if self._hide:
             self.get_question_calls += 1
             return None
-        return await super().get_question(consultation_id)
+        return await super().get_question(
+            consultation_id, message_key=message_key
+        )
 
 
 class _ThrowBeforeCommitRepository(WakeLedgerRepository):
@@ -4998,7 +5038,10 @@ async def test_exact_expiry_boundary_is_admitted(tmp_path: Path) -> None:
     assert data["blocker"] is None
     assert data["deadline"] == "2026-09-14T00:00:01Z"
     assert carrier.put_question_calls == 1
-    assert await carrier.get_question(consultation_id) is not None
+    assert await carrier.get_question(
+        consultation_id,
+        message_key=_intent_message_key(runtime, consultation_id),
+    ) is not None
     assert _requested_count(runtime, consultation_id) == 1
 
 
@@ -5046,7 +5089,10 @@ async def test_expiry_between_publication_and_request_creates_no_wake(
     assert data["blocker"] == "EXPIRED"
     assert _intent_count(runtime, consultation_id) == 1
     assert carrier.put_question_calls == 1
-    assert await carrier.get_question(consultation_id) is not None
+    assert await carrier.get_question(
+        consultation_id,
+        message_key=_intent_message_key(runtime, consultation_id),
+    ) is not None
     assert _requested_count(runtime, consultation_id) == 0
     assert WakeLedgerRepository(runtime).list_wake_events() == ()
 
@@ -5109,7 +5155,10 @@ async def test_expired_replay_cannot_originate_publication_or_wake(
     assert data["blocker"] == "EXPIRED"
     assert data["attention_requested"] is False
     assert carrier.put_question_calls == 1
-    assert await carrier.get_question(consultation_id) is None
+    assert await carrier.get_question(
+        consultation_id,
+        message_key=_intent_message_key(runtime, consultation_id),
+    ) is None
     assert _intent_count(runtime, consultation_id) == 1
     assert _requested_count(runtime, consultation_id) == 0
 
@@ -5202,9 +5251,13 @@ async def test_known_exact_packet_reconciles_to_single_request(tmp_path: Path) -
     # Simulated restart: a fresh carrier instance already holds the
     # exact packet; a fresh dispatcher replays the identical consult.
     restarted_carrier = _CountingQuestionCarrier()
-    restarted_carrier._questions[consultation_id] = dict(
-        await first_carrier.get_question(consultation_id)
+    first_frame = await first_carrier.get_question(
+        consultation_id, message_key=_intent_message_key(runtime, consultation_id)
     )
+    assert first_frame is not None
+    restarted_carrier._questions[
+        (consultation_id, str(first_frame["message_key"]))
+    ] = dict(first_frame)
     replay = _run(
         _gateway_with_dispatcher(
             _make_dispatcher(
@@ -5430,7 +5483,9 @@ class _VisibleThenLostPutCarrier(_CountingQuestionCarrier):
 
     async def put_question(self, consultation_id, frame):
         self.put_question_calls += 1
-        self._questions[consultation_id] = dict(frame)
+        self._questions[(consultation_id, str(frame.get("message_key", "")))] = dict(
+            frame
+        )
         if not self._hooked:
             self._hooked = True
             self._hook()
@@ -5869,7 +5924,10 @@ async def test_consume_during_answer_put_does_not_lose_the_answer(
 
     # The admitted answer is never lost: the carrier still holds the
     # exact admitted frame and the requester's read still surfaces it.
-    admitted = await carrier.get_answer(consultation_id)
+    admitted = await carrier.get_answer(
+        consultation_id,
+        message_key=_reserved_answer_message_key(runtime, consultation_id),
+    )
     assert admitted is not None
     assert admitted["fingerprint"] == reply["data"]["answer_fingerprint"]
     read_envelope = _run(
@@ -6163,3 +6221,258 @@ async def test_replay_after_restart_is_idempotent_under_await(
     assert carrier.put_question_calls == 1
     assert _intent_count(runtime, consultation_id) == 1
     assert _requested_count(runtime, consultation_id) == 1
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1-C-A — exact message-key carrier reads (Sol 5826784627)
+# ---------------------------------------------------------------------------
+
+
+def _intent_message_key(runtime: Runtime, consultation_id: str) -> str:
+    """The QUESTION message_key recorded on the persisted INTENT event."""
+    with runtime.store.read() as connection:
+        row = connection.execute(
+            "SELECT payload_json FROM events WHERE aggregate_type='consultation' "
+            "AND aggregate_id=? AND event_type='INTENT' "
+            "ORDER BY event_id LIMIT 1",
+            (consultation_id,),
+        ).fetchone()
+    assert row is not None, "INTENT event missing"
+    return str(json.loads(row["payload_json"])["message_key"])
+
+
+def _reserved_answer_message_key(runtime: Runtime, consultation_id: str) -> str:
+    """The ANSWER message_key recorded on the admitted ANSWER_AVAILABLE event."""
+    with runtime.store.read() as connection:
+        row = connection.execute(
+            "SELECT payload_json FROM events WHERE aggregate_type='consultation' "
+            "AND aggregate_id=? AND event_type='ANSWER_AVAILABLE' "
+            "ORDER BY event_id DESC LIMIT 1",
+            (consultation_id,),
+        ).fetchone()
+    assert row is not None, "ANSWER_AVAILABLE event missing"
+    return str(json.loads(row["payload_json"])["message_key"])
+
+
+class _RecordingKeyCarrier(InMemoryConsultationPacketCarrier):
+    """TEST-ONLY carrier: a read without an exact key fails loudly and
+    every ``(kind, consultation_id, message_key)`` read is recorded."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.recorded: list[tuple[str, str, str]] = []
+
+    async def get_question(self, consultation_id: str, *, message_key: str):
+        if not isinstance(message_key, str) or not message_key:
+            raise AssertionError(
+                "get_question was called without an exact message_key"
+            )
+        self.recorded.append(("QUESTION", consultation_id, message_key))
+        return await super().get_question(
+            consultation_id, message_key=message_key
+        )
+
+    async def get_answer(self, consultation_id: str, *, message_key: str):
+        if not isinstance(message_key, str) or not message_key:
+            raise AssertionError(
+                "get_answer was called without an exact message_key"
+            )
+        self.recorded.append(("ANSWER", consultation_id, message_key))
+        return await super().get_answer(consultation_id, message_key=message_key)
+
+
+def _carrier_frame(message_key: str, body: str) -> dict[str, Any]:
+    """A minimal carrier body; the hermetic carrier validates nothing."""
+    return {"message_key": message_key, "body": body}
+
+
+@_sync_test
+async def test_carrier_read_requires_an_exact_message_key() -> None:
+    """``message_key`` is keyword-only with no default: omitting it is a
+    ``TypeError``, never a silent read by ``consultation_id`` alone."""
+    carrier = InMemoryConsultationPacketCarrier()
+    with pytest.raises(TypeError):
+        await carrier.get_question("consult-" + "0" * 32)
+    with pytest.raises(TypeError):
+        await carrier.get_answer("consult-" + "0" * 32)
+
+
+@_sync_test
+async def test_wrong_message_key_reads_as_absent_not_as_the_body() -> None:
+    """A non-matching key reads as ABSENT (``None``), never as the body."""
+    carrier = InMemoryConsultationPacketCarrier()
+    await carrier.put_question(
+        "consult-" + "0" * 32, _carrier_frame("asd-consultation-k1", "older")
+    )
+    await carrier.put_answer(
+        "consult-" + "0" * 32, _carrier_frame("asd-consultation-a1", "answer")
+    )
+    consultation_id = "consult-" + "0" * 32
+    assert (
+        await carrier.get_question(consultation_id, message_key="asd-consultation-k1")
+        == _carrier_frame("asd-consultation-k1", "older")
+    )
+    assert (
+        await carrier.get_question(consultation_id, message_key="asd-consultation-k2")
+        is None
+    )
+    assert (
+        await carrier.get_answer(consultation_id, message_key="asd-consultation-a2")
+        is None
+    )
+    assert (
+        await carrier.get_answer(consultation_id, message_key="asd-consultation-a1")
+        == _carrier_frame("asd-consultation-a1", "answer")
+    )
+
+
+@_sync_test
+async def test_absent_body_still_reads_as_none() -> None:
+    """A body that was never written reads as ``None`` for both methods."""
+    carrier = InMemoryConsultationPacketCarrier()
+    consultation_id = "consult-" + "0" * 32
+    assert await carrier.get_question(
+        consultation_id, message_key="asd-consultation-k1"
+    ) is None
+    assert await carrier.get_answer(
+        consultation_id, message_key="asd-consultation-a1"
+    ) is None
+
+
+@_sync_test
+async def test_a_read_with_a_stale_key_does_not_return_a_newer_body() -> None:
+    """Keying by ``(consultation_id, message_key)`` keeps an older body
+    readable under its own key; a newer body never replaces it there."""
+    carrier = InMemoryConsultationPacketCarrier()
+    consultation_id = "consult-" + "0" * 32
+    await carrier.put_question(
+        consultation_id, _carrier_frame("asd-consultation-old", "older body")
+    )
+    await carrier.put_question(
+        consultation_id, _carrier_frame("asd-consultation-new", "newer body")
+    )
+    stale = await carrier.get_question(
+        consultation_id, message_key="asd-consultation-old"
+    )
+    assert stale is not None
+    assert stale["body"] == "older body"
+    fresh = await carrier.get_question(
+        consultation_id, message_key="asd-consultation-new"
+    )
+    assert fresh is not None
+    assert fresh["body"] == "newer body"
+
+
+@_sync_test
+async def test_two_reads_of_different_keys_both_reach_the_carrier() -> None:
+    """No consultation_id→key memo: the second read reaches the carrier."""
+    carrier = _RecordingKeyCarrier()
+    consultation_id = "consult-" + "0" * 32
+    await carrier.put_question(
+        consultation_id, _carrier_frame("asd-consultation-k1", "older")
+    )
+    first = await carrier.get_question(
+        consultation_id, message_key="asd-consultation-k1"
+    )
+    assert first is not None
+    second = await carrier.get_question(
+        consultation_id, message_key="asd-consultation-k2"
+    )
+    assert second is None
+    third = await carrier.get_question(
+        consultation_id, message_key="asd-consultation-k2"
+    )
+    assert third is None
+    assert [key for _, _, key in carrier.recorded] == [
+        "asd-consultation-k1",
+        "asd-consultation-k2",
+        "asd-consultation-k2",
+    ]
+
+
+@_sync_test
+async def test_every_carrier_read_carries_an_exact_key(tmp_path: Path) -> None:
+    """consult → reply → read → consume: every carrier read carries the
+    persisted INTENT QUESTION key or the reserved ANSWER key — each read
+    resolves its key from runtime state, never from a cache."""
+    runtime = _runtime_at(tmp_path / "exact-keys")
+    _consultations(runtime, tmp_path / "exact-keys")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "exact-keys-repo")
+    shared_carrier = _RecordingKeyCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+
+    a_dispatcher = _make_dispatcher(
+        runtime, fixture_repo, requester=requester, recipient=recipient,
+        packets=shared_carrier, invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime, fixture_repo, requester=recipient, recipient=requester,
+        packets=shared_carrier, invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Exact key question?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert consult_envelope["ok"] is True
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    reply_envelope = _run(
+        b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "exact key answer",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply_envelope["ok"] is True
+    # A second identical reply replays the admitted ANSWER_AVAILABLE.
+    replay_envelope = _run(
+        b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "exact key answer",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert replay_envelope["ok"] is True
+
+    read_envelope = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert read_envelope["ok"] is True
+    assert read_envelope["data"]["body_status"] == "AVAILABLE"
+    consume = await a_dispatcher.consume_answer(consultation_id)
+    assert consume["state"] == "CONSUMED"
+
+    question_key = _intent_message_key(runtime, consultation_id)
+    answer_key = _reserved_answer_message_key(runtime, consultation_id)
+    assert question_key and answer_key
+    assert question_key != answer_key
+
+    assert set(shared_carrier.recorded) == {
+        ("QUESTION", consultation_id, question_key),
+        ("ANSWER", consultation_id, answer_key),
+    }
+    assert shared_carrier.recorded.count(
+        ("QUESTION", consultation_id, question_key)
+    ) >= 4, shared_carrier.recorded
+    assert shared_carrier.recorded.count(
+        ("ANSWER", consultation_id, answer_key)
+    ) >= 3, shared_carrier.recorded

@@ -127,7 +127,7 @@ class ConsultationPacketCarrier(Protocol):
     ) -> None: ...
 
     async def get_question(
-        self, consultation_id: str
+        self, consultation_id: str, *, message_key: str
     ) -> Mapping[str, Any] | None: ...
 
     async def put_answer(
@@ -135,12 +135,19 @@ class ConsultationPacketCarrier(Protocol):
     ) -> None: ...
 
     async def get_answer(
-        self, consultation_id: str
+        self, consultation_id: str, *, message_key: str
     ) -> Mapping[str, Any] | None: ...
 
 
 class InMemoryConsultationPacketCarrier:
     """TEST-ONLY carrier — hermetic in-memory carrier for tests.
+
+    Bodies are keyed by ``(consultation_id, message_key)``: a read under a
+    non-matching key reads as ABSENT (``None``), never as a body stored
+    under another key. ``message_key`` on the reads is keyword-only with
+    no default, so no site can fall back to reading by
+    ``consultation_id`` alone. ``put_*`` store under ``message_key`` when
+    given, else under the frame's own ``message_key`` field.
 
     This implementation is not a production body source. The production
     owner is the existing dialogue carrier lineage (issues #611, #719,
@@ -149,30 +156,50 @@ class InMemoryConsultationPacketCarrier:
     """
 
     def __init__(self) -> None:
-        self._questions: dict[str, dict[str, Any]] = {}
-        self._answers: dict[str, dict[str, Any]] = {}
+        self._questions: dict[tuple[str, str], dict[str, Any]] = {}
+        self._answers: dict[tuple[str, str], dict[str, Any]] = {}
 
     async def put_question(
-        self, consultation_id: str, frame: Mapping[str, Any]
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        message_key: str | None = None,
     ) -> None:
-        self._questions[consultation_id] = dict(frame)
+        self._questions[
+            (consultation_id, _carrier_storage_key(message_key, frame))
+        ] = dict(frame)
 
     async def get_question(
-        self, consultation_id: str
+        self, consultation_id: str, *, message_key: str
     ) -> Mapping[str, Any] | None:
-        frame = self._questions.get(consultation_id)
+        frame = self._questions.get((consultation_id, message_key))
         return dict(frame) if frame is not None else None
 
     async def put_answer(
-        self, consultation_id: str, frame: Mapping[str, Any]
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        message_key: str | None = None,
     ) -> None:
-        self._answers[consultation_id] = dict(frame)
+        self._answers[
+            (consultation_id, _carrier_storage_key(message_key, frame))
+        ] = dict(frame)
 
     async def get_answer(
-        self, consultation_id: str
+        self, consultation_id: str, *, message_key: str
     ) -> Mapping[str, Any] | None:
-        frame = self._answers.get(consultation_id)
+        frame = self._answers.get((consultation_id, message_key))
         return dict(frame) if frame is not None else None
+
+
+def _carrier_storage_key(
+    message_key: str | None, frame: Mapping[str, Any]
+) -> str:
+    if message_key is not None:
+        return message_key
+    return str(frame.get("message_key", ""))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -713,15 +740,22 @@ class RuntimeConsultationDispatcher:
                 "NOT_A_PARTY",
                 detail="caller is not the requester Runtime Attempt",
             )
-        answer_frame = await self.packets.get_answer(consultation_ref)
+        reserved = _non_historical_answer_event(
+            self.runtime, consultation_ref
+        )
+        reserved_message_key = (
+            str(reserved.payload.get("message_key", ""))
+            if reserved is not None
+            else ""
+        )
+        answer_frame = await self.packets.get_answer(
+            consultation_ref, message_key=reserved_message_key
+        )
         if answer_frame is None:
             raise ConsultationRefusal(
                 "CARRIER_UNAVAILABLE",
                 detail="no admitted ANSWER frame on the carrier",
             )
-        reserved = _non_historical_answer_event(
-            self.runtime, consultation_ref
-        )
         if reserved is None:
             raise ConsultationRefusal(
                 "CONFLICT",
@@ -880,7 +914,9 @@ class RuntimeConsultationDispatcher:
         existing_intent = _find_consultation_event(
             self.runtime, consultation_id, "INTENT"
         )
-        carrier_question_frame = await self.packets.get_question(consultation_id)
+        carrier_question_frame = await self.packets.get_question(
+            consultation_id, message_key=message_key
+        )
         carrier_holds_packet = carrier_question_frame is not None
         if existing_intent is not None:
             persisted_payload = existing_intent.payload
@@ -1041,7 +1077,9 @@ class RuntimeConsultationDispatcher:
                 }
         else:
             try:
-                readback = await self.packets.get_question(consultation_id)
+                readback = await self.packets.get_question(
+                    consultation_id, message_key=message_key
+                )
             except Exception:
                 readback = None
             if _validated_question_frame(intent_event.payload, readback) is None:
@@ -1237,7 +1275,10 @@ class RuntimeConsultationDispatcher:
                 detail="caller RuntimeBinding does not match persisted recipient_binding",
             )
 
-        question_frame = await self.packets.get_question(consultation_ref)
+        question_frame = await self.packets.get_question(
+            consultation_ref,
+            message_key=str(intent.payload.get("message_key", "")),
+        )
         if question_frame is None:
             raise ConsultationRefusal(
                 "CARRIER_UNAVAILABLE",
@@ -1368,7 +1409,10 @@ class RuntimeConsultationDispatcher:
                     "CONFLICT",
                     detail="second answer differs from the admitted answer",
                 )
-            packet = await self.packets.get_answer(consultation_ref)
+            packet = await self.packets.get_answer(
+                consultation_ref,
+                message_key=str(reserved.payload.get("message_key", "")),
+            )
             validated = _validated_answer_frame(
                 intent.payload, reserved, packet
             )
@@ -1440,7 +1484,14 @@ class RuntimeConsultationDispatcher:
             current_reserved = _non_historical_answer_event(
                 self.runtime, consultation_ref
             )
-            packet = await self.packets.get_answer(consultation_ref)
+            packet = await self.packets.get_answer(
+                consultation_ref,
+                message_key=(
+                    str(current_reserved.payload.get("message_key", ""))
+                    if current_reserved is not None
+                    else ""
+                ),
+            )
             validated = _validated_answer_frame(
                 intent.payload, current_reserved, packet
             )
@@ -1614,8 +1665,21 @@ class RuntimeConsultationDispatcher:
             self._clock(),
         )
 
-        question_frame = await self.packets.get_question(consultation_ref)
-        answer_frame = await self.packets.get_answer(consultation_ref)
+        reserved_answer = _non_historical_answer_event(
+            self.runtime, consultation_ref
+        )
+        question_frame = await self.packets.get_question(
+            consultation_ref,
+            message_key=str(intent.payload.get("message_key", "")),
+        )
+        answer_frame = await self.packets.get_answer(
+            consultation_ref,
+            message_key=(
+                str(reserved_answer.payload.get("message_key", ""))
+                if reserved_answer is not None
+                else ""
+            ),
+        )
 
         # Validate every carrier frame against the persisted INTENT and
         # (for answers) the admitted non-historical ANSWER_AVAILABLE
@@ -1623,9 +1687,6 @@ class RuntimeConsultationDispatcher:
         # blocker becomes ``CARRIER_INTEGRITY`` and no part of the
         # rejected frame reaches the read result, blocker, log, or
         # exception.
-        reserved_answer = _non_historical_answer_event(
-            self.runtime, consultation_ref
-        )
         validated_question = _validated_question_frame(
             intent.payload, question_frame
         )
