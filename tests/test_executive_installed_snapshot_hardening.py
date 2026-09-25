@@ -2245,3 +2245,38 @@ def test_macro_snapshot_capture_still_refuses_untracked_record_namespace(
             include_seal=True,
             snapshot_capture=[],
         )
+
+
+def test_object_type_probe_shards_large_complete_sets_without_weakening():
+    from pathlib import Path
+    from integrations.executive_mcp.installed import _require_git_object_types
+
+    expected = {f"{index:040x}": "blob" for index in range(48_001)}
+    calls: list[tuple[str, ...]] = []
+
+    def runner(argv, **kwargs):
+        object_ids = tuple(
+            line for line in kwargs["input_bytes"].decode("ascii").splitlines() if line
+        )
+        calls.append(object_ids)
+        return {
+            "code": 0,
+            "stdout": "".join(f"{object_id} blob\n" for object_id in object_ids),
+            "stderr": "",
+            "timed_out": False,
+            "limit_exceeded": False,
+            "invalid_utf8": False,
+        }
+
+    _require_git_object_types(
+        Path("/tmp/unused"),
+        expected,
+        runner=runner,
+        env={},
+        deadline=None,
+        label="Macro source",
+    )
+
+    assert len(calls) == 2
+    assert {object_id for call in calls for object_id in call} == set(expected)
+    assert sum(len(call) for call in calls) == len(expected)
