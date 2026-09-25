@@ -6476,3 +6476,154 @@ async def test_every_carrier_read_carries_an_exact_key(tmp_path: Path) -> None:
     assert shared_carrier.recorded.count(
         ("ANSWER", consultation_id, answer_key)
     ) >= 3, shared_carrier.recorded
+
+
+class _UncertainAnswerReadCarrier(InMemoryConsultationPacketCarrier):
+    """TEST-ONLY carrier: once armed, every ``get_answer`` read raises,
+    which is the carrier port's only way to say UNCERTAIN."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._answer_read_uncertain = False
+
+    def arm_answer_uncertainty(self) -> None:
+        self._answer_read_uncertain = True
+
+    async def get_answer(self, consultation_id, *, message_key):
+        if self._answer_read_uncertain:
+            raise RuntimeError("simulated uncertain carrier read")
+        return await super().get_answer(
+            consultation_id, message_key=message_key
+        )
+
+
+class _UncertainQuestionReadCarrier(InMemoryConsultationPacketCarrier):
+    """TEST-ONLY carrier: once armed, every ``get_question`` read raises."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._question_read_uncertain = False
+
+    def arm_question_uncertainty(self) -> None:
+        self._question_read_uncertain = True
+
+    async def get_question(self, consultation_id, *, message_key):
+        if self._question_read_uncertain:
+            raise RuntimeError("simulated uncertain carrier read")
+        return await super().get_question(
+            consultation_id, message_key=message_key
+        )
+
+
+def _journey_to_available_answer(tmp_path: Path, name: str, carrier):
+    """consult → wake → reply on one shared runtime; return the pieces."""
+    runtime = _runtime_at(tmp_path / name)
+    _consultations(runtime, tmp_path / name)
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / f"{name}-repo")
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime, fixture_repo, requester=requester, recipient=recipient,
+        packets=carrier, invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_gateway = _gateway_with_dispatcher(
+        _make_dispatcher(
+            runtime, fixture_repo, requester=recipient, recipient=requester,
+            packets=carrier, invocations=invocations,
+        )
+    )
+    consult_envelope = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Uncertain read question?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert consult_envelope["ok"] is True
+    consultation_id = consult_envelope["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    reply_envelope = _run(
+        b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "uncertain read answer",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply_envelope["ok"] is True
+    return runtime, a_gateway, consultation_id
+
+
+def test_uncertain_read_is_reconciliation_required_with_no_body(
+    tmp_path: Path,
+) -> None:
+    """An UNCERTAIN carrier read on the zero-write read path degrades to
+    ``CARRIER_RECONCILIATION_REQUIRED`` with no body — never a typed
+    refusal, never a body guess."""
+    carrier = _UncertainAnswerReadCarrier()
+    runtime, a_gateway, consultation_id = _journey_to_available_answer(
+        tmp_path, "uncertain-answer-read", carrier
+    )
+    healthy = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert healthy["ok"] is True
+    assert healthy["data"]["body_status"] == "AVAILABLE"
+    events_before = _evidence_for(runtime, consultation_id)
+
+    carrier.arm_answer_uncertainty()
+    degraded = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert degraded["ok"] is True
+    assert degraded["data"]["body_status"] == "PARTIAL"
+    assert degraded["data"]["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert degraded["data"]["answer"] is None
+    assert degraded["data"]["question"] is not None
+    assert degraded["data"]["question"]["text"] == "Uncertain read question?"
+    assert _evidence_for(runtime, consultation_id) == events_before
+
+
+def test_uncertain_read_never_surfaces_effect_unknown(tmp_path: Path) -> None:
+    """The degraded zero-write read keeps the healthy result's exact key
+    set and never becomes an ``EFFECT_UNKNOWN`` gateway error."""
+    carrier = _UncertainQuestionReadCarrier()
+    runtime, a_gateway, consultation_id = _journey_to_available_answer(
+        tmp_path, "uncertain-question-read", carrier
+    )
+    healthy = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert healthy["ok"] is True
+    assert healthy["error"] is None
+    healthy_keys = set(healthy)
+    events_before = _evidence_for(runtime, consultation_id)
+
+    carrier.arm_question_uncertainty()
+    degraded = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert set(degraded) == healthy_keys, degraded
+    assert degraded["ok"] is True
+    assert degraded["error"] is None
+    assert set(degraded["data"]) == set(healthy["data"])
+    assert degraded["data"]["body_status"] == "PARTIAL"
+    assert degraded["data"]["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert degraded["data"]["question"] is None
+    assert degraded["data"]["answer"] is not None
+    assert degraded["data"]["answer"]["text"] == "uncertain read answer"
+    assert _evidence_for(runtime, consultation_id) == events_before

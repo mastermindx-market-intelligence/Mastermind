@@ -1668,18 +1668,31 @@ class RuntimeConsultationDispatcher:
         reserved_answer = _non_historical_answer_event(
             self.runtime, consultation_ref
         )
-        question_frame = await self.packets.get_question(
-            consultation_ref,
-            message_key=str(intent.payload.get("message_key", "")),
-        )
-        answer_frame = await self.packets.get_answer(
-            consultation_ref,
-            message_key=(
-                str(reserved_answer.payload.get("message_key", ""))
-                if reserved_answer is not None
-                else ""
-            ),
-        )
+        question_read_uncertain = False
+        answer_read_uncertain = False
+        try:
+            question_frame = await self.packets.get_question(
+                consultation_ref,
+                message_key=str(intent.payload.get("message_key", "")),
+            )
+        except Exception:
+            # An UNCERTAIN read neither confirms the body nor proves its
+            # absence; it degrades below like an absent body but is never
+            # relabelled CARRIER_UNAVAILABLE.
+            question_frame = None
+            question_read_uncertain = True
+        try:
+            answer_frame = await self.packets.get_answer(
+                consultation_ref,
+                message_key=(
+                    str(reserved_answer.payload.get("message_key", ""))
+                    if reserved_answer is not None
+                    else ""
+                ),
+            )
+        except Exception:
+            answer_frame = None
+            answer_read_uncertain = True
 
         # Validate every carrier frame against the persisted INTENT and
         # (for answers) the admitted non-historical ANSWER_AVAILABLE
@@ -1700,6 +1713,16 @@ class RuntimeConsultationDispatcher:
         answer_body, answer_blocker = _build_answer_body(
             answer_frame, reserved_answer, validated_answer is not None
         )
+        # An UNCERTAIN carrier read is a reconciliation seam, not an
+        # unavailable body: withhold the body and say so with the existing
+        # closed-set code instead of leaking an exception through the
+        # gateway as EFFECT_UNKNOWN.
+        if question_read_uncertain:
+            question_body = None
+            question_blocker = "CARRIER_RECONCILIATION_REQUIRED"
+        if answer_read_uncertain:
+            answer_body = None
+            answer_blocker = "CARRIER_RECONCILIATION_REQUIRED"
 
         body_status, body_blocker = _body_status_for(
             question_body, answer_body, question_blocker, answer_blocker
