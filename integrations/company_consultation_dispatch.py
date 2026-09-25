@@ -1370,6 +1370,17 @@ class RuntimeConsultationDispatcher:
                 detail=f"answer frame invalid: {type(exc).__name__}",
             ) from exc
 
+        # IAC-P1-C-B (Sol 5826854603 §2): exact-render the actual ANSWER and
+        # fence it BEFORE ``answer_available()`` — no historical or current
+        # Runtime event may be appended for an over-ceiling packet. The
+        # advertised inner payload budget above is necessary but not
+        # sufficient: the frame carries its evidence_refs a second time, so a
+        # payload inside the budget can still render over the wire ceiling.
+        try:
+            assert_packet_within_ceiling(answer_frame)
+        except ConsultationPacketOverCeiling as exc:
+            raise _packet_over_ceiling_refusal(exc) from exc
+
         try:
             question_item = self._consultations._intent_from_event(intent)
             pre_wake_state = self._consultations._canonical_wake_state(

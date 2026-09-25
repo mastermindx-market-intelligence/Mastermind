@@ -6963,6 +6963,123 @@ async def test_at_ceiling_question_still_records_its_intent(
 
 
 @_sync_test
+async def test_over_ceiling_answer_is_refused_before_it_is_advertised(
+    tmp_path: Path,
+) -> None:
+    """An ANSWER whose inner canonical JSON sits inside the advertised payload
+    budget but whose rendered packet exceeds the wire ceiling is fenced BEFORE
+    ``answer_available()``: no Runtime event of any kind, nothing advertised."""
+    (
+        runtime, _carrier, _a, b_dispatcher, consultation_id,
+        question_frame, _revision,
+    ) = _consulted_for_ceiling(tmp_path, "over-ceiling-answer")
+    advertised = _advertised_max_payload_bytes(runtime, consultation_id)
+    refs = _budget_saturating_evidence_refs(question_frame, advertised)
+    witness_frame = _dispatch_build_answer_frame(
+        question_frame, answer_text="ok", evidence_refs=refs, supersedes=None
+    )
+    witness_budget = consultation_packet_budget(witness_frame)
+    # The premise: inside the advertised budget, over the wire ceiling.
+    assert _inner_answer_bytes("ok", refs) <= advertised
+    assert witness_budget.fits_wire_ceiling is False
+    assert witness_budget.rendered_bytes > _WIRE_CEILING_BYTES
+    events_before = _evidence_for(runtime, consultation_id)
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        await b_dispatcher(
+            "company.reply", _reply_request(consultation_id, "ok", refs)
+        )
+    assert excinfo.value.code == "BODY_OVER_BUDGET"
+    assert excinfo.value.effect == "NONE"
+    # No historical or current Runtime event may be appended for it.
+    assert _evidence_for(runtime, consultation_id) == events_before
+    assert _evidence_for(runtime, consultation_id).get(
+        "ANSWER_AVAILABLE"
+    ) is None
+
+
+@_sync_test
+async def test_at_ceiling_answer_is_advertised_normally(tmp_path: Path) -> None:
+    """A payload AT the advertised maximum is still useful: it is advertised,
+    its ANSWER packet renders within the wire ceiling, and one
+    ``ANSWER_AVAILABLE`` event is appended."""
+    (
+        runtime, carrier, _a, b_dispatcher, consultation_id,
+        _question_frame, _revision,
+    ) = _consulted_for_ceiling(tmp_path, "at-ceiling-answer")
+    advertised = _advertised_max_payload_bytes(runtime, consultation_id)
+    assert advertised > 0
+    # One-byte-granular payload sized so the inner canonical JSON is exactly
+    # the advertised maximum.
+    size = 1
+    while _inner_answer_bytes("x" * (size + 1), []) <= advertised:
+        size += 1
+    answer = "x" * size
+    assert _inner_answer_bytes(answer, []) == advertised
+    result = _run(
+        b_dispatcher(
+            "company.reply", _reply_request(consultation_id, answer, [])
+        )
+    )
+    assert result["ok"] is True, result
+    assert result["result"]["state"] == "ANSWER_AVAILABLE"
+    answer_events = _evidence_for(runtime, consultation_id).get(
+        "ANSWER_AVAILABLE", []
+    )
+    assert len(answer_events) == 1
+    reserved_key = _dispatch_non_historical_answer_event(
+        runtime, consultation_id
+    ).payload["message_key"]
+    admitted = await carrier.get_answer(
+        consultation_id, message_key=reserved_key
+    )
+    assert admitted is not None
+    assert admitted["answer"]["text"] == canonical_consultation_json(
+        {"text": answer, "evidence_refs": []}
+    )
+    budget = consultation_packet_budget(admitted)
+    assert budget.fits_wire_ceiling is True
+    assert budget.rendered_bytes <= _WIRE_CEILING_BYTES
+
+
+@_sync_test
+async def test_named_641_backslash_answer_is_refused_before_answer_available(
+    tmp_path: Path,
+) -> None:
+    """The 641-backslash falsifier dies at the dispatcher, end to end.
+
+    Its inner canonical JSON is 1312 bytes — comfortably inside the naive
+    32768 budget this slice replaced — and its rendered ANSWER packet is over
+    the wire ceiling. The production path refuses it before
+    ``answer_available()`` with zero Runtime effect.
+    """
+    (
+        runtime, _carrier, _a, b_dispatcher, consultation_id,
+        question_frame, _revision,
+    ) = _consulted_for_ceiling(tmp_path, "named-641-backslash")
+    advertised = _advertised_max_payload_bytes(runtime, consultation_id)
+    answer = "\\" * 641
+    assert _inner_answer_bytes(answer, []) == 1312
+    assert _inner_answer_bytes(answer, []) > advertised
+    witness = consultation_packet_budget(
+        _dispatch_build_answer_frame(
+            question_frame, answer_text=answer, evidence_refs=[], supersedes=None
+        )
+    )
+    assert witness.rendered_bytes == 4584
+    assert witness.fits_wire_ceiling is False
+    events_before = _evidence_for(runtime, consultation_id)
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        await b_dispatcher(
+            "company.reply", _reply_request(consultation_id, answer, [])
+        )
+    assert excinfo.value.effect == "NONE"
+    assert _evidence_for(runtime, consultation_id) == events_before
+    assert _evidence_for(runtime, consultation_id).get(
+        "ANSWER_AVAILABLE"
+    ) is None
+
+
+@_sync_test
 async def test_advertised_budget_never_exceeds_the_expansion_aware_clamp(
     tmp_path: Path,
 ) -> None:
