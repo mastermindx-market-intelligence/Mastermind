@@ -570,7 +570,7 @@ class DialogueEngineV2:
         self._ensure_barrier_generation = 0
         self._ensure_inflight: dict[tuple[str | None, ...], _EnsureFlight] = {}
         self._send_registry_lock = asyncio.Lock()
-        self._send_inflight: dict[tuple[str, str], _SendFlight] = {}
+        self._send_inflight: dict[tuple[str, str, str], _SendFlight] = {}
 
     @property
     def active_waiter_registry(self) -> ActiveWaiterRegistry | None:
@@ -1387,7 +1387,7 @@ class DialogueEngineV2:
 
     async def _retire_send_flight(
         self,
-        key: tuple[str, str],
+        key: tuple[str, str, str],
         flight: _SendFlight,
     ) -> None:
         async with self._send_registry_lock:
@@ -1400,7 +1400,7 @@ class DialogueEngineV2:
 
     def _send_flight_done(
         self,
-        key: tuple[str, str],
+        key: tuple[str, str, str],
         flight: _SendFlight,
     ) -> None:
         try:
@@ -1421,7 +1421,9 @@ class DialogueEngineV2:
             raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
         if fingerprint != prepared.fingerprint:
             raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
-        key = (prepared.thread_ts, prepared.message_key)
+        # One logical send is exactly (frame kind, thread, message key): a
+        # message and a packet sharing a key are two independent flights.
+        key = (prepared.frame_kind.value, prepared.thread_ts, prepared.message_key)
         async with self._send_registry_lock:
             flight = self._send_inflight.get(key)
             if flight is None:
