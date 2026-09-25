@@ -185,9 +185,24 @@ def project_claude_native_helpers(
         raise ClaudeNativeHelperProjectionError(
             "v1 native helpers require a noninteractive parent session"
         )
+    if profile.execution_surface != "claude-code":
+        raise ClaudeNativeHelperProjectionError(
+            "Claude native helpers require a claude-code execution profile"
+        )
     grant = profile.native_helper
     if grant is None:
         raise ClaudeNativeHelperProjectionError("profile has no native helper grant")
+    if grant.mechanism != "claude-code-agent-inherit-parent":
+        raise ClaudeNativeHelperProjectionError(
+            "profile does not carry the Claude Code native helper mechanism"
+        )
+    if (
+        grant.default_model != "inherit-parent"
+        or grant.default_reasoning_effort != "inherit"
+    ):
+        raise ClaudeNativeHelperProjectionError(
+            "Claude native helper grant does not inherit parent model and effort"
+        )
     if profile.write_capable:
         raise ClaudeNativeHelperProjectionError(
             "v1 Claude native helpers are read-only; write work must use an "

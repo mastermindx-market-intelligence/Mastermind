@@ -12,6 +12,7 @@ from control_plane.claude_native_helper_projection import (
     project_claude_native_helpers,
 )
 from control_plane.executive_agent_capabilities import (
+    CapabilityPolicyError,
     ExecutionCapabilityRegistry,
     observed_mcp_tool_schema_digest,
 )
@@ -22,14 +23,74 @@ from control_plane.operator_harness_contract import ObservedTriState
 def profile():
     registry = ExecutionCapabilityRegistry.load(
         Path(
-            "scripts/ohf/fixtures/"
-            "executive_agent_capabilities_v4_mastermind_operator.json"
+            "tests/fixtures/"
+            "executive_agent_capabilities_claude_native_helper_v3.json"
         ),
         source_root=Path.cwd(),
     )
-    return registry.resolve(
+    return registry.resolve("operator.claude.readonly.native-helper.v1")
+
+
+def test_profile_is_claude_specific(profile):
+    assert profile.execution_surface == "claude-code"
+    assert profile.native_helper is not None
+    assert profile.native_helper.mechanism == "claude-code-agent-inherit-parent"
+    assert profile.native_helper.default_model == "inherit-parent"
+    assert profile.native_helper.default_reasoning_effort == "inherit"
+
+
+def test_codex_native_helper_grant_is_refused():
+    registry = ExecutionCapabilityRegistry.load(
+        Path("config/executive_agent_capabilities.json"),
+        source_root=Path.cwd(),
+    )
+    codex_profile = registry.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
     )
+    with pytest.raises(
+        ClaudeNativeHelperProjectionError,
+        match="claude-code execution profile",
+    ):
+        project_claude_native_helpers(
+            codex_profile,
+            helpers=_roster(),
+            permission_mode="dontAsk",
+            execution_mode="noninteractive",
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("execution_surface", "codex-app-server", "requires claude-code execution surface"),
+        ("default_model", "sonnet", "inherit the admitted parent model"),
+        (
+            "default_reasoning_effort",
+            "medium",
+            "inherit the admitted parent reasoning effort",
+        ),
+    ),
+)
+def test_registry_refuses_drifted_claude_helper_identity(
+    tmp_path, field, value, message
+):
+    source = Path(
+        "tests/fixtures/executive_agent_capabilities_claude_native_helper_v3.json"
+    )
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    profile = raw["profiles"]["operator.claude.readonly.native-helper.v1"]
+    if field == "execution_surface":
+        profile[field] = value
+    else:
+        profile["native_helper"][field] = value
+    candidate = tmp_path / "capabilities.json"
+    candidate.write_text(
+        json.dumps(raw, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    with pytest.raises(CapabilityPolicyError, match=message):
+        ExecutionCapabilityRegistry.load(candidate, source_root=Path.cwd())
 
 
 def _roster():

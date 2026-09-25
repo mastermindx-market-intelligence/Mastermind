@@ -1,0 +1,54 @@
+{
+  "schema_version": "mastermind.executive_agent_capabilities/v3",
+  "policy_version": "2026-09-25.claude-native-helper-fixture",
+  "lifecycle_authority": "executive_os",
+  "production_armed": false,
+  "mcp_servers": {
+    "openai-developer-docs-v1": {
+      "config_name": "openaiDeveloperDocs",
+      "transport": "streamable-http",
+      "url": "https://developers.openai.com/mcp",
+      "required": true,
+      "auth_status": "unsupported",
+      "server_identity": "openai-docs-mcp",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "fetch_openai_doc",
+        "search_openai_docs"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "9c6e56942336e507f7fb8e3cb781288c40028b2284c2b2d629e262521d66f8e7"
+    }
+  },
+  "resources": {},
+  "plugins": {},
+  "profiles": {
+    "operator.claude.readonly.native-helper.v1": {
+      "enabled": true,
+      "execution_surface": "claude-code",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "parent_read_only_ceiling",
+      "native_helper": {
+        "mechanism": "claude-code-agent-inherit-parent",
+        "default_model": "inherit-parent",
+        "default_reasoning_effort": "inherit",
+        "inherit_parent_capabilities": true,
+        "hide_spawn_agent_metadata": true,
+        "max_concurrent_helpers": 1,
+        "max_depth": 1,
+        "max_runtime_seconds": 60
+      },
+      "skills": [],
+      "mcp_servers": [
+        "openai-developer-docs-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": []
+    }
+  }
+}

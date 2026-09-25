@@ -286,8 +286,12 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
         source_root=ROOT,
     )
     original = registry.resolve("operator.browser.local-review.v1")
-    helper_source = registry.resolve(
-        "operator.appserver.readonly.docs-mcp.native-helper.v1"
+    helper_registry = ExecutionCapabilityRegistry.load(
+        ROOT / "tests/fixtures/executive_agent_capabilities_claude_native_helper_v3.json",
+        source_root=ROOT,
+    )
+    helper_source = helper_registry.resolve(
+        "operator.claude.readonly.native-helper.v1"
     )
     grant = next(g for g in original.mcp_server_grants if g.transport == "stdio")
     mcp_args = (str(runtime / "node_modules/@playwright/mcp/cli.js"), "--headless", "--sandbox", "--isolated",
@@ -305,6 +309,7 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
                                 grant_digest=hashlib.sha256(repr((mcp_args, selected_tools, selected_digest)).encode()).hexdigest())
     profile = dataclasses.replace(
         original,
+        execution_surface=helper_source.execution_surface,
         mcp_server_grants=(grant,),
         resource_grants=(),
         native_helper_policy=NativeHelperPolicy.PARENT_READ_ONLY_CEILING,
