@@ -265,7 +265,7 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
     sys.path.insert(0, str(ROOT))
     from control_plane.claude_mcp_client_projection import project_claude_mcp_client
     from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest
-    from control_plane.operator_harness_contract import NativeHelperPolicy
+    from control_plane.operator_harness_contract import NativeHelperPolicy, ObservedTriState
     root = Path(tempfile.mkdtemp(prefix="mmxnb-", dir="/private/tmp"))
     root.chmod(0o700)
     for name in ["home", "tmp", "sockets", "workspace", "workspace/output"]:
@@ -305,6 +305,7 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
                 max_turns=10,
             ),),
             permission_mode="dontAsk",
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
             observed_tool_catalogs=observed_catalogs,
         )
         agent = projection.agents()["browser-tester"]
