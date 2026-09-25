@@ -167,7 +167,7 @@ class Oracle:
                 self.parent_started = True
                 return [{"type": "tool_use", "id": "toolu_browser_child", "name": "Agent",
                          "input": {"description": "Synthetic browser fixture", "subagent_type": "browser-tester",
-                                   "prompt": LEAF_MARKER + " Execute only the fixed synthetic browser fixture.", "model": "sonnet"}}]
+                                   "prompt": LEAF_MARKER + " Execute only the fixed synthetic browser fixture."}}]
             result = tool_result(messages, "toolu_browser_child")
             self.parent_consumed = bool(result and not result.get("is_error") and self.nonce in text_parts(result) and (self.completed or (self.case in DENIAL_CASES and self.denied)))
             return [{"type": "text", "text": "PARENT_CONSUMED:" + self.nonce if self.parent_consumed else "PARENT_CONSUMPTION_FAILED"}]
@@ -379,6 +379,7 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
                "source_projection_sha256": hashlib.sha256((ROOT / "control_plane/claude_mcp_client_projection.py").read_bytes()).hexdigest(),
                "tool_catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
                "projected_denied_tools": list(projection.denied_tools),
+               "native_helper_environment": (projection.environment() if case in CHILD_CASES else None),
                "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
     if evidence.exists():
         raise ValueError("evidence path already exists")
