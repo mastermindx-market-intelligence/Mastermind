@@ -296,16 +296,24 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
                                   native_helper_policy=NativeHelperPolicy.PARENT_READ_ONLY_CEILING, profile_digest="f" * 64)
     args = [str(binary), *([] if case in CHILD_CASES else ["--bare"]), "--setting-sources", "", "--no-session-persistence", "--no-chrome", "--model", "sonnet", "--effort", "medium"]
     if case in CHILD_CASES:
-        projection = project_claude_mcp_client(profile, surface="inline-subagent", observed_tool_catalogs=observed_catalogs)
-        agent = {"description": "Fixed synthetic browser fixture", "prompt": LEAF_MARKER,
-                 "model": "inherit", "maxTurns": 10, **projection.configuration()}
-        parent_allow = projection.auto_approved_tools
+        projection = project_claude_native_helpers(
+            profile,
+            helpers=(ClaudeNativeHelperDefinition(
+                agent_id="browser-tester",
+                description="Fixed synthetic browser fixture",
+                prompt=LEAF_MARKER,
+                max_turns=10,
+            ),),
+            permission_mode="dontAsk",
+            observed_tool_catalogs=observed_catalogs,
+        )
+        agent = projection.agents()["browser-tester"]
+        helper_args = list(projection.cli_arguments())
         if case in {"child-generated-deny", "child-explicit-deny"}:
-            parent_allow += ("mcp__fixtureBrowser__browser_fill_form",)
-        if case in {"child-generated-deny", "child-explicit-deny"}:
+            helper_args.insert(helper_args.index("--agents"), "mcp__fixtureBrowser__browser_fill_form")
             assert "mcp__fixtureBrowser__browser_fill_form" in agent["disallowedTools"]
-        args += ["--tools", "Agent", "--allowedTools", "Agent", *parent_allow,
-                 "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--agents", json.dumps({"browser-tester": agent})]
+        args += ["--tools", "Agent", *helper_args,
+                 "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
     else:
         projection = project_claude_mcp_client(profile, surface="cli", observed_tool_catalogs=observed_catalogs)
         args += ["--tools", "", *projection.cli_arguments()]
