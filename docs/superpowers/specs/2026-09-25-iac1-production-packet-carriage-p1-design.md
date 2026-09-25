@@ -198,7 +198,7 @@ The test matrix measures quote-heavy, backslash-heavy, CJK and astral payloads; 
 
 ## 7. Safe answer payload budget
 
-The current consultation contract permits `response_budget.max_payload_bytes` up to 32768, which cannot fit the P1 packet wire. P1 derives and freezes a packet-safe answer budget when the QUESTION is built.
+The current consultation contract permits `response_budget.max_payload_bytes` up to 32768, which cannot fit the P1 packet wire. P1 derives and freezes a packet-safe answer budget when the QUESTION is built, but it never silently narrows `max_evidence_reads`.
 
 Pure helper in `integrations/company_consultation_dispatch.py`:
 
@@ -208,7 +208,7 @@ def _packet_safe_answer_payload_limit(
 ) -> int: ...
 ```
 
-The helper uses the actual immutable QUESTION metadata and a binary search over valid worst-case answer payloads, including the maximum allowed evidence references and nested JSON escaping, to find the largest canonical semantic-answer byte count whose complete rendered ANSWER packet stays within `CONSULTATION_PACKET_MAX_BYTES`.
+The helper uses the immutable QUESTION metadata, the exact requested evidence-count ceiling, and maximum-length valid evidence references. It binary-searches canonical semantic-answer bytes against complete rendered ANSWER packets for five hostile text classes: plain ASCII, quote-heavy, backslash-heavy, BMP Unicode, and astral Unicode. This covers the nested answer JSON, canonical JSON escaping, and UTF-8 amplification rather than inferring safety from character count.
 
 The QUESTION’s persisted response budget becomes:
 
@@ -219,7 +219,7 @@ max_payload_bytes = min(
 )
 ```
 
-The frame is rebuilt until the clamped budget is stable, then rendered again. At reply time the actual ANSWER packet is rendered before `answer_available()` as a final invariant check. A zero safe budget is `BODY_OVER_BUDGET` with zero effect.
+`max_evidence_reads` remains exactly the caller’s admitted value. If that evidence-count contract leaves no positive renderable answer budget, the QUESTION is refused `BODY_OVER_BUDGET` before Runtime or carrier effects; P1 never rewrites it to a smaller count. Because the first measurement uses the original equal-or-larger numeric payload value, replacing it with the derived smaller value cannot increase packet bytes, so one conservative measurement is sufficient. At reply time the actual complete ANSWER packet is rendered before `answer_available()` as a final invariant check. A zero safe budget is `BODY_OVER_BUDGET` with zero effect.
 
 ---
 
@@ -404,9 +404,9 @@ COMMIT
   -> requester answer-attention request
 ```
 
-If the Runtime callback returns replay/already-existing state, it raises a local pre-COMMIT abort. Closing the READY connection causes no provider effect. The dispatcher then reconciles the exact existing packet through `read_consultation_packet()`; it never resends.
+If the Runtime callback returns replay/already-existing state, it raises a local pre-COMMIT abort. Closing the READY connection causes no provider effect. The dispatcher then re-reads both canonical Runtime and the exact physical packet through `read_consultation_packet()`; it never reuses a pre-await snapshot and never resends. A packet visible without its canonical Runtime fact is an orphan conflict, not permission to manufacture state. If Relay reports a duplicate before this caller’s callback because another identical caller won the race, the fresh Runtime+packet readback returns the truthful `ALREADY_INTENDED` or reconciled ANSWER result with insertion credit `false`.
 
-If the Runtime callback commits and COMMIT is later ambiguous, the Runtime fact is known and packet effect is `EFFECT_UNKNOWN` on the original carrier. The dispatcher returns `CARRIER_RECONCILIATION_REQUIRED` and never retries automatically.
+If the Runtime callback commits and COMMIT is later ambiguous, the Runtime fact is known and packet effect is `EFFECT_UNKNOWN` on the original carrier. The dispatcher returns `CARRIER_RECONCILIATION_REQUIRED` and never retries automatically. Insertion credit defaults to `false` whenever this caller’s callback result is absent.
 
 This is not a new transaction coordinator. It is composition of the incumbent READY/COMMIT effect gate with the incumbent Runtime transaction.
 
@@ -457,13 +457,16 @@ class AgentDialogueConsultationPacketCarrier:
 
 Each operation resolves the current trusted `DialogueBinding`, builds `DialogueContextV2`, validates the caller’s party/direction, and calls the incumbent service. No direct Slack client is allowed.
 
-Write methods accept one `before_commit` awaitable callback. Read methods return a frame or `None`; `None` is permitted only after a complete, mutation-complete service result proves absence. Transport, incomplete history, mutation uncertainty or conflicting physical packets raise `ConsultationPacketCarrierUnknown`.
+Write methods accept one `before_commit` awaitable callback. Read methods return a frame or `None`; `None` is permitted only after a complete, mutation-complete service result proves absence. Transport, incomplete history, mutation uncertainty or conflicting physical packets raise `ConsultationPacketCarrierUnknown`. The adapter catches only its own typed Relay errors and `ConsultationPacketCommitAborted`; arbitrary callback or programmer exceptions propagate and are never relabeled as carrier outages.
 
-The dispatcher catches that exception:
+The dispatcher catches the typed carrier exception:
 
-- zero-write `company.consultation` returns an unknown-shaped `CARRIER_RECONCILIATION_REQUIRED` body blocker and never `EFFECT_UNKNOWN`;
+- zero-write `company.consultation` returns an unknown-shaped `carrier_blocker=CARRIER_RECONCILIATION_REQUIRED` and never `EFFECT_UNKNOWN`;
+- question and answer read uncertainty are tracked independently, so a known QUESTION is preserved when only ANSWER history is unknown;
+- a pre-existing canonical Runtime blocker is preserved rather than overwritten by carrier uncertainty;
 - consult/reply after a durable Runtime fact returns the existing committed envelope with `CARRIER_RECONCILIATION_REQUIRED`;
 - pre-Runtime unknown returns a known typed refusal with zero Runtime/Wake effect;
+- a carrier abort before the Runtime callback cannot return a committed-shaped result;
 - proven absence alone maps to `CARRIER_UNAVAILABLE`.
 
 `PRODUCTION_PACKET_CARRIAGE` remains `UNAVAILABLE` in P1. Source availability is not installed/live availability.

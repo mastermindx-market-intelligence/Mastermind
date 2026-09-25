@@ -462,6 +462,31 @@ def test_agent_dialogue_packet_carrier_preserves_precommit_abort() -> None:
         )
 
 
+def test_agent_dialogue_packet_carrier_does_not_launder_callback_defects() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(requester)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(),
+    )
+
+    async def before_commit() -> None:
+        raise AssertionError("runtime programmer defect")
+
+    with pytest.raises(AssertionError, match="programmer defect"):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"],
+                frame,
+                before_commit=before_commit,
+            )
+        )
+
+
 def test_agent_dialogue_packet_carrier_hides_malformed_service_response() -> None:
     requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
     recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
@@ -4888,7 +4913,10 @@ class _MissingInvocations:
 class _RaisingPacketCarrier(InMemoryConsultationPacketCarrier):
     """In-memory carrier whose ``put_question`` always raises."""
 
-    def __init__(self, exc_type: type[Exception] = RuntimeError) -> None:
+    def __init__(
+        self,
+        exc_type: type[Exception] = ConsultationPacketCarrierUnknown,
+    ) -> None:
         super().__init__()
         self._exc_type = exc_type
         self.put_question_calls = 0
@@ -5381,7 +5409,10 @@ class _RaceQuestionCarrier(_CountingQuestionCarrier):
         if not self._hook_ran:
             self._hook_ran = True
             await self._hook()
-            return None
+            if self._hide:
+                self.get_question_calls += 1
+                return None
+            return await super().get_question(consultation_id)
         if self._hide:
             self.get_question_calls += 1
             return None
@@ -5981,7 +6012,9 @@ class _VisibleThenLostPutCarrier(_CountingQuestionCarrier):
         if not self._hooked:
             self._hooked = True
             await self._hook()
-            raise RuntimeError("synthetic lost put_question response")
+            raise ConsultationPacketEffectUnknown(
+                "synthetic lost put_question response"
+            )
 
 
 class _HookAfterPutCarrier(_CountingQuestionCarrier):
@@ -6322,8 +6355,14 @@ def test_consumed_between_carrier_write_and_first_answer_wake_creates_no_request
 # ---------------------------------------------------------------------------
 
 
+class _PacketWireCountingQuestionCarrier(_CountingQuestionCarrier):
+    requires_packet_wire = True
+
+
 class _RuntimeOrderingCarrier(InMemoryConsultationPacketCarrier):
     """Record the durable Runtime count immediately around COMMIT authority."""
+
+    requires_packet_wire = True
 
     def __init__(self, runtime: Runtime) -> None:
         super().__init__()
@@ -6374,6 +6413,8 @@ class _RuntimeOrderingCarrier(InMemoryConsultationPacketCarrier):
 
 
 class _ToggleUnknownCarrier(InMemoryConsultationPacketCarrier):
+    requires_packet_wire = True
+
     def __init__(self) -> None:
         super().__init__()
         self.question_unknown = False
@@ -6429,6 +6470,48 @@ def _ascii_answer_for_canonical_budget(max_bytes: int) -> tuple[str, str]:
     return admitted, refused
 
 
+def _pattern_text_at_semantic_budget(
+    pattern: str,
+    *,
+    max_bytes: int,
+    evidence_refs: list[str],
+) -> str:
+    best = ""
+    low = 0
+    high = max_bytes
+    while low <= high:
+        repeats = (low + high) // 2
+        candidate = pattern * repeats
+        size = len(
+            canonical_consultation_json(
+                {"text": candidate, "evidence_refs": evidence_refs}
+            ).encode("utf-8")
+        )
+        if size <= max_bytes:
+            best = candidate
+            low = repeats + 1
+        else:
+            high = repeats - 1
+    return best
+
+
+def _p1_invocations(
+    *,
+    max_evidence_reads: int = 1,
+    max_payload_bytes: int = 32_768,
+) -> _StaticInvocations:
+    return _StaticInvocations(
+        _default_invocation(
+            response_budget={
+                "max_answers": 1,
+                "max_evidence_reads": max_evidence_reads,
+                "max_forward_hops": 0,
+                "max_payload_bytes": max_payload_bytes,
+            }
+        )
+    )
+
+
 def test_oversize_question_packet_refuses_before_runtime_or_wake(
     tmp_path: Path,
 ) -> None:
@@ -6437,13 +6520,14 @@ def test_oversize_question_packet_refuses_before_runtime_or_wake(
     fixture_repo, fixture_revision = _fixture_repo(
         tmp_path / "p1-question-budget-repo"
     )
-    carrier = _CountingQuestionCarrier()
+    carrier = _PacketWireCountingQuestionCarrier()
     dispatcher = _make_dispatcher(
         runtime,
         fixture_repo,
         requester=requester,
         recipient=recipient,
         packets=carrier,
+        invocations=_p1_invocations(),
     )
 
     with pytest.raises(ConsultationRefusal) as excinfo:
@@ -6478,6 +6562,7 @@ def test_question_runtime_intent_is_created_inside_carrier_commit_gate(
         requester=requester,
         recipient=recipient,
         packets=carrier,
+        invocations=_p1_invocations(),
     )
 
     envelope = _run(
@@ -6511,7 +6596,7 @@ def test_question_clamps_answer_budget_to_renderable_packet(
         _default_invocation(
             response_budget={
                 "max_answers": 1,
-                "max_evidence_reads": 4,
+                "max_evidence_reads": 1,
                 "max_forward_hops": 0,
                 "max_payload_bytes": 32_768,
             }
@@ -6543,6 +6628,7 @@ def test_question_clamps_answer_budget_to_renderable_packet(
         question_frame
     )
     persisted_limit = int(question_frame["response_budget"]["max_payload_bytes"])
+    assert question_frame["response_budget"]["max_evidence_reads"] == 1
     assert 0 < persisted_limit == safe_limit < 32_768
 
     admitted_text, refused_text = _ascii_answer_for_canonical_budget(
@@ -6598,7 +6684,7 @@ def test_answer_runtime_fact_is_created_inside_carrier_commit_gate(
         tmp_path / "p1-answer-order-repo"
     )
     carrier = _RuntimeOrderingCarrier(runtime)
-    invocations = _StaticInvocations(_default_invocation())
+    invocations = _p1_invocations()
     a_dispatcher = _make_dispatcher(
         runtime,
         fixture_repo,
@@ -6656,7 +6742,7 @@ def test_zero_write_detail_read_reports_carrier_unknown_without_effect_unknown(
         tmp_path / "p1-read-unknown-repo"
     )
     carrier = _ToggleUnknownCarrier()
-    invocations = _StaticInvocations(_default_invocation())
+    invocations = _p1_invocations()
     a_dispatcher = _make_dispatcher(
         runtime,
         fixture_repo,
@@ -6691,5 +6777,582 @@ def test_zero_write_detail_read_reports_carrier_unknown_without_effect_unknown(
     assert read["data"]["question"] is None
     assert read["data"]["answer"] is None
     assert read["data"]["body_status"] == "UNAVAILABLE"
-    assert read["data"]["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert read["data"]["blocker"] == "PENDING_RETRYABLE"
+    assert read["data"]["carrier_blocker"] == (
+        "CARRIER_RECONCILIATION_REQUIRED"
+    )
     assert _canonical_event_digest(runtime, consultation_id) == before
+
+
+class _ConcurrentQuestionWinnerCarrier(InMemoryConsultationPacketCarrier):
+    """A concurrent winner creates Runtime+packet before the loser callback."""
+
+    requires_packet_wire = True
+
+    def __init__(
+        self,
+        *,
+        consultations: ConsultationRuntime,
+        requester_attempt_id: str,
+        repository_root: Path,
+        observed_at: str,
+    ) -> None:
+        super().__init__()
+        self.consultations = consultations
+        self.requester_attempt_id = requester_attempt_id
+        self.repository_root = repository_root
+        self.observed_at = observed_at
+        self.winner_inserted: bool | None = None
+        self.loser_callback_calls = 0
+
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        result = self.consultations.intent(
+            frame,
+            requester_attempt_id=self.requester_attempt_id,
+            carrier_ref=f"company-mcp://{consultation_id}",
+            observed_at=self.observed_at,
+            repository_root=self.repository_root,
+        )
+        self.winner_inserted = result.inserted
+        self._questions[consultation_id] = dict(frame)
+        # Relay returns DUPLICATE before invoking this caller's callback.
+        assert before_commit is not None
+
+
+class _ConcurrentAnswerWinnerCarrier(InMemoryConsultationPacketCarrier):
+    """A concurrent winner admits/stores ANSWER before the loser callback."""
+
+    requires_packet_wire = True
+
+    def __init__(self, *, consultations: ConsultationRuntime, observed_at: str) -> None:
+        super().__init__()
+        self.consultations = consultations
+        self.observed_at = observed_at
+        self.winner_inserted: bool | None = None
+
+    async def put_answer(
+        self, consultation_id, frame, *, before_commit
+    ):
+        result = self.consultations.answer_available(
+            frame,
+            observed_at=self.observed_at,
+        )
+        self.winner_inserted = result.inserted
+        self._answers[consultation_id] = dict(frame)
+        # Relay returns DUPLICATE before invoking this caller's callback.
+        assert before_commit is not None
+
+
+def test_question_duplicate_before_callback_reconciles_concurrent_winner(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-question-duplicate-before-callback")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-question-duplicate-before-callback-repo"
+    )
+    carrier = _ConcurrentQuestionWinnerCarrier(
+        consultations=_consultations(runtime, fixture_repo),
+        requester_attempt_id=requester[1],
+        repository_root=fixture_repo,
+        observed_at="2026-09-14T00:00:00Z",
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_p1_invocations(),
+    )
+
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Concurrent winner already committed this packet?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["state"] == "ALREADY_INTENDED"
+    assert envelope["data"]["is_already_intended"] is True
+    assert envelope["data"]["blocker"] is None
+    assert envelope["data"]["attention_requested"] is True
+    assert carrier.winner_inserted is True
+    assert len(
+        runtime.events.list_events(aggregate_type="consultation")
+    ) == 1
+    consultation_id = envelope["data"]["consultation_ref"]
+    obligation_id = _obligation_id_for_intent(runtime, consultation_id)
+    assert len(WakeLedgerRepository(runtime).list_records(obligation_id)) == 1
+
+
+def test_answer_duplicate_before_callback_reconciles_concurrent_winner(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-answer-duplicate-before-callback")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-answer-duplicate-before-callback-repo"
+    )
+    carrier = _ConcurrentAnswerWinnerCarrier(
+        consultations=_consultations(runtime, fixture_repo),
+        observed_at="2026-09-14T00:04:00Z",
+    )
+    invocations = _p1_invocations()
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Concurrent answer winner?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    reply = _run(
+        _gateway_with_dispatcher(b_dispatcher).call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "A concurrent recipient already admitted this answer.",
+                "evidence_refs": [],
+            },
+        )
+    )
+
+    assert reply["ok"] is True
+    assert reply["data"]["state"] == "ANSWER_AVAILABLE"
+    assert reply["data"]["inserted"] is False
+    assert reply["data"]["reconciled"] is True
+    assert reply["data"]["attention_requested"] is True
+    assert reply["data"]["blocker"] is None
+    assert carrier.winner_inserted is True
+    assert _consultation_event_count(
+        runtime, consultation_id, "ANSWER_AVAILABLE"
+    ) == 1
+    assert len(_answer_attention_requested_records(runtime)) == 1
+
+
+def test_high_requested_budget_replays_the_same_clamped_question(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-clamped-replay")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-clamped-replay-repo"
+    )
+    carrier = _PacketWireCountingQuestionCarrier()
+    invocations = _StaticInvocations(
+        _default_invocation(
+            response_budget={
+                "max_answers": 1,
+                "max_evidence_reads": 1,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 32_768,
+            }
+        )
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    gateway = _gateway_with_dispatcher(dispatcher)
+    args = _consult_args(
+        question="Replay the exact clamped packet.",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+
+    first = _run(gateway.call("company.consult", args))
+    second = _run(gateway.call("company.consult", args))
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert first["data"]["state"] == "INTENDED"
+    assert second["data"]["state"] == "ALREADY_INTENDED"
+    assert carrier.put_question_calls == 1
+    consultation_id = first["data"]["consultation_ref"]
+    assert _consultation_event_count(runtime, consultation_id, "INTENT") == 1
+
+
+def test_tiny_answer_budget_refuses_question_before_runtime_or_carrier(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-tiny-budget")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-tiny-budget-repo"
+    )
+    carrier = _PacketWireCountingQuestionCarrier()
+    invocations = _StaticInvocations(
+        _default_invocation(
+            response_budget={
+                "max_answers": 1,
+                "max_evidence_reads": 0,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 1,
+            }
+        )
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="No valid answer can fit a one-byte semantic budget.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert excinfo.value.code == "BODY_OVER_BUDGET"
+    assert runtime.events.list_events(aggregate_type="consultation") == []
+    assert carrier.put_question_attempts == 0
+    assert carrier.put_question_calls == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_unrepresentable_evidence_budget_refuses_without_silent_narrowing(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-evidence-budget-refusal")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-evidence-budget-refusal-repo"
+    )
+    carrier = _PacketWireCountingQuestionCarrier()
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_p1_invocations(max_evidence_reads=4),
+    )
+
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="Four maximum evidence references cannot fit this wire.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert excinfo.value.code == "BODY_OVER_BUDGET"
+    assert runtime.events.list_events(aggregate_type="consultation") == []
+    assert carrier.put_question_attempts == 0
+    assert carrier.put_question_calls == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_packet_safe_limit_includes_maximum_admitted_evidence_amplification(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-evidence-amplification")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-evidence-amplification-repo"
+    )
+    carrier = _RuntimeOrderingCarrier(runtime)
+    invocations = _StaticInvocations(
+        _default_invocation(
+            response_budget={
+                "max_answers": 1,
+                "max_evidence_reads": 1,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 32_768,
+            }
+        )
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Budget worst-case evidence amplification.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    question = _run(carrier.get_question(consult["data"]["consultation_ref"]))
+    assert question is not None
+    budget = dict(question["response_budget"])
+    refs = consultation_dispatch._max_length_packet_evidence_refs(
+        int(budget["max_evidence_reads"])
+    )
+    for pattern in ('x', '"', "\\", "界", "😀"):
+        text = _pattern_text_at_semantic_budget(
+            pattern,
+            max_bytes=int(budget["max_payload_bytes"]),
+            evidence_refs=refs,
+        )
+        frame = consultation_dispatch._build_answer_frame(
+            question,
+            answer_text=text,
+            evidence_refs=refs,
+            supersedes=None,
+        )
+        assert len(render_consultation_packet(frame).encode("utf-8")) <= (
+            CONSULTATION_PACKET_MAX_BYTES
+        )
+    if refs:
+        with pytest.raises(ConsultationRefusal) as excinfo:
+            _run_dispatcher(
+                _make_dispatcher(
+                    runtime,
+                    fixture_repo,
+                    requester=recipient,
+                    recipient=requester,
+                    packets=carrier,
+                    invocations=invocations,
+                ),
+                "company.reply",
+                {
+                    "schema": COMPANY_CONSULTATION_SCHEMA,
+                    "operation": "reply",
+                    "semantic": {
+                        "consultation_ref": consult["data"]["consultation_ref"],
+                        "answer": "bounded",
+                        "supersedes_message_key": None,
+                        "evidence_refs": refs + [
+                            "https://github.com/mastermindx-market-intelligence/"
+                            "Mastermind/commit/" + "f" * 40
+                        ],
+                    },
+                },
+            )
+        assert excinfo.value.code == "INVALID_REQUEST"
+
+
+class _AbortBeforeQuestionCommitCarrier(InMemoryConsultationPacketCarrier):
+    requires_packet_wire = True
+
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        raise ConsultationPacketCommitAborted(
+            "synthetic abort before Runtime callback"
+        )
+
+
+def test_carrier_abort_before_callback_never_returns_committed_shape(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-abort-before-callback")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-abort-before-callback-repo"
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=_AbortBeforeQuestionCommitCarrier(),
+        invocations=_p1_invocations(),
+    )
+
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="Abort before Runtime callback.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert excinfo.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+    assert runtime.events.list_events(aggregate_type="consultation") == []
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_answer_read_unknown_preserves_question_and_canonical_runtime_facts(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-answer-read-unknown")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-answer-read-unknown-repo"
+    )
+    carrier = _ToggleUnknownCarrier()
+    invocations = _p1_invocations()
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Preserve this question when ANSWER history is unknown.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    reply_args = {
+        "consultation_ref": consultation_id,
+        "answer": "This answer is durable but its carrier read is unavailable.",
+        "evidence_refs": [],
+    }
+    reply = _run(
+        _gateway_with_dispatcher(b_dispatcher).call(
+            "company.reply", reply_args
+        )
+    )
+    assert reply["ok"] is True
+    before = _canonical_event_digest(runtime, consultation_id)
+    carrier.answer_unknown = True
+
+    read = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consultation",
+            {"consultation_ref": consultation_id},
+        )
+    )
+
+    assert read["ok"] is True
+    assert read["data"]["question"]["text"] == (
+        "Preserve this question when ANSWER history is unknown."
+    )
+    assert read["data"]["answer"] is None
+    assert read["data"]["body_status"] == "UNAVAILABLE"
+    assert read["data"]["carrier_blocker"] == (
+        "CARRIER_RECONCILIATION_REQUIRED"
+    )
+    assert _canonical_event_digest(runtime, consultation_id) == before
+
+
+def test_answer_read_unknown_blocks_consume_and_replay_without_new_effect(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-answer-consume-unknown")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-answer-consume-unknown-repo"
+    )
+    carrier = _ToggleUnknownCarrier()
+    invocations = _p1_invocations()
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Unknown answer read must not consume or resend.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    reply_request = {
+        "schema": COMPANY_CONSULTATION_SCHEMA,
+        "operation": "reply",
+        "semantic": {
+            "consultation_ref": consultation_id,
+            "answer": "One admitted answer.",
+            "supersedes_message_key": None,
+            "evidence_refs": [],
+        },
+    }
+    first = _run_dispatcher(b_dispatcher, "company.reply", reply_request)
+    assert first["result"]["state"] == "ANSWER_AVAILABLE"
+    before = _canonical_event_digest(runtime, consultation_id)
+    carrier.answer_unknown = True
+
+    with pytest.raises(ConsultationRefusal) as consume_exc:
+        _run(a_dispatcher.consume_answer(consultation_id))
+    assert consume_exc.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+
+    with pytest.raises(ConsultationRefusal) as replay_exc:
+        _run_dispatcher(b_dispatcher, "company.reply", reply_request)
+    assert replay_exc.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+    assert _canonical_event_digest(runtime, consultation_id) == before
+    assert _consultation_event_count(
+        runtime, consultation_id, "CONSUMED_BY_REQUESTER"
+    ) == 0
+    assert _consultation_event_count(
+        runtime, consultation_id, "ANSWER_AVAILABLE"
+    ) == 1

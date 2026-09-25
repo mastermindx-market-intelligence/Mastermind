@@ -732,14 +732,19 @@ Use quote/backslash/CJK/astral and maximum evidence/artifact metadata cases.
 
 - [ ] **Step 2: Write derived answer-budget RED tests**
 
-Build a lawful QUESTION at metadata maxima. Assert the persisted `max_payload_bytes` equals the pure helper result and that:
+Build a lawful packet-wire QUESTION at metadata maxima. Assert:
 
 ```text
-payload exactly at limit -> complete ANSWER packet <= 4500 bytes
+persisted max_evidence_reads == requested max_evidence_reads
+persisted max_payload_bytes == pure helper result
+plain / quote / backslash / CJK / astral payloads at the semantic limit
+  -> complete ANSWER packet <= 4500 bytes
 payload one byte above -> dispatcher refuses before ANSWER_AVAILABLE
+an evidence-count contract with no positive safe payload
+  -> BODY_OVER_BUDGET before Runtime/carrier effects, never silent narrowing
 ```
 
-The test must use the actual `_build_answer_frame()` nested JSON path.
+The tests must use the actual `_build_answer_frame()` nested JSON path and maximum-length valid evidence references.
 
 - [ ] **Step 3: Write READY/Runtime/COMMIT interleaving RED tests**
 
@@ -750,7 +755,7 @@ prepare -> before_commit(INTENT inserted) -> physical QUESTION put -> question W
 prepare -> before_commit(ANSWER admitted) -> physical ANSWER put -> answer attention
 ```
 
-A Runtime replay/race loser raises `ConsultationPacketCommitAborted`; no physical write occurs; exact readback reconciles instead. If Relay reports a duplicate packet before the Runtime callback and no exact Runtime fact exists, refuse it as an orphaned carrier conflict rather than manufacturing INTENT/ANSWER state.
+A Runtime replay/race loser raises `ConsultationPacketCommitAborted`; no physical write occurs; fresh Runtime+packet readback reconciles instead. The race test must return the winner’s real packet on the initial awaited read, not hide it. If Relay reports a duplicate before this caller’s callback because another identical caller won, return truthful replay/reconciled state with `inserted=False`; if no exact Runtime fact exists, refuse the physical packet as an orphan conflict rather than manufacturing INTENT/ANSWER state.
 
 - [ ] **Step 4: Write post-COMMIT effect-unknown RED tests**
 
@@ -770,10 +775,15 @@ For QUESTION and ANSWER reads:
 
 ```text
 complete proven absence -> CARRIER_UNAVAILABLE / body unavailable
-carrier unknown -> CARRIER_RECONCILIATION_REQUIRED
+carrier unknown -> typed CARRIER_RECONCILIATION_REQUIRED
 company.consultation remains ok:true, zero-write, never EFFECT_UNKNOWN
-consume/reply map unknown without pretending absence
+question/answer legs are read independently
+known question is preserved when answer history is unknown
+canonical Runtime blocker is preserved; carrier_blocker records transport uncertainty
+consume/reply map answer unknown without pretending absence or appending events
 ```
+
+Also add a carrier-adapter discriminator proving an untyped callback/programmer exception is not laundered into `ConsultationPacketCarrierUnknown`, and a pre-callback abort discriminator proving no committed-shaped result can be returned without a Runtime fact.
 
 - [ ] **Step 6: Re-prove async interleavings**
 
@@ -791,7 +801,7 @@ Expected: current ordering/return semantics fail the new discriminators.
 
 - [ ] **Step 8: Implement minimal dispatcher composition**
 
-Move `intent()` and `answer_available()` into local async `before_commit` callbacks. Preserve existing inserted/replay/refusal identities. Static packet render happens before carrier invocation; Relay prepare/page budget happens before callback. After Runtime replay abort, perform exact readback and never COMMIT.
+Move `intent()` and `answer_available()` into local async `before_commit` callbacks. Preserve existing inserted/replay/refusal identities. Static packet render happens before carrier invocation; Relay prepare/page budget happens before callback. After Runtime replay abort or duplicate-before-callback return, re-read canonical Runtime and the exact packet, default insertion credit to false, and never COMMIT or resend. Catch only typed carrier uncertainty; arbitrary callback defects propagate.
 
 - [ ] **Step 9: Run full protected Company Inbox/Runtime/Wake envelope**
 

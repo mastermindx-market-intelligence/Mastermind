@@ -44,6 +44,7 @@ from control_plane.company_inbox_projection import (
 )
 from control_plane.consultation_runtime import (
     ConsultationConflict,
+    ConsultationEventResult,
     ConsultationRuntime,
 )
 from control_plane.executive_runtime import Runtime, StateConflict
@@ -177,6 +178,7 @@ class InMemoryConsultationPacketCarrier:
     """TEST-ONLY hermetic packet carrier."""
 
     requires_dialogue_binding = False
+    requires_packet_wire = False
 
     def __init__(self) -> None:
         self._questions: dict[str, dict[str, Any]] = {}
@@ -262,6 +264,7 @@ class AgentDialogueConsultationPacketCarrier:
     """Adapter over the incumbent authenticated Agent Relay AF_UNIX service."""
 
     requires_dialogue_binding = True
+    requires_packet_wire = True
 
     def __init__(
         self,
@@ -349,10 +352,6 @@ class AgentDialogueConsultationPacketCarrier:
                 raise ConsultationPacketEffectUnknown(
                     "consultation packet effect remains unknown"
                 ) from exc
-            raise ConsultationPacketCarrierUnknown(
-                "Agent Relay packet carrier is unavailable"
-            ) from exc
-        except Exception as exc:
             raise ConsultationPacketCarrierUnknown(
                 "Agent Relay packet carrier is unavailable"
             ) from exc
@@ -960,90 +959,119 @@ def _max_length_packet_evidence_refs(count: int) -> list[str]:
     return refs
 
 
+_PACKET_BUDGET_TEXT_PATTERNS = ("x", '"', "\\", "界", "😀")
+
+
+def _max_pattern_text_for_semantic_budget(
+    pattern: str,
+    *,
+    semantic_budget: int,
+    evidence_refs: list[str],
+) -> str | None:
+    """Largest repetition of one hostile text pattern within semantic bytes."""
+
+    best: str | None = None
+    low = 0
+    high = semantic_budget
+    while low <= high:
+        repeats = (low + high) // 2
+        candidate = pattern * repeats
+        semantic_bytes = len(
+            canonical_consultation_json(
+                {"text": candidate, "evidence_refs": evidence_refs}
+            ).encode("utf-8")
+        )
+        if semantic_bytes <= semantic_budget:
+            best = candidate
+            low = repeats + 1
+        else:
+            high = repeats - 1
+    return best
+
+
 def _packet_safe_answer_payload_limit(
     question_frame: Mapping[str, Any],
 ) -> int:
-    """Largest canonical semantic-answer byte budget with worst-case evidence.
+    """Largest semantic-answer byte budget safe for hostile valid text.
 
-    The immutable question metadata and its admitted ``max_evidence_reads``
-    determine the complete ANSWER frame overhead.  The search uses ASCII text
-    so the candidate length is exact UTF-8 bytes; callers still render the
-    actual answer packet before admitting ``ANSWER_AVAILABLE``.
+    The complete ANSWER packet is probed with maximum-length admitted evidence
+    references and text classes that maximize each JSON/UTF-8 amplification
+    boundary: plain ASCII, quote, backslash, BMP Unicode, and astral Unicode.
     """
 
     question = validate_consultation(copy.deepcopy(dict(question_frame)))
     evidence_count = int(question["response_budget"]["max_evidence_reads"])
     evidence_refs = _max_length_packet_evidence_refs(evidence_count)
+    requested = int(question["response_budget"]["max_payload_bytes"])
+    minimum = len(
+        canonical_consultation_json(
+            {"text": "", "evidence_refs": evidence_refs}
+        ).encode("utf-8")
+    )
+    if requested < minimum:
+        return 0
     best = 0
-    low = 0
-    high = int(question["response_budget"]["max_payload_bytes"])
+    low = minimum
+    high = requested
     while low <= high:
-        text_bytes = (low + high) // 2
-        answer_text = "x" * text_bytes
-        semantic_bytes = len(
-            canonical_consultation_json(
-                {"text": answer_text, "evidence_refs": evidence_refs}
-            ).encode("utf-8")
-        )
-        try:
-            answer = _build_answer_frame(
-                question,
-                answer_text=answer_text,
+        semantic_budget = (low + high) // 2
+        safe = True
+        for pattern in _PACKET_BUDGET_TEXT_PATTERNS:
+            answer_text = _max_pattern_text_for_semantic_budget(
+                pattern,
+                semantic_budget=semantic_budget,
                 evidence_refs=evidence_refs,
-                supersedes=None,
             )
-            rendered = render_consultation_packet(answer)
-            if len(rendered.encode("utf-8")) > CONSULTATION_PACKET_MAX_BYTES:
-                raise DialogueContractError("FRAME_TOO_LARGE")
-        except (DialogueContractError, ValueError, TypeError):
-            high = text_bytes - 1
-            continue
-        best = semantic_bytes
-        low = text_bytes + 1
+            if answer_text is None:
+                safe = False
+                break
+            try:
+                answer = _build_answer_frame(
+                    question,
+                    answer_text=answer_text,
+                    evidence_refs=evidence_refs,
+                    supersedes=None,
+                )
+                render_consultation_packet(answer)
+            except (DialogueContractError, ValueError, TypeError):
+                safe = False
+                break
+        if safe:
+            best = semantic_budget
+            low = semantic_budget + 1
+        else:
+            high = semantic_budget - 1
     return best
 
 
 def _packet_safe_question_frame(
     question_frame: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Clamp response evidence/payload budgets to one renderable ANSWER."""
+    """Clamp only payload bytes; never silently narrow evidence semantics.
+
+    The first measurement includes the caller's original numeric budget in
+    every candidate ANSWER frame. Replacing it with an equal-or-smaller value
+    cannot increase canonical packet bytes, so one conservative measurement is
+    sufficient and no unstable refinement loop is needed.
+    """
 
     question = validate_consultation(copy.deepcopy(dict(question_frame)))
     requested = dict(question["response_budget"])
     requested_payload = int(requested["max_payload_bytes"])
-    requested_evidence = int(requested["max_evidence_reads"])
+    safe_limit = _packet_safe_answer_payload_limit(question)
+    next_limit = min(requested_payload, safe_limit)
+    if next_limit <= 0:
+        raise DialogueContractError("FRAME_TOO_LARGE")
 
-    for evidence_count in range(requested_evidence, -1, -1):
-        budget = {
-            **requested,
-            "max_evidence_reads": evidence_count,
-            "max_payload_bytes": requested_payload,
-        }
-        candidate = copy.deepcopy(question)
-        candidate["response_budget"] = budget
-        candidate["fingerprint"] = ""
-        candidate = build_consultation(candidate)
-
-        safe_limit = _packet_safe_answer_payload_limit(candidate)
-        if safe_limit <= 0:
-            continue
-        # The budget value itself contributes digits to the packet.  Rebuild
-        # until the clamped value and the measured complete-frame limit agree.
-        for _round in range(4):
-            next_limit = min(requested_payload, safe_limit)
-            budget["max_payload_bytes"] = next_limit
-            candidate = copy.deepcopy(question)
-            candidate["response_budget"] = budget
-            candidate["fingerprint"] = ""
-            candidate = build_consultation(candidate)
-            measured = _packet_safe_answer_payload_limit(candidate)
-            if measured == next_limit or min(requested_payload, measured) == next_limit:
-                break
-            safe_limit = measured
-        render_consultation_packet(candidate)
-        return candidate
-
-    raise DialogueContractError("FRAME_TOO_LARGE")
+    candidate = copy.deepcopy(question)
+    candidate["response_budget"] = {
+        **requested,
+        "max_payload_bytes": next_limit,
+    }
+    candidate["fingerprint"] = ""
+    candidate = build_consultation(candidate)
+    render_consultation_packet(candidate)
+    return candidate
 
 
 class RuntimeConsultationDispatcher:
@@ -1290,26 +1318,26 @@ class RuntimeConsultationDispatcher:
         }
 
         try:
-            question_frame = _packet_safe_question_frame(
-                _build_question_frame(
-                    caller=self.caller,
-                    requester_actor_ref=requester_actor_ref,
-                    recipient_actor_ref=recipient_actor_ref,
-                    recipient_peer_ref=peer_ref,
-                    recipient_binding=normalized_recipient_binding,
-                    correlation=correlation,
-                    question_text=semantic["question"],
-                    evidence_refs=list(semantic.get("evidence_refs", [])),
-                    artifact_revisions=list(semantic.get("artifact_revisions", [])),
-                    message_key=message_key,
-                    consultation_id=consultation_id,
-                    valid_until=valid_until,
-                    deadline_ms=ctx.deadline_ms,
-                    response_budget=response_budget,
-                )
+            question_frame = _build_question_frame(
+                caller=self.caller,
+                requester_actor_ref=requester_actor_ref,
+                recipient_actor_ref=recipient_actor_ref,
+                recipient_peer_ref=peer_ref,
+                recipient_binding=normalized_recipient_binding,
+                correlation=correlation,
+                question_text=semantic["question"],
+                evidence_refs=list(semantic.get("evidence_refs", [])),
+                artifact_revisions=list(semantic.get("artifact_revisions", [])),
+                message_key=message_key,
+                consultation_id=consultation_id,
+                valid_until=valid_until,
+                deadline_ms=ctx.deadline_ms,
+                response_budget=response_budget,
             )
-            render_consultation_packet(question_frame)
-        except DialogueContractError as exc:
+            if getattr(self.packets, "requires_packet_wire", False):
+                question_frame = _packet_safe_question_frame(question_frame)
+                render_consultation_packet(question_frame)
+        except (DialogueContractError, TypeError, ValueError) as exc:
             raise ConsultationRefusal(
                 "BODY_OVER_BUDGET",
                 detail="QUESTION packet exceeds the bounded Relay wire",
@@ -1359,6 +1387,12 @@ class RuntimeConsultationDispatcher:
                 detail="QUESTION carrier history is unavailable before INTENT",
             ) from exc
         carrier_holds_packet = carrier_question_frame is not None
+        # The carrier read is an await boundary. Re-read canonical Runtime
+        # before classifying a visible packet as orphaned; an identical
+        # concurrent caller may have committed INTENT and packet meanwhile.
+        existing_intent = _find_consultation_event(
+            self.runtime, consultation_id, "INTENT"
+        )
         if existing_intent is None and carrier_holds_packet:
             raise ConsultationRefusal(
                 "CONFLICT",
@@ -1489,6 +1523,16 @@ class RuntimeConsultationDispatcher:
             intent_event = _find_consultation_event(
                 self.runtime, consultation_id, "INTENT"
             )
+            try:
+                carrier_question_frame = await self.packets.get_question(
+                    consultation_id
+                )
+            except (
+                ConsultationPacketCarrierUnknown,
+                ConsultationPacketEffectUnknown,
+            ):
+                carrier_question_frame = None
+            carrier_holds_packet = carrier_question_frame is not None
             if (
                 intent_event is None
                 or not carrier_holds_packet
@@ -1552,11 +1596,18 @@ class RuntimeConsultationDispatcher:
                     ConsultationPacketEffectUnknown,
                 ):
                     readback = None
-                if (
-                    intent_event is None
-                    or _validated_question_frame(
-                        intent_event.payload, readback
+                if intent_event is None:
+                    if readback is not None:
+                        raise ConsultationRefusal(
+                            "CONFLICT",
+                            detail="orphan QUESTION packet exists without canonical INTENT",
+                        )
+                    raise ConsultationRefusal(
+                        "CARRIER_RECONCILIATION_REQUIRED",
+                        detail="Relay COMMIT aborted before canonical INTENT",
                     )
+                if (
+                    _validated_question_frame(intent_event.payload, readback)
                     is None
                 ):
                     return {
@@ -1566,10 +1617,8 @@ class RuntimeConsultationDispatcher:
                             valid_until=valid_until,
                             carrier_ref=carrier_ref,
                             intent_inserted=False,
-                            attention_requested=(
-                                self._existing_wake_request(intent_event)
-                                if intent_event is not None
-                                else None
+                            attention_requested=self._existing_wake_request(
+                                intent_event
                             ),
                             wake_state=None,
                             blocker="CARRIER_RECONCILIATION_REQUIRED",
@@ -1592,7 +1641,7 @@ class RuntimeConsultationDispatcher:
                         valid_until=valid_until,
                         carrier_ref=carrier_ref,
                         intent_inserted=bool(
-                            getattr(intent_result, "inserted", True)
+                            getattr(intent_result, "inserted", False)
                         ),
                         attention_requested=self._existing_wake_request(intent_event),
                         wake_state=None,
@@ -1612,7 +1661,7 @@ class RuntimeConsultationDispatcher:
                             valid_until=valid_until,
                             carrier_ref=carrier_ref,
                             intent_inserted=bool(
-                                getattr(intent_result, "inserted", True)
+                                getattr(intent_result, "inserted", False)
                             ),
                             attention_requested=self._existing_wake_request(intent_event),
                             wake_state=None,
@@ -1623,37 +1672,70 @@ class RuntimeConsultationDispatcher:
                     "CARRIER_RECONCILIATION_REQUIRED",
                     detail="Relay packet carrier unavailable before INTENT",
                 ) from exc
-            except Exception as exc:
-                # A non-production test carrier may raise before or after its
-                # callback. Read canonical Runtime to retain only proven facts.
-                intent_result = intent_box.get("result")
-                intent_event = _find_consultation_event(
-                    self.runtime, consultation_id, "INTENT"
-                )
-                if intent_event is not None:
+
+
+            intent_result = intent_box.get("result")
+            intent_event = _find_consultation_event(
+                self.runtime, consultation_id, "INTENT"
+            )
+
+            if intent_result is None:
+                try:
+                    readback = await self.packets.get_question(consultation_id)
+                except (
+                    ConsultationPacketCarrierUnknown,
+                    ConsultationPacketEffectUnknown,
+                ):
+                    if intent_event is not None:
+                        return {
+                            "ok": True,
+                            "result": _committed_consult_result(
+                                consultation_id=consultation_id,
+                                valid_until=valid_until,
+                                carrier_ref=carrier_ref,
+                                intent_inserted=False,
+                                attention_requested=self._existing_wake_request(
+                                    intent_event
+                                ),
+                                wake_state="RECONCILIATION_REQUIRED",
+                                blocker="CARRIER_RECONCILIATION_REQUIRED",
+                            ),
+                        }
+                    raise ConsultationRefusal(
+                        "CARRIER_RECONCILIATION_REQUIRED",
+                        detail="Relay duplicate returned without Runtime/readback",
+                    )
+                if intent_event is None:
+                    if readback is not None:
+                        raise ConsultationRefusal(
+                            "CONFLICT",
+                            detail="orphan QUESTION packet exists without canonical INTENT",
+                        )
+                    raise ConsultationRefusal(
+                        "CARRIER_RECONCILIATION_REQUIRED",
+                        detail="Relay returned without Runtime INTENT or packet",
+                    )
+                if (
+                    _validated_question_frame(intent_event.payload, readback)
+                    is None
+                ):
                     return {
                         "ok": True,
                         "result": _committed_consult_result(
                             consultation_id=consultation_id,
                             valid_until=valid_until,
                             carrier_ref=carrier_ref,
-                            intent_inserted=bool(
-                                getattr(intent_result, "inserted", True)
+                            intent_inserted=False,
+                            attention_requested=self._existing_wake_request(
+                                intent_event
                             ),
-                            attention_requested=self._existing_wake_request(intent_event),
-                            wake_state=None,
+                            wake_state="RECONCILIATION_REQUIRED",
                             blocker="CARRIER_RECONCILIATION_REQUIRED",
                         ),
                     }
-                raise ConsultationRefusal(
-                    "CARRIER_RECONCILIATION_REQUIRED",
-                    detail="packet carrier failed before canonical INTENT",
-                ) from exc
-
-            intent_result = intent_box.get("result")
-            intent_event = _find_consultation_event(
-                self.runtime, consultation_id, "INTENT"
-            )
+                intent_result = ConsultationEventResult(
+                    event=intent_event, inserted=False
+                )
 
         if intent_result is None or intent_event is None:
             raise ConsultationRefusal(
@@ -1890,7 +1972,10 @@ class RuntimeConsultationDispatcher:
                 _DEFAULT_RESPONSE_BUDGET["max_evidence_reads"],
             )
         )
-        if len(evidence_refs) > max_evidence_reads:
+        packet_wire_required = getattr(
+            self.packets, "requires_packet_wire", False
+        )
+        if packet_wire_required and len(evidence_refs) > max_evidence_reads:
             raise ConsultationRefusal(
                 "INVALID_REQUEST",
                 detail=f"answer evidence exceeds {max_evidence_reads} references",
@@ -1916,7 +2001,8 @@ class RuntimeConsultationDispatcher:
                 evidence_refs=evidence_refs,
                 supersedes=semantic.get("supersedes_message_key"),
             )
-            render_consultation_packet(answer_frame)
+            if packet_wire_required:
+                render_consultation_packet(answer_frame)
         except DialogueContractError as exc:
             raise ConsultationRefusal(
                 "INVALID_REQUEST",
@@ -2199,48 +2285,79 @@ class RuntimeConsultationDispatcher:
                 "CARRIER_RECONCILIATION_REQUIRED",
                 detail="Relay packet carrier unavailable before ANSWER_AVAILABLE",
             ) from exc
-        except Exception as exc:
-            # Preserve only canonical Runtime facts from non-production test
-            # carriers; never infer packet absence from an arbitrary failure.
-            answer = answer_box.get("result")
+
+
+        answer = answer_box.get("result")
+        if answer is None:
             current_reserved = _non_historical_answer_event(
                 self.runtime, consultation_ref
             )
-            if answer is not None and current_reserved is not None:
-                event, _event_type, _payload_fact, historical = _answer_event_facts(answer)
+            try:
+                packet = await self.packets.get_answer(consultation_ref)
+            except (
+                ConsultationPacketCarrierUnknown,
+                ConsultationPacketEffectUnknown,
+            ):
+                if current_reserved is not None:
+                    return {
+                        "ok": True,
+                        "result": {
+                            "schema": _INBOX_SCHEMA,
+                            "consultation_ref": consultation_ref,
+                            "state": "ANSWER_AVAILABLE",
+                            "answer_fingerprint": current_reserved.payload.get(
+                                "answer_fingerprint", ""
+                            ),
+                            "semantic_answer_digest": current_reserved.payload.get(
+                                "semantic_answer_digest", ""
+                            ),
+                            "historical": False,
+                            "inserted": False,
+                            "reconciled": True,
+                            "attention_requested": None,
+                            "wake_state": "RECONCILIATION_REQUIRED",
+                            "blocker": "CARRIER_RECONCILIATION_REQUIRED",
+                        },
+                    }
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="Relay duplicate returned without Runtime/readback",
+                )
+            if current_reserved is None:
+                if packet is not None:
+                    raise ConsultationRefusal(
+                        "CONFLICT",
+                        detail="orphan ANSWER packet exists without canonical ANSWER_AVAILABLE",
+                    )
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="Relay returned without ANSWER_AVAILABLE or packet",
+                )
+            validated = _validated_answer_frame(
+                intent.payload, current_reserved, packet
+            )
+            if validated is None:
                 return {
                     "ok": True,
                     "result": {
                         "schema": _INBOX_SCHEMA,
                         "consultation_ref": consultation_ref,
-                        "state": (
-                            "ANSWER_HISTORICAL"
-                            if historical
-                            else "ANSWER_AVAILABLE"
-                        ),
-                        "answer_fingerprint": event.payload.get(
+                        "state": "ANSWER_AVAILABLE",
+                        "answer_fingerprint": current_reserved.payload.get(
                             "answer_fingerprint", ""
                         ),
-                        "semantic_answer_digest": event.payload.get(
+                        "semantic_answer_digest": current_reserved.payload.get(
                             "semantic_answer_digest", ""
                         ),
-                        "historical": historical,
-                        "inserted": bool(answer.inserted),
+                        "historical": False,
+                        "inserted": False,
+                        "reconciled": True,
                         "attention_requested": None,
                         "wake_state": "RECONCILIATION_REQUIRED",
                         "blocker": "CARRIER_RECONCILIATION_REQUIRED",
                     },
                 }
-            raise ConsultationRefusal(
-                "CARRIER_RECONCILIATION_REQUIRED",
-                detail="packet carrier failed before canonical ANSWER_AVAILABLE",
-            ) from exc
-
-        answer = answer_box.get("result")
-        if answer is None:
-            raise ConsultationRefusal(
-                "CONFLICT", detail="ANSWER_AVAILABLE missing after Relay/Runtime composition"
-            )
+            return _reconciled_envelope(current_reserved, validated)
         event, event_type, payload_fact, historical = _answer_event_facts(answer)
         if historical or not answer.inserted:
             raise ConsultationRefusal(
@@ -2392,17 +2509,24 @@ class RuntimeConsultationDispatcher:
             self._clock(),
         )
 
-        carrier_unknown = False
+        question_carrier_unknown = False
+        answer_carrier_unknown = False
         try:
             question_frame = await self.packets.get_question(consultation_ref)
-            answer_frame = await self.packets.get_answer(consultation_ref)
         except (
             ConsultationPacketCarrierUnknown,
             ConsultationPacketEffectUnknown,
         ):
             question_frame = None
+            question_carrier_unknown = True
+        try:
+            answer_frame = await self.packets.get_answer(consultation_ref)
+        except (
+            ConsultationPacketCarrierUnknown,
+            ConsultationPacketEffectUnknown,
+        ):
             answer_frame = None
-            carrier_unknown = True
+            answer_carrier_unknown = True
 
         # Validate every carrier frame against the persisted INTENT and
         # (for answers) the admitted non-historical ANSWER_AVAILABLE
@@ -2435,11 +2559,15 @@ class RuntimeConsultationDispatcher:
         result["question"] = question_body
         result["answer"] = answer_body
         result["body_status"] = body_status
-        if carrier_unknown:
-            result["question"] = None
-            result["answer"] = None
+        if question_carrier_unknown or answer_carrier_unknown:
+            if question_carrier_unknown:
+                result["question"] = None
+            if answer_carrier_unknown:
+                result["answer"] = None
             result["body_status"] = "UNAVAILABLE"
-            result["blocker"] = "CARRIER_RECONCILIATION_REQUIRED"
+            result["carrier_blocker"] = "CARRIER_RECONCILIATION_REQUIRED"
+            if row.get("blocker") is None:
+                result["blocker"] = "CARRIER_RECONCILIATION_REQUIRED"
         elif body_blocker is not None:
             result["blocker"] = body_blocker
         elif row.get("blocker") is None:
