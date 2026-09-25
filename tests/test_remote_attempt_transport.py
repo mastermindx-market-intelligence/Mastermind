@@ -179,6 +179,32 @@ def test_root_binding_cannot_redirect_capacity_identity(
     assert raised.value.code == "HOST_BINDING_MISMATCH"
 
 
+def test_invalid_root_managed_worker_principal_is_sanitized(tmp_path: Path) -> None:
+    runtime, job, lease = _claimed_runtime(tmp_path)
+
+    def source(host_ref: str, worker_id: str):
+        binding = _host_binding(tmp_path, host_ref=host_ref, worker_id=worker_id)
+        return RemoteWorkerHostBinding(
+            host_ref=binding.host_ref,
+            worker_id=binding.worker_id,
+            transport=binding.transport,
+            worker_user=binding.worker_user,
+            worker_uid=0,
+            worker_gid=binding.worker_gid,
+            secret_canary_verdict=binding.secret_canary_verdict,
+        )
+
+    with pytest.raises(RemoteAttemptTransportError) as raised:
+        resolve_remote_attempt_transport(
+            runtime,
+            job_id=job.job_id,
+            attempt_id=lease.attempt.attempt_id,
+            binding_source=source,
+        )
+    assert raised.value.code == "HOST_BINDING_MISMATCH"
+    assert "worker_uid" not in str(raised.value)
+
+
 def test_local_unbound_capacity_never_becomes_remote_transport(tmp_path: Path) -> None:
     runtime, job, lease = _claimed_runtime(tmp_path, host_ref="local-unbound")
     called = False
