@@ -37,6 +37,7 @@ from control_plane.executive_runtime import (
 from control_plane.executive_worker_broker import (
     RemoteWorkerBrokerEndpoint,
     RemoteWorkerBrokerFleet,
+    WorkerBrokerError,
 )
 from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
 from control_plane.remote_worker_transport import (
@@ -335,7 +336,7 @@ def resolve_remote_attempt_transport(
             allowed_operations=allowed_operations,
         )
         endpoint = host_binding.endpoint_for(client)
-    except (TransportValidationError, ValueError) as exc:
+    except (TransportValidationError, WorkerBrokerError, ValueError) as exc:
         raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from exc
 
     return ResolvedRemoteAttemptTransport(
