@@ -122,19 +122,19 @@ class ConsultationPacketCarrier(Protocol):
     location.
     """
 
-    def put_question(
+    async def put_question(
         self, consultation_id: str, frame: Mapping[str, Any]
     ) -> None: ...
 
-    def get_question(
+    async def get_question(
         self, consultation_id: str
     ) -> Mapping[str, Any] | None: ...
 
-    def put_answer(
+    async def put_answer(
         self, consultation_id: str, frame: Mapping[str, Any]
     ) -> None: ...
 
-    def get_answer(
+    async def get_answer(
         self, consultation_id: str
     ) -> Mapping[str, Any] | None: ...
 
@@ -152,23 +152,23 @@ class InMemoryConsultationPacketCarrier:
         self._questions: dict[str, dict[str, Any]] = {}
         self._answers: dict[str, dict[str, Any]] = {}
 
-    def put_question(
+    async def put_question(
         self, consultation_id: str, frame: Mapping[str, Any]
     ) -> None:
         self._questions[consultation_id] = dict(frame)
 
-    def get_question(
+    async def get_question(
         self, consultation_id: str
     ) -> Mapping[str, Any] | None:
         frame = self._questions.get(consultation_id)
         return dict(frame) if frame is not None else None
 
-    def put_answer(
+    async def put_answer(
         self, consultation_id: str, frame: Mapping[str, Any]
     ) -> None:
         self._answers[consultation_id] = dict(frame)
 
-    def get_answer(
+    async def get_answer(
         self, consultation_id: str
     ) -> Mapping[str, Any] | None:
         frame = self._answers.get(consultation_id)
@@ -689,7 +689,7 @@ class RuntimeConsultationDispatcher:
 
     # -- explicit authenticated consumption seam (NOT reachable via __call__) --
 
-    def consume_answer(self, consultation_ref: str) -> dict[str, Any]:
+    async def consume_answer(self, consultation_ref: str) -> dict[str, Any]:
         """Append one exact ``CONSUMED_BY_REQUESTER`` event for the requester.
 
         This is the only Python seam that appends ``CONSUMED_BY_REQUESTER``
@@ -713,7 +713,7 @@ class RuntimeConsultationDispatcher:
                 "NOT_A_PARTY",
                 detail="caller is not the requester Runtime Attempt",
             )
-        answer_frame = self.packets.get_answer(consultation_ref)
+        answer_frame = await self.packets.get_answer(consultation_ref)
         if answer_frame is None:
             raise ConsultationRefusal(
                 "CARRIER_UNAVAILABLE",
@@ -880,7 +880,7 @@ class RuntimeConsultationDispatcher:
         existing_intent = _find_consultation_event(
             self.runtime, consultation_id, "INTENT"
         )
-        carrier_question_frame = self.packets.get_question(consultation_id)
+        carrier_question_frame = await self.packets.get_question(consultation_id)
         carrier_holds_packet = carrier_question_frame is not None
         if existing_intent is not None:
             persisted_payload = existing_intent.payload
@@ -1015,7 +1015,7 @@ class RuntimeConsultationDispatcher:
             )
         if intent_result.inserted:
             try:
-                self.packets.put_question(consultation_id, question_frame)
+                await self.packets.put_question(consultation_id, question_frame)
             except Exception:
                 # INTENT is durable but this caller's carrier response is
                 # lost. Unique INTENT insertion granted the initial
@@ -1041,7 +1041,7 @@ class RuntimeConsultationDispatcher:
                 }
         else:
             try:
-                readback = self.packets.get_question(consultation_id)
+                readback = await self.packets.get_question(consultation_id)
             except Exception:
                 readback = None
             if _validated_question_frame(intent_event.payload, readback) is None:
@@ -1237,7 +1237,7 @@ class RuntimeConsultationDispatcher:
                 detail="caller RuntimeBinding does not match persisted recipient_binding",
             )
 
-        question_frame = self.packets.get_question(consultation_ref)
+        question_frame = await self.packets.get_question(consultation_ref)
         if question_frame is None:
             raise ConsultationRefusal(
                 "CARRIER_UNAVAILABLE",
@@ -1368,7 +1368,7 @@ class RuntimeConsultationDispatcher:
                     "CONFLICT",
                     detail="second answer differs from the admitted answer",
                 )
-            packet = self.packets.get_answer(consultation_ref)
+            packet = await self.packets.get_answer(consultation_ref)
             validated = _validated_answer_frame(
                 intent.payload, reserved, packet
             )
@@ -1440,7 +1440,7 @@ class RuntimeConsultationDispatcher:
             current_reserved = _non_historical_answer_event(
                 self.runtime, consultation_ref
             )
-            packet = self.packets.get_answer(consultation_ref)
+            packet = await self.packets.get_answer(consultation_ref)
             validated = _validated_answer_frame(
                 intent.payload, current_reserved, packet
             )
@@ -1462,7 +1462,7 @@ class RuntimeConsultationDispatcher:
             and payload_fact == "ANSWER_AVAILABLE"
         ):
             try:
-                self.packets.put_answer(consultation_ref, answer_frame)
+                await self.packets.put_answer(consultation_ref, answer_frame)
             except Exception as exc:
                 raise ConsultationRefusal(
                     "CARRIER_RECONCILIATION_REQUIRED",
@@ -1614,8 +1614,8 @@ class RuntimeConsultationDispatcher:
             self._clock(),
         )
 
-        question_frame = self.packets.get_question(consultation_ref)
-        answer_frame = self.packets.get_answer(consultation_ref)
+        question_frame = await self.packets.get_question(consultation_ref)
+        answer_frame = await self.packets.get_answer(consultation_ref)
 
         # Validate every carrier frame against the persisted INTENT and
         # (for answers) the admitted non-historical ANSWER_AVAILABLE
