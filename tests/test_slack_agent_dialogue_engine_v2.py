@@ -2583,3 +2583,64 @@ def test_duplicate_packet_identity_is_uncertainty() -> None:
 
     assert read.outcome is ConsultationPacketReadOutcome.UNCERTAIN
     assert read.packet is None
+
+
+def test_prepare_defaults_to_message_frame_kind() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        PreparedMessageSend,
+        SendFrameKind,
+    )
+
+    client = setup_client()
+    engine = make_engine(client)
+    message = v2_message("ACK", message_key="asd-ack-v2-frame-kind-default")
+
+    prepared = run(
+        engine.prepare_send_message(
+            thread_ts=THREAD_TS, context=context(), message=message
+        )
+    )
+
+    assert isinstance(prepared, PreparedMessageSend)
+    assert prepared.frame_kind is SendFrameKind.MESSAGE
+    assert prepared.text.startswith("MMX/AGENT_DIALOGUE_V2")
+
+
+def test_unknown_frame_kind_is_a_typed_engine_error() -> None:
+    client = setup_client()
+    engine = make_engine(client)
+    message = v2_message("ACK", message_key="asd-ack-v2-frame-kind-unknown")
+
+    for unknown in ("MESSAGE", "CONSULTATION_PACKET", 7, None):
+        with pytest.raises(DialogueEngineError) as exc:
+            run(
+                engine.prepare_send_message(
+                    thread_ts=THREAD_TS,
+                    context=context(),
+                    message=message,
+                    frame_kind=unknown,
+                )
+            )
+        assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+    assert client.post_call_count == 0
+    assert client.thread_history_call_count == 0
+
+
+def test_existing_send_message_callers_are_signature_unchanged() -> None:
+    client = setup_client()
+    engine = make_engine(client)
+    message = v2_message("ACK", message_key="asd-ack-v2-signature-stable")
+
+    receipt = run(
+        engine.send_message(thread_ts=THREAD_TS, context=context(), message=message)
+    )
+    prepared = run(
+        engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=v2_message("ACK", message_key="asd-ack-v2-signature-stable-2"),
+        )
+    )
+
+    assert receipt.action == "POSTED"
+    assert prepared.message_key == "asd-ack-v2-signature-stable-2"

@@ -16,6 +16,7 @@ from typing import Any, Mapping, Sequence
 
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_PACKET_DISCRIMINATOR_V1,
+    assert_packet_within_ceiling,
     build_consultation,
     parse_consultation_packet,
     render_consultation_packet,
@@ -62,6 +63,13 @@ from integrations.slack_agent_dialogue.turn_runtime_primitives import (
 
 _CONTEXT_PROBE_SOL = "U00000000"
 _TS_RE = re.compile(r"\A[0-9]{10,16}\.[0-9]{6}\Z")
+
+
+class SendFrameKind(str, Enum):
+    """Closed frame kinds one exact send may carry; no third kind exists."""
+
+    MESSAGE = "MESSAGE"
+    CONSULTATION_PACKET = "CONSULTATION_PACKET"
 
 
 @dataclass(frozen=True)
@@ -133,6 +141,7 @@ class PreparedMessageSend:
     text: str
     message_key: str
     fingerprint: str
+    frame_kind: SendFrameKind = SendFrameKind.MESSAGE
 
 
 @dataclass(frozen=True)
@@ -1115,6 +1124,31 @@ class DialogueEngineV2:
             raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
         return candidate
 
+    @staticmethod
+    def _find_packet(
+        packets: Sequence[_PacketObservation],
+        *,
+        message_key: str,
+        fingerprint: str,
+    ) -> ReadMessage | None:
+        """Key lookup over admitted packet frames, mirroring ``_find_key``."""
+
+        matches = [
+            observation
+            for observation in packets
+            if observation.packet is not None
+            and observation.packet["message_key"] == message_key
+        ]
+        if not matches:
+            return None
+        if len(matches) != 1 or matches[0].packet["fingerprint"] != fingerprint:
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        return ReadMessage(
+            message=matches[0].packet,
+            primary_ts=matches[0].ts,
+            duplicate_timestamps=(),
+        )
+
     def _validate_outbound(
         self, message: Mapping[str, Any], *, context: DialogueContextV2
     ) -> dict[str, Any]:
@@ -1128,6 +1162,19 @@ class DialogueEngineV2:
             or validated["actor_ref"] != normalized["actor_ref"]
         ):
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        return validated
+
+    @staticmethod
+    def _validate_outbound_packet(frame: Mapping[str, Any]) -> dict[str, Any]:
+        """Admit one outbound packet only through the accepted P1-0 contract."""
+
+        try:
+            validated = build_consultation(dict(frame))
+        except (DialogueContractError, TypeError, ValueError, KeyError):
+            raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
+        if parse_consultation_packet(render_consultation_packet(validated)) is None:
+            raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
+        assert_packet_within_ceiling(validated)
         return validated
 
     @staticmethod
@@ -1190,9 +1237,13 @@ class DialogueEngineV2:
         thread_ts: str,
         context: DialogueContextV2,
         message: Mapping[str, Any],
+        frame_kind: SendFrameKind = SendFrameKind.MESSAGE,
     ) -> PreparedMessageSend | MessageReceipt:
         """Freeze one exact send after every deterministic pre-dispatch check."""
 
+        if not isinstance(frame_kind, SendFrameKind):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        is_packet = frame_kind is SendFrameKind.CONSULTATION_PACKET
         normalized = context.normalized()
         frozen_context = DialogueContextV2(
             work_ref=normalized["work_ref"],
@@ -1203,13 +1254,29 @@ class DialogueEngineV2:
             actor_ref=_deep_freeze(normalized["actor_ref"]),
             applies_to=_deep_freeze(normalized["applies_to"]),
         )
-        validated = self._validate_outbound(message, context=context)
-        text = render_message_v2(validated)
-        existing = self._find_key(
-            await self._history(thread_ts=thread_ts, context=frozen_context),
-            message_key=validated["message_key"],
-            fingerprint=validated["fingerprint"],
+        if is_packet:
+            validated = self._validate_outbound_packet(message)
+            text = render_consultation_packet(validated)
+        else:
+            validated = self._validate_outbound(message, context=context)
+            text = render_message_v2(validated)
+        read, packets = await self._scan_thread(
+            thread_ts=thread_ts,
+            context=frozen_context,
+            collect_packets=is_packet,
         )
+        if is_packet:
+            existing = self._find_packet(
+                packets,
+                message_key=validated["message_key"],
+                fingerprint=validated["fingerprint"],
+            )
+        else:
+            existing = self._find_key(
+                read,
+                message_key=validated["message_key"],
+                fingerprint=validated["fingerprint"],
+            )
         if existing is not None:
             return self._duplicate_receipt(
                 existing,
@@ -1223,6 +1290,7 @@ class DialogueEngineV2:
             text=text,
             message_key=validated["message_key"],
             fingerprint=validated["fingerprint"],
+            frame_kind=frame_kind,
         )
 
     async def _commit_send_once(
@@ -1485,4 +1553,5 @@ __all__ = [
     "DialogueEngineV2",
     "DiscoveredDialogueParent",
     "PreparedMessageSend",
+    "SendFrameKind",
 ]
