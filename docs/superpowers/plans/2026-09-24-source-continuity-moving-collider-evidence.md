@@ -1,8 +1,8 @@
 # Source Continuity Moving-Collider Evidence Successor
 
-**Operation:** `source-continuity-moving-collider-evidence-successor-20260924-sol-001`  
-**Canonical owner:** Mastermind #346  
-**Protected pickup:** `819abc8c23609cdded2b33f6e1bfc7854bd5c847`  
+**Operation:** `source-continuity-moving-collider-evidence-successor-20260924-sol-001`
+**Canonical owner:** Mastermind #346
+**Protected pickup:** `819abc8c23609cdded2b33f6e1bfc7854bd5c847`
 **Predecessor semantic owner:** protected #860 / `5f62e9f6119cc3e3bc542a793ba96731e063e3a1`
 
 ## Goal
