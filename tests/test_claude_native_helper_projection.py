@@ -101,17 +101,22 @@ def test_empty_mcp_roster_compiles_cardless_read_only_agents(profile):
     )
     assert args[-2] == "--agents"
     assert projection.environment() == {
+        "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
         "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": str(
             source.native_helper.max_concurrent_helpers
         ),
         "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": str(
             source.native_helper.max_depth
         ),
+        "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
     }
     agents = projection.agents()
     assert tuple(agents) == ("code-reader", "research-scout")
     for definition in agents.values():
         assert definition["model"] == "inherit"
+        assert definition["permissionMode"] == "bypassPermissions"
+        assert definition["background"] is False
+        assert definition["omitClaudeMd"] is True
         assert set(definition["tools"]) == {"Glob", "Grep", "Read"}
         assert {
             "Agent",
