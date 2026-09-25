@@ -130,6 +130,7 @@ def project_claude_native_helpers(
     *,
     helpers: Sequence[ClaudeNativeHelperDefinition],
     permission_mode: str,
+    supports_subagent_capability_ceiling: ObservedTriState,
     observed_tool_catalogs: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ClaudeNativeHelperProjection:
     """Project an exact read-only helper roster; never infer broader authority."""
@@ -157,10 +158,19 @@ def project_claude_native_helpers(
         raise ClaudeNativeHelperProjectionError(
             "profile does not admit read-only native helpers"
         )
+    if not isinstance(
+        supports_subagent_capability_ceiling,
+        ObservedTriState,
+    ):
+        raise ClaudeNativeHelperProjectionError(
+            "subagent capability ceiling observation is invalid"
+        )
     if not native_helpers_allowed(
         write_capable=False,
         native_helper_policy=profile.native_helper_policy,
-        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+        supports_subagent_capability_ceiling=(
+            supports_subagent_capability_ceiling
+        ),
     ):
         raise ClaudeNativeHelperProjectionError(
             "native helper capability ceiling is not admitted"
