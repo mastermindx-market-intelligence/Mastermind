@@ -2929,3 +2929,62 @@ def test_packet_at_exactly_the_ceiling_is_admitted(socket_root: Path) -> None:
         ]
 
     run(scenario())
+
+
+def test_packet_support_adds_no_socket_or_arming(socket_root: Path) -> None:
+    """Packet support rides the incumbent service: no new carrier, no state."""
+
+    mutable_globals = sorted(
+        name
+        for name, value in vars(service_module).items()
+        if isinstance(value, (list, dict, set, bytearray)) and not name.startswith("__")
+    )
+    assert mutable_globals == []
+    assert isinstance(service_module.EXACT_SEND_OPERATIONS, frozenset)
+    assert service_module.EXACT_SEND_OPERATIONS == frozenset(
+        {"send_message", PACKET_OPERATION}
+    )
+    assert sorted(service_module.__all__) == sorted(
+        [
+            "AF_UNIX_PATH_MAX_BYTES",
+            "AgentDialogueService",
+            "CONTROL_VERSION",
+            "CONTROL_VERSION_V2",
+            "DialogueServiceError",
+            "ERROR_CODES",
+            "EXACT_SEND_PROTOCOL",
+            "ServiceConfig",
+            "call_service",
+            "client_main",
+        ]
+    )
+    assert service_module.DEFAULT_MAX_REQUEST_BYTES == 32 * 1024
+    assert service_module.DEFAULT_MAX_RESPONSE_BYTES == 64 * 1024
+    config = ServiceConfig(
+        socket_path=Path("/tmp/mmx-asd-packet-support/dialogue.sock"),
+        allowed_peer_uids=(1,),
+    )
+    assert config.max_request_bytes == 32 * 1024
+    assert config.max_response_bytes == 64 * 1024
+    assert config.request_timeout_seconds == 15.0
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            response = await call_service(
+                srv.config.socket_path, request_envelope_v2("status", {})
+            )
+        finally:
+            await srv.close()
+        assert response == {
+            "ok": True,
+            "result": {
+                "schema": "mastermind.agent_dialogue_status.v2",
+                "status": "DEVELOPMENT_UNARMED",
+                "production_armed": False,
+            },
+        }
+        assert [name for name, _value in fake.calls] == ["status"]
+
+    run(scenario())
