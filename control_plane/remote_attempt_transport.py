@@ -79,6 +79,7 @@ _ERROR_CODES = frozenset(
         "HOST_BINDING_UNAVAILABLE",
         "HOST_BINDING_MISMATCH",
         "STATE_MOVED",
+        "PROVIDER_UNSUPPORTED",
     }
 )
 
@@ -164,8 +165,10 @@ class ResolvedRemoteAttemptTransport:
 
 
 def _require_identity(value: str, *, code: str = "INVALID_INPUT") -> str:
-    token = str(value or "").strip()
-    if not token or any(character.isspace() for character in token):
+    if not isinstance(value, str):
+        raise RemoteAttemptTransportError(code)
+    token = value.strip()
+    if not token or token != value or any(character.isspace() for character in token):
         raise RemoteAttemptTransportError(code)
     return token
 
@@ -368,6 +371,12 @@ def build_attempt_bound_worker_fleet(
 
     if not isinstance(resolution, ResolvedRemoteAttemptTransport):
         raise RemoteAttemptTransportError("INVALID_INPUT")
+    # The protected fleet consumer still constructs RemoteCodexWorkerAdapter by
+    # default. Transport identity is provider-neutral, but executable adapter
+    # composition must not pretend provider neutrality before the incumbent
+    # broker/adapter generalization is accepted.
+    if resolution.provider != "codex":
+        raise RemoteAttemptTransportError("PROVIDER_UNSUPPORTED")
     return RemoteWorkerBrokerFleet(
         (resolution.endpoint,),
         validation_commands_for_spec=validation_commands_for_spec,
