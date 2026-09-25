@@ -35,8 +35,10 @@ from control_plane.executive_runtime import (
     WorkerStatus,
 )
 from control_plane.executive_worker_broker import (
+    BrokerStateError,
     RemoteWorkerBrokerEndpoint,
     RemoteWorkerBrokerFleet,
+    RemoteWorkerProcessController,
     WorkerBrokerError,
 )
 from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
@@ -45,7 +47,13 @@ from control_plane.remote_worker_transport import (
     TransportValidationError,
     validate_host_ref,
 )
-from control_plane.worker_execution_contract import WorkerLaunchSpec
+from control_plane.codex_worker import ProcessIdentityError
+from control_plane.worker_execution_contract import (
+    WorkerLaunchSpec,
+    WorkerProcessRef,
+    WorkerRecoveryBinding,
+    WorkerRecoveryContractError,
+)
 
 
 REMOTE_WORKER_OPERATIONS = frozenset(
@@ -383,9 +391,318 @@ def build_attempt_bound_worker_fleet(
     )
 
 
+class _UnavailableAttemptBoundRemoteInspector:
+    """Fail closed: remote process identity is owned by the broker controller."""
+
+    @staticmethod
+    def boot_session_id() -> str:
+        raise ProcessIdentityError(
+            "attempt-bound remote identity requires the remote process controller"
+        )
+
+    @staticmethod
+    def identity(_pid: int) -> tuple[str, int]:
+        raise ProcessIdentityError(
+            "attempt-bound remote identity requires the remote process controller"
+        )
+
+    @staticmethod
+    def inspect(_pid: int) -> object:
+        raise ProcessIdentityError(
+            "attempt-bound remote identity requires the remote process controller"
+        )
+
+
+class _AttemptBoundRemoteProcessController:
+    """Restart-safe synchronous process control through the exact Attempt carrier."""
+
+    def __init__(self, owner: "AttemptBoundRemoteWorkerAdapter") -> None:
+        self.owner = owner
+
+    def presence(self, attempt: Attempt):
+        return self.owner._controller_for_attempt(attempt).presence(attempt)
+
+    def absence_verified(self, attempt: Attempt) -> bool:
+        return bool(
+            self.owner._controller_for_attempt(attempt).absence_verified(attempt)
+        )
+
+    def terminate(self, attempt: Attempt) -> None:
+        self.owner._controller_for_attempt(attempt).terminate(attempt)
+
+    def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
+        if isinstance(attempt_or_run_id, Attempt):
+            attempt = attempt_or_run_id
+        else:
+            attempt = self.owner._attempt_for_run(attempt_or_run_id)
+        return self.owner._controller_for_attempt(attempt).uid_sweep_receipt(
+            attempt
+        )
+
+    def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
+        attempt = self.owner._attempt_for_run(run_id)
+        return self.owner._controller_for_attempt(attempt).cleanup_unbound_run(
+            attempt.attempt_id
+        )
+
+
+AttemptBoundFleetFactory = Callable[[ResolvedRemoteAttemptTransport], Any]
+
+
+class AttemptBoundRemoteWorkerAdapter:
+    """Static Supervisor adapter that resolves physical transport only post-claim.
+
+    ExecutiveSupervisor may keep this adapter for its whole process lifetime.
+    No carrier exists until start(spec) supplies the already-claimed Attempt id.
+    The chosen fleet is cached before remote I/O so an ambiguous start cannot
+    silently resolve to another endpoint. Restart recovery derives the same
+    Worker/host again from canonical Runtime + Capacity state and uses a
+    recovery-only remote client that cannot issue start.
+    """
+
+    adapter_id = "attempt-bound-remote-worker"
+
+    def __init__(
+        self,
+        runtime: Runtime,
+        binding_source: RemoteWorkerHostBindingSource,
+        *,
+        validation_commands_for_spec: (
+            Callable[[WorkerLaunchSpec], Sequence[Sequence[str]]] | None
+        ) = None,
+        fleet_factory: AttemptBoundFleetFactory | None = None,
+    ) -> None:
+        if not isinstance(runtime, Runtime) or not callable(binding_source):
+            raise RemoteAttemptTransportError("INVALID_INPUT")
+        self.runtime = runtime
+        self.binding_source = binding_source
+        self.validation_commands_for_spec = validation_commands_for_spec
+        self.fleet_factory = fleet_factory or (
+            lambda resolution: build_attempt_bound_worker_fleet(
+                resolution,
+                validation_commands_for_spec=self.validation_commands_for_spec,
+            )
+        )
+        self.inspector = _UnavailableAttemptBoundRemoteInspector()
+        self.process_controller = _AttemptBoundRemoteProcessController(self)
+        self._fleets: dict[str, Any] = {}
+        self._specs: dict[str, WorkerLaunchSpec] = {}
+        self._controllers: dict[str, RemoteWorkerProcessController] = {}
+
+    def _attempt_for_run(self, run_id: Any) -> Attempt:
+        token = _require_identity(run_id)
+        attempt = self.runtime.attempts.get_attempt(token)
+        if attempt is None:
+            raise BrokerStateError("remote run has no canonical Attempt")
+        return attempt
+
+    def _resolve_attempt(
+        self,
+        attempt: Attempt,
+        *,
+        purpose: RemoteTransportPurpose,
+    ) -> ResolvedRemoteAttemptTransport:
+        if not isinstance(attempt, Attempt):
+            raise BrokerStateError("remote carrier requires a canonical Attempt")
+        return resolve_remote_attempt_transport(
+            self.runtime,
+            job_id=attempt.job_id,
+            attempt_id=attempt.attempt_id,
+            binding_source=self.binding_source,
+            purpose=purpose,
+        )
+
+    def _build_fleet(
+        self,
+        resolution: ResolvedRemoteAttemptTransport,
+        *,
+        expected_worker_id: str,
+    ) -> Any:
+        try:
+            fleet = self.fleet_factory(resolution)
+        except RemoteAttemptTransportError:
+            raise
+        except Exception as exc:
+            raise BrokerStateError("remote fleet composition refused") from exc
+        workers = getattr(fleet, "worker_ids", None)
+        if tuple(workers or ()) != (expected_worker_id,):
+            raise BrokerStateError(
+                "remote fleet does not contain exactly the claimed Worker"
+            )
+        for name in (
+            "start",
+            "reattach",
+            "status",
+            "collect_result",
+            "cancel",
+            "run_validation_argv",
+            "launch_attestation",
+            "uid_sweep_receipt",
+            "cleanup_unbound_run",
+        ):
+            if not callable(getattr(fleet, name, None)):
+                raise BrokerStateError(
+                    "remote fleet does not satisfy the Worker adapter contract"
+                )
+        return fleet
+
+    def _bind_fleet(
+        self,
+        spec: WorkerLaunchSpec,
+        fleet: Any,
+    ) -> Any:
+        existing = self._fleets.get(spec.run_id)
+        if existing is not None:
+            if existing is fleet and self._specs.get(spec.run_id) == spec:
+                return existing
+            raise BrokerStateError(
+                "remote run is already bound to another attempt carrier"
+            )
+        self._fleets[spec.run_id] = fleet
+        self._specs[spec.run_id] = spec
+        return fleet
+
+    def _fleet_for_ref(self, ref: WorkerProcessRef) -> Any:
+        if not isinstance(ref, WorkerProcessRef):
+            raise BrokerStateError("remote operation requires a WorkerProcessRef")
+        try:
+            return self._fleets[ref.run_id]
+        except KeyError as exc:
+            raise BrokerStateError(
+                "remote run has not been attached to this control generation"
+            ) from exc
+
+    def _fleet_for_spec(self, spec: WorkerLaunchSpec) -> Any:
+        if not isinstance(spec, WorkerLaunchSpec):
+            raise BrokerStateError("remote operation requires a WorkerLaunchSpec")
+        fleet = self._fleets.get(spec.run_id)
+        if fleet is None or self._specs.get(spec.run_id) != spec:
+            raise BrokerStateError(
+                "remote LaunchSpec is not bound to this control generation"
+            )
+        return fleet
+
+    def _controller_for_attempt(self, attempt: Attempt) -> RemoteWorkerProcessController:
+        if not isinstance(attempt, Attempt):
+            raise BrokerStateError("remote process control requires an Attempt")
+        resolution = self._resolve_attempt(
+            attempt, purpose=RemoteTransportPurpose.RECOVERY
+        )
+        current = self._controllers.get(attempt.attempt_id)
+        if current is not None:
+            if current.client.identity != resolution.client.identity:
+                raise BrokerStateError(
+                    "remote process carrier identity changed during recovery"
+                )
+            return current
+        controller = RemoteWorkerProcessController(resolution.client)
+        self._controllers[attempt.attempt_id] = controller
+        return controller
+
+    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+        if not isinstance(spec, WorkerLaunchSpec):
+            raise BrokerStateError("remote start requires a WorkerLaunchSpec")
+        if spec.run_id in self._fleets:
+            raise BrokerStateError("remote run already has an attempt carrier")
+        attempt = self._attempt_for_run(spec.run_id)
+        if attempt.job_id != spec.job_id or attempt.worker_id != spec.worker_id:
+            raise BrokerStateError(
+                "remote LaunchSpec differs from the canonical claim"
+            )
+        resolution = self._resolve_attempt(
+            attempt, purpose=RemoteTransportPurpose.LAUNCH
+        )
+        fleet = self._build_fleet(
+            resolution, expected_worker_id=attempt.worker_id
+        )
+        self._bind_fleet(spec, fleet)
+        return await fleet.start(spec)
+
+    def reattach(
+        self,
+        spec: WorkerLaunchSpec,
+        binding: WorkerRecoveryBinding,
+    ) -> WorkerProcessRef:
+        if not isinstance(spec, WorkerLaunchSpec):
+            raise BrokerStateError("remote recovery requires a WorkerLaunchSpec")
+        if not isinstance(binding, WorkerRecoveryBinding):
+            raise BrokerStateError("remote recovery requires a WorkerRecoveryBinding")
+        if binding.adapter_id != self.adapter_id:
+            raise BrokerStateError("attempt-bound recovery adapter identity changed")
+        try:
+            recovered_spec = binding.recover_launch_spec(type(spec))
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+        if recovered_spec != spec:
+            raise BrokerStateError("attempt-bound recovery LaunchSpec changed")
+        attempt = self._attempt_for_run(spec.run_id)
+        if attempt.job_id != spec.job_id or attempt.worker_id != spec.worker_id:
+            raise BrokerStateError(
+                "attempt-bound recovery differs from the canonical claim"
+            )
+        resolution = self._resolve_attempt(
+            attempt, purpose=RemoteTransportPurpose.RECOVERY
+        )
+        fleet = self._build_fleet(
+            resolution, expected_worker_id=attempt.worker_id
+        )
+        self._bind_fleet(spec, fleet)
+        inner_binding = dataclasses.replace(
+            binding,
+            adapter_id=str(getattr(fleet, "adapter_id", "")),
+        )
+        recovered = fleet.reattach(spec, inner_binding)
+        if recovered != binding.process_ref:
+            raise BrokerStateError(
+                "attempt-bound recovery changed immutable process identity"
+            )
+        return recovered
+
+    def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
+        return self._fleet_for_ref(ref).launch_attestation(ref)
+
+    def uid_sweep_receipt(self, subject: Any) -> Mapping[str, Any]:
+        if isinstance(subject, WorkerProcessRef):
+            return self._fleet_for_ref(subject).uid_sweep_receipt(subject)
+        attempt = (
+            subject if isinstance(subject, Attempt)
+            else self._attempt_for_run(subject)
+        )
+        return self.process_controller.uid_sweep_receipt(attempt)
+
+    async def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
+        fleet = self._fleets.get(run_id)
+        if fleet is not None:
+            return await fleet.cleanup_unbound_run(run_id)
+        return self.process_controller.cleanup_unbound_run(run_id)
+
+    async def status(self, ref: WorkerProcessRef):
+        return await self._fleet_for_ref(ref).status(ref)
+
+    async def collect_result(self, ref: WorkerProcessRef):
+        return await self._fleet_for_ref(ref).collect_result(ref)
+
+    async def cancel(self, ref: WorkerProcessRef, reason: str):
+        return await self._fleet_for_ref(ref).cancel(ref, reason)
+
+    async def run_validation_argv(
+        self,
+        spec: WorkerLaunchSpec,
+        argv: Sequence[str],
+        *,
+        timeout_seconds: float = 300.0,
+    ):
+        return await self._fleet_for_spec(spec).run_validation_argv(
+            spec,
+            argv,
+            timeout_seconds=timeout_seconds,
+        )
+
+
 __all__ = [
     "REMOTE_RECOVERY_OPERATIONS",
     "REMOTE_WORKER_OPERATIONS",
+    "AttemptBoundRemoteWorkerAdapter",
     "RemoteAttemptTransportError",
     "RemoteTransportPurpose",
     "RemoteWorkerHostBinding",
