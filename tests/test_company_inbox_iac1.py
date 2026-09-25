@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import inspect
 import json
 import os
 import shutil
@@ -64,6 +65,15 @@ from integrations.company_consultation_dispatch import (
 
 
 PEER_REF = "peer-7bdf4a6f9a664bbcf1a93d67a41ba51d"
+
+
+def test_consultation_packet_carrier_methods_are_async() -> None:
+    carrier = InMemoryConsultationPacketCarrier()
+
+    assert inspect.iscoroutinefunction(carrier.put_question)
+    assert inspect.iscoroutinefunction(carrier.get_question)
+    assert inspect.iscoroutinefunction(carrier.put_answer)
+    assert inspect.iscoroutinefunction(carrier.get_answer)
 
 _FIXTURE_PARENT_FINGERPRINT = hashlib.sha256(b"iac1-r4a-parent-fingerprint").hexdigest()
 
@@ -1149,11 +1159,11 @@ def test_a_b_a_journey_with_full_credit_and_consumption(tmp_path: Path) -> None:
     assert len(evidence.get("CONSUMED_BY_REQUESTER", [])) == 0
 
     # Explicit consume_answer: first call inserts, second call is idempotent.
-    first_consume = a_dispatcher.consume_answer(consultation_id)
+    first_consume = _run(a_dispatcher.consume_answer(consultation_id))
     assert first_consume["state"] == "CONSUMED"
     assert first_consume["inserted"] is True
 
-    second_consume = a_dispatcher.consume_answer(consultation_id)
+    second_consume = _run(a_dispatcher.consume_answer(consultation_id))
     assert second_consume["state"] == "CONSUMED"
     assert second_consume["inserted"] is False
 
@@ -1426,7 +1436,7 @@ def test_session_rotation_observes_existing_runtime_rule(tmp_path: Path) -> None
     )
     assert reply_envelope["ok"] is True
 
-    answer_frame = shared_carrier.get_answer(consultation_id)
+    answer_frame = _run(shared_carrier.get_answer(consultation_id))
     assert answer_frame is not None
 
     rotated_attempt = (
@@ -1856,20 +1866,20 @@ def test_explicit_consumption_appends_once_and_retry_reconciles(
     )
     assert reply_envelope["ok"] is True
 
-    first = a_dispatcher.consume_answer(consultation_id)
+    first = _run(a_dispatcher.consume_answer(consultation_id))
     assert first["state"] == "CONSUMED"
     assert first["inserted"] is True
     events = _evidence_for(runtime, consultation_id)
     assert len(events["CONSUMED_BY_REQUESTER"]) == 1
 
-    second = a_dispatcher.consume_answer(consultation_id)
+    second = _run(a_dispatcher.consume_answer(consultation_id))
     assert second["state"] == "CONSUMED"
     assert second["inserted"] is False
     events = _evidence_for(runtime, consultation_id)
     assert len(events["CONSUMED_BY_REQUESTER"]) == 1
 
     with pytest.raises(ConsultationRefusal) as excinfo:
-        b_dispatcher.consume_answer(consultation_id)
+        _run(b_dispatcher.consume_answer(consultation_id))
     assert excinfo.value.code == "NOT_A_PARTY"
     events = _evidence_for(runtime, consultation_id)
     assert len(events["CONSUMED_BY_REQUESTER"]) == 1
@@ -3462,12 +3472,12 @@ class _TamperedQuestionCarrier(InMemoryConsultationPacketCarrier):
         super().__init__()
         self._marker = marker
 
-    def put_question(self, consultation_id, frame):
+    async def put_question(self, consultation_id, frame):
         # Consume the consult call but keep the original frame.
-        super().put_question(consultation_id, frame)
+        await super().put_question(consultation_id, frame)
 
-    def get_question(self, consultation_id):
-        frame = super().get_question(consultation_id)
+    async def get_question(self, consultation_id):
+        frame = await super().get_question(consultation_id)
         if frame is None:
             return None
         tampered = dict(frame)
@@ -3486,7 +3496,7 @@ class _ForeignQuestionCarrier(InMemoryConsultationPacketCarrier):
         super().__init__()
         self._foreign_id: str | None = None
 
-    def install_foreign(
+    async def install_foreign(
         self,
         foreign_consultation_id: str,
         frame: Mapping[str, Any],
@@ -3494,12 +3504,12 @@ class _ForeignQuestionCarrier(InMemoryConsultationPacketCarrier):
         self._foreign_id = foreign_consultation_id
         # Stash the foreign frame under the real consultation_id key so
         # the dispatcher's get_question returns it.
-        super().put_question(foreign_consultation_id, frame)
+        await super().put_question(foreign_consultation_id, frame)
 
-    def get_question(self, consultation_id):
+    async def get_question(self, consultation_id):
         if self._foreign_id is not None and self._foreign_id == consultation_id:
-            return super().get_question(consultation_id)
-        frame = super().get_question(consultation_id)
+            return await super().get_question(consultation_id)
+        frame = await super().get_question(consultation_id)
         return frame
 
 
@@ -3516,8 +3526,8 @@ class _TamperedAnswerCarrier(InMemoryConsultationPacketCarrier):
         super().__init__()
         self._marker = marker
 
-    def get_answer(self, consultation_id):
-        frame = super().get_answer(consultation_id)
+    async def get_answer(self, consultation_id):
+        frame = await super().get_answer(consultation_id)
         if frame is None:
             return None
         tampered = dict(frame)
@@ -3658,9 +3668,9 @@ def test_foreign_consultation_packet_is_not_exposed_on_detail(
     foreign_consultation_id = foreign_envelope["data"]["consultation_ref"]
     assert foreign_consultation_id != first_consultation_id
 
-    real_first_frame = first_carrier.get_question(first_consultation_id)
+    real_first_frame = _run(first_carrier.get_question(first_consultation_id))
     assert real_first_frame is not None
-    foreign_frame = foreign_carrier.get_question(foreign_consultation_id)
+    foreign_frame = _run(foreign_carrier.get_question(foreign_consultation_id))
     assert foreign_frame is not None
 
     # Build a FOREIGN carrier that returns the FOREIGN frame when asked
@@ -3668,8 +3678,8 @@ def test_foreign_consultation_packet_is_not_exposed_on_detail(
     # under the real consultation_id so the dispatcher's get_question
     # returns it for that ref.
     cross_carrier = _ForeignQuestionCarrier()
-    cross_carrier.install_foreign(first_consultation_id, foreign_frame)
-    cross_carrier.put_question(foreign_consultation_id, dict(real_first_frame))
+    _run(cross_carrier.install_foreign(first_consultation_id, foreign_frame))
+    _run(cross_carrier.put_question(foreign_consultation_id, dict(real_first_frame)))
 
     cross_dispatcher = _make_dispatcher(
         runtime,
@@ -3886,7 +3896,7 @@ def test_replay_with_changed_evidence_refs_alone_conflicts(
     )
     consultation_id = original_envelope["data"]["consultation_ref"]
     assert original_envelope["data"]["state"] == "INTENDED"
-    original_question_frame = shared_carrier.get_question(consultation_id)
+    original_question_frame = _run(shared_carrier.get_question(consultation_id))
     assert original_question_frame is not None
 
     repository = WakeLedgerRepository(runtime)
@@ -3920,7 +3930,7 @@ def test_replay_with_changed_evidence_refs_alone_conflicts(
 
     # Carrier question packet is unchanged — the dispatcher refused
     # before any put_question could overwrite it.
-    after_question_frame = shared_carrier.get_question(consultation_id)
+    after_question_frame = _run(shared_carrier.get_question(consultation_id))
     assert after_question_frame == original_question_frame
 
     # Zero new wake records.
@@ -4012,7 +4022,7 @@ class _CountingAnswerCarrier(InMemoryConsultationPacketCarrier):
         self._raise_on_put_n = raise_on_put_n
         self._raised = False
 
-    def put_answer(self, consultation_id, frame):
+    async def put_answer(self, consultation_id, frame):
         self.put_answer_calls += 1
         if (
             self._raise_on_put_n is not None
@@ -4021,11 +4031,11 @@ class _CountingAnswerCarrier(InMemoryConsultationPacketCarrier):
         ):
             self._raised = True
             raise RuntimeError("synthetic carrier write failure")
-        super().put_answer(consultation_id, frame)
+        await super().put_answer(consultation_id, frame)
 
-    def get_answer(self, consultation_id):
+    async def get_answer(self, consultation_id):
         self.get_answer_calls += 1
-        return super().get_answer(consultation_id)
+        return await super().get_answer(consultation_id)
 
 
 def test_identical_reply_replay_does_not_write_carrier_twice(
@@ -4266,12 +4276,12 @@ def test_known_same_packet_readback_returns_without_second_write(
     # identical reply must reconcile without any runtime or carrier
     # writes.
     counting_carrier = _CountingAnswerCarrier()
-    admitted_packet = shared_carrier.get_answer(consultation_id)
+    admitted_packet = _run(shared_carrier.get_answer(consultation_id))
     assert admitted_packet is not None
-    counting_carrier.put_answer(consultation_id, dict(admitted_packet))
-    admitted_question = shared_carrier.get_question(consultation_id)
+    _run(counting_carrier.put_answer(consultation_id, dict(admitted_packet)))
+    admitted_question = _run(shared_carrier.get_question(consultation_id))
     assert admitted_question is not None
-    counting_carrier.put_question(consultation_id, dict(admitted_question))
+    _run(counting_carrier.put_question(consultation_id, dict(admitted_question)))
     puts_before = counting_carrier.put_answer_calls
 
     restarted_b_dispatcher = _make_dispatcher(
@@ -4329,7 +4339,7 @@ class _RaisingPacketCarrier(InMemoryConsultationPacketCarrier):
         self._exc_type = exc_type
         self.put_question_calls = 0
 
-    def put_question(
+    async def put_question(
         self, consultation_id: str, frame: Mapping[str, Any]
     ) -> None:
         self.put_question_calls += 1
@@ -4757,7 +4767,7 @@ class _CountingQuestionCarrier(InMemoryConsultationPacketCarrier):
         self._raise_on_put_n = raise_on_put_n
         self._raised = False
 
-    def put_question(self, consultation_id, frame):
+    async def put_question(self, consultation_id, frame):
         self.put_question_calls += 1
         if (
             self._raise_on_put_n is not None
@@ -4766,11 +4776,11 @@ class _CountingQuestionCarrier(InMemoryConsultationPacketCarrier):
         ):
             self._raised = True
             raise RuntimeError("synthetic carrier write failure")
-        super().put_question(consultation_id, frame)
+        await super().put_question(consultation_id, frame)
 
-    def get_question(self, consultation_id):
+    async def get_question(self, consultation_id):
         self.get_question_calls += 1
-        return super().get_question(consultation_id)
+        return await super().get_question(consultation_id)
 
 
 class _ClockAdvancingQuestionCarrier(_CountingQuestionCarrier):
@@ -4783,8 +4793,8 @@ class _ClockAdvancingQuestionCarrier(_CountingQuestionCarrier):
         self._clock = clock
         self._advance_to = advance_to
 
-    def put_question(self, consultation_id, frame):
-        super().put_question(consultation_id, frame)
+    async def put_question(self, consultation_id, frame):
+        await super().put_question(consultation_id, frame)
         self._clock.value = self._advance_to
 
 
@@ -4800,15 +4810,15 @@ class _RaceQuestionCarrier(_CountingQuestionCarrier):
         self._hook_ran = False
         self._hide = hide_readback_after_hook
 
-    def get_question(self, consultation_id):
+    async def get_question(self, consultation_id):
         if not self._hook_ran:
             self._hook_ran = True
-            self._hook()
+            await self._hook()
             return None
         if self._hide:
             self.get_question_calls += 1
             return None
-        return super().get_question(consultation_id)
+        return await super().get_question(consultation_id)
 
 
 class _ThrowBeforeCommitRepository(WakeLedgerRepository):
@@ -4968,7 +4978,7 @@ def test_exact_expiry_boundary_is_admitted(tmp_path: Path) -> None:
     assert data["blocker"] is None
     assert data["deadline"] == "2026-09-14T00:00:01Z"
     assert carrier.put_question_calls == 1
-    assert carrier.get_question(consultation_id) is not None
+    assert _run(carrier.get_question(consultation_id)) is not None
     assert _requested_count(runtime, consultation_id) == 1
 
 
@@ -5015,7 +5025,7 @@ def test_expiry_between_publication_and_request_creates_no_wake(
     assert data["blocker"] == "EXPIRED"
     assert _intent_count(runtime, consultation_id) == 1
     assert carrier.put_question_calls == 1
-    assert carrier.get_question(consultation_id) is not None
+    assert _run(carrier.get_question(consultation_id)) is not None
     assert _requested_count(runtime, consultation_id) == 0
     assert WakeLedgerRepository(runtime).list_wake_events() == ()
 
@@ -5077,7 +5087,7 @@ def test_expired_replay_cannot_originate_publication_or_wake(
     assert data["blocker"] == "EXPIRED"
     assert data["attention_requested"] is False
     assert carrier.put_question_calls == 1
-    assert carrier.get_question(consultation_id) is None
+    assert _run(carrier.get_question(consultation_id)) is None
     assert _intent_count(runtime, consultation_id) == 1
     assert _requested_count(runtime, consultation_id) == 0
 
@@ -5170,7 +5180,7 @@ def test_known_exact_packet_reconciles_to_single_request(tmp_path: Path) -> None
     # exact packet; a fresh dispatcher replays the identical consult.
     restarted_carrier = _CountingQuestionCarrier()
     restarted_carrier._questions[consultation_id] = dict(
-        first_carrier.get_question(consultation_id)
+        _run(first_carrier.get_question(consultation_id))
     )
     replay = _run(
         _gateway_with_dispatcher(
@@ -5221,7 +5231,7 @@ def test_intent_insertion_race_loser_cannot_publish(
     )
     results: dict[str, Any] = {}
 
-    def _winner_consults() -> None:
+    async def _winner_consults() -> None:
         winner = _make_dispatcher(
             runtime,
             fixture_repo,
@@ -5230,7 +5240,7 @@ def test_intent_insertion_race_loser_cannot_publish(
             packets=carrier,
             invocations=invocations,
         )
-        results["winner"] = _drive_sync(winner.__call__("company.consult", envelope))
+        results["winner"] = await winner.__call__("company.consult", envelope)
 
     carrier = _RaceQuestionCarrier(
         _winner_consults, hide_readback_after_hook=hide_readback
@@ -5395,12 +5405,12 @@ class _VisibleThenLostPutCarrier(_CountingQuestionCarrier):
         self._hook = hook
         self._hooked = False
 
-    def put_question(self, consultation_id, frame):
+    async def put_question(self, consultation_id, frame):
         self.put_question_calls += 1
         self._questions[consultation_id] = dict(frame)
         if not self._hooked:
             self._hooked = True
-            self._hook()
+            await self._hook()
             raise RuntimeError("synthetic lost put_question response")
 
 
@@ -5412,9 +5422,11 @@ class _HookAfterPutCarrier(_CountingQuestionCarrier):
         super().__init__()
         self._hook = hook
 
-    def put_question(self, consultation_id, frame):
-        super().put_question(consultation_id, frame)
-        self._hook()
+    async def put_question(self, consultation_id, frame):
+        await super().put_question(consultation_id, frame)
+        hook_result = self._hook()
+        if inspect.isawaitable(hook_result):
+            await hook_result
 
 
 def _release_writer_for_attempt(runtime: Runtime, attempt_id: str) -> None:
@@ -5458,7 +5470,7 @@ def test_lost_put_response_after_concurrent_wake_reports_existing_request(
     )
     results: dict[str, Any] = {}
 
-    def _concurrent_identical_call() -> None:
+    async def _concurrent_identical_call() -> None:
         other = _make_dispatcher(
             runtime,
             fixture_repo,
@@ -5467,7 +5479,7 @@ def test_lost_put_response_after_concurrent_wake_reports_existing_request(
             packets=carrier,
             invocations=invocations,
         )
-        results["other"] = _drive_sync(other.__call__("company.consult", envelope))
+        results["other"] = await other.__call__("company.consult", envelope)
 
     carrier = _VisibleThenLostPutCarrier(_concurrent_identical_call)
     first_dispatcher = _make_dispatcher(
@@ -5632,7 +5644,7 @@ def test_reply_creates_one_requester_answer_attention_and_replay_is_sticky(
     assert replay["data"]["blocker"] is None
     assert len(_answer_attention_requested_records(runtime)) == 1
 
-    consumed = a_dispatcher.consume_answer(consultation_id)
+    consumed = _run(a_dispatcher.consume_answer(consultation_id))
     assert consumed["inserted"] is True
     post_consume_dispatcher = _make_dispatcher(
         runtime,
@@ -5656,11 +5668,13 @@ class _ConsumeDuringAnswerPutCarrier(_CountingAnswerCarrier):
         super().__init__()
         self.after_put = None
 
-    def put_answer(self, consultation_id, frame):
-        super().put_answer(consultation_id, frame)
+    async def put_answer(self, consultation_id, frame):
+        await super().put_answer(consultation_id, frame)
         callback = self.after_put
         if callback is not None:
-            callback(consultation_id)
+            callback_result = callback(consultation_id)
+            if inspect.isawaitable(callback_result):
+                await callback_result
 
 
 def test_consumed_between_carrier_write_and_first_answer_wake_creates_no_request(
