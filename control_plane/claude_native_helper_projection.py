@@ -42,10 +42,35 @@ _ALWAYS_DENIED = (
     "NotebookEdit",
     "Skill",
     "Task",
+    "SendMessage",
+    "ListAgents",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "TaskOutput",
+    "TaskStop",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
     "WebFetch",
     "WebSearch",
 )
+_PARENT_COORDINATION_DENIED = (
+    "SendMessage",
+    "ListAgents",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
+    "TaskOutput",
+    "TaskStop",
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+)
 _PERMISSION_MODES = frozenset({"dontAsk", "bypassPermissions"})
+_EXECUTION_MODE = "noninteractive"
 
 
 class ClaudeNativeHelperProjectionError(ValueError):
@@ -71,14 +96,21 @@ class ClaudeNativeHelperProjection:
     source_mcp_grant_digests: tuple[str, ...]
     source_mcp_tool_schema_digests: tuple[str, ...]
     permission_mode: str
+    execution_mode: str
     agent_ids: tuple[str, ...]
     enabled_tools: tuple[str, ...]
     auto_approved_tools: tuple[str, ...]
     denied_tools: tuple[str, ...]
+    parent_denied_tools: tuple[str, ...]
+    runtime_ceiling_seconds: int
     _agents_json: str
     _max_concurrent_helpers: int
     _max_depth: int
     production_armed: bool = dataclasses.field(default=False, init=False)
+    external_runtime_enforcement_required: bool = dataclasses.field(
+        default=True,
+        init=False,
+    )
 
     def agents(self) -> dict[str, Any]:
         return json.loads(self._agents_json)
@@ -92,6 +124,8 @@ class ClaudeNativeHelperProjection:
             self.permission_mode,
             "--allowedTools",
             *allowed,
+            "--disallowedTools",
+            *self.parent_denied_tools,
             "--agents",
             self._agents_json,
         )
@@ -104,6 +138,9 @@ class ClaudeNativeHelperProjection:
             # addition to the exact session roster.  Remove them so the
             # Executive-admitted roster is the whole available agent set.
             "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "1",
+            # Native helper work is one-shot in V1. A completed helper must
+            # return to the parent instead of lingering as a background task.
+            "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
             "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": str(
                 self._max_concurrent_helpers
             ),
@@ -130,6 +167,7 @@ def project_claude_native_helpers(
     *,
     helpers: Sequence[ClaudeNativeHelperDefinition],
     permission_mode: str,
+    execution_mode: str,
     supports_subagent_capability_ceiling: ObservedTriState,
     observed_tool_catalogs: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ClaudeNativeHelperProjection:
@@ -142,6 +180,10 @@ def project_claude_native_helpers(
     if permission_mode not in _PERMISSION_MODES:
         raise ClaudeNativeHelperProjectionError(
             "parent permission mode is not unattended"
+        )
+    if execution_mode != _EXECUTION_MODE:
+        raise ClaudeNativeHelperProjectionError(
+            "v1 native helpers require a noninteractive parent session"
         )
     grant = profile.native_helper
     if grant is None:
@@ -288,10 +330,13 @@ def project_claude_native_helpers(
             sorted(item.tool_schema_digest for item in profile.mcp_server_grants)
         ),
         permission_mode=permission_mode,
+        execution_mode=execution_mode,
         agent_ids=ids,
         enabled_tools=tools,
         auto_approved_tools=tuple(sorted(mcp.auto_approved_tools)),
         denied_tools=denied,
+        parent_denied_tools=_PARENT_COORDINATION_DENIED,
+        runtime_ceiling_seconds=grant.max_runtime_seconds,
         _agents_json=payload,
         _max_concurrent_helpers=grant.max_concurrent_helpers,
         _max_depth=grant.max_depth,
