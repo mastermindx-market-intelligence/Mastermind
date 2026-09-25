@@ -15,6 +15,7 @@ from control_plane.executive_agent_capabilities import (
     ExecutionCapabilityRegistry,
     observed_mcp_tool_schema_digest,
 )
+from control_plane.operator_harness_contract import ObservedTriState
 
 
 @pytest.fixture
@@ -91,6 +92,7 @@ def test_empty_mcp_roster_compiles_cardless_read_only_agents(profile):
         source,
         helpers=_roster(),
         permission_mode="bypassPermissions",
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
     )
     args = projection.cli_arguments()
     assert args[:4] == (
@@ -135,6 +137,7 @@ def test_exact_mcp_grants_are_visible_and_ungranted_tools_are_denied(profile):
         source,
         helpers=_roster(),
         permission_mode="dontAsk",
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         observed_tool_catalogs=catalogs,
     )
     expected = tuple(
@@ -164,6 +167,7 @@ def test_cli_payload_is_canonical_and_has_no_worker_or_placement_selector(profil
         source,
         helpers=_roster(),
         permission_mode="dontAsk",
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
     )
     payload = projection.cli_arguments()[-1]
     assert payload == json.dumps(
@@ -189,6 +193,7 @@ def test_projection_retains_source_identity_and_stays_production_inert(profile):
         source,
         helpers=_roster(),
         permission_mode="bypassPermissions",
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
     )
     assert projection.source_profile_id == source.profile_id
     assert projection.source_profile_digest == source.profile_digest
@@ -219,6 +224,8 @@ def test_write_capable_native_helper_refuses_to_executive_child_boundary(profile
             source,
             helpers=_roster(),
             permission_mode="bypassPermissions",
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
 
@@ -236,6 +243,22 @@ def test_missing_native_helper_grant_refuses(profile):
             source,
             helpers=_roster(),
             permission_mode="bypassPermissions",
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+        )
+
+
+def test_unverified_subagent_ceiling_refuses(profile):
+    source = dataclasses.replace(profile, mcp_server_grants=())
+    with pytest.raises(
+        ClaudeNativeHelperProjectionError,
+        match="not admitted",
+    ):
+        project_claude_native_helpers(
+            source,
+            helpers=_roster(),
+            permission_mode="bypassPermissions",
+            supports_subagent_capability_ceiling=ObservedTriState.UNKNOWN,
         )
 
 
@@ -249,6 +272,7 @@ def test_interactive_permission_mode_refuses(profile):
             source,
             helpers=_roster(),
             permission_mode="default",
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
 
@@ -263,6 +287,8 @@ def test_duplicate_or_nondeterministic_roster_refuses(profile):
             source,
             helpers=(second, first),
             permission_mode="bypassPermissions",
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
     with pytest.raises(
         ClaudeNativeHelperProjectionError,
@@ -272,6 +298,8 @@ def test_duplicate_or_nondeterministic_roster_refuses(profile):
             source,
             helpers=(first, first),
             permission_mode="bypassPermissions",
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
 
 
@@ -284,4 +312,6 @@ def test_mcp_profile_requires_complete_observed_catalog(profile):
             profile,
             helpers=_roster(),
             permission_mode="bypassPermissions",
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
