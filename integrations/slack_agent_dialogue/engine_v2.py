@@ -13,6 +13,13 @@ from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_PACKET_DISCRIMINATOR_V1,
+    build_consultation,
+    parse_consultation_packet,
+    render_consultation_packet,
+)
+
 from integrations.slack_agent_dialogue.contract import (
     AUTHORITY_CLASSES,
     FABLE_MESSAGE_TYPES,
@@ -897,6 +904,7 @@ class DialogueEngineV2:
         eligible: dict[str, list[tuple[SlackMessage, Mapping[str, Any]]]] = {}
         ineligible_count = 0
         mutated_count = 0
+        packet_count = 0
 
         for transport in page.messages:
             if transport.ts == thread_ts or transport.thread_ts != thread_ts:
@@ -910,6 +918,12 @@ class DialogueEngineV2:
                 raw_text = transport.created_text
 
             if not raw_text.startswith(MESSAGE_DISCRIMINATOR_V2):
+                # Exact closed classification: a consultation packet frame is
+                # only counted.  It is never parsed as a V2 message, never
+                # sender-screened, and never enters lifecycle interpretation,
+                # ordering, parent discovery, or key reconciliation.
+                if raw_text.startswith(CONSULTATION_PACKET_DISCRIMINATOR_V1):
+                    packet_count += 1
                 continue
 
             # Unknown Slack identities are transport-ineligible even when their
@@ -960,6 +974,7 @@ class DialogueEngineV2:
             historical_messages=(),
             ineligible_count=ineligible_count,
             mutated_count=mutated_count,
+            packet_count=packet_count,
         )
 
     async def read_thread(

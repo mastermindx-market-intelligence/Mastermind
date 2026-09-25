@@ -6,11 +6,17 @@ import dataclasses
 
 import pytest
 
+from common.agent_dialogue_consultation_contract import (
+    RECEIPT_KEYS,
+    build_consultation,
+    render_consultation_packet,
+)
 from common.commission_ref import (
     CommissionRef,
     CommissionRefError,
     normalize_commission_ref,
 )
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from integrations.slack_agent_dialogue.contract import (
     DialogueContractError,
     MESSAGE_SCHEMA,
@@ -33,6 +39,7 @@ from integrations.slack_agent_dialogue.contract_v2 import (
     render_parent_v2,
 )
 from integrations.slack_agent_dialogue.engine import (
+    DialogueContext,
     DialogueEngineError,
     DialoguePolicy,
     SlackMessage,
@@ -2181,3 +2188,256 @@ def test_v2_wait_amendment_available_requires_canonical_ref() -> None:
         "selected_option": None,
         "canonical_ref": canonical_ref,
     }
+
+
+# --- IAC-P1-B1: consultation packet frames in the exact-send engine ---------
+
+
+def worker_ref(job: str = "JOB-200", attempt: str = "ATT-100") -> dict[str, str]:
+    return {
+        "kind": "worker_attempt",
+        "job_id": job,
+        "attempt_id": attempt,
+        "worker_id": f"codex-{attempt.lower()}",
+    }
+
+
+def raw_packet(
+    message_key: str = "asd-packet-engine-0001", **overrides
+) -> dict[str, object]:
+    consultation_id = "consult-" + "a1" * 16
+    value: dict[str, object] = {
+        "schema": "mastermind.agent_dialogue_consultation.v1",
+        "message_key": message_key,
+        "consultation_id": consultation_id,
+        "purpose": "QUESTION",
+        "requester_actor_ref": worker_ref(),
+        "recipient_actor_ref": worker_ref(job="JOB-200", attempt="ATT-200"),
+        "recipient_peer_ref": "peer-" + "a1" * 16,
+        "recipient_binding": {
+            "binding_id": runtime_binding_id_for("ATT-100", "EPOCH-0001"),
+            "binding_generation": 1,
+            "reasoning_surface": "codex",
+        },
+        "correlation": {
+            "parent_fingerprint": "a" * 64,
+            "request_message_key": message_key,
+            "consultation_id": consultation_id,
+            "requester_actor_digest": "b" * 64,
+            "recipient_actor_digest": "c" * 64,
+        },
+        "question": "Which bounded packet frame should be admitted?",
+        "answer": None,
+        "evidence_refs": [],
+        "artifact_revisions": [
+            {
+                "repository": REPO,
+                "path": "integrations/slack_agent_dialogue/engine_v2.py",
+                "commit": "1" * 40,
+                "content_sha256": "2" * 64,
+            }
+        ],
+        "valid_until": "2026-09-14T00:00:00Z",
+        "deadline_ms": 60000,
+        "response_budget": {
+            "max_answers": 1,
+            "max_evidence_reads": 2,
+            "max_forward_hops": 0,
+            "max_payload_bytes": 32768,
+        },
+        "supersedes_message_key": None,
+        "receipts": {key: None for key in RECEIPT_KEYS},
+        "fingerprint": "",
+    }
+    value.update(overrides)
+    return value
+
+
+def packet_value(
+    message_key: str = "asd-packet-engine-0001", **overrides
+) -> dict[str, object]:
+    return build_consultation(raw_packet(message_key, **overrides))
+
+
+def add_packet_reply(
+    client: InMemorySlackClient,
+    frame: dict[str, object],
+    *,
+    author: str = BOT,
+    ts: str,
+    text: str | None = None,
+    edited: bool = False,
+    deleted: bool = False,
+    created_text: str | None = None,
+) -> None:
+    client.add_reply(
+        SlackMessage(
+            ts=ts,
+            author_user_id=author,
+            text=render_consultation_packet(frame) if text is None else text,
+            thread_ts=THREAD_TS,
+            edited=edited,
+            deleted=deleted,
+            created_text=created_text,
+        )
+    )
+
+
+def test_packet_frame_is_counted_and_never_enters_lifecycle() -> None:
+    message = v2_message("ACK", message_key="asd-ack-v2-packet-coexist")
+    packet = packet_value(message_key="asd-packet-engine-0001")
+
+    plain = setup_client()
+    add_v2_reply(plain, message, author=BOT, ts="1787471000.000060")
+    with_packets = setup_client()
+    add_v2_reply(with_packets, message, author=BOT, ts="1787471000.000060")
+    add_packet_reply(with_packets, packet, ts="1787471000.000061")
+    add_packet_reply(with_packets, packet, ts="1787471000.000062")
+
+    plain_read = run(
+        make_engine(plain).read_thread(thread_ts=THREAD_TS, context=context())
+    )
+    packet_read = run(
+        make_engine(with_packets).read_thread(thread_ts=THREAD_TS, context=context())
+    )
+
+    assert packet_read.packet_count == 2
+    assert plain_read.packet_count == 0
+    assert packet_read.messages == plain_read.messages
+    assert packet_read.ineligible_count == plain_read.ineligible_count == 0
+    assert packet_read.mutated_count == plain_read.mutated_count == 0
+    from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
+
+    key = message["message_key"]
+    fingerprint = message["fingerprint"]
+    assert DialogueEngineV2._find_key(
+        packet_read, message_key=key, fingerprint=fingerprint
+    ) == DialogueEngineV2._find_key(plain_read, message_key=key, fingerprint=fingerprint)
+
+
+def test_packet_frame_is_never_parsed_as_a_v2_message() -> None:
+    client = setup_client()
+    message = v2_message("ACK", message_key="asd-ack-v2-packet-unknown-author")
+    add_v2_reply(client, message, author=BOT, ts="1787471000.000063")
+    add_packet_reply(
+        client,
+        packet_value(message_key="asd-packet-engine-0002"),
+        author="U0UNKNOWN01",
+        ts="1787471000.000064",
+    )
+
+    read = run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
+
+    assert read.packet_count == 1
+    assert read.ineligible_count == 0
+    assert len(read.messages) == 1
+
+
+def test_mutated_packet_frame_without_created_text_still_raises_reconciliation_incomplete() -> None:
+    client = setup_client()
+    add_packet_reply(
+        client,
+        packet_value(message_key="asd-packet-engine-0003"),
+        ts="1787471000.000065",
+        text="edited packet transport text",
+        edited=True,
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
+
+    assert code(exc) == "THREAD_RECONCILIATION_INCOMPLETE"
+
+
+def v1_parent_message() -> SlackMessage:
+    parent = build_parent(
+        {
+            "schema": PARENT_SCHEMA,
+            "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+            "commission_ref": commission(),
+            "session_ref": "asd-session-fable0001",
+            "allowed_sol_user_ids": list(tuple(sorted((SOL1, SOL2)))),
+            "created_at": "2026-08-23T08:00:00Z",
+        }
+    )
+    return SlackMessage(ts=THREAD_TS, author_user_id=SOL1, text=render_parent(parent))
+
+
+def v1_applies() -> dict[str, str]:
+    return {"repository": REPO, "head_sha": "c" * 40, "pr": f"{REPO}#125"}
+
+
+def v1_context() -> DialogueContext:
+    return DialogueContext(
+        "WS:CHAIRMAN-CONTROL-ROOM",
+        commission(),
+        "asd-session-fable0001",
+        v1_applies(),
+    )
+
+
+def v1_ack(key: str) -> dict[str, object]:
+    return build_message(
+        {
+            "schema": MESSAGE_SCHEMA,
+            "message_key": key,
+            "message_type": "ACK",
+            "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+            "commission_ref": commission(),
+            "session_ref": "asd-session-fable0001",
+            "seat_ref": "fable",
+            "reply_to_message_key": None,
+            "applies_to": v1_applies(),
+            "summary": "Bounded Fable message.",
+            "body": {"acknowledged": True},
+            "evidence_refs": [],
+            "requires_response": False,
+            "created_at": "2026-08-23T08:00:00Z",
+        }
+    )
+
+
+def test_v1_engine_read_is_unchanged_by_packet_frames() -> None:
+    from integrations.slack_agent_dialogue.engine import DialogueEngine
+
+    def v1_client(*, with_packet: bool) -> InMemorySlackClient:
+        client = InMemorySlackClient(relay_bot_user_id=BOT)
+        client.add_parent(v1_parent_message())
+        client.add_reply(
+            SlackMessage(
+                ts="1787471000.000066",
+                author_user_id=BOT,
+                text=render_message(v1_ack("asd-ack-v1-packet-coexist")),
+                thread_ts=THREAD_TS,
+            )
+        )
+        if with_packet:
+            client.add_reply(
+                SlackMessage(
+                    ts="1787471000.000067",
+                    author_user_id=BOT,
+                    text=render_consultation_packet(
+                        packet_value(message_key="asd-packet-engine-0004")
+                    ),
+                    thread_ts=THREAD_TS,
+                )
+            )
+        return client
+
+    plain_read = run(
+        DialogueEngine(policy(), v1_client(with_packet=False),
+                       authority_policy=ExactV2AuthorityPolicy()).read_thread(
+                           thread_ts=THREAD_TS, context=v1_context()
+                       )
+    )
+    packet_read = run(
+        DialogueEngine(policy(), v1_client(with_packet=True),
+                       authority_policy=ExactV2AuthorityPolicy()).read_thread(
+                           thread_ts=THREAD_TS, context=v1_context()
+                       )
+    )
+
+    assert packet_read.packet_count == 0
+    assert packet_read.messages == plain_read.messages
+    assert packet_read.ineligible_count == plain_read.ineligible_count == 0
+    assert packet_read.mutated_count == plain_read.mutated_count == 0

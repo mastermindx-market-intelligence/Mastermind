@@ -251,6 +251,9 @@ class ThreadRead:
     historical_messages: tuple[ReadMessage, ...]
     ineligible_count: int
     mutated_count: int
+    # Number of consultation packet frames classified by the reader that
+    # produced this value.  The V1 engine does not classify them and leaves 0.
+    packet_count: int = 0
 
 
 def _ts_order(value: str) -> Decimal:
