@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
+import subprocess
+from pathlib import Path
 
 import pytest
 
 from control_plane.executive_runtime import Runtime
+from control_plane.executive_service import (
+    ExecutiveControlService,
+    ServiceConfig,
+)
 from control_plane.model_router import (
     DEFAULT_POLICY_PATH,
     ModelRouter,
@@ -21,6 +28,10 @@ from control_plane.worker_adapter import (
     adapter_descriptor,
 )
 from scripts.executive_os_phase1b import main as phase1b_main
+from scripts.executive_os_phase1c_worker import (  # noqa: E402  (import-order pinned by the existing top-of-file block)
+    WorkerConfigError,
+    _assert_service_activation_allowed,
+)
 
 
 _V1_EQUIVALENT_FIRST_TIERS = {
@@ -126,16 +137,45 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
             decision.job_constraints()
 
 
-def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible():
+def test_minimax_seam_is_declared_but_unarmed():
+    """Round-2 seam census: minimax is declared on the reviewed codex-cli adapter
+    but explicitly unarmed (enabled False, autonomous_allowed False). It groups
+    with the qwen/glm/xai provider-seam placeholders on adapter codex-cli while
+    codex remains the ONLY provider that is both enabled and autonomous_allowed.
+    Every alias with worker_eligible True must point at the codex provider seam.
+    """
+
     router = ModelRouter.load()
 
+    # The provider set is the reviewed codex seam plus the four placeholder
+    # provider aliases. minimax is the fifth, declared but unarmed.
+    assert set(router.providers) == {"codex", "qwen", "glm", "xai", "minimax"}
+
+    # codex is the ONLY provider with both enabled and autonomous_allowed True.
     assert router.providers["codex"].enabled
     assert router.providers["codex"].autonomous_allowed
+
+    # minimax is declared but explicitly unarmed on the codex-cli adapter.
+    assert router.providers["minimax"].adapter_id == "codex-cli"
+    assert not router.providers["minimax"].enabled
+    assert not router.providers["minimax"].autonomous_allowed
+
+    # The openai-compatible placeholder seams stay disabled and non-autonomous.
     for provider in ("qwen", "glm", "xai"):
         assert not router.providers[provider].enabled
         assert not router.providers[provider].autonomous_allowed
         assert router.providers[provider].adapter_id == "openai-compatible"
 
+    # Every alias that the router would actually admit for worker dispatch
+    # points at the codex seam — the worker-eligibility fence forbids the rest.
+    for alias_name, alias in router.model_aliases.items():
+        if alias.worker_eligible:
+            assert alias.provider_alias == "codex", (
+                f"worker_eligible alias {alias_name!r} unexpectedly resolves "
+                f"to provider {alias.provider_alias!r}"
+            )
+
+    # Sanity: the canonical worker alias and the sealed profile still resolve.
     luna = router.resolve_model_alias("fast.engineering")
     assert luna.model == "gpt-5.6-luna"
     assert luna.adapter_id == "codex-cli"
@@ -144,8 +184,433 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
     assert terra.model == "gpt-5.6-terra"
     assert terra.execution_profile_id == "sealed.worker.readonly.no-extensions.v1"
 
+    # The non-eligible minimax alias is in the policy but NOT resolvable via the
+    # worker-eligibility gate; resolve_model_alias must refuse it.
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("coo.sealed.minimax")
+
     assert adapter_descriptor("codex-cli").implemented
     assert not adapter_descriptor("openai-compatible").implemented
+
+
+def test_minimax_alias_declares_same_sealed_profile_without_eligibility():
+    """The minimax alias declares the exact same sealed profile id and digest,
+    capabilities, effort, and cost_class as ``coo.sealed`` — but is explicitly
+    NOT worker-eligible and names a different (real) MiniMax model id. The
+    profile parity is what makes the alias a defensible future swap surface;
+    the worker-eligibility fence is what prevents today's host binding from
+    being sourced from it.
+    """
+
+    router = ModelRouter.load()
+
+    codex_sealed = router.model_aliases["coo.sealed"]
+    minimax_sealed = router.model_aliases["coo.sealed.minimax"]
+
+    # Same execution surface — only the provider seam and the model id differ.
+    assert (
+        minimax_sealed.execution_profile_id
+        == codex_sealed.execution_profile_id
+    )
+    assert (
+        minimax_sealed.execution_profile_digest
+        == codex_sealed.execution_profile_digest
+    )
+    assert minimax_sealed.capabilities == codex_sealed.capabilities
+    assert minimax_sealed.effort == codex_sealed.effort
+    assert minimax_sealed.cost_class == codex_sealed.cost_class
+
+    # Provider seam differs by construction.
+    assert minimax_sealed.provider_alias != codex_sealed.provider_alias
+    assert minimax_sealed.provider_alias == "minimax"
+    assert codex_sealed.provider_alias == "codex"
+
+    # Adapter is identical (both sides honour the Codex-cli review).
+    assert minimax_sealed.adapter_id == codex_sealed.adapter_id == "codex-cli"
+
+    # Worker-eligibility fence: the alias is declared but the router refuses
+    # to source worker dispatch from it. This is the structural guard.
+    assert minimax_sealed.worker_eligible is False
+
+    # The model id must be the real MiniMax-M3 id from
+    # config/provider_model_economics.v1.json; the realm binding is
+    # control_plane.codex_provider_realm.MINIMAX_TOKEN_PLAN, whose transport
+    # proof is review_evidence/provider_realms/minimax_codex_responses_20260915.json.
+    assert minimax_sealed.model == "MiniMax-M3"
+    assert minimax_sealed.model != codex_sealed.model
+
+
+def _register_sealed_worker_from_profile(
+    runtime: Runtime,
+    *,
+    worker_id: str,
+    profile,
+    routing_policy_version: str,
+) -> None:
+    """Register a worker whose quota-class metadata mirrors a router ``ModelAlias``
+    *directly* (no resolver hop), so a non-worker-eligible alias like
+    ``coo.sealed.minimax`` can be registered even though
+    ``router.resolve_model_alias`` now refuses it.
+    """
+
+    runtime.workers.register_worker(
+        worker_id,
+        provider=profile.provider_alias,
+        account_label=f"account-{worker_id}",
+        worker_type=profile.adapter_id,
+        capabilities=list(profile.capabilities),
+        quota_classes={
+            "default": {
+                "provider": profile.provider_alias,
+                "model": profile.model,
+                "effort": profile.effort,
+                "cost_class": profile.cost_class,
+                "capabilities": list(profile.capabilities),
+                "metadata": {
+                    "adapter_id": profile.adapter_id,
+                    "model_alias": profile.model_alias,
+                    "provider_alias": profile.provider_alias,
+                    "routing_policy_version": routing_policy_version,
+                    "execution_profile_id": profile.execution_profile_id,
+                    "execution_profile_digest": profile.execution_profile_digest,
+                    "capability_policy_version": profile.capability_policy_version,
+                    "capability_policy_digest": profile.capability_policy_digest,
+                },
+            }
+        },
+    )
+
+
+def test_minimax_registered_worker_is_never_selected_for_any_routed_job(tmp_path):
+    """Restored broker-selection coverage under an honest name (round 3):
+    a registered minimax-sealed worker is never selected by the broker for
+    any route × risk decision the router actually emits, because every route's
+    ``preferred_model_aliases`` is anchored to the codex seam and never names
+    ``coo.sealed.minimax``. The structural guard is the routing policy; the
+    broker is the witness.
+
+    Two complementary cases pin the surfaced behaviour:
+
+    (a) Every ``task_kind`` × ``risk`` combination — selection is either None
+        or the codex-sealed worker.
+    (b) A job hand-constrained to ``preferred_model_aliases=["coo.sealed"]``
+        selects and claims the codex-sealed worker.
+    (c) A job hand-constrained to ``preferred_model_aliases=
+        ["coo.sealed.minimax"]`` *does* byte-match the minimax-registered
+        worker. ``_capacity_matches_route`` string-matches the worker's
+        ``model_alias`` metadata against the constraint's
+        ``preferred_model_aliases`` and never consults ``worker_eligible``.
+        This is a pre-existing behaviour, NOT an authority grant by this PR;
+        the round-2 review recorded it as residual 2.
+    """
+
+    router = ModelRouter.load()
+    codex_sealed = router.model_aliases["coo.sealed"]
+    minimax_sealed = router.model_aliases["coo.sealed.minimax"]
+
+    runtime = Runtime.at(tmp_path)
+    _register_sealed_worker_from_profile(
+        runtime,
+        worker_id="codex-sealed-01",
+        profile=codex_sealed,
+        routing_policy_version=router.policy_version,
+    )
+    _register_sealed_worker_from_profile(
+        runtime,
+        worker_id="minimax-sealed-01",
+        profile=minimax_sealed,
+        routing_policy_version=router.policy_version,
+    )
+
+    # (a) Every route × risk level: selection is either None or the codex
+    # worker. The routing policy never names ``coo.sealed.minimax`` inside
+    # any tier, so the minimax-sealed worker's metadata can never match.
+    for task_kind, route in router.routes.items():
+        for risk in ("routine", "elevated"):
+            decision = router.route(WorkRequest(task_kind, risk=risk))
+            assert decision.mode is RouteMode.WORKER, (
+                f"{task_kind}.{risk} unexpectedly routes to "
+                f"{decision.mode.value!r}"
+            )
+            constraints = decision.job_constraints()
+            assert (
+                "coo.sealed.minimax"
+                not in constraints["preferred_model_aliases"]
+            ), (
+                f"{task_kind}.{risk} surfaces the minimax alias in "
+                f"preferred_model_aliases: {constraints['preferred_model_aliases']!r}"
+            )
+            job = runtime.jobs.create_job(
+                f"{task_kind}.{risk}", constraints=constraints,
+            )
+            selected = runtime.broker.select_worker(job)
+            if selected is not None:
+                assert selected.worker_id == "codex-sealed-01", (
+                    f"{task_kind}.{risk} unexpectedly selected "
+                    f"{selected.worker_id!r}"
+                )
+
+    # (b) A job constrained to ``coo.sealed`` only selects AND claims the
+    # codex-sealed worker. This proves the codex seam is fully wired through
+    # the broker for an explicit constraint.
+    codex_only_job = runtime.jobs.create_job(
+        "coo sealed only",
+        constraints={
+            "task_kind": "implementation",
+            "risk": "routine",
+            "execution_profile_id": codex_sealed.execution_profile_id,
+            "execution_profile_digest": codex_sealed.execution_profile_digest,
+            "capability_policy_version": (
+                codex_sealed.capability_policy_version
+            ),
+            "capability_policy_digest": codex_sealed.capability_policy_digest,
+            "preferred_model_aliases": ["coo.sealed"],
+            "required_capabilities": list(codex_sealed.capabilities),
+            "routing_policy_version": router.policy_version,
+            "routing_reason_codes": ("sealed_only",),
+        },
+    )
+    codex_selected = runtime.broker.select_worker(codex_only_job)
+    assert codex_selected is not None
+    assert codex_selected.worker_id == "codex-sealed-01"
+    codex_lease = runtime.broker.claim(codex_only_job.job_id)
+    assert codex_lease is not None
+    assert codex_lease.attempt.worker_id == "codex-sealed-01"
+
+    # (c) Residual 2 of the round-2 review (job constraints are not validated
+    # against router eligibility; pre-existing; not an authority grant by this
+    # PR): the broker byte-matches the minimax-registered worker when a job
+    # is hand-constrained to ``preferred_model_aliases=["coo.sealed.minimax"]``.
+    # ``_capacity_matches_route`` string-matches the worker's ``model_alias``
+    # metadata against the constraint's ``preferred_model_aliases`` and never
+    # consults the alias's ``worker_eligible`` flag — so the minimax-registered
+    # worker IS selected. We record the observed behaviour here rather than
+    # change production code; that follows the round-2 instruction.
+    minimax_only_job = runtime.jobs.create_job(
+        "minimax sealed only",
+        constraints={
+            "task_kind": "implementation",
+            "risk": "routine",
+            "execution_profile_id": minimax_sealed.execution_profile_id,
+            "execution_profile_digest": minimax_sealed.execution_profile_digest,
+            "capability_policy_version": (
+                minimax_sealed.capability_policy_version
+            ),
+            "capability_policy_digest": minimax_sealed.capability_policy_digest,
+            "preferred_model_aliases": ["coo.sealed.minimax"],
+            "required_capabilities": list(minimax_sealed.capabilities),
+            "routing_policy_version": router.policy_version,
+            "routing_reason_codes": ("sealed_only_minimax",),
+        },
+    )
+    minimax_selected = runtime.broker.select_worker(minimax_only_job)
+    assert minimax_selected is not None, (
+        "residual 2 of round-2 review: broker unexpectedly refused to "
+        "select the minimax-registered worker for a job constrained to "
+        "coo.sealed.minimax; _capacity_matches_route string-matches "
+        "model_alias metadata and is the documented failure mode"
+    )
+    assert minimax_selected.worker_id == "minimax-sealed-01", (
+        "residual 2 of round-2 review: broker selected "
+        f"{minimax_selected.worker_id!r} instead of the minimax worker"
+    )
+
+
+def _build_coo_host_binding_service(
+    tmp_path: Path,
+    *,
+    coo_model_alias: str,
+) -> ExecutiveControlService:
+    """Build the smallest ``ExecutiveControlService`` that reaches
+    ``_load_coo_execution_binding`` on construction, mirroring the
+    ``tests/test_executive_service.py`` ``_config``/``_service`` fixture pair
+    but stripped down so we never arm a live socket.
+    """
+
+    source = tmp_path / "proof-source"
+    source.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(source)], check=True)
+    (source / "README.md").write_text("# router test proof base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Router Test",
+            "-c",
+            "user.email=router-test@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "proof base",
+        ],
+        check=True,
+    )
+    base_sha = subprocess.run(
+        ["git", "-C", str(source), "rev-parse", "HEAD"],
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    ).stdout.strip()
+    config = ServiceConfig(
+        runtime_root=tmp_path / "runtime",
+        socket_path=tmp_path / "run" / "executive.sock",
+        proof_source_repository=source,
+        proof_workspace_root=tmp_path / "workspaces",
+        proof_base_sha=base_sha,
+        proof_shared_gid=os.getegid(),
+        backup_root=tmp_path / "backups",
+        allowed_peer_uids=(os.geteuid(),),
+        shutdown_grace_seconds=0.1,
+        coo_model_alias=coo_model_alias,
+    )
+    return ExecutiveControlService(config)
+
+
+def test_minimax_alias_cannot_source_the_coo_host_binding(tmp_path):
+    """The non-eligible ``coo.sealed.minimax`` alias cannot be used as the
+    configured COO execution alias — ``_load_coo_execution_binding`` must
+    refuse it before any host-binding digest, provider, or work_placement_union
+    is minted. The control.json.template / install.sh default of
+    ``coo_model_alias = coo.sealed`` continues to source only codex realms.
+    """
+
+    # (a) coo.sealed.minimax is refused at the host-binding load.
+    with pytest.raises(
+        ValueError,
+        match="must be a sealed, extension-free, write-capable Codex worker",
+    ):
+        _build_coo_host_binding_service(
+            tmp_path / "minimax-host-binding",
+            coo_model_alias="coo.sealed.minimax",
+        )
+
+    # (b) coo.sealed still builds, and every generated work_placement_union
+    # entry is anchored to the codex provider realm.
+    codex_service = _build_coo_host_binding_service(
+        tmp_path / "codex-host-binding",
+        coo_model_alias="coo.sealed",
+    )
+    binding = codex_service._coo_execution_binding
+    assert binding["provider"] == "codex"
+    assert binding["work_placement_union"]
+    for entry in binding["work_placement_union"]:
+        assert entry["provider_realm"] == "codex"
+
+
+def test_minimax_binding_activation_still_refused():
+    """Adding the ``minimax`` provider seam does not arm its subscription
+    binding — ``_assert_service_activation_allowed`` keeps refusing it. The
+    provider may be declared in the routing policy; the binding stays
+    BUILT_NOT_PROVEN until a separate enrollment, capacity, canary, and
+    usage-policy decision arms it.
+    """
+
+    config = {
+        "schema_version": "mastermind.executive_worker_broker_config/v5",
+        "harness_binding_id": "minimax-token-plan.codex-responses",
+    }
+    with pytest.raises(WorkerConfigError, match="not armed for autonomous service"):
+        _assert_service_activation_allowed(config)
+
+
+def test_openai_compatible_provider_block_remains_refused(tmp_path):
+    """The closed rule is unchanged: a provider on the unimplemented
+    ``openai-compatible`` adapter cannot be armed even when the alias
+    targets it. Pins the refusal so future minimax-shaped provider blocks
+    cannot quietly bypass it.
+    """
+
+    raw = _v2_policy()
+    raw["providers"]["minimax"] = {
+        "adapter_id": "openai-compatible",
+        "enabled": True,
+        "autonomous_allowed": True,
+    }
+    raw["model_aliases"]["coo.sealed.minimax"] = {
+        "provider_alias": "minimax",
+        "execution_profile_id": ModelRouter.load()
+        .model_aliases["coo.sealed"]
+        .execution_profile_id,
+        "model": "gpt-5.6-sol",
+        "effort": "xhigh",
+        "cost_class": "small",
+        "capabilities": ["code", "planning", "research", "review", "tests"],
+        "worker_eligible": True,
+    }
+    path = tmp_path / "openai-compatible-provider.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(RoutingPolicyError, match="unimplemented adapter"):
+        ModelRouter.load(path)
+
+
+def test_no_tier_in_any_route_resolves_to_minimax():
+    """Every route × risk level tier in the loaded policy resolves to aliases
+    whose ``provider_alias`` is ``codex`` — not ``minimax``. The
+    worker-eligibility fence plus the non-eligible-alias tier rule together
+    forbid any minimax-anchored tier from being admitted into the v2 policy.
+
+    Intentional single-seam pin: this asserts every tier resolves to codex today
+    and must be widened deliberately when a second provider is armed through the
+    six gates.
+    """
+
+    router = ModelRouter.load()
+
+    for task_kind, route in router.routes.items():
+        for risk in ("routine", "elevated"):
+            tiers = route[risk]
+            assert tiers, f"{task_kind}.{risk} has no tiers"
+            for tier in tiers:
+                for alias_name in tier.model_aliases:
+                    profile = router.model_aliases[alias_name]
+                    assert profile.provider_alias != "minimax", (
+                        f"route {task_kind}.{risk}.{tier.tier_id} resolves "
+                        f"alias {alias_name!r} to provider 'minimax'"
+                    )
+                    assert profile.provider_alias == "codex"
+                    assert profile.worker_eligible is True
+
+
+def test_minimax_alias_in_a_tier_is_refused_by_the_router(tmp_path):
+    """The non-eligible-alias tier rule (model_router.py ~321-322) refuses any
+    variant policy that names the staged ``coo.sealed.minimax`` alias inside a
+    suitability tier. This is the structural complement to the
+    worker-eligibility fence: even a hand-authored override cannot quietly
+    promote the minimax seam into a tier without the router tripping.
+    """
+
+    raw = _v2_policy()
+    raw["routes"]["implementation"]["routine"][0]["model_aliases"] = [
+        "coo.sealed.minimax",
+    ]
+    path = tmp_path / "minimax-in-tier.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(RoutingPolicyError, match="ineligible alias"):
+        ModelRouter.load(path)
+
+
+def test_control_template_and_installer_default_coo_alias_is_codex():
+    """Read-only pin: the reviewed installer and control-template both pin
+    ``coo_model_alias = "coo.sealed"`` as the default. No runtime deployment
+    can quietly switch the COO host binding to a non-eligible alias without
+    a code change here, so the staged ``coo.sealed.minimax`` cannot be
+    surfaced through the operator-default control plane.
+    """
+
+    repo_root = Path(__file__).resolve().parents[1]
+    template = (repo_root / "ops" / "executive_os" / "control.json.template").read_text(
+        encoding="utf-8"
+    )
+    install = (repo_root / "ops" / "executive_os" / "install.sh").read_text(
+        encoding="utf-8"
+    )
+    assert '"coo_model_alias": "coo.sealed"' in template
+    assert '"coo_model_alias": "coo.sealed"' in install
 
 
 def test_policy_refuses_production_arming_or_an_unimplemented_live_provider(tmp_path):
