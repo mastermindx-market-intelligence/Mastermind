@@ -16,36 +16,78 @@ cannot choose an arbitrary host path, Paper endpoint, account, credential or app
 `paper_prepare` action is action-specific surface degradation; it does not by itself invalidate
 current-file inspect/read/edit capability.
 
-## Remote Desktop Commander — same bridge, bounded fallback
+## Remote Desktop Commander — same bridge, independently authorized alternative
 
-Remote Desktop Commander is an authorized fallback when the intended host is explicitly available
-and the Studio Direct Paper family is technically absent or unserviceable before any Paper mutation.
-It is also valid for host diagnosis and installation. It is **not** another Paper gateway.
+Remote Desktop Commander can reach the same guarded Paper bridge, but Studio Direct absence never
+grants authority to use it. Before selecting RDC for a Paper modifying action, establish
+`INDEPENDENT_RDC_AUTHORIZATION` from existing owners; do not create a new grant or registry.
+
+`INDEPENDENT_RDC_AUTHORIZATION` means **all** of the following are already true:
+
+1. current live Chairman intent/delegated authority or accepted canonical placement covers the exact
+   Paper task **and** the exact target host carrier;
+2. the current session directly observes RDC access/resource permission for that exact host;
+3. no explicit provider, Studio Direct, Paper, workspace, account, safety, or organizational denial
+   applies to the intended effect;
+4. no Paper mutation on another carrier is STARTed, pending, or `EFFECT_UNKNOWN`; and
+5. current same-pinned source procedure, document identity, source custody, and action-specific write
+   gates are satisfied.
+
+A missing/unserviceable Studio action is only capability evidence. It satisfies none of these
+authorization predicates. If independent RDC authorization cannot be established, stop at the exact
+carrier/permission gate instead of using host access as a substitute for permission.
+
+<!-- PAPER_CARRIER_DECISION_V1_START -->
+```json
+{
+  "schema": "mastermind.paper_carrier_decision.v1",
+  "cases": [
+    {"studio_state":"PAPER_ACTION_AVAILABLE","rdc_independently_authorized":false,"effect_state":"NONE","decision":"USE_STUDIO"},
+    {"studio_state":"ACTION_ABSENT_OR_UNSERVICEABLE","rdc_independently_authorized":true,"effect_state":"NONE","decision":"RDC_ELIGIBLE_PRE_EFFECT"},
+    {"studio_state":"ACTION_ABSENT_OR_UNSERVICEABLE","rdc_independently_authorized":false,"effect_state":"NONE","decision":"BLOCK_EXACT_CARRIER_GATE"},
+    {"studio_state":"EXPLICIT_DENIAL","rdc_independently_authorized":true,"effect_state":"NONE","decision":"BLOCK_NO_FALLBACK"},
+    {"studio_state":"ANY","rdc_independently_authorized":true,"effect_state":"EFFECT_UNKNOWN","decision":"BLOCK_RECONCILE_ORIGINAL_CARRIER"}
+  ]
+}
+```
+<!-- PAPER_CARRIER_DECISION_V1_END -->
+
+RDC remains valid for authorized host diagnosis/installation even when it is not authorized to edit
+Paper. It is **not** another Paper gateway.
 
 Never choose a runtime by directory recency, a remembered `vN`, or an old `INSTALLATION.json`.
 At the same protected repository commit used for the task, read
-`integrations/studio_direct_mcp/private_service.py` and obtain the current
-`PAPER_RUNTIME_REL`, `PAPER_RUNTIME_SCHEMA`, and `PAPER_BRIDGE_SHA256` pins. On the target host:
+`integrations/studio_direct_mcp/private_service.py`. Treat its current
+`_verify_paper_runtime()`, `PAPER_RUNTIME_REL`, `PAPER_RUNTIME_SCHEMA`, and
+`PAPER_BRIDGE_SHA256` as the fail-closed runtime owner. On the target host:
 
-1. read `~/<PAPER_RUNTIME_REL>/RUNTIME.json`;
-2. verify the receipt schema/generation and its `bridge_sha256` / `source_sha256.bridge.py`;
-3. hash the exact `source/bridge.py` and require the protected SHA match;
-4. use the receipt's exact `python_source` when present and valid;
-5. run the bridge's `status`, then `catalog`, before any edit;
-6. confirm the exact Paper file identity again immediately before a modifying call.
+1. resolve `RUNTIME = $HOME / PAPER_RUNTIME_REL` and read `RUNTIME/RUNTIME.json`;
+2. require receipt `schema == PAPER_RUNTIME_SCHEMA`;
+3. require receipt `generation == Path(PAPER_RUNTIME_REL).name`;
+4. require receipt `bridge_sha256 == PAPER_BRIDGE_SHA256` and
+   `source_sha256 == {"bridge.py": PAPER_BRIDGE_SHA256}`;
+5. require `network_install_performed is false` and `production_acceptance is false`;
+6. require the runtime/source directories and bridge/receipt files to satisfy the same owner,
+   private-mode, regular-file, and non-symlink predicates as `_verify_paper_runtime()`;
+7. hash `RUNTIME/source/bridge.py` and require `PAPER_BRIDGE_SHA256`;
+8. use only `RUNTIME/venv/bin/python`, requiring a regular non-symlink executable. The receipt's
+   `python_source` is staging provenance only and is never runtime interpreter selection;
+9. run the bridge's `status`, then `catalog`, before any edit; and
+10. confirm the exact Paper file identity again immediately before a modifying call.
 
-Conceptual command shapes — values come only from the verified current receipt/source pin:
+Conceptual command shapes — values come only from those same-pinned protected predicates:
 
 ```sh
-"$PYTHON" "$BRIDGE" status
-"$PYTHON" "$BRIDGE" catalog
-"$PYTHON" "$BRIDGE" read --tool get_screenshot --arguments @/owned/args.json --artifact-dir /owned/private-artifacts
-"$PYTHON" "$BRIDGE" edit --allow-write --tool write_html --arguments @/owned/args.json --expected-snapshot <observed-sha256> --operation-id <same-operation-id>
+"$RUNTIME/venv/bin/python" "$RUNTIME/source/bridge.py" status
+"$RUNTIME/venv/bin/python" "$RUNTIME/source/bridge.py" catalog
+"$RUNTIME/venv/bin/python" "$RUNTIME/source/bridge.py" read --tool get_screenshot --arguments @/owned/args.json --artifact-dir /owned/private-artifacts
+"$RUNTIME/venv/bin/python" "$RUNTIME/source/bridge.py" edit --allow-write --tool write_html --arguments @/owned/args.json --expected-snapshot <observed-sha256> --operation-id <same-operation-id>
 ```
 
-Use Desktop Commander's `start_process` with those exact verified values. Keep returned image
-artifacts on that same device. `catalog` is the live upstream schema owner; never guess Paper tool
-arguments. An unavailable endpoint is not proof of logged-out status.
+Use Desktop Commander's `start_process` only after the independent authorization and exact runtime
+checks above. Keep returned image artifacts on that same device. `catalog` is the live upstream
+schema owner; never guess Paper tool arguments. An unavailable endpoint is not proof of logged-out
+status.
 
 If a different Paper file must be focused, prefer Studio Direct's bounded `paper_prepare` when
 available. Do not synthesize an arbitrary host/application transition from memory. If the current
@@ -54,9 +96,11 @@ authorized current source-law path; do not broaden the bridge's raw `open_file` 
 
 ## Mutation and fallback fence
 
-A pre-dispatch technical absence with proven `EFFECT_NONE` may justify choosing the other lawful
-carrier before the first Paper edit. An explicit safety/permission denial never does. After any Paper
-edit dispatch, the logical mutation remains on that carrier until its post-read/effect is reconciled.
+A pre-dispatch technical absence with proven `EFFECT_NONE` may justify choosing another carrier
+before the first Paper edit **only when that carrier is independently authorized under the predicates
+above**. Technical absence does not grant that authorization. An explicit safety/permission denial
+never permits fallback. After any Paper edit dispatch, the logical mutation remains on that carrier
+until its post-read/effect is reconciled.
 A timeout or lost response is `EFFECT_UNKNOWN`; do not replay through Desktop Commander, Studio
 Direct, another mode, account or provider.
 

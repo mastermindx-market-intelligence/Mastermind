@@ -1,6 +1,6 @@
 ---
 name: paper-design-workflow
-description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind guarded adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. ChatGPT Web prefers Studio Direct's Paper actions; authorized Remote Desktop Commander may invoke the same protected bridge as a pre-effect fallback when that Paper action family is not exposed or serviceable. Neither path creates a second Paper gateway. Requires Paper Desktop plus exact document identity; setup, login and worker grants remain separate gates.
+description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind guarded adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. ChatGPT Web prefers Studio Direct's Paper actions; an independently authorized Remote Desktop Commander carrier may invoke the same protected bridge only when the exact host and Paper action are already within current authority. Studio absence never grants that authority. Neither path creates a second Paper gateway. Requires Paper Desktop plus exact document identity; setup, login and worker grants remain separate gates.
 ---
 
 # Paper design workflow
@@ -23,22 +23,26 @@ surface before making a capability claim.
    nothing about whether the Paper family is available.
 2. **Do not over-block on `paper_prepare`.** Its absence alone does not make Paper unavailable.
    If the intended file is already active, inspect/read/edit may still be usable. If a different file
-   must be focused, use `paper_prepare` when exposed; otherwise follow the authorized host fallback
-   or surface the exact missing file-transition action.
-3. **Desktop Commander is a real guarded-bridge fallback.** If the Studio Direct Paper action family
-   is technically absent or unserviceable **before any Paper mutation has begun**, and an authorized
-   Remote Desktop Commander connection to the intended host exists, follow
-   `references/connection.md` to verify the current protected Paper runtime pin and invoke that same
-   `bridge.py` with `status` / `catalog` / `read` / `edit`. This is another client of the
-   same guarded adapter, not another Paper gateway or authority plane.
+   must be focused, use `paper_prepare` when exposed; otherwise use only an independently authorized
+   host carrier or surface the exact missing file-transition action.
+3. **Desktop Commander is a real guarded-bridge alternative, never authority by fallback.**
+   Technical absence or unserviceability of the Studio Direct Paper family may justify considering
+   RDC **before any Paper mutation**, but does not authorize it. Require
+   `INDEPENDENT_RDC_AUTHORIZATION` from `references/connection.md`: the current Chairman
+   assignment/delegation or accepted canonical placement must already cover the exact host carrier and
+   Paper action, current RDC resource permission must be observed, and no conflicting/unknown Paper
+   effect may exist. Only then verify the protected runtime pin and invoke that same `bridge.py`
+   with `status` / `catalog` / `read` / `edit`. This is another client of the same guarded
+   adapter, not another Paper gateway or authority plane.
 4. **A denial is not a fallback invitation.** An explicit safety, permission, workspace, account, or
-   organizational denial ends that action. Do not switch to Desktop Commander, another mode, account,
-   or provider to obtain the denied effect.
+   organizational denial ends that action. Tool absence is not proof that a denied permission may be
+   recovered elsewhere. Do not switch to Desktop Commander, another mode, account, or provider to
+   obtain the denied effect.
 5. **Bind mutations to one carrier.** Select the modifying carrier before the first edit. A
    pre-dispatch technical absence with proven `EFFECT_NONE` may justify choosing the other lawful
-   carrier. Once a Paper edit is dispatched, keep that logical mutation and its reconciliation on the
-   original carrier. On `EFFECT_UNKNOWN`, stop writes and inspect the original file; never replay the
-   edit through the other carrier.
+   carrier only when that carrier is already independently authorized. Once a Paper edit is dispatched,
+   keep that logical mutation and its reconciliation on the original carrier. On `EFFECT_UNKNOWN`,
+   stop writes and inspect the original file; never replay the edit through the other carrier.
 
 For native MCP clients, use only the Paper actions exposed and approved in that client. Tool discovery
 never grants permission, and sealed workers do not inherit ambient plugins or Executive grants.

@@ -98,10 +98,12 @@ or extract implementation from Paper.design. Although this domain skill lives ou
 **same pinned repository commit** before making Paper capability claims or effects. For attended
 ChatGPT work, discover the exact Paper action family first; generic Studio filesystem/process tools
 do not prove Paper unavailable. Studio Direct is the preferred Web carrier when its Paper actions are
-exposed. Before any Paper mutation, an authorized Remote Desktop Commander session on the intended
-host may use the same protected guarded bridge as a fallback when Studio Direct's Paper action family
-is technically absent or unserviceable. An explicit safety/permission denial is never a fallback
-signal, and `EFFECT_UNKNOWN` never permits cross-carrier replay.
+exposed. Studio Direct absence or degradation grants **no** Desktop Commander authority. Before any
+Paper mutation, Remote Desktop Commander may be selected only when the current Chairman assignment,
+delegated authority, or accepted canonical placement independently authorizes that exact host carrier
+and Paper action, the current RDC resource permission is observed, no explicit safety/permission denial
+applies, and no prior modifying effect is unresolved. Otherwise preserve the exact carrier gate.
+`EFFECT_UNKNOWN` never permits cross-carrier replay.
 
 
 ### `WEB_CEO_DELEGATION.md`
