@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -187,6 +188,44 @@ def test_resolution_is_runtime_read_only(tmp_path: Path) -> None:
         ),
     )
     assert counts() == before
+
+
+def test_current_fleet_consumer_refuses_unaccepted_provider_adapter(
+    tmp_path: Path,
+) -> None:
+    runtime, job, lease = _claimed_runtime(tmp_path)
+    resolved = resolve_remote_attempt_transport(
+        runtime,
+        job_id=job.job_id,
+        attempt_id=lease.attempt.attempt_id,
+        binding_source=lambda host_ref, worker_id: _host_binding(
+            tmp_path, host_ref=host_ref, worker_id=worker_id
+        ),
+    )
+    with pytest.raises(RemoteAttemptTransportError) as raised:
+        build_attempt_bound_worker_fleet(
+            dataclasses.replace(resolved, provider="anthropic")
+        )
+    assert raised.value.code == "PROVIDER_UNSUPPORTED"
+
+
+@pytest.mark.parametrize("field,value", [("job_id", True), ("attempt_id", 7), ("job_id", " JOB-1")])
+def test_resolution_refuses_noncanonical_caller_identity(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    runtime, job, lease = _claimed_runtime(tmp_path)
+    kwargs = {
+        "runtime": runtime,
+        "job_id": job.job_id,
+        "attempt_id": lease.attempt.attempt_id,
+        "binding_source": lambda host_ref, worker_id: _host_binding(
+            tmp_path, host_ref=host_ref, worker_id=worker_id
+        ),
+    }
+    kwargs[field] = value
+    with pytest.raises(RemoteAttemptTransportError) as raised:
+        resolve_remote_attempt_transport(**kwargs)
+    assert raised.value.code == "INVALID_INPUT"
 
 
 def test_root_binding_cannot_redirect_capacity_identity(
