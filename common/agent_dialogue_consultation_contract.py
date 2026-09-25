@@ -492,8 +492,17 @@ def clamp_response_budget(
     response_budget: Mapping[str, int], *, answer_frame_overhead_bytes: int
 ) -> dict[str, int]:
     clamped = {key: response_budget[key] for key in RESPONSE_BUDGET_KEYS}
+    # canonical_consultation_json renders with ensure_ascii=False, so inside a
+    # frame only '"' and '\' expand, each one byte becoming two; _require_string
+    # already refuses every control character.  A payload budget named in bytes
+    # therefore needs exactly this factor of 2 to be renderable in every case -
+    # an answer of exactly this many UTF-8 bytes always fits the frame ceiling.
     clamped["max_payload_bytes"] = max(
-        0, min(clamped["max_payload_bytes"], MAX_FRAME_BYTES - answer_frame_overhead_bytes)
+        0,
+        min(
+            clamped["max_payload_bytes"],
+            (MAX_FRAME_BYTES - answer_frame_overhead_bytes) // 2,
+        ),
     )
     return clamped
 

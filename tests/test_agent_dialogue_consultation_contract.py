@@ -14,6 +14,7 @@ from common.agent_dialogue_consultation_contract import (
     CONSULTATION_V2_SCHEMA,
     GROK_CONSULTATION_SCHEMA,
     RECEIPT_KEYS,
+    RESPONSE_BUDGET_KEYS,
     RESPONSE_BUDGET_MAXIMA,
     DuplicateClassification,
     build_consultation,
@@ -802,3 +803,116 @@ def test_replies_page_still_admits_at_least_one_ceiling_frame() -> None:
         )
         is True
     )
+
+
+# --- IAC-P1-B3: an advertised payload budget must always be renderable --------
+
+
+def lean_answer_overhead_bytes() -> int:
+    lean_answer = build_consultation(packet_frame("ANSWER"))
+    return len(
+        consultation_contract.render_consultation_packet(lean_answer).encode("utf-8")
+    )
+
+
+def advertised_payload_budget(answer_frame_overhead_bytes: int) -> int:
+    return consultation_contract.clamp_response_budget(
+        RESPONSE_BUDGET_MAXIMA, answer_frame_overhead_bytes=answer_frame_overhead_bytes
+    )["max_payload_bytes"]
+
+
+def loaded_answer_frame(answer_text: str) -> dict:
+    """An ANSWER frame whose fixed content dominates, so the answer budget is small."""
+    revisions = [
+        {
+            "repository": "a" * 99 + "/" + "b" * 100,
+            "path": f"p{index}" + "q" * 148,
+            "commit": "1" * 40,
+            "content_sha256": "2" * 64,
+        }
+        for index in range(4)
+    ]
+    return build_consultation(
+        packet_frame("ANSWER", answer_text=answer_text, artifact_revisions=revisions)
+    )
+
+
+def rendered_frame_bytes(frame: dict) -> int:
+    return len(
+        consultation_contract.render_consultation_packet(frame).encode("utf-8")
+    )
+
+
+def test_clamped_payload_budget_always_renders_within_the_ceiling() -> None:
+    budget = advertised_payload_budget(lean_answer_overhead_bytes())
+    assert budget > 0
+    for character in ('"', "\\", "x"):
+        answer = character * (budget // len(character.encode("utf-8")))
+        frame = build_consultation(packet_frame("ANSWER", answer_text=answer))
+        assert rendered_frame_bytes(frame) <= INCUMBENT_MAX_FRAME_BYTES
+
+
+def test_clamped_payload_budget_is_denominated_in_utf8_bytes_not_characters() -> None:
+    budget = advertised_payload_budget(lean_answer_overhead_bytes())
+    assert budget > 0
+    for character in ("好", "\U0001F600"):
+        answer = character * (budget // len(character.encode("utf-8")))
+        assert len(answer.encode("utf-8")) <= budget
+        frame = build_consultation(packet_frame("ANSWER", answer_text=answer))
+        assert rendered_frame_bytes(frame) <= INCUMBENT_MAX_FRAME_BYTES
+
+
+def test_clamped_payload_budget_is_exactly_tight() -> None:
+    overhead = lean_answer_overhead_bytes()
+    budget = advertised_payload_budget(overhead)
+    # The lean frame carries a one-byte answer text; everything else is fixed cost.
+    fixed_bytes = overhead - len("x".encode("utf-8"))
+    largest = (INCUMBENT_MAX_FRAME_BYTES - fixed_bytes) // 2
+    assert largest >= 1
+    fitting = build_consultation(packet_frame("ANSWER", answer_text="\\" * largest))
+    assert rendered_frame_bytes(fitting) <= INCUMBENT_MAX_FRAME_BYTES
+    overflowing = build_consultation(
+        packet_frame("ANSWER", answer_text="\\" * (largest + 1))
+    )
+    assert rendered_frame_bytes(overflowing) > INCUMBENT_MAX_FRAME_BYTES
+    assert budget == largest
+
+
+def test_clamped_payload_budget_stays_zero_or_positive_across_overheads() -> None:
+    lean = lean_answer_overhead_bytes()
+    for overhead in (
+        0,
+        1,
+        lean,
+        INCUMBENT_MAX_FRAME_BYTES - 1,
+        INCUMBENT_MAX_FRAME_BYTES,
+    ):
+        clamped = consultation_contract.clamp_response_budget(
+            RESPONSE_BUDGET_MAXIMA, answer_frame_overhead_bytes=overhead
+        )
+        assert clamped["max_payload_bytes"] >= 0
+        assert set(clamped) == set(RESPONSE_BUDGET_KEYS)
+        assert clamped["max_answers"] == RESPONSE_BUDGET_MAXIMA["max_answers"]
+        assert clamped["max_evidence_reads"] == RESPONSE_BUDGET_MAXIMA["max_evidence_reads"]
+        assert clamped["max_forward_hops"] == RESPONSE_BUDGET_MAXIMA["max_forward_hops"]
+    spent = consultation_contract.clamp_response_budget(
+        RESPONSE_BUDGET_MAXIMA,
+        answer_frame_overhead_bytes=INCUMBENT_MAX_FRAME_BYTES + 10,
+    )
+    assert spent["max_payload_bytes"] == 0
+
+
+def test_named_falsifier_641_backslash_answer_never_inside_budget_and_over_ceiling() -> None:
+    answer = "\\" * 641
+    assert len(
+        canonical_consultation_json({"text": answer, "evidence_refs": []}).encode(
+            "utf-8"
+        )
+    ) == 1312
+    overhead = rendered_frame_bytes(loaded_answer_frame("x"))
+    advertised = advertised_payload_budget(overhead)
+    witness_bytes = rendered_frame_bytes(loaded_answer_frame(answer))
+    # Either the witness sits outside the advertised budget, or it renders inside
+    # the wire ceiling.  The PARENT state - inside the budget AND over the
+    # ceiling - is exactly what must not survive.
+    assert advertised < len(answer) or witness_bytes <= INCUMBENT_MAX_FRAME_BYTES
