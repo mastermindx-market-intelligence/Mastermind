@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from control_plane.executive_runtime import AttemptStatus, Runtime
-from control_plane.executive_supervisor import ExecutiveSupervisor
+from control_plane.executive_supervisor import (
+    ExecutiveSupervisor,
+    ProcessPresence,
+    ReconcileStatus,
+)
 from control_plane.remote_attempt_transport import (
     REMOTE_RECOVERY_OPERATIONS,
     AttemptBoundRemoteWorkerAdapter,
@@ -150,6 +154,17 @@ def _process_ref(run_id: str) -> WorkerProcessRef:
     )
 
 
+class _LiveProcessController:
+    def presence(self, _attempt):
+        return ProcessPresence.LIVE
+
+    def absence_verified(self, _attempt) -> bool:
+        return False
+
+    def terminate(self, _attempt) -> None:
+        raise AssertionError("restart recovery must not terminate the live run")
+
+
 class _FakeAttemptFleet:
     adapter_id = "remote-worker-broker-fleet"
 
@@ -280,6 +295,101 @@ async def test_executive_supervisor_consumes_facade_only_after_runtime_claim(
     recovery = current.launch_metadata["worker_recovery_binding"]
     assert recovery["adapter_id"] == AttemptBoundRemoteWorkerAdapter.adapter_id
     assert recovery["process_ref"]["run_id"] == resolution.attempt_id
+
+
+@pytest.mark.asyncio
+async def test_fresh_supervisor_reattaches_without_remote_start(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path / "runtime")
+    runtime.workers.register_worker(
+        WORKER,
+        provider=PROVIDER,
+        account_label="fixture-remote",
+        worker_type="fixture",
+        capabilities=["research"],
+        quota_classes={
+            QUOTA: {
+                "capabilities": ["research"],
+                "metadata": {"capacity_join": _join()},
+            }
+        },
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    job = runtime.jobs.create_job(
+        "restart remote carrier proof",
+        worktree=str(workspace),
+        requested_authorities=["READ"],
+        attempt_limit=1,
+    )
+
+    initial_built = []
+
+    def initial_factory(resolution):
+        fleet = _FakeAttemptFleet(
+            resolution.worker_id,
+            process_ref=_process_ref(resolution.attempt_id),
+        )
+        initial_built.append((resolution, fleet))
+        return fleet
+
+    first_adapter = AttemptBoundRemoteWorkerAdapter(
+        runtime,
+        lambda host_ref, worker_id: _host_binding(
+            tmp_path, host_ref=host_ref, worker_id=worker_id
+        ),
+        fleet_factory=initial_factory,
+    )
+    first = ExecutiveSupervisor(
+        runtime,
+        first_adapter,
+        runs_root=tmp_path / "runs",
+        process_controller=first_adapter.process_controller,
+        instance_id="supervisor-first",
+    )
+    active = await first.start_job(job.job_id)
+    attempt_id = active.lease.attempt.attempt_id
+    assert initial_built[0][0].purpose is RemoteTransportPurpose.LAUNCH
+
+    recovery_built = []
+
+    def recovery_factory(resolution):
+        fleet = _FakeAttemptFleet(
+            resolution.worker_id,
+            process_ref=active.process_ref,
+        )
+        recovery_built.append((resolution, fleet))
+        return fleet
+
+    second_adapter = AttemptBoundRemoteWorkerAdapter(
+        runtime,
+        lambda host_ref, worker_id: _host_binding(
+            tmp_path, host_ref=host_ref, worker_id=worker_id
+        ),
+        fleet_factory=recovery_factory,
+    )
+    second = ExecutiveSupervisor(
+        runtime,
+        second_adapter,
+        runs_root=tmp_path / "runs",
+        process_controller=_LiveProcessController(),
+        instance_id="supervisor-second",
+    )
+
+    outcomes = second.reconcile_restart(requeue_lost=False)
+
+    assert len(outcomes) == 1
+    assert outcomes[0].attempt_id == attempt_id
+    assert outcomes[0].status is ReconcileStatus.LIVE_RECOVERED
+    assert len(recovery_built) == 1
+    resolution, fleet = recovery_built[0]
+    assert resolution.purpose is RemoteTransportPurpose.RECOVERY
+    assert "start" not in resolution.client.allowed_operations
+    assert fleet.start_calls == 0
+    assert len(fleet.reattach_bindings) == 1
+    assert fleet.reattach_bindings[0].adapter_id == fleet.adapter_id
+    assert fleet.reattach_bindings[0].process_ref == active.process_ref
 
 
 @pytest.mark.asyncio
