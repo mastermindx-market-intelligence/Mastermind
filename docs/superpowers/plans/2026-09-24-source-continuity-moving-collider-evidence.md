@@ -36,11 +36,13 @@ Source receipt payload version becomes `v2`; writer-gate remains `v1`. Existing 
 
 Unchanged:
 
-- max open PRs: 485
+- max open PRs: 490 (inherited from protected Macro-490 scale successor #982)
 - max HTTP calls: 1,152
 - normalized bytes: 128 MiB
 - cooperative read budget: 300 s
 - per-response body cap: 5,000,000 bytes
+- combined 490-estate moved-collider proof: 998 calls / 154 calls headroom, 332,297 normalized bytes
+- protected Macro-490 adverse scale proof remains the tighter envelope: 1,140 calls / 12 calls headroom
 - subject PR / branch / source / base revalidation
 - dirt/unpushed/effect rules
 - no cache, cursor, retry service, GraphQL/POST path, lock, queue, persistence, lifecycle, receiver-transfer or merge authority.

@@ -107,7 +107,7 @@ def run_cli(module, capsys, http, *, kind="checkpoint", runner=None):
     return exit_code, json.loads(captured.out)
 
 
-@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485])
+@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490])
 @pytest.mark.parametrize("kind", ["checkpoint", "remote-complete"])
 def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     module = fx._cli_module()
@@ -122,7 +122,7 @@ def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     assert payload["collision_state"] == ("NONE" if count == 1 else "DISJOINT")
 
 
-@pytest.mark.parametrize("count", [486, 1000])
+@pytest.mark.parametrize("count", [491, 1000])
 def test_over_ceiling_refuses_before_foreign_files(count, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
@@ -146,12 +146,13 @@ def test_large_estate_still_requires_stable_complete_observations(
     assert rc != 0 and payload["code"] == code
 
 
-def test_485_estate_moved_collider_same_projection_stays_within_closed_budget(
+def test_490_estate_moved_collider_same_projection_stays_within_closed_budget(
         capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    estate_size = 490
     http = EstateHTTP(
-        485,
+        estate_size,
         overlap=True,
         identity_complete=True,
         move_overlap=True,
@@ -159,7 +160,7 @@ def test_485_estate_moved_collider_same_projection_stays_within_closed_budget(
     rc, payload = run_cli(module, capsys, http)
     assert rc == 0, payload
     assert payload["collision_state"] == "OVERLAP"
-    assert payload["colliding_pr_numbers"] == [1483]
+    assert payload["colliding_pr_numbers"] == [1000 + estate_size - 2]
     assert payload["receipt_version"] == "v2"
     assert len(payload["collision_evidence_fingerprint"]) == 64
     assert len(http.calls) < module._MAX_HTTP_CALLS
@@ -355,7 +356,7 @@ def test_exact_call_and_byte_limit_remains_successful(capsys, monkeypatch):
 
 def test_budget_constants_are_closed_and_raw_response_cap_is_unchanged():
     module = fx._cli_module()
-    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (485, 1152)
+    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (490, 1152)
     assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
     assert module._MAX_HTTP_BODY_BYTES == 5_000_000

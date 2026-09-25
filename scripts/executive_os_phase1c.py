@@ -1617,6 +1617,12 @@ def _service_from_config(
     if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
         # SDK-free canonical projection runs under the existing control uid.
         # The network App has no Runtime database or source-checkout access.
+        # Commission lookup is likewise host-owned. Provider construction is
+        # network-inert; observations occur only during trusted admission.
+        from integrations.mastermind_executive_app.web_commission_source import (
+            GitHubWebCommissionSourceProvider,
+        )
+
         reader_kwargs = dict(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
@@ -1729,6 +1735,9 @@ def _service_from_config(
             grounding_provider=readers, read_provider=readers,
             read_schema=app_read_schema,
             **content_factories, **workspace_factories,
+        )
+        ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
+            GitHubWebCommissionSourceProvider()
         )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
