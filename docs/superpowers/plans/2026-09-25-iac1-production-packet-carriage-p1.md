@@ -15,7 +15,7 @@
 - Protected source/procedure pin is exactly `a29161fa0a44cca9927afe042b5f7ea25aae1736`; repin before each modifying phase and stop on material movement.
 - Operation and sole source carrier are `iac1-production-packet-carriage-p1-20260925-sol-001`, branch `sol/iac1-production-packet-carriage-p1-20260925-sol-001`, worktree `/Users/chriswong/.mastermind/agent-workspaces/sol/iac1-production-packet-carriage-p1-20260925-sol-001`.
 - Preserve #959/#973 as DO_NOT_REDO.
-- P1 supports only peers whose trusted bindings share `work_ref`, `commission_ref`, `session_ref`, `operation_key`, `watch_mode`, `thread_ts`, and applicability `job_id`.
+- P1 supports peers whose trusted bindings share `work_ref`, `commission_ref`, `session_ref`, `operation_key`, `watch_mode`, and `thread_ts`; each binding separately must have `actor_ref` == `applies_to` on its own job/attempt/worker, so distinct child Jobs may lawfully share that physical parent.
 - `CONSULTATION_PACKET_MAX_BYTES` initially equals incumbent `MAX_FRAME_BYTES` (`4500`). It may be lowered, not raised, in this operation.
 - No truncation, chunking, compression, upload, attachment, alternate channel/thread, or fallback carrier.
 - No new database, registry, queue, retry controller, ACK store, daemon, socket, Slack client, scheduler, lifecycle, identity, or notification plane.
@@ -638,10 +638,9 @@ session_ref
 operation_key
 watch_mode
 thread_ts
-applies_to.job_id
 ```
 
-Parametrize one-field drift. Every drift is a typed zero-effect refusal before Runtime INTENT, carrier write or Wake.
+Parametrize one physical-parent field drift. Separately falsify an `actor_ref` / `applies_to` job-attempt-worker mismatch inside either binding. Every drift or self-inconsistent binding is a typed zero-effect refusal before Runtime INTENT, carrier write or Wake.
 
 - [ ] **Step 2: Write party/direction RED tests**
 

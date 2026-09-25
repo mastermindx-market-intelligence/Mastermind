@@ -51,12 +51,11 @@ session_ref
 operation_key
 watch_mode
 thread_ts
-applicability-carrier job_id
 ```
 
-Therefore P1 admits only peers whose trusted caller and recipient `DialogueBinding` values match on all seven fields above. Their Worker Attempts and workers may differ.
+Therefore P1 admits only peers whose trusted caller and recipient `DialogueBinding` values match on all six physical-parent fields above. Each binding separately remains exact to its own Worker Attempt: `actor_ref` and `applies_to` must agree on that binding's `job_id`, `attempt_id`, and `worker_id`. Distinct child Jobs and Attempts may therefore share one physical Relay parent without laundering either actor identity.
 
-After P1 source acceptance, a separate reviewed **P1-R reachability amendment** must evolve the incumbent Company Dialogue / Agent Relay binding owner to project one canonical authorized consultation carrier across sessions. P1-R may not add a thread registry, mailbox, router, queue, or second transport owner. Until P1-R exists, cross-session and cross-job consultation remains `NOT_BUILT`, not silently emulated.
+After P1 source acceptance, a separate reviewed **P1-R reachability amendment** must evolve the incumbent Company Dialogue / Agent Relay binding owner to project one canonical authorized consultation carrier across different sessions/parent threads. P1-R may not add a thread registry, mailbox, router, queue, or second transport owner. Until P1-R exists, different-session/different-parent consultation remains `NOT_BUILT`, not silently emulated.
 
 ---
 
@@ -89,7 +88,6 @@ CarrierIdentity = tuple[
     str,                  # operation_key
     str | None,           # watch_mode
     str,                  # thread_ts
-    str,                  # applies_to.job_id
 ]
 ```
 
@@ -97,11 +95,12 @@ Admission requires:
 
 1. caller `DialogueBinding.actor_ref` equals the host-injected `CallerIdentity` job/attempt/worker;
 2. recipient `DialogueBinding.actor_ref` equals the trusted `RecipientBinding.actor_ref`;
-3. caller and recipient carrier identities are equal;
-4. the consultation frame requester/recipient actors equal those trusted actors;
-5. the frame-carried `recipient_binding` equals the trusted recipient Runtime binding id, generation and reasoning surface;
-6. QUESTION sender is the immutable requester; ANSWER sender is the admitted recipient;
-7. neither model input nor the consultation frame supplies channel, thread, session, work, commission, operation or carrier authority.
+3. each binding's `actor_ref` and `applies_to` agree on its own job/attempt/worker identity;
+4. caller and recipient physical-parent carrier identities are equal;
+5. the consultation frame requester/recipient actors equal those trusted actors;
+6. the frame-carried `recipient_binding` equals the trusted recipient Runtime binding id, generation and reasoning surface;
+7. QUESTION sender is the immutable requester; ANSWER sender is the admitted recipient;
+8. neither model input nor the consultation frame supplies channel, thread, session, work, commission, operation or carrier authority.
 
 A mismatch is a typed known-no-effect refusal before `ConsultationRuntime.intent()` or `answer_available()`.
 

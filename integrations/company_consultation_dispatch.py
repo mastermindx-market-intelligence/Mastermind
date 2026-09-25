@@ -218,14 +218,27 @@ class InMemoryConsultationPacketCarrier:
 
 
 def _dialogue_carrier_identity(binding: DialogueBinding) -> tuple[object, ...]:
+    """Return the incumbent Relay parent identity, not one child Attempt.
+
+    Every worker context remains bound to its own exact ``actor_ref`` and
+    ``applies_to`` Attempt.  The shared physical parent is separately keyed by
+    work/commission/session/operation/watch/thread; requiring the child Job to
+    match would make two simultaneously current Runtime Attempts impossible.
+    """
+
     if not isinstance(binding, DialogueBinding):
         raise StateConflict("trusted dialogue binding is unavailable")
+    actor = dict(binding.actor_ref)
     applies_to = dict(binding.applies_to)
-    applicability_job_id = applies_to.get("job_id")
     if (
-        applies_to.get("kind") != "executive_attempt"
-        or not isinstance(applicability_job_id, str)
-        or not applicability_job_id
+        actor.get("kind") != "worker_attempt"
+        or applies_to.get("kind") != "executive_attempt"
+        or any(
+            not isinstance(actor.get(field), str)
+            or not actor.get(field)
+            or actor.get(field) != applies_to.get(field)
+            for field in ("job_id", "attempt_id", "worker_id")
+        )
     ):
         raise StateConflict("dialogue binding applicability carrier is invalid")
     return (
@@ -235,7 +248,6 @@ def _dialogue_carrier_identity(binding: DialogueBinding) -> tuple[object, ...]:
         binding.operation_key,
         binding.watch_mode,
         binding.thread_ts,
-        applicability_job_id,
     )
 
 

@@ -7,6 +7,7 @@ tool surface is frozen in ``integrations/mastermind_company_mcp``.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import copy
 import dataclasses
@@ -14,13 +15,22 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import shutil
 import subprocess
+import tempfile
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from common.agent_dialogue_contract_v2 import (
+    PARENT_SCHEMA_V2,
+    TURN_WATCH_MODE_V1,
+    build_parent_v2,
+    render_parent_v2,
+)
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_PACKET_MAX_BYTES,
     CONSULTATION_SCHEMA,
@@ -57,10 +67,23 @@ from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_SCHEMA,
     CompanyConsultationGateway,
 )
+from integrations.slack_agent_dialogue.engine import (
+    DialogueEngine,
+    DialoguePolicy,
+    SlackMessage,
+)
+from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
+from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
 from integrations.slack_agent_dialogue.service import (
+    AgentDialogueService,
     CONTROL_VERSION_V2,
     EXACT_SEND_PROTOCOL,
     DialogueServiceError,
+    ServiceConfig,
+)
+from integrations.slack_agent_dialogue.slack_web_api import (
+    BoundedHistoryPage,
+    MAX_RESPONSE_BYTES,
 )
 import integrations.company_consultation_dispatch as consultation_dispatch
 from integrations.company_consultation_dispatch import (
@@ -566,15 +589,6 @@ def test_agent_dialogue_packet_carrier_preserves_transport_uncertainty(
         ("operation_key", "iac1-p1-other-operation-20260925"),
         ("watch_mode", None),
         ("thread_ts", "1787961600.000099"),
-        (
-            "applies_to",
-            {
-                "kind": "executive_attempt",
-                "job_id": "JOB-OTHER",
-                "attempt_id": "ATT-CARRIER",
-                "worker_id": "relay-parent",
-            },
-        ),
     ],
 )
 def test_same_parent_carrier_refuses_one_field_drift(
@@ -595,9 +609,9 @@ def test_same_parent_carrier_refuses_one_field_drift(
         )
 
 
-def test_same_parent_carrier_accepts_distinct_workers_on_one_parent() -> None:
+def test_same_parent_carrier_accepts_distinct_jobs_on_one_parent() -> None:
     requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
-    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    recipient = ("JOB-201", "ATT-200", "codex-recipient", _binding("recipient"))
     caller_binding = _dialogue_binding(requester)
     recipient_binding = _dialogue_binding(recipient)
 
@@ -607,6 +621,29 @@ def test_same_parent_carrier_accepts_distinct_workers_on_one_parent() -> None:
         caller_actor_ref=caller_binding.actor_ref,
         recipient_actor_ref=recipient_binding.actor_ref,
     )
+
+
+def test_dialogue_carrier_refuses_actor_applicability_mismatch() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-201", "ATT-200", "codex-recipient", _binding("recipient"))
+    caller_binding = _dialogue_binding(requester)
+    recipient_binding = _dialogue_binding(
+        recipient,
+        applies_to={
+            "kind": "executive_attempt",
+            "job_id": "JOB-OTHER",
+            "attempt_id": "ATT-OTHER",
+            "worker_id": "worker-other",
+        },
+    )
+
+    with pytest.raises(StateConflict, match="applicability carrier is invalid"):
+        _require_same_dialogue_carrier(
+            caller_binding,
+            recipient_binding,
+            caller_actor_ref=caller_binding.actor_ref,
+            recipient_actor_ref=recipient_binding.actor_ref,
+        )
 
 
 class _DialogueRequiredCarrier(InMemoryConsultationPacketCarrier):
@@ -7356,3 +7393,430 @@ def test_answer_read_unknown_blocks_consume_and_replay_without_new_effect(
     assert _consultation_event_count(
         runtime, consultation_id, "ANSWER_AVAILABLE"
     ) == 1
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1 Task 8 — real AF_UNIX Relay restart journey
+# ---------------------------------------------------------------------------
+
+
+class _ExactRelayAuthorityPolicy:
+    def minimum_authority(self, *, request, option) -> str:
+        return "WITHIN_COMMISSION"
+
+    def allows_continuation(self, *, request, reply) -> bool:
+        return True
+
+
+class _BoundedInMemorySlackClient(InMemorySlackClient):
+    """Hermetic Slack transport with exact raw-page byte facts."""
+
+    @staticmethod
+    def _raw_message(message: SlackMessage) -> dict[str, object]:
+        value: dict[str, object] = {
+            "ts": message.ts,
+            "user": message.author_user_id,
+            "text": message.text,
+        }
+        if message.thread_ts is not None:
+            value["thread_ts"] = message.thread_ts
+        if message.edited:
+            value["edited"] = {"ts": message.ts}
+        if message.deleted:
+            value["subtype"] = "tombstone"
+        return value
+
+    async def fetch_thread(
+        self, *, channel_id: str, thread_ts: str, limit: int
+    ) -> BoundedHistoryPage:
+        page = await super().fetch_thread(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            limit=limit,
+        )
+        raw = json.dumps(
+            {
+                "ok": True,
+                "messages": [
+                    self._raw_message(message) for message in page.messages
+                ],
+                "has_more": False,
+                "response_metadata": {"next_cursor": ""},
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+        assert 0 < len(raw) <= MAX_RESPONSE_BYTES
+        return BoundedHistoryPage(
+            messages=page.messages,
+            complete=page.complete,
+            mutation_evidence_complete=page.mutation_evidence_complete,
+            response_page_bytes=(len(raw),),
+            response_byte_limit=MAX_RESPONSE_BYTES,
+        )
+
+
+def _relay_policy() -> DialoguePolicy:
+    return DialoguePolicy(
+        workspace_id="T0BRD2AQXQV",
+        channel_id="C0BRUL9F2V7",
+        relay_bot_user_id="U0BST4WG996",
+        allowed_sol_user_ids=("U0BRETDUAS2",),
+        allowed_parent_user_ids=("U0BRETDUAS2",),
+        max_channel_history=100,
+        max_thread_history=100,
+        poll_interval_seconds=0,
+        method_timeout_seconds=1,
+    )
+
+
+def _relay_parent(binding: DialogueBinding, policy: DialoguePolicy) -> SlackMessage:
+    parent = build_parent_v2(
+        {
+            "schema": PARENT_SCHEMA_V2,
+            "work_ref": binding.work_ref,
+            "commission_ref": dict(binding.commission_ref),
+            "session_ref": binding.session_ref,
+            "operation_key": binding.operation_key,
+            "watch_mode": TURN_WATCH_MODE_V1,
+            "allowed_sol_user_ids": list(policy.allowed_sol_user_ids),
+            "created_at": "2026-09-25T00:00:00Z",
+        }
+    )
+    return SlackMessage(
+        ts=binding.thread_ts,
+        author_user_id=policy.relay_bot_user_id,
+        text=render_parent_v2(parent),
+    )
+
+
+def _relay_service(
+    *,
+    socket_path: Path,
+    client: _BoundedInMemorySlackClient,
+) -> AgentDialogueService:
+    policy = _relay_policy()
+    authority = _ExactRelayAuthorityPolicy()
+    return AgentDialogueService(
+        ServiceConfig(
+            socket_path=socket_path,
+            allowed_peer_uids=(os.geteuid(),),
+            request_timeout_seconds=2,
+        ),
+        DialogueEngine(
+            policy,
+            client,
+            authority_policy=authority,
+        ),
+        engine_v2=DialogueEngineV2(
+            policy,
+            client,
+            authority_policy=authority,
+        ),
+    )
+
+
+async def _start_relay_service(
+    *,
+    socket_path: Path,
+    client: _BoundedInMemorySlackClient,
+) -> tuple[AgentDialogueService, asyncio.Task[None]]:
+    service = _relay_service(socket_path=socket_path, client=client)
+    task = asyncio.create_task(service.serve_forever())
+    for _attempt in range(200):
+        if socket_path.exists():
+            return service, task
+        if task.done():
+            await task
+        await asyncio.sleep(0.005)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    raise AssertionError("Agent Relay service did not bind its AF_UNIX socket")
+
+
+async def _stop_relay_service(
+    service: AgentDialogueService,
+    task: asyncio.Task[None],
+) -> None:
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    await service.close()
+    assert not service.config.socket_path.exists()
+
+
+def _relay_dispatcher(
+    runtime: Runtime,
+    repository_root: Path,
+    *,
+    caller: tuple,
+    recipient: tuple,
+    caller_dialogue: DialogueBinding,
+    recipient_dialogue: DialogueBinding,
+    socket_path: Path,
+    invocations: InvocationContextSource,
+) -> RuntimeConsultationDispatcher:
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(caller_dialogue),
+        socket_path=socket_path,
+        timeout_seconds=2,
+    )
+
+    def resolve_recipient(_peer_ref: str) -> RecipientBinding:
+        return RecipientBinding(
+            actor_ref={
+                "kind": "worker_attempt",
+                "job_id": recipient[0],
+                "attempt_id": recipient[1],
+                "worker_id": recipient[2],
+            },
+            recipient_binding=dict(recipient[3]),
+            dialogue_binding=recipient_dialogue,
+        )
+
+    return RuntimeConsultationDispatcher(
+        runtime=runtime,
+        repository_root=repository_root,
+        caller=CallerIdentity(
+            job_id=caller[0],
+            worker_id=caller[2],
+            attempt_id=caller[1],
+            reasoning_surface="codex",
+            binding=dict(caller[3]),
+            dialogue_binding=caller_dialogue,
+        ),
+        recipients=resolve_recipient,
+        packets=carrier,
+        invocations=invocations,
+        _clock=_ManualClock("2026-09-14T00:00:00Z"),
+    )
+
+
+def test_real_af_unix_relay_survives_service_and_dispatcher_restarts(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        runtime = _runtime_at(tmp_path / "p1-real-relay-runtime")
+        requester, recipient, _third, _root = _workers(runtime)
+        fixture_repo, fixture_revision = _fixture_repo(
+            tmp_path / "p1-real-relay-repo"
+        )
+        invocations = _p1_invocations()
+        requester_dialogue = _dialogue_binding(requester)
+        recipient_dialogue = _dialogue_binding(recipient)
+        _require_same_dialogue_carrier(
+            requester_dialogue,
+            recipient_dialogue,
+            caller_actor_ref=dict(requester_dialogue.actor_ref),
+            recipient_actor_ref=dict(recipient_dialogue.actor_ref),
+        )
+
+        socket_root = Path(
+            tempfile.mkdtemp(prefix="iac1-p1-relay-", dir="/tmp")
+        )
+        socket_path = socket_root / "relay.sock"
+        client = _BoundedInMemorySlackClient(
+            relay_bot_user_id=_relay_policy().relay_bot_user_id,
+            next_timestamp=Decimal("1787961600.000002"),
+        )
+        client.add_parent(_relay_parent(requester_dialogue, _relay_policy()))
+
+        try:
+            service_1, service_task_1 = await _start_relay_service(
+                socket_path=socket_path,
+                client=client,
+            )
+            a_dispatcher = _relay_dispatcher(
+                runtime,
+                fixture_repo,
+                caller=requester,
+                recipient=recipient,
+                caller_dialogue=requester_dialogue,
+                recipient_dialogue=recipient_dialogue,
+                socket_path=socket_path,
+                invocations=invocations,
+            )
+            consultation = await _gateway_with_dispatcher(a_dispatcher).call(
+                "company.consult",
+                _consult_args(
+                    question="Can this QUESTION survive a real Relay restart?",
+                    evidence_refs=[],
+                    artifact_revisions=[fixture_revision],
+                ),
+            )
+            assert consultation["ok"] is True
+            consultation_id = consultation["data"]["consultation_ref"]
+            await _stop_relay_service(service_1, service_task_1)
+
+            service_2, service_task_2 = await _start_relay_service(
+                socket_path=socket_path,
+                client=client,
+            )
+            b_dispatcher = _relay_dispatcher(
+                runtime,
+                fixture_repo,
+                caller=recipient,
+                recipient=requester,
+                caller_dialogue=recipient_dialogue,
+                recipient_dialogue=requester_dialogue,
+                socket_path=socket_path,
+                invocations=invocations,
+            )
+            b_gateway = _gateway_with_dispatcher(b_dispatcher)
+            b_read = await b_gateway.call(
+                "company.consultation",
+                {"consultation_ref": consultation_id},
+            )
+            assert b_read["ok"] is True
+            assert b_read["data"]["question"]["text"] == (
+                "Can this QUESTION survive a real Relay restart?"
+            )
+            _deliver_and_ack_wake_path(runtime, consultation_id)
+            answer = await b_gateway.call(
+                "company.reply",
+                {
+                    "consultation_ref": consultation_id,
+                    "answer": "Yes. The same physical thread carries the ANSWER.",
+                    "evidence_refs": [],
+                },
+            )
+            assert answer["ok"] is True
+            await _stop_relay_service(service_2, service_task_2)
+
+            service_3, service_task_3 = await _start_relay_service(
+                socket_path=socket_path,
+                client=client,
+            )
+            a_dispatcher_after_restart = _relay_dispatcher(
+                runtime,
+                fixture_repo,
+                caller=requester,
+                recipient=recipient,
+                caller_dialogue=requester_dialogue,
+                recipient_dialogue=recipient_dialogue,
+                socket_path=socket_path,
+                invocations=invocations,
+            )
+            a_gateway_after_restart = _gateway_with_dispatcher(
+                a_dispatcher_after_restart
+            )
+            a_read = await a_gateway_after_restart.call(
+                "company.consultation",
+                {"consultation_ref": consultation_id},
+            )
+            assert a_read["ok"] is True
+            assert a_read["data"]["answer"]["text"] == (
+                "Yes. The same physical thread carries the ANSWER."
+            )
+            consumed = await a_dispatcher_after_restart.consume_answer(
+                consultation_id
+            )
+            assert consumed["state"] == "CONSUMED"
+            await _stop_relay_service(service_3, service_task_3)
+
+            packet_replies = [
+                message
+                for message in client.thread_messages[
+                    requester_dialogue.thread_ts
+                ]
+                if message.text.startswith(
+                    "MMX/AGENT_DIALOGUE_CONSULTATION_PACKET_V1"
+                )
+            ]
+            assert len(packet_replies) == 2
+            assert _consultation_event_count(
+                runtime, consultation_id, "INTENT"
+            ) == 1
+            assert _consultation_event_count(
+                runtime, consultation_id, "ANSWER_AVAILABLE"
+            ) == 1
+            assert _consultation_event_count(
+                runtime, consultation_id, "CONSUMED_BY_REQUESTER"
+            ) == 1
+            question_obligation_id = _obligation_id_for_intent(
+                runtime, consultation_id
+            )
+            question_records = WakeLedgerRepository(runtime).list_records(
+                question_obligation_id
+            )
+            assert sum(
+                1
+                for item in question_records
+                if item.record.phase is LedgerPhase.WAKE_REQUESTED
+            ) == 1
+            assert len(_answer_attention_requested_records(runtime)) == 1
+        finally:
+            shutil.rmtree(socket_root, ignore_errors=True)
+
+    _run(scenario())
+
+
+_P1_PROTECTED_BASE = "a29161fa0a44cca9927afe042b5f7ea25aae1736"
+_P1_PRODUCTION_PATHS = (
+    "common/agent_dialogue_consultation_contract.py",
+    "integrations/slack_agent_dialogue/engine.py",
+    "integrations/slack_agent_dialogue/engine_v2.py",
+    "integrations/slack_agent_dialogue/service.py",
+    "integrations/slack_agent_dialogue/slack_web_api.py",
+    "integrations/slack_agent_dialogue/turn_observer.py",
+    "integrations/company_consultation_dispatch.py",
+)
+
+
+def _p1_base_source(path: str) -> str:
+    result = subprocess.run(
+        ["git", "show", f"{_P1_PROTECTED_BASE}:{path}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def _top_level_symbols(source: str) -> set[str]:
+    tree = ast.parse(source)
+    return {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def test_p1_adds_no_parallel_packet_control_plane() -> None:
+    root = Path(__file__).resolve().parents[1]
+    forbidden_symbol = re.compile(
+        r"(Store|Cache|Registry|Queue|Retry|Scheduler|Daemon|Listener|Server)$"
+    )
+    forbidden_added_text = (
+        "sqlite3",
+        "CREATE TABLE",
+        "ALTER TABLE",
+        "DROP TABLE",
+        "SlackWebApiDialogueClient(",
+        "asyncio.start_unix_server(",
+        "launchctl",
+        ".plist",
+        "token_file",
+    )
+    for path in _P1_PRODUCTION_PATHS:
+        current = (root / path).read_text()
+        base = _p1_base_source(path)
+        new_symbols = _top_level_symbols(current) - _top_level_symbols(base)
+        assert not {
+            name for name in new_symbols if forbidden_symbol.search(name)
+        }, (path, new_symbols)
+
+    diff = subprocess.run(
+        ["git", "diff", "--unified=0", _P1_PROTECTED_BASE, "--", *_P1_PRODUCTION_PATHS],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=root,
+    ).stdout
+    added = "\n".join(
+        line[1:]
+        for line in diff.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+    for forbidden in forbidden_added_text:
+        assert forbidden not in added, forbidden
