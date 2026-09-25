@@ -5782,3 +5782,115 @@ def test_consume_answer_is_a_coroutine_function() -> None:
     assert inspect.iscoroutinefunction(
         RuntimeConsultationDispatcher.consume_answer
     )
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1-A interleaving fences — the await points are real interleavings
+# ---------------------------------------------------------------------------
+
+
+@_sync_test
+async def test_consume_during_answer_put_does_not_lose_the_answer(
+    tmp_path: Path,
+) -> None:
+    """A consume interleaved with an in-flight ``put_answer`` loses nothing.
+
+    The requester's ``consume_answer`` runs at the carrier's ``after_put``
+    seam, mid-reply. The admitted answer must stay on the carrier, the
+    ``CONSUMED_BY_REQUESTER`` event must be inserted exactly once (a
+    second consume is idempotent), and the requester's read must still
+    surface the answer body.
+    """
+    runtime = _runtime_at(tmp_path / "consume-during-put")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "consume-during-put-repo"
+    )
+    carrier = _ConsumeDuringAnswerPutCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    a_gateway = _gateway_with_dispatcher(a_dispatcher)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    b_gateway = _gateway_with_dispatcher(b_dispatcher)
+
+    consult = _run(
+        a_gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Consume interleaves with the answer put?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+
+    interleaved: list[dict[str, Any]] = []
+
+    async def _consume_during_put(ref: str) -> None:
+        interleaved.append(await a_dispatcher.consume_answer(ref))
+
+    carrier.after_put = _consume_during_put
+
+    reply = _run(
+        b_gateway.call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "interleaved answer",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply["ok"] is True
+    assert reply["data"]["state"] == "ANSWER_AVAILABLE"
+    assert interleaved == [
+        {
+            "consultation_ref": consultation_id,
+            "state": "CONSUMED",
+            "inserted": True,
+        }
+    ]
+
+    # The admitted answer is never lost: the carrier still holds the
+    # exact admitted frame and the requester's read still surfaces it.
+    admitted = await carrier.get_answer(consultation_id)
+    assert admitted is not None
+    assert admitted["fingerprint"] == reply["data"]["answer_fingerprint"]
+    read_envelope = _run(
+        a_gateway.call(
+            "company.consultation", {"consultation_ref": consultation_id}
+        )
+    )
+    assert read_envelope["ok"] is True
+    assert read_envelope["data"]["body_status"] == "AVAILABLE"
+    assert read_envelope["data"]["answer"]["text"] == "interleaved answer"
+
+    # Never double-counted: exactly one CONSUMED event and the second
+    # explicit consume is idempotent.
+    events = _evidence_for(runtime, consultation_id)
+    assert len(events.get("CONSUMED_BY_REQUESTER", [])) == 1
+    assert len(events.get("ANSWER_AVAILABLE", [])) == 1
+    assert len(events.get("INTENT", [])) == 1
+    second = await a_dispatcher.consume_answer(consultation_id)
+    assert second["inserted"] is False
+    events = _evidence_for(runtime, consultation_id)
+    assert len(events.get("CONSUMED_BY_REQUESTER", [])) == 1
+    assert _answer_attention_requested_records(runtime) == ()
+
+
