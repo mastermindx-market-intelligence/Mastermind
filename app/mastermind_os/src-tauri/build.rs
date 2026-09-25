@@ -1,3 +1,6 @@
+#[path = "src/native_client.rs"]
+mod native_client;
+
 fn required(name: &str) -> String {
     let value = std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set at build time"));
     assert!(
@@ -15,6 +18,14 @@ fn required(name: &str) -> String {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=MM_NATIVE_CLIENT_ID");
+    match std::env::var("MM_NATIVE_CLIENT_ID") {
+        Ok(value) => native_client::validate_native_client_id(&value)
+            .unwrap_or_else(|message| panic!("MM_NATIVE_CLIENT_ID {message}")),
+        Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_)) => {
+            panic!("MM_NATIVE_CLIENT_ID contains an invalid character")
+        }
+    }
     println!("cargo:rerun-if-env-changed=MM_SOURCE_REVISION");
     println!("cargo:rerun-if-env-changed=MM_BUILD_IDENTITY");
     let revision = required("MM_SOURCE_REVISION");

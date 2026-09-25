@@ -68,6 +68,7 @@ interface BuildReceipt {
   build_identity: string;
   transport: string;
   state: string;
+  native_client_ref?: string | null;
 }
 declare global {
   interface Window {
@@ -1914,6 +1915,14 @@ export function App() {
               <dd>
                 <code>{build.build_identity}</code>
               </dd>
+              {build.native_client_ref ? (
+                <>
+                  <dt>Native client reference</dt>
+                  <dd>
+                    <code>{build.native_client_ref}</code>
+                  </dd>
+                </>
+              ) : null}
               <dt>Transport</dt>
               <dd>{`${build.transport} / ${build.state}`}</dd>
             </dl>
