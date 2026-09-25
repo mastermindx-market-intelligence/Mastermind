@@ -264,6 +264,10 @@ document.querySelector('#submit').onclick=async()=>{const r=await fetch('/submit
 def run_case(binary, runtime, case, evidence, catalog_path=None):
     sys.path.insert(0, str(ROOT))
     from control_plane.claude_mcp_client_projection import project_claude_mcp_client
+    from control_plane.claude_native_helper_projection import (
+        ClaudeNativeHelperDefinition,
+        project_claude_native_helpers,
+    )
     from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest
     from control_plane.operator_harness_contract import NativeHelperPolicy, ObservedTriState
     root = Path(tempfile.mkdtemp(prefix="mmxnb-", dir="/private/tmp"))
@@ -277,7 +281,14 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
     oracle.origin = "http://127.0.0.1:" + str(server.server_port)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    original = ExecutionCapabilityRegistry.load(ROOT / "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json", source_root=ROOT).resolve("operator.browser.local-review.v1")
+    registry = ExecutionCapabilityRegistry.load(
+        ROOT / "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json",
+        source_root=ROOT,
+    )
+    original = registry.resolve("operator.browser.local-review.v1")
+    helper_source = registry.resolve(
+        "operator.appserver.readonly.docs-mcp.native-helper.v1"
+    )
     grant = next(g for g in original.mcp_server_grants if g.transport == "stdio")
     mcp_args = (str(runtime / "node_modules/@playwright/mcp/cli.js"), "--headless", "--sandbox", "--isolated",
                 "--executable-path", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -292,8 +303,15 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
     grant = dataclasses.replace(grant, config_name="fixtureBrowser", command="/opt/homebrew/bin/node", args=mcp_args,
                                 enabled_tools=selected_tools, tool_schema_digest=selected_digest,
                                 grant_digest=hashlib.sha256(repr((mcp_args, selected_tools, selected_digest)).encode()).hexdigest())
-    profile = dataclasses.replace(original, mcp_server_grants=(grant,), resource_grants=(),
-                                  native_helper_policy=NativeHelperPolicy.PARENT_READ_ONLY_CEILING, profile_digest="f" * 64)
+    profile = dataclasses.replace(
+        original,
+        mcp_server_grants=(grant,),
+        resource_grants=(),
+        native_helper_policy=NativeHelperPolicy.PARENT_READ_ONLY_CEILING,
+        native_helper=helper_source.native_helper,
+        write_capable=False,
+        profile_digest="f" * 64,
+    )
     args = [str(binary), *([] if case in CHILD_CASES else ["--bare"]), "--setting-sources", "", "--no-session-persistence", "--no-chrome", "--model", "sonnet", "--effort", "medium"]
     if case in CHILD_CASES:
         projection = project_claude_native_helpers(
@@ -305,6 +323,7 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
                 max_turns=10,
             ),),
             permission_mode="dontAsk",
+            execution_mode="noninteractive",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
             observed_tool_catalogs=observed_catalogs,
         )
@@ -320,8 +339,12 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
         args += ["--tools", "", *projection.cli_arguments()]
         if case == "denied":
             args += ["--disallowedTools", *projection.denied_tools, "mcp__fixtureBrowser__browser_fill_form"]
-    args += ["--permission-mode", "dontAsk", "--max-turns", "12", "--output-format", "json", "-p", ROOT_MARKER + " Run only the fixed local browser conformance task."]
+    if case not in CHILD_CASES:
+        args += ["--permission-mode", "dontAsk"]
+    args += ["--max-turns", "12", "--output-format", "json", "-p", ROOT_MARKER + " Run only the fixed local browser conformance task."]
     env = fixture_environment(root, server.server_port)
+    if case in CHILD_CASES:
+        env.update(projection.environment())
     if case == "sdk":
         sdk_path = runtime.parent / "sdk-libs"
         from importlib.metadata import distributions
@@ -338,7 +361,13 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
     with (root / "stdout.json").open("wb") as out, (root / "stderr.log").open("wb") as err:
         proc = subprocess.Popen(args, cwd=root / "workspace", env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True)
         try:
-            proc.wait(timeout=100)
+            proc.wait(
+                timeout=(
+                    projection.runtime_ceiling_seconds
+                    if case in CHILD_CASES
+                    else 100
+                )
+            )
         except subprocess.TimeoutExpired:
             timed_out = True
             os.killpg(proc.pid, signal.SIGTERM)
@@ -381,6 +410,9 @@ def run_case(binary, runtime, case, evidence, catalog_path=None):
                "tool_catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
                "projected_denied_tools": list(projection.denied_tools),
                "native_helper_environment": (projection.environment() if case in CHILD_CASES else None),
+               "native_helper_parent_denied_tools": (list(projection.parent_denied_tools) if case in CHILD_CASES else None),
+               "native_helper_runtime_ceiling_seconds": (projection.runtime_ceiling_seconds if case in CHILD_CASES else None),
+               "source_native_helper_projection_sha256": (hashlib.sha256((ROOT / "control_plane/claude_native_helper_projection.py").read_bytes()).hexdigest() if case in CHILD_CASES else None),
                "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
     if evidence.exists():
         raise ValueError("evidence path already exists")
