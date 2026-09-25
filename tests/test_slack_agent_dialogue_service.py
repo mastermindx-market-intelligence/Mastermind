@@ -2796,3 +2796,59 @@ def test_v2_non_exact_router_does_not_accept_the_packet_operation(
         assert fake.calls == []
 
     run(scenario())
+
+
+def test_ready_and_commit_envelope_keys_are_identical_for_both_operations(
+    socket_root: Path,
+) -> None:
+    """One READY/COMMIT envelope law for every operation in the closed set."""
+
+    async def drive(srv, request: dict[str, object], commit_extra: bool) -> object:
+        fingerprint = request["args"][
+            "packet" if request["operation"] == PACKET_OPERATION else "message"
+        ]["fingerprint"]
+        reader, writer = await asyncio.open_unix_connection(
+            str(srv.config.socket_path)
+        )
+        try:
+            writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+            await writer.drain()
+            ready = json.loads(await reader.readline())
+            assert set(ready) == {"ok", "ready"}
+            assert set(ready["ready"]) == {"fingerprint"}
+            assert ready["ok"] is True
+            assert ready["ready"]["fingerprint"] == fingerprint
+            commit: dict[str, object] = {"commit": "COMMIT", "fingerprint": fingerprint}
+            if commit_extra:
+                commit["extra"] = "must not widen the accepted envelope"
+            writer.write(json.dumps(commit, separators=(",", ":")).encode() + b"\n")
+            await writer.drain()
+            return json.loads(await reader.readline())
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            for request in (exact_send_request_v2(), exact_packet_request_v2()):
+                accepted = await drive(srv, request, commit_extra=False)
+                assert set(accepted) == {"ok", "result"}
+                assert accepted["ok"] is True
+                widened = await drive(srv, request, commit_extra=True)
+                assert widened == {
+                    "ok": False,
+                    "error": {"code": "REQUEST_INVALID"},
+                }
+        finally:
+            await srv.close()
+        prepared = [
+            value for name, value in fake.calls if name == "prepare_send_message"
+        ]
+        assert {value["frame_kind"] for value in prepared} == {
+            SendFrameKind.MESSAGE,
+            SendFrameKind.CONSULTATION_PACKET,
+        }
+
+    run(scenario())
