@@ -39,6 +39,10 @@ from integrations.slack_agent_dialogue.engine_v2 import (
 from integrations.slack_agent_dialogue.turn_runtime_primitives import (
     ActiveWaiterConflict,
 )
+from common.agent_dialogue_consultation_contract import (
+    ConsultationPacketOverCeiling,
+    assert_packet_within_ceiling,
+)
 
 CONTROL_VERSION = "mastermind.agent_dialogue_control.v1"
 CONTROL_VERSION_V2 = "mastermind.agent_dialogue_control.v2"
@@ -82,6 +86,7 @@ ERROR_CODES = frozenset(
     {
         "ACTIVE_WAITER_CONFLICT",
         "INTERNAL_ERROR",
+        "PACKET_OVER_CEILING",
         "PEER_CREDENTIALS_UNAVAILABLE",
         "PEER_DENIED",
         "REQUEST_INVALID",
@@ -587,6 +592,13 @@ class AgentDialogueService:
             or not isinstance(body, dict)
         ):
             raise DialogueServiceError("REQUEST_INVALID")
+        if frame_kind is SendFrameKind.CONSULTATION_PACKET:
+            # Pre-effect refusal: an over-ceiling packet earns no provider call
+            # and no READY frame, and keeps its own code on the wire.
+            try:
+                assert_packet_within_ceiling(body)
+            except ConsultationPacketOverCeiling:
+                raise DialogueServiceError("PACKET_OVER_CEILING") from None
         context = _context_v2(values["context"])
         parent = self.engine_result(
             await engine.bind_or_verify_relay_parent_thread(context)
@@ -718,6 +730,11 @@ class AgentDialogueService:
                 return
             except ActiveWaiterConflict as exc:
                 await self._error(writer, exc.code)
+                return
+            except ConsultationPacketOverCeiling:
+                # The engine's own pre-effect packet refusal keeps its typed
+                # code instead of dissolving into INTERNAL_ERROR.
+                await self._error(writer, "PACKET_OVER_CEILING")
                 return
             except Exception:
                 await self._error(writer, "INTERNAL_ERROR")

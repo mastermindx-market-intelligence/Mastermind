@@ -30,6 +30,7 @@ from integrations.slack_agent_dialogue.engine_v2 import (
     PreparedMessageSend,
     SendFrameKind,
 )
+from common.agent_dialogue_contract import MAX_FRAME_BYTES
 from common.agent_dialogue_consultation_contract import (
     RECEIPT_KEYS,
     build_consultation,
@@ -2850,5 +2851,81 @@ def test_ready_and_commit_envelope_keys_are_identical_for_both_operations(
             SendFrameKind.MESSAGE,
             SendFrameKind.CONSULTATION_PACKET,
         }
+
+    run(scenario())
+
+
+def test_over_ceiling_packet_is_refused_pre_effect_with_its_own_code(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_packet_request_v2(
+            question="q" * (MAX_FRAME_BYTES + 256),
+        )
+        try:
+            reader, writer = await asyncio.open_unix_connection(
+                str(srv.config.socket_path)
+            )
+            writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+            await writer.drain()
+            frames = []
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                frames.append(json.loads(line))
+            writer.close()
+            await writer.wait_closed()
+            await task
+        finally:
+            await srv.close()
+        assert frames == [{"ok": False, "error": {"code": "PACKET_OVER_CEILING"}}]
+        assert fake.calls == []
+
+    run(scenario())
+
+
+def test_packet_at_exactly_the_ceiling_is_admitted(socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        request = exact_packet_request_v2()
+        request["args"]["packet"] = packet_scaled_to_ceiling(MAX_FRAME_BYTES)
+        packet = request["args"]["packet"]
+        try:
+            reader, writer = await asyncio.open_unix_connection(
+                str(srv.config.socket_path)
+            )
+            writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+            await writer.drain()
+            ready = json.loads(await reader.readline())
+            assert ready == {"ok": True, "ready": {"fingerprint": packet["fingerprint"]}}
+            writer.write(
+                json.dumps(
+                    {"commit": "COMMIT", "fingerprint": packet["fingerprint"]},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            result = json.loads(await reader.readline())
+            writer.close()
+            await writer.wait_closed()
+            await task
+        finally:
+            await srv.close()
+        assert result["ok"] is True
+        assert result["result"]["action"] == "POSTED"
+        assert [
+            name for name, _value in fake.calls
+        ] == [
+            "bind_or_verify_relay_parent_thread",
+            "prepare_send_message",
+            "commit_send_message",
+        ]
 
     run(scenario())
