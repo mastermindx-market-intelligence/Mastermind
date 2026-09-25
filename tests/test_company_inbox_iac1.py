@@ -8,6 +8,7 @@ tool surface is frozen in ``integrations/mastermind_company_mcp``.
 from __future__ import annotations
 
 import asyncio
+import copy
 import dataclasses
 import hashlib
 import inspect
@@ -22,6 +23,8 @@ import pytest
 
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_SCHEMA,
+    CONSULTATION_V2_SCHEMA,
+    RECEIPT_KEYS,
     build_consultation,
     canonical_consultation_json,
 )
@@ -46,14 +49,24 @@ from control_plane.operator_harness_contract import (
 )
 from control_plane.wake_ledger import LedgerPhase, attempt_record
 from control_plane.wake_persist import WakeLedgerRepository
+from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
     COMPANY_CONSULTATION_SCHEMA,
     CompanyConsultationGateway,
 )
+from integrations.slack_agent_dialogue.service import (
+    CONTROL_VERSION_V2,
+    EXACT_SEND_PROTOCOL,
+    DialogueServiceError,
+)
 from integrations.company_consultation_dispatch import (
+    AgentDialogueConsultationPacketCarrier,
     CallerIdentity,
     ConsultationPacketCarrier,
+    ConsultationPacketCarrierUnknown,
+    ConsultationPacketCommitAborted,
+    ConsultationPacketEffectUnknown,
     ConsultationRefusal,
     InMemoryConsultationPacketCarrier,
     InvocationContext,
@@ -61,6 +74,7 @@ from integrations.company_consultation_dispatch import (
     RecipientBinding,
     REFUSAL_CODES,
     RuntimeConsultationDispatcher,
+    _require_same_dialogue_carrier,
 )
 
 
@@ -74,6 +88,8 @@ def test_consultation_packet_carrier_methods_are_async() -> None:
     assert inspect.iscoroutinefunction(carrier.get_question)
     assert inspect.iscoroutinefunction(carrier.put_answer)
     assert inspect.iscoroutinefunction(carrier.get_answer)
+    assert "before_commit" in inspect.signature(carrier.put_question).parameters
+    assert "before_commit" in inspect.signature(carrier.put_answer).parameters
 
 _FIXTURE_PARENT_FINGERPRINT = hashlib.sha256(b"iac1-r4a-parent-fingerprint").hexdigest()
 
@@ -117,6 +133,525 @@ def _binding(attempt_epoch: str, generation: int = 1) -> dict[str, object]:
         "binding_generation": generation,
         "reasoning_surface": "codex",
     }
+
+
+def _dialogue_binding(
+    worker: tuple,
+    **overrides: object,
+) -> DialogueBinding:
+    job_id, attempt_id, worker_id, _runtime_binding = worker
+    values: dict[str, object] = {
+        "actor_ref": {
+            "kind": "worker_attempt",
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "worker_id": worker_id,
+        },
+        "work_ref": "WS:EXECUTIVE-CAPACITY-FABRIC",
+        "commission_ref": {
+            "repository": "mastermindx-market-intelligence/Mastermind",
+            "commit": "1" * 40,
+            "path": "docs/superpowers/plans/iac1-p1.md",
+            "content_sha256": "2" * 64,
+        },
+        "session_ref": "asd-session-iac1-p1-shared-0001",
+        "operation_key": "iac1-production-packet-carriage-p1-20260925-sol-001",
+        "watch_mode": "turn_watch_v1",
+        "applies_to": {
+            "kind": "executive_attempt",
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "worker_id": worker_id,
+        },
+        "thread_ts": "1787961600.000001",
+        "allowed_message_types": (
+            "ACK",
+            "PROGRESS",
+            "BLOCKED",
+            "DECISION_REQUEST",
+            "RESULT",
+        ),
+    }
+    values.update(overrides)
+    return DialogueBinding(**values)
+
+
+@dataclasses.dataclass
+class _StaticDialogueBindingResolver:
+    binding: DialogueBinding
+    calls: int = 0
+
+    def resolve(self) -> DialogueBinding:
+        self.calls += 1
+        return self.binding
+
+
+class _RecordingPacketService:
+    def __init__(
+        self,
+        *,
+        response: dict[str, Any] | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        self.response = response or {
+            "ok": True,
+            "result": {
+                "action": "POSTED",
+                "message_key": "asd-consultation-packet-carrier-0001",
+                "fingerprint": "f" * 64,
+                "message_ts": "1787961600.000002",
+                "duplicate_timestamps": [],
+                "thread_ts": "1787961600.000001",
+                "parent_author_user_id": "U00000002",
+                "parent_fingerprint": "a" * 64,
+            },
+        }
+        self.error_code = error_code
+        self.calls: list[dict[str, Any]] = []
+
+    async def __call__(
+        self,
+        socket_path: Path,
+        request: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "socket_path": socket_path,
+                "request": dict(request),
+                **kwargs,
+            }
+        )
+        before_write = kwargs.get("before_write")
+        if before_write is not None:
+            await before_write()
+        if self.error_code is not None:
+            raise DialogueServiceError(self.error_code)
+        return self.response
+
+
+def _packet_frame(
+    requester: tuple,
+    recipient: tuple,
+    *,
+    purpose: str = "QUESTION",
+) -> dict[str, Any]:
+    question_key = "asd-consultation-packet-carrier-0001"
+    consultation_id = "consult-9bdf4a6f9a664bbcf1a93d67a41ba51d"
+    question = build_consultation(
+        {
+            "schema": CONSULTATION_SCHEMA,
+            "message_key": question_key,
+            "consultation_id": consultation_id,
+            "purpose": "QUESTION",
+            "requester_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": requester[0],
+                "attempt_id": requester[1],
+                "worker_id": requester[2],
+            },
+            "recipient_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": recipient[0],
+                "attempt_id": recipient[1],
+                "worker_id": recipient[2],
+            },
+            "recipient_peer_ref": PEER_REF,
+            "recipient_binding": dict(recipient[3]),
+            "correlation": {
+                "parent_fingerprint": "a" * 64,
+                "request_message_key": question_key,
+                "consultation_id": consultation_id,
+                "requester_actor_digest": "b" * 64,
+                "recipient_actor_digest": "c" * 64,
+            },
+            "question": "Can the trusted Relay carry this packet?",
+            "answer": None,
+            "evidence_refs": [],
+            "artifact_revisions": [
+                {
+                    "repository": "mastermindx-market-intelligence/Mastermind",
+                    "path": "research/commission.md",
+                    "commit": "1" * 40,
+                    "content_sha256": "2" * 64,
+                }
+            ],
+            "valid_until": "2026-09-25T01:00:00Z",
+            "deadline_ms": 60000,
+            "response_budget": {
+                "max_answers": 1,
+                "max_evidence_reads": 2,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 2048,
+            },
+            "supersedes_message_key": None,
+            "receipts": {key: None for key in RECEIPT_KEYS},
+            "fingerprint": "",
+        }
+    )
+    if purpose == "QUESTION":
+        return question
+    answer = copy.deepcopy(question)
+    answer["schema"] = CONSULTATION_V2_SCHEMA
+    answer["message_key"] = "asd-consultation-packet-answer-0001"
+    answer["purpose"] = "ANSWER"
+    answer["question"] = None
+    answer["answer"] = {
+        "text": '{"answer":"bounded"}',
+        "evidence_refs": [],
+    }
+    answer["question_message_key"] = question_key
+    answer["fingerprint"] = ""
+    return build_consultation(answer)
+
+
+@pytest.mark.parametrize(
+    ("purpose", "method_name", "sender_index"),
+    [
+        ("QUESTION", "put_question", 0),
+        ("ANSWER", "put_answer", 1),
+    ],
+)
+def test_agent_dialogue_packet_carrier_uses_trusted_parent_and_callback(
+    purpose: str,
+    method_name: str,
+    sender_index: int,
+) -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    workers = (requester, recipient)
+    frame = _packet_frame(requester, recipient, purpose=purpose)
+    binding = _dialogue_binding(workers[sender_index])
+    resolver = _StaticDialogueBindingResolver(binding)
+    service = _RecordingPacketService(
+        response={
+            "ok": True,
+            "result": {
+                "action": "POSTED",
+                "message_key": frame["message_key"],
+                "fingerprint": frame["fingerprint"],
+                "message_ts": "1787961600.000002",
+                "duplicate_timestamps": [],
+                "thread_ts": binding.thread_ts,
+                "parent_author_user_id": "U00000002",
+                "parent_fingerprint": "a" * 64,
+            },
+        }
+    )
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=resolver,
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=service,
+        timeout_seconds=7.5,
+    )
+    callbacks: list[str] = []
+
+    async def before_commit() -> None:
+        callbacks.append("before_commit")
+
+    _run(
+        getattr(carrier, method_name)(
+            frame["consultation_id"],
+            frame,
+            before_commit=before_commit,
+        )
+    )
+
+    assert callbacks == ["before_commit"]
+    assert resolver.calls == 1
+    assert len(service.calls) == 1
+    call = service.calls[0]
+    assert call["socket_path"] == Path("/private/tmp/iac1-p1-agent-relay.sock")
+    assert call["timeout_seconds"] == 7.5
+    assert call["before_write"] is before_commit
+    assert call["request"] == {
+        "version": CONTROL_VERSION_V2,
+        "operation": "send_consultation_packet",
+        "args": {
+            "context": {
+                "work_ref": binding.work_ref,
+                "commission_ref": dict(binding.commission_ref),
+                "session_ref": binding.session_ref,
+                "operation_key": binding.operation_key,
+                "watch_mode": binding.watch_mode,
+                "actor_ref": dict(binding.actor_ref),
+                "applies_to": dict(binding.applies_to),
+            },
+            "thread_ts": binding.thread_ts,
+            "message": frame,
+            "send_protocol": EXACT_SEND_PROTOCOL,
+        },
+    }
+
+
+def test_agent_dialogue_packet_carrier_reads_exact_packet_or_absence() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    binding = _dialogue_binding(requester)
+    response = {
+        "ok": True,
+        "result": {
+            "packet": frame,
+            "primary_ts": "1787961600.000002",
+            "duplicate_timestamps": [],
+        },
+    }
+    service = _RecordingPacketService(response=response)
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(binding),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=service,
+    )
+
+    assert _run(carrier.get_question(frame["consultation_id"])) == frame
+    assert service.calls[0]["request"]["operation"] == "read_consultation_packet"
+    assert service.calls[0]["request"]["args"]["thread_ts"] == binding.thread_ts
+
+    absent = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(binding),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(
+            response={"ok": True, "result": None}
+        ),
+    )
+    assert _run(absent.get_question(frame["consultation_id"])) is None
+
+    unrelated = (
+        "JOB-THIRD",
+        "ATT-THIRD",
+        "consultation-third",
+        _binding("third"),
+    )
+    foreign = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(unrelated)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(response=response),
+    )
+    with pytest.raises(StateConflict, match="party"):
+        _run(foreign.get_question(frame["consultation_id"]))
+
+
+def test_agent_dialogue_packet_carrier_preserves_precommit_abort() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(requester)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(),
+    )
+
+    async def before_commit() -> None:
+        raise ConsultationPacketCommitAborted("runtime replay closes before COMMIT")
+
+    with pytest.raises(ConsultationPacketCommitAborted, match="runtime replay"):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"],
+                frame,
+                before_commit=before_commit,
+            )
+        )
+
+
+def test_agent_dialogue_packet_carrier_hides_malformed_service_response() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    service = _RecordingPacketService()
+    service.response = []
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(requester)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=service,
+    )
+
+    async def before_commit() -> None:
+        return None
+
+    with pytest.raises(ConsultationPacketCarrierUnknown):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"],
+                frame,
+                before_commit=before_commit,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("service_code", "expected"),
+    [
+        ("SERVICE_UNAVAILABLE", ConsultationPacketCarrierUnknown),
+        ("SEND_EFFECT_UNKNOWN", ConsultationPacketEffectUnknown),
+    ],
+)
+def test_agent_dialogue_packet_carrier_preserves_transport_uncertainty(
+    service_code: str,
+    expected: type[Exception],
+) -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(requester)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(error_code=service_code),
+    )
+
+    async def before_commit() -> None:
+        return None
+
+    with pytest.raises(expected):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"],
+                frame,
+                before_commit=before_commit,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("work_ref", "WS:OTHER"),
+        (
+            "commission_ref",
+            {
+                "repository": "mastermindx-market-intelligence/Mastermind",
+                "commit": "3" * 40,
+                "path": "docs/superpowers/plans/other.md",
+                "content_sha256": "4" * 64,
+            },
+        ),
+        ("session_ref", "asd-session-iac1-p1-other-0001"),
+        ("operation_key", "iac1-p1-other-operation-20260925"),
+        ("watch_mode", None),
+        ("thread_ts", "1787961600.000099"),
+        (
+            "applies_to",
+            {
+                "kind": "executive_attempt",
+                "job_id": "JOB-OTHER",
+                "attempt_id": "ATT-CARRIER",
+                "worker_id": "relay-parent",
+            },
+        ),
+    ],
+)
+def test_same_parent_carrier_refuses_one_field_drift(
+    field: str,
+    value: object,
+) -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    caller_binding = _dialogue_binding(requester)
+    recipient_binding = _dialogue_binding(recipient, **{field: value})
+
+    with pytest.raises(StateConflict, match="same exact parent"):
+        _require_same_dialogue_carrier(
+            caller_binding,
+            recipient_binding,
+            caller_actor_ref=caller_binding.actor_ref,
+            recipient_actor_ref=recipient_binding.actor_ref,
+        )
+
+
+def test_same_parent_carrier_accepts_distinct_workers_on_one_parent() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    caller_binding = _dialogue_binding(requester)
+    recipient_binding = _dialogue_binding(recipient)
+
+    _require_same_dialogue_carrier(
+        caller_binding,
+        recipient_binding,
+        caller_actor_ref=caller_binding.actor_ref,
+        recipient_actor_ref=recipient_binding.actor_ref,
+    )
+
+
+class _DialogueRequiredCarrier(InMemoryConsultationPacketCarrier):
+    requires_dialogue_binding = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.put_calls = 0
+
+    async def put_question(self, consultation_id, frame, **kwargs):
+        self.put_calls += 1
+        return await super().put_question(consultation_id, frame, **kwargs)
+
+
+def test_same_parent_carrier_drift_refuses_before_runtime_or_wake(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "same-parent-refusal")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "same-parent-refusal-repo"
+    )
+    carrier = _DialogueRequiredCarrier()
+    caller_binding = _dialogue_binding(requester)
+    recipient_binding = _dialogue_binding(
+        recipient, thread_ts="1787961600.000099"
+    )
+    caller = CallerIdentity(
+        job_id=requester[0],
+        worker_id=requester[2],
+        attempt_id=requester[1],
+        reasoning_surface="codex",
+        binding=requester[3],
+        dialogue_binding=caller_binding,
+    )
+
+    def resolve(_peer_ref: str) -> RecipientBinding:
+        return RecipientBinding(
+            actor_ref={
+                "kind": "worker_attempt",
+                "job_id": recipient[0],
+                "attempt_id": recipient[1],
+                "worker_id": recipient[2],
+            },
+            recipient_binding=dict(recipient[3]),
+            dialogue_binding=recipient_binding,
+        )
+
+    dispatcher = RuntimeConsultationDispatcher(
+        runtime=runtime,
+        repository_root=fixture_repo,
+        caller=caller,
+        recipients=resolve,
+        packets=carrier,
+        invocations=_StaticInvocations(_default_invocation()),
+        _clock=_ManualClock("2026-09-14T00:00:00Z"),
+    )
+
+    with pytest.raises(ConsultationRefusal) as exc:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="Cross-parent consultation must fail before INTENT.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert exc.value.code == "NOT_A_PARTY"
+    assert runtime.events.list_events(aggregate_type="consultation") == []
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+    assert carrier.put_calls == 0
 
 
 def _profile(lease):
@@ -715,6 +1250,9 @@ def _gateway_with_dispatcher(
 
 def _run(coroutine):
     return asyncio.run(coroutine)
+
+async def _packet_commit_noop() -> None:
+    return None
 
 
 def _run_dispatcher(dispatcher, tool_name, request):
@@ -3472,9 +4010,13 @@ class _TamperedQuestionCarrier(InMemoryConsultationPacketCarrier):
         super().__init__()
         self._marker = marker
 
-    async def put_question(self, consultation_id, frame):
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
         # Consume the consult call but keep the original frame.
-        await super().put_question(consultation_id, frame)
+        await super().put_question(
+            consultation_id, frame, before_commit=before_commit
+        )
 
     async def get_question(self, consultation_id):
         frame = await super().get_question(consultation_id)
@@ -3504,7 +4046,11 @@ class _ForeignQuestionCarrier(InMemoryConsultationPacketCarrier):
         self._foreign_id = foreign_consultation_id
         # Stash the foreign frame under the real consultation_id key so
         # the dispatcher's get_question returns it.
-        await super().put_question(foreign_consultation_id, frame)
+        await super().put_question(
+            foreign_consultation_id,
+            frame,
+            before_commit=_packet_commit_noop,
+        )
 
     async def get_question(self, consultation_id):
         if self._foreign_id is not None and self._foreign_id == consultation_id:
@@ -3679,7 +4225,7 @@ def test_foreign_consultation_packet_is_not_exposed_on_detail(
     # returns it for that ref.
     cross_carrier = _ForeignQuestionCarrier()
     _run(cross_carrier.install_foreign(first_consultation_id, foreign_frame))
-    _run(cross_carrier.put_question(foreign_consultation_id, dict(real_first_frame)))
+    _run(cross_carrier.put_question(foreign_consultation_id, dict(real_first_frame), before_commit=_packet_commit_noop))
 
     cross_dispatcher = _make_dispatcher(
         runtime,
@@ -4022,7 +4568,9 @@ class _CountingAnswerCarrier(InMemoryConsultationPacketCarrier):
         self._raise_on_put_n = raise_on_put_n
         self._raised = False
 
-    async def put_answer(self, consultation_id, frame):
+    async def put_answer(
+        self, consultation_id, frame, *, before_commit
+    ):
         self.put_answer_calls += 1
         if (
             self._raise_on_put_n is not None
@@ -4031,7 +4579,9 @@ class _CountingAnswerCarrier(InMemoryConsultationPacketCarrier):
         ):
             self._raised = True
             raise RuntimeError("synthetic carrier write failure")
-        await super().put_answer(consultation_id, frame)
+        await super().put_answer(
+            consultation_id, frame, before_commit=before_commit
+        )
 
     async def get_answer(self, consultation_id):
         self.get_answer_calls += 1
@@ -4278,10 +4828,10 @@ def test_known_same_packet_readback_returns_without_second_write(
     counting_carrier = _CountingAnswerCarrier()
     admitted_packet = _run(shared_carrier.get_answer(consultation_id))
     assert admitted_packet is not None
-    _run(counting_carrier.put_answer(consultation_id, dict(admitted_packet)))
+    _run(counting_carrier.put_answer(consultation_id, dict(admitted_packet), before_commit=_packet_commit_noop))
     admitted_question = _run(shared_carrier.get_question(consultation_id))
     assert admitted_question is not None
-    _run(counting_carrier.put_question(consultation_id, dict(admitted_question)))
+    _run(counting_carrier.put_question(consultation_id, dict(admitted_question), before_commit=_packet_commit_noop))
     puts_before = counting_carrier.put_answer_calls
 
     restarted_b_dispatcher = _make_dispatcher(
@@ -4340,7 +4890,11 @@ class _RaisingPacketCarrier(InMemoryConsultationPacketCarrier):
         self.put_question_calls = 0
 
     async def put_question(
-        self, consultation_id: str, frame: Mapping[str, Any]
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit,
     ) -> None:
         self.put_question_calls += 1
         raise self._exc_type("simulated carrier write failure")
@@ -4767,7 +5321,9 @@ class _CountingQuestionCarrier(InMemoryConsultationPacketCarrier):
         self._raise_on_put_n = raise_on_put_n
         self._raised = False
 
-    async def put_question(self, consultation_id, frame):
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
         self.put_question_calls += 1
         if (
             self._raise_on_put_n is not None
@@ -4776,7 +5332,9 @@ class _CountingQuestionCarrier(InMemoryConsultationPacketCarrier):
         ):
             self._raised = True
             raise RuntimeError("synthetic carrier write failure")
-        await super().put_question(consultation_id, frame)
+        await super().put_question(
+            consultation_id, frame, before_commit=before_commit
+        )
 
     async def get_question(self, consultation_id):
         self.get_question_calls += 1
@@ -4793,8 +5351,12 @@ class _ClockAdvancingQuestionCarrier(_CountingQuestionCarrier):
         self._clock = clock
         self._advance_to = advance_to
 
-    async def put_question(self, consultation_id, frame):
-        await super().put_question(consultation_id, frame)
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        await super().put_question(
+            consultation_id, frame, before_commit=before_commit
+        )
         self._clock.value = self._advance_to
 
 
@@ -5405,8 +5967,11 @@ class _VisibleThenLostPutCarrier(_CountingQuestionCarrier):
         self._hook = hook
         self._hooked = False
 
-    async def put_question(self, consultation_id, frame):
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
         self.put_question_calls += 1
+        await before_commit()
         self._questions[consultation_id] = dict(frame)
         if not self._hooked:
             self._hooked = True
@@ -5422,8 +5987,12 @@ class _HookAfterPutCarrier(_CountingQuestionCarrier):
         super().__init__()
         self._hook = hook
 
-    async def put_question(self, consultation_id, frame):
-        await super().put_question(consultation_id, frame)
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        await super().put_question(
+            consultation_id, frame, before_commit=before_commit
+        )
         hook_result = self._hook()
         if inspect.isawaitable(hook_result):
             await hook_result
@@ -5668,8 +6237,12 @@ class _ConsumeDuringAnswerPutCarrier(_CountingAnswerCarrier):
         super().__init__()
         self.after_put = None
 
-    async def put_answer(self, consultation_id, frame):
-        await super().put_answer(consultation_id, frame)
+    async def put_answer(
+        self, consultation_id, frame, *, before_commit
+    ):
+        await super().put_answer(
+            consultation_id, frame, before_commit=before_commit
+        )
         callback = self.after_put
         if callback is not None:
             callback_result = callback(consultation_id)

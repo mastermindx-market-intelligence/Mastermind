@@ -21,7 +21,7 @@ import datetime as dt
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -50,8 +50,19 @@ from control_plane.wake_ledger import (
     requested_record,
 )
 from control_plane.wake_persist import WakeLedgerRepository
+from integrations.mastermind_company_mcp.adapter import (
+    DialogueBinding,
+    DialogueBindingResolver,
+)
 from integrations.mastermind_company_mcp.consultation import (
     validate_company_consult_dispatch_request,
+)
+from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
+from integrations.slack_agent_dialogue.service import (
+    CONTROL_VERSION_V2,
+    EXACT_SEND_PROTOCOL,
+    DialogueServiceError,
+    call_service,
 )
 from integrations.slack_agent_dialogue.persisted_wake_carrier import (
     ConsultationWakeExtension,
@@ -110,20 +121,35 @@ _DEFAULT_RESPONSE_BUDGET = {
 }
 
 
-class ConsultationPacketCarrier(Protocol):
-    """Single injected port for QUESTION/ANSWER bodies.
+PacketCommitHook = Callable[[], Awaitable[None]]
+ServiceCall = Callable[..., Awaitable[dict[str, Any]]]
 
-    The recipient dispatcher ``put_question``s the exact validated QUESTION
-    frame after the runtime admitted the INTENT (inserted or replayed); the
-    recipient dispatcher ``put_answer``s the exact admitted ANSWER frame
-    after the runtime admitted a non-historical ``ANSWER_AVAILABLE``. The
-    requester dispatcher reads the bodies via ``get_question`` /
-    ``get_answer``; the dispatcher never reads bodies from any other
-    location.
-    """
+
+class ConsultationPacketCarrierUnknown(RuntimeError):
+    """The existing carrier could not prove packet presence or absence."""
+
+
+class ConsultationPacketEffectUnknown(RuntimeError):
+    """The exact carrier COMMIT crossed but could not be reconciled."""
+
+
+class ConsultationPacketCommitAborted(RuntimeError):
+    """The caller deliberately closed after READY without COMMIT."""
+
+
+async def _noop_packet_commit() -> None:
+    return None
+
+
+class ConsultationPacketCarrier(Protocol):
+    """Single injected port for QUESTION/ANSWER bodies."""
 
     async def put_question(
-        self, consultation_id: str, frame: Mapping[str, Any]
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
     ) -> None: ...
 
     async def get_question(
@@ -131,7 +157,11 @@ class ConsultationPacketCarrier(Protocol):
     ) -> Mapping[str, Any] | None: ...
 
     async def put_answer(
-        self, consultation_id: str, frame: Mapping[str, Any]
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
     ) -> None: ...
 
     async def get_answer(
@@ -140,21 +170,22 @@ class ConsultationPacketCarrier(Protocol):
 
 
 class InMemoryConsultationPacketCarrier:
-    """TEST-ONLY carrier — hermetic in-memory carrier for tests.
+    """TEST-ONLY hermetic packet carrier."""
 
-    This implementation is not a production body source. The production
-    owner is the existing dialogue carrier lineage (issues #611, #719,
-    #738) and PRODUCTION_PACKET_CARRIAGE is declared ``UNAVAILABLE`` in
-    this slice.
-    """
+    requires_dialogue_binding = False
 
     def __init__(self) -> None:
         self._questions: dict[str, dict[str, Any]] = {}
         self._answers: dict[str, dict[str, Any]] = {}
 
     async def put_question(
-        self, consultation_id: str, frame: Mapping[str, Any]
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
     ) -> None:
+        await before_commit()
         self._questions[consultation_id] = dict(frame)
 
     async def get_question(
@@ -164,8 +195,13 @@ class InMemoryConsultationPacketCarrier:
         return dict(frame) if frame is not None else None
 
     async def put_answer(
-        self, consultation_id: str, frame: Mapping[str, Any]
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
     ) -> None:
+        await before_commit()
         self._answers[consultation_id] = dict(frame)
 
     async def get_answer(
@@ -173,6 +209,281 @@ class InMemoryConsultationPacketCarrier:
     ) -> Mapping[str, Any] | None:
         frame = self._answers.get(consultation_id)
         return dict(frame) if frame is not None else None
+
+
+def _dialogue_carrier_identity(binding: DialogueBinding) -> tuple[object, ...]:
+    if not isinstance(binding, DialogueBinding):
+        raise StateConflict("trusted dialogue binding is unavailable")
+    applies_to = dict(binding.applies_to)
+    applicability_job_id = applies_to.get("job_id")
+    if (
+        applies_to.get("kind") != "executive_attempt"
+        or not isinstance(applicability_job_id, str)
+        or not applicability_job_id
+    ):
+        raise StateConflict("dialogue binding applicability carrier is invalid")
+    return (
+        binding.work_ref,
+        canonical_consultation_json(dict(binding.commission_ref)),
+        binding.session_ref,
+        binding.operation_key,
+        binding.watch_mode,
+        binding.thread_ts,
+        applicability_job_id,
+    )
+
+
+def _require_same_dialogue_carrier(
+    caller_binding: DialogueBinding | None,
+    recipient_binding: DialogueBinding | None,
+    *,
+    caller_actor_ref: Mapping[str, Any],
+    recipient_actor_ref: Mapping[str, Any],
+) -> None:
+    if not isinstance(caller_binding, DialogueBinding) or not isinstance(
+        recipient_binding, DialogueBinding
+    ):
+        raise StateConflict("same exact parent dialogue binding is unavailable")
+    if dict(caller_binding.actor_ref) != dict(caller_actor_ref):
+        raise StateConflict("caller dialogue binding actor is not trusted")
+    if dict(recipient_binding.actor_ref) != dict(recipient_actor_ref):
+        raise StateConflict("recipient dialogue binding actor is not trusted")
+    if _dialogue_carrier_identity(caller_binding) != _dialogue_carrier_identity(
+        recipient_binding
+    ):
+        raise StateConflict("parties do not share the same exact parent carrier")
+
+
+class AgentDialogueConsultationPacketCarrier:
+    """Adapter over the incumbent authenticated Agent Relay AF_UNIX service."""
+
+    requires_dialogue_binding = True
+
+    def __init__(
+        self,
+        *,
+        binding_resolver: DialogueBindingResolver,
+        socket_path: Path,
+        service_call: ServiceCall = call_service,
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        if not isinstance(socket_path, Path) or not socket_path.is_absolute():
+            raise TypeError("socket_path must be an absolute Path")
+        if not callable(getattr(binding_resolver, "resolve", None)):
+            raise TypeError("binding_resolver must resolve the current binding")
+        if not callable(service_call):
+            raise TypeError("service_call must be callable")
+        if not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        self._binding_resolver = binding_resolver
+        self._socket_path = socket_path
+        self._service_call = service_call
+        self._timeout_seconds = float(timeout_seconds)
+
+    def _binding(self) -> DialogueBinding:
+        try:
+            binding = self._binding_resolver.resolve()
+        except Exception as exc:
+            raise ConsultationPacketCarrierUnknown(
+                "current Agent Relay binding is unavailable"
+            ) from exc
+        if not isinstance(binding, DialogueBinding):
+            raise ConsultationPacketCarrierUnknown(
+                "current Agent Relay binding is unavailable"
+            )
+        return binding
+
+    @staticmethod
+    def _context(binding: DialogueBinding) -> dict[str, Any]:
+        return DialogueContextV2(
+            work_ref=binding.work_ref,
+            commission_ref=dict(binding.commission_ref),
+            session_ref=binding.session_ref,
+            operation_key=binding.operation_key,
+            watch_mode=binding.watch_mode,
+            actor_ref=dict(binding.actor_ref),
+            applies_to=dict(binding.applies_to),
+        ).normalized()
+
+    @staticmethod
+    def _sender_actor(frame: Mapping[str, Any]) -> Mapping[str, Any]:
+        if frame["purpose"] == "QUESTION":
+            return frame["requester_actor_ref"]
+        if frame["purpose"] == "ANSWER":
+            return frame["recipient_actor_ref"]
+        raise StateConflict("consultation packet purpose is not sendable")
+
+    @staticmethod
+    def _assert_current_party(
+        binding: DialogueBinding, frame: Mapping[str, Any]
+    ) -> None:
+        actor = dict(binding.actor_ref)
+        parties = (
+            dict(frame["requester_actor_ref"]),
+            dict(frame["recipient_actor_ref"]),
+        )
+        if actor not in parties:
+            raise StateConflict("current dialogue binding is not a packet party")
+
+    async def _call(
+        self,
+        request: Mapping[str, Any],
+        *,
+        before_write: PacketCommitHook | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return await self._service_call(
+                self._socket_path,
+                request,
+                timeout_seconds=self._timeout_seconds,
+                before_write=before_write,
+            )
+        except ConsultationPacketCommitAborted:
+            raise
+        except DialogueServiceError as exc:
+            if exc.code == "SEND_EFFECT_UNKNOWN":
+                raise ConsultationPacketEffectUnknown(
+                    "consultation packet effect remains unknown"
+                ) from exc
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet carrier is unavailable"
+            ) from exc
+        except Exception as exc:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet carrier is unavailable"
+            ) from exc
+
+    async def _put(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        purpose: str,
+        before_commit: PacketCommitHook,
+    ) -> None:
+        item = validate_consultation(frame)
+        if (
+            consultation_id != item["consultation_id"]
+            or item["purpose"] != purpose
+        ):
+            raise StateConflict("consultation packet identity disagrees")
+        binding = self._binding()
+        if dict(binding.actor_ref) != dict(self._sender_actor(item)):
+            raise StateConflict("current dialogue binding is not the packet sender")
+        response = await self._call(
+            {
+                "version": CONTROL_VERSION_V2,
+                "operation": "send_consultation_packet",
+                "args": {
+                    "context": self._context(binding),
+                    "thread_ts": binding.thread_ts,
+                    "message": item,
+                    "send_protocol": EXACT_SEND_PROTOCOL,
+                },
+            },
+            before_write=before_commit,
+        )
+        result = response.get("result") if isinstance(response, Mapping) else None
+        if (
+            not isinstance(response, Mapping)
+            or response.get("ok") is not True
+            or not isinstance(result, Mapping)
+            or result.get("message_key") != item["message_key"]
+            or result.get("fingerprint") != item["fingerprint"]
+            or result.get("thread_ts") != binding.thread_ts
+        ):
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet receipt is invalid"
+            )
+
+    async def put_question(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
+    ) -> None:
+        await self._put(
+            consultation_id,
+            frame,
+            purpose="QUESTION",
+            before_commit=before_commit,
+        )
+
+    async def put_answer(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
+    ) -> None:
+        await self._put(
+            consultation_id,
+            frame,
+            purpose="ANSWER",
+            before_commit=before_commit,
+        )
+
+    async def _get(
+        self, consultation_id: str, *, purpose: str
+    ) -> Mapping[str, Any] | None:
+        if _CONSULTATION_REF_RE.fullmatch(consultation_id) is None:
+            raise StateConflict("consultation packet identity is invalid")
+        binding = self._binding()
+        response = await self._call(
+            {
+                "version": CONTROL_VERSION_V2,
+                "operation": "read_consultation_packet",
+                "args": {
+                    "context": self._context(binding),
+                    "thread_ts": binding.thread_ts,
+                    "consultation_id": consultation_id,
+                    "purpose": purpose,
+                },
+            }
+        )
+        if not isinstance(response, Mapping) or response.get("ok") is not True:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is invalid"
+            )
+        result = response.get("result")
+        if result is None:
+            return None
+        if not isinstance(result, Mapping) or set(result) != {
+            "packet",
+            "primary_ts",
+            "duplicate_timestamps",
+        }:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is invalid"
+            )
+        packet = result.get("packet")
+        try:
+            item = validate_consultation(packet)
+        except Exception as exc:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is invalid"
+            ) from exc
+        if (
+            item["consultation_id"] != consultation_id
+            or item["purpose"] != purpose
+            or result.get("duplicate_timestamps") != []
+        ):
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is conflicting"
+            )
+        self._assert_current_party(binding, item)
+        return item
+
+    async def get_question(
+        self, consultation_id: str
+    ) -> Mapping[str, Any] | None:
+        return await self._get(consultation_id, purpose="QUESTION")
+
+    async def get_answer(
+        self, consultation_id: str
+    ) -> Mapping[str, Any] | None:
+        return await self._get(consultation_id, purpose="ANSWER")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -188,6 +499,7 @@ class CallerIdentity:
     attempt_id: str
     reasoning_surface: str
     binding: Mapping[str, Any]
+    dialogue_binding: DialogueBinding | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -196,6 +508,7 @@ class RecipientBinding:
 
     actor_ref: Mapping[str, Any]
     recipient_binding: Mapping[str, Any]
+    dialogue_binding: DialogueBinding | None = None
 
 
 RecipientResolver = Callable[[str], RecipientBinding]
@@ -791,6 +1104,25 @@ class RuntimeConsultationDispatcher:
                 detail=f"recipient binding normalization failed: {type(exc).__name__}",
             ) from exc
 
+        if getattr(self.packets, "requires_dialogue_binding", False):
+            try:
+                _require_same_dialogue_carrier(
+                    self.caller.dialogue_binding,
+                    recipient.dialogue_binding,
+                    caller_actor_ref={
+                        "kind": "worker_attempt",
+                        "job_id": self.caller.job_id,
+                        "attempt_id": self.caller.attempt_id,
+                        "worker_id": self.caller.worker_id,
+                    },
+                    recipient_actor_ref=recipient_actor_ref,
+                )
+            except StateConflict as exc:
+                raise ConsultationRefusal(
+                    "NOT_A_PARTY",
+                    detail="consultation parties do not share one Agent Relay parent",
+                ) from exc
+
         if recipient_actor_ref["worker_id"] == self.caller.worker_id:
             raise ConsultationRefusal(
                 "INVALID_REQUEST",
@@ -1015,7 +1347,11 @@ class RuntimeConsultationDispatcher:
             )
         if intent_result.inserted:
             try:
-                await self.packets.put_question(consultation_id, question_frame)
+                await self.packets.put_question(
+                    consultation_id,
+                    question_frame,
+                    before_commit=_noop_packet_commit,
+                )
             except Exception:
                 # INTENT is durable but this caller's carrier response is
                 # lost. Unique INTENT insertion granted the initial
@@ -1462,7 +1798,11 @@ class RuntimeConsultationDispatcher:
             and payload_fact == "ANSWER_AVAILABLE"
         ):
             try:
-                await self.packets.put_answer(consultation_ref, answer_frame)
+                await self.packets.put_answer(
+                    consultation_ref,
+                    answer_frame,
+                    before_commit=_noop_packet_commit,
+                )
             except Exception as exc:
                 raise ConsultationRefusal(
                     "CARRIER_RECONCILIATION_REQUIRED",
@@ -1956,8 +2296,12 @@ def _body_status_for(
 
 
 __all__ = [
+    "AgentDialogueConsultationPacketCarrier",
     "CallerIdentity",
     "ConsultationPacketCarrier",
+    "ConsultationPacketCarrierUnknown",
+    "ConsultationPacketCommitAborted",
+    "ConsultationPacketEffectUnknown",
     "ConsultationRefusal",
     "InMemoryConsultationPacketCarrier",
     "InvocationContext",
