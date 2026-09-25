@@ -30,8 +30,12 @@ from common.agent_dialogue_consultation_contract import (
     CONSULTATION_V2_SCHEMA,
     GROK_CONSULTATION_SCHEMA,
     RECEIPT_KEYS,
+    ConsultationPacketOverCeiling,
+    assert_packet_within_ceiling,
     build_consultation,
     canonical_consultation_json,
+    clamp_response_budget,
+    render_consultation_packet,
     validate_consultation,
 )
 from control_plane.company_inbox_projection import (
@@ -894,6 +898,21 @@ class RuntimeConsultationDispatcher:
             response_budget=response_budget,
         )
 
+        # IAC-P1-C-B (Sol 5826854603 §1/§3): the QUESTION advertises the
+        # expansion-aware response budget, never the raw invocation budget, so
+        # an answer the recipient is invited to write can always be rendered.
+        # ``response_budget`` is semantic (it is part of the fingerprint), so
+        # the fingerprint is recomputed for the frame that is reconciled and
+        # persisted below.
+        clamped_budget = _clamped_response_budget(
+            response_budget, probe_frame=question_frame
+        )
+        if clamped_budget != dict(question_frame["response_budget"]):
+            response_budget = clamped_budget
+            question_frame["response_budget"] = clamped_budget
+            question_frame["fingerprint"] = ""
+            question_frame = build_consultation(question_frame)
+
         # If an INTENT for this consultation_id already exists, reconcile
         # the entire normalized semantic request against the persisted
         # INTENT. Rebuild a CANDIDATE frame under the persisted identity
@@ -1018,6 +1037,17 @@ class RuntimeConsultationDispatcher:
             )
 
         carrier_ref = f"company-mcp://{consultation_id}"
+
+        # IAC-P1-C-B: the wire ceiling is enforced BEFORE any durable effect.
+        # This covers both the fresh frame and a replayed candidate, and it is
+        # deliberately the earliest of the three steps — after an INTENT is
+        # recorded a refusal is no longer free, because a consumer may already
+        # have acted on it. Order here is the difference between a refusal and
+        # a retraction.
+        try:
+            assert_packet_within_ceiling(question_frame)
+        except ConsultationPacketOverCeiling as exc:
+            raise _packet_over_ceiling_refusal(exc) from exc
 
         try:
             intent_result = self._consultations.intent(
@@ -1889,6 +1919,51 @@ def _build_question_frame(
         "fingerprint": "",
     }
     return build_consultation(raw)
+
+
+def _answer_frame_overhead_bytes(question_frame: Mapping[str, Any]) -> int:
+    """Rendered bytes of the leanest ANSWER frame this QUESTION can elicit."""
+    probe = _build_answer_frame(
+        question_frame, answer_text="x", evidence_refs=[], supersedes=None
+    )
+    return len(render_consultation_packet(probe).encode("utf-8"))
+
+
+def _clamped_response_budget(
+    requested_budget: Mapping[str, Any],
+    *,
+    probe_frame: Mapping[str, Any],
+) -> dict[str, int]:
+    """Expansion-aware payload budget a QUESTION may advertise.
+
+    Sol 5826854603 §1/§3: the QUESTION must advertise a ``max_payload_bytes``
+    that is safe for the double-encoded ANSWER. ``_build_answer_frame`` embeds
+    the inner canonical answer JSON as a JSON string inside the frame, so the
+    rendered packet escapes it a second time; ``clamp_response_budget`` charges
+    the rendered lean ANSWER frame and then halves the remainder of the
+    incumbent wire ceiling. Sizing the lean probe with the still-unclamped
+    budget can only overstate the overhead (a wider integer renders wider),
+    which clamps one byte low — the safe direction. No second budget plane is
+    minted: these are the values the QUESTION carries and the reply leg
+    enforces.
+    """
+    return clamp_response_budget(
+        requested_budget,
+        answer_frame_overhead_bytes=_answer_frame_overhead_bytes(probe_frame),
+    )
+
+
+def _packet_over_ceiling_refusal(
+    exc: ConsultationPacketOverCeiling,
+) -> ConsultationRefusal:
+    """Map the contract's typed ceiling refusal onto the closed refusal set."""
+    return ConsultationRefusal(
+        "BODY_OVER_BUDGET",
+        detail=(
+            "rendered consultation packet exceeds the wire ceiling: "
+            f"{exc.rendered_bytes}"
+        ),
+    )
 
 
 def _build_answer_frame(

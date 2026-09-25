@@ -2190,11 +2190,15 @@ def test_fresh_dispatcher_reads_same_packets_from_injected_carrier_only(
 def test_oversized_body_returns_digests_only(tmp_path: Path) -> None:
     """A read result that exceeds 60_000 bytes returns digests only.
 
-    The answer text is forced near the runtime cap so the assembled read
-    result (projection row + question body + answer body + body_status)
-    crosses the 60_000-byte body budget; the dispatcher must then return
-    digests only with ``body_status == 'UNAVAILABLE'`` and
-    ``blocker == 'BODY_OVER_BUDGET'``. Zero events appended.
+    IAC-P1-C-B: that branch is no longer reachable through the dispatcher.
+    Since the wire ceiling is enforced BEFORE the INTENT is recorded and
+    BEFORE the answer is advertised, no packet that could push an assembled
+    read result past the 60_000-byte body budget can ever be published: an
+    oversized consult is refused upstream with zero effect, and the reply
+    budget the QUESTION advertises is the expansion-aware clamp. The read
+    path itself is unchanged, so it is exercised here at the largest packets
+    the wire ceiling admits — full bodies, ``body_status == 'AVAILABLE'``,
+    zero events appended by the read.
     """
     runtime = _runtime_at(tmp_path / "oversized")
     _consultations(runtime, tmp_path / "oversized")
@@ -2222,7 +2226,25 @@ def test_oversized_body_returns_digests_only(tmp_path: Path) -> None:
     )
     b_gateway = _gateway_with_dispatcher(b_dispatcher)
 
+    # A body big enough to threaten the 60_000-byte read budget can no longer
+    # be published at all: the wire ceiling refuses it ahead of ``intent()``.
     long_question = "q" * 15_960
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            a_dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question=long_question,
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    assert excinfo.value.code == "BODY_OVER_BUDGET"
+    assert excinfo.value.effect == "NONE"
+    assert _all_consultation_rows(runtime) == []
+
+    # The largest packets the ceiling admits still read back in full.
+    long_question = "q" * 2500
     consult_envelope = _run(
         a_gateway.call("company.consult", _consult_args(
             question=long_question,
@@ -2233,7 +2255,7 @@ def test_oversized_body_returns_digests_only(tmp_path: Path) -> None:
     consultation_id = consult_envelope["data"]["consultation_ref"]
     _deliver_and_ack_wake_path(runtime, consultation_id)
 
-    long_answer = "a" * 15_960
+    long_answer = "a" * 1200
     reply_envelope = _run(
         b_gateway.call(
             "company.reply",
@@ -6627,3 +6649,336 @@ def test_uncertain_read_never_surfaces_effect_unknown(tmp_path: Path) -> None:
     assert degraded["data"]["answer"] is not None
     assert degraded["data"]["answer"]["text"] == "uncertain read answer"
     assert _evidence_for(runtime, consultation_id) == events_before
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1 slice C-B — the wire ceiling is enforced BEFORE any durable effect
+# (Sol 5826854603). ``assert_packet_within_ceiling`` is exact-rendered ahead of
+# ``ConsultationRuntime.intent()`` and ahead of ``answer_available()``; after
+# either of those a refusal is no longer free, because a consumer may already
+# have acted. The advertised payload budget is the expansion-aware clamp.
+# ---------------------------------------------------------------------------
+
+from common.agent_dialogue_contract import (  # noqa: E402 - incumbent wire ceiling
+    MAX_FRAME_BYTES as _WIRE_CEILING_BYTES,
+)
+from common.agent_dialogue_consultation_contract import (  # noqa: E402
+    consultation_packet_budget,
+)
+from integrations.company_consultation_dispatch import (  # noqa: E402
+    _build_answer_frame as _dispatch_build_answer_frame,
+    _build_question_frame as _dispatch_build_question_frame,
+    _build_deterministic_ids as _dispatch_build_deterministic_ids,
+    _mint_request_identity as _dispatch_mint_request_identity,
+    _non_historical_answer_event as _dispatch_non_historical_answer_event,
+)
+
+
+def _all_consultation_rows(runtime: Runtime) -> list:
+    """Every persisted consultation event row, whatever its aggregate_id."""
+    with runtime.store.read() as connection:
+        return connection.execute(
+            "SELECT aggregate_id, event_type FROM events "
+            "WHERE aggregate_type='consultation' ORDER BY event_id"
+        ).fetchall()
+
+
+def _dispatch_reserved_ids(
+    dispatcher: RuntimeConsultationDispatcher,
+) -> tuple[str, str]:
+    """The (consultation_id, message_key) this dispatcher's consult derives."""
+    identity_hash = _dispatch_mint_request_identity(
+        caller=dispatcher.caller,
+        peer_ref=PEER_REF,
+        invocation_id=dispatcher.invocations.current().invocation_id,
+    )
+    return _dispatch_build_deterministic_ids(identity_hash)
+
+
+def _consulted_for_ceiling(
+    tmp_path: Path, name: str, *, question: str = "Ceiling question?"
+) -> tuple[Any, ...]:
+    """consult → acked wake on one shared runtime, dispatchers kept callable.
+
+    Returns ``(runtime, carrier, a_dispatcher, b_dispatcher, consultation_id,
+    question_frame, fixture_revision)``. The QUESTION frame is read back from
+    the carrier under its exact persisted message_key.
+    """
+    runtime = _runtime_at(tmp_path / name)
+    _consultations(runtime, tmp_path / name)
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / f"{name}-repo")
+    carrier = InMemoryConsultationPacketCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime, fixture_repo, requester=requester, recipient=recipient,
+        packets=carrier, invocations=invocations,
+    )
+    b_dispatcher = _make_dispatcher(
+        runtime, fixture_repo, requester=recipient, recipient=requester,
+        packets=carrier, invocations=invocations,
+    )
+    result = _run(
+        a_dispatcher(
+            "company.consult",
+            _dispatch_consult_envelope(
+                question=question,
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert result["ok"] is True, result
+    consultation_id = result["result"]["consultation_id"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    message_key = _intent_message_key(runtime, consultation_id)
+    question_frame = _run(
+        carrier.get_question(consultation_id, message_key=message_key)
+    )
+    assert question_frame is not None
+    return (
+        runtime,
+        carrier,
+        a_dispatcher,
+        b_dispatcher,
+        consultation_id,
+        question_frame,
+        fixture_revision,
+    )
+
+
+def _intent_message_key(runtime: Runtime, consultation_id: str) -> str:
+    with runtime.store.read() as connection:
+        row = connection.execute(
+            "SELECT payload_json FROM events WHERE aggregate_type='consultation' "
+            "AND aggregate_id=? AND event_type='INTENT' ORDER BY event_id LIMIT 1",
+            (consultation_id,),
+        ).fetchone()
+    assert row is not None
+    return str(json.loads(row["payload_json"])["message_key"])
+
+
+def _advertised_max_payload_bytes(
+    runtime: Runtime, consultation_id: str
+) -> int:
+    """The payload budget the persisted INTENT advertises to the recipient."""
+    with runtime.store.read() as connection:
+        row = connection.execute(
+            "SELECT payload_json FROM events WHERE aggregate_type='consultation' "
+            "AND aggregate_id=? AND event_type='INTENT' ORDER BY event_id LIMIT 1",
+            (consultation_id,),
+        ).fetchone()
+    assert row is not None
+    return int(
+        json.loads(row["payload_json"])["response_budget"]["max_payload_bytes"]
+    )
+
+
+def _inner_answer_bytes(
+    answer_text: str, evidence_refs: list[str]
+) -> int:
+    """Bytes of the inner canonical answer JSON the budget is denominated in."""
+    return len(
+        canonical_consultation_json(
+            {"text": answer_text, "evidence_refs": evidence_refs}
+        ).encode("utf-8")
+    )
+
+
+def _budget_saturating_evidence_refs(
+    question_frame: dict, advertised: int
+) -> list[str]:
+    """Eight legal blob refs that sit inside the advertised payload budget.
+
+    ``evidence_refs`` are carried by the ANSWER frame twice — once inside the
+    double-encoded ``answer.text`` and once as the frame's own field — while
+    the advertised budget charges the inner canonical JSON for one copy only.
+    The result is the strongest generated witness: inner canonical JSON well
+    inside the advertised budget, rendered ANSWER packet over the wire ceiling.
+    """
+    for pathlen in range(200, 1, -2):
+        refs = [
+            f"https://github.com/fixture/consultation/blob/"
+            f"{'1' * 40}/{'p' * pathlen}/{index}"
+            for index in range(8)
+        ]
+        if _inner_answer_bytes("ok", refs) > advertised - 100:
+            continue
+        rendered = consultation_packet_budget(
+            _dispatch_build_answer_frame(
+                question_frame,
+                answer_text="ok",
+                evidence_refs=refs,
+                supersedes=None,
+            )
+        ).rendered_bytes
+        assert rendered > _WIRE_CEILING_BYTES
+        return refs
+    raise AssertionError("no inside-budget over-ceiling witness found")
+
+
+def _party_tuples(
+    runtime: Runtime, consultation_id: str, dispatcher: RuntimeConsultationDispatcher
+) -> tuple[tuple, tuple]:
+    """The (requester, recipient) tuples this persisted consultation binds."""
+    caller = dispatcher.caller
+    requester = (
+        caller.job_id,
+        caller.attempt_id,
+        caller.worker_id,
+        dict(caller.binding),
+    )
+    with runtime.store.read() as connection:
+        row = connection.execute(
+            "SELECT payload_json FROM events WHERE aggregate_type='consultation' "
+            "AND aggregate_id=? AND event_type='INTENT' ORDER BY event_id LIMIT 1",
+            (consultation_id,),
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(row["payload_json"])
+    ref = payload["recipient_actor_ref"]
+    recipient = (
+        ref["job_id"],
+        ref["attempt_id"],
+        ref["worker_id"],
+        dict(payload["recipient_binding"]),
+    )
+    return requester, recipient
+
+
+def _reply_request(
+    consultation_id: str, answer: str, evidence_refs: list[str]
+) -> dict:
+    return {
+        "schema": COMPANY_CONSULTATION_SCHEMA,
+        "operation": "reply",
+        "semantic": {
+            "consultation_ref": consultation_id,
+            "answer": answer,
+            "supersedes_message_key": None,
+            "evidence_refs": evidence_refs,
+        },
+    }
+
+
+@_sync_test
+async def test_over_ceiling_question_is_refused_before_any_intent_is_recorded(
+    tmp_path: Path,
+) -> None:
+    """A QUESTION that exact-renders over the wire ceiling is refused ahead of
+    ``intent()``: no INTENT row, no reserved key, no durable state at all."""
+    runtime = _runtime_at(tmp_path / "over-ceiling-question")
+    _consultations(runtime, tmp_path / "over-ceiling-question")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "over-ceiling-question-repo"
+    )
+    carrier = InMemoryConsultationPacketCarrier()
+    a_dispatcher = _make_dispatcher(
+        runtime, fixture_repo, requester=requester, recipient=recipient,
+        packets=carrier,
+    )
+    assert _all_consultation_rows(runtime) == []
+    oversized_question = "q" * 4000
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        await a_dispatcher(
+            "company.consult",
+            _dispatch_consult_envelope(
+                question=oversized_question,
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    assert excinfo.value.code == "BODY_OVER_BUDGET"
+    assert excinfo.value.effect == "NONE"
+    # Insist on the persisted Runtime state, not on the return value.
+    assert _all_consultation_rows(runtime) == []
+    consultation_id, message_key = _dispatch_reserved_ids(a_dispatcher)
+    assert await carrier.get_question(
+        consultation_id, message_key=message_key
+    ) is None
+
+
+@_sync_test
+async def test_at_ceiling_question_still_records_its_intent(
+    tmp_path: Path,
+) -> None:
+    """The boundary must ADMIT: a QUESTION rendered exactly at the wire ceiling
+    records its INTENT and publishes, so the fence never rejects the largest
+    legal frame."""
+    runtime, carrier, a_dispatcher, _b, first_id, first_frame, revision = (
+        _consulted_for_ceiling(tmp_path, "at-ceiling-question")
+    )
+    # Measure the frame's fixed cost from a published packet, then size the
+    # boundary question so the rendered frame is exactly the ceiling. A second
+    # invocation context is required because the consultation identity binds
+    # caller + peer + invocation_id only, never the question text: the same
+    # context would reconcile this as a changed-payload replay.
+    probe_question = "Ceiling question?"
+    fixed = (
+        consultation_packet_budget(first_frame).rendered_bytes
+        - len(probe_question.encode("utf-8"))
+    )
+    boundary_question = "q" * (_WIRE_CEILING_BYTES - fixed)
+    fixture_repo = a_dispatcher.repository_root
+    requester, recipient = _party_tuples(runtime, first_id, a_dispatcher)
+    boundary_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_StaticInvocations(
+            _default_invocation(invocation_id="iac1-c-b-boundary-invocation")
+        ),
+    )
+    result = _run(
+        boundary_dispatcher(
+            "company.consult",
+            _dispatch_consult_envelope(
+                question=boundary_question,
+                evidence_refs=[],
+                artifact_revisions=[revision],
+            ),
+        )
+    )
+    assert result["ok"] is True, result
+    consultation_id = result["result"]["consultation_id"]
+    assert consultation_id != first_id
+    message_key = _intent_message_key(runtime, consultation_id)
+    published = await carrier.get_question(
+        consultation_id, message_key=message_key
+    )
+    assert published is not None
+    budget = consultation_packet_budget(published)
+    assert budget.rendered_bytes == _WIRE_CEILING_BYTES
+    assert budget.fits_wire_ceiling is True
+    with runtime.store.read() as connection:
+        intent_rows = connection.execute(
+            "SELECT COUNT(*) AS total FROM events WHERE aggregate_type='consultation' "
+            "AND aggregate_id=? AND event_type='INTENT'",
+            (consultation_id,),
+        ).fetchone()
+    assert intent_rows["total"] == 1
+
+
+@_sync_test
+async def test_advertised_budget_never_exceeds_the_expansion_aware_clamp(
+    tmp_path: Path,
+) -> None:
+    """The QUESTION advertises the expansion-aware payload budget, so the
+    answer the recipient is invited to write can always be rendered."""
+    _runtime, _carrier, _a, _b, consultation_id, question_frame, _revision = (
+        _consulted_for_ceiling(tmp_path, "advertised-clamp")
+    )
+    advertised = _advertised_max_payload_bytes(_runtime, consultation_id)
+    assert advertised == dict(question_frame["response_budget"])[
+        "max_payload_bytes"
+    ]
+    lean_overhead = consultation_packet_budget(
+        _dispatch_build_answer_frame(
+            question_frame, answer_text="x", evidence_refs=[], supersedes=None
+        )
+    ).rendered_bytes
+    assert advertised == (_WIRE_CEILING_BYTES - lean_overhead) // 2
+    assert advertised < _WIRE_CEILING_BYTES
