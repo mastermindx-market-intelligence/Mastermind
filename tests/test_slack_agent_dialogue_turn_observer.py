@@ -6,6 +6,14 @@ from dataclasses import dataclass, field
 from dataclasses import replace
 from unittest.mock import patch
 
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_PACKET_DISCRIMINATOR,
+    CONSULTATION_SCHEMA,
+    RECEIPT_KEYS,
+    build_consultation,
+    render_consultation_packet,
+)
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.session_targets import load_session_targets, route_obligation
 from control_plane.dialogue_source_resolution import (
     DialogueDelayedAckReconciler,
@@ -188,6 +196,79 @@ def _client_with_result(parent: dict[str, object]) -> InMemorySlackClient:
     return client
 
 
+def _consultation_packet() -> dict[str, object]:
+    message_key = "asd-consultation-observer-0001"
+    consultation_id = "consult-7bdf4a6f9a664bbcf1a93d67a41ba51d"
+    return build_consultation(
+        {
+            "schema": CONSULTATION_SCHEMA,
+            "message_key": message_key,
+            "consultation_id": consultation_id,
+            "purpose": "QUESTION",
+            "requester_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-100",
+                "worker_id": "codex-requester",
+            },
+            "recipient_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-200",
+                "worker_id": "codex-recipient",
+            },
+            "recipient_peer_ref": "peer-7bdf4a6f9a664bbcf1a93d67a41ba51d",
+            "recipient_binding": {
+                "binding_id": runtime_binding_id_for("ATT-200", "EPOCH-0002"),
+                "binding_generation": 1,
+                "reasoning_surface": "codex",
+            },
+            "correlation": {
+                "parent_fingerprint": "a" * 64,
+                "request_message_key": message_key,
+                "consultation_id": consultation_id,
+                "requester_actor_digest": "b" * 64,
+                "recipient_actor_digest": "c" * 64,
+            },
+            "question": "Can the observer classify this packet?",
+            "answer": None,
+            "evidence_refs": [],
+            "artifact_revisions": [
+                {
+                    "repository": REPO,
+                    "path": "research/commission.md",
+                    "commit": "a" * 40,
+                    "content_sha256": "b" * 64,
+                }
+            ],
+            "valid_until": "2026-09-25T01:00:00Z",
+            "deadline_ms": 60000,
+            "response_budget": {
+                "max_answers": 1,
+                "max_evidence_reads": 2,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 2048,
+            },
+            "supersedes_message_key": None,
+            "receipts": {key: None for key in RECEIPT_KEYS},
+            "fingerprint": "",
+        }
+    )
+
+
+def _client_with_packet(parent: dict[str, object]) -> InMemorySlackClient:
+    client = _client(parent)
+    client.add_reply(
+        SlackMessage(
+            ts="1787961600.000005",
+            author_user_id=RELAY_USER,
+            text=render_consultation_packet(_consultation_packet()),
+            thread_ts=PARENT_TS,
+        )
+    )
+    return client
+
+
 def _registry():
     return load_session_targets().with_root_job_bindings(
         {
@@ -361,6 +442,88 @@ def test_adapter_preserves_existing_root_workstream_seat_routing_precedence() ->
     assert seat_route.session_alias == "EXECUTIVE-CEO-A"
     assert seat_route.root_job_id is None
     assert seat_route.workstream is None
+
+
+def test_observer_classifies_packet_without_lifecycle_interpretation() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client_with_packet(parent),
+            registry=_registry(),
+            wake_carrier=RecordingWakeCarrier(),
+        )
+
+        accepted = await observer._accepted_history(_context(parent))
+
+        assert len(accepted) == 4
+        observed_parent, messages, thread_ts, packet_count = accepted
+        assert observed_parent == parent
+        assert messages == ()
+        assert thread_ts == PARENT_TS
+        assert packet_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_observer_refuses_malformed_consultation_packet() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        client = _client(parent)
+        client.add_reply(
+            SlackMessage(
+                ts="1787961600.000006",
+                author_user_id=RELAY_USER,
+                text=CONSULTATION_PACKET_DISCRIMINATOR + "\n{not-json}",
+                thread_ts=PARENT_TS,
+            )
+        )
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=client,
+            registry=_registry(),
+            wake_carrier=RecordingWakeCarrier(),
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.REFUSED
+        assert result.reason == "THREAD_MESSAGE_INVALID"
+
+    asyncio.run(scenario())
+
+
+def test_observer_packet_mutation_without_creation_is_incomplete() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        client = _client(parent)
+        client.add_reply(
+            SlackMessage(
+                ts="1787961600.000007",
+                author_user_id=RELAY_USER,
+                text=render_consultation_packet(_consultation_packet()),
+                thread_ts=PARENT_TS,
+                edited=True,
+                created_text=None,
+            )
+        )
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=client,
+            registry=_registry(),
+            wake_carrier=RecordingWakeCarrier(),
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert result.reason == "MUTATION_RECONCILIATION_INCOMPLETE"
+
+    asyncio.run(scenario())
 
 
 def test_observer_reconstructs_initial_turn_and_submits_one_canonical_wake() -> None:

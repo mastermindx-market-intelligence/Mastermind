@@ -10,9 +10,15 @@ import asyncio
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_PACKET_DISCRIMINATOR,
+    parse_consultation_packet,
+    render_consultation_packet,
+)
 from integrations.slack_agent_dialogue.contract import (
     AUTHORITY_CLASSES,
     FABLE_MESSAGE_TYPES,
@@ -47,6 +53,10 @@ from integrations.slack_agent_dialogue.engine import (
     SlackTransportUnavailable,
     ThreadRead,
 )
+from integrations.slack_agent_dialogue.slack_web_api import (
+    BoundedHistoryPage,
+    estimate_replies_append_bytes,
+)
 from integrations.slack_agent_dialogue.turn_runtime_primitives import (
     ActiveWaiterKey,
     ActiveWaiterRegistry,
@@ -54,6 +64,8 @@ from integrations.slack_agent_dialogue.turn_runtime_primitives import (
 
 _CONTEXT_PROBE_SOL = "U00000000"
 _TS_RE = re.compile(r"\A[0-9]{10,16}\.[0-9]{6}\Z")
+_CONSULTATION_ID_RE = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
+CONSULTATION_PACKET_PAGE_RESERVE_BYTES = 13_096
 
 
 @dataclass(frozen=True)
@@ -115,6 +127,27 @@ class _EnsureFlight:
     waiters: int = 0
 
 
+class DialogueFrameKind(str, Enum):
+    LIFECYCLE = "LIFECYCLE"
+    CONSULTATION_PACKET = "CONSULTATION_PACKET"
+
+
+@dataclass(frozen=True)
+class ReadConsultationPacket:
+    packet: Mapping[str, Any]
+    primary_ts: str
+    duplicate_timestamps: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _ClassifiedThreadHistory:
+    lifecycle: ThreadRead
+    consultation_packets: tuple[ReadConsultationPacket, ...]
+    consultation_packet_count: int
+    response_page_bytes: tuple[int, ...] | None
+    response_byte_limit: int | None
+
+
 @dataclass(frozen=True)
 class PreparedMessageSend:
     """One connection-local send frozen after deterministic reconciliation."""
@@ -125,6 +158,7 @@ class PreparedMessageSend:
     text: str
     message_key: str
     fingerprint: str
+    frame_kind: DialogueFrameKind = DialogueFrameKind.LIFECYCLE
 
 
 @dataclass(frozen=True)
@@ -524,7 +558,7 @@ class DialogueEngineV2:
         self._ensure_barrier_generation = 0
         self._ensure_inflight: dict[tuple[str | None, ...], _EnsureFlight] = {}
         self._send_registry_lock = asyncio.Lock()
-        self._send_inflight: dict[tuple[str, str], _SendFlight] = {}
+        self._send_inflight: dict[tuple[str, str, str], _SendFlight] = {}
 
     @property
     def active_waiter_registry(self) -> ActiveWaiterRegistry | None:
@@ -867,9 +901,9 @@ class DialogueEngineV2:
             and actor["seat"] in {"ceo", "chairman"}
         )
 
-    async def _history(
+    async def _classified_history(
         self, *, thread_ts: str, context: DialogueContextV2
-    ) -> ThreadRead:
+    ) -> _ClassifiedThreadHistory:
         if not isinstance(thread_ts, str) or _TS_RE.fullmatch(thread_ts) is None:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
         bound = await self.bind_or_verify_thread(context)
@@ -895,6 +929,9 @@ class DialogueEngineV2:
 
         normalized_context = context.normalized()
         eligible: dict[str, list[tuple[SlackMessage, Mapping[str, Any]]]] = {}
+        packet_entries: dict[
+            str, list[tuple[SlackMessage, Mapping[str, Any]]]
+        ] = {}
         ineligible_count = 0
         mutated_count = 0
 
@@ -909,12 +946,22 @@ class DialogueEngineV2:
                     raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
                 raw_text = transport.created_text
 
+            if raw_text.startswith(CONSULTATION_PACKET_DISCRIMINATOR):
+                try:
+                    packet = parse_consultation_packet(raw_text)
+                except DialogueContractError:
+                    raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
+                if transport.author_user_id != self.policy.relay_bot_user_id:
+                    ineligible_count += 1
+                    continue
+                packet_entries.setdefault(packet["message_key"], []).append(
+                    (transport, packet)
+                )
+                continue
+
             if not raw_text.startswith(MESSAGE_DISCRIMINATOR_V2):
                 continue
 
-            # Unknown Slack identities are transport-ineligible even when their
-            # text happens to be a valid V2 frame. Actor identity comes from the
-            # validated frame, not from the Slack member/app identity.
             sender_known = (
                 transport.author_user_id == self.policy.relay_bot_user_id
                 or transport.author_user_id in self.policy.allowed_sol_user_ids
@@ -934,7 +981,9 @@ class DialogueEngineV2:
                 ineligible_count += 1
                 continue
 
-            eligible.setdefault(message["message_key"], []).append((transport, message))
+            eligible.setdefault(message["message_key"], []).append(
+                (transport, message)
+            )
 
         output: list[ReadMessage] = []
         for entries in eligible.values():
@@ -953,19 +1002,88 @@ class DialogueEngineV2:
                 )
             )
 
+        packets: list[ReadConsultationPacket] = []
+        for entries in packet_entries.values():
+            fingerprints = {entry[1]["fingerprint"] for entry in entries}
+            if len(fingerprints) != 1:
+                raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+            entries.sort(key=lambda entry: _ts_order(entry[0].ts))
+            primary_transport, primary_packet = entries[0]
+            packets.append(
+                ReadConsultationPacket(
+                    packet=primary_packet,
+                    primary_ts=primary_transport.ts,
+                    duplicate_timestamps=tuple(
+                        transport.ts for transport, _packet in entries[1:]
+                    ),
+                )
+            )
+
         output.sort(key=lambda item: _ts_order(item.primary_ts))
-        return ThreadRead(
+        packets.sort(key=lambda item: _ts_order(item.primary_ts))
+        lifecycle = ThreadRead(
             thread_ts=thread_ts,
             messages=tuple(output),
             historical_messages=(),
             ineligible_count=ineligible_count,
             mutated_count=mutated_count,
         )
+        if isinstance(page, BoundedHistoryPage):
+            response_page_bytes = page.response_page_bytes
+            response_byte_limit = page.response_byte_limit
+        else:
+            response_page_bytes = None
+            response_byte_limit = None
+        return _ClassifiedThreadHistory(
+            lifecycle=lifecycle,
+            consultation_packets=tuple(packets),
+            consultation_packet_count=sum(
+                len(entries) for entries in packet_entries.values()
+            ),
+            response_page_bytes=response_page_bytes,
+            response_byte_limit=response_byte_limit,
+        )
+
+    async def _history(
+        self, *, thread_ts: str, context: DialogueContextV2
+    ) -> ThreadRead:
+        return (
+            await self._classified_history(thread_ts=thread_ts, context=context)
+        ).lifecycle
 
     async def read_thread(
         self, *, thread_ts: str, context: DialogueContextV2
     ) -> ThreadRead:
         return await self._history(thread_ts=thread_ts, context=context)
+
+    async def read_consultation_packet(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        consultation_id: str,
+        purpose: str,
+    ) -> ReadConsultationPacket | None:
+        if (
+            not isinstance(consultation_id, str)
+            or _CONSULTATION_ID_RE.fullmatch(consultation_id) is None
+            or purpose not in {"QUESTION", "ANSWER"}
+        ):
+            raise DialogueEngineError("THREAD_MESSAGE_INVALID")
+        classified = await self._classified_history(
+            thread_ts=thread_ts, context=context
+        )
+        matches = [
+            item
+            for item in classified.consultation_packets
+            if item.packet["consultation_id"] == consultation_id
+            and item.packet["purpose"] == purpose
+        ]
+        if not matches:
+            return None
+        if len(matches) != 1:
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        return matches[0]
 
     @staticmethod
     def _find_key(
@@ -982,6 +1100,47 @@ class DialogueEngineV2:
         if candidate.message["fingerprint"] != fingerprint:
             raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
         return candidate
+
+    @staticmethod
+    def _find_packet(
+        packets: Sequence[ReadConsultationPacket],
+        *,
+        message_key: str,
+        fingerprint: str,
+    ) -> ReadConsultationPacket | None:
+        matches = [
+            item
+            for item in packets
+            if item.packet["message_key"] == message_key
+        ]
+        if not matches:
+            return None
+        if len(matches) != 1:
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        candidate = matches[0]
+        if candidate.packet["fingerprint"] != fingerprint:
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        return candidate
+
+    @staticmethod
+    def _assert_packet_history_budget(
+        classified: _ClassifiedThreadHistory,
+        *,
+        text: str,
+        thread_ts: str,
+    ) -> None:
+        if (
+            classified.response_page_bytes is None
+            or classified.response_byte_limit is None
+        ):
+            raise DialogueEngineError("THREAD_HISTORY_BUDGET_UNAVAILABLE")
+        projected = (
+            max(classified.response_page_bytes, default=0)
+            + estimate_replies_append_bytes(text=text, thread_ts=thread_ts)
+            + CONSULTATION_PACKET_PAGE_RESERVE_BYTES
+        )
+        if projected > classified.response_byte_limit:
+            raise DialogueEngineError("THREAD_HISTORY_BUDGET_EXCEEDED")
 
     def _validate_outbound(
         self, message: Mapping[str, Any], *, context: DialogueContextV2
@@ -1020,15 +1179,24 @@ class DialogueEngineV2:
     async def _reconcile_post_effect(
         self,
         *,
+        frame_kind: DialogueFrameKind,
         thread_ts: str,
         context: DialogueContextV2,
         message_key: str,
         fingerprint: str,
-    ) -> ReadMessage | None:
+    ) -> ReadMessage | ReadConsultationPacket | None:
         try:
-            read = await self._history(thread_ts=thread_ts, context=context)
-            return self._find_key(
-                read,
+            classified = await self._classified_history(
+                thread_ts=thread_ts, context=context
+            )
+            if frame_kind is DialogueFrameKind.LIFECYCLE:
+                return self._find_key(
+                    classified.lifecycle,
+                    message_key=message_key,
+                    fingerprint=fingerprint,
+                )
+            return self._find_packet(
+                classified.consultation_packets,
                 message_key=message_key,
                 fingerprint=fingerprint,
             )
@@ -1037,7 +1205,7 @@ class DialogueEngineV2:
 
     @staticmethod
     def _duplicate_receipt(
-        existing: ReadMessage,
+        existing: ReadMessage | ReadConsultationPacket,
         *,
         message_key: str,
         fingerprint: str,
@@ -1091,19 +1259,95 @@ class DialogueEngineV2:
             text=text,
             message_key=validated["message_key"],
             fingerprint=validated["fingerprint"],
+            frame_kind=DialogueFrameKind.LIFECYCLE,
+        )
+
+    async def prepare_send_consultation_packet(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        packet: Mapping[str, Any],
+    ) -> PreparedMessageSend | MessageReceipt:
+        normalized = context.normalized()
+        frozen_context = DialogueContextV2(
+            work_ref=normalized["work_ref"],
+            commission_ref=_deep_freeze(normalized["commission_ref"]),
+            session_ref=normalized["session_ref"],
+            operation_key=normalized["operation_key"],
+            watch_mode=normalized["watch_mode"],
+            actor_ref=_deep_freeze(normalized["actor_ref"]),
+            applies_to=_deep_freeze(normalized["applies_to"]),
+        )
+        try:
+            text = render_consultation_packet(packet)
+            validated = parse_consultation_packet(text)
+        except DialogueContractError:
+            raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
+        classified = await self._classified_history(
+            thread_ts=thread_ts, context=frozen_context
+        )
+        self._assert_packet_history_budget(
+            classified,
+            text=text,
+            thread_ts=thread_ts,
+        )
+        existing = self._find_packet(
+            classified.consultation_packets,
+            message_key=validated["message_key"],
+            fingerprint=validated["fingerprint"],
+        )
+        if existing is not None:
+            return self._duplicate_receipt(
+                existing,
+                message_key=validated["message_key"],
+                fingerprint=validated["fingerprint"],
+            )
+        return PreparedMessageSend(
+            thread_ts=thread_ts,
+            context=frozen_context,
+            message=_deep_freeze(validated),
+            text=text,
+            message_key=validated["message_key"],
+            fingerprint=validated["fingerprint"],
+            frame_kind=DialogueFrameKind.CONSULTATION_PACKET,
+        )
+
+    async def _existing_prepared(
+        self,
+        prepared: PreparedMessageSend,
+        *,
+        enforce_packet_budget: bool,
+    ) -> ReadMessage | ReadConsultationPacket | None:
+        classified = await self._classified_history(
+            thread_ts=prepared.thread_ts,
+            context=prepared.context,
+        )
+        if prepared.frame_kind is DialogueFrameKind.LIFECYCLE:
+            return self._find_key(
+                classified.lifecycle,
+                message_key=prepared.message_key,
+                fingerprint=prepared.fingerprint,
+            )
+        if enforce_packet_budget:
+            self._assert_packet_history_budget(
+                classified,
+                text=prepared.text,
+                thread_ts=prepared.thread_ts,
+            )
+        return self._find_packet(
+            classified.consultation_packets,
+            message_key=prepared.message_key,
+            fingerprint=prepared.fingerprint,
         )
 
     async def _commit_send_once(
         self,
         prepared: PreparedMessageSend,
     ) -> MessageReceipt:
-        existing = self._find_key(
-            await self._history(
-                thread_ts=prepared.thread_ts,
-                context=prepared.context,
-            ),
-            message_key=prepared.message_key,
-            fingerprint=prepared.fingerprint,
+        existing = await self._existing_prepared(
+            prepared,
+            enforce_packet_budget=True,
         )
         if existing is not None:
             return self._duplicate_receipt(
@@ -1143,6 +1387,7 @@ class DialogueEngineV2:
                 pass
 
         recovered = await self._reconcile_post_effect(
+            frame_kind=prepared.frame_kind,
             thread_ts=prepared.thread_ts,
             context=prepared.context,
             message_key=prepared.message_key,
@@ -1165,7 +1410,7 @@ class DialogueEngineV2:
 
     async def _retire_send_flight(
         self,
-        key: tuple[str, str],
+        key: tuple[str, str, str],
         flight: _SendFlight,
     ) -> None:
         async with self._send_registry_lock:
@@ -1178,7 +1423,7 @@ class DialogueEngineV2:
 
     def _send_flight_done(
         self,
-        key: tuple[str, str],
+        key: tuple[str, str, str],
         flight: _SendFlight,
     ) -> None:
         try:
@@ -1187,25 +1432,30 @@ class DialogueEngineV2:
             pass
         asyncio.create_task(self._retire_send_flight(key, flight))
 
-    async def commit_send_message(
+    async def _commit_prepared(
         self,
         prepared: PreparedMessageSend | MessageReceipt,
         *,
         fingerprint: str,
+        frame_kind: DialogueFrameKind,
     ) -> MessageReceipt:
-        """Commit only the exact frozen fingerprint, coalescing concurrent peers."""
-
-        if not isinstance(prepared, PreparedMessageSend):
+        if (
+            not isinstance(prepared, PreparedMessageSend)
+            or prepared.frame_kind is not frame_kind
+            or fingerprint != prepared.fingerprint
+        ):
             raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
-        if fingerprint != prepared.fingerprint:
-            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
-        key = (prepared.thread_ts, prepared.message_key)
+        key = (
+            prepared.frame_kind.value,
+            prepared.thread_ts,
+            prepared.message_key,
+        )
         async with self._send_registry_lock:
             flight = self._send_inflight.get(key)
             if flight is None:
                 flight = _SendFlight(
                     fingerprint=prepared.fingerprint,
-                    task=asyncio.create_task(self._commit_send_once(prepared))
+                    task=asyncio.create_task(self._commit_send_once(prepared)),
                 )
                 self._send_inflight[key] = flight
                 flight.task.add_done_callback(
@@ -1227,6 +1477,30 @@ class DialogueEngineV2:
                 ):
                     del self._send_inflight[key]
 
+    async def commit_send_message(
+        self,
+        prepared: PreparedMessageSend | MessageReceipt,
+        *,
+        fingerprint: str,
+    ) -> MessageReceipt:
+        return await self._commit_prepared(
+            prepared,
+            fingerprint=fingerprint,
+            frame_kind=DialogueFrameKind.LIFECYCLE,
+        )
+
+    async def commit_send_consultation_packet(
+        self,
+        prepared: PreparedMessageSend | MessageReceipt,
+        *,
+        fingerprint: str,
+    ) -> MessageReceipt:
+        return await self._commit_prepared(
+            prepared,
+            fingerprint=fingerprint,
+            frame_kind=DialogueFrameKind.CONSULTATION_PACKET,
+        )
+
     async def send_message(
         self,
         *,
@@ -1244,6 +1518,25 @@ class DialogueEngineV2:
         if isinstance(prepared, MessageReceipt):
             return prepared
         return await self.commit_send_message(
+            prepared,
+            fingerprint=prepared.fingerprint,
+        )
+
+    async def send_consultation_packet(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        packet: Mapping[str, Any],
+    ) -> MessageReceipt:
+        prepared = await self.prepare_send_consultation_packet(
+            thread_ts=thread_ts,
+            context=context,
+            packet=packet,
+        )
+        if isinstance(prepared, MessageReceipt):
+            return prepared
+        return await self.commit_send_consultation_packet(
             prepared,
             fingerprint=prepared.fingerprint,
         )
@@ -1347,8 +1640,11 @@ class DialogueEngineV2:
 
 
 __all__ = [
+    "CONSULTATION_PACKET_PAGE_RESERVE_BYTES",
     "DialogueContextV2",
+    "DialogueFrameKind",
     "DialogueEngineV2",
     "DiscoveredDialogueParent",
     "PreparedMessageSend",
+    "ReadConsultationPacket",
 ]

@@ -6,11 +6,19 @@ import dataclasses
 
 import pytest
 
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_PACKET_DISCRIMINATOR,
+    CONSULTATION_SCHEMA,
+    RECEIPT_KEYS,
+    build_consultation,
+    render_consultation_packet,
+)
 from common.commission_ref import (
     CommissionRef,
     CommissionRefError,
     normalize_commission_ref,
 )
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from integrations.slack_agent_dialogue.contract import (
     DialogueContractError,
     MESSAGE_SCHEMA,
@@ -37,7 +45,17 @@ from integrations.slack_agent_dialogue.engine import (
     DialoguePolicy,
     SlackMessage,
 )
+from integrations.slack_agent_dialogue.engine_v2 import (
+    CONSULTATION_PACKET_PAGE_RESERVE_BYTES,
+    DialogueFrameKind,
+    PreparedMessageSend,
+    ReadConsultationPacket,
+)
 from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
+from integrations.slack_agent_dialogue.slack_web_api import (
+    BoundedHistoryPage,
+    MAX_RESPONSE_BYTES,
+)
 
 REPO = "mastermindx-market-intelligence/Mastermind"
 CHANNEL = "C0BRUL9F2V7"
@@ -215,6 +233,114 @@ def setup_client() -> InMemorySlackClient:
     client = InMemorySlackClient(relay_bot_user_id=BOT)
     client.add_parent(parent_message())
     return client
+
+
+def consultation_packet(
+    *,
+    message_key: str = "asd-consultation-engine-0001",
+    consultation_id: str = "consult-6bdf4a6f9a664bbcf1a93d67a41ba51d",
+) -> dict[str, object]:
+    return build_consultation(
+        {
+            "schema": CONSULTATION_SCHEMA,
+            "message_key": message_key,
+            "consultation_id": consultation_id,
+            "purpose": "QUESTION",
+            "requester_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-100",
+                "worker_id": "codex-requester",
+            },
+            "recipient_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-200",
+                "worker_id": "codex-recipient",
+            },
+            "recipient_peer_ref": "peer-6bdf4a6f9a664bbcf1a93d67a41ba51d",
+            "recipient_binding": {
+                "binding_id": runtime_binding_id_for("ATT-200", "EPOCH-0002"),
+                "binding_generation": 1,
+                "reasoning_surface": "codex",
+            },
+            "correlation": {
+                "parent_fingerprint": "a" * 64,
+                "request_message_key": message_key,
+                "consultation_id": consultation_id,
+                "requester_actor_digest": "b" * 64,
+                "recipient_actor_digest": "c" * 64,
+            },
+            "question": "Can the Relay carry this bounded packet?",
+            "answer": None,
+            "evidence_refs": [],
+            "artifact_revisions": [
+                {
+                    "repository": REPO,
+                    "path": "research/commission.md",
+                    "commit": "a" * 40,
+                    "content_sha256": "b" * 64,
+                }
+            ],
+            "valid_until": "2026-09-25T01:00:00Z",
+            "deadline_ms": 60000,
+            "response_budget": {
+                "max_answers": 1,
+                "max_evidence_reads": 2,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 2048,
+            },
+            "supersedes_message_key": None,
+            "receipts": {key: None for key in RECEIPT_KEYS},
+            "fingerprint": "",
+        }
+    )
+
+
+def add_consultation_packet_reply(
+    client: InMemorySlackClient,
+    packet: dict[str, object],
+    *,
+    ts: str,
+    author: str = BOT,
+    text: str | None = None,
+    edited: bool = False,
+    created_text: str | None = None,
+) -> None:
+    client.add_reply(
+        SlackMessage(
+            ts=ts,
+            author_user_id=author,
+            text=render_consultation_packet(packet) if text is None else text,
+            thread_ts=THREAD_TS,
+            edited=edited,
+            created_text=created_text,
+        )
+    )
+
+
+class BoundedThreadClient(InMemorySlackClient):
+    def __init__(
+        self,
+        *,
+        response_page_bytes: tuple[int, ...] = (1024,),
+    ) -> None:
+        super().__init__(relay_bot_user_id=BOT)
+        self.response_page_bytes = response_page_bytes
+
+    async def fetch_thread(self, *, channel_id: str, thread_ts: str, limit: int):
+        page = await super().fetch_thread(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            limit=limit,
+        )
+        return BoundedHistoryPage(
+            messages=page.messages,
+            complete=page.complete,
+            mutation_evidence_complete=page.mutation_evidence_complete,
+            response_page_bytes=self.response_page_bytes,
+            response_byte_limit=MAX_RESPONSE_BYTES,
+        )
 
 
 def test_discovers_bounded_unique_validated_v2_parents_on_shared_client() -> None:
@@ -950,6 +1076,72 @@ def test_v2_history_reads_only_v2_frames_and_accepts_opposite_actor() -> None:
     assert read.ineligible_count == 0
 
 
+def test_v2_classifies_consultation_packet_without_lifecycle_interpretation() -> None:
+    client = setup_client()
+    lifecycle = v2_message(
+        "ACK", message_key="asd-ack-v2-packet-classification"
+    )
+    packet = consultation_packet()
+    add_v2_reply(client, lifecycle, author=BOT, ts="1787471000.000013")
+    add_consultation_packet_reply(
+        client, packet, ts="1787471000.000014"
+    )
+    engine = make_engine(client)
+
+    lifecycle_read = run(
+        engine.read_thread(thread_ts=THREAD_TS, context=context())
+    )
+    packet_read = run(
+        engine.read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            consultation_id=packet["consultation_id"],
+            purpose="QUESTION",
+        )
+    )
+
+    assert [item.message["message_key"] for item in lifecycle_read.messages] == [
+        lifecycle["message_key"]
+    ]
+    assert isinstance(packet_read, ReadConsultationPacket)
+    assert packet_read.packet == packet
+    assert packet_read.primary_ts == "1787471000.000014"
+    assert packet_read.duplicate_timestamps == ()
+
+
+def test_v2_malformed_consultation_packet_is_visible_degraded_evidence() -> None:
+    client = setup_client()
+    client.add_reply(
+        SlackMessage(
+            ts="1787471000.000015",
+            author_user_id=BOT,
+            text=CONSULTATION_PACKET_DISCRIMINATOR + "\n{not-json}",
+            thread_ts=THREAD_TS,
+        )
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
+
+    assert code(exc) == "THREAD_MESSAGE_INVALID"
+
+
+def test_v2_mutated_consultation_packet_requires_creation_evidence() -> None:
+    client = setup_client()
+    packet = consultation_packet()
+    add_consultation_packet_reply(
+        client,
+        packet,
+        ts="1787471000.000016",
+        edited=True,
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
+
+    assert code(exc) == "THREAD_RECONCILIATION_INCOMPLETE"
+
+
 @pytest.mark.parametrize("mutation", ["work", "commission", "session"])
 def test_v2_history_wrong_bound_context_fails_closed(mutation: str) -> None:
     client = setup_client()
@@ -1043,6 +1235,249 @@ def test_v2_history_unknown_sender_is_ineligible_not_actor_authority() -> None:
     read = run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
     assert read.messages == ()
     assert read.ineligible_count == 1
+
+
+def test_v2_packet_prepare_requires_bounded_history_byte_facts() -> None:
+    client = setup_client()
+    packet = consultation_packet()
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).prepare_send_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            packet=packet,
+        ))
+
+    assert code(exc) == "THREAD_HISTORY_BUDGET_UNAVAILABLE"
+    assert client.post_call_count == 0
+
+
+def test_v2_packet_prepare_refuses_history_page_budget_exhaustion() -> None:
+    client = BoundedThreadClient(
+        response_page_bytes=(MAX_RESPONSE_BYTES - 100,)
+    )
+    client.add_parent(parent_message())
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).prepare_send_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            packet=consultation_packet(),
+        ))
+
+    assert code(exc) == "THREAD_HISTORY_BUDGET_EXCEEDED"
+    assert CONSULTATION_PACKET_PAGE_RESERVE_BYTES == 13_096
+    assert client.post_call_count == 0
+
+
+def test_v2_packet_prepare_within_history_budget_returns_packet_kind() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    packet = consultation_packet()
+
+    prepared = run(make_engine(client).prepare_send_consultation_packet(
+        thread_ts=THREAD_TS,
+        context=context(),
+        packet=packet,
+    ))
+
+    assert isinstance(prepared, PreparedMessageSend)
+    assert prepared.frame_kind is DialogueFrameKind.CONSULTATION_PACKET
+    assert prepared.message["message_key"] == packet["message_key"]
+    assert prepared.message["fingerprint"] == packet["fingerprint"]
+    assert prepared.text == render_consultation_packet(packet)
+    assert client.post_call_count == 0
+
+
+def test_v2_same_key_across_frame_kinds_uses_independent_send_flights() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    engine = make_engine(client)
+    shared_key = "asd-shared-v2-packet-flight-0001"
+    lifecycle = v2_message("ACK", message_key=shared_key)
+    packet = consultation_packet(message_key=shared_key)
+
+    lifecycle_prepared = run(engine.prepare_send_message(
+        thread_ts=THREAD_TS,
+        context=context(),
+        message=lifecycle,
+    ))
+    packet_prepared = run(engine.prepare_send_consultation_packet(
+        thread_ts=THREAD_TS,
+        context=context(),
+        packet=packet,
+    ))
+    lifecycle_receipt = run(engine.commit_send_message(
+        lifecycle_prepared,
+        fingerprint=lifecycle_prepared.fingerprint,
+    ))
+    packet_receipt = run(engine.commit_send_consultation_packet(
+        packet_prepared,
+        fingerprint=packet_prepared.fingerprint,
+    ))
+
+    assert lifecycle_prepared.frame_kind is DialogueFrameKind.LIFECYCLE
+    assert packet_prepared.frame_kind is DialogueFrameKind.CONSULTATION_PACKET
+    assert lifecycle_receipt.message_key == shared_key
+    assert packet_receipt.message_key == shared_key
+    assert client.post_call_count == 2
+
+
+def test_v2_packet_duplicate_is_storeless_and_posts_zero_times() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    packet = consultation_packet()
+    add_consultation_packet_reply(
+        client, packet, ts="1787471000.000041"
+    )
+
+    receipt = run(make_engine(client).send_consultation_packet(
+        thread_ts=THREAD_TS,
+        context=context(),
+        packet=packet,
+    ))
+
+    assert receipt.action == "DUPLICATE"
+    assert receipt.message_ts == "1787471000.000041"
+    assert client.post_call_count == 0
+
+
+def test_v2_packet_same_key_changed_fingerprint_is_conflict() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    first = consultation_packet()
+    add_consultation_packet_reply(
+        client, first, ts="1787471000.000042"
+    )
+    changed = copy.deepcopy(first)
+    changed["question"] = "Changed packet payload for the same message key."
+    changed["fingerprint"] = ""
+    changed = build_consultation(changed)
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).send_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            packet=changed,
+        ))
+
+    assert code(exc) == "MESSAGE_KEY_CONFLICT"
+    assert client.post_call_count == 0
+
+
+def test_v2_packet_effect_unknown_reconciles_once_without_resend() -> None:
+    committed = BoundedThreadClient()
+    committed.add_parent(parent_message())
+    committed.post_behaviors = ["commit_unknown"]
+    receipt = run(make_engine(committed).send_consultation_packet(
+        thread_ts=THREAD_TS,
+        context=context(),
+        packet=consultation_packet(),
+    ))
+    assert receipt.action == "RECOVERED"
+    assert committed.post_call_count == 1
+
+    ambiguous = BoundedThreadClient()
+    ambiguous.add_parent(parent_message())
+    ambiguous.post_behaviors = ["unknown_no_commit"]
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(ambiguous).send_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            packet=consultation_packet(
+                message_key="asd-consultation-engine-unknown-0001"
+            ),
+        ))
+    assert code(exc) == "SEND_EFFECT_UNKNOWN"
+    assert ambiguous.post_call_count == 1
+
+
+def test_v2_packet_physical_duplicate_is_effect_unknown() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    packet = consultation_packet()
+    add_consultation_packet_reply(
+        client, packet, ts="1787471000.000043"
+    )
+    add_consultation_packet_reply(
+        client, packet, ts="1787471000.000044"
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).prepare_send_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            packet=packet,
+        ))
+
+    assert code(exc) == "SEND_EFFECT_UNKNOWN"
+    assert client.post_call_count == 0
+
+
+def test_v2_packet_complete_history_can_prove_absence() -> None:
+    client = BoundedThreadClient()
+    client.add_parent(parent_message())
+    packet = consultation_packet()
+
+    observed = run(make_engine(client).read_consultation_packet(
+        thread_ts=THREAD_TS,
+        context=context(),
+        consultation_id=packet["consultation_id"],
+        purpose="QUESTION",
+    ))
+
+    assert observed is None
+
+
+def test_v2_packet_concurrent_commits_singleflight_one_post() -> None:
+    class HeldPacketClient(BoundedThreadClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.post_entered = asyncio.Event()
+            self.release_post = asyncio.Event()
+
+        async def post_reply(self, *, channel_id: str, thread_ts: str, text: str):
+            self.post_entered.set()
+            await self.release_post.wait()
+            return await super().post_reply(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+            )
+
+    async def scenario() -> None:
+        client = HeldPacketClient()
+        client.add_parent(parent_message())
+        engine = make_engine(client)
+        packet = consultation_packet(
+            message_key="asd-consultation-engine-singleflight-0001"
+        )
+        first = await engine.prepare_send_consultation_packet(
+            thread_ts=THREAD_TS, context=context(), packet=packet
+        )
+        second = await engine.prepare_send_consultation_packet(
+            thread_ts=THREAD_TS, context=context(), packet=packet
+        )
+        first_task = asyncio.create_task(
+            engine.commit_send_consultation_packet(
+                first, fingerprint=first.fingerprint
+            )
+        )
+        await asyncio.wait_for(client.post_entered.wait(), timeout=1)
+        second_task = asyncio.create_task(
+            engine.commit_send_consultation_packet(
+                second, fingerprint=second.fingerprint
+            )
+        )
+        await asyncio.sleep(0)
+        client.release_post.set()
+        first_receipt, second_receipt = await asyncio.gather(
+            first_task, second_task
+        )
+        assert first_receipt == second_receipt
+        assert client.post_call_count == 1
+
+    run(scenario())
 
 
 def test_v2_send_duplicate_is_storeless_and_posts_zero_times() -> None:
