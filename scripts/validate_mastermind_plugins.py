@@ -22,6 +22,10 @@ PLUGIN_VERSIONS = {
     "mastermind-cortex": "0.1.0",
     "mastermind-navigator": "0.1.0",
 }
+BINDING_TEMPLATE_VERSIONS = {
+    "mastermind-sol": "0.1.0",
+    "mastermind-operator": "0.1.0",
+}
 
 SOL_SKILLS = (
     "bootstrap-mastermind",
@@ -172,7 +176,7 @@ TEMPLATES = {
     "mastermind-sol": {
         "schema": "mastermind.plugin_app_bindings_template.v1",
         "plugin": "mastermind-sol",
-        "plugin_version": PLUGIN_VERSIONS["mastermind-sol"],
+        "plugin_version": BINDING_TEMPLATE_VERSIONS["mastermind-sol"],
         "generated_file": ".app.json",
         "generated_by_wave": "BSC-U1",
         "bindings": [
@@ -193,7 +197,7 @@ TEMPLATES = {
     "mastermind-operator": {
         "schema": "mastermind.plugin_app_bindings_template.v1",
         "plugin": "mastermind-operator",
-        "plugin_version": PLUGIN_VERSIONS["mastermind-operator"],
+        "plugin_version": BINDING_TEMPLATE_VERSIONS["mastermind-operator"],
         "generated_file": ".app.json",
         "generated_by_wave": "BSC-U1",
         "bindings": [

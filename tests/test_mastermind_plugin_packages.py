@@ -653,9 +653,9 @@ def test_repository_documents_match_the_closed_contract() -> None:
             ("mastermind-dialogue", "integrations/mastermind_company_mcp/schemas.py")
         ],
     }
-    for plugin, display_name, version in (
-        ("mastermind-sol", "Mastermind CEO", "0.2.0"),
-        ("mastermind-operator", "Mastermind Operator", "0.1.0"),
+    for plugin, display_name, version, template_version in (
+        ("mastermind-sol", "Mastermind CEO", "0.2.0", "0.1.0"),
+        ("mastermind-operator", "Mastermind Operator", "0.1.0", "0.1.0"),
     ):
         manifest = json.loads(
             (ROOT / "plugins" / plugin / ".codex-plugin/plugin.json").read_text()
@@ -686,7 +686,7 @@ def test_repository_documents_match_the_closed_contract() -> None:
         )
         assert template["schema"] == "mastermind.plugin_app_bindings_template.v1"
         assert template["plugin"] == plugin
-        assert template["plugin_version"] == version
+        assert template["plugin_version"] == template_version
         assert template["generated_file"] == ".app.json"
         assert template["generated_by_wave"] == "BSC-U1"
         assert [
@@ -747,6 +747,31 @@ def test_key_workflow_semantics_are_explicit() -> None:
         "finish-operation"
     )
     assert "never self-merge" in _operator("finish-operation")
+
+
+def test_personal_ceo_release_preserves_frozen_business_u1_generation_one() -> None:
+    manifest = json.loads(
+        (ROOT / "plugins/mastermind-sol/.codex-plugin/plugin.json").read_text()
+    )
+    template = json.loads(
+        (ROOT / "plugins/mastermind-sol/references/app-bindings.template.json").read_text()
+    )
+    from integrations.business_sol_installation import bindings as business_u1
+
+    assert manifest["name"] == "mastermind-sol"
+    assert manifest["version"] == "0.2.0"
+    assert manifest["interface"]["displayName"] == "Mastermind CEO"
+
+    assert template["plugin"] == "mastermind-sol"
+    assert template["plugin_version"] == "0.1.0"
+    assert template["generated_by_wave"] == "BSC-U1"
+
+    assert business_u1.PLUGIN_NAME == "mastermind-sol"
+    assert business_u1.PLUGIN_DISPLAY_NAME == "Mastermind Sol"
+    assert business_u1.PLUGIN_VERSION == "0.1.0"
+    assert business_u1.PLUGIN_SCOPE == "WORKSPACE"
+    assert business_u1.GENERATION == 1
+    assert business_u1.GENERATED_BY_WAVE == "BSC-U1"
 
 
 @pytest.mark.parametrize(
