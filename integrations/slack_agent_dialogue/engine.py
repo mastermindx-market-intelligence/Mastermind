@@ -254,6 +254,11 @@ class ThreadRead:
     # Number of consultation packet frames classified by the reader that
     # produced this value.  The V1 engine does not classify them and leaves 0.
     packet_count: int = 0
+    # Number of packet-classified frames refused on physical origin (the
+    # authorized packet writer is the Relay bot only).  Held separately from
+    # the lifecycle ineligible count: origin authority is packet accounting,
+    # not lifecycle accounting.  The V1 engine does not classify them.
+    packet_ineligible_count: int = 0
 
 
 def _ts_order(value: str) -> Decimal:

@@ -975,6 +975,7 @@ class DialogueEngineV2:
         ineligible_count = 0
         mutated_count = 0
         packet_count = 0
+        packet_ineligible_count = 0
         packets: list[_PacketObservation] = []
 
         for transport in page.messages:
@@ -1002,6 +1003,7 @@ class DialogueEngineV2:
                 # is never credited as an existing send.
                 if raw_text.startswith(CONSULTATION_PACKET_DISCRIMINATOR_V1):
                     if transport.author_user_id != self.policy.relay_bot_user_id:
+                        packet_ineligible_count += 1
                         if collect_packets:
                             packets.append(
                                 _PacketObservation(
@@ -1070,6 +1072,7 @@ class DialogueEngineV2:
             ineligible_count=ineligible_count,
             mutated_count=mutated_count,
             packet_count=packet_count,
+            packet_ineligible_count=packet_ineligible_count,
         ), tuple(packets)
 
     async def read_thread(

@@ -2332,6 +2332,7 @@ def test_packet_frame_is_never_parsed_as_a_v2_message() -> None:
     # effect) but is no longer credited as a packet: only the Relay bot is an
     # authorized packet writer, so a foreign packet frame is refused unparsed.
     assert read.packet_count == 0
+    assert read.packet_ineligible_count == 1
     assert read.ineligible_count == 0
     assert len(read.messages) == 1
 
@@ -3011,6 +3012,34 @@ def test_unauthorized_origin_packet_cannot_satisfy_post_effect_recovery() -> Non
     assert code(exc) == "SEND_EFFECT_UNKNOWN"
     assert untrusted_ts not in str(exc.value)
     assert client.post_call_count == 1
+
+
+def test_packet_origin_refusal_does_not_touch_lifecycle_counters() -> None:
+    message = v2_message("ACK", message_key="asd-ack-v2-origin-refusal")
+    packet = packet_value(message_key="asd-packet-origin-0008")
+
+    plain = setup_client()
+    add_v2_reply(plain, message, author=BOT, ts="1787471000.000084")
+    refused = setup_client()
+    add_v2_reply(refused, message, author=BOT, ts="1787471000.000084")
+    add_packet_reply(refused, packet, author=UNTRUSTED, ts="1787471000.000085")
+
+    plain_read = run(
+        make_engine(plain).read_thread(thread_ts=THREAD_TS, context=context())
+    )
+    refused_read = run(
+        make_engine(refused).read_thread(thread_ts=THREAD_TS, context=context())
+    )
+
+    # The refusal is honest and separate: it is its own accounting, never
+    # folded into the lifecycle ineligible count, and the visible lifecycle
+    # read is identical to the same thread without the packet frame.
+    assert refused_read.packet_count == 0
+    assert refused_read.packet_ineligible_count == 1
+    assert plain_read.packet_ineligible_count == 0
+    assert refused_read.ineligible_count == plain_read.ineligible_count == 0
+    assert refused_read.mutated_count == plain_read.mutated_count == 0
+    assert refused_read.messages == plain_read.messages
 
 
 def test_relay_authored_packet_is_read_normally() -> None:
