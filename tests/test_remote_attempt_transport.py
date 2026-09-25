@@ -8,6 +8,7 @@ import pytest
 from control_plane.executive_runtime import Runtime
 from control_plane.remote_attempt_transport import (
     REMOTE_RECOVERY_OPERATIONS,
+    AttemptBoundRemoteWorkerAdapter,
     REMOTE_WORKER_OPERATIONS,
     RemoteAttemptTransportError,
     RemoteTransportPurpose,
@@ -17,7 +18,12 @@ from control_plane.remote_attempt_transport import (
 )
 from control_plane.remote_worker_transport import BrokerTransportBinding
 from control_plane.worker_adapter import WorkerExecutionAdapter
-from control_plane.worker_execution_contract import WorkerLaunchSpec
+from control_plane.worker_execution_contract import (
+    BinaryAttestation,
+    WorkerLaunchSpec,
+    WorkerProcessRef,
+    WorkerRecoveryBinding,
+)
 
 
 HOST_A = "host-" + "a" * 64
@@ -105,6 +111,195 @@ def _spec(tmp_path: Path, *, run_id: str, job_id: str) -> WorkerLaunchSpec:
         prompt="bounded job",
         result_schema_path=tmp_path / "run" / "schema.json",
     )
+
+
+def _process_ref(run_id: str) -> WorkerProcessRef:
+    return WorkerProcessRef(
+        run_id=run_id,
+        pid=7001,
+        pgid=7001,
+        process_start_identity="start-1",
+        boot_session_id="boot-1",
+        launch_nonce="nonce-1",
+        provider_session_id="provider-session-1",
+        stdout_path="/tmp/remote.stdout",
+        stderr_path="/tmp/remote.stderr",
+        result_path="/tmp/remote.result.json",
+        started_at="2026-09-25T00:00:00Z",
+        binary=BinaryAttestation(
+            path="/usr/local/bin/codex",
+            real_path="/usr/local/bin/codex",
+            version="fixture",
+            sha256="a" * 64,
+            team_identifier=None,
+            size=1,
+            device=1,
+            inode=1,
+            mode=0o755,
+            uid=0,
+            gid=0,
+            mtime_ns=1,
+        ),
+        base_sha="b" * 40,
+        session_id=7001,
+        effective_uid=451,
+        effective_gid=451,
+        real_uid=451,
+        real_gid=451,
+    )
+
+
+class _FakeAttemptFleet:
+    adapter_id = "remote-worker-broker-fleet"
+
+    def __init__(
+        self,
+        worker_id: str,
+        *,
+        process_ref: WorkerProcessRef,
+        fail_start: bool = False,
+    ) -> None:
+        self.worker_ids = (worker_id,)
+        self.process_ref = process_ref
+        self.fail_start = fail_start
+        self.start_calls = 0
+        self.reattach_bindings = []
+        self.cleanup_calls = []
+        self.last_spec = None
+
+    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+        self.start_calls += 1
+        self.last_spec = spec
+        if self.fail_start:
+            raise RuntimeError("simulated ambiguous start")
+        return self.process_ref
+
+    def reattach(
+        self, spec: WorkerLaunchSpec, binding: WorkerRecoveryBinding
+    ) -> WorkerProcessRef:
+        self.last_spec = spec
+        self.reattach_bindings.append(binding)
+        return binding.process_ref
+
+    async def status(self, ref: WorkerProcessRef):
+        return "RUNNING"
+
+    async def collect_result(self, ref: WorkerProcessRef):
+        raise AssertionError("not used in facade contract test")
+
+    async def cancel(self, ref: WorkerProcessRef, reason: str):
+        raise AssertionError("not used in facade contract test")
+
+    async def run_validation_argv(
+        self,
+        spec: WorkerLaunchSpec,
+        argv,
+        *,
+        timeout_seconds: float = 300.0,
+    ):
+        raise AssertionError("not used in facade contract test")
+
+    def launch_attestation(self, ref: WorkerProcessRef):
+        if ref != self.process_ref:
+            raise AssertionError("wrong process")
+        return {"schema_version": "fixture"}
+
+    def uid_sweep_receipt(self, subject):
+        return {"reason": "fixture", "passed": True}
+
+    async def cleanup_unbound_run(self, run_id: str):
+        self.cleanup_calls.append(run_id)
+        return {"reason": "fixture", "passed": True}
+
+
+@pytest.mark.asyncio
+async def test_static_facade_resolves_only_after_claim_and_sticks_ambiguous_start(
+    tmp_path: Path,
+) -> None:
+    runtime, job, lease = _claimed_runtime(tmp_path)
+    spec = _spec(
+        tmp_path, run_id=lease.attempt.attempt_id, job_id=job.job_id
+    )
+    ref = _process_ref(spec.run_id)
+    built = []
+
+    def fleet_factory(resolution):
+        fleet = _FakeAttemptFleet(
+            resolution.worker_id, process_ref=ref, fail_start=True
+        )
+        built.append((resolution, fleet))
+        return fleet
+
+    adapter = AttemptBoundRemoteWorkerAdapter(
+        runtime,
+        lambda host_ref, worker_id: _host_binding(
+            tmp_path, host_ref=host_ref, worker_id=worker_id
+        ),
+        fleet_factory=fleet_factory,
+    )
+    assert isinstance(adapter, WorkerExecutionAdapter)
+    assert built == []
+
+    with pytest.raises(RuntimeError, match="simulated ambiguous start"):
+        await adapter.start(spec)
+
+    assert len(built) == 1
+    resolution, fleet = built[0]
+    assert resolution.purpose is RemoteTransportPurpose.LAUNCH
+    assert resolution.worker_id == WORKER
+    assert resolution.host_ref == HOST_A
+
+    # The carrier is pinned before the ambiguous provider/network return. The
+    # Supervisor cleanup path therefore cannot re-resolve to another host.
+    receipt = await adapter.cleanup_unbound_run(spec.run_id)
+    assert receipt["passed"] is True
+    assert fleet.cleanup_calls == [spec.run_id]
+    assert len(built) == 1
+
+
+def test_static_facade_recovery_uses_recovery_only_transport(
+    tmp_path: Path,
+) -> None:
+    runtime, job, lease = _claimed_runtime(tmp_path)
+    spec = _spec(
+        tmp_path, run_id=lease.attempt.attempt_id, job_id=job.job_id
+    )
+    input_dir = spec.run_dir / "input"
+    input_dir.mkdir(parents=True)
+    prompt_path = input_dir / "worker-prompt.txt"
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    ref = _process_ref(spec.run_id)
+    outer = WorkerRecoveryBinding.bind(
+        adapter_id=AttemptBoundRemoteWorkerAdapter.adapter_id,
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
+    )
+    built = []
+
+    def fleet_factory(resolution):
+        fleet = _FakeAttemptFleet(resolution.worker_id, process_ref=ref)
+        built.append((resolution, fleet))
+        return fleet
+
+    adapter = AttemptBoundRemoteWorkerAdapter(
+        runtime,
+        lambda host_ref, worker_id: _host_binding(
+            tmp_path, host_ref=host_ref, worker_id=worker_id
+        ),
+        fleet_factory=fleet_factory,
+    )
+    recovered = adapter.reattach(spec, outer)
+
+    assert recovered == ref
+    assert len(built) == 1
+    resolution, fleet = built[0]
+    assert resolution.purpose is RemoteTransportPurpose.RECOVERY
+    assert "start" not in resolution.client.allowed_operations
+    assert len(fleet.reattach_bindings) == 1
+    assert fleet.reattach_bindings[0].adapter_id == fleet.adapter_id
+    assert fleet.reattach_bindings[0].process_ref == ref
 
 
 def test_launch_resolves_only_the_already_claimed_worker_and_host(tmp_path: Path) -> None:
