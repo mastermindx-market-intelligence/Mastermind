@@ -1203,9 +1203,20 @@ class DialogueEngineV2:
         context: DialogueContextV2,
         message_key: str,
         fingerprint: str,
+        frame_kind: SendFrameKind = SendFrameKind.MESSAGE,
     ) -> ReadMessage | None:
         try:
-            read = await self._history(thread_ts=thread_ts, context=context)
+            read, packets = await self._scan_thread(
+                thread_ts=thread_ts,
+                context=context,
+                collect_packets=frame_kind is SendFrameKind.CONSULTATION_PACKET,
+            )
+            if frame_kind is SendFrameKind.CONSULTATION_PACKET:
+                return self._find_packet(
+                    packets,
+                    message_key=message_key,
+                    fingerprint=fingerprint,
+                )
             return self._find_key(
                 read,
                 message_key=message_key,
@@ -1297,14 +1308,24 @@ class DialogueEngineV2:
         self,
         prepared: PreparedMessageSend,
     ) -> MessageReceipt:
-        existing = self._find_key(
-            await self._history(
-                thread_ts=prepared.thread_ts,
-                context=prepared.context,
-            ),
-            message_key=prepared.message_key,
-            fingerprint=prepared.fingerprint,
+        is_packet = prepared.frame_kind is SendFrameKind.CONSULTATION_PACKET
+        read, packets = await self._scan_thread(
+            thread_ts=prepared.thread_ts,
+            context=prepared.context,
+            collect_packets=is_packet,
         )
+        if is_packet:
+            existing = self._find_packet(
+                packets,
+                message_key=prepared.message_key,
+                fingerprint=prepared.fingerprint,
+            )
+        else:
+            existing = self._find_key(
+                read,
+                message_key=prepared.message_key,
+                fingerprint=prepared.fingerprint,
+            )
         if existing is not None:
             return self._duplicate_receipt(
                 existing,
@@ -1347,6 +1368,7 @@ class DialogueEngineV2:
             context=prepared.context,
             message_key=prepared.message_key,
             fingerprint=prepared.fingerprint,
+            frame_kind=prepared.frame_kind,
         )
         if recovered is None or recovered.duplicate_timestamps:
             raise DialogueEngineError("SEND_EFFECT_UNKNOWN")

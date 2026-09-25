@@ -2644,3 +2644,64 @@ def test_existing_send_message_callers_are_signature_unchanged() -> None:
 
     assert receipt.action == "POSTED"
     assert prepared.message_key == "asd-ack-v2-signature-stable-2"
+
+
+def test_packet_post_commit_ambiguity_is_send_effect_unknown() -> None:
+    from integrations.slack_agent_dialogue.engine_v2 import SendFrameKind
+
+    class AmbiguousReadAfterPostClient(InMemorySlackClient):
+        async def post_reply(self, *, channel_id: str, thread_ts: str, text: str):
+            message = await super().post_reply(
+                channel_id=channel_id, thread_ts=thread_ts, text=text
+            )
+            self.thread_history_complete = False
+            return message
+
+    client = AmbiguousReadAfterPostClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message())
+    engine = make_engine(client)
+    packet = packet_value(message_key="asd-packet-send-ambig-0001")
+    prepared = run(
+        engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=packet,
+            frame_kind=SendFrameKind.CONSULTATION_PACKET,
+        )
+    )
+
+    with pytest.raises(DialogueEngineError) as exc:
+        run(engine.commit_send_message(prepared, fingerprint=prepared.fingerprint))
+
+    assert code(exc) == "SEND_EFFECT_UNKNOWN"
+    assert code(exc) != "SERVICE_UNAVAILABLE"
+    assert client.post_call_count == 1
+
+    clean = setup_client()
+    clean_engine = make_engine(clean)
+    clean_packet = packet_value(message_key="asd-packet-send-ambig-0002")
+    clean_prepared = run(
+        clean_engine.prepare_send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=clean_packet,
+            frame_kind=SendFrameKind.CONSULTATION_PACKET,
+        )
+    )
+    receipt = run(
+        clean_engine.commit_send_message(
+            clean_prepared, fingerprint=clean_prepared.fingerprint
+        )
+    )
+
+    assert receipt.action == "POSTED"
+    assert receipt.message_key == "asd-packet-send-ambig-0002"
+    assert clean.post_call_count == 1
+    read = run(
+        clean_engine.read_consultation_packet(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message_key="asd-packet-send-ambig-0002",
+        )
+    )
+    assert read.packet == clean_packet
