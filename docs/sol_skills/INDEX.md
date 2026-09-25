@@ -91,6 +91,21 @@ Mandatory after current-state recovery for substantial continuing or modifying C
 active session. It keeps Sol on the highest-leverage unblocked critical-path dependency, prevents
 status/artifact substitution and repeated tool rediscovery, and applies the final-response gate.
 
+### `skills/paper-design-workflow/SKILL.md`
+Mandatory domain companion for any Mastermind request to inspect, edit, upgrade, review, migrate,
+or extract implementation from Paper.design. Although this domain skill lives outside
+`docs/sol_skills/`, load it plus `skills/paper-design-workflow/references/connection.md` from the
+**same pinned repository commit** before making Paper capability claims or effects. For attended
+ChatGPT work, discover the exact Paper action family first; generic Studio filesystem/process tools
+do not prove Paper unavailable. Studio Direct is the preferred Web carrier when its Paper actions are
+exposed. Studio Direct absence or degradation grants **no** Desktop Commander authority. Before any
+Paper mutation, Remote Desktop Commander may be selected only when the current Chairman assignment,
+delegated authority, or accepted canonical placement independently authorizes that exact host carrier
+and Paper action, the current RDC resource permission is observed, no explicit safety/permission denial
+applies, and no prior modifying effect is unresolved. Otherwise preserve the exact carrier gate.
+`EFFECT_UNKNOWN` never permits cross-carrier replay.
+
+
 ### `WEB_CEO_DELEGATION.md`
 Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires
 principal-duty selection, delegation economics, worker packets, capacity-aware routing, or
@@ -128,8 +143,8 @@ Use when sources disagree, a modifying response is ambiguous, transport reconnec
 stale, a duplicate appears, or a projection may be false-green.
 
 ### `CLOSEOUT.md`
-Use after accepted implementation/production proof to update the correct durable homes and
-leave the exact next action recoverable by a new session.
+Use after a material ruling, accepted implementation/production proof, verified `CHECKPOINTED_CONTINUATION`, or substantive operator handoff to update the correct durable homes
+and leave the exact mission-completion state and next action recoverable by a new session.
 
 ### `BOOTSTRAP_KERNEL.md`
 The compact text intended for Shared Project instructions. It is constitutional boot logic,
@@ -218,10 +233,20 @@ specific law.
 23. Forward execution. After current-source recovery, keep advancing the highest-leverage unblocked
     dependency in the Chairman-authorized scope. A genuine blocker freezes that lane, not the whole
     turn, while another useful independent lane remains. Supporting artifacts do not substitute for
-    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`; durable
-    work may outlive the turn only through a production-proven external owner with a real return path.
+    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`.
+    ACTIVE_EXECUTION alone defines the verified CHECKPOINTED_CONTINUATION exception: mission
+    incomplete, current checkpoint readback, justified boundary and exact next action, without
+    transferring custody or inventing a wake. Durable execution after a turn still requires a
+    production-proven external owner with a real return path.
 
 ## Modification handshake
+
+Apply gates to the specific next action, not every possible future action. Repository-only source
+work does not require a healthy Executive runtime unless that action actually invokes or depends on
+Executive authority. A later deployment or reciprocal-dialogue gate does not freeze independent
+permitted source work. No new permission is created by this scoping rule: the applicable current
+assignment, source custody, protected procedure, resource permission and effect fences remain mandatory.
+Use ACTIVE_EXECUTION's start/recovery defaults; do not add a second Slack claim or human approval.
 
 Before any modifying CEO action, all applicable gates must be true:
 

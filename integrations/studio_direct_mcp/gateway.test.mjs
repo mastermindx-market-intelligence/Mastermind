@@ -20,7 +20,8 @@ import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import http from 'node:http';
 import { Readable } from 'node:stream';
@@ -466,7 +467,113 @@ test('tools/list publishes gateway-owned neutral backend metadata and privacy-mi
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     'gateway generation must be an ephemeral random UUID, not a host-derived identifier',
   );
-  assert.equal(payload.gatewayVersion, '0.1.5');
+  assert.equal(payload.gatewayVersion, '0.1.7');
+});
+
+test('configured studio_fleet_status lists and returns the bounded public projection', async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'studio-fleet-gateway-'));
+  cleanup.dirs.push(dir);
+  const launcher = resolve(dir, 'studio-direct');
+  const owner = {
+    schema: 'mastermind.studio_direct_fleet_status.v1',
+    action: 'status',
+    accountCount: 2,
+    readyCount: 1,
+    allReady: false,
+    accounts: [
+      {
+        account: 'chatgpt1',
+        action: 'status',
+        steps: [],
+        ready: true,
+        gateway: {
+          account: 'chatgpt1', label: 'gateway-chatgpt1', loaded: true,
+          pid: 11111, port: 45018, running: true,
+        },
+        tunnel: {
+          account: 'chatgpt1', label: 'tunnel-chatgpt1', loaded: true,
+          pid: 22222, running: true, healthy: true, ready: true,
+          configurationDrift: false,
+          tunnelReady: true, controlPlanePollReady: true, gatewayReady: true,
+          transportTTL: '5h', maxConcurrentRequests: 4,
+          gatewayPort: 45018, healthPort: 45019,
+          tunnelId: 'tunnel_0123456789abcdef0123456789abcdef',
+          organizationId: null,
+          managedAlias: 'studio-direct-private-chatgpt1',
+          managedAliasRunning: false,
+        },
+      },
+      {
+        account: 'chatgpt2',
+        action: 'status',
+        steps: [],
+        ready: false,
+        gateway: {
+          account: 'chatgpt2', label: 'gateway-chatgpt2', loaded: true,
+          pid: 33333, port: 45020, running: true,
+        },
+        tunnel: {
+          account: 'chatgpt2', label: 'tunnel-chatgpt2', loaded: false,
+          pid: null, running: false, healthy: false, ready: false,
+          configurationDrift: false,
+          tunnelReady: false, controlPlanePollReady: false, gatewayReady: true,
+          transportTTL: '5h', maxConcurrentRequests: 4,
+          gatewayPort: 45020, healthPort: 45021,
+          tunnelId: 'tunnel_1123456789abcdef0123456789abcdef',
+          organizationId: null,
+          managedAlias: 'studio-direct-private-chatgpt2',
+          managedAliasRunning: false,
+        },
+      },
+    ],
+  };
+  await writeFile(
+    launcher,
+    "#!/bin/sh\nprintf '%s\\n' '" + JSON.stringify(owner) + "'\n",
+  );
+  await chmod(launcher, 0o700);
+  const launcherHash = createHash('sha256').update(await readFile(launcher)).digest('hex');
+  const { gw } = await bootGateway({
+    fleetStatus: {
+      enabled: true,
+      launcherPath: launcher,
+      launcherSha256: launcherHash,
+      timeoutMs: 5000,
+    },
+  });
+  const a = newClient('tok-alice');
+  await connect(a.client, gw.url, a.transportOpts);
+  const listed = await a.client.listTools();
+  const tool = listed.tools.find((candidate) => candidate.name === 'studio_fleet_status');
+  assert.ok(tool, 'configured fleet status tool must be advertised');
+  assert.deepEqual(
+    [
+      tool.annotations.readOnlyHint,
+      tool.annotations.destructiveHint,
+      tool.annotations.idempotentHint,
+      tool.annotations.openWorldHint,
+    ],
+    [true, false, true, false],
+  );
+  const result = await a.client.callTool(
+    { name: 'studio_fleet_status', arguments: {} },
+    undefined,
+    { timeout: 5000 },
+  );
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v1');
+  assert.equal(result.structuredContent.state, 'DEGRADED');
+  assert.equal(result.structuredContent.accountCount, 2);
+  assert.equal(result.structuredContent.readyCount, 1);
+  assert.equal(result.structuredContent.accounts[0].account, 'chatgpt1');
+  assert.equal(result.structuredContent.accounts[0].state, 'READY');
+  assert.equal(result.structuredContent.accounts[1].account, 'chatgpt2');
+  assert.equal(result.structuredContent.accounts[1].state, 'DEGRADED');
+  assert.equal(Object.hasOwn(result.structuredContent, 'owner'), false);
+  const rendered = JSON.stringify(result);
+  assert.equal(rendered.includes('45018'), false);
+  assert.equal(rendered.includes('11111'), false);
+  assert.equal(rendered.includes('tunnel_0123456789abcdef0123456789abcdef'), false);
 });
 
 test('shared backend reserves one slot for catalog traffic while typed Git remains advertised', { timeout: 15_000 }, async () => {

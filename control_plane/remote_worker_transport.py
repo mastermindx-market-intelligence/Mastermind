@@ -21,6 +21,10 @@ REMOTE_BROKER_RESPONSE_SCHEMA = "mastermind.remote_worker_broker_response/v1"
 MAX_FRAME_BYTES = 1024 * 1024
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
+_BROKER_OPERATION_RE = re.compile(
+    r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{1,127}|"
+    r"[A-Za-z0-9][A-Za-z0-9._-]{1,118}/v[1-9][0-9]{0,5})$"
+)
 _HOST_REF_RE = re.compile(r"^host-[0-9a-f]{64}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _RESERVED_UNBOUND_HOST_REFS = frozenset({"local-unbound"})
@@ -33,6 +37,9 @@ _RESPONSE_KEYS = frozenset({
     "broker_operation", "request_sha256", "outcome", "broker_response", "observed_at_ms",
 })
 _IDENTITY_KEYS = ("host_ref", "job_id", "attempt_id", "worker_id", "operation_id")
+_BOUND_AUTHORITY_KEYS = frozenset({"host_ref", "job_id", "attempt_id", "worker_id"})
+_BOUND_PAYLOAD_IDENTITY_KEYS = frozenset({"session_epoch_id", "process_generation_id"})
+_ATTEMPT_RUN_OPERATIONS = frozenset({"start", "status", "collect", "cancel", "validate"})
 
 
 class TransportValidationError(ValueError):
@@ -123,12 +130,84 @@ def validate_host_ref(value: Any) -> str:
     return value
 
 
+def validate_broker_operation(value: Any) -> str:
+    if not isinstance(value, str) or _BROKER_OPERATION_RE.fullmatch(value) is None:
+        raise TransportValidationError("transport identity is invalid")
+    return value
+
+
 def _validate_id(name: str, value: Any) -> str:
     if name == "host_ref":
         return validate_host_ref(value)
+    if name == "broker_operation":
+        return validate_broker_operation(value)
     if not isinstance(value, str) or not _ID_RE.fullmatch(value):
         raise TransportValidationError("transport identity is invalid")
     return value
+
+
+def payload_retargets_authority(
+    broker_operation: str,
+    payload: Mapping[str, Any],
+    identity: Mapping[str, Any],
+    *,
+    bound_payload_identity: Mapping[str, str] | None = None,
+) -> bool:
+    """Return whether a broker payload disagrees with its authenticated envelope.
+
+    Ordinary Worker Broker runs are Attempt-owned, so their ``run_id`` aliases
+    the outer ``attempt_id``.  OHF generation identities remain bound only when
+    the control-side owner supplies their established values; the gateway does
+    not invent a second generation registry.
+    """
+
+    operation = validate_broker_operation(broker_operation)
+    if not isinstance(payload, Mapping) or set(identity) != set(_IDENTITY_KEYS):
+        raise TransportValidationError("remote request payload identity is invalid")
+    normalized_identity = {
+        key: _validate_id(key, identity.get(key)) for key in _IDENTITY_KEYS
+    }
+    payload_identity: Mapping[str, str] | None
+    if bound_payload_identity is None:
+        payload_identity = None
+    elif isinstance(bound_payload_identity, Mapping):
+        payload_identity = bound_payload_identity
+    else:
+        raise TransportValidationError("remote request payload identity is invalid")
+
+    def retargets(value: Any) -> bool:
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                if not isinstance(key, str):
+                    raise TransportValidationError(
+                        "remote request payload identity is invalid"
+                    )
+                if (
+                    key in _BOUND_AUTHORITY_KEYS
+                    and child != normalized_identity[key]
+                ):
+                    return True
+                if (
+                    key == "run_id"
+                    and operation in _ATTEMPT_RUN_OPERATIONS
+                    and child != normalized_identity["attempt_id"]
+                ):
+                    return True
+                if (
+                    payload_identity is not None
+                    and key in _BOUND_PAYLOAD_IDENTITY_KEYS
+                ):
+                    expected = payload_identity.get(key)
+                    if expected is None or child != expected:
+                        return True
+                if retargets(child):
+                    return True
+            return False
+        if isinstance(value, (list, tuple)):
+            return any(retargets(child) for child in value)
+        return False
+
+    return retargets(payload)
 
 
 def request_sha256(request: Mapping[str, Any]) -> str:
@@ -182,6 +261,9 @@ def validate_request(
         raise TransportValidationError("remote request hash is invalid")
     if actual_hash != request_sha256(request):
         raise TransportValidationError("remote request hash is invalid")
+    envelope_identity = {key: request[key] for key in _IDENTITY_KEYS}
+    if payload_retargets_authority(operation, payload, envelope_identity):
+        raise TransportValidationError("remote request payload retargets authority")
     return dict(request)
 
 

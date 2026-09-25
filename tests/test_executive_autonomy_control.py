@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import copy
 import dataclasses
 import hashlib
+import io
 import json
 import os
+import re
+import select
 import socket
 import stat
 import subprocess
@@ -107,8 +111,8 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
     disarm = parser.parse_args(["disarm", "--expected-sha", SHA])
     assert vars(disarm) == {"command": "disarm", "expected_sha": SHA}
 
-    # R17 B1: the CEO-submit operation domain is the SAME parser, three verbs,
-    # each bounded to --expected-sha alone.
+    # The CEO-submit operation domain is the SAME parser: three state verbs plus
+    # one same-transaction reconciliation verb, each bounded to --expected-sha alone.
     assert vars(parser.parse_args(["ceo-submit-status", "--expected-sha", SHA])) == {
         "command": "ceo-submit-status",
         "expected_sha": SHA,
@@ -121,9 +125,13 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "command": "ceo-submit-disarm",
         "expected_sha": SHA,
     }
+    assert vars(parser.parse_args(["ceo-submit-reconcile", "--expected-sha", SHA])) == {
+        "command": "ceo-submit-reconcile",
+        "expected_sha": SHA,
+    }
 
-    # The command set is EXACTLY the closed six: no seventh verb exists, and the
-    # three legacy verbs are still present.
+    # The command set is EXACTLY the closed seven: no generic recovery/debug verb
+    # exists, and the three legacy autonomy verbs remain present.
     subparser_actions = [
         action
         for action in parser._actions
@@ -137,6 +145,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "ceo-submit-status",
         "ceo-submit-arm",
         "ceo-submit-disarm",
+        "ceo-submit-reconcile",
     }
 
     # A CEO verb carries no COO authority flag: the arm admission surface of the
@@ -164,7 +173,12 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
     ):
         assert forbidden not in help_text
 
-    for verb in ("ceo-submit-status", "ceo-submit-arm", "ceo-submit-disarm"):
+    for verb in (
+        "ceo-submit-status",
+        "ceo-submit-arm",
+        "ceo-submit-disarm",
+        "ceo-submit-reconcile",
+    ):
         ceo_help = subparser_actions[0].choices[verb].format_help()
         for forbidden in (
             "--system-root",
@@ -342,6 +356,16 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     assert "must run as root" in wrapper
     assert "exact installed release" in wrapper
     assert "exec " in wrapper
+    for verb in (
+        "status",
+        "arm",
+        "disarm",
+        "ceo-submit-status",
+        "ceo-submit-arm",
+        "ceo-submit-disarm",
+        "ceo-submit-reconcile",
+    ):
+        assert verb in wrapper
     for forbidden in ("eval ", "bash -c", "sh -c", "curl ", "security "):
         assert forbidden not in wrapper
 
@@ -935,6 +959,75 @@ def test_concurrent_marker_race_never_rolls_back_a_foreign_transaction():
     assert host.worker_config["operator_harness_armed"] is False
 
 
+def test_arm_begin_ownership_failure_refuses_without_rollback_or_service_effects():
+    host = FakeTransactionHost()
+    before_control = copy.deepcopy(host.control_config)
+    before_worker = copy.deepcopy(host.worker_config)
+    effects = []
+
+    def ownership_failure(_transaction):
+        # The failed creator's marker is durable evidence, but this process did
+        # not acquire its execution owner and may not operate on that marker.
+        host.marker = True
+        raise control.TransactionOwnershipError()
+
+    host.begin_transaction = ownership_failure
+    host.stop_services = lambda _sha: effects.append("stop")
+    host.rollback_disarmed = lambda *_args, **_kwargs: effects.append("rollback")
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        control.execute_arm(host, _arm_request(), now=NOW)
+
+    assert effects == []
+    assert host.marker is True
+    assert host.control_config == before_control
+    assert host.worker_config == before_worker
+    assert host.receipt is None
+
+
+def test_arm_owned_post_begin_failure_still_runs_the_normal_rollback():
+    host = FakeTransactionHost(fail_after="candidates")
+    rollback = []
+    real_rollback = host.rollback_disarmed
+
+    def recorded_rollback(transaction, receipt):
+        rollback.append(transaction.transaction_id)
+        real_rollback(transaction, receipt)
+
+    host.rollback_disarmed = recorded_rollback
+
+    with pytest.raises(control.ArmTransactionError) as raised:
+        control.execute_arm(host, _arm_request(), now=NOW)
+
+    assert raised.value.code == "arm_rolled_back"
+    assert rollback == ["autonomy-deadbeefcafe"]
+    assert host.marker is False
+    assert host.services == "STOPPED"
+    assert host.receipt["state"] == "DISARMED"
+
+
+def test_arm_owned_partial_begin_failure_still_runs_the_normal_rollback():
+    host = FakeTransactionHost(fail_after="lock")
+    rollback = []
+    real_rollback = host.rollback_disarmed
+
+    def recorded_rollback(transaction, receipt):
+        rollback.append(transaction.transaction_id)
+        real_rollback(transaction, receipt)
+
+    host.rollback_disarmed = recorded_rollback
+
+    with pytest.raises(control.ArmTransactionError) as raised:
+        control.execute_arm(host, _arm_request(), now=NOW)
+
+    assert raised.value.code == "arm_rolled_back"
+    assert host.transaction_calls == ["lock"]
+    assert rollback == ["autonomy-deadbeefcafe"]
+    assert host.marker is False
+    assert host.services == "STOPPED"
+    assert host.receipt["state"] == "DISARMED"
+
+
 def test_unproven_rollback_retains_marker_and_returns_effect_unknown():
     host = FakeTransactionHost(fail_after="control", rollback_fails=True)
     with pytest.raises(control.TransactionEffectUnknown) as raised:
@@ -1088,7 +1181,28 @@ def test_transaction_order_and_static_safety_fences_are_structural():
     )
 
     production = source.split("class ProductionTransactionHost", 1)[1]
-    assert "os.mkdir(AUTONOMY_TRANSACTION, 0o700)" in production
+    # The canonical marker is never mkdir'd into visibility: it exists only as
+    # a private generation renamed into place, so the first visible state is
+    # the complete sealed marker and no empty canonical directory can be
+    # stolen.  The publication itself stays serialized, no-clobber and
+    # verified against the exact held inode.
+    assert "os.mkdir(AUTONOMY_TRANSACTION" not in production
+    create = production.split("def _create_marker", 1)[1].split("\n    def ", 1)[0]
+    assert "os.mkdir(generation, 0o700)" in create
+    assert "os.rename(generation, AUTONOMY_TRANSACTION)" in create
+    assert "_seal_generation(" in create
+    assert "_publication_mutex()" in create
+    assert "_require_canonical_absent()" in create
+    assert "_verify_published_inode(" in create
+    assert "fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)" in create
+    assert create.index("fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)") < create.index(
+        "_seal_generation("
+    ) < create.index("_publication_mutex()") < create.index(
+        "os.rename(generation, AUTONOMY_TRANSACTION)"
+    ) < create.index("_fsync_directory(CONFIG_ROOT)") < create.index(
+        "_verify_published_inode("
+    )
+    assert "TransactionEffectUnknown" in create
     assert "os.fsync(" in source
     assert "os.replace(" in source
     assert "prior-control.json" in production
@@ -2203,12 +2317,11 @@ def test_nonobject_receipt_is_refused_at_every_level(value, capsys):
 
 def _strict_receipt_payload(raw):
     host = control.ProductionCeoSubmitHost()
-    read = control._read_root_file
 
     def bounded_read(*args, **kwargs):
         if len(raw) > control._MAX_JSON_BYTES:
             raise control.HostControlError("config_identity_unavailable")
-        return read(*args, **kwargs)
+        return raw, mock.Mock()
 
     with mock.patch.object(control.Path, "exists", return_value=True), mock.patch.object(
         control.Path, "is_symlink", return_value=False
@@ -2257,6 +2370,13 @@ def test_production_receipt_read_boundary_refuses_duplicate_valid_keys():
     assert duplicated != raw
     assert _strict_receipt_payload(duplicated) is None
     json.loads(duplicated, object_pairs_hook=dict)
+
+
+def test_production_receipt_read_boundary_accepts_exact_valid_fixture_bytes():
+    host = _armed_ceo_submit_host()
+    raw = control._encoded_json(host.receipt)
+
+    assert _strict_receipt_payload(raw) == host.receipt
 
 
 @pytest.mark.parametrize(
@@ -3555,6 +3675,42 @@ def test_the_real_submit_ceo_intent_sink_admits_only_the_transaction_produced_st
     assert "ceo_submit_sink_eligible" not in service_source
 
 
+def test_ceo_submit_control_boundary_enables_only_control_before_bootstrap(monkeypatch):
+    """A disabled control override must not strand the control-only CEO-submit reconcile."""
+
+    host = control.ProductionCeoSubmitHost()
+    ledger: list[list[str]] = []
+    probes = {"count": 0}
+
+    def fake_run(cmd, **kw):
+        argv = list(cmd)
+        ledger.append(argv)
+        if argv[:2] == ["/bin/launchctl", "print"]:
+            probes["count"] += 1
+            return mock.Mock(returncode=1 if probes["count"] == 1 else 0)
+        return mock.Mock(returncode=0)
+
+    monkeypatch.setattr(control.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        control.ProductionCeoSubmitHost,
+        "_require_control_plist_safe",
+        staticmethod(lambda: None),
+        raising=False,
+    )
+    monkeypatch.setattr(host, "_ensure_control_launchd_preimage", lambda: True)
+
+    host.reconcile_control_service(SHA)
+
+    non_probes = [argv for argv in ledger if argv[:2] != ["/bin/launchctl", "print"]]
+    assert non_probes == [
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+        ["/bin/launchctl", "bootstrap", "system", os.fspath(control.CONTROL_PLIST)],
+    ]
+    joined = "\n".join(" ".join(argv) for argv in ledger)
+    assert control.WORKER_LABEL not in joined
+    assert os.fspath(control.WORKER_PLIST) not in joined
+
+
 def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundary(
     monkeypatch,
 ):
@@ -3602,6 +3758,7 @@ def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundar
 
     host = control.ProductionCeoSubmitHost()
     assert host._active_transaction is None
+    monkeypatch.setattr(host, "_ensure_control_launchd_preimage", lambda: True)
     monkeypatch.setattr(
         control.ProductionCeoSubmitHost,
         "_require_control_plist_safe",
@@ -3614,7 +3771,8 @@ def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundar
     absent = drive(control_loaded=False)
     assert_control_only(absent)
     assert non_probes(absent) == [
-        ["/bin/launchctl", "bootstrap", "system", os.fspath(control.CONTROL_PLIST)]
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+        ["/bin/launchctl", "bootstrap", "system", os.fspath(control.CONTROL_PLIST)],
     ]
 
     # PRESENT: the control label is loaded, so the boundary kickstarts it. This
@@ -3623,7 +3781,8 @@ def test_ceo_submit_reconcile_control_service_can_never_reach_the_worker_boundar
     present = drive(control_loaded=True)
     assert_control_only(present)
     assert non_probes(present) == [
-        ["/bin/launchctl", "kickstart", "-k", f"system/{control.CONTROL_LABEL}"]
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+        ["/bin/launchctl", "kickstart", "-k", f"system/{control.CONTROL_LABEL}"],
     ]
 
     for ledger in (absent, present):
@@ -3693,18 +3852,572 @@ def test_ceo_submit_control_boundary_refuses_when_the_launchd_call_does_not_regi
         staticmethod(lambda: None),
         raising=False,
     )
+    monkeypatch.setattr(host, "_ensure_control_launchd_preimage", lambda: True)
 
     with pytest.raises(control.TransactionEffectUnknown):
         host.reconcile_control_service(SHA)
 
     assert host._active_transaction is None
     verbs = [argv for argv in ledger if argv[:2] != ["/bin/launchctl", "print"]]
-    assert verbs == [expected_argv], case
+    assert verbs == [
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+        expected_argv,
+    ], case
     # The read-back ran strictly AFTER the launchd verb: the refusal is the
     # read-back's, never a skipped call.
     assert ledger.index(expected_argv) < len(ledger) - 1
     assert ledger[-1][:2] == ["/bin/launchctl", "print"]
     assert probes["count"] >= 2
+
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("disabled", True),
+        ("true", True),
+        ("enabled", False),
+        ("false", False),
+    ],
+)
+def test_ceo_submit_launchd_override_reader_accepts_only_explicit_target_rows(
+    monkeypatch, state, expected
+):
+    payload = (
+        "disabled services = {\n"
+        '\t"com.apple.example" => enabled\n'
+        f'\t"{control.CONTROL_LABEL}" => {state}\n'
+        "}\n"
+    ).encode()
+
+    monkeypatch.setattr(
+        control.ProductionCeoSubmitHost,
+        "_capture_control_launchd_disabled_output",
+        staticmethod(lambda: payload),
+    )
+
+    assert control.ProductionCeoSubmitHost._read_control_launchd_disabled_override() is expected
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'disabled services = {\n"com.apple.example" => enabled\n}\n',
+        (
+            'disabled services = {\n'
+            f'"{control.CONTROL_LABEL}" => disabled\n'
+            f'"{control.CONTROL_LABEL}" => disabled\n'
+            '}\n'
+        ).encode(),
+        (
+            'disabled services = {\n'
+            f'"{control.CONTROL_LABEL}" => banana\n'
+            '}\n'
+        ).encode(),
+        b"not the launchd table\n",
+    ],
+)
+def test_ceo_submit_launchd_override_reader_refuses_missing_duplicate_or_malformed(
+    monkeypatch, payload
+):
+    monkeypatch.setattr(
+        control.ProductionCeoSubmitHost,
+        "_capture_control_launchd_disabled_output",
+        staticmethod(lambda: payload),
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        control.ProductionCeoSubmitHost._read_control_launchd_disabled_override()
+
+
+def test_ceo_submit_launchd_override_capture_bounds_before_buffering_and_reaps(
+    monkeypatch,
+):
+    real_popen = control.subprocess.Popen
+    spawned = {}
+
+    def oversized_launchctl(argv, **kwargs):
+        assert argv == ["/bin/launchctl", "print-disabled", "system"]
+        process = real_popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys,time;"
+                    "sys.stdout.buffer.write(b'x' * "
+                    f"{control._MAX_LAUNCHCTL_DISABLED_BYTES + 1});"
+                    "sys.stdout.flush();time.sleep(10)"
+                ),
+            ],
+            **kwargs,
+        )
+        spawned["process"] = process
+        return process
+
+    monkeypatch.setattr(control.subprocess, "Popen", oversized_launchctl)
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        control.ProductionCeoSubmitHost._capture_control_launchd_disabled_output()
+
+    assert spawned["process"].poll() is not None
+
+
+def test_ceo_submit_control_boundary_seals_preimage_before_enable(monkeypatch):
+    host = control.ProductionCeoSubmitHost()
+    ledger = []
+
+    monkeypatch.setattr(
+        host,
+        "_ensure_control_launchd_preimage",
+        lambda: ledger.append(("preimage", True)) or True,
+    )
+    monkeypatch.setattr(host, "_loaded", lambda _label: True)
+    monkeypatch.setattr(
+        host,
+        "_run_fixed",
+        lambda argv, **kwargs: ledger.append(("run", list(argv))),
+    )
+
+    host._reconcile_control_boundary(SHA)
+
+    assert ledger[0] == ("preimage", True)
+    assert ledger[1] == (
+        "run",
+        ["/bin/launchctl", "enable", f"system/{control.CONTROL_LABEL}"],
+    )
+    assert ledger[2] == (
+        "run",
+        ["/bin/launchctl", "kickstart", "-k", f"system/{control.CONTROL_LABEL}"],
+    )
+
+
+@pytest.mark.parametrize(("prior_disabled", "expect_disable"), [(True, True), (False, False)])
+def test_ceo_submit_rollback_restores_and_proves_launchd_override(
+    monkeypatch, prior_disabled, expect_disable
+):
+    prior = _ceo_submit_evidence(armed=False)
+    transaction = _rollback_transaction(
+        prior, control.derive_ceo_submit_candidate(prior, armed=False)
+    )
+    host = control.ProductionCeoSubmitHost()
+    ledger = []
+    manifest = {
+        "transaction_id": transaction.transaction_id,
+        "expected_sha": transaction.expected_sha,
+        control._CONTROL_LAUNCHD_PREIMAGE_FIELD: prior_disabled,
+    }
+    monkeypatch.setattr(host, "_manifest", lambda: dict(manifest))
+    monkeypatch.setattr(
+        host,
+        "_run_fixed",
+        lambda argv, **kwargs: ledger.append(("run", list(argv))),
+    )
+    monkeypatch.setattr(
+        host,
+        "_read_control_launchd_disabled_override",
+        lambda: ledger.append(("readback", prior_disabled)) or prior_disabled,
+    )
+    monkeypatch.setattr(
+        host,
+        "_persist_phase",
+        lambda _tx, phase, **kwargs: ledger.append(("phase", phase)),
+    )
+
+    host._restore_control_launchd_preimage_if_recorded(transaction)
+
+    disable = ["/bin/launchctl", "disable", f"system/{control.CONTROL_LABEL}"]
+    assert (("run", disable) in ledger) is expect_disable
+    assert ("readback", prior_disabled) in ledger
+    assert ledger[-1] == ("phase", "CONTROL_OVERRIDE_RESTORED")
+
+
+def test_ceo_submit_rollback_keeps_marker_when_launchd_restore_readback_disagrees(
+    monkeypatch,
+):
+    prior = _ceo_submit_evidence(armed=False)
+    transaction = _rollback_transaction(
+        prior, control.derive_ceo_submit_candidate(prior, armed=False)
+    )
+    host = control.ProductionCeoSubmitHost()
+    manifest = {
+        "transaction_id": transaction.transaction_id,
+        "expected_sha": transaction.expected_sha,
+        control._CONTROL_LAUNCHD_PREIMAGE_FIELD: True,
+    }
+    monkeypatch.setattr(host, "_manifest", lambda: dict(manifest))
+    monkeypatch.setattr(host, "_run_fixed", lambda *args, **kwargs: None)
+    monkeypatch.setattr(host, "_read_control_launchd_disabled_override", lambda: False)
+    phases = []
+    monkeypatch.setattr(
+        host, "_persist_phase", lambda _tx, phase, **kwargs: phases.append(phase)
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host._restore_control_launchd_preimage_if_recorded(transaction)
+
+    assert phases == []
+
+
+def test_ceo_submit_enable_response_loss_is_effect_unknown_and_not_auto_rolled_back(
+    monkeypatch,
+):
+    host = FakeCeoSubmitHost()
+    rollback_calls = []
+    monkeypatch.setattr(
+        host,
+        "reconcile_control_service",
+        lambda _sha: (_ for _ in ()).throw(control.TransactionEffectUnknown()),
+    )
+    monkeypatch.setattr(
+        host,
+        "rollback_ceo_submit",
+        lambda *args, **kwargs: rollback_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        control.execute_ceo_submit_arm(host, _ceo_submit_request(), now=NOW)
+
+    assert host.marker is True
+    assert rollback_calls == []
+
+
+
+def test_ceo_submit_process_recovery_reuses_marker_and_rolls_back_to_archived_preimage(
+    monkeypatch,
+):
+    prior = _ceo_submit_evidence(armed=False)
+    transaction_id = "autonomy-7a7a7a7a7a7a"
+    host = control.ProductionCeoSubmitHost()
+    manifest = {
+        "operation": "CEO_SUBMIT_ARM",
+        "phase": "CONTROL_OVERRIDE_SNAPSHOTTED",
+        "transaction_id": transaction_id,
+        "expected_sha": SHA,
+        control._CONTROL_LAUNCHD_PREIMAGE_FIELD: True,
+    }
+    rollback = []
+    ownership = []
+
+    monkeypatch.setattr(host, "effective_uid", lambda: 0)
+    monkeypatch.setattr(host, "require_exact_install", lambda _sha: SHA)
+    monkeypatch.setattr(
+        host,
+        "_claim_transaction_owner",
+        lambda: ownership.append("claimed"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        host,
+        "_manifest",
+        lambda: ownership.append("manifest") or dict(manifest),
+    )
+    monkeypatch.setattr(host, "_archived_configs", lambda _sha: prior)
+    monkeypatch.setattr(
+        host,
+        "executive_app_binding",
+        lambda: FakeCeoSubmitHost().executive_app_binding(),
+    )
+    monkeypatch.setattr(
+        host,
+        "ceo_submit_separation",
+        lambda _configs: control.CeoSubmitSeparation(
+            ceo_ingress_app_armed=True,
+            ceo_ingress_app_peer_uid=458,
+            ceo_ingress_peer_uid=452,
+            coo_autonomy_armed=False,
+            coo_operator_harness_armed=False,
+            worker_operator_harness_armed=False,
+        ),
+    )
+    monkeypatch.setattr(
+        host,
+        "rollback_ceo_submit",
+        lambda tx, receipt: (
+            ownership.append("rollback"),
+            rollback.append((tx, receipt)),
+        ),
+    )
+
+    result = host.recover_ceo_submit_effect_unknown(
+        control.CeoSubmitRequest(expected_sha=SHA), now=NOW
+    )
+
+    assert result.transaction_id == transaction_id
+    assert result.state == "CEO_SUBMIT_DISARMED"
+    assert result.replayed is True
+    assert ownership == ["claimed", "manifest", "rollback"]
+    assert len(rollback) == 1
+    recovered, receipt = rollback[0]
+    assert recovered.transaction_id == transaction_id
+    assert recovered.prior_configs.control_sha256 == prior.control_sha256
+    assert recovered.candidates.control_sha256 == prior.control_sha256
+    assert recovered.candidates.worker_sha256 == prior.worker_sha256
+    assert receipt["state"] == "CEO_SUBMIT_DISARMED"
+    assert receipt["transaction_id"] == transaction_id
+
+
+def test_ceo_submit_process_recovery_refuses_before_reading_an_unowned_marker(
+    monkeypatch,
+):
+    host = control.ProductionCeoSubmitHost()
+    ledger = []
+    monkeypatch.setattr(host, "effective_uid", lambda: 0)
+    monkeypatch.setattr(host, "require_exact_install", lambda _sha: SHA)
+    monkeypatch.setattr(
+        host,
+        "_claim_transaction_owner",
+        lambda: (
+            ledger.append("claim"),
+            (_ for _ in ()).throw(control.TransactionEffectUnknown()),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        host,
+        "_manifest",
+        lambda: ledger.append("manifest") or {},
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host.recover_ceo_submit_effect_unknown(
+            control.CeoSubmitRequest(expected_sha=SHA), now=NOW
+        )
+
+    assert ledger == ["claim"]
+
+
+def test_transaction_owner_claim_refuses_a_competing_writer_and_closes_its_fd(
+    monkeypatch,
+):
+    host = control.ProductionCeoSubmitHost()
+    info = types.SimpleNamespace(
+        st_mode=stat.S_IFDIR | 0o700,
+        st_uid=0,
+        st_gid=0,
+        st_dev=41,
+        st_ino=73,
+    )
+    ledger = []
+    monkeypatch.setattr(host, "_config_root_safe", lambda: ledger.append("root"))
+    monkeypatch.setattr(
+        host, "_transaction_present", lambda: ledger.append("marker") or True
+    )
+    monkeypatch.setattr(
+        control.os,
+        "open",
+        lambda path, flags: ledger.append(("open", path, flags)) or 91,
+    )
+    monkeypatch.setattr(control.os, "fstat", lambda fd: info)
+    monkeypatch.setattr(control.Path, "lstat", lambda _path: info)
+    monkeypatch.setattr(
+        control.fcntl,
+        "flock",
+        lambda fd, operation: (
+            ledger.append(("flock", fd, operation)),
+            (_ for _ in ()).throw(BlockingIOError()),
+        ),
+    )
+    monkeypatch.setattr(
+        control.os, "close", lambda fd: ledger.append(("close", fd))
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host._claim_transaction_owner()
+
+    assert ("flock", 91, control.fcntl.LOCK_EX | control.fcntl.LOCK_NB) in ledger
+    assert ledger[-1] == ("close", 91)
+    assert host._transaction_owner_fd is None
+
+
+def test_production_arm_begin_types_a_failure_before_ownership(monkeypatch, tmp_path):
+    host = control.ProductionTransactionHost()
+    transaction = mock.Mock()
+    monkeypatch.setattr(
+        control, "AUTONOMY_TRANSACTION", tmp_path / "absent-transaction.lock"
+    )
+    monkeypatch.setattr(
+        host,
+        "_create_marker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            control.TransactionEffectUnknown()
+        ),
+    )
+
+    with pytest.raises(control.TransactionOwnershipError):
+        host.begin_transaction(transaction)
+
+    assert host._transaction_owner_fd is None
+    assert host._active_transaction is None
+
+
+def test_production_arm_begin_preserves_an_owned_partial_failure(
+    monkeypatch, tmp_path
+):
+    host = control.ProductionTransactionHost()
+    host._transaction_owner_fd = 91
+    transaction = mock.Mock()
+    failure = RuntimeError("archive write failed after ownership")
+    monkeypatch.setattr(
+        control, "AUTONOMY_TRANSACTION", tmp_path / "absent-transaction.lock"
+    )
+    monkeypatch.setattr(
+        host,
+        "_create_marker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        host.begin_transaction(transaction)
+
+    assert raised.value is failure
+    assert host._transaction_owner_fd == 91
+    assert host._active_transaction is transaction
+
+
+def test_transaction_owner_directory_lock_excludes_competing_process_carriers(
+    monkeypatch, tmp_path
+):
+    marker = tmp_path / "autonomy-transaction.lock"
+    marker.mkdir(mode=0o700)
+    real_fstat = os.fstat
+    probe_fd = os.open(marker, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        actual = real_fstat(probe_fd)
+    finally:
+        os.close(probe_fd)
+    safe = types.SimpleNamespace(
+        st_mode=stat.S_IFDIR | 0o700,
+        st_uid=0,
+        st_gid=0,
+        st_dev=actual.st_dev,
+        st_ino=actual.st_ino,
+    )
+    first = control.ProductionCeoSubmitHost()
+    second = control.ProductionCeoSubmitHost()
+    for host in (first, second):
+        monkeypatch.setattr(host, "_config_root_safe", lambda: None)
+        monkeypatch.setattr(host, "_transaction_present", lambda: True)
+    monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
+    monkeypatch.setattr(control.os, "fstat", lambda _fd: safe)
+    monkeypatch.setattr(control.Path, "lstat", lambda _path: safe)
+
+    first._claim_transaction_owner()
+    try:
+        with pytest.raises(control.TransactionEffectUnknown):
+            second._claim_transaction_owner()
+        assert first._transaction_owner_fd is not None
+        assert second._transaction_owner_fd is None
+    finally:
+        first._release_transaction_owner()
+
+    second._claim_transaction_owner()
+    second._release_transaction_owner()
+
+
+def test_existing_disarm_claims_transaction_owner_before_reading_identity(
+    monkeypatch, tmp_path
+):
+    marker = tmp_path / "autonomy-transaction.lock"
+    marker.mkdir()
+    host = control.ProductionTransactionHost()
+    ledger = []
+    monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
+    monkeypatch.setattr(
+        host, "_claim_transaction_owner", lambda: ledger.append("claim")
+    )
+    monkeypatch.setattr(
+        host,
+        "_manifest",
+        lambda: ledger.append("manifest")
+        or {"transaction_id": "autonomy-121212121212"},
+    )
+
+    transaction_id = host.new_transaction_id()
+
+    assert transaction_id == "autonomy-121212121212"
+    assert ledger == ["claim", "manifest"]
+
+
+@pytest.mark.parametrize(
+    ("mode", "uid", "gid", "has_acl"),
+    [
+        (stat.S_IFLNK | 0o777, 0, 0, False),
+        (stat.S_IFDIR | 0o755, 0, 0, False),
+        (stat.S_IFDIR | 0o700, 501, 0, False),
+        (stat.S_IFDIR | 0o700, 0, 20, False),
+        (stat.S_IFDIR | 0o700, 0, 0, True),
+    ],
+)
+def test_transaction_owner_claim_refuses_unsafe_marker_before_open(
+    monkeypatch, mode, uid, gid, has_acl
+):
+    host = control.ProductionCeoSubmitHost()
+    opened = []
+    info = types.SimpleNamespace(st_mode=mode, st_uid=uid, st_gid=gid)
+    monkeypatch.setattr(host, "_config_root_safe", lambda: None)
+    monkeypatch.setattr(control.Path, "lstat", lambda _path: info)
+    monkeypatch.setattr(control, "_has_acl", lambda _path: has_acl)
+    monkeypatch.setattr(
+        control.os, "open", lambda *args, **kwargs: opened.append((args, kwargs))
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host._claim_transaction_owner()
+
+    assert opened == []
+    assert host._transaction_owner_fd is None
+
+
+def test_transaction_owner_is_claimed_by_creation_and_held_through_completion():
+    source = Path(control.__file__).read_text(encoding="utf-8")
+    production = source.split("class ProductionTransactionHost", 1)[1]
+    create = production.split("def _create_marker", 1)[1].split("\n    def ", 1)[0]
+    complete = production.split("def complete_transaction", 1)[1].split(
+        "\n    def ", 1
+    )[0]
+
+    # Creation owns the marker before the canonical path exists, and the
+    # descriptor it published with is the one only a lawful settlement
+    # releases; completion still removes the marker before releasing it.
+    assert create.index("fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)") < create.index(
+        "_seal_generation("
+    )
+    assert create.index("os.rename(generation, AUTONOMY_TRANSACTION)") < create.index(
+        "_transaction_owner_fd = descriptor"
+    )
+    assert complete.index("AUTONOMY_TRANSACTION.rmdir()") < complete.index(
+        "_release_transaction_owner"
+    )
+
+
+def test_ceo_submit_process_recovery_refuses_legacy_marker_without_launchd_preimage(
+    monkeypatch,
+):
+    host = control.ProductionCeoSubmitHost()
+    monkeypatch.setattr(host, "effective_uid", lambda: 0)
+    monkeypatch.setattr(host, "require_exact_install", lambda _sha: SHA)
+    monkeypatch.setattr(host, "_claim_transaction_owner", lambda: None)
+    monkeypatch.setattr(
+        host,
+        "_manifest",
+        lambda: {
+            "operation": "CEO_SUBMIT_ARM",
+            "phase": "RECEIPT_REPLACED",
+            "transaction_id": "autonomy-8b8b8b8b8b8b",
+            "expected_sha": SHA,
+        },
+    )
+    called = []
+    monkeypatch.setattr(
+        host, "rollback_ceo_submit", lambda *args, **kwargs: called.append(True)
+    )
+
+    with pytest.raises(control.TransactionEffectUnknown):
+        host.recover_ceo_submit_effect_unknown(
+            control.CeoSubmitRequest(expected_sha=SHA), now=NOW
+        )
+
+    assert called == []
 
 
 def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecycle_script():
@@ -3726,6 +4439,7 @@ def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecy
         "CONTROL_LABEL",
         "cwd=release",
         "_require_control_plist_safe",
+        "enable",
     ):
         assert token in boundary
 
@@ -3778,6 +4492,9 @@ class _RollbackProbeHost(control.ProductionCeoSubmitHost):
 
     def _persist_phase(self, transaction, phase, *, operation=None):
         self.ledger.append(("phase", phase))
+
+    def _restore_control_launchd_preimage_if_recorded(self, transaction):
+        self.ledger.append(("restore_launchd", None))
 
     def write_ceo_submit_receipt(self, transaction, receipt):
         self.ledger.append(("receipt", None))
@@ -3906,6 +4623,7 @@ def test_ceo_submit_rollback_proves_the_live_control_service_before_removing_the
         probe_entries[0],
         ("phase", "ADMISSION_BOUND"),
         ("phase", "ROLLBACK_CONTROL_PROVEN"),
+        ("restore_launchd", None),
         ("complete", None),
     ]
     assert host.ledger[-1] == ("complete", None)
@@ -6792,3 +7510,1340 @@ def test_arm_and_authority_read_share_every_authority_invariant(case, expected_c
     assert read_host.control_writes == 1  # the original legitimate ARM only
     assert read_host.worker_writes == 0
     assert read_host.receipt_writes == 1
+
+
+# ---------------------------------------------------------------------------
+# Transaction marker publication repair harness.
+#
+# The ONE ``AUTONOMY_TRANSACTION`` marker must be complete -- recoverable
+# identity, both exact preimages and the creator's own directory flock --
+# before the canonical path is visible for the first time, and first
+# publication must be serialized on the trusted config-directory inode lock.
+# These tests import the FULL production module and run its real transaction
+# machinery (real directory ``flock``, real ``fsync``, real atomic writes, the
+# real publication rename, real inode readback) on a disposable filesystem,
+# with competing creators and recovery claimants in SEPARATE interpreter
+# processes.  Nothing is installed; no installed, mounted or service path is
+# touched.
+#
+# Exactly three hermetic adapter families are supplied.  They are declared
+# once (``_marker_adapter_bindings``) and installed identically by every
+# spawned harness process:
+#   * root paths -- the fixed installed roots are rebound to the test's
+#     disposable directory;
+#   * privilege metadata -- ownership identity is mapped to the privileged
+#     (0, 0) identity the installed host runs as, while every mode, inode,
+#     link-count and size fact stays the real on-disk value;
+#   * ACL -- ``_has_acl`` reports False (existing fixture style).
+# Admission and service boundaries (release identity, the App peer binding,
+# the sudo candidate validator, the launchctl reconcile/admission effects) are
+# hermetically supplied stubs.  The marker lifecycle itself is never stubbed.
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
+_CANONICAL_MARKER_NAME = "autonomy-transaction.lock"
+_SEALED_MARKER_ENTRIES = [
+    "prior-control.json",
+    "prior-worker.json",
+    "transaction.json",
+]
+_MARKER_CONFIG_ENTRIES = [
+    "control.json",
+    "unrelated-dir",
+    "unrelated-root-entry.json",
+    "worker-codex.json",
+]
+
+
+def _marker_control_document():
+    """The installed control document, in the composed disarmed shape."""
+
+    return {
+        "schema_version": "mastermind.executive_control_config/v1",
+        "proof_base_sha": SHA,
+        "ceo_submit_armed": False,
+        "ceo_ingress_app_armed": True,
+        "ceo_ingress_app_peer_uid": 458,
+        "ceo_ingress_peer_uid": 452,
+        "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
+        "ceo_ingress_launchd_socket_name": "CeoIngress",
+        "ceo_ingress_app_macro_root": CEO_SUBMIT_APP_MACRO_ROOT,
+        "coo_autonomy_armed": False,
+        "coo_operator_harness_armed": False,
+        "coo_tick_interval_seconds": 15.0,
+        "coo_model_alias": "coo.sealed",
+        "preserved": {"alpha": 1},
+    }
+
+
+def _marker_worker_document():
+    return {
+        "schema_version": "mastermind.executive_worker_config/v1",
+        "operator_harness_armed": False,
+        "preserved": ["beta"],
+    }
+
+
+def _marker_workspace(workdir: Path) -> Path:
+    """The disposable config root with the installed documents in place."""
+
+    config_root = workdir / "config"
+    config_root.mkdir(mode=0o755)
+    for name, document in (
+        ("control.json", _marker_control_document()),
+        ("worker-codex.json", _marker_worker_document()),
+    ):
+        target = config_root / name
+        target.write_bytes(control.encode_config(document))
+        os.chmod(target, 0o440)
+    # A foreign entry the transaction must never touch, whatever happens.
+    (config_root / "unrelated-root-entry.json").write_bytes(b"foreign\n")
+    (config_root / "unrelated-dir").mkdir()
+    (config_root / "unrelated-dir" / "keep.txt").write_bytes(b"keep\n")
+    os.chmod(config_root, 0o755)
+    return config_root
+
+
+def _marker_adapter_bindings():
+    """The three hermetic adapters, declared once for every harness process."""
+
+    real_fstat = os.fstat
+    real_lstat = Path.lstat
+
+    def _privileged(info):
+        return os.stat_result(
+            (
+                info.st_mode,
+                info.st_ino,
+                info.st_dev,
+                info.st_nlink,
+                0,
+                0,
+                info.st_size,
+                info.st_atime,
+                info.st_mtime,
+                info.st_ctime,
+            )
+        )
+
+    def privileged_fstat(descriptor):
+        return _privileged(real_fstat(descriptor))
+
+    def privileged_lstat(path):
+        return _privileged(real_lstat(path))
+
+    def privileged_root_chown(path, uid, gid):
+        if (uid, gid) != (0, 0):
+            raise ValueError("marker harness only adapts the root identity")
+        return None
+
+    return [
+        (control.os, "fstat", privileged_fstat),
+        (control.Path, "lstat", privileged_lstat),
+        (control.os, "chown", privileged_root_chown),
+        (control.os, "fchown", privileged_root_chown),
+        (control.grp, "getgrnam", lambda name: types.SimpleNamespace(gr_gid=0)),
+        (control, "_has_acl", lambda _path: False),
+    ]
+
+
+def _marker_roots(config_root: Path):
+    return [
+        (control, "CONFIG_ROOT", config_root),
+        (control, "AUTONOMY_TRANSACTION", config_root / _CANONICAL_MARKER_NAME),
+        (control, "CONTROL_CONFIG", config_root / "control.json"),
+        (control, "WORKER_CONFIG", config_root / "worker-codex.json"),
+        (control, "AUTONOMY_RECEIPT", config_root / "autonomy-state-v1.json"),
+        (control, "CEO_SUBMIT_RECEIPT", config_root / "ceo-submit-state-v1.json"),
+    ]
+
+
+def _install_marker_adapters(monkeypatch, config_root: Path) -> None:
+    for target, name, value in _marker_roots(config_root):
+        monkeypatch.setattr(target, name, value)
+    for target, name, value in _marker_adapter_bindings():
+        monkeypatch.setattr(target, name, value)
+
+
+def _manifest_of(canonical: Path) -> dict:
+    return json.loads((canonical / "transaction.json").read_text(encoding="utf-8"))
+
+
+def _assert_complete_locked_marker(canonical: Path, expected_operation: str) -> dict:
+    """The commissioned first-visibility postcondition, at the canonical path.
+
+    Complete recoverable identity, both exact preimages and creator-owned
+    exclusion must already hold at the FIRST canonical visibility.
+    """
+
+    manifest = _manifest_of(canonical)
+    assert manifest["schema_version"] == control._TRANSACTION_SCHEMA
+    assert manifest["operation"] == expected_operation
+    assert manifest["phase"] == "LOCKED"
+    assert (
+        re.fullmatch(r"autonomy-[0-9a-f]{12}", manifest["transaction_id"]) is not None
+    )
+    assert manifest["expected_sha"] == SHA
+    for field in (
+        "prior_control_sha256",
+        "prior_worker_sha256",
+        "target_control_sha256",
+        "target_worker_sha256",
+    ):
+        assert re.fullmatch(r"[0-9a-f]{64}", manifest[field]) is not None
+    assert sorted(os.listdir(canonical)) == _SEALED_MARKER_ENTRIES
+    control_bytes = (canonical / "prior-control.json").read_bytes()
+    worker_bytes = (canonical / "prior-worker.json").read_bytes()
+    assert (
+        hashlib.sha256(control_bytes).hexdigest() == manifest["prior_control_sha256"]
+    )
+    assert hashlib.sha256(worker_bytes).hexdigest() == manifest["prior_worker_sha256"]
+    assert json.loads(control_bytes.decode("utf-8")) == _marker_control_document()
+    assert json.loads(worker_bytes.decode("utf-8")) == _marker_worker_document()
+    info = canonical.stat()
+    assert stat.S_ISDIR(info.st_mode)
+    assert stat.S_IMODE(info.st_mode) == 0o700
+    return manifest
+
+
+def _foreign_entry_snapshot(config_root: Path) -> dict:
+    return {
+        "unrelated-root-entry.json": (
+            config_root / "unrelated-root-entry.json"
+        ).read_bytes(),
+        "unrelated-dir": sorted(
+            entry.name for entry in (config_root / "unrelated-dir").iterdir()
+        ),
+    }
+
+
+_HARNESS_CHILD_BOOTSTRAP = '''
+"""Spawned marker-publication harness process (imports the full module)."""
+import importlib.util
+import json
+import os
+import sys
+from pathlib import Path
+
+_repo, _workdir, _scenario = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert(0, _repo)
+from ops.executive_os import autonomy_control as control  # full production module
+
+_spec = importlib.util.spec_from_file_location(
+    "mmx_marker_publication_harness",
+    os.path.join(_repo, "tests", "test_executive_autonomy_control.py"),
+)
+_harness = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _harness  # dataclasses resolve annotations via sys.modules
+_spec.loader.exec_module(_harness)
+
+_journal = []
+_summary = {"scenario": _scenario}
+try:
+    _summary.update(_harness.run_harness_scenario(_scenario, Path(_workdir), _journal))
+    _summary["ok"] = True
+except BaseException as exc:  # recorded for the parent, never hidden
+    _summary["ok"] = False
+    _summary["error"] = type(exc).__name__
+    _summary["code"] = getattr(exc, "code", None)
+    _summary["errno"] = getattr(exc, "errno", None)
+    _summary["detail"] = repr(exc)[:500]
+finally:
+    with open(
+        os.path.join(_workdir, f"harness-child-{_scenario}.json"), "w", encoding="utf-8"
+    ) as _fh:
+        json.dump({"summary": _summary, "journal": _journal}, _fh, indent=2)
+'''
+
+_HARNESS_SCENARIOS = {}
+_HARNESS_RELEASE_TOKEN = b"release"
+
+
+def _harness_scenario(name):
+    def register(handler):
+        _HARNESS_SCENARIOS[name] = handler
+        return handler
+
+    return register
+
+
+def run_harness_scenario(scenario: str, workdir: Path, journal: list) -> dict:
+    """Entry point for the spawned harness processes."""
+
+    return _HARNESS_SCENARIOS[scenario](workdir, journal)
+
+
+class _HarnessChannel:
+    """The parent's stage gate: signal a label, then block for the release."""
+
+    def __init__(self):
+        self._descriptor = int(os.environ["MMX_MARKER_RELEASE_FD"])
+
+    def signal(self, label):
+        sys.__stdout__.write(f"{label}\n")
+        sys.__stdout__.flush()
+
+    def pause(self, label="PAUSED"):
+        self.signal(label)
+        # Exactly one token per gate: reads are sized to the token so queued
+        # teardown tokens cannot corrupt the comparison.
+        if os.read(self._descriptor, len(_HARNESS_RELEASE_TOKEN)) != _HARNESS_RELEASE_TOKEN:
+            os._exit(75)
+
+
+def _harness_child_setup(workdir: Path):
+    config_root = workdir / "config"
+    for target, name, value in _marker_roots(config_root):
+        setattr(target, name, value)
+    for target, name, value in _marker_adapter_bindings():
+        setattr(target, name, value)
+    return config_root, config_root / _CANONICAL_MARKER_NAME
+
+
+def _harness_watch_canonical_visibility(canonical: Path, journal: list, channel):
+    """Record and gate the FIRST canonical visibility, however it is reached."""
+
+    real_mkdir = os.mkdir
+    real_rename = os.rename
+
+    def mkdir(path, mode=0o777):
+        result = real_mkdir(path, mode)
+        if Path(path) == canonical:
+            journal.append({"event": "canonical_mkdir", "path": os.fspath(path)})
+            channel.pause()
+        return result
+
+    def rename(source, destination):
+        published = Path(destination) == canonical
+        if published:
+            journal.append(
+                {"event": "publication_edge", "generation": os.fspath(source)}
+            )
+        result = real_rename(source, destination)
+        if published:
+            journal.append(
+                {"event": "canonical_visible", "generation": os.fspath(source)}
+            )
+            channel.pause()
+        return result
+
+    os.mkdir = mkdir
+    os.rename = rename
+
+
+def _harness_ceo_submit_host():
+    """The production CEO-submit host; ONLY admission/service boundaries are
+    hermetic.  Every marker, config, receipt and completion method stays the
+    production implementation."""
+
+    host = control.ProductionCeoSubmitHost()
+    host.effective_uid = lambda: 0
+    host.require_exact_install = lambda expected_sha: expected_sha
+    host.executive_app_binding = lambda: control.ExecutiveAppBinding(
+        present=True,
+        app_peer_uid=458,
+        app_peer_user=control.EXECUTIVE_APP_USER,
+        app_armed=True,
+        app_macro_root=CEO_SUBMIT_APP_MACRO_ROOT,
+        ingress_peer_uid=452,
+        ingress_socket_path="/var/run/mastermind-executive/ceo-ingress.sock",
+        launchd_socket_name="CeoIngress",
+        binding_valid=True,
+        acl_valid=True,
+        topology_valid=True,
+    )
+    host.validate_candidates = lambda transaction: host._persist_phase(
+        transaction, "CANDIDATES_VALIDATED"
+    )
+    host.reconcile_control_service = lambda _expected_sha: host._persist_phase(
+        host._active_transaction, "CONTROL_RECONCILED"
+    )
+    host.prove_control_admission_bound = lambda _sha, _digest: host._persist_phase(
+        host._active_transaction, "ADMISSION_BOUND"
+    )
+    return host
+
+
+def _harness_configs(host):
+    (
+        control_document,
+        worker_document,
+        control_digest,
+        worker_digest,
+        control_raw,
+        worker_raw,
+    ) = host._configs()
+    return control.ConfigEvidence(
+        control_sha256=control_digest,
+        worker_sha256=worker_digest,
+        control=control_document,
+        worker=worker_document,
+        control_bytes=control_raw,
+        worker_bytes=worker_raw,
+    )
+
+
+def _harness_coo_transaction(host, *, armed):
+    configs = _harness_configs(host)
+    return control.TransactionContext(
+        transaction_id=host.new_transaction_id(),
+        expected_sha=SHA,
+        prior_configs=configs,
+        candidates=control.derive_candidate_configs(configs, armed=armed),
+        admission=None,
+    )
+
+
+def _harness_ceo_submit_transaction(host):
+    configs = host.load_ceo_submit_configs(SHA)
+    return control.TransactionContext(
+        transaction_id=host.new_transaction_id(),
+        expected_sha=SHA,
+        prior_configs=configs,
+        candidates=control.derive_ceo_submit_candidate(configs, armed=True),
+        admission=None,
+    )
+
+
+@_harness_scenario("ceo-submit-arm-paused-at-publication")
+def _scenario_ceo_submit_arm_paused(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    channel = _HarnessChannel()
+    _harness_watch_canonical_visibility(canonical, journal, channel)
+    worker_before = (config_root / "worker-codex.json").read_bytes()
+    host = _harness_ceo_submit_host()
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exit_code = control.main(
+            ["ceo-submit-arm", "--expected-sha", SHA], host=host, now=lambda: NOW
+        )
+    return {
+        "exit_code": exit_code,
+        "document": json.loads(buffer.getvalue()),
+        "worker_bytes_unchanged": (config_root / "worker-codex.json").read_bytes()
+        == worker_before,
+        "control_document": json.loads(
+            (config_root / "control.json").read_text(encoding="utf-8")
+        ),
+        "receipt_present": (config_root / "ceo-submit-state-v1.json").exists(),
+        "marker_present": canonical.exists(),
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+@_harness_scenario("coo-arm-begin-paused-at-publication")
+def _scenario_coo_arm_begin_paused(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    channel = _HarnessChannel()
+    _harness_watch_canonical_visibility(canonical, journal, channel)
+    host = control.ProductionTransactionHost()
+    transaction = _harness_coo_transaction(host, armed=True)
+    host.begin_transaction(transaction)
+    published = os.stat(canonical)
+    channel.signal("PUBLISHED")
+    channel.pause("RELEASED")
+    return {
+        "transaction_id": transaction.transaction_id,
+        "marker_dev": published.st_dev,
+        "marker_ino": published.st_ino,
+        "owner_fd_retained": host._transaction_owner_fd is not None,
+        "manifest": _manifest_of(canonical),
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+@_harness_scenario("ceo-submit-begin-paused-at-publication")
+def _scenario_ceo_submit_begin_paused(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    channel = _HarnessChannel()
+    _harness_watch_canonical_visibility(canonical, journal, channel)
+    host = control.ProductionCeoSubmitHost()
+    transaction = _harness_ceo_submit_transaction(host)
+    host.begin_ceo_submit_transaction(transaction, operation="CEO_SUBMIT_ARM")
+    published = os.stat(canonical)
+    channel.signal("PUBLISHED")
+    channel.pause("RELEASED")
+    return {
+        "transaction_id": transaction.transaction_id,
+        "marker_dev": published.st_dev,
+        "marker_ino": published.st_ino,
+        "owner_fd_retained": host._transaction_owner_fd is not None,
+        "manifest": _manifest_of(canonical),
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+@_harness_scenario("disarm-begin-paused-at-publication")
+def _scenario_disarm_begin_paused(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    channel = _HarnessChannel()
+    _harness_watch_canonical_visibility(canonical, journal, channel)
+    host = control.ProductionTransactionHost()
+    transaction_id = host.new_transaction_id()
+    configs = host.begin_disarm(SHA, transaction_id)
+    published = os.stat(canonical)
+    channel.signal("PUBLISHED")
+    channel.pause("RELEASED")
+    transaction = control.TransactionContext(
+        transaction_id=transaction_id,
+        expected_sha=SHA,
+        prior_configs=configs,
+        candidates=control.derive_candidate_configs(configs, armed=False),
+        admission=None,
+    )
+    manifest = _manifest_of(canonical)
+    host.complete_transaction(transaction)
+    return {
+        "transaction_id": transaction_id,
+        "marker_dev": published.st_dev,
+        "marker_ino": published.st_ino,
+        "owner_fd_retained": host._transaction_owner_fd is not None,
+        "manifest": manifest,
+        "marker_present_after_completion": canonical.exists(),
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+@_harness_scenario("coo-new-transaction-id")
+def _scenario_coo_new_transaction_id(workdir, journal):
+    _config_root, _canonical = _harness_child_setup(workdir)
+    transaction_id = control.ProductionTransactionHost().new_transaction_id()
+    return {"transaction_id": transaction_id}
+
+
+@_harness_scenario("ceo-submit-new-transaction-id")
+def _scenario_ceo_submit_new_transaction_id(workdir, journal):
+    _config_root, _canonical = _harness_child_setup(workdir)
+    transaction_id = control.ProductionCeoSubmitHost().new_transaction_id()
+    return {"transaction_id": transaction_id}
+
+
+@_harness_scenario("coo-begin-competitor")
+def _scenario_coo_begin_competitor(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    host = control.ProductionTransactionHost()
+    configs = _harness_configs(host)
+    transaction = control.TransactionContext(
+        transaction_id=host.new_transaction_id(),
+        expected_sha=SHA,
+        prior_configs=configs,
+        candidates=control.derive_candidate_configs(configs, armed=True),
+        admission=None,
+    )
+    try:
+        host.begin_transaction(transaction)
+    except control.ArmAdmissionError as exc:
+        return {
+            "refused": exc.code,
+            "transaction_id": transaction.transaction_id,
+            "config_entries": sorted(os.listdir(config_root)),
+        }
+    return {
+        "refused": None,
+        "transaction_id": transaction.transaction_id,
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+@_harness_scenario("ceo-submit-begin-competitor")
+def _scenario_ceo_submit_begin_competitor(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    host = control.ProductionCeoSubmitHost()
+    transaction = _harness_ceo_submit_transaction(host)
+    try:
+        host.begin_ceo_submit_transaction(transaction, operation="CEO_SUBMIT_ARM")
+    except control.CeoSubmitAdmissionError as exc:
+        return {
+            "refused": exc.code,
+            "transaction_id": transaction.transaction_id,
+            "config_entries": sorted(os.listdir(config_root)),
+        }
+    return {
+        "refused": None,
+        "transaction_id": transaction.transaction_id,
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+@_harness_scenario("recovery-claim")
+def _scenario_recovery_claim(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    host = control.ProductionCeoSubmitHost()
+    try:
+        host._claim_transaction_owner()
+    except control.TransactionEffectUnknown:
+        return {
+            "claimed": False,
+            "marker_present": canonical.exists(),
+            "config_entries": sorted(os.listdir(config_root)),
+        }
+    manifest = host._manifest()
+    prior = host._archived_configs(SHA)
+    info = os.stat(canonical)
+    host._release_transaction_owner()
+    return {
+        "claimed": True,
+        "transaction_id": str(manifest["transaction_id"]),
+        "operation": manifest.get("operation"),
+        "phase": manifest.get("phase"),
+        "marker_dev": info.st_dev,
+        "marker_ino": info.st_ino,
+        "prior_control_sha256": prior.control_sha256,
+        "prior_worker_sha256": prior.worker_sha256,
+        "marker_present": canonical.exists(),
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+@_harness_scenario("pre-publication-failure-coo")
+def _scenario_pre_publication_failure_coo(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    real_atomic = control._atomic_file
+
+    def failing_atomic(path, payload, *, mode, uid, gid, replace):
+        if Path(path).name == "prior-worker.json":
+            raise OSError(28, "No space left on device")
+        return real_atomic(path, payload, mode=mode, uid=uid, gid=gid, replace=replace)
+
+    control._atomic_file = failing_atomic
+    host = control.ProductionTransactionHost()
+    transaction = _harness_coo_transaction(host, armed=True)
+    try:
+        host.begin_transaction(transaction)
+    except Exception as exc:
+        failure = {
+            "error": type(exc).__name__,
+            "code": getattr(exc, "code", None),
+            "errno": getattr(exc, "errno", None),
+        }
+    else:
+        failure = {"error": None}
+    return {
+        "failure": failure,
+        "transaction_id": transaction.transaction_id,
+        "marker_present": canonical.exists(),
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+@_harness_scenario("pre-publication-failure-ceo")
+def _scenario_pre_publication_failure_ceo(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    real_atomic = control._atomic_file
+
+    def failing_atomic(path, payload, *, mode, uid, gid, replace):
+        if Path(path).name == "prior-worker.json":
+            raise OSError(28, "No space left on device")
+        return real_atomic(path, payload, mode=mode, uid=uid, gid=gid, replace=replace)
+
+    control._atomic_file = failing_atomic
+    host = control.ProductionCeoSubmitHost()
+    transaction = _harness_ceo_submit_transaction(host)
+    try:
+        host.begin_ceo_submit_transaction(transaction, operation="CEO_SUBMIT_ARM")
+    except Exception as exc:
+        failure = {
+            "error": type(exc).__name__,
+            "code": getattr(exc, "code", None),
+            "errno": getattr(exc, "errno", None),
+        }
+    else:
+        failure = {"error": None}
+    return {
+        "failure": failure,
+        "transaction_id": transaction.transaction_id,
+        "marker_present": canonical.exists(),
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+@_harness_scenario("ceo-submit-arm-publication-acknowledgement-loss")
+def _scenario_ceo_submit_arm_acknowledgement_loss(workdir, journal):
+    config_root, canonical = _harness_child_setup(workdir)
+    real_fsync = control._fsync_directory
+
+    def failing_fsync(path):
+        if Path(path) == config_root:
+            raise OSError(5, "Input/output error")
+        return real_fsync(path)
+
+    control._fsync_directory = failing_fsync
+    control_before = (config_root / "control.json").read_bytes()
+    worker_before = (config_root / "worker-codex.json").read_bytes()
+    host = _harness_ceo_submit_host()
+    try:
+        control.execute_ceo_submit_arm(
+            host, control.CeoSubmitRequest(expected_sha=SHA), now=NOW
+        )
+    except Exception as exc:
+        failure = {
+            "error": type(exc).__name__,
+            "code": getattr(exc, "code", None),
+            "errno": getattr(exc, "errno", None),
+        }
+    else:
+        failure = {"error": None}
+    info = os.stat(canonical)
+    try:
+        manifest = _manifest_of(canonical)
+    except (OSError, ValueError):
+        # An unreadable/unparseable manifest is itself a reportable condition;
+        # the parent classifies it.
+        manifest = None
+    return {
+        "failure": failure,
+        "manifest": manifest,
+        "marker_entries": sorted(os.listdir(canonical)),
+        "marker_dev": info.st_dev,
+        "marker_ino": info.st_ino,
+        "owner_fd_retained": host._transaction_owner_fd is not None,
+        "control_bytes_unchanged": (config_root / "control.json").read_bytes()
+        == control_before,
+        "worker_bytes_unchanged": (config_root / "worker-codex.json").read_bytes()
+        == worker_before,
+        "receipt_present": (config_root / "ceo-submit-state-v1.json").exists(),
+        "config_entries": sorted(os.listdir(config_root)),
+    }
+
+
+class _HarnessProcess:
+    """A spawned full-module harness process and its stage gate."""
+
+    def __init__(self, workdir: Path, scenario: str) -> None:
+        self.workdir = workdir
+        self.scenario = scenario
+        read_fd, write_fd = os.pipe()
+        script = workdir / f"harness-{scenario}.py"
+        script.write_text(_HARNESS_CHILD_BOOTSTRAP, encoding="utf-8")
+        environment = dict(os.environ)
+        environment["MMX_MARKER_RELEASE_FD"] = str(read_fd)
+        self.stderr_path = workdir / f"harness-{scenario}.stderr.txt"
+        self._stderr = open(self.stderr_path, "wb")
+        self.process = subprocess.Popen(
+            [
+                sys.executable,
+                "-B",
+                os.fspath(script),
+                _REPO_ROOT,
+                os.fspath(workdir),
+                scenario,
+            ],
+            cwd=_REPO_ROOT,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=self._stderr,
+            pass_fds=(read_fd,),
+        )
+        os.close(read_fd)
+        self._release_fd = write_fd
+        self._released = False
+
+    def wait_for(self, label: str, timeout: float = 90.0) -> None:
+        ready, _, _ = select.select([self.process.stdout], [], [], timeout)
+        if not ready:
+            raise AssertionError(
+                f"harness child {self.scenario} never signalled {label}; "
+                f"stderr: {self._stderr_tail()}"
+            )
+        line = self.process.stdout.readline()
+        if line != f"{label}\n".encode("utf-8"):
+            raise AssertionError(
+                f"harness child {self.scenario} signalled {line!r}, not {label}; "
+                f"stderr: {self._stderr_tail()}"
+            )
+
+    def release(self) -> None:
+        """Release exactly ONE stage gate (the one the child is paused on)."""
+
+        if self._released:
+            return
+        self._released = True
+        try:
+            os.write(self._release_fd, _HARNESS_RELEASE_TOKEN)
+        except OSError:
+            pass
+
+    def result(self, timeout: float = 120.0) -> tuple[dict, list]:
+        try:
+            self.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=30)
+            raise AssertionError(
+                f"harness child {self.scenario} hung and was killed; "
+                f"stderr: {self._stderr_tail()}"
+            ) from None
+        payload = json.loads(
+            (self.workdir / f"harness-child-{self.scenario}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        return payload["summary"], payload["journal"]
+
+    def _stderr_tail(self) -> str:
+        try:
+            return self.stderr_path.read_text(encoding="utf-8", errors="replace")[-800:]
+        except OSError:
+            return ""
+
+    def close(self) -> None:
+        # Drain every remaining stage gate so a child paused deeper in the
+        # scenario can never deadlock the teardown.  Spare tokens are ignored
+        # by a child that has already left its gates, and EPIPE by one that
+        # has already exited.
+        self._released = True
+        for _ in range(4):
+            try:
+                os.write(self._release_fd, _HARNESS_RELEASE_TOKEN)
+            except OSError:
+                pass
+        try:
+            self.process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=30)
+        if self.process.stdout is not None:
+            self.process.stdout.close()
+        self._stderr.close()
+        os.close(self._release_fd)
+
+
+@contextlib.contextmanager
+def _harness_process(workdir: Path, scenario: str):
+    child = _HarnessProcess(workdir, scenario)
+    try:
+        yield child
+    finally:
+        child.close()
+
+
+def test_ceo_submit_arm_publishes_a_complete_marker_at_first_visibility(tmp_path):
+    """Matrix 1: through ``main`` with the real production CEO-submit host.
+
+    At the FIRST canonical visibility the marker must already be a complete,
+    parseable LOCKED manifest carrying both exact preimages, and a competing
+    creator in another process must be excluded from the identity.
+    """
+
+    workdir = tmp_path / "harness"
+    workdir.mkdir()
+    config_root = _marker_workspace(workdir)
+    canonical = config_root / _CANONICAL_MARKER_NAME
+    with _harness_process(workdir, "ceo-submit-arm-paused-at-publication") as child:
+        child.wait_for("PAUSED")
+        manifest = _assert_complete_locked_marker(canonical, "CEO_SUBMIT_ARM")
+
+        # A competing creator in another process cannot take or even read the
+        # identity while the publication owner is alive: it is refused, mints
+        # nothing, and leaves no residue.
+        with _harness_process(workdir, "ceo-submit-new-transaction-id") as competitor:
+            competitor_summary, _competitor_journal = competitor.result()
+        assert competitor_summary["ok"] is False, competitor_summary
+        assert competitor_summary["error"] == "TransactionEffectUnknown"
+        assert sorted(os.listdir(config_root)) == sorted(
+            _MARKER_CONFIG_ENTRIES + [_CANONICAL_MARKER_NAME]
+        )
+        assert _manifest_of(canonical) == manifest
+
+        child.release()
+    summary, journal = child.result()
+    assert summary["ok"] is True, summary
+    assert summary["exit_code"] == 0
+    assert summary["document"]["status"] == "CEO_SUBMIT_ARMED"
+    assert summary["document"]["transaction_id"] == manifest["transaction_id"]
+    assert summary["marker_present"] is False
+    assert summary["receipt_present"] is True
+    assert summary["control_document"]["ceo_submit_armed"] is True
+    assert summary["worker_bytes_unchanged"] is True
+    assert summary["config_entries"] == sorted(
+        _MARKER_CONFIG_ENTRIES + ["ceo-submit-state-v1.json"]
+    )
+    assert [event["event"] for event in journal] == [
+        "publication_edge",
+        "canonical_visible",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("creator_scenario", "expected_operation"),
+    [
+        ("coo-arm-begin-paused-at-publication", "ARM"),
+        ("ceo-submit-begin-paused-at-publication", "CEO_SUBMIT_ARM"),
+    ],
+)
+def test_competing_creators_and_recovery_claimants_cannot_steal_first_ownership(
+    tmp_path, creator_scenario, expected_operation
+):
+    """Matrix 2: both creation-owner uses, contested across real processes."""
+
+    workdir = tmp_path / "harness"
+    workdir.mkdir()
+    config_root = _marker_workspace(workdir)
+    canonical = config_root / _CANONICAL_MARKER_NAME
+    with _harness_process(workdir, creator_scenario) as creator:
+        creator.wait_for("PAUSED")
+        manifest = _assert_complete_locked_marker(canonical, expected_operation)
+
+        # A recovery claimant in a separate process cannot take the owner.
+        with _harness_process(workdir, "recovery-claim") as claimant:
+            claim_summary, _claim_journal = claimant.result()
+        assert claim_summary["ok"] is True, claim_summary
+        assert claim_summary["claimed"] is False
+        assert claim_summary["marker_present"] is True
+
+        # A competing creator cannot even read the identity while the owner
+        # holds the marker: it is excluded, and it leaves nothing behind.
+        for competitor_scenario in (
+            "coo-begin-competitor",
+            "ceo-submit-begin-competitor",
+        ):
+            with _harness_process(workdir, competitor_scenario) as competitor:
+                competitor_summary, _competitor_journal = competitor.result()
+            assert competitor_summary["ok"] is False, competitor_summary
+            assert competitor_summary["error"] == "TransactionEffectUnknown"
+            assert sorted(os.listdir(config_root)) == sorted(
+                _MARKER_CONFIG_ENTRIES + [_CANONICAL_MARKER_NAME]
+            )
+
+        creator.release()
+        creator.wait_for("PUBLISHED")
+        inode = canonical.stat().st_ino
+        assert _manifest_of(canonical) == manifest
+        assert canonical.stat().st_ino == inode
+    summary, journal = creator.result()
+    assert summary["ok"] is True, summary
+    assert summary["transaction_id"] == manifest["transaction_id"]
+    assert summary["owner_fd_retained"] is True
+    assert summary["manifest"] == manifest
+    assert [event["event"] for event in journal] == [
+        "publication_edge",
+        "canonical_visible",
+    ]
+
+    # After the owner exits, a real recovery process claims the SAME inode.
+    with _harness_process(workdir, "recovery-claim") as claimant:
+        recovery, _recovery_journal = claimant.result()
+    assert recovery["ok"] is True, recovery
+    assert recovery["claimed"] is True
+    assert recovery["transaction_id"] == manifest["transaction_id"]
+    assert (recovery["marker_dev"], recovery["marker_ino"]) == (
+        summary["marker_dev"],
+        summary["marker_ino"],
+    )
+    assert (
+        recovery["prior_control_sha256"]
+        == control.sha256_bytes(control.encode_config(_marker_control_document()))
+    )
+    assert (
+        recovery["prior_worker_sha256"]
+        == control.sha256_bytes(control.encode_config(_marker_worker_document()))
+    )
+
+    # With the owner gone, a competing creator is typed-refused on the SAME
+    # identity: no second transaction is ever minted or orphaned.
+    for competitor_scenario, expected_code in (
+        ("coo-begin-competitor", "transaction_incomplete"),
+        ("ceo-submit-begin-competitor", "ceo_submit_transaction_incomplete"),
+    ):
+        with _harness_process(workdir, competitor_scenario) as competitor:
+            competitor_summary, _competitor_journal = competitor.result()
+        assert competitor_summary["ok"] is True, competitor_summary
+        assert competitor_summary["refused"] == expected_code
+        assert competitor_summary["transaction_id"] == manifest["transaction_id"]
+    assert sorted(os.listdir(config_root)) == sorted(
+        _MARKER_CONFIG_ENTRIES + [_CANONICAL_MARKER_NAME]
+    )
+    assert _manifest_of(canonical) == manifest
+
+
+@pytest.mark.parametrize(
+    "scenario", ["pre-publication-failure-coo", "pre-publication-failure-ceo"]
+)
+def test_pre_publication_failure_leaves_zero_canonical_effect(tmp_path, scenario):
+    """Matrix 3: a private generation that fails is exactly disposed of."""
+
+    workdir = tmp_path / "harness"
+    workdir.mkdir()
+    config_root = _marker_workspace(workdir)
+    canonical = config_root / _CANONICAL_MARKER_NAME
+    foreign_before = _foreign_entry_snapshot(config_root)
+    with _harness_process(workdir, scenario) as child:
+        summary, journal = child.result()
+    assert summary["ok"] is True, summary
+    if scenario.endswith("coo"):
+        assert summary["failure"] == {
+            "error": "TransactionOwnershipError",
+            "code": "effect_unknown",
+            "errno": None,
+        }
+    else:
+        assert summary["failure"]["error"] == "OSError"
+        assert summary["failure"]["errno"] == 28
+    assert summary["marker_present"] is False
+    assert journal == []
+    entries = sorted(os.listdir(config_root))
+    assert _CANONICAL_MARKER_NAME not in entries
+    assert [name for name in entries if name.startswith(".autonomy-transaction-")] == []
+    assert _foreign_entry_snapshot(config_root) == foreign_before
+    assert (config_root / "control.json").read_bytes() == control.encode_config(
+        _marker_control_document()
+    )
+    assert (config_root / "worker-codex.json").read_bytes() == control.encode_config(
+        _marker_worker_document()
+    )
+
+
+def test_publication_acknowledgement_loss_stays_effect_unknown_and_recoverable(
+    tmp_path,
+):
+    """Matrix 4: loss after publication is typed UNKNOWN, never rolled back."""
+
+    workdir = tmp_path / "harness"
+    workdir.mkdir()
+    config_root = _marker_workspace(workdir)
+    canonical = config_root / _CANONICAL_MARKER_NAME
+    with _harness_process(
+        workdir, "ceo-submit-arm-publication-acknowledgement-loss"
+    ) as child:
+        summary, journal = child.result()
+    assert summary["ok"] is True, summary
+    assert summary["failure"] == {
+        "error": "TransactionEffectUnknown",
+        "code": "effect_unknown",
+        "errno": None,
+    }
+    assert summary["owner_fd_retained"] is True
+    assert summary["control_bytes_unchanged"] is True
+    assert summary["worker_bytes_unchanged"] is True
+    assert summary["receipt_present"] is False
+    assert summary["config_entries"] == sorted(
+        _MARKER_CONFIG_ENTRIES + [_CANONICAL_MARKER_NAME]
+    )
+    manifest = summary["manifest"]
+    assert manifest["operation"] == "CEO_SUBMIT_ARM"
+    assert _assert_complete_locked_marker(canonical, "CEO_SUBMIT_ARM") == manifest
+    published = (summary["marker_dev"], summary["marker_ino"])
+
+    with _harness_process(workdir, "recovery-claim") as claimant:
+        recovery, _recovery_journal = claimant.result()
+    assert recovery["ok"] is True, recovery
+    assert recovery["claimed"] is True
+    assert recovery["transaction_id"] == manifest["transaction_id"]
+    assert (recovery["marker_dev"], recovery["marker_ino"]) == published
+
+    # A conflicting replacement fails closed and is never clobbered or erased.
+    foreign_generation = (
+        config_root
+        / ".autonomy-transaction-aaaaaaaaaaaa.99999999.deadbeefdeadbeef.generating"
+    )
+    foreign_generation.mkdir()
+    (foreign_generation / "evidence.txt").write_bytes(b"evidence\n")
+    os.rename(canonical, config_root / "superseded-marker")
+    os.symlink("decoy", canonical)
+    (config_root / "decoy").mkdir()
+    with _harness_process(workdir, "recovery-claim") as claimant:
+        conflicting, _conflicting_journal = claimant.result()
+    assert conflicting["ok"] is True, conflicting
+    assert conflicting["claimed"] is False
+    assert os.path.islink(canonical)
+    assert (config_root / "decoy").is_dir()
+    assert (config_root / "superseded-marker").is_dir()
+    assert (foreign_generation / "evidence.txt").read_bytes() == b"evidence\n"
+
+
+def test_legacy_disarm_creation_is_also_complete_before_visible(tmp_path):
+    """Matrix 5: the legacy DISARM creation owner satisfies the same law."""
+
+    workdir = tmp_path / "harness"
+    workdir.mkdir()
+    config_root = _marker_workspace(workdir)
+    canonical = config_root / _CANONICAL_MARKER_NAME
+    with _harness_process(workdir, "disarm-begin-paused-at-publication") as creator:
+        creator.wait_for("PAUSED")
+        manifest = _assert_complete_locked_marker(canonical, "DISARM")
+        creator.release()
+        creator.wait_for("PUBLISHED")
+    summary, journal = creator.result()
+    assert summary["ok"] is True, summary
+    assert summary["transaction_id"] == manifest["transaction_id"]
+    assert summary["owner_fd_retained"] is False
+    assert summary["marker_present_after_completion"] is False
+    assert summary["config_entries"] == _MARKER_CONFIG_ENTRIES
+    assert [event["event"] for event in journal] == [
+        "publication_edge",
+        "canonical_visible",
+    ]
+
+
+def _inprocess_marker_host(monkeypatch, tmp_path):
+    config_root = _marker_workspace(tmp_path)
+    _install_marker_adapters(monkeypatch, config_root)
+    return config_root, config_root / _CANONICAL_MARKER_NAME
+
+
+def test_owner_fd_is_held_from_publication_until_lawful_settlement(
+    monkeypatch, tmp_path
+):
+    config_root, canonical = _inprocess_marker_host(monkeypatch, tmp_path)
+    host = control.ProductionTransactionHost()
+    configs = _harness_configs(host)
+    transaction = control.TransactionContext(
+        transaction_id=host.new_transaction_id(),
+        expected_sha=SHA,
+        prior_configs=configs,
+        candidates=control.derive_candidate_configs(configs, armed=True),
+        admission=None,
+    )
+    host.begin_transaction(transaction)
+    manifest = _assert_complete_locked_marker(canonical, "ARM")
+    assert manifest["transaction_id"] == transaction.transaction_id
+    held = host._transaction_owner_fd
+    assert held is not None
+
+    competitor = control.ProductionCeoSubmitHost()
+    with pytest.raises(control.TransactionEffectUnknown):
+        competitor._claim_transaction_owner()
+    assert competitor._transaction_owner_fd is None
+    assert host._transaction_owner_fd == held
+
+    refused_transaction = control.TransactionContext(
+        transaction_id="autonomy-" + "cd" * 6,
+        expected_sha=SHA,
+        prior_configs=configs,
+        candidates=control.derive_candidate_configs(configs, armed=True),
+        admission=None,
+    )
+    with pytest.raises(control.CeoSubmitAdmissionError) as refused:
+        competitor.begin_ceo_submit_transaction(
+            refused_transaction, operation="CEO_SUBMIT_ARM"
+        )
+    assert refused.value.code == "ceo_submit_transaction_incomplete"
+    assert _manifest_of(canonical) == manifest
+    assert host._transaction_owner_fd == held
+
+    host.complete_transaction(transaction)
+    assert host._transaction_owner_fd is None
+    assert not canonical.exists()
+    assert sorted(os.listdir(config_root)) == _MARKER_CONFIG_ENTRIES
+
+
+def test_existing_valid_marker_recovery_and_replay_semantics_are_preserved(
+    monkeypatch, tmp_path
+):
+    config_root, canonical = _inprocess_marker_host(monkeypatch, tmp_path)
+    host = control.ProductionTransactionHost()
+    configs = _harness_configs(host)
+    transaction = control.TransactionContext(
+        transaction_id=host.new_transaction_id(),
+        expected_sha=SHA,
+        prior_configs=configs,
+        candidates=control.derive_candidate_configs(configs, armed=True),
+        admission=None,
+    )
+    host.begin_transaction(transaction)
+    manifest_before = _manifest_of(canonical)
+    inode_before = canonical.stat().st_ino
+
+    # The creating owner exits (the flock is dropped with its descriptor); the
+    # marker itself stays exactly as published.
+    host._release_transaction_owner()
+
+    ceo_host = control.ProductionCeoSubmitHost()
+    # The same declared privilege adapter family: the installed host runs as
+    # root, so the identity probe observes 0 while every mode/inode/ownership
+    # fact stays the real on-disk value.
+    ceo_host.effective_uid = lambda: 0
+    assert ceo_host.new_transaction_id() == transaction.transaction_id
+    assert ceo_host.incomplete_transaction_operation() == "ARM"
+    with pytest.raises(control.CeoSubmitAdmissionError) as hold:
+        ceo_host.require_transaction_absent()
+    assert hold.value.code == "ceo_submit_transaction_incomplete"
+    assert _manifest_of(canonical) == manifest_before
+    assert canonical.stat().st_ino == inode_before
+    ceo_host._release_transaction_owner()
+
+
+@pytest.mark.parametrize("ceo", [False, True])
+def test_rename_publication_ack_loss_preserves_exact_generation_owner(monkeypatch, tmp_path, ceo):
+    _, canonical = _inprocess_marker_host(monkeypatch, tmp_path)
+    host = control.ProductionCeoSubmitHost() if ceo else control.ProductionTransactionHost()
+    configs = _harness_configs(host)
+    transaction = control.TransactionContext(transaction_id=host.new_transaction_id(), expected_sha=SHA, prior_configs=configs, candidates=control.derive_candidate_configs(configs, armed=True), admission=None)
+    real_rename = control.os.rename
+    published = []
+    def rename_then_raise(src, dst):
+        result = real_rename(src, dst)
+        if Path(dst) == canonical:
+            published.append((canonical.stat().st_dev, canonical.stat().st_ino))
+            raise OSError(5, "injected acknowledgement loss AFTER rename effect")
+        return result
+    monkeypatch.setattr(control.os, "rename", rename_then_raise)
+    caught = None
+    try:
+        try:
+            if ceo:
+                host.begin_ceo_submit_transaction(transaction, operation="CEO_SUBMIT_ARM")
+            else:
+                host.begin_transaction(transaction)
+        except Exception as exc:
+            caught = exc
+        assert type(caught) is control.TransactionEffectUnknown
+        assert _manifest_of(canonical)["transaction_id"] == transaction.transaction_id
+        assert published == [(canonical.stat().st_dev, canonical.stat().st_ino)]
+        assert host._transaction_owner_fd is not None
+        held = os.fstat(host._transaction_owner_fd)
+        assert (held.st_dev, held.st_ino) == published[0]
+        with _harness_process(tmp_path, "recovery-claim") as claimant:
+            recovery, _ = claimant.result()
+        assert recovery["claimed"] is False
+    finally:
+        if host._transaction_owner_fd is not None:
+            host._release_transaction_owner()
+
+
+@pytest.mark.parametrize("ceo", [False, True])
+@pytest.mark.parametrize("fault", ["rename_then_raise", "parent_fsync_loss"])
+def test_arm_controller_publication_unknown_never_rolls_back(monkeypatch, tmp_path, ceo, fault):
+    config_root, canonical = _inprocess_marker_host(monkeypatch, tmp_path)
+    journal = []
+    if ceo:
+        host = _harness_ceo_submit_host()
+        invoke = lambda: control.execute_ceo_submit_arm(host, control.CeoSubmitRequest(expected_sha=SHA), now=NOW)
+    else:
+        host = control.ProductionTransactionHost()
+        gates = FakeAdmissionHost()
+        host.existing_arm = lambda *_args, **_kwargs: None
+        for name in ("require_exact_install", "validate_acceptance", "validate_gate_b", "validate_provider_readiness", "require_runtime_quiescent", "require_services_stopped", "require_service_uids_quiescent"):
+            setattr(host, name, getattr(gates, name))
+        host.load_unarmed_configs = lambda _sha: _harness_configs(host)
+        host.validate_candidates = lambda txn: host._persist_phase(txn, "CANDIDATES_VALIDATED")
+        host.stop_services = lambda _sha: journal.append("STOP_SERVICES")
+        host._loaded = lambda _label: False
+        real_rollback = host.rollback_disarmed
+        def rollback(txn, receipt):
+            journal.append("ROLLBACK_DISARMED")
+            return real_rollback(txn, receipt)
+        host.rollback_disarmed = rollback
+        invoke = lambda: control.execute_arm(host, _arm_request(), now=NOW)
+    real_rename = control.os.rename
+    real_fsync = control._fsync_directory
+    published = []
+    fired = False
+    def rename_then_raise(src, dst):
+        result = real_rename(src, dst)
+        if Path(dst) == canonical:
+            published.append((canonical.stat().st_dev, canonical.stat().st_ino))
+            if fault == "rename_then_raise":
+                raise OSError(5, "injected acknowledgement loss AFTER rename effect")
+        return result
+    def parent_fsync_loss(path):
+        nonlocal fired
+        if fault == "parent_fsync_loss" and not fired and Path(path) == config_root and canonical.exists():
+            fired = True
+            raise OSError(5, "injected parent directory fsync acknowledgement loss")
+        return real_fsync(path)
+    monkeypatch.setattr(control.os, "rename", rename_then_raise)
+    monkeypatch.setattr(control, "_fsync_directory", parent_fsync_loss)
+    before = {p: p.read_bytes() for p in (control.CONTROL_CONFIG, control.WORKER_CONFIG)}
+    caught = None
+    try:
+        try:
+            invoke()
+        except Exception as exc:
+            caught = exc
+        assert type(caught) is control.TransactionEffectUnknown
+        assert journal == []
+        assert all(p.read_bytes() == raw for p, raw in before.items())
+        assert not control.AUTONOMY_RECEIPT.exists()
+        assert not control.CEO_SUBMIT_RECEIPT.exists()
+        assert host._transaction_owner_fd is not None
+        assert published == [(canonical.stat().st_dev, canonical.stat().st_ino)]
+        manifest = _assert_complete_locked_marker(canonical, "CEO_SUBMIT_ARM" if ceo else "ARM")
+        assert manifest["transaction_id"] == host._active_transaction.transaction_id
+        with _harness_process(tmp_path, "recovery-claim") as claimant:
+            recovery, _ = claimant.result()
+        assert recovery["claimed"] is False
+    finally:
+        if host._transaction_owner_fd is not None:
+            host._release_transaction_owner()
+
+
+@pytest.mark.parametrize("ceo", [False, True])
+def test_rename_known_prepublication_failure_is_not_promoted_to_published(monkeypatch, tmp_path, ceo):
+    config_root, canonical = _inprocess_marker_host(monkeypatch, tmp_path)
+    host = control.ProductionCeoSubmitHost() if ceo else control.ProductionTransactionHost()
+    configs = _harness_configs(host)
+    transaction = control.TransactionContext(transaction_id=host.new_transaction_id(), expected_sha=SHA, prior_configs=configs, candidates=control.derive_candidate_configs(configs, armed=True), admission=None)
+    before = {p: p.read_bytes() for p in (control.CONTROL_CONFIG, control.WORKER_CONFIG)}
+    def refuse_rename(_src, _dst):
+        raise OSError(5, "injected failure BEFORE rename effect")
+    monkeypatch.setattr(control.os, "rename", refuse_rename)
+    with pytest.raises(Exception):
+        if ceo:
+            host.begin_ceo_submit_transaction(transaction, operation="CEO_SUBMIT_ARM")
+        else:
+            host.begin_transaction(transaction)
+    assert not canonical.exists()
+    assert host._transaction_owner_fd is None
+    assert all(p.read_bytes() == raw for p, raw in before.items())
+    assert sorted(p.name for p in config_root.iterdir()) == _MARKER_CONFIG_ENTRIES
+
+
+@_harness_scenario("coo-before-publication-mutex")
+def _scenario_coo_before_publication_mutex(workdir, journal):
+    return _scenario_creator_before_publication_mutex(workdir, ceo=False)
+
+
+@_harness_scenario("ceo-before-publication-mutex")
+def _scenario_ceo_before_publication_mutex(workdir, journal):
+    return _scenario_creator_before_publication_mutex(workdir, ceo=True)
+
+
+def _scenario_creator_before_publication_mutex(workdir, *, ceo):
+    _, canonical = _harness_child_setup(workdir)
+    channel = _HarnessChannel()
+    host = control.ProductionCeoSubmitHost() if ceo else control.ProductionTransactionHost()
+    transaction = _harness_ceo_submit_transaction(host) if ceo else _harness_coo_transaction(host, armed=True)
+    publication_mutex = host._publication_mutex
+    def gated_mutex():
+        # Both actual begin methods already passed canonical absence, acquired
+        # their private inode flock, and sealed the complete generation.
+        channel.pause("ADMITTED_BEFORE_PUBLICATION")
+        return publication_mutex()
+    host._publication_mutex = gated_mutex
+    if ceo:
+        host.begin_ceo_submit_transaction(transaction, operation="CEO_SUBMIT_ARM")
+    else:
+        host.begin_transaction(transaction)
+    channel.pause("PUBLISHED_AND_OWNED")
+    return {"transaction_id": transaction.transaction_id, "manifest": _manifest_of(canonical)}
+
+
+@pytest.mark.parametrize("first", ["coo", "ceo"])
+def test_two_creators_admitted_before_publication_cannot_replace_winner(tmp_path, first):
+    config_root = _marker_workspace(tmp_path)
+    canonical = config_root / _CANONICAL_MARKER_NAME
+    second = "ceo" if first == "coo" else "coo"
+    with _harness_process(tmp_path, first + "-before-publication-mutex") as winner:
+        with _harness_process(tmp_path, second + "-before-publication-mutex") as loser:
+            winner.wait_for("ADMITTED_BEFORE_PUBLICATION")
+            loser.wait_for("ADMITTED_BEFORE_PUBLICATION")
+            assert not canonical.exists()
+            winner.release()
+            winner.wait_for("PUBLISHED_AND_OWNED")
+            manifest = _assert_complete_locked_marker(canonical, "ARM" if first == "coo" else "CEO_SUBMIT_ARM")
+            identity = (canonical.stat().st_dev, canonical.stat().st_ino)
+            loser.release()
+            rejected, _ = loser.result()
+            assert rejected["ok"] is False
+            assert rejected["error"] == ("CeoSubmitAdmissionError" if second == "ceo" else "ArmAdmissionError")
+            assert _manifest_of(canonical) == manifest
+            assert (canonical.stat().st_dev, canonical.stat().st_ino) == identity
+            with _harness_process(tmp_path, "recovery-claim") as claimant:
+                recovery, _ = claimant.result()
+            assert recovery["claimed"] is False
+            winner.release()
+    result, _ = winner.result()
+    assert result["ok"] is True
+    assert result["transaction_id"] == manifest["transaction_id"]
