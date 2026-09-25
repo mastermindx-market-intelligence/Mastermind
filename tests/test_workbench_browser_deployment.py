@@ -19,7 +19,9 @@ from integrations.workbench_action_mcp.contracts import (
 from integrations.workbench_action_mcp.deployment import RuntimeServices
 from integrations.workbench_browser_mcp.deployment import (
     BrowserDeployment,
+    BrowserPorts,
     create_browser_deployment,
+    create_browser_ports,
 )
 from integrations.workbench_browser_mcp.resource_port import BrowserHostConfig
 
@@ -216,5 +218,29 @@ def test_deployment_refuses_a_new_browser_permission_plane(tmp_path: Path):
             assert "ACTION_SCOPE_REQUIRED" in str(error) or "AUTH_POLICY_BINDING_MISMATCH" in str(error)
         else:
             raise AssertionError("browser-specific permission plane was accepted")
+    finally:
+        os.close(fd)
+
+def test_ports_can_be_borrowed_without_constructing_web_auth_server(tmp_path: Path):
+    fd, services, host_config, catalog, _caller, _run_calls = _fixture(tmp_path)
+    try:
+        ports = create_browser_ports(
+            resolve_binding=services.resolve_binding,
+            clock_ms=services.clock_ms,
+            action_token_key=services.action_token_key,
+            artifact_store=services.artifact_store,
+            host_binding=services.host_binding,
+            action_ttl_ms=services.action_ttl_ms,
+            host_config=host_config,
+            profile_resolver=lambda _ref: None,
+        )
+        assert isinstance(ports, BrowserPorts)
+        assert ports.resource_port._store is services.artifact_store
+        assert ports.action_port._store is services.artifact_store
+        assert ports.resource_port._host is services.host_binding
+        assert ports.action_port._host_binding is services.host_binding
+        assert ports.resource_port.codec is ports.action_port.codec
+        # Tool catalogs belong to the surface adapter, not the resource/effect ports.
+        assert catalog["tools"]
     finally:
         os.close(fd)

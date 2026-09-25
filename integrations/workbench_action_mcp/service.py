@@ -255,7 +255,7 @@ def _incoming_authority(value: object) -> str:
     return value
 
 
-def _browser(value: object) -> BrowserServiceConfig:
+def parse_browser_service_config(value: object) -> BrowserServiceConfig:
     if not isinstance(value, dict) or set(value) != _BROWSER_KEYS:
         _refuse()
     return BrowserServiceConfig(
@@ -329,7 +329,7 @@ def parse_service_config(value: object) -> ServiceConfig:
     elif schema == SERVICE_SCHEMA_V2:
         if set(value) != _CONFIG_KEYS_V2:
             _refuse()
-        browser = _browser(value.get("browser"))
+        browser = parse_browser_service_config(value.get("browser"))
     else:
         _refuse()
     if value.get("bind_host") != "127.0.0.1":

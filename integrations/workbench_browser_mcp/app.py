@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import hashlib
 import json
 import re
@@ -240,6 +241,152 @@ _ACTION_REF_SCHEMA = {
 }
 
 
+@dataclass(frozen=True)
+class BrowserToolSurface:
+    """One canonical Browser tool/schema projection shared by all transports."""
+
+    catalog: Mapping[str, Mapping[str, Any]]
+    schemas: Mapping[str, Mapping[str, Any]]
+    validators: Mapping[str, Draft202012Validator]
+    prepare_tool_to_native: Mapping[str, str]
+    tools: tuple[Tool, ...]
+
+
+def build_browser_tool_surface(
+    tool_catalog: Mapping[str, Any],
+    *,
+    expected_tool_schema_digest: str = WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+) -> BrowserToolSurface:
+    catalog = _validated_catalog(
+        tool_catalog,
+        expected_digest=expected_tool_schema_digest,
+    )
+    resource_prepare_schema = _snapshot(_RESOURCE_PREPARE_SCHEMA, 32768)
+    start_ref_schema = _snapshot(_START_REF_SCHEMA, 32768)
+    action_ref_schema = _snapshot(_ACTION_REF_SCHEMA, 32768)
+    schemas: dict[str, dict[str, Any]] = {
+        PREPARE_RESOURCE_TOOL: resource_prepare_schema,
+        START_RESOURCE_TOOL: start_ref_schema,
+        RECONCILE_RESOURCE_TOOL: start_ref_schema,
+        RUN_ACTION_TOOL: action_ref_schema,
+        RECONCILE_ACTION_TOOL: action_ref_schema,
+    }
+    prepare_tool_to_native: dict[str, str] = {}
+    for name in sorted(ALLOWED_BROWSER_TOOLS):
+        wrapped = _snapshot(_with_browser_ref(catalog[name]["inputSchema"]), 32768)
+        if name in READ_ONLY_BROWSER_TOOLS:
+            schemas[name] = wrapped
+        else:
+            prepare_name = "prepare_" + name
+            prepare_tool_to_native[prepare_name] = name
+            schemas[prepare_name] = wrapped
+    validators = {
+        name: Draft202012Validator(schema) for name, schema in schemas.items()
+    }
+    rows: list[Tool] = [
+        Tool(
+            name=PREPARE_RESOURCE_TOOL,
+            description="Prepare one browser resource against the current Workbench owner binding. No process is started.",
+            inputSchema=resource_prepare_schema,
+            annotations=ToolAnnotations(
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name=START_RESOURCE_TOOL,
+            description="Start exactly one previously prepared owner-bound browser resource. Safe replay reconciles the same resource.",
+            inputSchema=start_ref_schema,
+            annotations=ToolAnnotations(
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name=RECONCILE_RESOURCE_TOOL,
+            description="Read the effect state of one prepared browser start without starting another resource.",
+            inputSchema=start_ref_schema,
+            annotations=ToolAnnotations(
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
+    ]
+    for name in sorted(READ_ONLY_BROWSER_TOOLS):
+        native = catalog[name]
+        annotations = native.get("annotations", {})
+        rows.append(
+            Tool(
+                name=name,
+                description=str(native.get("description", name)),
+                inputSchema=schemas[name],
+                annotations=ToolAnnotations(
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=bool(annotations.get("openWorldHint", True)),
+                ),
+            )
+        )
+    for prepare_name, native_name in sorted(prepare_tool_to_native.items()):
+        native = catalog[native_name]
+        rows.append(
+            Tool(
+                name=prepare_name,
+                description=(
+                    f"Prepare {native_name} against one browser resource. "
+                    "This does not execute the browser action."
+                ),
+                inputSchema=schemas[prepare_name],
+                annotations=ToolAnnotations(
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=False,
+                    openWorldHint=False,
+                ),
+            )
+        )
+    rows.extend(
+        [
+            Tool(
+                name=RUN_ACTION_TOOL,
+                description="Execute exactly one signed prepared browser action. Safe replay reconciles and never dispatches the action twice.",
+                inputSchema=action_ref_schema,
+                annotations=ToolAnnotations(
+                    readOnlyHint=False,
+                    destructiveHint=True,
+                    idempotentHint=True,
+                    openWorldHint=True,
+                ),
+            ),
+            Tool(
+                name=RECONCILE_ACTION_TOOL,
+                description="Read NOT_APPLIED, APPLIED, or EFFECT_UNKNOWN for one signed browser action without dispatching it.",
+                inputSchema=action_ref_schema,
+                annotations=ToolAnnotations(
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+            ),
+        ]
+    )
+    return BrowserToolSurface(
+        catalog=catalog,
+        schemas=schemas,
+        validators=validators,
+        prepare_tool_to_native=prepare_tool_to_native,
+        tools=tuple(rows),
+    )
+
+
 def create_authenticated_browser_server(
     *,
     authenticator: JwtAuthenticator,
@@ -277,31 +424,14 @@ def create_authenticated_browser_server(
     ):
         raise ValueError("explicit Workbench Browser services are required")
 
-    catalog = _validated_catalog(
+    surface = build_browser_tool_surface(
         tool_catalog,
-        expected_digest=expected_tool_schema_digest,
+        expected_tool_schema_digest=expected_tool_schema_digest,
     )
-    resource_prepare_schema = _snapshot(_RESOURCE_PREPARE_SCHEMA, 32768)
-    start_ref_schema = _snapshot(_START_REF_SCHEMA, 32768)
-    action_ref_schema = _snapshot(_ACTION_REF_SCHEMA, 32768)
-
-    schemas: dict[str, dict[str, Any]] = {
-        PREPARE_RESOURCE_TOOL: resource_prepare_schema,
-        START_RESOURCE_TOOL: start_ref_schema,
-        RECONCILE_RESOURCE_TOOL: start_ref_schema,
-        RUN_ACTION_TOOL: action_ref_schema,
-        RECONCILE_ACTION_TOOL: action_ref_schema,
-    }
-    prepare_tool_to_native: dict[str, str] = {}
-    for name in sorted(ALLOWED_BROWSER_TOOLS):
-        wrapped = _snapshot(_with_browser_ref(catalog[name]["inputSchema"]), 32768)
-        if name in READ_ONLY_BROWSER_TOOLS:
-            schemas[name] = wrapped
-        else:
-            prepare_name = "prepare_" + name
-            prepare_tool_to_native[prepare_name] = name
-            schemas[prepare_name] = wrapped
-    validators = {name: Draft202012Validator(schema) for name, schema in schemas.items()}
+    catalog = surface.catalog
+    schemas = surface.schemas
+    validators = surface.validators
+    prepare_tool_to_native = surface.prepare_tool_to_native
 
     verifier = MastermindTokenVerifier(
         authenticator=authenticator,
@@ -334,102 +464,7 @@ def create_authenticated_browser_server(
 
     @server._mcp_server.list_tools()
     async def list_tools() -> list[Tool]:
-        rows: list[Tool] = [
-            Tool(
-                name=PREPARE_RESOURCE_TOOL,
-                description="Prepare one browser resource against the current Workbench owner binding. No process is started.",
-                inputSchema=resource_prepare_schema,
-                annotations=ToolAnnotations(
-                    readOnlyHint=True,
-                    destructiveHint=False,
-                    idempotentHint=False,
-                    openWorldHint=False,
-                ),
-            ),
-            Tool(
-                name=START_RESOURCE_TOOL,
-                description="Start exactly one previously prepared owner-bound browser resource. Safe replay reconciles the same resource.",
-                inputSchema=start_ref_schema,
-                annotations=ToolAnnotations(
-                    readOnlyHint=False,
-                    destructiveHint=False,
-                    idempotentHint=True,
-                    openWorldHint=False,
-                ),
-            ),
-            Tool(
-                name=RECONCILE_RESOURCE_TOOL,
-                description="Read the effect state of one prepared browser start without starting another resource.",
-                inputSchema=start_ref_schema,
-                annotations=ToolAnnotations(
-                    readOnlyHint=True,
-                    destructiveHint=False,
-                    idempotentHint=True,
-                    openWorldHint=False,
-                ),
-            ),
-        ]
-        for name in sorted(READ_ONLY_BROWSER_TOOLS):
-            native = catalog[name]
-            annotations = native.get("annotations", {})
-            rows.append(
-                Tool(
-                    name=name,
-                    description=str(native.get("description", name)),
-                    inputSchema=schemas[name],
-                    annotations=ToolAnnotations(
-                        readOnlyHint=True,
-                        destructiveHint=False,
-                        idempotentHint=True,
-                        openWorldHint=bool(annotations.get("openWorldHint", True)),
-                    ),
-                )
-            )
-        for prepare_name, native_name in sorted(prepare_tool_to_native.items()):
-            native = catalog[native_name]
-            rows.append(
-                Tool(
-                    name=prepare_name,
-                    description=(
-                        f"Prepare {native_name} against one browser resource. "
-                        "This does not execute the browser action."
-                    ),
-                    inputSchema=schemas[prepare_name],
-                    annotations=ToolAnnotations(
-                        readOnlyHint=True,
-                        destructiveHint=False,
-                        idempotentHint=False,
-                        openWorldHint=False,
-                    ),
-                )
-            )
-        rows.extend(
-            [
-                Tool(
-                    name=RUN_ACTION_TOOL,
-                    description="Execute exactly one signed prepared browser action. Safe replay reconciles and never dispatches the action twice.",
-                    inputSchema=action_ref_schema,
-                    annotations=ToolAnnotations(
-                        readOnlyHint=False,
-                        destructiveHint=True,
-                        idempotentHint=True,
-                        openWorldHint=True,
-                    ),
-                ),
-                Tool(
-                    name=RECONCILE_ACTION_TOOL,
-                    description="Read NOT_APPLIED, APPLIED, or EFFECT_UNKNOWN for one signed browser action without dispatching it.",
-                    inputSchema=action_ref_schema,
-                    annotations=ToolAnnotations(
-                        readOnlyHint=True,
-                        destructiveHint=False,
-                        idempotentHint=True,
-                        openWorldHint=False,
-                    ),
-                ),
-            ]
-        )
-        return rows
+        return list(surface.tools)
 
     def emit_call_receipt(name: str, request: object, caller: ActionCaller) -> None:
         if call_receipt_sink is None:
@@ -569,11 +604,13 @@ def create_authenticated_browser_server(
 
 
 __all__ = [
+    "BrowserToolSurface",
     "CALL_RECEIPT_SCHEMA",
     "PREPARE_RESOURCE_TOOL",
     "RECONCILE_ACTION_TOOL",
     "RECONCILE_RESOURCE_TOOL",
     "RUN_ACTION_TOOL",
     "START_RESOURCE_TOOL",
+    "build_browser_tool_surface",
     "create_authenticated_browser_server",
 ]
