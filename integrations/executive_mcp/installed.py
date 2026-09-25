@@ -39,6 +39,7 @@ PacketRunner = Callable[..., Mapping[str, Any]]
 _default_packet_runner = ceo_boot_packet.bounded_subprocess_runner
 _PACKET_SETTLEMENT_MARGIN_SECONDS = 0.75
 _INSTALLED_PACKET_TOTAL_TIMEOUT_SECONDS = READ_TIMEOUT_SECONDS - 2.0
+_OBJECT_TYPE_PROBE_SHARD_SIZE = 48_000
 
 
 def _valid_sha(value: object) -> bool:
@@ -654,56 +655,93 @@ def _require_git_object_types(
     """Prove exact object existence/type without inflating packed object headers."""
     if not expected_types:
         return
-    object_input = ("\n".join(sorted(expected_types)) + "\n").encode("ascii")
-    try:
-        object_result = runner(
-            [
-                "git", "cat-file", "--buffer",
-                "--batch-check=%(objectname) %(objecttype)",
-            ],
-            cwd=path,
-            timeout=_remaining_deadline_seconds(
-                deadline, label=label, ceiling=10.0,
-            ),
-            max_bytes=32 * 1024 * 1024, env=env, input_bytes=object_input,
-        )
-    except Exception as exc:
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        ) from exc
-    if not isinstance(object_result, Mapping) or any(
-        object_result.get(flag) is True
-        for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
-    ):
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        )
-    object_stdout = object_result.get("stdout")
-    if object_result.get("code") != 0 or type(object_stdout) is not str:
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        )
-    observed_objects: dict[str, str] = {}
-    for line in object_stdout.splitlines():
-        parts = line.split()
-        if (
-            len(parts) != 2
-            or not _valid_sha(parts[0])
-            or parts[1] not in {"blob", "commit", "tree", "tag"}
-            or parts[0] in observed_objects
+
+    ordered_ids = sorted(expected_types)
+    shards = [
+        ordered_ids[offset:offset + _OBJECT_TYPE_PROBE_SHARD_SIZE]
+        for offset in range(0, len(ordered_ids), _OBJECT_TYPE_PROBE_SHARD_SIZE)
+    ]
+
+    def probe(object_ids: list[str]) -> dict[str, str]:
+        object_input = ("\n".join(object_ids) + "\n").encode("ascii")
+        try:
+            object_result = runner(
+                [
+                    "git", "cat-file", "--buffer",
+                    "--batch-check=%(objectname) %(objecttype)",
+                ],
+                cwd=path,
+                timeout=_remaining_deadline_seconds(
+                    deadline, label=label, ceiling=10.0,
+                ),
+                max_bytes=32 * 1024 * 1024, env=env, input_bytes=object_input,
+            )
+        except Exception as exc:
+            raise GatewayError(
+                "backend_unavailable",
+                f"installed {label} repository objects are incomplete",
+            ) from exc
+        if not isinstance(object_result, Mapping) or any(
+            object_result.get(flag) is True
+            for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
         ):
             raise GatewayError(
-                "backend_unavailable", f"installed {label} repository objects are incomplete"
+                "backend_unavailable",
+                f"installed {label} repository objects are incomplete",
             )
-        observed_objects[parts[0]] = parts[1]
-    if set(observed_objects) != set(expected_types) or any(
-        observed_objects.get(object_id) != expected_type
-        for object_id, expected_type in expected_types.items()
-    ):
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} repository objects are incomplete"
-        )
+        object_stdout = object_result.get("stdout")
+        if object_result.get("code") != 0 or type(object_stdout) is not str:
+            raise GatewayError(
+                "backend_unavailable",
+                f"installed {label} repository objects are incomplete",
+            )
+        observed: dict[str, str] = {}
+        for line in object_stdout.splitlines():
+            parts = line.split()
+            if (
+                len(parts) != 2
+                or not _valid_sha(parts[0])
+                or parts[1] not in {"blob", "commit", "tree", "tag"}
+                or parts[0] in observed
+            ):
+                raise GatewayError(
+                    "backend_unavailable",
+                    f"installed {label} repository objects are incomplete",
+                )
+            observed[parts[0]] = parts[1]
+        if set(observed) != set(object_ids) or any(
+            observed.get(object_id) != expected_types[object_id]
+            for object_id in object_ids
+        ):
+            raise GatewayError(
+                "backend_unavailable",
+                f"installed {label} repository objects are incomplete",
+            )
+        return observed
 
+    if len(shards) == 1:
+        probe(shards[0])
+        return
+
+    failures: list[BaseException] = []
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(2, len(shards)),
+        thread_name_prefix="mmx-object-types",
+    ) as executor:
+        futures = [executor.submit(probe, shard) for shard in shards]
+        for future in futures:
+            try:
+                future.result()
+            except BaseException as exc:  # noqa: BLE001 - re-raised fail-closed below
+                failures.append(exc)
+    if failures:
+        failure = failures[0]
+        if isinstance(failure, GatewayError):
+            raise failure
+        raise GatewayError(
+            "backend_unavailable",
+            f"installed {label} repository objects are incomplete",
+        ) from failure
 
 def _frontmatter_scalar(raw: str) -> str:
     value = raw.strip()
