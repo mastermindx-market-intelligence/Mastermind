@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -481,3 +482,237 @@ def test_v3_schema_identity_is_not_a_v1_fingerprint_alias() -> None:
     )
     assert v3["fingerprint"] != v1["fingerprint"]
     assert classify_duplicate(v1, v3) is DuplicateClassification.CONFLICT
+
+
+# --- IAC-P1-0: the consultation packet wire and its byte budget ---------------
+
+import common.agent_dialogue_consultation_contract as consultation_contract
+from common.agent_dialogue_contract import MAX_FRAME_BYTES as INCUMBENT_MAX_FRAME_BYTES
+from common.agent_dialogue_contract_v2 import (
+    MESSAGE_DISCRIMINATOR_V2,
+    PARENT_DISCRIMINATOR_V2,
+)
+
+PACKET_LINE_OVERHEAD = len(
+    consultation_contract.CONSULTATION_PACKET_DISCRIMINATOR_V1
+) + 1
+
+
+def packet_frame(
+    purpose: str = "QUESTION",
+    question: str | None = None,
+    answer_text: str | None = None,
+    **overrides,
+) -> dict:
+    if purpose == "ANSWER":
+        value = raw_consultation(
+            purpose="ANSWER",
+            question=None,
+            answer={"text": answer_text if answer_text is not None else "x", "evidence_refs": []},
+            **overrides,
+        )
+    else:
+        value = raw_consultation(
+            purpose=purpose,
+            question=question if question is not None else "packet?",
+            answer=None,
+            **overrides,
+        )
+    if value.get("schema") == CONSULTATION_SCHEMA:
+        value.pop("question_message_key", None)
+    return value
+
+
+def worst_case_ceiling_frame() -> dict:
+    """A ceiling-fitting frame whose variable content is astral (worst escape expansion)."""
+    base = build_consultation(packet_frame())
+    base_canonical = len(canonical_consultation_json(base).encode())
+    old_question_bytes = len(base["question"].encode())
+    emoji = "\U0001F600"
+    pad = (
+        INCUMBENT_MAX_FRAME_BYTES
+        - PACKET_LINE_OVERHEAD
+        - base_canonical
+        + old_question_bytes
+    ) // len(emoji.encode())
+    frame = copy.deepcopy(base)
+    frame["question"] = emoji * pad
+    frame["fingerprint"] = consultation_semantic_fingerprint(frame)
+    return frame
+
+
+def test_packet_discriminator_is_not_a_prefix_of_either_v2_discriminator() -> None:
+    packet_discriminator = consultation_contract.CONSULTATION_PACKET_DISCRIMINATOR_V1
+    for incumbent_discriminator in (MESSAGE_DISCRIMINATOR_V2, PARENT_DISCRIMINATOR_V2):
+        assert not incumbent_discriminator.startswith(packet_discriminator)
+        assert not packet_discriminator.startswith(incumbent_discriminator)
+
+
+def test_render_packet_emits_discriminator_newline_then_canonical_json() -> None:
+    frame = build_consultation(packet_frame())
+    rendered = consultation_contract.render_consultation_packet(frame)
+    first_line, newline, remainder = rendered.partition("\n")
+    assert first_line == consultation_contract.CONSULTATION_PACKET_DISCRIMINATOR_V1
+    assert newline == "\n"
+    assert remainder == canonical_consultation_json(frame)
+    # The first line must equal the discriminator EXACTLY: a longer line is refused.
+    tampered = consultation_contract.CONSULTATION_PACKET_DISCRIMINATOR_V1 + "X\n"
+    assert consultation_contract.parse_consultation_packet(tampered + remainder) is None
+
+
+def test_parse_packet_rejects_non_prefix_discriminator_in_both_directions() -> None:
+    body = canonical_consultation_json(build_consultation(packet_frame()))
+    assert consultation_contract.parse_consultation_packet(
+        MESSAGE_DISCRIMINATOR_V2 + "\n" + body
+    ) is None
+    assert consultation_contract.parse_consultation_packet(
+        PARENT_DISCRIMINATOR_V2 + "\n" + body
+    ) is None
+    assert consultation_contract.parse_consultation_packet(
+        consultation_contract.CONSULTATION_PACKET_DISCRIMINATOR_V1 + "\n" + body
+    ) is not None
+
+
+def test_packet_purposes_are_question_and_answer_only() -> None:
+    assert consultation_contract.CONSULTATION_PACKET_PURPOSES == frozenset(
+        {"QUESTION", "ANSWER"}
+    )
+    question_packet = consultation_contract.render_consultation_packet(
+        build_consultation(packet_frame("QUESTION"))
+    )
+    assert consultation_contract.parse_consultation_packet(question_packet)[
+        "purpose"
+    ] == "QUESTION"
+    answer_packet = consultation_contract.render_consultation_packet(
+        build_consultation(packet_frame("ANSWER"))
+    )
+    assert consultation_contract.parse_consultation_packet(answer_packet)[
+        "purpose"
+    ] == "ANSWER"
+    notice_packet = consultation_contract.render_consultation_packet(
+        build_consultation(packet_frame("NOTICE"))
+    )
+    assert consultation_contract.parse_consultation_packet(notice_packet) is None
+
+
+def test_parse_packet_error_path_never_echoes_candidate_text() -> None:
+    marker = "UNTRUSTED_BODY_MARKER"
+    good = consultation_contract.render_consultation_packet(
+        build_consultation(packet_frame(question=marker + "?"))
+    )
+    body = good.partition("\n")[2]
+    assert marker in body
+    tampered_discriminator = good.replace(
+        consultation_contract.CONSULTATION_PACKET_DISCRIMINATOR_V1,
+        "MMX/TAMPERED_PACKET_V1",
+        1,
+    )
+    tampered_body = consultation_contract.CONSULTATION_PACKET_DISCRIMINATOR_V1 + "\n" + body[:-1]
+    raised_messages: list[str] = []
+    for candidate in (
+        tampered_discriminator,
+        tampered_body,
+        "",
+        consultation_contract.CONSULTATION_PACKET_DISCRIMINATOR_V1,
+        consultation_contract.CONSULTATION_PACKET_DISCRIMINATOR_V1 + "\nnot json",
+    ):
+        try:
+            parsed = consultation_contract.parse_consultation_packet(candidate)
+        except Exception as exc:  # noqa: BLE001 - the contract is the absence of echo
+            raised_messages.append(str(exc))
+            parsed = None
+        assert parsed is None
+    assert marker not in "\n".join(raised_messages)
+
+
+def test_packet_ceiling_is_the_imported_incumbent_max_frame_bytes() -> None:
+    assert consultation_contract.MAX_FRAME_BYTES is INCUMBENT_MAX_FRAME_BYTES
+    assert consultation_contract.MAX_FRAME_BYTES == INCUMBENT_MAX_FRAME_BYTES
+    source = Path(consultation_contract.__file__).read_text(encoding="utf-8")
+    assert "4500" not in source
+
+
+def test_question_over_ceiling_is_a_typed_refusal_before_any_effect() -> None:
+    oversized_question = "OVERSIZE" * 400
+    frame = build_consultation(packet_frame(question=oversized_question))
+    budget = consultation_contract.consultation_packet_budget(frame)
+    assert budget.fits_wire_ceiling is False
+    with pytest.raises(
+        consultation_contract.ConsultationPacketOverCeiling
+    ) as excinfo:
+        consultation_contract.assert_packet_within_ceiling(frame)
+    assert excinfo.value.code == "PACKET_OVER_CEILING"
+    assert "OVERSIZE" not in str(excinfo.value)
+    assert frame["question"] not in str(excinfo.value)
+
+
+def test_escaped_request_line_bytes_stay_within_the_af_unix_request_limit() -> None:
+    frame = worst_case_ceiling_frame()
+    budget = consultation_contract.consultation_packet_budget(frame)
+    assert budget.rendered_bytes <= INCUMBENT_MAX_FRAME_BYTES
+    af_unix_request_limit = RESPONSE_BUDGET_MAXIMA["max_payload_bytes"]
+    assert budget.escaped_request_line_bytes > budget.rendered_bytes
+    assert budget.escaped_request_line_bytes < af_unix_request_limit
+
+
+def test_no_truncation_chunking_or_alternate_carrier_symbol_exists() -> None:
+    source = Path(consultation_contract.__file__).read_text(encoding="utf-8")
+    for token in ("truncat", "chunk", "files_upload", "upload"):
+        assert token not in source
+
+
+def test_response_budget_max_payload_bytes_is_clamped_under_the_wire_ceiling() -> None:
+    # A fully loaded ANSWER frame (envelope + its own narrative) is the overhead;
+    # only the remainder of the wire ceiling may be declared as payload budget.
+    lean_answer = build_consultation(packet_frame("ANSWER"))
+    lean_bytes = len(
+        consultation_contract.render_consultation_packet(lean_answer).encode()
+    )
+    filler = INCUMBENT_MAX_FRAME_BYTES - 150 - lean_bytes
+    assert filler > 0
+    loaded_answer = build_consultation(packet_frame("ANSWER", answer_text="x" * filler))
+    overhead = len(
+        consultation_contract.render_consultation_packet(loaded_answer).encode()
+    )
+    clamped = consultation_contract.clamp_response_budget(
+        RESPONSE_BUDGET_MAXIMA, answer_frame_overhead_bytes=overhead
+    )
+    assert clamped is not RESPONSE_BUDGET_MAXIMA
+    assert clamped["max_payload_bytes"] < INCUMBENT_MAX_FRAME_BYTES
+    assert clamped["max_payload_bytes"] * 100 < RESPONSE_BUDGET_MAXIMA["max_payload_bytes"]
+    assert clamped["max_answers"] == RESPONSE_BUDGET_MAXIMA["max_answers"]
+    assert clamped["max_evidence_reads"] == RESPONSE_BUDGET_MAXIMA["max_evidence_reads"]
+    assert clamped["max_forward_hops"] == RESPONSE_BUDGET_MAXIMA["max_forward_hops"]
+    assert RESPONSE_BUDGET_MAXIMA["max_payload_bytes"] == 32768
+    never_negative = consultation_contract.clamp_response_budget(
+        RESPONSE_BUDGET_MAXIMA,
+        answer_frame_overhead_bytes=INCUMBENT_MAX_FRAME_BYTES + 10,
+    )
+    assert never_negative["max_payload_bytes"] == 0
+
+
+def test_worst_case_replies_page_plus_candidate_stays_under_max_response_bytes() -> None:
+    candidate = worst_case_ceiling_frame()
+    candidate_bytes = len(
+        consultation_contract.render_consultation_packet(candidate).encode()
+    )
+    assert candidate_bytes <= INCUMBENT_MAX_FRAME_BYTES
+    page_ceiling_bytes = 64 * 1024
+    capacity = page_ceiling_bytes // candidate_bytes
+    assert capacity >= 1
+    full_page = capacity * candidate_bytes
+    assert full_page <= page_ceiling_bytes
+    assert (
+        consultation_contract.replies_page_has_room(
+            full_page, candidate, page_ceiling_bytes=page_ceiling_bytes
+        )
+        is False
+    )
+    assert (
+        consultation_contract.replies_page_has_room(
+            full_page - candidate_bytes,
+            candidate,
+            page_ceiling_bytes=page_ceiling_bytes,
+        )
+        is True
+    )

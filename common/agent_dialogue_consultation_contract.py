@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 from common.agent_dialogue_contract import (
     DialogueContractError,
     MAX_EVIDENCE_REFS,
+    MAX_FRAME_BYTES,
     validate_evidence_ref,
 )
 from common.agent_dialogue_contract_v2 import (
@@ -95,6 +97,8 @@ RESPONSE_BUDGET_MAXIMA = {
     "max_forward_hops": 0,
     "max_payload_bytes": 32768,
 }
+CONSULTATION_PACKET_DISCRIMINATOR_V1 = "MMX/AGENT_DIALOGUE_CONSULTATION_PACKET_V1"
+CONSULTATION_PACKET_PURPOSES = frozenset({"QUESTION", "ANSWER"})
 RECEIPT_KEYS = frozenset(
     {
         "accepted_for_processing",
@@ -426,6 +430,84 @@ def build_consultation(value: Any) -> dict[str, Any]:
     return item
 
 
+class ConsultationPacketOverCeiling(DialogueContractError):
+    """Typed pre-effect refusal: rendered packet exceeds the incumbent wire ceiling."""
+
+    code = "PACKET_OVER_CEILING"
+
+    def __init__(self, rendered_bytes: int) -> None:
+        RuntimeError.__init__(self, self.code)
+        self.rendered_bytes = rendered_bytes
+
+
+@dataclass(frozen=True)
+class ConsultationPacketBudget:
+    rendered_bytes: int
+    escaped_request_line_bytes: int
+    fits_wire_ceiling: bool
+
+
+def render_consultation_packet(frame: Mapping[str, Any]) -> str:
+    return CONSULTATION_PACKET_DISCRIMINATOR_V1 + "\n" + canonical_consultation_json(frame)
+
+
+def parse_consultation_packet(text: Any) -> dict[str, Any] | None:
+    if not isinstance(text, str):
+        return None
+    first_line, newline, remainder = text.partition("\n")
+    if first_line != CONSULTATION_PACKET_DISCRIMINATOR_V1 or newline != "\n":
+        return None
+    try:
+        candidate = json.loads(remainder)
+    except ValueError:
+        return None
+    if not isinstance(candidate, dict):
+        return None
+    try:
+        frame = validate_consultation(candidate)
+    except (DialogueContractError, TypeError, ValueError):
+        return None
+    if frame["purpose"] not in CONSULTATION_PACKET_PURPOSES:
+        return None
+    return frame
+
+
+def consultation_packet_budget(frame: Mapping[str, Any]) -> ConsultationPacketBudget:
+    rendered = render_consultation_packet(frame)
+    rendered_bytes = len(rendered.encode("utf-8"))
+    return ConsultationPacketBudget(
+        rendered_bytes=rendered_bytes,
+        escaped_request_line_bytes=len(json.dumps({"text": rendered}).encode("utf-8")),
+        fits_wire_ceiling=rendered_bytes <= MAX_FRAME_BYTES,
+    )
+
+
+def assert_packet_within_ceiling(frame: Mapping[str, Any]) -> None:
+    budget = consultation_packet_budget(frame)
+    if not budget.fits_wire_ceiling:
+        raise ConsultationPacketOverCeiling(budget.rendered_bytes)
+
+
+def clamp_response_budget(
+    response_budget: Mapping[str, int], *, answer_frame_overhead_bytes: int
+) -> dict[str, int]:
+    clamped = {key: response_budget[key] for key in RESPONSE_BUDGET_KEYS}
+    clamped["max_payload_bytes"] = max(
+        0, min(clamped["max_payload_bytes"], MAX_FRAME_BYTES - answer_frame_overhead_bytes)
+    )
+    return clamped
+
+
+def replies_page_has_room(
+    current_page_bytes: int,
+    candidate_frame: Mapping[str, Any],
+    *,
+    page_ceiling_bytes: int,
+) -> bool:
+    candidate_bytes = len(render_consultation_packet(candidate_frame).encode("utf-8"))
+    return current_page_bytes + candidate_bytes <= page_ceiling_bytes
+
+
 def classify_duplicate(
     original: Mapping[str, Any], replay: Mapping[str, Any]
 ) -> DuplicateClassification:
@@ -440,6 +522,8 @@ __all__ = [
     "ANSWER_KEYS",
     "ARTIFACT_REVISION_KEYS",
     "CONSULTATION_KEYS",
+    "CONSULTATION_PACKET_DISCRIMINATOR_V1",
+    "CONSULTATION_PACKET_PURPOSES",
     "CONSULTATION_V2_KEYS",
     "CONSULTATION_V2_SCHEMA",
     "CONSULTATION_PURPOSES",
@@ -455,7 +539,15 @@ __all__ = [
     "build_consultation",
     "canonical_consultation_json",
     "classify_duplicate",
+    "consultation_packet_budget",
     "consultation_schema_for_reasoning_surface",
     "consultation_semantic_fingerprint",
+    "assert_packet_within_ceiling",
+    "clamp_response_budget",
+    "ConsultationPacketBudget",
+    "ConsultationPacketOverCeiling",
+    "parse_consultation_packet",
+    "replies_page_has_room",
+    "render_consultation_packet",
     "validate_consultation",
 ]
