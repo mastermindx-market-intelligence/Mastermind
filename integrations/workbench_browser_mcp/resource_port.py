@@ -195,6 +195,8 @@ def default_relay_command(
         config.tmp_dir,
         "--barrier-fd",
         str(barrier_fd),
+        "--expires-at-ms",
+        str(prepared.resource_expires_at_ms),
     )
 
 

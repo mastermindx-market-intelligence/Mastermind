@@ -21,7 +21,7 @@ import stat
 import subprocess
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from control_plane.browser_resource_contract import (
@@ -348,6 +348,9 @@ class BrowserRelayServer:
         resource_id: str,
         socket_path: Path,
         session: McpStdioSession,
+        expires_at_ms: int | None = None,
+        parent_pid: int | None = None,
+        clock_ms: Callable[[], int] | None = None,
     ) -> None:
         if type(resource_id) is not str or _HEX32.fullmatch(resource_id) is None:
             raise BrowserRelayError("resource identity is invalid")
@@ -361,9 +364,22 @@ class BrowserRelayServer:
             raise BrowserRelayError("relay socket path is too long")
         if not isinstance(session, McpStdioSession):
             raise BrowserRelayError("relay MCP session is invalid")
+        if expires_at_ms is not None and (
+            type(expires_at_ms) is not int or not 0 <= expires_at_ms < 2**63
+        ):
+            raise BrowserRelayError("relay lease expiry is invalid")
+        if parent_pid is not None and (
+            type(parent_pid) is not int or parent_pid <= 1
+        ):
+            raise BrowserRelayError("relay parent identity is invalid")
+        if clock_ms is not None and not callable(clock_ms):
+            raise BrowserRelayError("relay clock is invalid")
         self._resource_id = resource_id
         self._socket_path = socket_path
         self._session = session
+        self._expires_at_ms = expires_at_ms
+        self._parent_pid = parent_pid
+        self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
         self._stop = threading.Event()
         self._ready = threading.Event()
         self._server: socket.socket | None = None
@@ -394,6 +410,15 @@ class BrowserRelayServer:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def _owner_requires_stop(self) -> bool:
+        if self._expires_at_ms is not None:
+            now_ms = self._clock_ms()
+            if type(now_ms) is not int or now_ms < 0 or now_ms >= self._expires_at_ms:
+                return True
+        if self._parent_pid is not None and os.getppid() != self._parent_pid:
+            return True
+        return False
 
     def _response(
         self,
@@ -516,6 +541,8 @@ class BrowserRelayServer:
             self._server = server
             self._ready.set()
             while not self._stop.is_set():
+                if self._owner_requires_stop():
+                    break
                 try:
                     connection, _ = server.accept()
                 except socket.timeout:
@@ -674,6 +701,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--home-dir", required=True)
     parser.add_argument("--tmp-dir", required=True)
     parser.add_argument("--barrier-fd", type=int, required=True)
+    parser.add_argument("--expires-at-ms", type=int, required=True)
     args = parser.parse_args(argv)
 
     if _HEX32.fullmatch(args.resource_id) is None:
@@ -715,6 +743,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         resource_id=args.resource_id,
         socket_path=socket_path,
         session=session,
+        expires_at_ms=args.expires_at_ms,
+        parent_pid=os.getppid(),
     )
     previous: dict[int, Any] = {}
 

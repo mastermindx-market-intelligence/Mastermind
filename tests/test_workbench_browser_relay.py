@@ -261,3 +261,61 @@ def test_relay_refuses_preexisting_socket_path(tmp_path):
     with pytest.raises(BrowserRelayError, match="exists"):
         relay.serve_forever()
     assert socket_path.read_text(encoding="utf-8") == "do-not-delete"
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets required")
+def test_relay_self_retires_at_authoritative_lease_expiry(tmp_path):
+    socket_path = tmp_path / "relay-expiry.sock"
+    now = {"value": 1000}
+    session = McpStdioSession(
+        argv=_fake_child(tmp_path),
+        env={"PYTHONDONTWRITEBYTECODE": "1"},
+        allowed_tools=frozenset({"browser_snapshot", "browser_click"}),
+        expected_tool_schema_digest=_digest(),
+    )
+    relay = BrowserRelayServer(
+        resource_id="a" * 32,
+        socket_path=socket_path,
+        session=session,
+        expires_at_ms=2000,
+        clock_ms=lambda: now["value"],
+    )
+    thread = threading.Thread(target=relay.serve_forever, daemon=True)
+    thread.start()
+    relay.wait_ready(timeout=3)
+    assert socket_path.exists()
+    now["value"] = 2000
+    thread.join(timeout=3)
+    assert not thread.is_alive()
+    assert not socket_path.exists()
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets required")
+def test_relay_self_retires_when_workbench_parent_disappears(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    import integrations.workbench_browser_mcp.relay as relay_module
+
+    socket_path = tmp_path / "relay-parent.sock"
+    observed_parent = {"pid": 4242}
+    monkeypatch.setattr(relay_module.os, "getppid", lambda: observed_parent["pid"])
+    session = McpStdioSession(
+        argv=_fake_child(tmp_path),
+        env={"PYTHONDONTWRITEBYTECODE": "1"},
+        allowed_tools=frozenset({"browser_snapshot", "browser_click"}),
+        expected_tool_schema_digest=_digest(),
+    )
+    relay = BrowserRelayServer(
+        resource_id="a" * 32,
+        socket_path=socket_path,
+        session=session,
+        parent_pid=4242,
+    )
+    thread = threading.Thread(target=relay.serve_forever, daemon=True)
+    thread.start()
+    relay.wait_ready(timeout=3)
+    assert socket_path.exists()
+    observed_parent["pid"] = 1
+    thread.join(timeout=3)
+    assert not thread.is_alive()
+    assert not socket_path.exists()

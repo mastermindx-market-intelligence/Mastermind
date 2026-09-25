@@ -27,6 +27,7 @@ from integrations.workbench_browser_mcp.resource_port import (
     BrowserResourcePort,
     BrowserResourceRefused,
     PersistentBrowserProfileGrant,
+    default_relay_command,
 )
 
 
@@ -443,6 +444,33 @@ time.sleep(60)
         pid = int(pid_file.read_text(encoding="utf-8"))
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_default_relay_command_carries_authoritative_resource_expiry(tmp_path: Path):
+    fd, caller, port, relay_root = _port(tmp_path)
+    try:
+        start_ref = port.prepare_resource(
+            caller,
+            project_ref="project:browser",
+            mode="isolated",
+        )
+        prepared = port.codec.decode_start(start_ref, now_ms=2000)
+        output_dir = _private(tmp_path / "relay-output")
+        argv = default_relay_command(
+            config=port._config,
+            prepared=prepared,
+            barrier_fd=9,
+            socket_path=relay_root / (prepared.action_id + ".sock"),
+            output_dir=output_dir,
+            profile_dir=None,
+        )
+        assert "--expires-at-ms" in argv
+        assert argv[argv.index("--expires-at-ms") + 1] == str(
+            prepared.resource_expires_at_ms
+        )
     finally:
         os.close(fd)
         shutil.rmtree(relay_root, ignore_errors=True)

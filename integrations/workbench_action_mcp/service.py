@@ -14,7 +14,7 @@ Key rotation is a generation boundary and must not strand an unresolved effect.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 import dataclasses
 import enum
 import json
@@ -40,8 +40,10 @@ from .contracts import ActionCaller
 from .runtime import StableWorkbenchActionLease, WorkbenchActionRuntime
 
 SERVICE_SCHEMA = "mastermind.workbench_action_service.v1"
+SERVICE_SCHEMA_V2 = "mastermind.workbench_action_service.v2"
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_POLICY_BYTES = 64 * 1024
+MAX_BROWSER_CATALOG_BYTES = 2 * 1024 * 1024
 MAX_CONCURRENCY = 8
 MAX_TIMEOUT_SECONDS = 60.0
 MAX_ACTION_TTL_MS = 5 * 60 * 1000
@@ -64,6 +66,22 @@ _CONFIG_KEYS = frozenset(
         "close_timeout_seconds",
         "action_ttl_ms",
         "lease",
+    }
+)
+_CONFIG_KEYS_V2 = _CONFIG_KEYS | {"browser"}
+_BROWSER_KEYS = frozenset(
+    {
+        "source_root",
+        "python_executable",
+        "node_executable",
+        "mcp_cli_path",
+        "chrome_executable",
+        "relay_root",
+        "output_root",
+        "home_dir",
+        "tmp_dir",
+        "tool_catalog_file",
+        "startup_timeout_seconds",
     }
 )
 _LEASE_KEYS = frozenset(
@@ -109,6 +127,24 @@ class ShutdownOutcome(str, enum.Enum):
 
 
 @dataclasses.dataclass(frozen=True)
+class BrowserServiceConfig:
+    """Closed owner-selected Browser sibling settings for service v2."""
+
+    source_root: str
+    python_executable: str
+    node_executable: str
+    mcp_cli_path: str
+    chrome_executable: str
+    relay_root: str
+    output_root: str
+    home_dir: str
+    tmp_dir: str
+    tool_catalog_file: str
+    startup_timeout_seconds: float
+    mount_path: str = "/browser"
+
+
+@dataclasses.dataclass(frozen=True)
 class ServiceConfig:
     schema: str
     policy_file: str
@@ -125,6 +161,7 @@ class ServiceConfig:
     close_timeout_seconds: float
     action_ttl_ms: int
     lease: StableWorkbenchActionLease
+    browser: BrowserServiceConfig | None = None
 
     @property
     def allowed_hosts(self) -> tuple[str, ...]:
@@ -218,6 +255,24 @@ def _incoming_authority(value: object) -> str:
     return value
 
 
+def _browser(value: object) -> BrowserServiceConfig:
+    if not isinstance(value, dict) or set(value) != _BROWSER_KEYS:
+        _refuse()
+    return BrowserServiceConfig(
+        source_root=_absolute_path(value.get("source_root")),
+        python_executable=_absolute_path(value.get("python_executable")),
+        node_executable=_absolute_path(value.get("node_executable")),
+        mcp_cli_path=_absolute_path(value.get("mcp_cli_path")),
+        chrome_executable=_absolute_path(value.get("chrome_executable")),
+        relay_root=_absolute_path(value.get("relay_root")),
+        output_root=_absolute_path(value.get("output_root")),
+        home_dir=_absolute_path(value.get("home_dir")),
+        tmp_dir=_absolute_path(value.get("tmp_dir")),
+        tool_catalog_file=_absolute_path(value.get("tool_catalog_file")),
+        startup_timeout_seconds=_bounded_timeout(value.get("startup_timeout_seconds")),
+    )
+
+
 def _lease(value: object) -> StableWorkbenchActionLease:
     if not isinstance(value, dict) or set(value) != _LEASE_KEYS:
         _refuse()
@@ -264,13 +319,24 @@ def _lease(value: object) -> StableWorkbenchActionLease:
 
 
 def parse_service_config(value: object) -> ServiceConfig:
-    if not isinstance(value, dict) or set(value) != _CONFIG_KEYS:
+    if not isinstance(value, dict):
         _refuse()
-    if value.get("schema") != SERVICE_SCHEMA or value.get("bind_host") != "127.0.0.1":
+    schema = value.get("schema")
+    if schema == SERVICE_SCHEMA:
+        if set(value) != _CONFIG_KEYS:
+            _refuse()
+        browser = None
+    elif schema == SERVICE_SCHEMA_V2:
+        if set(value) != _CONFIG_KEYS_V2:
+            _refuse()
+        browser = _browser(value.get("browser"))
+    else:
+        _refuse()
+    if value.get("bind_host") != "127.0.0.1":
         _refuse()
     ttl = _bounded_int(value.get("action_ttl_ms"), minimum=1000, maximum=MAX_ACTION_TTL_MS)
     return ServiceConfig(
-        schema=SERVICE_SCHEMA,
+        schema=schema,
         policy_file=_absolute_path(value.get("policy_file")),
         project_root=_absolute_path(value.get("project_root")),
         audit_directory=_absolute_path(value.get("audit_directory")),
@@ -287,6 +353,7 @@ def parse_service_config(value: object) -> ServiceConfig:
         close_timeout_seconds=_bounded_timeout(value.get("close_timeout_seconds")),
         action_ttl_ms=ttl,
         lease=_lease(value.get("lease")),
+        browser=browser,
     )
 
 
@@ -704,6 +771,54 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
     return runtime
 
 
+def create_browser_sibling(
+    runtime: WorkbenchActionRuntime,
+    config: ServiceConfig,
+):
+    """Compose Browser from the exact existing Workbench runtime services.
+
+    V1 stays action-only. V2 creates no second runtime, lease, artifact store,
+    token key, auth policy, process owner, or lifecycle.
+    """
+    if not isinstance(runtime, WorkbenchActionRuntime) or not isinstance(config, ServiceConfig):
+        _refuse()
+    selected = config.browser
+    if selected is None:
+        return None
+    try:
+        from integrations.workbench_browser_mcp.deployment import create_browser_deployment
+        from integrations.workbench_browser_mcp.resource_port import BrowserHostConfig
+
+        catalog = _secure_json(
+            selected.tool_catalog_file,
+            maximum=MAX_BROWSER_CATALOG_BYTES,
+        )
+        host_config = BrowserHostConfig(
+            source_root=Path(selected.source_root),
+            python_executable=selected.python_executable,
+            node_executable=selected.node_executable,
+            mcp_cli_path=selected.mcp_cli_path,
+            chrome_executable=selected.chrome_executable,
+            relay_root=Path(selected.relay_root),
+            output_root=Path(selected.output_root),
+            home_dir=selected.home_dir,
+            tmp_dir=selected.tmp_dir,
+            startup_timeout_seconds=selected.startup_timeout_seconds,
+        )
+        return create_browser_deployment(
+            services=runtime.services,
+            host_config=host_config,
+            tool_catalog=catalog,
+            # Persistent authenticated profiles remain held until the existing
+            # profile owner can provide an exclusive typed grant.
+            profile_resolver=lambda _profile_ref: None,
+        )
+    except ServiceConfigurationError:
+        raise
+    except Exception as error:
+        raise ServiceConfigurationError("SERVICE_CONFIGURATION_REFUSED") from error
+
+
 def build_service_app(
     runtime: WorkbenchActionRuntime,
     config: ServiceConfig,
@@ -714,6 +829,12 @@ def build_service_app(
     from starlette.routing import Mount, Route
 
     inner = runtime.server.streamable_http_app()
+    browser_deployment = create_browser_sibling(runtime, config)
+    browser_inner = (
+        browser_deployment.server.streamable_http_app()
+        if browser_deployment is not None
+        else None
+    )
 
     async def health(_request):
         return PlainTextResponse("OK\n", status_code=200)
@@ -726,7 +847,12 @@ def build_service_app(
     @asynccontextmanager
     async def lifespan(_app):
         try:
-            async with runtime.server.session_manager.run():
+            async with AsyncExitStack() as stack:
+                await stack.enter_async_context(runtime.server.session_manager.run())
+                if browser_deployment is not None:
+                    await stack.enter_async_context(
+                        browser_deployment.server.session_manager.run()
+                    )
                 state.lifespan_started = True
                 try:
                     yield
@@ -742,14 +868,14 @@ def build_service_app(
             if not state.runtime_close_attempted:
                 await _close_runtime(runtime, config, state)
 
-    return Starlette(
-        routes=[
-            Route("/healthz", health, methods=["GET"]),
-            Route("/readyz", ready, methods=["GET"]),
-            Mount("/", app=inner),
-        ],
-        lifespan=lifespan,
-    )
+    routes = [
+        Route("/healthz", health, methods=["GET"]),
+        Route("/readyz", ready, methods=["GET"]),
+    ]
+    if browser_inner is not None:
+        routes.append(Mount(config.browser.mount_path, app=browser_inner))
+    routes.append(Mount("/", app=inner))
+    return Starlette(routes=routes, lifespan=lifespan)
 
 
 async def run_service(config: ServiceConfig) -> int:
