@@ -16,6 +16,7 @@ import re
 
 
 PLAYWRIGHT_MCP_VERSION = "0.0.79"
+WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST = "ea956fcbb62baedc543f0e8bf299b0a59bdaa30f7c5808faf1ca32a5e9094730"
 
 ALLOWED_BROWSER_TOOLS = frozenset(
     {
@@ -32,6 +33,16 @@ ALLOWED_BROWSER_TOOLS = frozenset(
         "browser_tabs",
         "browser_take_screenshot",
         "browser_type",
+        "browser_wait_for",
+    }
+)
+
+READ_ONLY_BROWSER_TOOLS = frozenset(
+    {
+        "browser_console_messages",
+        "browser_network_requests",
+        "browser_snapshot",
+        "browser_take_screenshot",
         "browser_wait_for",
     }
 )
