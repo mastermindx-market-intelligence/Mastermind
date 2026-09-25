@@ -470,7 +470,14 @@ def _scoped_worktree_path_sets(
 
     actual_types: dict[str, str] = {}
     actual_directories: set[str] = set()
-    for rel in sorted(files | directories, key=os.fsencode):
+    # Parents must be proven as direct directories before any descendant path is
+    # observed. Otherwise a live directory->symlink substitution could make a
+    # later ``lstat(root / child)`` resolve outside the admitted Macro root.
+    ordered_paths = sorted(
+        files | directories,
+        key=lambda rel: (len(rel.split("/")), os.fsencode(rel)),
+    )
+    for rel in ordered_paths:
         _check_deadline(deadline, label=label)
         if not rel or rel.startswith("/") or "\x00" in rel or "\\" in rel:
             raise OSError("scoped worktree path is unsafe")
@@ -478,7 +485,9 @@ def _scoped_worktree_path_sets(
         if any(part in {"", ".", ".."} for part in parts):
             raise OSError("scoped worktree path is unsafe")
         observed = (root / rel).lstat()
-        if stat.S_ISDIR(observed.st_mode) and not stat.S_ISLNK(observed.st_mode):
+        if rel in directories:
+            if not stat.S_ISDIR(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+                raise OSError("scoped worktree directory topology differs")
             kind = "directory"
             actual_directories.add(rel)
         elif stat.S_ISLNK(observed.st_mode):
@@ -488,8 +497,7 @@ def _scoped_worktree_path_sets(
             kind = "regular"
             actual_types[rel] = kind
         else:
-            kind = "other"
-            actual_types[rel] = kind
+            raise OSError("scoped worktree file topology differs")
         _seal_stat(seal, rel=rel, kind=kind, observed=observed)
 
     if verify_record_namespaces:
