@@ -1,0 +1,188 @@
+# F0 source admissibility after real historical-membership qualification
+
+Status: **PARTIAL / FAIL-CLOSED FOR TRAINING**. This record separates technical source quality from
+rights, historical identity, operational possession and model authority. It is not a new source
+registry, universe owner, feature store, evaluator or promotion plane.
+
+## Evidence pins
+
+- Mastermind operation: `market-experience-direction-20260924-astra-001`; existing PR #967.
+- Current protected Skillpack: `605cd056c3463c992d85ba76dbcc90fbb758da75`,
+  version 1.0.1. Required procedures were loaded from that same revision.
+- Historical-membership upstream: `fja05680/sp500@a2430f2af0c79ddf0748e91de11bdeb1616ab5a7`.
+  Interval blob `3ed3b0e8d9e6e63730c153ee1f13ddaf6ed281bb`; snapshot blob
+  `656b033be9418db272f1903f4f8e79a2a8664e6a`.
+- Existing acquisition owner: Macro `scripts/residual_alpha_pit.py`; do not replace it or run its
+  top-level command as a membership-only act because it also downloads delisted prices and writes
+  canonical data.
+- Current rights/identity/event inspection pin: Macro
+  `3a29e6145ce53ca4551adef866a5f73e62c8c4ff`.
+- Current source-rights register blob:
+  `research/licenses/PROPHET_US_SOURCE_RIGHTS_REGISTER_2026-09-23.md`
+  / `a9ee6f288bfb2716facd88dcf2c5135ca8125303`.
+- Massive operator entitlement record blob:
+  `research/licenses/MASSIVE_ENTITLEMENT_RECORD.md`
+  / `3969a9aae918141b51baffbb0e17d8a2ec2485a0`.
+- Canonical identity reader blob:
+  `lib/dataos/identity.py` / `d9d5018aac47910bf2c802b1a74114a99511f74f`.
+- Company event/document contracts:
+  `events.py` `9d839a468ba0de2b2ea090bfe7d3ae698d303c44`,
+  `documents.py` `21ef185557d54e8b4c24c4e84c6f94bf3ea1190b`,
+  `event_workspace.py` `efdbd91156b2a94e6e8bdca7e8cae454a6860e68`,
+  `event_workspace_build.py` `69d39a58ecc9cfd6143192f29eb2e0f62016aeb5`.
+
+## What became true
+
+The two pinned historical-membership representations are internally consistent over the frozen
+2019-2023 diagnostic window when the interval table is read with its actual convention:
+`start_date <= t < end_date`, with null end open.
+
+Observed source structure:
+
+| Check | Result |
+|---|---:|
+| interval rows | 1,262 |
+| interval unique normalized symbols | 1,209 |
+| snapshot rows | 2,720 |
+| snapshot unique normalized symbols | 1,209 |
+| source coverage | 1996-01-02 through 2026-08-18 |
+| invalid rows | 0 |
+| inverted finite intervals | 0 |
+| overlapping same-symbol intervals | 0 |
+| dot-to-dash normalization collisions | 0 |
+| frozen quarter-end comparisons, 2019-2023 | 20 / 20 covered |
+| end-exclusive exact member-set matches | 20 / 20 |
+
+Quarter ends do not exercise every removal boundary. The final source date does: on
+2026-08-18 the snapshot and end-exclusive interval reader both contain 503 names with identical
+member-set SHA-256. An inclusive-end interpretation incorrectly retains **AVB** and **EQR**.
+Therefore the existing Mastermind `loop/single_name_panel.py::members_asof` convention matches the
+upstream converter; Macro `scripts/s13_reversal_phase0.py::_eligible` does not on a removal day.
+No existing evaluator is changed or regraded by this F0 unit.
+
+The exact receipt is
+`research/MARKET_EXPERIENCE_F0_MEMBERSHIP_SOURCE_RECEIPT_2026-09-24.json`.
+The reproducible offline checker is
+`research/market_experience_f0_membership_source_audit.py`.
+
+## What did NOT become true
+
+Technical consistency is not source admission.
+
+The upstream README says the older history is reconstructed from book-associated data plus later
+Wikipedia/manual maintenance, warns selected changes are incomplete, and notes likely missing early
+members. Its ticker strings are not durable issuer identity. The repository carries an MIT LICENSE,
+but this F0 unit does **not** treat that software/repository license as a determination of rights in
+the underlying S&P/index membership dataset.
+
+Therefore:
+
+- internal source qualification: **YES**;
+- model-training use of this membership source: **NO / rights unresolved**;
+- user redistribution of this membership source: **NO / rights unresolved**;
+- historical operational possession by Mastermind: **NOT PROVEN**;
+- announcement-time index-change availability: **NOT PROVEN**;
+- stock pilot cohort admitted: **NO**.
+
+The 50-issuer/five-year scenario remains a capacity shape, not a cohort.
+
+## Canonical identity join
+
+Membership tickers never become issuer keys directly. The existing Data OS identity spine remains
+the only exact identity authority.
+
+`VendorAliasTable` uses inclusive `valid_from` and exclusive `valid_to`, matching the qualified
+membership interval convention. Historical naming must use the dated historical vendor spaces;
+current-catalog aliases may not answer a historical naming question. The security master then
+supplies the issuer axis, and issuer-level learning may aggregate only when its canonical
+`issuer_state` is `RESOLVED`. Unresolved, ambiguous, evidence-conflict and deferred-identity rows
+stay out of the joined denominator rather than being ticker-guessed.
+
+This F0 unit does not materialize that join yet.
+
+## Source admissibility for the first learning loop
+
+The first learning loop must be assembled from sources whose **technical clocks and permitted use**
+both pass. Current in-repo evidence yields this matrix:
+
+| Source family | Technical role | Model-learning posture now | Ruling |
+|---|---|---|---|
+| Massive `massive_stock_day` | daily U.S. stock OHLCV, rolling history | recorded AI/ML + derived-use rights for this feed, subject to per-feed conditions | **candidate trainable price substrate after actual R2 coverage/identity audit** |
+| SEC EDGAR company filings/releases | issuer event evidence with acceptance/observation clocks | current rights register records acquisition, processing, storage, model use and redistribution | **candidate trainable event substrate** |
+| recovered S&P membership source | historical universe intervals | underlying index-data rights unresolved | **technical qualification only; no training** |
+| transcripts `rp_public_primary_v1` | event context | profile name is not a rights grant; model use unresolved | **context-only, not a training source** |
+| consensus estimates | expectation context | explicitly unlicensed | **absent; never synthesize beat/miss** |
+| FRED/ALFRED CPI | macro vintage context | technically validated, but current rights register records model-use posture as UNKNOWN/not a source | **context/research only until rights reconciled** |
+| Yahoo/yfinance bars | historical price context | model use and redistribution unresolved; personal-use label is adverse | **not a training source** |
+
+The Massive entitlement record covers bars, archives, reference data, derived materials and AI/ML
+at the enterprise scope, but also states that per-dataset written conditions can override it.
+The current `massive_stock_day` rights row is explicitly recorded as model-usable. The store itself
+is a rolling approximately five-year archive; its code records an observed floor of 2021-07-06 at
+the 2026-07-03 probe. This means broad license rights do not manufacture older price history.
+
+## Implication for the pilot
+
+Do **not** silently execute the earlier literal 2019-2023 stock-learning pilot with the recovered
+free membership source or Yahoo prices.
+
+The first trainable market-learning slice should instead be selected only after:
+
+1. the existing Massive R2 daily store is audited for actual date/name completeness and the exact
+   per-feed entitlement remains valid;
+2. membership/universe definition is supplied by a rights-qualified existing source owner, or the
+   recovered source receives an explicit rights determination;
+3. historical tickers join to canonical security and RESOLVED issuer identities at the decision
+   date;
+4. SEC-backed earnings/event metadata coverage is measured without reading a sealed evaluation
+   outcome set;
+5. the cohort, dates, missingness denominator and evaluation split are frozen **before** outcome
+   inspection.
+
+Until those gates pass, the system may research source mechanics and context, but it may not call
+the result a trainable cohort or a validated forecasting corpus.
+
+## Existing earnings contract to reuse
+
+No new event model is required. The Company Intelligence contracts already carry the necessary
+shape:
+
+- canonical issuer/fiscal-period event identity;
+- `source_available_at` and `observed_at` as distinct clocks;
+- exact document ids, content hashes, revisions and supersession;
+- filing key `(CIK, accession)`, never fuzzy date;
+- typed absences and source-specific rights state;
+- immutable workspace generations and correction chain;
+- `context_only` authority and false rank/size/gate flags.
+
+The next event-coverage audit should project only source metadata and rights state first. Consensus
+remains `consensus_unlicensed`; missing reaction remains `reaction_not_joined`; transcript content
+does not become a training source because it is present.
+
+## Verification and remaining proof
+
+New source-audit tests plus the prior membership-boundary tests: **27 passed, 0 failed**.
+The first attempt to import the entire panel module failed because its vendored Macro `lib` package
+was unavailable in that workspace environment. The test was corrected to AST-extract and execute
+only the repository-native `members_asof` function; no fallback semantics were substituted.
+
+Still unproven:
+
+- current R2 Massive store completeness and per-security coverage;
+- a rights-qualified historical index-universe source;
+- historical identity join coverage and denominator;
+- SEC-only event coverage for the eventual pilot;
+- user-facing consumer;
+- forecast quality, calibration or incremental value;
+- any model-training cost.
+
+No production writer, training, paid model call, forecast publication or promotion is performed by
+this source-qualification unit.
+
+## Exact continuation
+
+Audit the **existing** R2 `massive_stock_day` manifest/store through its current owner and return
+actual coverage bounds, missing-day/name diagnostics and the feed-specific entitlement reference.
+In parallel, project metadata-only SEC event coverage by canonical issuer/date through the existing
+Company Intelligence contracts. Do not select the stock cohort until the historical-universe rights
+gate and canonical identity join are resolved.
