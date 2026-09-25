@@ -336,7 +336,7 @@ def resolve_remote_attempt_transport(
             allowed_operations=allowed_operations,
         )
         endpoint = host_binding.endpoint_for(client)
-    except (TransportValidationError, WorkerBrokerError, ValueError) as exc:
+    except (TransportValidationError, WorkerBrokerError, TypeError, ValueError) as exc:
         raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from exc
 
     return ResolvedRemoteAttemptTransport(
