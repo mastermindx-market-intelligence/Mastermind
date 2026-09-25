@@ -1646,20 +1646,38 @@ class RuntimeConsultationDispatcher:
                         "CARRIER_RECONCILIATION_REQUIRED",
                         detail="Relay COMMIT is uncertain and INTENT is unavailable",
                     )
-                return {
-                    "ok": True,
-                    "result": _committed_consult_result(
-                        consultation_id=consultation_id,
-                        valid_until=valid_until,
-                        carrier_ref=carrier_ref,
-                        intent_inserted=bool(
-                            getattr(intent_result, "inserted", False)
+                # One same-carrier readback may prove that the uncertain COMMIT
+                # actually landed. It never authorizes a resend. Continue to
+                # the owed Wake only when the exact persisted QUESTION validates.
+                try:
+                    readback = await self.packets.get_question(consultation_id)
+                except (
+                    ConsultationPacketCarrierUnknown,
+                    ConsultationPacketEffectUnknown,
+                ):
+                    readback = None
+                existing_wake = self._existing_wake_request(intent_event)
+                if (
+                    _validated_question_frame(intent_event.payload, readback)
+                    is None
+                    or existing_wake is True
+                ):
+                    return {
+                        "ok": True,
+                        "result": _committed_consult_result(
+                            consultation_id=consultation_id,
+                            valid_until=valid_until,
+                            carrier_ref=carrier_ref,
+                            intent_inserted=bool(
+                                getattr(intent_result, "inserted", False)
+                            ),
+                            attention_requested=existing_wake,
+                            wake_state=None,
+                            blocker="CARRIER_RECONCILIATION_REQUIRED",
                         ),
-                        attention_requested=self._existing_wake_request(intent_event),
-                        wake_state=None,
-                        blocker="CARRIER_RECONCILIATION_REQUIRED",
-                    ),
-                }
+                    }
+                # Validated readback proves the packet is already committed.
+                # Fall through to the single existing Wake creation path.
             except ConsultationPacketCarrierUnknown as exc:
                 intent_result = intent_box.get("result")
                 intent_event = _find_consultation_event(
@@ -2239,30 +2257,51 @@ class RuntimeConsultationDispatcher:
                     "CARRIER_RECONCILIATION_REQUIRED",
                     detail="Relay ANSWER COMMIT is uncertain without canonical readback",
                 )
-            event, _event_type, _payload_fact, historical = _answer_event_facts(answer)
-            return {
-                "ok": True,
-                "result": {
-                    "schema": _INBOX_SCHEMA,
-                    "consultation_ref": consultation_ref,
-                    "state": (
-                        "ANSWER_HISTORICAL"
-                        if historical
-                        else "ANSWER_AVAILABLE"
-                    ),
-                    "answer_fingerprint": event.payload.get(
-                        "answer_fingerprint", ""
-                    ),
-                    "semantic_answer_digest": event.payload.get(
-                        "semantic_answer_digest", ""
-                    ),
-                    "historical": historical,
-                    "inserted": bool(answer.inserted),
-                    "attention_requested": None,
-                    "wake_state": "RECONCILIATION_REQUIRED",
-                    "blocker": "CARRIER_RECONCILIATION_REQUIRED",
-                },
-            }
+            # Reconcile the exact admitted answer once on the same carrier.
+            # A validated readback proves the COMMIT landed and allows the
+            # existing requester-attention path below to continue. Any absent,
+            # uncertain, or mismatched readback preserves the barrier.
+            try:
+                packet = await self.packets.get_answer(consultation_ref)
+            except (
+                ConsultationPacketCarrierUnknown,
+                ConsultationPacketEffectUnknown,
+            ):
+                packet = None
+            if (
+                _validated_answer_frame(
+                    intent.payload, current_reserved, packet
+                )
+                is None
+            ):
+                event, _event_type, _payload_fact, historical = _answer_event_facts(
+                    answer
+                )
+                return {
+                    "ok": True,
+                    "result": {
+                        "schema": _INBOX_SCHEMA,
+                        "consultation_ref": consultation_ref,
+                        "state": (
+                            "ANSWER_HISTORICAL"
+                            if historical
+                            else "ANSWER_AVAILABLE"
+                        ),
+                        "answer_fingerprint": event.payload.get(
+                            "answer_fingerprint", ""
+                        ),
+                        "semantic_answer_digest": event.payload.get(
+                            "semantic_answer_digest", ""
+                        ),
+                        "historical": historical,
+                        "inserted": bool(answer.inserted),
+                        "attention_requested": None,
+                        "wake_state": "RECONCILIATION_REQUIRED",
+                        "blocker": "CARRIER_RECONCILIATION_REQUIRED",
+                    },
+                }
+            # Exact readback proves the answer is already on the carrier.
+            # Fall through to the single existing requester-attention path.
         except ConsultationPacketCarrierUnknown as exc:
             answer = answer_box.get("result")
             current_reserved = _non_historical_answer_event(

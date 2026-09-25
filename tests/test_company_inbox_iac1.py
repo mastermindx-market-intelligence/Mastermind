@@ -7820,3 +7820,251 @@ def test_p1_adds_no_parallel_packet_control_plane() -> None:
     )
     for forbidden in forbidden_added_text:
         assert forbidden not in added, forbidden
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1 canonical C-C-R donor-property adjudication
+# ---------------------------------------------------------------------------
+
+
+class _CanonicalCommittedThenLostQuestionCarrier(_CountingQuestionCarrier):
+    """QUESTION commits to the carrier, then its return is lost exactly once."""
+
+    async def put_question(self, consultation_id, frame, *, before_commit):
+        self.put_question_attempts += 1
+        await before_commit()
+        self.put_question_calls += 1
+        self._questions[consultation_id] = dict(frame)
+        if not self._raised:
+            self._raised = True
+            raise ConsultationPacketEffectUnknown(
+                "synthetic committed question response lost"
+            )
+
+
+class _CanonicalCommittedThenLostAnswerCarrier(_CountingAnswerCarrier):
+    """ANSWER commits to the carrier, then its return is lost exactly once."""
+
+    async def put_answer(self, consultation_id, frame, *, before_commit):
+        self.put_answer_attempts += 1
+        await before_commit()
+        self.put_answer_calls += 1
+        self._answers[consultation_id] = dict(frame)
+        if not self._raised:
+            self._raised = True
+            raise ConsultationPacketEffectUnknown(
+                "synthetic committed answer response lost"
+            )
+
+
+class _CanonicalUncertainQuestionReadCarrier(
+    _CanonicalCommittedThenLostQuestionCarrier
+):
+    async def get_question(self, consultation_id):
+        self.get_question_calls += 1
+        if self.put_question_calls:
+            raise ConsultationPacketCarrierUnknown("synthetic uncertain readback")
+        return await InMemoryConsultationPacketCarrier.get_question(
+            self, consultation_id
+        )
+
+
+class _CanonicalUncertainAnswerReadCarrier(
+    _CanonicalCommittedThenLostAnswerCarrier
+):
+    async def get_answer(self, consultation_id):
+        self.get_answer_calls += 1
+        if self.put_answer_calls:
+            raise ConsultationPacketCarrierUnknown("synthetic uncertain readback")
+        return await InMemoryConsultationPacketCarrier.get_answer(
+            self, consultation_id
+        )
+
+
+def test_canonical_lost_question_return_validated_readback_continues_one_wake(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "ccr-question-valid")
+    _consultations(runtime, tmp_path / "ccr-question-valid")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "ccr-question-valid-repo")
+    carrier = _CanonicalCommittedThenLostQuestionCarrier()
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_StaticInvocations(
+            _default_invocation(invocation_id="iac1-canonical-ccr-question")
+        ),
+    )
+    result = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Did the committed question survive the lost return?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert result["ok"] is True
+    data = result["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["blocker"] is None
+    assert data["attention_requested"] is True
+    assert carrier.put_question_calls == 1
+    assert carrier.get_question_calls == 2
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+
+
+def test_canonical_lost_question_return_uncertain_readback_keeps_barrier(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "ccr-question-unknown")
+    _consultations(runtime, tmp_path / "ccr-question-unknown")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "ccr-question-unknown-repo")
+    carrier = _CanonicalUncertainQuestionReadCarrier()
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_StaticInvocations(
+            _default_invocation(invocation_id="iac1-canonical-ccr-question-unknown")
+        ),
+    )
+    result = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Does uncertain readback preserve the barrier?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert result["ok"] is True
+    data = result["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert data["attention_requested"] is False
+    assert carrier.put_question_calls == 1
+    assert carrier.get_question_calls == 2
+    assert _requested_count(runtime, consultation_id) == 0
+
+
+def test_canonical_lost_answer_return_validated_readback_continues_requester_attention(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "ccr-answer-valid")
+    _consultations(runtime, tmp_path / "ccr-answer-valid")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "ccr-answer-valid-repo")
+    carrier = _CanonicalCommittedThenLostAnswerCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Will the answer return be reconciled?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    reply = _run(
+        _gateway_with_dispatcher(b_dispatcher).call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "Committed answer survived.",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply["ok"] is True
+    data = reply["data"]
+    assert data["blocker"] is None
+    assert data["attention_requested"] is True
+    assert carrier.put_answer_calls == 1
+    assert carrier.get_answer_calls == 1
+    assert len(_answer_attention_requested_records(runtime)) == 1
+
+
+def test_canonical_lost_answer_return_uncertain_readback_keeps_barrier(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "ccr-answer-unknown")
+    _consultations(runtime, tmp_path / "ccr-answer-unknown")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "ccr-answer-unknown-repo")
+    carrier = _CanonicalUncertainAnswerReadCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Will uncertain answer readback stay blocked?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    reply = _run(
+        _gateway_with_dispatcher(b_dispatcher).call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "Uncertain carrier read.",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply["ok"] is True
+    data = reply["data"]
+    assert data["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert data["attention_requested"] is None
+    assert carrier.put_answer_calls == 1
+    assert carrier.get_answer_calls == 1
+    assert len(_answer_attention_requested_records(runtime)) == 0
