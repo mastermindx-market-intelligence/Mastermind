@@ -31,18 +31,36 @@ cleanup_unhardened() {
 }
 trap cleanup_unhardened EXIT
 
-HEAD_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse HEAD)"
-REMOTE_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse refs/remotes/origin/master)"
+CANONICAL_REMOTE="https://github.com/mastermindx-market-intelligence/Mastermind.git"
+GIT_ENV=(/usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0
+  GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false)
+
+if ! REMOTE_URL="$("${GIT_ENV[@]}" /usr/bin/git -C "$SOURCE_REPO" remote get-url origin)"; then
+  refuse "canonical origin is unavailable"
+fi
+[ "$REMOTE_URL" = "$CANONICAL_REMOTE" ] || refuse "origin is not the canonical protected repository"
+if ! "${GIT_ENV[@]}" /usr/bin/git -C "$SOURCE_REPO" fetch \
+  --no-tags --no-recurse-submodules origin \
+  refs/heads/master:refs/remotes/origin/master; then
+  refuse "protected origin/master refresh failed"
+fi
+if ! REMOTE_URL_AFTER="$("${GIT_ENV[@]}" /usr/bin/git -C "$SOURCE_REPO" remote get-url origin)"; then
+  refuse "canonical origin changed during refresh"
+fi
+[ "$REMOTE_URL_AFTER" = "$CANONICAL_REMOTE" ] \
+  || refuse "origin changed during protected refresh"
+
+HEAD_SHA="$("${GIT_ENV[@]}" /usr/bin/git -C "$SOURCE_REPO" rev-parse --verify 'HEAD^{commit}')"
+REMOTE_SHA="$("${GIT_ENV[@]}" /usr/bin/git -C "$SOURCE_REPO" rev-parse --verify 'refs/remotes/origin/master^{commit}')"
 [ "$HEAD_SHA" = "$REMOTE_SHA" ] || refuse "source HEAD is not exact origin/master"
-[ -z "$(/usr/bin/git -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=normal)" ] \
+[ -z "$("${GIT_ENV[@]}" /usr/bin/git -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=normal)" ] \
   || refuse "source checkout is not clean"
-RELEASE_SHA="$HEAD_SHA"
+RELEASE_SHA="$REMOTE_SHA"
 
 STAGING="$(/usr/bin/mktemp -d "/private/tmp/mastermind-secondary-enroll.${RELEASE_SHA:0:12}.XXXXXX")"
 HARDENED_SOURCE="$STAGING/source"
-GIT_ENV=(/usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin
-  LANG=C.UTF-8 LC_ALL=C.UTF-8 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-  GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0)
 
 "${GIT_ENV[@]}" /usr/bin/git clone --no-hardlinks --no-checkout "$SOURCE_REPO" "$HARDENED_SOURCE"
 "${GIT_ENV[@]}" /usr/bin/git -C "$HARDENED_SOURCE" checkout --detach "$RELEASE_SHA"
