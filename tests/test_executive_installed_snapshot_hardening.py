@@ -2188,3 +2188,60 @@ def test_installed_collector_refuses_live_macro_mutation_made_during_child(
     assert materialized_roots[0] != macro
     assert not materialized_roots[0].exists()
     assert consumed.read_text(encoding="utf-8").endswith("mutated\n")
+
+
+def test_macro_snapshot_capture_scopes_live_inventory_to_child_visible_paths(
+    tmp_path: Path,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+
+    macro, head = _macro_sparse_fixture(tmp_path)
+    unrelated = macro / "unrelated/runtime-only.tmp"
+    unrelated.write_text("not child visible\n", encoding="utf-8")
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    captures = []
+
+    observed = _clean_git_snapshot(
+        macro,
+        runner=_default_packet_runner,
+        env=env,
+        label="Macro source",
+        content_scope="macro_brief",
+        include_seal=True,
+        snapshot_capture=captures,
+    )
+
+    assert observed[0] == head
+    assert len(captures) == 1
+    assert captures[0].sealed_to_caller is True
+
+
+def test_macro_snapshot_capture_still_refuses_untracked_record_namespace(
+    tmp_path: Path,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    macro, _head = _macro_sparse_fixture(tmp_path)
+    shadow = macro / "agentos/workstreams/SHADOW.md"
+    shadow.write_text("---\nkey: SHADOW\n---\n", encoding="utf-8")
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+
+    with pytest.raises(GatewayError, match="worktree observation failed"):
+        _clean_git_snapshot(
+            macro,
+            runner=_default_packet_runner,
+            env=env,
+            label="Macro source",
+            content_scope="macro_brief",
+            include_seal=True,
+            snapshot_capture=[],
+        )
