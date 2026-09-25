@@ -19,7 +19,6 @@ def _caller(**overrides):
         subject_digest="a" * 64,
         client_ref="client:web-ceo",
         resource="https://workbench.example/mcp",
-        scopes=("workbench.targets",),
         expires_at=200,
     )
     values.update(overrides)
@@ -321,3 +320,26 @@ def test_context_required_scope_cannot_exceed_bound_scope():
             prepared["workbench_context_ref"],
             required_scope=("browser",),
         )
+
+
+def test_context_binding_is_independent_of_capability_scope_by_design():
+    owner = Owner()
+    broker = _broker(owner)
+    option = broker.list_permitted_targets(_caller(), client_call_ref="call:scope-1")["target_options"][0]
+    prepared = broker.prepare_attended_context(
+        _caller(),
+        target_option_ref=option["target_option_ref"],
+        requested_scope=("browser",),
+        client_call_ref="call:scope-2",
+    )
+    # The pure context broker intentionally has no OAuth/tool-scope field.
+    # Target-list, Action, and Browser surfaces enforce their own scopes outside
+    # this binding layer while reusing the same subject/client/resource context.
+    context = broker.resolve_context(
+        _caller(),
+        prepared["workbench_context_ref"],
+        required_scope=("browser",),
+    )
+    assert context.target_ref == _target().target_ref
+    assert not hasattr(context, "oauth_scopes")
+    assert not hasattr(context, "tool_scopes")

@@ -45,7 +45,6 @@ class AttendedCaller:
     subject_digest: str
     client_ref: str
     resource: str
-    scopes: tuple[str, ...]
     expires_at: int
 
 
@@ -164,7 +163,6 @@ def _caller(value: object) -> AttendedCaller:
         or value.expires_at <= 0
     ):
         raise AttendedContextError("caller is invalid")
-    _scopes(value.scopes, "caller scopes")
     return value
 
 
@@ -326,7 +324,6 @@ class AttendedTargetBroker:
             "subject_digest": caller.subject_digest,
             "client_ref": caller.client_ref,
             "resource": caller.resource,
-            "scopes": list(tuple(sorted(caller.scopes))),
         }
 
     @staticmethod
