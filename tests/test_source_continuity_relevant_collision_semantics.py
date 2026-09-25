@@ -107,9 +107,9 @@ class CollisionChurnHTTP:
                 number = int(suffix.split("/", 1)[0])
                 if number in self.foreign_files:
                     configured = self.foreign_files[number]
+                    read_index = self.foreign_file_reads.get(number, 0)
+                    self.foreign_file_reads[number] = read_index + 1
                     if isinstance(configured, list):
-                        read_index = self.foreign_file_reads.get(number, 0)
-                        self.foreign_file_reads[number] = read_index + 1
                         paths = configured[min(read_index, len(configured) - 1)]
                     else:
                         paths = configured
@@ -191,6 +191,7 @@ def test_new_disjoint_pr_is_freshly_proved_and_does_not_starve(
     )
 
     _assert_receipt(_run(module, http, capsys))
+    assert http.foreign_file_reads == {FOREIGN_A: 1, FOREIGN_B: 1}
     assert any(f"/pulls/{FOREIGN_B}/files?" in url for url in http.plain_calls)
 
 
@@ -209,6 +210,7 @@ def test_moved_disjoint_pr_is_freshly_reproved_and_does_not_starve(
     )
 
     _assert_receipt(_run(module, http, capsys))
+    assert http.foreign_file_reads == {FOREIGN_A: 2}
 
 
 def test_missing_disjoint_pr_may_drop_only_when_direct_detail_proves_closed(
@@ -270,6 +272,26 @@ def test_new_colliding_pr_refuses(
     _assert_changed(_run(module, http, capsys))
 
 
+def test_stable_colliding_pr_reuses_first_pass_evidence_without_refetch(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = sat._module()
+    row = _foreign_row(FOREIGN_A, head_sha=A_HEAD)
+    http = CollisionChurnHTTP(
+        module,
+        first_roster=[_target_row(), row],
+        second_roster=[_target_row(), copy.deepcopy(row)],
+        foreign_files={FOREIGN_A: ("scripts/source_continuity.py",)},
+    )
+
+    result = _run(module, http, capsys)
+    _assert_receipt(result)
+    payload = result[1]
+    assert payload["collision_state"] == "OVERLAP"
+    assert payload["colliding_pr_numbers"] == [FOREIGN_A]
+    assert http.foreign_file_reads == {FOREIGN_A: 1}
+
+
 def test_colliding_pr_head_movement_with_same_overlap_projection_does_not_starve(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -291,6 +313,7 @@ def test_colliding_pr_head_movement_with_same_overlap_projection_does_not_starve
     assert payload["colliding_pr_numbers"] == [FOREIGN_A]
     assert payload["receipt_version"] == "v2"
     assert len(payload["collision_evidence_fingerprint"]) == 64
+    assert http.foreign_file_reads == {FOREIGN_A: 2}
 
 
 def test_colliding_pr_movement_that_swaps_target_path_refuses(

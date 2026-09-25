@@ -146,6 +146,80 @@ def test_large_estate_still_requires_stable_complete_observations(
     assert rc != 0 and payload["code"] == code
 
 
+def _foreign_file_call_count(http: EstateHTTP) -> int:
+    return sum(
+        1
+        for url, _token, _timeout in http.calls
+        if "/files?" in url and f"/pulls/{fx.PR_NUMBER}/" not in url
+    )
+
+
+def test_490_selective_revalidation_reuses_stable_foreign_evidence(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    estate_size = 490
+    http = EstateHTTP(
+        estate_size,
+        overlap=True,
+        identity_complete=True,
+    )
+
+    first = module._collision_census_details(
+        http, fx.TOKEN, fx.REPOSITORY, fx.PR_NUMBER, fx.FINAL_OWNED_PATHS
+    )
+    assert first.complete is True
+    assert first.state is module.CollisionState.OVERLAP
+    first_file_calls = _foreign_file_call_count(http)
+    assert first_file_calls == estate_size - 1
+
+    matched, complete, final_records = module._revalidate_collision_census(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        fx.PR_NUMBER,
+        fx.FINAL_OWNED_PATHS,
+        first.foreign_records,
+        first.colliding_pr_numbers,
+    )
+
+    assert (matched, complete) == (True, True)
+    assert len(final_records) == estate_size - 1
+    assert _foreign_file_call_count(http) == first_file_calls
+    assert http.passes == 2
+
+
+def test_490_selective_revalidation_reproves_only_moved_foreign_identity(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    estate_size = 490
+    http = EstateHTTP(
+        estate_size,
+        overlap=True,
+        identity_complete=True,
+        move_overlap=True,
+    )
+
+    first = module._collision_census_details(
+        http, fx.TOKEN, fx.REPOSITORY, fx.PR_NUMBER, fx.FINAL_OWNED_PATHS
+    )
+    first_file_calls = _foreign_file_call_count(http)
+
+    matched, complete, final_records = module._revalidate_collision_census(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        fx.PR_NUMBER,
+        fx.FINAL_OWNED_PATHS,
+        first.foreign_records,
+        first.colliding_pr_numbers,
+    )
+
+    assert (matched, complete) == (True, True)
+    assert len(final_records) == estate_size - 1
+    assert _foreign_file_call_count(http) == first_file_calls + 1
+    assert http.passes == 2
+
+
 def test_490_estate_moved_collider_same_projection_stays_within_closed_budget(
         capsys, monkeypatch):
     module = fx._cli_module()

@@ -1645,27 +1645,137 @@ def _revalidate_collision_census(
     first_records: tuple[_ForeignCollisionRecord, ...],
     first_colliding_pr_numbers: tuple[int, ...],
 ) -> tuple[bool, bool, tuple[_ForeignCollisionRecord, ...]]:
-    """Re-prove custody under a complete second open-PR census.
+    """Re-prove custody without re-fetching stable foreign evidence.
 
-    Stable and moved foreign identities are classified through the same collision
-    evidence owner. A moved collider is accepted only when its exact target-owned
-    overlap projection is unchanged; any overlap growth, shrinkage, substitution,
-    disappearance or new collision still fails closed.
+    The second pass reads only the open-PR roster first. Stable immutable
+    identities reuse their first-pass collision evidence. New or moved
+    identities are freshly proved. A moved collider may continue only when
+    its exact non-empty target-owned overlap projection is unchanged.
     """
 
     reader = _collision_reader(http_get)
-    second_details = _collision_census_details(
-        http_get, token, repository, target_pr, owned_paths
-    )
-    return _revalidate_collision_records(
-        reader,
-        token,
-        repository,
-        owned_paths,
-        first_records,
-        first_colliding_pr_numbers,
-        second_details,
-    )
+    pulls, complete = _read_open_pull_roster(reader, token, repository)
+    if not complete:
+        return False, False, ()
+
+    seen_numbers: set[int] = set()
+    target_seen = False
+    second_foreign: dict[int, object] = {}
+    for raw_pr in pulls:
+        if not isinstance(raw_pr, dict):
+            raise _RemoteProbeError()
+        number = raw_pr.get("number")
+        state = raw_pr.get("state")
+        if (
+            type(number) is not int
+            or number <= 0
+            or number in seen_numbers
+            or (state is not None and state != "open")
+        ):
+            raise _RemoteProbeError()
+        seen_numbers.add(number)
+        if number == target_pr:
+            target_seen = True
+        else:
+            second_foreign[number] = raw_pr
+    if not target_seen:
+        return False, True, ()
+
+    first_by_number = {record.pr_number: record for record in first_records}
+    if len(first_by_number) != len(first_records):
+        raise _RemoteProbeError()
+    if tuple(sorted(
+        number for number, record in first_by_number.items() if record.overlaps
+    )) != tuple(sorted(first_colliding_pr_numbers)):
+        raise _RemoteProbeError()
+
+    final_records: list[_ForeignCollisionRecord] = []
+    for number, first_record in first_by_number.items():
+        if first_record.identity is None:
+            raise _RemoteProbeError()
+        raw_pr = second_foreign.pop(number, None)
+        if raw_pr is None:
+            if first_record.overlaps:
+                return False, True, ()
+            direct = _api(
+                http_get=reader,
+                token=token,
+                endpoint=f"repos/{repository}/pulls/{number}",
+            )
+            if not isinstance(direct, dict) or direct.get("state") != "closed":
+                return False, True, ()
+            if _foreign_pull_identity(direct, repository).pr_number != number:
+                raise _RemoteProbeError()
+            continue
+
+        second_identity = _foreign_pull_identity(raw_pr, repository)
+        if second_identity == first_record.identity:
+            # Stable identity means the first-pass changed-path/tree evidence is
+            # still the current evidence. Reuse it; do not spend file reads.
+            final_records.append(first_record)
+            continue
+
+        second_evidence, second_overlaps = _foreign_collision_evidence(
+            reader,
+            token,
+            repository,
+            raw_pr,
+            number,
+            owned_paths,
+        )
+        second_record = _ForeignCollisionRecord(
+            pr_number=number,
+            identity=second_identity,
+            evidence=second_evidence,
+            overlaps=second_overlaps,
+        )
+
+        if first_record.overlaps:
+            if not second_overlaps:
+                return False, True, ()
+            first_identity = first_record.identity
+            if (
+                first_identity.head_repository != second_identity.head_repository
+                or first_identity.base_repository != second_identity.base_repository
+            ):
+                return False, True, ()
+            first_projection = _collision_overlap_projection(
+                owned_paths, first_record.evidence
+            )
+            second_projection = _collision_overlap_projection(
+                owned_paths, second_evidence
+            )
+            if not first_projection or second_projection != first_projection:
+                return False, True, ()
+        elif second_overlaps:
+            return False, True, ()
+
+        final_records.append(second_record)
+
+    for number, raw_pr in second_foreign.items():
+        second_identity = _foreign_pull_identity(raw_pr, repository)
+        if second_identity.pr_number != number:
+            raise _RemoteProbeError()
+        second_evidence, second_overlaps = _foreign_collision_evidence(
+            reader,
+            token,
+            repository,
+            raw_pr,
+            number,
+            owned_paths,
+        )
+        if second_overlaps:
+            return False, True, ()
+        final_records.append(
+            _ForeignCollisionRecord(
+                pr_number=number,
+                identity=second_identity,
+                evidence=second_evidence,
+                overlaps=False,
+            )
+        )
+
+    return True, True, tuple(sorted(final_records, key=lambda item: item.pr_number))
 
 
 def _probe_remote_prefix(
