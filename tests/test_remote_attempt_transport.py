@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from control_plane.executive_runtime import Runtime
+from control_plane.executive_runtime import AttemptStatus, Runtime
+from control_plane.executive_supervisor import ExecutiveSupervisor
 from control_plane.remote_attempt_transport import (
     REMOTE_RECOVERY_OPERATIONS,
     AttemptBoundRemoteWorkerAdapter,
@@ -210,6 +211,75 @@ class _FakeAttemptFleet:
     async def cleanup_unbound_run(self, run_id: str):
         self.cleanup_calls.append(run_id)
         return {"reason": "fixture", "passed": True}
+
+
+@pytest.mark.asyncio
+async def test_executive_supervisor_consumes_facade_only_after_runtime_claim(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.at(tmp_path / "runtime")
+    runtime.workers.register_worker(
+        WORKER,
+        provider=PROVIDER,
+        account_label="fixture-remote",
+        worker_type="fixture",
+        capabilities=["research"],
+        quota_classes={
+            QUOTA: {
+                "capabilities": ["research"],
+                "metadata": {"capacity_join": _join()},
+            }
+        },
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    job = runtime.jobs.create_job(
+        "supervisor remote carrier proof",
+        worktree=str(workspace),
+        requested_authorities=["READ"],
+        attempt_limit=1,
+    )
+    built = []
+
+    def fleet_factory(resolution):
+        fleet = _FakeAttemptFleet(
+            resolution.worker_id,
+            process_ref=_process_ref(resolution.attempt_id),
+        )
+        built.append((resolution, fleet))
+        return fleet
+
+    adapter = AttemptBoundRemoteWorkerAdapter(
+        runtime,
+        lambda host_ref, worker_id: _host_binding(
+            tmp_path, host_ref=host_ref, worker_id=worker_id
+        ),
+        fleet_factory=fleet_factory,
+    )
+    supervisor = ExecutiveSupervisor(
+        runtime,
+        adapter,
+        runs_root=tmp_path / "runs",
+        process_controller=adapter.process_controller,
+    )
+
+    assert built == []
+    active = await supervisor.start_job(job.job_id)
+
+    assert len(built) == 1
+    resolution, fleet = built[0]
+    assert resolution.job_id == job.job_id
+    assert resolution.attempt_id == active.lease.attempt.attempt_id
+    assert resolution.worker_id == active.lease.attempt.worker_id == WORKER
+    assert resolution.purpose is RemoteTransportPurpose.LAUNCH
+    assert fleet.start_calls == 1
+
+    current = runtime.attempts.get_attempt(resolution.attempt_id)
+    assert current is not None
+    assert current.status is AttemptStatus.CHECKPOINTED
+    recovery = current.launch_metadata["worker_recovery_binding"]
+    assert recovery["adapter_id"] == AttemptBoundRemoteWorkerAdapter.adapter_id
+    assert recovery["process_ref"]["run_id"] == resolution.attempt_id
 
 
 @pytest.mark.asyncio
