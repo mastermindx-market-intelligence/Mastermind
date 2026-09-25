@@ -106,3 +106,10 @@ def test_new_roles_add_no_plugin_identity_tools_hooks_or_runtime_store() -> None
         directory = ROOT / "plugins/mastermind-sol/skills" / name
         assert directory.is_dir(), f"Missing skill: {name}"
         assert sorted(p.name for p in directory.iterdir()) == ["SKILL.md"]
+
+
+@pytest.mark.parametrize("name", SKILLS)
+def test_pin_reuse_is_limited_to_the_current_turn(name: str) -> None:
+    text = _text(name)
+    assert "already loaded in the current turn" in text
+    assert "new-turn recovery must re-establish current source" in text

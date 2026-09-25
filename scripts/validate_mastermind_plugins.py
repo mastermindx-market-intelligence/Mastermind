@@ -26,6 +26,11 @@ SOL_SKILLS = (
     "review-worker-return",
     "review-pull-request",
     "close-out-program",
+    "mastermind-web-ceo",
+    "mastermind-principal-architect",
+    "mastermind-product-designer",
+    "mastermind-deep-research",
+    "mastermind-recovery",
 )
 OPERATOR_SKILLS = (
     "receive-commission",
