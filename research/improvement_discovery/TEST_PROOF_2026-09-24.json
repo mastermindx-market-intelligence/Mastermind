@@ -1,0 +1,16 @@
+{
+  "code_hashes": {
+    "brain/improvement_agenda.py": "f1a3fff2325e308af11fdf4f4adff06d4d0d57dcb02cd42553b8da8cdf72a4d4",
+    "brain/improvement_discovery.py": "aae158a56005ce29f0e39fea5f7c7c1572cb750e15042b32fa374b553005575d",
+    "scripts/improvement_discovery.py": "e3921814b5086647c258344c3cefdaa7c475f2819a87f4987a51cb52f9b9741b"
+  },
+  "command": "python3 -m pytest -q tests/test_improvement_discovery.py tests/test_improvement_discovery_agenda.py tests/test_agentos_readiness_agenda.py",
+  "errors": 0,
+  "failures": 0,
+  "full_repository_ci": "NOT_YET_RUN_ON_THIS_CANDIDATE",
+  "junit_timestamp": "2026-09-23T22:19:54.919504-07:00",
+  "production_proven": false,
+  "scope": "FOCUSED_UNIT_INTEGRATION_AND_EXISTING_READINESS_REGRESSION",
+  "skipped": 0,
+  "tests": 59
+}

@@ -1,0 +1,31 @@
+{
+  "deployed_source_hashes": {
+    "brain/improvement_agenda.py": "8e0675664b3697a9258c4cf188c0d502e0563fff288aa2385439837491e33c0a",
+    "brain/improvement_discovery.py": null,
+    "brain/improvement_discovery_nw.py": null,
+    "brain/nw_reflection.py": "46066d6782ca79ad570b2114270bfe86011fb318a23c20f0f1bc516e1f35d7a9"
+  },
+  "health_http": 200,
+  "health_identity": {
+    "commit": "2e5da23c48e4eed49f14608a5b4ee281f53cb817",
+    "status": "ok",
+    "version": "2e5da23c48e4eed49f14608a5b4ee281f53cb817"
+  },
+  "observed_at": "2026-09-24T06:19:41.735264+00:00",
+  "operation": "READ_ONLY_CURRENT_OWNER_QUALIFICATION",
+  "owner_report": {
+    "asof": "2026-07-27",
+    "coverage": {
+      "context_rows_n": 0,
+      "coverage_rate": 0.0,
+      "open_theses_n": 3,
+      "resolved_recent_n": 0,
+      "state": "context_absent",
+      "with_context_row_n": 0
+    },
+    "exists": true,
+    "generated_at": "2026-07-27T23:01:02Z",
+    "schema": "nw_reflection.v1",
+    "sha256": "53866649f195e2f1df848a05cc7c3f70c1863059d985555ef8b3bc5ab860150f"
+  }
+}

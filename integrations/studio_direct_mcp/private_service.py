@@ -47,6 +47,23 @@ TYPED_GIT_SOURCE_REPOSITORY_REL = Path("Documents/GitHub/Mastermind")
 TYPED_GIT_BINARY = "/usr/bin/git"
 TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
 
+# Paper Desktop capability is a gateway-local consumer of the separately reviewed
+# guarded adapter in PR #585. The private gateway never accepts these paths or
+# hashes from ChatGPT.
+# Runtime generations are immutable from the perspective of installed seats. A new
+# bridge SHA gets a new directory so one-seat canaries cannot invalidate another
+# seat that still pins the previous bridge bytes.
+PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v3")
+PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
+PAPER_BRIDGE_SHA256 = "26e3b5e8435d9a44f9476d29ae8d2f55819b9d7c05a0c008fb021da58d96e081"
+PAPER_COMMAND_TIMEOUT_MS = 70_000
+PAPER_APP_REL = Path("Applications/Paper.app")
+
+# Optional read-only fleet-status consumer. It delegates to the installed
+# Studio Direct control owner instead of letting a model compose shell probes.
+FLEET_STATUS_LAUNCHER_REL = Path(".local/bin/studio-direct")
+FLEET_STATUS_TIMEOUT_MS = 15_000
+
 # CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
 
@@ -61,20 +78,30 @@ STAGE_FILES = (
     "gateway.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
+    "paper-design.mjs",
+    "fleet-status.mjs",
     "private-tunnel-auth.mjs",
     "private-tunnel-gateway.mjs",
     "package.json",
     "package-lock.json",
 )
 
-# Version-1 installs created before typed Git did not stage git-publish.mjs.
-# Accept only that exact historical set (or the current set) so the canonical
-# installer can stop and upgrade those known installs without accepting an
-# arbitrary manifest shape.
-LEGACY_STAGE_FILES_V2 = tuple(name for name in STAGE_FILES if name != "output-budget.mjs")
+# Historical installs are admitted only through exact known file sets. The
+# immediately preceding v0.1.6 install has every current file except the new
+# read-only fleet-status consumer; earlier generations also predate Paper,
+# output paging, and typed Git.
+LEGACY_STAGE_FILES_V4 = tuple(name for name in STAGE_FILES if name != "fleet-status.mjs")
+LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
+LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
 LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
 KNOWN_MANIFEST_FILESETS = frozenset(
-    (frozenset(STAGE_FILES), frozenset(LEGACY_STAGE_FILES_V2), frozenset(LEGACY_STAGE_FILES_V1))
+    (
+        frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V4),
+        frozenset(LEGACY_STAGE_FILES_V3),
+        frozenset(LEGACY_STAGE_FILES_V2),
+        frozenset(LEGACY_STAGE_FILES_V1),
+    )
 )
 
 MANIFEST_VERSION = 2
@@ -96,6 +123,11 @@ MANIFEST_KEYS_V2 = MANIFEST_KEYS_V1 + (
     "backendHash",
     "dependencyTreeHash",
 )
+LEGACY_PROVISIONED_MANIFEST_KEYS = MANIFEST_KEYS_V1 + (
+    "provisioned_from",
+    "installation_state",
+)
+LEGACY_PROVISIONED_STATE = "LOCAL_GATEWAY_PREPARED_TUNNEL_NOT_CREATED"
 
 
 class CmdResult:
@@ -417,6 +449,77 @@ def _typed_git_config(user_root: Path) -> dict:
     }
 
 
+def _verify_paper_runtime(user_root: Path, *, expected_sha: str | None = None) -> dict:
+    runtime = user_root / PAPER_RUNTIME_REL
+    expected_sha = PAPER_BRIDGE_SHA256 if expected_sha is None else expected_sha
+    source = runtime / "source"
+    bridge = source / "bridge.py"
+    receipt_path = runtime / "RUNTIME.json"
+    python = runtime / "venv" / "bin" / "python"
+
+    for path, label in ((runtime, "runtime"), (source, "source")):
+        if path.is_symlink() or not path.is_dir():
+            raise SystemExit(f"paper {label} missing or unsafe: {path}")
+        info = path.stat()
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            raise SystemExit(f"paper {label} permissions/owner are unsafe: {path}")
+
+    for path, label in ((bridge, "bridge"), (receipt_path, "receipt")):
+        if path.is_symlink() or not path.is_file():
+            raise SystemExit(f"paper {label} missing or unsafe: {path}")
+        info = path.stat()
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            raise SystemExit(f"paper {label} permissions/owner are unsafe: {path}")
+
+    if python.is_symlink() or not python.is_file() or not os.access(python, os.X_OK):
+        raise SystemExit(f"paper runtime python missing or unsafe: {python}")
+    if _sha256_file(bridge) != expected_sha:
+        raise SystemExit("paper bridge hash mismatch")
+
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("paper runtime receipt invalid") from exc
+    expected_sources = {"bridge.py": expected_sha}
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("schema") != PAPER_RUNTIME_SCHEMA
+        or receipt.get("generation") != PAPER_RUNTIME_REL.name
+        or receipt.get("bridge_sha256") != expected_sha
+        or receipt.get("source_sha256") != expected_sources
+        or receipt.get("network_install_performed") is not False
+        or receipt.get("production_acceptance") is not False
+    ):
+        raise SystemExit("paper runtime receipt does not match the required generation")
+    return receipt
+
+
+def _paper_design_config(user_root: Path) -> dict:
+    runtime = user_root / PAPER_RUNTIME_REL
+    return {
+        "enabled": True,
+        "pythonPath": str(runtime / "venv" / "bin" / "python"),
+        "bridgePath": str(runtime / "source" / "bridge.py"),
+        "bridgeSha256": PAPER_BRIDGE_SHA256,
+        "appPath": str(user_root / PAPER_APP_REL),
+        "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
+    }
+
+
+def _fleet_status_config(user_root: Path) -> dict | None:
+    launcher = user_root / FLEET_STATUS_LAUNCHER_REL
+    if not launcher.exists():
+        return None
+    return {
+        "enabled": True,
+        "launcherPath": str(launcher),
+        "launcherSha256": _stable_regular_file_hash(
+            launcher, label="Studio Direct control launcher"
+        ),
+        "timeoutMs": FLEET_STATUS_TIMEOUT_MS,
+    }
+
+
 def _build_config(
     account: str,
     host: str,
@@ -427,7 +530,7 @@ def _build_config(
     user_root: Path,
 ) -> dict:
     # publicUrl is omitted: the private adapter rejects a public origin.
-    return {
+    config = {
         "accountLabel": account,
         "host": host,
         "testMode": False,
@@ -442,7 +545,12 @@ def _build_config(
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "reclaimIdleGraceMs": 30_000,
         "gitPublish": _typed_git_config(user_root),
+        "paperDesign": _paper_design_config(user_root),
     }
+    fleet_status = _fleet_status_config(user_root)
+    if fleet_status is not None:
+        config["fleetStatus"] = fleet_status
+    return config
 
 
 def _build_plist(
@@ -488,17 +596,40 @@ def _valid_manifest(data, account: str, label: str) -> bool:
     if not isinstance(data, dict):
         return False
     version = data.get("version")
+    keys = frozenset(data)
+    legacy_provisioned = (
+        version == 1 and keys == frozenset(LEGACY_PROVISIONED_MANIFEST_KEYS)
+    )
     expected_keys = (
         frozenset(MANIFEST_KEYS_V1)
-        if version == 1
+        if version == 1 and not legacy_provisioned
         else frozenset(MANIFEST_KEYS_V2)
         if version == MANIFEST_VERSION
+        else frozenset(LEGACY_PROVISIONED_MANIFEST_KEYS)
+        if legacy_provisioned
         else None
     )
-    if expected_keys is None or frozenset(data) != expected_keys:
+    if expected_keys is None or keys != expected_keys:
         return False
     if data.get("account") != account or data.get("label") != label:
         return False
+    if legacy_provisioned:
+        if data.get("installation_state") != LEGACY_PROVISIONED_STATE:
+            return False
+        provisioned_from = data.get("provisioned_from")
+        if not isinstance(provisioned_from, str) or not provisioned_from:
+            return False
+        source_account = Path(provisioned_from)
+        expected_parent = (
+            _user_root() / ".local" / "share" / "studio-direct-mcp" / "private"
+        )
+        if (
+            not source_account.is_absolute()
+            or source_account.parent != expected_parent
+            or source_account.name == account
+            or ACCOUNT_LABEL_RE.fullmatch(source_account.name) is None
+        ):
+            return False
     files = data.get("files")
     if not isinstance(files, dict) or frozenset(files) not in KNOWN_MANIFEST_FILESETS:
         return False
@@ -852,6 +983,9 @@ def cmd_stage(args) -> int:
     prior = _preflight_stage(
         source, node_abs, backend_abs, account, label, host, port, roots
     )
+    # The Paper-owned immutable runtime must exist and match before this
+    # lifecycle writes a config/plist that advertises the Paper capability.
+    _verify_paper_runtime(_user_root())
     retained_dependency_hash = (
         prior.get("dependencyTreeHash")
         if isinstance(prior, dict) and prior.get("version") == MANIFEST_VERSION
@@ -974,6 +1108,9 @@ def cmd_upgrade(args) -> int:
         )
     for path in _stage_dest_files(roots):
         _assert_dest_safe(path)
+    # Upgrade is still pre-effect here. Refuse before replacing any staged
+    # source/config if the Paper generation is missing or no longer exact.
+    _verify_paper_runtime(_user_root())
 
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,

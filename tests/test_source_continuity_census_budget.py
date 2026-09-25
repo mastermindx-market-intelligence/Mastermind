@@ -12,10 +12,19 @@ import test_source_continuity as fx
 class EstateHTTP(fx._ProbeHTTP):
     """Existing identity fixture plus a paginated, changing foreign PR estate."""
 
-    def __init__(self, count=143, *, files_per_pr=1, change=None, overlap=False):
+    def __init__(
+        self,
+        count=143,
+        *,
+        files_per_pr=1,
+        file_counts=None,
+        change=None,
+        overlap=False,
+    ):
         super().__init__()
         self.count = count
         self.files_per_pr = files_per_pr
+        self.file_counts = {} if file_counts is None else dict(file_counts)
         self.change = change
         self.overlap = overlap
         self.passes = 0
@@ -39,8 +48,9 @@ class EstateHTTP(fx._ProbeHTTP):
                 f"/pulls/{fx.PR_NUMBER}/" not in parsed.path):
             self.calls.append((url, token, timeout))
             number = int(parsed.path.split("/")[-2])
+            file_count = self.file_counts.get(number, self.files_per_pr)
             rows = [{"filename": f"docs/foreign-{number}-{i}.md", "status": "modified"}
-                    for i in range(self.files_per_pr)]
+                    for i in range(file_count)]
             if self.overlap and number == 1000 + self.count - 2:
                 rows[-1]["filename"] = fx.FINAL_OWNED_PATHS[0]
             if self.change == "paths" and self.passes > 1:
@@ -69,7 +79,7 @@ def run_cli(module, capsys, http, *, kind="checkpoint", runner=None):
     return exit_code, json.loads(captured.out)
 
 
-@pytest.mark.parametrize("count", [1, 100, 143, 200, 256])
+@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485])
 @pytest.mark.parametrize("kind", ["checkpoint", "remote-complete"])
 def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     module = fx._cli_module()
@@ -84,7 +94,7 @@ def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     assert payload["collision_state"] == ("NONE" if count == 1 else "DISJOINT")
 
 
-@pytest.mark.parametrize("count", [401, 1000])
+@pytest.mark.parametrize("count", [486, 1000])
 def test_over_ceiling_refuses_before_foreign_files(count, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
@@ -297,10 +307,35 @@ def test_exact_call_and_byte_limit_remains_successful(capsys, monkeypatch):
 
 def test_budget_constants_are_closed_and_raw_response_cap_is_unchanged():
     module = fx._cli_module()
-    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (400, 1152)
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (485, 1152)
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
     assert module._MAX_HTTP_BODY_BYTES == 5_000_000
+
+
+def test_current_macro_estate_payload_fits_successor_byte_budget(monkeypatch):
+    """Measured current census payload must fit without changing any other ceiling."""
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock())
+    bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
+    bounded._bytes = 104_630_037
+
+    assert bounded._bytes > 96 * 1024 * 1024
+    assert bounded._bytes < 128 * 1024 * 1024
+    bounded.check()
+
+
+def test_normalized_byte_budget_accepts_exact_128_mib_and_refuses_one_over(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock())
+    bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
+
+    bounded._bytes = 128 * 1024 * 1024
+    bounded.check()
+
+    bounded._bytes += 1
+    with pytest.raises(module._ReadBudgetExceeded):
+        bounded.check()
 
 
 def test_single_get_rejects_accounting_overrun_before_return(monkeypatch):

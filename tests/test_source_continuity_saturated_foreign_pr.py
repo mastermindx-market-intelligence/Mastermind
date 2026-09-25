@@ -1235,8 +1235,9 @@ def _roster() -> list[dict[str, object]]:
 
 def test_invocation_ceilings_are_unchanged_by_semantic_revalidation() -> None:
     module = _module()
+    assert module._MAX_COLLISION_PRS == 485
     assert module._MAX_HTTP_CALLS == 1152
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
 
 

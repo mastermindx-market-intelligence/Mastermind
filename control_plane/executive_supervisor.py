@@ -32,7 +32,7 @@ import urllib.request
 from enum import Enum
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from control_plane.worker_execution_contract import (
@@ -64,6 +64,10 @@ from control_plane.executive_runtime import (
     JobPayload,
     JobStatus,
     OrchestrationDispatchOutcome,
+    ExactWorkerClaimTarget,
+    _require_exact_worker_target,
+    _validate_exact_worker_target_replay,
+    _validate_exact_worker_target_selection,
     Runtime,
     RuntimeProofError,
     StateConflict,
@@ -1008,8 +1012,12 @@ class ExecutiveSupervisor:
         process_controller: PersistedProcessController | None = None,
         validation_timeout_seconds: float = 300.0,
         instance_id: str | None = None,
+        exact_target_provider: Callable[[str], ExactWorkerClaimTarget | None] | None = None,
     ) -> None:
         self.runtime = runtime
+        if exact_target_provider is not None and not callable(exact_target_provider):
+            raise SupervisorError("exact worker target provider must be callable")
+        self._exact_target_provider = exact_target_provider
         self.adapter = adapter
         self.runs_root = (
             Path(runs_root).resolve()
@@ -1731,33 +1739,38 @@ class ExecutiveSupervisor:
     async def start_cycle_job(
         self, job_id: str, *, command_id: str
     ) -> ActiveRun | OrchestrationDispatchOutcome:
-        """Claim exactly ``job_id`` under ``command_id`` and launch it once.
-
-        Replaying an already active/terminal dispatch returns the immutable
-        command-bound outcome.  It never scans or claims another queued Job.
-        """
-
+        """Use the existing exact child claim; replay never reissues a target."""
+        target = (
+            self._exact_target_provider(job_id)
+            if self._exact_target_provider is not None else None
+        )
+        if target is not None:
+            target = _require_exact_worker_target(target)
         outcome = self.runtime.attempts.dispatch_cycle_job(
             job_id,
             command_id=command_id,
             lease_owner=self.instance_id,
+            **({"exact_target": target} if target is not None else {}),
         )
         if outcome is None:
             raise SupervisorError(f"no eligible worker capacity for {job_id}")
-        if outcome.outcome == "TERMINAL" or outcome.attempt.status is not AttemptStatus.CLAIMED:
+        if (
+            (target is not None and not outcome.claimed_now)
+            or outcome.outcome == "TERMINAL"
+            or outcome.attempt.status is not AttemptStatus.CLAIMED
+        ):
             return outcome
         if outcome.lease_token is None:  # pragma: no cover - dataclass invariant
             raise SupervisorError("active cycle dispatch lost its lease token")
         return await self._start_claimed_job(
             job_id,
-            AttemptLease(
-                attempt=outcome.attempt,
-                lease_token=outcome.lease_token,
-            ),
+            AttemptLease(attempt=outcome.attempt, lease_token=outcome.lease_token),
+            **({"exact_target": target} if target is not None else {}),
         )
 
     async def _start_claimed_job(
-        self, job_id: str, lease: AttemptLease
+        self, job_id: str, lease: AttemptLease, *,
+        exact_target: ExactWorkerClaimTarget | None = None,
     ) -> ActiveRun:
         """Launch one already claimed exact Job and persist its principal."""
 
@@ -1794,6 +1807,9 @@ class ExecutiveSupervisor:
             )
             recovery_prompt_path = schema_path.parent / "worker-prompt.txt"
             _write_private_recovery_prompt(recovery_prompt_path, spec.prompt)
+            if exact_target is not None:
+                exact_target.revalidate_source()
+                self.runtime.attempts._validate_exact_target_launch(exact_target, lease)
             start_invoked = True
             process_ref = await self.adapter.start(spec)
             launch_metadata = self._launch_metadata(
@@ -2761,6 +2777,83 @@ class ExecutiveSupervisor:
             )
         return binding, spec, effective_grant
 
+    def _revalidate_recovery_inputs(
+        self, attempt: Attempt, spec: WorkerLaunchSpec
+    ) -> None:
+        """Recheck immutable launch inputs before adopting an existing execution."""
+
+        job = self._job(attempt.job_id)
+        try:
+            workspace = Path(spec.workspace_path).resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise SupervisorError(
+                "worker recovery workspace is unavailable"
+            ) from exc
+        self.verified_commission(job, workspace)
+
+        try:
+            target = (
+                self._exact_target_provider(job.job_id)
+                if self._exact_target_provider is not None
+                else None
+            )
+            if target is not None:
+                target = _require_exact_worker_target(target)
+                target.require_fresh(self.runtime.store.now_ms())
+                target.revalidate_source()
+
+            with self.runtime.store.read() as connection:
+                rows = connection.execute(
+                    """SELECT payload_json FROM events
+                       WHERE event_type='JOB_CLAIMED' AND attempt_id=?""",
+                    (attempt.attempt_id,),
+                ).fetchall()
+                if len(rows) != 1:
+                    raise StateConflict(
+                        "worker recovery lost its exact claim evidence"
+                    )
+                try:
+                    payload = json.loads(str(rows[0]["payload_json"]))
+                except (TypeError, ValueError) as exc:
+                    raise StateConflict(
+                        "worker recovery claim evidence is malformed"
+                    ) from exc
+                _validate_exact_worker_target_replay(payload, target)
+                if target is None:
+                    return
+
+                job_row = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?",
+                    (attempt.job_id,),
+                ).fetchone()
+                capacity = connection.execute(
+                    """SELECT q.*, w.provider AS worker_provider,
+                              w.account_label, w.identity_status
+                       FROM worker_quota_classes q
+                       JOIN workers w ON w.worker_id=q.worker_id
+                       WHERE q.worker_id=? AND q.quota_class=?""",
+                    (attempt.worker_id, attempt.quota_class),
+                ).fetchone()
+                if (
+                    job_row is None
+                    or capacity is None
+                    or capacity["identity_status"] != "ONLINE"
+                ):
+                    raise StateConflict(
+                        "exact worker target disappeared before recovery"
+                    )
+                _validate_exact_worker_target_selection(
+                    connection,
+                    target,
+                    job_row,
+                    capacity,
+                    attempt.authority_policy_hash,
+                )
+        except StateConflict as exc:
+            raise SupervisorError(
+                f"worker recovery exact target is invalid: {exc}"
+            ) from exc
+
     def _normalise_recovered_lease(
         self, lease: AttemptLease
     ) -> AttemptLease:
@@ -2840,6 +2933,7 @@ class ExecutiveSupervisor:
             binding, spec, effective_grant = (
                 self._validated_recovery_binding(attempt)
             )
+            self._revalidate_recovery_inputs(attempt, spec)
         except SupervisorError as exc:
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id,
@@ -2945,14 +3039,19 @@ class ExecutiveSupervisor:
                 / "reconciliation-receipt.json"
             ),
         )
-        _write_private_json(
-            path,
-            {
-                "schema_version": "mastermind.executive_reconciliation_evidence/v1",
-                "outcome": outcome.to_dict(),
-                "uid_sweep": _jsonable(uid_sweep),
-            },
-        )
+        payload = {
+            "schema_version": "mastermind.executive_reconciliation_evidence/v1",
+            "outcome": outcome.to_dict(),
+            "uid_sweep": _jsonable(uid_sweep),
+        }
+        try:
+            _write_private_json(path, payload)
+        except FileExistsError:
+            # A no-PID claim may first await expiry and reconcile again later.
+            # Keep each fresh sweep/outcome immutable and return its exact path;
+            # neither overwrite the earlier receipt nor reuse its stale sweep.
+            path = path.with_name(f"{path.stem}-{uuid4().hex}{path.suffix}")
+            _write_private_json(path, payload)
         return dataclasses.replace(outcome, uid_sweep_receipt_path=str(path))
 
     def _restart_uid_sweep(self, attempt: Attempt) -> Mapping[str, Any] | None:
@@ -2977,6 +3076,48 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "restart reconciliation received a non-passing dedicated-UID sweep"
             )
+        return sweep
+
+    @staticmethod
+    def _is_unbound_claim(attempt: Attempt) -> bool:
+        """Empty control identity is a cleanup candidate, never absence proof."""
+
+        return (
+            attempt.status is AttemptStatus.CLAIMED
+            and all(value is None for value in (
+                attempt.pid, attempt.pgid, attempt.process_start_identity,
+                attempt.boot_id, attempt.provider_session_id,
+                attempt.stdout_path, attempt.stderr_path, attempt.result_path,
+            ))
+            and "worker_recovery_binding" not in attempt.launch_metadata
+            and "launch_attestation" not in attempt.launch_metadata
+        )
+
+    def _cleanup_unbound_claim(self, attempt: Attempt) -> Mapping[str, Any]:
+        """Ask the existing exact-run owner for fresh, worker-bound absence."""
+
+        cleanup = getattr(self.process_controller, "cleanup_unbound_run", None)
+        if not callable(cleanup):
+            raise SupervisorError("unbound claim has no exact-run cleanup owner")
+        requested_at = time.time()
+        sweep = self._validate_terminal_uid_sweep(cleanup(attempt.attempt_id))
+        completed_at = time.time()
+        observed_at = sweep.get("observed_at")
+        if not isinstance(observed_at, str):
+            raise SupervisorError("unbound cleanup has no observation time")
+        observed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        expected_uid = (
+            self.worker_uid if self.worker_uid is not None
+            else pwd.getpwnam(self.worker_user).pw_uid
+        )
+        if (
+            observed.tzinfo is None
+            or not requested_at <= observed.timestamp() <= completed_at
+            or sweep.get("reason") != "status_absence"
+            or sweep.get("worker_uid") != expected_uid
+            or self._restart_uid_sweep(attempt) != sweep
+        ):
+            raise SupervisorError("unbound cleanup absence receipt is stale or foreign")
         return sweep
 
     def reconcile_restart(self, *, requeue_lost: bool = True) -> list[ReconcileReceipt]:
@@ -3071,7 +3212,25 @@ class ExecutiveSupervisor:
                         f"attempt {attempt.attempt_id} remained live or ambiguous after termination"
                     )
                 presence = ProcessPresence.ABSENT
-            if presence is ProcessPresence.ABSENT:
+            if presence is ProcessPresence.UNKNOWN and self._is_unbound_claim(attempt):
+                try:
+                    uid_sweep = self._cleanup_unbound_claim(attempt)
+                except Exception as exc:
+                    outcomes.append(
+                        ReconcileReceipt(
+                            attempt_id=attempt.attempt_id,
+                            job_id=attempt.job_id,
+                            status=ReconcileStatus.IDENTITY_AMBIGUOUS,
+                            process_was_live=False,
+                            error=_render_recovery_error(exc),
+                        )
+                    )
+                    continue
+                # The exact broker owner proved fresh overall absence. Its
+                # retained terminal run still cannot match missing control
+                # metadata, so repeating presence() would recreate the wedge.
+                presence = ProcessPresence.ABSENT
+            elif presence is ProcessPresence.ABSENT:
                 if not self.process_controller.absence_verified(attempt):
                     presence = ProcessPresence.UNKNOWN
                 else:

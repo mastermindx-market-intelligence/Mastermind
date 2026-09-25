@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -77,7 +79,7 @@ class RuntimeStageTests(unittest.TestCase):
 
     def test_valid_but_unreviewed_generation_refuses(self):
         with self.assertRaisesRegex(stage.Refusal, "GENERATION_UNSUPPORTED"):
-            stage.stage("v3", root=self.root, _source_dir=self.source)
+            stage.stage("v4", root=self.root, _source_dir=self.source)
 
     def test_source_hash_must_match_reviewed_generation(self):
         with mock.patch.object(
@@ -151,6 +153,26 @@ class RuntimeStageTests(unittest.TestCase):
         with self.assertRaisesRegex(stage.Refusal, "RUNTIME_ROOT_UNSAFE"):
             stage.stage("v2", root=escaped_root, _source_dir=self.source)
         self.assertFalse((outside / "runtime").exists())
+
+
+    def test_precommit_bridge_probe_timeout_is_retryable_and_has_no_generation_effect(self):
+        timeout = stage.subprocess.TimeoutExpired(["python", "bridge.py", "--help"], 15)
+        with mock.patch.object(stage.subprocess, "run", side_effect=timeout):
+            with self.assertRaisesRegex(stage.RetryableRefusal, "BRIDGE_PROBE_TIMEOUT"):
+                stage.stage("v2", root=self.root, _source_dir=self.source)
+        self.assertFalse((self.root / "v2").exists())
+
+    def test_cli_reports_precommit_timeout_as_retryable_after_reconciliation(self):
+        output = io.StringIO()
+        argv = ["runtime_stage.py", "stage", "--generation", "v2"]
+        with mock.patch.object(stage.sys, "argv", argv), \
+             mock.patch.object(stage, "stage", side_effect=stage.RetryableRefusal("BRIDGE_PROBE_TIMEOUT")), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(stage.main(), 2)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["state"], "BRIDGE_PROBE_TIMEOUT")
+        self.assertTrue(payload["retry_allowed"])
+        self.assertEqual(payload["reconcile_action"], "verify")
 
     def test_post_rename_sync_failure_is_effect_unknown(self):
         real_fsync = stage.os.fsync

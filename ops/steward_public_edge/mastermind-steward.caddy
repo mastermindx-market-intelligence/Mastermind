@@ -1,0 +1,55 @@
+@PUBLIC_HOST@ {
+	route {
+		@steward_metadata {
+			method GET
+			path /.well-known/oauth-protected-resource/mcp/steward/v1
+		}
+		handle @steward_metadata {
+			reverse_proxy 127.0.0.1:8766 {
+				header_up Host @PUBLIC_HOST@
+				header_up X-Forwarded-Proto https
+				header_up X-Forwarded-For 127.0.0.1
+				header_up -Forwarded
+				header_up -X-Forwarded-Host
+				header_up -X-Forwarded-Port
+				header_up -X-Real-IP
+				header_up -CF-Connecting-IP
+				header_up -EO-Connecting-IP
+				header_up -EO-Client-IP
+			}
+		}
+
+		@steward_mcp {
+			method GET POST DELETE
+			path /mcp/steward/v1
+		}
+		handle @steward_mcp {
+			request_body {
+				max_size 64KB
+			}
+			reverse_proxy 127.0.0.1:8766 {
+				header_up Host @PUBLIC_HOST@
+				header_up X-Forwarded-Proto https
+				header_up X-Forwarded-For 127.0.0.1
+				header_up -Forwarded
+				header_up -X-Forwarded-Host
+				header_up -X-Forwarded-Port
+				header_up -X-Real-IP
+				header_up -CF-Connecting-IP
+				header_up -EO-Connecting-IP
+				header_up -EO-Client-IP
+			}
+		}
+
+		abort
+	}
+
+	header {
+		Cache-Control "private, no-store"
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		-Server
+	}
+
+}

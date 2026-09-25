@@ -2541,6 +2541,8 @@ def _repair_host_fixture(
         path = system_root / relative
         path.mkdir(parents=True, mode=mode, exist_ok=True)
         path.chmod(mode)
+    # Mirror the real producer's umask-077 intermediate source boundary.
+    (system_root / "capacity-sources").chmod(0o700)
     lock = system_root / "locks" / "cf2-h0.lock"
     lock.write_bytes(b"")
     lock.chmod(0o600)
@@ -2776,7 +2778,7 @@ def test_source_repair_parent_graph_refuses_untrusted_intermediate_metadata(
         capacity_sources.rename(moved)
         capacity_sources.symlink_to(moved, target_is_directory=True)
     elif drift == "parent-mode":
-        capacity_sources.chmod(0o777)
+        capacity_sources.chmod(0o755)
     elif drift == "parent-xattr":
         name = b"com.mastermind.test" if sys.platform == "darwin" else b"user.mastermind-test"
         try:

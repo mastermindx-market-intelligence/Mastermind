@@ -44,6 +44,20 @@ and must not be projected as active, STARTED, executing, waiting-on-worker, or w
 PICKUP_ACK and START are separate edges. Executive OS remains the lifecycle owner: a delivery, pickup,
 watcher receipt, or this procedure does not create a Job, Attempt, or Worker state.
 
+### 1.3 Assignment is not an ACK-of-ACK barrier
+
+Current deliberate delivery to the eligible receiving session is the assignment edge at the
+human/session layer. The receiver must not wait for a second Chairman message or Slack claim before
+performing otherwise-permitted work: recording receipt is not asking permission again. Keep pickup,
+START, execution and acceptance truthful and distinct, but do not invent a Slack dependency for a
+non-Slack assignment. A retrieved packet alone remains data, not assignment. Existing RuntimeBinding,
+source custody and effect-unknown reconciliation remain controlling; delivery cannot steal a live lease.
+
+A watcher failure blocks reliance on unattended continuation, not otherwise-authorized foreground work.
+Record WATCH_UNAVAILABLE honestly and continue safe permitted actions that do not depend on that
+watcher or on a required transport-dependent effect. Where the exact operation actually requires
+reciprocal transport, preserve that gate and carrier; never fabricate ACK, START, wake or a new carrier.
+
 ## 2. Mandatory Sol edge after every worker return
 
 After every worker/COO `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must emit exactly one explicit state in the same lawful carrier/thread.

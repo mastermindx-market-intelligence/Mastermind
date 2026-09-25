@@ -20,6 +20,44 @@ no Chairman-authenticated admitted job can exist yet. The value of this view is
 therefore mostly in *how it renders nothing*: an absent runtime must read as a
 typed refusal, never as "no work".
 
+
+## Web-CEO Executive MCP access (`executive_fabric`)
+
+The protected BSC-E1 / EXEC-MCP-A generation remains the exact five-tool
+`1.0.0` contract and does **not** advertise `executive_fabric`.
+
+The separately versioned static profile `web_ceo_v1` uses server version
+`1.1.0` and adds one read-only tool named `executive_fabric`:
+
+```json
+{"view":"roots","limit":50}
+{"view":"root","root_job_id":"JOB-1"}
+```
+
+Its schema digest is
+`17e052ed734c2c4606094c49b0e9c057382a193fc181d595fc084da10809a5cd`.
+Profile selection is host composition, never caller input. The profile reuses
+the same authenticated App, CeoIngress, Executive Runtime and result-envelope
+owners; it does not create a second MCP lifecycle or control plane.
+
+`view=roots` calls the existing bounded `list_roots` projection; `view=root`
+calls the existing `read_fabric_view` projection. The gateway does not recreate
+job joins, review/result logic, or Runtime access. It replaces configured host
+runtime coordinates with the stable non-secret runtime label before the document
+crosses the MCP boundary. Projector failures return one typed, path-safe
+`backend_unavailable` envelope.
+
+This is **visibility only**. It does not dispatch, claim, spawn, cancel,
+terminate, wake, retry, reassign, resume, merge, deploy, read credentials, or
+call a provider. Installed read transport is explicitly versioned: legacy App
+bindings default to `mastermind.executive_ceo_ingress_app_read.v1`, while
+`web_ceo_v1` requires the host-bound v2 reader profile. See
+`docs/EXECUTIVE_WEB_CEO_FABRIC_READ_AMENDMENT.md`.
+
+The source remains `BUILT_NOT_PROVEN` for production until the separately
+owned installed-read hardening and an explicitly activated Web-CEO app
+generation prove current-runtime enumeration and one-root detail.
+
 ## Usage
 
 ```

@@ -14,6 +14,7 @@ All mutations stay inside temp fixtures; subprocess is mocked.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -30,6 +31,40 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import private_service as svc  # noqa: E402
+
+
+PAPER_BRIDGE_FIXTURE = b"fixture-paper-bridge\n"
+PAPER_BRIDGE_FIXTURE_SHA = hashlib.sha256(PAPER_BRIDGE_FIXTURE).hexdigest()
+
+
+def _seed_paper_runtime(home: Path) -> str:
+    runtime = home / svc.PAPER_RUNTIME_REL
+    source = runtime / "source"
+    python_dir = runtime / "venv" / "bin"
+    source.mkdir(parents=True, mode=0o700, exist_ok=True)
+    runtime.chmod(0o700)
+    source.chmod(0o700)
+    python_dir.mkdir(parents=True, exist_ok=True)
+    bridge = source / "bridge.py"
+    bridge.write_bytes(PAPER_BRIDGE_FIXTURE)
+    bridge.chmod(0o600)
+    python = python_dir / "python"
+    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python.chmod(0o700)
+    receipt = {
+        "schema": svc.PAPER_RUNTIME_SCHEMA,
+        "generation": svc.PAPER_RUNTIME_REL.name,
+        "source_sha256": {"bridge.py": PAPER_BRIDGE_FIXTURE_SHA},
+        "bridge_sha256": PAPER_BRIDGE_FIXTURE_SHA,
+        "python_source": "/usr/bin/python3",
+        "python_version": "fixture",
+        "network_install_performed": False,
+        "production_acceptance": False,
+    }
+    receipt_path = runtime / "RUNTIME.json"
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
+    receipt_path.chmod(0o600)
+    return PAPER_BRIDGE_FIXTURE_SHA
 
 
 def _label_for(account: str) -> str:
@@ -157,8 +192,10 @@ def _do_stage(tmp: Path, home: Path, account: str = "test-account", port: int = 
     node = _make_node(tmp)
     backend = _make_backend(tmp)
     rec = recorder or CmdRecorder()
+    paper_sha = _seed_paper_runtime(home)
     with mock.patch.dict(os.environ, {"HOME": str(home)}):
-        with mock.patch.object(svc, "_run", rec):
+        with mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+             mock.patch.object(svc, "_run", rec):
             _capture_stdout(
                 lambda: svc.cmd_stage(_stage_args(src, node, backend, account, port))
             )
@@ -185,6 +222,8 @@ def _seal_runtime(account: str = "test-account", recorder=None):
 def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     """Recreate one exact historical layout; never include newly staged modules."""
     config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    config.pop("paperDesign", None)
+    config.pop("fleetStatus", None)
     if not typed_git:
         config.pop("gitPublish", None)
     roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
@@ -192,7 +231,9 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     manifest["version"] = 1
     for key in ("nodeHash", "backendHash", "dependencyTreeHash"):
         manifest.pop(key, None)
-    removed = ("output-budget.mjs",) if typed_git else ("output-budget.mjs", "git-publish.mjs")
+    removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
+        "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
+    )
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -221,6 +262,8 @@ class TestIdentity(unittest.TestCase):
                 "gateway.mjs",
                 "output-budget.mjs",
                 "git-publish.mjs",
+                "paper-design.mjs",
+                "fleet-status.mjs",
                 "private-tunnel-auth.mjs",
                 "private-tunnel-gateway.mjs",
                 "package.json",
@@ -257,8 +300,13 @@ class TestIdentity(unittest.TestCase):
         legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V1}
         self.assertTrue(svc._valid_manifest({**base, "files": current}, "test-account", _label_for("test-account")))
         self.assertTrue(svc._valid_manifest({**base, "files": legacy}, "test-account", _label_for("test-account")))
-        typed_legacy = {name: digest for name in svc.STAGE_FILES if name != "output-budget.mjs"}
+        previous_current = {name: digest for name in svc.LEGACY_STAGE_FILES_V4}
+        self.assertTrue(svc._valid_manifest({**base, "files": previous_current}, "test-account", _label_for("test-account")))
+        immediate_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V3}
+        self.assertTrue(svc._valid_manifest({**base, "files": immediate_legacy}, "test-account", _label_for("test-account")))
+        typed_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V2}
         self.assertTrue(svc._valid_manifest({**base, "files": typed_legacy}, "test-account", _label_for("test-account")))
+        self.assertNotIn("fleet-status.mjs", svc.LEGACY_STAGE_FILES_V4)
         self.assertNotIn("output-budget.mjs", svc.LEGACY_STAGE_FILES_V1)
         self.assertNotIn("git-publish.mjs", svc.LEGACY_STAGE_FILES_V1)
         partial = dict(legacy)
@@ -268,6 +316,50 @@ class TestIdentity(unittest.TestCase):
         extra["surprise.mjs"] = digest
         self.assertFalse(svc._valid_manifest({**base, "files": extra}, "test-account", _label_for("test-account")))
         self.assertFalse(svc._valid_manifest({**base, "version": 2, "files": current}, "test-account", _label_for("test-account")))
+
+    def test_v1_provisioned_manifest_accepts_only_exact_inert_legacy_shape(self):
+        digest = "0" * 64
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            base = {
+                "version": 1,
+                "account": "chatgpt4",
+                "label": _label_for("chatgpt4"),
+                "configHash": digest,
+                "plistHash": digest,
+                "source": "/tmp/src",
+                "node": "/tmp/node",
+                "backend": "/tmp/backend",
+                "host": "127.0.0.1",
+                "port": 45024,
+                "files": {name: digest for name in svc.LEGACY_STAGE_FILES_V1},
+                "provisioned_from": str(
+                    home / ".local" / "share" / "studio-direct-mcp" / "private" / "chatgpt3"
+                ),
+                "installation_state": svc.LEGACY_PROVISIONED_STATE,
+            }
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                self.assertTrue(
+                    svc._valid_manifest(base, "chatgpt4", _label_for("chatgpt4"))
+                )
+                wrong_state = {**base, "installation_state": "READY"}
+                self.assertFalse(
+                    svc._valid_manifest(wrong_state, "chatgpt4", _label_for("chatgpt4"))
+                )
+                wrong_source = {**base, "provisioned_from": "/tmp/chatgpt3"}
+                self.assertFalse(
+                    svc._valid_manifest(wrong_source, "chatgpt4", _label_for("chatgpt4"))
+                )
+                same_account = {
+                    **base,
+                    "provisioned_from": str(
+                        home / ".local" / "share" / "studio-direct-mcp" / "private" / "chatgpt4"
+                    ),
+                }
+                self.assertFalse(
+                    svc._valid_manifest(same_account, "chatgpt4", _label_for("chatgpt4"))
+                )
 
     def test_dir_mode_is_0700(self):
         self.assertEqual(svc.DIR_MODE, 0o700)
@@ -378,6 +470,66 @@ class TestRuntimeRoots(unittest.TestCase):
 
 
 # -------------------------------------------------------------------
+# Paper runtime admission
+# -------------------------------------------------------------------
+
+class TestPaperRuntimeAdmission(unittest.TestCase):
+    def test_exact_private_runtime_receipt_and_bridge_are_accepted(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            _seed_paper_runtime(home)
+            receipt = svc._verify_paper_runtime(
+                home, expected_sha=PAPER_BRIDGE_FIXTURE_SHA
+            )
+            self.assertEqual(receipt["generation"], svc.PAPER_RUNTIME_REL.name)
+
+    def test_bridge_hash_drift_refuses(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            _seed_paper_runtime(home)
+            bridge = home / svc.PAPER_RUNTIME_REL / "source" / "bridge.py"
+            bridge.write_text("drift", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "bridge hash mismatch"):
+                svc._verify_paper_runtime(
+                    home, expected_sha=PAPER_BRIDGE_FIXTURE_SHA
+                )
+
+    def test_receipt_generation_mismatch_refuses(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            _seed_paper_runtime(home)
+            receipt_path = home / svc.PAPER_RUNTIME_REL / "RUNTIME.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["generation"] = "wrong-generation"
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            receipt_path.chmod(0o600)
+            with self.assertRaisesRegex(SystemExit, "required generation"):
+                svc._verify_paper_runtime(
+                    home, expected_sha=PAPER_BRIDGE_FIXTURE_SHA
+                )
+
+    def test_stage_refuses_missing_runtime_before_writes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            args = _stage_args(
+                _make_source(tmp), _make_node(tmp), _make_backend(tmp)
+            )
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                 mock.patch.object(svc, "_run", CmdRecorder()):
+                with self.assertRaisesRegex(SystemExit, "paper runtime"):
+                    svc.cmd_stage(args)
+                roots = svc._build_runtime_roots("test-account")
+                self.assertFalse(roots["base"].exists())
+                self.assertFalse(roots["plist"].exists())
+
+
+# -------------------------------------------------------------------
 # Config and plist builders
 # -------------------------------------------------------------------
 
@@ -423,6 +575,47 @@ class TestBuildConfig(unittest.TestCase):
             self.assertNotIn("branch", config["gitPublish"])
             self.assertNotIn("remote", config["gitPublish"])
             self.assertNotIn("credential", config["gitPublish"])
+            paper_runtime = home / svc.PAPER_RUNTIME_REL
+            self.assertEqual(
+                config["paperDesign"],
+                {
+                    "enabled": True,
+                    "pythonPath": str(paper_runtime / "venv" / "bin" / "python"),
+                    "bridgePath": str(paper_runtime / "source" / "bridge.py"),
+                    "bridgeSha256": svc.PAPER_BRIDGE_SHA256,
+                    "appPath": str(home / "Applications" / "Paper.app"),
+                    "commandTimeoutMs": 70_000,
+                },
+            )
+            self.assertNotIn("fileId", config["paperDesign"])
+            self.assertNotIn("appPathOverride", config["paperDesign"])
+            self.assertNotIn("account", config["paperDesign"])
+            self.assertNotIn("token", config["paperDesign"])
+            self.assertNotIn("fleetStatus", config)
+
+    def test_config_enrolls_hash_pinned_existing_fleet_status_owner(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            launcher = home / ".local" / "bin" / "studio-direct"
+            launcher.parent.mkdir(parents=True)
+            launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            launcher.chmod(0o700)
+            node = _make_node(Path(raw))
+            backend = _make_backend(Path(raw))
+            config = svc._build_config(
+                "test-account", "127.0.0.1", 45018,
+                node, backend, home / "state", home,
+            )
+            self.assertEqual(
+                config["fleetStatus"],
+                {
+                    "enabled": True,
+                    "launcherPath": str(launcher),
+                    "launcherSha256": svc._sha256_file(launcher),
+                    "timeoutMs": 15_000,
+                },
+            )
 
 
 class TestBuildPlist(unittest.TestCase):
@@ -462,6 +655,11 @@ class TestBuildPlist(unittest.TestCase):
 # -------------------------------------------------------------------
 
 class TestStage(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(svc, "PAPER_BRIDGE_SHA256", PAPER_BRIDGE_FIXTURE_SHA)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_happy_path_writes_private_cli_and_hashes(self):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
@@ -767,6 +965,11 @@ class TestStage(unittest.TestCase):
 # -------------------------------------------------------------------
 
 class TestUpgrade(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(svc, "PAPER_BRIDGE_SHA256", PAPER_BRIDGE_FIXTURE_SHA)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_legacy_install_upgrades_stopped_and_preserves_runtime_state(self):
         self._assert_historical_upgrade(typed_git=False)
 

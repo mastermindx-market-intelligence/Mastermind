@@ -29,10 +29,19 @@ def test_control_plane_does_not_reference_window_reader() -> None:
 # Exact importer -> module exceptions. Each entry is a single importer path mapped to the
 # only Reader modules that importer may name; there is no package-wide or wildcard allowance.
 EXTERNAL_IMPORTER_EXCEPTIONS: dict[str, frozenset[str]] = {
+    "integrations/mastermind_steward_app/installed.py": frozenset(
+        {
+            "integrations.mastermind_window_reader.production_binding",
+            "integrations.mastermind_window_reader.owner_read_resource",
+        }
+    ),
     "integrations/mastermind_steward_app/live_window.py": frozenset(
         {"integrations.mastermind_window_reader.owner_read_resource"}
     ),
     "tests/test_mastermind_steward_app_live_window.py": frozenset(
+        {"integrations.mastermind_window_reader.owner_read_resource"}
+    ),
+    "tests/test_steward_installed_content.py": frozenset(
         {"integrations.mastermind_window_reader.owner_read_resource"}
     ),
 }
@@ -41,6 +50,7 @@ EXTERNAL_IMPORTER_EXCEPTIONS: dict[str, frozenset[str]] = {
 def test_window_reader_modules_have_only_package_and_test_importers() -> None:
     modules = {
         "integrations.mastermind_window_reader.live_window_read",
+        "integrations.mastermind_window_reader.production_binding",
         "integrations.mastermind_window_reader.owner_read_resource",
     }
     offenders: list[str] = []
