@@ -3,9 +3,11 @@
 The broker is deliberately smaller than a scheduler or control plane.  It runs
 as the dedicated Codex worker account, accepts requests only from the configured
 Executive control UID over a Unix-domain socket, and exposes five typed
-operations around :class:`CodexWorkerAdapter`:
+operations around :class:`CodexWorkerAdapter` plus one optional, requestless
+capacity observation owned by the existing Capacity evidence adapter:
 
-``start`` -> ``status`` -> ``collect`` / ``cancel`` and ``validate``.
+``start`` -> ``status`` -> ``collect`` / ``cancel`` and ``validate``;
+``capacity-observe/v1`` is read-only and available only while the broker is idle.
 
 There is no generic command or shell endpoint.  Validation argv must be frozen
 in the start request and is matched byte-for-byte before execution.  The
@@ -185,7 +187,15 @@ _OHF_OPERATIONS = frozenset(
     }
 )
 _ALLOWED_OPERATIONS = frozenset(
-    {"start", "status", "collect", "cancel", "validate", "autonomy-canary"}
+    {
+        "start",
+        "status",
+        "collect",
+        "cancel",
+        "validate",
+        "autonomy-canary",
+        "capacity-observe/v1",
+    }
 ) | _OHF_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
@@ -1326,6 +1336,7 @@ class ExecutiveWorkerBroker:
             [Mapping[str, Any]], Mapping[str, Any]
         ]
         | None = None,
+        capacity_observer: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         try:
             descriptor = bind_reviewed_adapter(adapter, adapter_id)
@@ -1386,6 +1397,9 @@ class ExecutiveWorkerBroker:
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
         self.autonomy_canary_factory = autonomy_canary_factory
+        if capacity_observer is not None and not callable(capacity_observer):
+            raise WorkerBrokerError("capacity observer must be callable")
+        self.capacity_observer = capacity_observer
         if self.operator_harness_armed and self.operator_adapter_factory is None:
             raise WorkerBrokerError(
                 "armed Operator Harness requires a reviewed worker-local adapter factory"
@@ -1500,6 +1514,8 @@ class ExecutiveWorkerBroker:
         }
 
     async def _dispatch(self, operation: str, payload: dict[str, Any]) -> Any:
+        if operation == "capacity-observe/v1":
+            return await self._capacity_observe(payload)
         if operation == "start":
             return await self._start(payload)
         if operation == "status":
@@ -1543,6 +1559,35 @@ class ExecutiveWorkerBroker:
         if operation == "ohf-reconcile-absence":
             return await self._ohf_reconcile_absence(payload)
         raise AssertionError(operation)  # pragma: no cover
+
+    async def _capacity_observe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return one trusted, requestless Capacity observation while idle.
+
+        The callback is construction-owned and accepts no caller payload.  The
+        broker contributes only its existing peer/worker admission and the
+        same state lock used by modifying operations; it does not sample, rank,
+        persist, reserve, retry, or choose another host.
+        """
+
+        if payload:
+            raise BrokerProtocolError("capacity-observe/v1 payload must be empty")
+        observer = self.capacity_observer
+        if observer is None:
+            raise BrokerStateError("capacity observer is not configured")
+        self._require_current_autonomy()
+        async with self._state_lock:
+            if (
+                self._active_run_id is not None
+                or self._operator_run is not None
+                or self._starting
+                or self._validation_busy
+                or self._status_sweep_busy
+            ):
+                raise BrokerStateError("capacity observation requires an idle broker")
+            observed = observer()
+            if not isinstance(observed, Mapping):
+                raise BrokerStateError("capacity observer returned an invalid projection")
+            return dict(observed)
 
     async def _autonomy_canary(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Issue one fixed, non-provider boot canary while the broker is idle."""
