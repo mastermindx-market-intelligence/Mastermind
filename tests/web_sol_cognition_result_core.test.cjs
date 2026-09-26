@@ -155,7 +155,7 @@ test("refuses non-string next-action payloads before export", () => {
 });
 
 
-test("accepts the closed existing Executive shape for every orchestration role family", () => {
+test("exports only commissioned work/review roles and refuses other orchestration roles", () => {
   const digestA = "a".repeat(64);
   const digestB = "b".repeat(64);
   const cases = [
@@ -284,7 +284,8 @@ test("accepts the closed existing Executive shape for every orchestration role f
       validations: [],
     };
     const result = core.reduceCanonicalResultText(canonical(value), roleExpected);
-    assert.equal(result.status, "RESULT_READY", item.role_result.schema_version);
+    const expectedStatus = item.role === "review" ? "RESULT_READY" : "RESULT_REFUSED";
+    assert.equal(result.status, expectedStatus, item.role_result.schema_version);
   }
 });
 

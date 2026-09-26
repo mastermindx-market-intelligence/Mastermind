@@ -5,13 +5,12 @@
   const MAX_CANONICAL_RESULT_BYTES = 24 * 1024;
   const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
   const DIGEST_RE = /^[0-9a-f]{64}$/;
-  const AUTHORITY_RE = /^[A-Z][A-Z0-9_]{1,31}$/;
   const EMAIL_RE = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/;
   const MASTERMIND_ENV_RE = /\bMASTERMIND_[A-Z_]+\b/;
   const JWT_RE = /(^|[^0-9A-Za-z])eyJ[0-9A-Za-z+\/=_-]{4,}\.[0-9A-Za-z+\/=_-]{4,}(?:\.[0-9A-Za-z+\/=_-]*)?/;
   const PREFIXED_SECRET_RE = /(^|[^0-9A-Za-z])(?:sb_secret_|sb_publishable_|sbp_|sk-ant-|sk-|github_pat_|ghp_|gho_|ghs_)[0-9A-Za-z+\/=_-]{8,}/;
   const SECRET_MARKERS = ["PASSWORD", "TOKEN", "SECRET", "KEY", "PASS"];
-  const ROLES = new Set(["plan", "work", "review", "repair", "aggregation"]);
+  const ROLES = new Set(["work", "review"]);
   const EXPECTED_KEYS = new Set([
     "job_id", "run_id", "worker_id", "role", "root_job_id",
   ]);
@@ -25,30 +24,11 @@
   const WORK_KEYS = new Set([
     "schema_version", ...LINEAGE_KEYS, "repair_round", "artifacts", "evidence_digests",
   ]);
-  const REPAIR_KEYS = new Set([
-    ...WORK_KEYS, "supersedes_job_id", "rejected_review_job_id", "rejected_review_result_digest",
-  ]);
   const REVIEW_KEYS = new Set([
     "schema_version", ...LINEAGE_KEYS, "reviewed_job_id", "reviewed_attempt_id",
     "reviewed_result_digest", "repair_round", "verdict", "evidence_digests", "findings",
   ]);
   const FINDING_KEYS = new Set(["code", "severity", "message", "evidence_digests"]);
-  const PLAN_KEYS = new Set(["schema_version", "root_job_id", "plan_attempt_id", "steps"]);
-  const PLAN_STEP_V1_KEYS = new Set([
-    "ordinal", "step_id", "objective", "business_impact", "review_required",
-    "requested_authorities", "allowed_write_paths", "validation_ids", "attempt_limit", "cost_class",
-  ]);
-  const PLAN_STEP_V2_KEYS = new Set([...PLAN_STEP_V1_KEYS, "placement"]);
-  const PLACEMENT_KEYS = new Set(["provider_realm", "quota_class"]);
-  const AGGREGATION_KEYS = new Set([
-    "schema_version", "root_job_id", "handoff_digest", "policy_sha", "plan_attempt_id",
-    "plan_digest", "revisions", "aggregate_summary", "evidence_digests",
-  ]);
-  const REVISION_KEYS = new Set([
-    "ordinal", "plan_step_id", "current_job_id", "current_attempt_id", "current_result_digest",
-    "repair_round", "review_required", "qualifying_review_job_id", "qualifying_review_attempt_id",
-    "qualifying_review_result_digest",
-  ]);
 
   function exactKeys(value, expected) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -131,16 +111,14 @@
     return validStringArray(value, 64, validDigest);
   }
 
-  function validWorkResult(value, expected, repair) {
-    const keys = repair ? REPAIR_KEYS : WORK_KEYS;
-    const schema = repair ? "mastermind.repair_result/v1" : "mastermind.work_result/v1";
-    if (!exactKeys(value, keys) || value.schema_version !== schema || !validLineage(value, expected) ||
-        !Number.isInteger(value.repair_round) || value.repair_round < (repair ? 1 : 0) ||
-        value.repair_round > (repair ? 2 : 0) || !validArtifacts(value.artifacts) ||
-        !validEvidence(value.evidence_digests)) return false;
-    if (!repair) return true;
-    return validId(value.supersedes_job_id) && validId(value.rejected_review_job_id) &&
-      validDigest(value.rejected_review_result_digest);
+  function validWorkResult(value, expected) {
+    return exactKeys(value, WORK_KEYS) &&
+      value.schema_version === "mastermind.work_result/v1" &&
+      validLineage(value, expected) &&
+      Number.isInteger(value.repair_round) &&
+      value.repair_round === 0 &&
+      validArtifacts(value.artifacts) &&
+      validEvidence(value.evidence_digests);
   }
 
   function validReviewResult(value, expected) {
@@ -154,52 +132,11 @@
       validText(item.message) && validEvidence(item.evidence_digests));
   }
 
-  function validPlanResult(value, expected) {
-    if (!exactKeys(value, PLAN_KEYS) || !["mastermind.execution_plan/v1", "mastermind.execution_plan/v2"].includes(value.schema_version) ||
-        value.root_job_id !== expected.root_job_id || value.plan_attempt_id !== expected.run_id) return false;
-    const v2 = value.schema_version === "mastermind.execution_plan/v2";
-    return validArray(value.steps, 8, (step, index) => {
-      const keys = v2 ? PLAN_STEP_V2_KEYS : PLAN_STEP_V1_KEYS;
-      if (!exactKeys(step, keys) || step.ordinal !== index || !validId(step.step_id) ||
-          !validText(step.objective, 8192, true) || !["routine", "material", "critical"].includes(step.business_impact) ||
-          typeof step.review_required !== "boolean" ||
-          !validStringArray(step.requested_authorities, 16, (item) => typeof item === "string" && AUTHORITY_RE.test(item)) ||
-          !validStringArray(step.allowed_write_paths, 32, (item) => validText(item, 1024, true)) ||
-          !validStringArray(step.validation_ids, 64, validDigest) ||
-          !Number.isInteger(step.attempt_limit) || step.attempt_limit < 1 || step.attempt_limit > 2 ||
-          !["default", "small"].includes(step.cost_class)) return false;
-      return !v2 || (exactKeys(step.placement, PLACEMENT_KEYS) &&
-        validText(step.placement.provider_realm, 128, true) && validText(step.placement.quota_class, 128, true));
-    }, 1);
-  }
-
-  function validAggregationResult(value, expected) {
-    if (!exactKeys(value, AGGREGATION_KEYS) || value.schema_version !== "mastermind.aggregation_result/v1" ||
-        value.root_job_id !== expected.job_id || !validDigest(value.handoff_digest) ||
-        !validDigest(value.policy_sha) || !validId(value.plan_attempt_id) || !validDigest(value.plan_digest) ||
-        !validText(value.aggregate_summary) || !validEvidence(value.evidence_digests)) return false;
-    return validArray(value.revisions, 8, (item, index) => {
-      if (!exactKeys(item, REVISION_KEYS) || item.ordinal !== index || !validId(item.plan_step_id) ||
-          !validId(item.current_job_id) || !validId(item.current_attempt_id) || !validDigest(item.current_result_digest) ||
-          !Number.isInteger(item.repair_round) || item.repair_round < 0 || item.repair_round > 2 ||
-          typeof item.review_required !== "boolean") return false;
-      const reviewIds = [item.qualifying_review_job_id, item.qualifying_review_attempt_id];
-      const nullableIds = reviewIds.every((entry) => entry === null || validId(entry));
-      const nullableDigest = item.qualifying_review_result_digest === null || validDigest(item.qualifying_review_result_digest);
-      if (!nullableIds || !nullableDigest) return false;
-      const allPresent = reviewIds.every((entry) => entry !== null) && item.qualifying_review_result_digest !== null;
-      const allAbsent = reviewIds.every((entry) => entry === null) && item.qualifying_review_result_digest === null;
-      return item.review_required ? allPresent : allAbsent;
-    }, 1);
-  }
-
   function validRoleResult(value, expected) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    if (expected.role === "plan") return validPlanResult(value, expected);
-    if (expected.role === "work") return validWorkResult(value, expected, false);
+    if (expected.role === "work") return validWorkResult(value, expected);
     if (expected.role === "review") return validReviewResult(value, expected);
-    if (expected.role === "repair") return validWorkResult(value, expected, true);
-    return validAggregationResult(value, expected);
+    return false;
   }
 
   function canonicalJson(value) {
