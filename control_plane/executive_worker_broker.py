@@ -4197,8 +4197,15 @@ class RemoteWorkerBrokerEndpoint:
     worker_uid: int
     worker_gid: int
     secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    # Fixed by trusted endpoint construction, never a broker request selector.
+    # Keep the legacy default without making native Claude use the Codex facade.
+    adapter_id: str = "codex-cli"
 
     def __post_init__(self) -> None:
+        if type(self.adapter_id) is not str or self.adapter_id not in (
+            "codex-cli", "claude-code"
+        ):
+            raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
         worker_id = str(self.worker_id or "").strip()
         worker_user = str(self.worker_user or "").strip()
         if not _ID_RE.fullmatch(worker_id):
@@ -4355,10 +4362,17 @@ class RemoteWorkerBrokerFleet:
             raise WorkerBrokerError("remote worker broker fleet has duplicate worker_id")
         validation_resolver = validation_commands_for_spec or (lambda _spec: ())
         if adapter_factory is None:
-            adapter_factory = lambda row: RemoteCodexWorkerAdapter(
-                row.client,
-                validation_commands_for_spec=validation_resolver,
-            )
+            def adapter_factory(row: RemoteWorkerBrokerEndpoint) -> RemoteCodexWorkerAdapter:
+                if row.adapter_id == "codex-cli":
+                    facade = RemoteCodexWorkerAdapter
+                elif row.adapter_id == "claude-code":
+                    facade = RemoteClaudeWorkerAdapter
+                else:
+                    raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
+                return facade(
+                    row.client,
+                    validation_commands_for_spec=validation_resolver,
+                )
         if controller_factory is None:
             controller_factory = lambda row: RemoteWorkerProcessController(row.client)
         self._endpoints = {row.worker_id: row for row in rows}
