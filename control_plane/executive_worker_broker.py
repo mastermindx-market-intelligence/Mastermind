@@ -3885,6 +3885,8 @@ class RemoteCodexWorkerAdapter:
             "status",
             {"run_id": ref.run_id},
         )
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote recovery adapter identity does not match facade")
         run = _mapping(result.get("run"), field="run status")
         observed = _process_ref_from_json(run.get("process_ref"))
         if observed != ref:
@@ -3948,6 +3950,8 @@ class RemoteCodexWorkerAdapter:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request("status", {"run_id": ref.run_id})
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote status adapter identity does not match facade")
         run = _mapping(result.get("run"), field="run status")
         value = run.get("status")
         aliases = {

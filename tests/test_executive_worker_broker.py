@@ -2841,6 +2841,8 @@ def test_remote_adapter_reattaches_exact_broker_run_without_starting_again(
             assert operation == "status"
             assert payload == {"run_id": ref.run_id}
             return {
+                # Mirror the existing broker status wire, including its identity.
+                "adapter_id": "codex-cli",
                 "run": {
                     "status": "RUNNING",
                     "process_ref": _jsonable(ref),

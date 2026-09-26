@@ -195,5 +195,130 @@ class NativeClaudeRemoteFleetTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(adapter_descriptor("claude-code").implemented)
 
 
+# Restart qualification uses the same real fleet/facade against a no-I/O wire.
+# Removing either status/recovery adapter-identity check must fail these tests.
+_MISSING_ADAPTER_ID = object()
+
+
+class _StatusBrokerWire(_BrokerWire):
+    def __init__(self) -> None:
+        super().__init__("claude-code")
+        self.observed_adapter_id = "claude-code"
+        self.process_ref = None
+        self.lose_status_response = False
+
+    def _status(self, operation: str, payload: dict) -> dict:
+        self.calls.append((operation, payload))
+        if self.lose_status_response:
+            raise ConnectionError("fixture lost recovery status response")
+        assert operation == "status"
+        assert payload == {"run_id": self.process_ref["run_id"]}
+        result = {
+            "run": {"status": "RUNNING", "process_ref": self.process_ref},
+        }
+        if self.observed_adapter_id is not _MISSING_ADAPTER_ID:
+            result["adapter_id"] = self.observed_adapter_id
+        return result
+
+    async def request(self, operation: str, payload: dict, **kwargs) -> dict:
+        if operation == "start":
+            response = await super().request(operation, payload)
+            self.process_ref = response["process_ref"]
+            return response
+        return self._status(operation, payload)
+
+    def request_sync(self, operation: str, payload: dict) -> dict:
+        return self._status(operation, payload)
+
+
+class NativeClaudeRecoveryIdentityTest(unittest.IsolatedAsyncioTestCase):
+    async def _launched(self, root: Path):
+        from control_plane.worker_execution_contract import WorkerRecoveryBinding
+
+        wire = _StatusBrokerWire()
+        endpoint = _endpoint("native", wire, adapter_id="claude-code")
+        fleet = RemoteWorkerBrokerFleet([endpoint])
+        spec = dataclasses.replace(_spec("native-recovery", "native"), run_dir=root / "run")
+        ref = await fleet.start(spec)
+        prompt_path = spec.run_dir / "input" / "worker-prompt.txt"
+        prompt_path.parent.mkdir(parents=True)
+        prompt_path.write_text(spec.prompt, encoding="utf-8")
+        prompt_path.chmod(0o600)
+        binding = WorkerRecoveryBinding.bind(
+            adapter_id=fleet.adapter_id,
+            spec=spec,
+            process_ref=ref,
+            prompt_path=prompt_path,
+        )
+        return wire, endpoint, fleet, spec, ref, binding
+
+    async def test_native_status_requires_exact_broker_adapter_identity(self) -> None:
+        import tempfile
+
+        invalid = (_MISSING_ADAPTER_ID, None, True, "", "codex-cli", "Claude-Code", "claude-code ")
+        for observed in invalid:
+            with self.subTest(observed=observed), tempfile.TemporaryDirectory() as temporary:
+                wire, _endpoint_value, fleet, _spec_value, ref, _binding = await self._launched(Path(temporary))
+                wire.observed_adapter_id = observed
+                with self.assertRaisesRegex(BrokerProtocolError, "adapter identity"):
+                    await fleet.status(ref)
+                self.assertEqual([call[0] for call in wire.calls], ["start", "status"])
+
+    async def test_native_recovery_requires_exact_broker_adapter_identity(self) -> None:
+        import tempfile
+
+        invalid = (_MISSING_ADAPTER_ID, None, True, "", "codex-cli", "Claude-Code", "claude-code ")
+        for observed in invalid:
+            with self.subTest(observed=observed), tempfile.TemporaryDirectory() as temporary:
+                wire, endpoint, _old_fleet, spec, _ref, binding = await self._launched(Path(temporary))
+                wire.observed_adapter_id = observed
+                recovered = RemoteWorkerBrokerFleet([endpoint])
+                with self.assertRaisesRegex(BrokerProtocolError, "adapter identity"):
+                    recovered.reattach(spec, binding)
+                with self.assertRaises(BrokerStateError):
+                    await recovered.start(spec)
+                self.assertEqual([call[0] for call in wire.calls], ["start", "status"])
+
+    async def test_native_recovery_and_status_keep_original_process_without_restart(self) -> None:
+        import tempfile
+        from control_plane.worker_execution_contract import WorkerRunStatus
+
+        with tempfile.TemporaryDirectory() as temporary:
+            wire, endpoint, _old_fleet, spec, ref, binding = await self._launched(Path(temporary))
+            recovered = RemoteWorkerBrokerFleet([endpoint])
+            self.assertEqual(recovered.reattach(spec, binding), ref)
+            self.assertEqual(recovered.reattach(spec, binding), ref)
+            self.assertEqual(await recovered.status(ref), WorkerRunStatus.RUNNING)
+            self.assertEqual([call[0] for call in wire.calls], ["start", "status", "status"])
+            with self.assertRaises(BrokerStateError):
+                await recovered.start(spec)
+
+    async def test_native_recovery_refuses_process_drift_without_another_start(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            wire, endpoint, _old_fleet, spec, _ref, binding = await self._launched(Path(temporary))
+            wire.process_ref = dict(wire.process_ref, launch_nonce="different-generation")
+            recovered = RemoteWorkerBrokerFleet([endpoint])
+            with self.assertRaisesRegex(BrokerProtocolError, "immutable process identity"):
+                recovered.reattach(spec, binding)
+            with self.assertRaises(BrokerStateError):
+                await recovered.start(spec)
+            self.assertEqual([call[0] for call in wire.calls], ["start", "status"])
+
+    async def test_lost_recovery_response_cannot_restart_same_worker(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            wire, endpoint, _old_fleet, spec, _ref, binding = await self._launched(Path(temporary))
+            wire.lose_status_response = True
+            recovered = RemoteWorkerBrokerFleet([endpoint])
+            with self.assertRaises(ConnectionError):
+                recovered.reattach(spec, binding)
+            with self.assertRaises(BrokerStateError):
+                await recovered.start(spec)
+            self.assertEqual([call[0] for call in wire.calls], ["start", "status"])
+
+
 if __name__ == "__main__":
     unittest.main()

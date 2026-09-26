@@ -12,7 +12,13 @@ before account-by-account onboarding.
 
 - Repository: `mastermindx-market-intelligence/Mastermind`.
 - Operation: `claude-fabric-preonboarding-integration-20260926-sol-001`.
-- Protected source/procedure pin: `0d12bb45c4429a7441614fac8eff4830db5e7c0d`.
+- Original source pin: `0d12bb45c4429a7441614fac8eff4830db5e7c0d`.
+- Current protected procedure/recovery pin: `763ec8f920177fdf48b18df1b8e37b61ab482ef0`.
+- Current-pin COLD_START, ACTIVE_EXECUTION, WEB_CEO_DELEGATION and CLOSEOUT
+  were reloaded and verified byte-identical to the previously fully read versions.
+  Protected movement changes only status.sh and its tests; adapter paths are unchanged.
+- Published first slice: PR #999 at `517a4b8e6c68d4c60163989a06fabb47dc24ee95`.
+  The containing commit of this updated file identifies the recovery-fix successor.
 - Skillpack: mastermind.sol_skillpack.v1, version 1.0.1, bootstrap major 1.
 - Loaded at that pin: INDEX, COLD_START, ACTIVE_EXECUTION,
   WEB_CEO_DELEGATION, CLOSEOUT, DELIVERY_WORKFLOW and repository instructions.
@@ -143,3 +149,55 @@ head/custody reconciliation. Resume in assigned attended Sol execution from this
 checkpoint and the exact published candidate, not unrelated historical handoffs.
 The parent mission remains incomplete until the pre-onboarding source vertical
 is actually wired and accepted.
+
+## Current recovery-identity unit and expanded Chairman assignment
+
+The Chairman extended the mission: rich native COO environments must expose the
+relevant complete skills/plugin catalog, direct access to Mastermind, macro and
+mastermind-terminal through existing source custody, and Executive OS / Agent OS /
+Mastermind OS / GitHub / Slack integration. Prepare bounded Web CEO handoffs while
+retaining this adapter lane. No Claude account login is requested now.
+
+Separate a rich COO principal profile from the sealed child-worker profile. Do not
+remove the latter's no-extension/no-MCP fences to simulate COO parity. Reuse #676
+(parity), #962/#955 (plugin/auth carrier), and existing workspace/Craft/communication
+owners. Cross-session organizational continuity belongs to WS:EXECUTIVE-CAPACITY-FABRIC
+in macro/agentos, not a new registry in this repository. Prepared packets are not
+worker assignment, PICKUP_ACK, START, or background execution.
+
+New concrete defect found and repaired: the remote facade checked adapter identity
+on start but ignored the broker's existing adapter_id in both asynchronous status
+and synchronous reattach responses. A Claude facade accepted absent, null, boolean,
+empty, Codex, wrong-case and whitespace-drift identities. Two checks now refuse
+these replies before accepting status or registering the recovered process. The
+same fleet run binding remains retained after refusal; no new start is authorized.
+The common wire/schema and provider selector are unchanged. Codex's positive
+recovery fixture now mirrors the real broker's existing adapter_id field.
+
+RED: 14 expected failing subcases, 12 tests passed, 11 earlier subtests passed;
+exit 1, 1.62 seconds. GREEN after the repair and schema-correct Codex fixture:
+**364 passed, 25 subtests passed**, exit 0, 65.39 seconds. The command above was
+reused with output `.pytest_cache/claude-recovery-regression.xml`. Five new tests
+also cover exact-process native recovery, idempotent reattachment without start,
+process-generation drift and lost-recovery-response/no-restart behavior.
+
+The new changed test path is `tests/test_executive_worker_broker.py` (one fixture
+field plus comment); its positive assertions remain intact. No account/provider
+process was used by the new native recovery tests.
+
+Hosted CI for the prior 517a4b8 candidate is now terminal FAILURE, not pending:
+run 36234343299, job 108383295498, synthetic merge
+f7769334436d1203ff8b69687e2cea04bf854031. The 754-module gate had one failure in
+`test_ohf_real_chain_publishes_visible_items_while_controller_nonterminal`:
+first snapshot contained only `LC1 real partial`, but the test prematurely
+expected both partial and final. Existing PR #984 owns this exact ordered-prefix
+repair. Additional evidence was posted there as comment 5845514532; do not
+reimplement its test fix or manually rerun unchanged CI. A current passing native
+suite is not full-repository acceptance. The current changed production candidate
+requires fresh exact-head CI/review and the normal release gate.
+
+Current effect state: acknowledged source edits and test results only; no unknown
+modifying effect. One compound source-discovery request in this continuation was
+refused before dispatch and was not repeated; permitted native reads and independent
+source/testing actions remained available. No package install, credential action,
+provider inference, runtime activation, source-custody transfer or deployment.
