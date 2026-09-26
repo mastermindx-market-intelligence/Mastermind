@@ -116,3 +116,38 @@ def test_example_refs_are_explicitly_nonproduction():
         assert "Never send the example" in body
         refs = [v for v in example["arguments"].values() if isinstance(v, str)]
         assert any(re.fullmatch(r"(?:peer|consult)-0{31}1", v) for v in refs)
+
+
+def test_native_same_machine_transport_is_preferred_when_exposed():
+    text = SKILL.read_text(encoding="utf-8")
+    for required in (
+        "ListAgents",
+        "SendMessage",
+        "native same-machine carrier",
+        "v2.1.224",
+        "crossSessionInbound",
+        "shared per-user",
+        "Desktop app-local session surface",
+        "upgrade or relaunch",
+        "do not patch",
+    ):
+        assert required in text, f"missing native-carrier rule: {required}"
+
+
+def test_native_qualification_records_current_four_profile_gate():
+    path = PLUGIN / "references/cross-account-qualification.md"
+    text = path.read_text(encoding="utf-8")
+    for required in (
+        "Claude 2",
+        "Claude 3",
+        "Claude 5",
+        "Claude 6",
+        "2.1.280",
+        "2.1.260",
+        "--disallowedTools SendMessage",
+        "ListAgents",
+        "SendMessage",
+        "same OS user",
+        "NOT_RUN",
+    ):
+        assert required in text, f"missing current native-gate evidence: {required}"

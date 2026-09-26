@@ -3,6 +3,35 @@
 Status: BUILT_NOT_PROVEN / source extension. Native matrix: NOT_RUN.
 This document is an acceptance contract, not runtime state or an enrollment registry.
 
+## Current host discovery — 2026-09-26
+
+The four recently active isolated profile labels are Claude 2, Claude 3, Claude 5,
+and Claude 6. These labels are not account identifiers or authorization claims.
+All observed processes run under the same OS user on the M2 host.
+
+- Claude 2: Desktop 2.7032.0, Claude Code 2.1.280; sampled launch denies
+  `SubscribePR`, not `SendMessage`.
+- Claude 3: Desktop 1.46388.4, Claude Code 2.1.260; sampled launch contains
+  `--disallowedTools SendMessage`.
+- Claude 5: Desktop 1.46388.4, Claude Code 2.1.260; sampled launch contains
+  `--disallowedTools SendMessage`.
+- Claude 6: Desktop 1.46388.4, Claude Code 2.1.260; sampled launch contains
+  `--disallowedTools SendMessage`.
+
+Anthropic's current native contract uses `ListAgents` + `SendMessage` for
+same-machine Claude Code sessions. macOS requires v2.1.224 or later; delivery is
+through a per-session local inbox and is independent of project identity when the
+sessions can see the same per-user registration files. The Desktop app-local
+session surface is narrower and only sees sessions that the same Desktop app runs.
+
+Therefore the first native remediation is to upgrade or relaunch Claude 3/5/6 on
+an accepted current Desktop runtime that does not suppress `SendMessage`, then
+prove cross-profile `/list-agents` visibility before changing Company transport.
+Do not patch live processes, write raw sockets, or copy messaging tokens.
+Shared peer-file/socket visibility across these Parall profiles remains NOT_RUN:
+two read-only host probes were refused before dispatch, so no result is inferred.
+
+
 ## Composition and ownership
 
 Extend the existing `mastermind-executive` Claude plugin from #962; do not install
