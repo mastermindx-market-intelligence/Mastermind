@@ -58,7 +58,8 @@
       ],
       "forbidden_substitutions": [
         "arbitrary filesystem path",
-        "local shell as selected-project authority"
+        "local shell as selected-project authority",
+        "Studio Direct generic shell as a fallback for missing Workbench or source actions"
       ],
       "static_liveness_claim": false,
       "read_fallback_owner": "Workbench Read",
@@ -74,7 +75,27 @@
       ],
       "attended_mode_owner": "RuntimeBinding plus authenticated Web-session owner",
       "worker_mode_owner": "Executive OS Job/Attempt/Worker",
-      "native_mode_owner": "approved native-session context owner"
+      "native_mode_owner": "approved native-session context owner",
+      "generic_shell_fallback": false,
+      "unsupported_effect_route": "Before any effect begins, preserve selected-project source custody and use an already-authorized native builder or Executive Job/Attempt/Worker for a bounded unsupported repo/build effect; do not emulate it through Studio Direct.",
+      "platform_refusal_policy": "ACTION_SCOPED_NO_RETRY_NO_FAILOVER_WITH_DISPATCH_RECONCILIATION",
+      "typed_git_publication_route": [
+        "studio_git_publish_status",
+        "studio_git_commit_current_changes",
+        "studio_git_push_current_branch"
+      ],
+      "typed_git_route_conditions": "Use only when those actions are currently exposed and owner-native status binds the same canonical mmx-workspace operation, Mastermind repository, sol/web-* branch and origin; they cover only status, current-change commit and same-branch push.",
+      "typed_git_forbidden_substitutions": [
+        "missing selected-project edit capability",
+        "missing build or test capability",
+        "another repository or branch",
+        "generic shell command transport"
+      ],
+      "platform_refusal_pre_dispatch_effect": "TOOL_DEGRADED / EFFECT_NONE",
+      "platform_refusal_ambiguous_dispatch_effect": "EFFECT_UNKNOWN",
+      "platform_refusal_retry_policy": "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL",
+      "typed_git_publication_owner": "Studio Direct typed Git publisher / canonical mmx-workspace",
+      "typed_git_publication_tool_family": "studio-direct-typed-git"
     },
     {
       "capability_class": "local_machine_process",
@@ -88,9 +109,16 @@
       ],
       "forbidden_substitutions": [
         "assumed local host",
-        "new fleet scheduler"
+        "new fleet scheduler",
+        "selected-project source, Git, build, or test work disguised as a local process command"
       ],
-      "static_liveness_claim": false
+      "static_liveness_claim": false,
+      "generic_shell_scope": "GENUINE_BOUND_HOST_PROCESS_ONLY",
+      "selected_project_source_fallback": false,
+      "platform_refusal_policy": "ACTION_SCOPED_NO_RETRY_NO_FAILOVER_WITH_DISPATCH_RECONCILIATION",
+      "platform_refusal_pre_dispatch_effect": "TOOL_DEGRADED / EFFECT_NONE",
+      "platform_refusal_ambiguous_dispatch_effect": "EFFECT_UNKNOWN",
+      "platform_refusal_retry_policy": "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL"
     },
     {
       "capability_class": "worker_browser",

@@ -1093,7 +1093,7 @@ def test_closed_json_scalar_alias_sweep_refuses_every_mutation(tmp_path: Path) -
             )
             for numeric in aliases:
                 mutations.append((path, text, index, numeric))
-    assert len(mutations) == 306
+    assert len(mutations) == 318
 
     for path, original, index, numeric in mutations:
         matches = list(re.finditer(r"\b(?:true|false)\b", original))
