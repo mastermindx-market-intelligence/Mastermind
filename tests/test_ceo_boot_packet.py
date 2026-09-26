@@ -212,6 +212,11 @@ def test_packet_shape_and_embedded_brief(tmp_path):
     assert packet["strategic_state"]["company_phase"]
     assert isinstance(packet["strategic_state"]["north_star"], list)
     assert isinstance(packet["strategic_state"]["resource_policy"], dict)
+    assert isinstance(packet["strategic_state"]["core_product_value_model"], dict)
+    assert packet["strategic_state"]["core_product_value_model"]["products"] == [
+        "Prophet", "Macro Dashboard", "Sector Intelligence", "Research Vault",
+        "Terminal", "Options Intelligence",
+    ]
     assert isinstance(packet["strategic_state"]["phase_gates"], dict)
     assert isinstance(packet["strategic_state"]["review_triggers"], list)
     assert isinstance(packet["strategic_state"]["p0"], list)
