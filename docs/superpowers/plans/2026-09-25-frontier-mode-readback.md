@@ -235,6 +235,34 @@ This bridge does **not** prove that the provider/model identity was what routing
 - [x] Run bridge + Secretary fences + Web-Sol regressions, syntax/diff/exact twelve-file scope.
 - [x] Publish on #989; keep actual worker dispatch/provider invocation under existing owners.
 
+## Task 9 — exact-session mode-effort action candidate
+
+Extend `reasoning_mode_transition_core.js` and its existing Node suite with `prepareModeEffortActionCandidate(request, transitionPlan, nowMs)`. This is a pure candidate builder for #836's existing action plane; it is **not** a transport, content-script command, action admission owner or browser actuator.
+
+Input request v1 is closed and contains:
+- exact incumbent `runtime_binding_id`, positive generation, binding fingerprint and `document_epoch`;
+- stable `operation_key` and nonce;
+- `issued_at_ms` / `expires_at_ms` with maximum 30-second lifetime and current-time membership;
+- requested family/effort.
+
+The supplied Task-3 transition plan must itself be a closed, internally consistent no-authority result. READY requires same requested family/effort, one verified selector-state digest, `SET_EFFORT_VALUE`, bounded target slider value, `action_authorized=false`, `browser_mutation_performed=false`, and the existing readback/reprobe flags. A Task-3 NO_CHANGE maps to `MODE_ACTION_NO_CHANGE`; no browser action is proposed.
+
+READY output schema `mastermind.web_sol_mode_effort_action_candidate/v1` contains only:
+- action `SET_REASONING_EFFORT`;
+- exact target identity/generation/document epoch;
+- operation key + nonce + issued/expires window;
+- requested family/effort, selector-state digest and target slider value;
+- policy-admission-required bit inherited from the plan;
+- fixed `action_authorized=false`, `browser_mutation_performed=false`, `post_action_readback_required=true`, `capability_reprobe_required=true`, `exact_owner_admission_required=true`, `served_model=null`.
+
+This candidate cannot be sent directly. The incumbent #836 owner must revalidate current identity/effects/window, extend/review its existing closed action vocabulary, perform the selector effect at most once, then Task 1 must prove post-action readback and the capability owner must re-probe current serviceability.
+
+- [x] Write RED tests for absent candidate API and the primary exact-bound Pro→Extra High candidate.
+- [x] Add stale/future/overlong window, identity/nonce/operation, transition tamper/mismatch, no-change and Pro-policy-bit tests.
+- [x] Implement minimal closed candidate builder with no I/O/browser/runtime dependency.
+- [x] Run all mode/census + Secretary/bridge fences, syntax/diff/exact twelve-file scope.
+- [ ] Publish on #989; actual action vocabulary/wiring remains #836-owned and held.
+
 ## Held integration task — not granted by this leaf
 
 The next source owner is #836 for actual DOM normalization, native bridge wiring and mode actuation. Consume this leaf only after #836 current custody and its merge conflict are reconciled, and the closed mode action is reviewed under the browser/context-rotation laws. Authenticate the observation producer, fence exact RuntimeBinding/document generations and mode effect identity, and prove no-send selector canaries before a turn is allowed. The #890 capability producer/consumer and #936/#953/#958 read-only limitations remain explicit dependencies. Do not edit these carriers from this workspace.
@@ -265,3 +293,4 @@ Task 7 RED: process 9684, 13 shadow cases failed because both shadow APIs were a
 Task 7 publication: source/docs commit `ec3cda1ab9e655ce37cd483e624457447dbff71d` action `11e234d9fb102ec7130f23d84c113695baf19818cfcf7ebe32d5f18c8398dc39` returned APPLIED; push action `92d99d421e09e1f3cbbcdbadd6f1dad6eb04ab2b776b165070e2c2945be4fcf5` returned APPLIED with local=remote and clean=true. No provider turn, rule promotion, counter persistence, lifecycle action or browser effect was introduced.
 Task 8 RED: process 33900, bridge API absent, 0 pass / 1 fail. Initial implementation focused run 36603 passed bridge behavior but exposed one source-fence test-string false positive (`requests` matched English `Secretary requests`); the test was narrowed to the actual API token `requests.` without production changes. The first cross-surface process 38174 then exposed a real architecture violation: placing the bridge inside `integrations/mastermind_secretary_mcp/**` imported `control_plane.worker_execution_contract`, violating the protected sealed-package static fence. That fence was preserved. The bridge was moved to the accepted outer integration boundary `integrations/secretary_worker_bridge.py`; no fence was weakened. Focused bridge + Secretary static fence process 40869 passed. Corrected full bounded process 41180: Secretary/bridge aggregate 368/368 (12 bridge + 60 decision/shadow + 296 incumbent MCP/gateway/static-fence), Web-Sol 183/183, Python/JS syntax + `git diff --check` + exact twelve-file scope PASS. The bridge creates no lifecycle/process/provider effect and keeps provider identity unattested.
 Task 8 publication: source/docs commit `9dab78af6d09223cca5fa577da029e51f28c96fd` action `596f885353acdad63120578d3ae9f766b3460b1094ab1ba80fac535318037323` returned APPLIED; push action `832ae8b386d8553bd84ebd512a8a3dc58107064a46b7bb93e884997bd3d72cf5` returned APPLIED with local=remote and clean=true. The protected Secretary static fence remained unchanged; actual worker dispatch/provider invocation and provider/model attestation remain existing-owner responsibilities.
+Task 9 RED: receipt `af7f0a10-dae3-4933-82c2-b3f6e2de9191`, transition suite 47 total = 24 prior PASS / 23 new FAIL solely because `prepareModeEffortActionCandidate` was absent. Focused GREEN: process 54450, 47/47. Cross-surface process 54896: Secretary/worker aggregate 368/368, Web-Sol mode/census 206/206, Python/JS syntax + `git diff --check` + exact twelve-file scope PASS. READY candidates remain `action_authorized=false`, `browser_mutation_performed=false`, `post_action_readback_required=true`, `capability_reprobe_required=true`, `exact_owner_admission_required=true`; no #836 protocol/background/content/native path was changed.

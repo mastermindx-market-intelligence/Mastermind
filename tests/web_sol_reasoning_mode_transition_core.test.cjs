@@ -199,3 +199,162 @@ if (core) {
     assert.doesNotMatch(source, /\b(?:retry|resend|sendMessage|executeScript)\b/i);
   });
 }
+
+
+test("mode effort action candidate API is available", () => {
+  assert.equal(typeof core?.prepareModeEffortActionCandidate, "function");
+});
+
+function actionRequest(overrides = {}) {
+  return {
+    schema: "mastermind.web_sol_mode_effort_action_request/v1",
+    runtime_binding_id: `bind-wsx-${"d".repeat(48)}`,
+    runtime_binding_generation: 9,
+    runtime_binding_fingerprint: "e".repeat(64),
+    document_epoch: "f".repeat(32),
+    operation_key: "frontier-mode-extra-high-001",
+    nonce: "mode-nonce-1234567890",
+    issued_at_ms: 1000,
+    expires_at_ms: 31000,
+    requested_family: "SOL",
+    requested_effort: "EXTRA_HIGH",
+    ...overrides,
+  };
+}
+
+if (core) {
+  test("prepares one exact-bound Pro to Extra High action candidate without authority", () => {
+    const plan = core.planModeTransition(request("SOL", "EXTRA_HIGH"), observed({effort: "PRO"}));
+    const result = core.prepareModeEffortActionCandidate(actionRequest(), plan, 1300);
+    assert.equal(result.status, "MODE_ACTION_READY");
+    assert.equal(result.action, "SET_REASONING_EFFORT");
+    assert.equal(result.target.runtime_binding_generation, 9);
+    assert.equal(result.target.document_epoch, "f".repeat(32));
+    assert.equal(result.operation_key, "frontier-mode-extra-high-001");
+    assert.equal(result.nonce, "mode-nonce-1234567890");
+    assert.equal(result.requested_family, "SOL");
+    assert.equal(result.requested_effort, "EXTRA_HIGH");
+    assert.equal(result.selector_state_digest, "a".repeat(64));
+    assert.equal(result.target_slider_value, 3);
+    assert.equal(result.policy_admission_required, false);
+    assert.equal(result.action_authorized, false);
+    assert.equal(result.browser_mutation_performed, false);
+    assert.equal(result.post_action_readback_required, true);
+    assert.equal(result.capability_reprobe_required, true);
+    assert.equal(result.exact_owner_admission_required, true);
+    assert.equal(result.served_model, null);
+    assert.ok(Object.isFrozen(result));
+    assert.ok(Object.isFrozen(result.target));
+  });
+
+  test("Pro action candidate keeps policy admission external", () => {
+    const plan = core.planModeTransition(
+      request("SOL", "PRO"),
+      observed({effort: "EXTRA_HIGH"}),
+    );
+    const result = core.prepareModeEffortActionCandidate(
+      actionRequest({requested_effort: "PRO"}),
+      plan,
+      1300,
+    );
+    assert.equal(result.status, "MODE_ACTION_READY");
+    assert.equal(result.target_slider_value, 4);
+    assert.equal(result.policy_admission_required, true);
+    assert.equal(result.action_authorized, false);
+  });
+
+  test("already-selected mode yields no-change and no action", () => {
+    const plan = core.planModeTransition(
+      request("SOL", "EXTRA_HIGH"),
+      observed({effort: "EXTRA_HIGH"}),
+    );
+    const result = core.prepareModeEffortActionCandidate(actionRequest(), plan, 1300);
+    assert.equal(result.status, "MODE_ACTION_NO_CHANGE");
+    assert.equal(result.action, null);
+    assert.equal(result.target_slider_value, null);
+    assert.equal(result.browser_mutation_performed, false);
+  });
+
+  for (const [name, overrides] of [
+    ["expired", {expires_at_ms: 1200}],
+    ["future", {issued_at_ms: 1400, expires_at_ms: 30000}],
+    ["overlong", {expires_at_ms: 31001}],
+  ]) {
+    test(`action candidate refuses ${name} time window`, () => {
+      const plan = core.planModeTransition(request(), observed());
+      const result = core.prepareModeEffortActionCandidate(actionRequest(overrides), plan, 1300);
+      assert.equal(result.status, "MODE_ACTION_WINDOW_INVALID");
+      assert.equal(result.action_authorized, false);
+    });
+  }
+
+  for (const [field, value] of [
+    ["runtime_binding_id", `bind-wsx-${"1".repeat(47)}`],
+    ["runtime_binding_generation", 0],
+    ["runtime_binding_fingerprint", "x".repeat(64)],
+    ["document_epoch", "a".repeat(31)],
+    ["operation_key", "bad operation"],
+    ["nonce", "short"],
+  ]) {
+    test(`action candidate refuses invalid exact identity/control field ${field}`, () => {
+      const plan = core.planModeTransition(request(), observed());
+      const result = core.prepareModeEffortActionCandidate(
+        actionRequest({[field]: value}),
+        plan,
+        1300,
+      );
+      assert.equal(result.status, "MODE_ACTION_INVALID");
+    });
+  }
+
+  test("action candidate request is closed to unknown fields", () => {
+    const req = actionRequest();
+    req.command = "CLICK";
+    const plan = core.planModeTransition(request(), observed());
+    const result = core.prepareModeEffortActionCandidate(req, plan, 1300);
+    assert.equal(result.status, "MODE_ACTION_INVALID");
+    assert.ok(!JSON.stringify(result).includes("CLICK"));
+  });
+
+  for (const [name, mutate] of [
+    ["upstream authority", p => { p.action_authorized = true; }],
+    ["upstream browser effect", p => { p.browser_mutation_performed = true; }],
+    ["missing readback", p => { p.readback_required = false; }],
+    ["missing reprobe", p => { p.capability_reprobe_required = false; }],
+    ["selector digest", p => { p.selector_state_digest = "bad"; }],
+    ["target value", p => { p.target_slider_value = 9; }],
+    ["requested effort mismatch", p => { p.requested_effort = "PRO"; }],
+  ]) {
+    test(`action candidate refuses transition-plan tamper: ${name}`, () => {
+      const plan = {...core.planModeTransition(request(), observed())};
+      mutate(plan);
+      const result = core.prepareModeEffortActionCandidate(actionRequest(), plan, 1300);
+      assert.equal(result.status, "MODE_ACTION_TRANSITION_INVALID");
+      assert.equal(result.action_authorized, false);
+    });
+  }
+
+  test("non-ready transition remains non-actionable", () => {
+    const plan = core.planModeTransition(
+      request("LATEST", "EXTRA_HIGH"),
+      observed({family: "SOL"}),
+    );
+    const result = core.prepareModeEffortActionCandidate(
+      actionRequest({requested_family: "LATEST"}),
+      plan,
+      1300,
+    );
+    assert.equal(result.status, "MODE_ACTION_TRANSITION_NOT_READY");
+    assert.equal(result.action, null);
+  });
+
+  test("candidate builder never mutates action request or transition plan", () => {
+    const req = actionRequest();
+    const plan = core.planModeTransition(request(), observed());
+    const beforeReq = JSON.stringify(req);
+    const beforePlan = JSON.stringify(plan);
+    core.prepareModeEffortActionCandidate(req, plan, 1300);
+    assert.equal(JSON.stringify(req), beforeReq);
+    assert.equal(JSON.stringify(plan), beforePlan);
+  });
+}

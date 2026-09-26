@@ -2,9 +2,28 @@
 
 (() => {
   const SCHEMA = "mastermind.web_sol_mode_transition_plan/v1";
+  const ACTION_REQUEST_SCHEMA = "mastermind.web_sol_mode_effort_action_request/v1";
+  const ACTION_CANDIDATE_SCHEMA = "mastermind.web_sol_mode_effort_action_candidate/v1";
   const PICKER_SCHEMA = "mastermind.web_sol_mode_picker_observation/v1";
   const DIGEST_RE = /^[0-9a-f]{64}$/;
+  const BINDING_RE = /^bind-wsx-[0-9a-f]{48}$/;
+  const DOCUMENT_EPOCH_RE = /^[0-9a-f]{32}$/;
+  const CONTROL_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,255}$/;
+  const NONCE_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/;
+  const MAX_ACTION_WINDOW_MS = 30000;
   const REQUEST_KEYS = new Set(["requested_family", "requested_effort"]);
+  const ACTION_REQUEST_KEYS = new Set([
+    "schema", "runtime_binding_id", "runtime_binding_generation",
+    "runtime_binding_fingerprint", "document_epoch", "operation_key", "nonce",
+    "issued_at_ms", "expires_at_ms", "requested_family", "requested_effort",
+  ]);
+  const TRANSITION_PLAN_KEYS = new Set([
+    "schema", "status", "current_family", "current_effort", "requested_family",
+    "requested_effort", "selector_state_digest", "transition_kind",
+    "target_slider_value", "policy_admission_required", "action_authorized",
+    "browser_mutation_performed", "readback_required",
+    "capability_reprobe_required", "served_model",
+  ]);
   const OBSERVATION_KEYS = new Set([
     "schema", "status", "selected_family", "selected_effort",
     "family_selection_count", "effort_control_count", "controls_enabled",
@@ -151,7 +170,157 @@
     return render("MODE_TRANSITION_READY", request, observation, "SET_EFFORT_VALUE", targetValue);
   }
 
-  const api = Object.freeze({SCHEMA, planModeTransition});
+  const TRANSITION_STATUSES = new Set([
+    "MODE_TRANSITION_INVALID",
+    "MODE_TRANSITION_UNAVAILABLE",
+    "MODE_FAMILY_CHANGE_UNSUPPORTED",
+    "MODE_TRANSITION_DISABLED",
+    "MODE_TRANSITION_NO_CHANGE",
+    "MODE_TARGET_UNAVAILABLE",
+    "MODE_TRANSITION_READY",
+  ]);
+
+  function validActionIdentityRequest(value) {
+    return value &&
+      value.schema === ACTION_REQUEST_SCHEMA &&
+      typeof value.runtime_binding_id === "string" &&
+      BINDING_RE.test(value.runtime_binding_id) &&
+      safeInteger(value.runtime_binding_generation) &&
+      value.runtime_binding_generation > 0 &&
+      typeof value.runtime_binding_fingerprint === "string" &&
+      DIGEST_RE.test(value.runtime_binding_fingerprint) &&
+      typeof value.document_epoch === "string" &&
+      DOCUMENT_EPOCH_RE.test(value.document_epoch) &&
+      typeof value.operation_key === "string" &&
+      CONTROL_TOKEN_RE.test(value.operation_key) &&
+      typeof value.nonce === "string" &&
+      NONCE_RE.test(value.nonce) &&
+      FAMILIES.has(value.requested_family) &&
+      TARGET_EFFORTS.has(value.requested_effort);
+  }
+
+  function validActionWindow(value, nowMs) {
+    return safeInteger(nowMs) && nowMs > 0 &&
+      safeInteger(value.issued_at_ms) && value.issued_at_ms > 0 &&
+      safeInteger(value.expires_at_ms) &&
+      value.expires_at_ms > value.issued_at_ms &&
+      value.expires_at_ms - value.issued_at_ms <= MAX_ACTION_WINDOW_MS &&
+      value.issued_at_ms <= nowMs && nowMs < value.expires_at_ms;
+  }
+
+  function normalizeTransitionPlan(raw) {
+    const value = snapshot(raw, TRANSITION_PLAN_KEYS);
+    if (!value || value.schema !== SCHEMA || !TRANSITION_STATUSES.has(value.status) ||
+        value.action_authorized !== false ||
+        value.browser_mutation_performed !== false ||
+        value.readback_required !== true ||
+        value.capability_reprobe_required !== true ||
+        value.served_model !== null) {
+      return null;
+    }
+
+    if (value.status !== "MODE_TRANSITION_READY" &&
+        value.status !== "MODE_TRANSITION_NO_CHANGE") {
+      return value;
+    }
+
+    if (!FAMILIES.has(value.current_family) ||
+        !FAMILIES.has(value.requested_family) ||
+        value.current_family !== value.requested_family ||
+        !OBSERVED_EFFORTS.has(value.current_effort) ||
+        !TARGET_EFFORTS.has(value.requested_effort) ||
+        typeof value.selector_state_digest !== "string" ||
+        !DIGEST_RE.test(value.selector_state_digest) ||
+        typeof value.policy_admission_required !== "boolean" ||
+        value.policy_admission_required !== (value.requested_effort === "PRO")) {
+      return null;
+    }
+
+    if (value.status === "MODE_TRANSITION_NO_CHANGE") {
+      if (value.current_effort !== value.requested_effort ||
+          value.transition_kind !== "NONE" ||
+          value.target_slider_value !== null) {
+        return null;
+      }
+      return value;
+    }
+
+    if (value.current_effort === value.requested_effort ||
+        value.transition_kind !== "SET_EFFORT_VALUE" ||
+        !safeInteger(value.target_slider_value) ||
+        value.target_slider_value < 0 || value.target_slider_value > 8) {
+      return null;
+    }
+    return value;
+  }
+
+  function renderActionCandidate(status, request = null, plan = null) {
+    const bound = request !== null &&
+      (status === "MODE_ACTION_READY" || status === "MODE_ACTION_NO_CHANGE");
+    const ready = status === "MODE_ACTION_READY";
+    const target = bound ? Object.freeze({
+      runtime_binding_id: request.runtime_binding_id,
+      runtime_binding_generation: request.runtime_binding_generation,
+      runtime_binding_fingerprint: request.runtime_binding_fingerprint,
+      document_epoch: request.document_epoch,
+    }) : null;
+    return Object.freeze({
+      schema: ACTION_CANDIDATE_SCHEMA,
+      status,
+      action: ready ? "SET_REASONING_EFFORT" : null,
+      target,
+      operation_key: bound ? request.operation_key : null,
+      nonce: bound ? request.nonce : null,
+      issued_at_ms: bound ? request.issued_at_ms : null,
+      expires_at_ms: bound ? request.expires_at_ms : null,
+      requested_family: bound ? request.requested_family : null,
+      requested_effort: bound ? request.requested_effort : null,
+      selector_state_digest: bound ? plan.selector_state_digest : null,
+      target_slider_value: ready ? plan.target_slider_value : null,
+      policy_admission_required: bound ? plan.policy_admission_required : null,
+      action_authorized: false,
+      browser_mutation_performed: false,
+      post_action_readback_required: true,
+      capability_reprobe_required: true,
+      exact_owner_admission_required: true,
+      served_model: null,
+    });
+  }
+
+  function prepareModeEffortActionCandidate(rawRequest, rawTransitionPlan, nowMs) {
+    const request = snapshot(rawRequest, ACTION_REQUEST_KEYS);
+    if (!validActionIdentityRequest(request)) {
+      return renderActionCandidate("MODE_ACTION_INVALID");
+    }
+    if (!validActionWindow(request, nowMs)) {
+      return renderActionCandidate("MODE_ACTION_WINDOW_INVALID");
+    }
+
+    const plan = normalizeTransitionPlan(rawTransitionPlan);
+    if (!plan) {
+      return renderActionCandidate("MODE_ACTION_TRANSITION_INVALID");
+    }
+    if (plan.status !== "MODE_TRANSITION_READY" &&
+        plan.status !== "MODE_TRANSITION_NO_CHANGE") {
+      return renderActionCandidate("MODE_ACTION_TRANSITION_NOT_READY");
+    }
+    if (plan.requested_family !== request.requested_family ||
+        plan.requested_effort !== request.requested_effort) {
+      return renderActionCandidate("MODE_ACTION_TRANSITION_INVALID");
+    }
+    if (plan.status === "MODE_TRANSITION_NO_CHANGE") {
+      return renderActionCandidate("MODE_ACTION_NO_CHANGE", request, plan);
+    }
+    return renderActionCandidate("MODE_ACTION_READY", request, plan);
+  }
+
+  const api = Object.freeze({
+    SCHEMA,
+    ACTION_CANDIDATE_SCHEMA,
+    MAX_ACTION_WINDOW_MS,
+    planModeTransition,
+    prepareModeEffortActionCandidate,
+  });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else globalThis.MMXWebSolModeTransitionCore = api;
 })();
