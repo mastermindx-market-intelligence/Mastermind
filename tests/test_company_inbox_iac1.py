@@ -8449,8 +8449,23 @@ def test_p1r1_carrier_exposes_no_caller_supplied_destination() -> None:
         "actor_ref",
     }
     for name in ("put_question", "put_answer", "get_question", "get_answer"):
-        params = set(inspect.signature(getattr(carrier_cls, name)).parameters)
+        signature = inspect.signature(getattr(carrier_cls, name))
+        params = set(signature.parameters)
         assert not (params & forbidden), (name, params & forbidden)
+        # A forbidden-name set is not teeth on its own: a single ``**kwargs``
+        # would let a caller pass every name above while keeping this set
+        # clean.  Variadics are therefore banned outright on the packet
+        # methods, which is what actually closes the channel.
+        variadic = sorted(
+            parameter.name
+            for parameter in signature.parameters.values()
+            if parameter.kind
+            in (
+                inspect.Parameter.VAR_KEYWORD,
+                inspect.Parameter.VAR_POSITIONAL,
+            )
+        )
+        assert variadic == [], (name, variadic)
 
 
 def test_p1r1_same_parent_carrier_path_is_unchanged() -> None:
@@ -8471,6 +8486,47 @@ def test_p1r1_same_parent_carrier_path_is_unchanged() -> None:
             caller_actor_ref=dict(a_binding.actor_ref),
             recipient_actor_ref=dict(b_binding.actor_ref),
         )
+
+    # Name-absence and a helper-level refusal are both indirect.  Drive the
+    # incumbent itself: it must refuse the targeting collaborator outright, and
+    # when handed a frame whose parties sit on DISTINCT parents it must still
+    # post on the caller's own parent.  A carrier that had quietly learned to
+    # honour a distinct recipient parent would satisfy every assertion above
+    # and fail here.
+    with pytest.raises(TypeError):
+        AgentDialogueConsultationPacketCarrier(
+            binding_resolver=_StaticDialogueBindingResolver(a_binding),
+            socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+            service_call=_RecordingPacketService(response={"ok": True, "result": {}}),
+            timeout_seconds=7.5,
+            target_resolver=_StaticPacketTargetResolver(),
+        )
+
+    cross_parent_frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    caller_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    service = _p1r1_send_service(caller_binding, cross_parent_frame)
+    incumbent = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(caller_binding),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=service,
+        timeout_seconds=7.5,
+    )
+
+    _run(
+        incumbent.put_question(
+            cross_parent_frame["consultation_id"],
+            cross_parent_frame,
+            before_commit=_noop_before_commit,
+        )
+    )
+
+    assert len(service.calls) == 1
+    incumbent_args = service.calls[0]["request"]["args"]
+    assert incumbent_args["thread_ts"] == _P1R1_A_THREAD
+    assert incumbent_args["context"]["session_ref"] == "asd-session-p1r1-a-0001"
+    assert incumbent_args["context"]["actor_ref"] == dict(caller_binding.actor_ref)
 
 
 def test_p1r1_admitted_question_read_reconstructs_target_without_cache() -> None:
@@ -8507,6 +8563,39 @@ def test_p1r1_admitted_question_read_reconstructs_target_without_cache() -> None
         for key, value in vars(carrier).items()
         if key not in {"_socket_path"}
     )
+
+    # Instance state is only one of the two channels.  A *process*-level memo
+    # -- ``functools.lru_cache`` on the read path, or a module dict keyed by
+    # consultation -- would survive every assertion above.  So read the same
+    # consultation again through a second fresh carrier whose host resolves a
+    # different parent for the same destination Attempt: the read must reach
+    # the parent the host names now.  No cache keyed on the consultation can
+    # do that.  This says nothing about whether the host may move a parent --
+    # stickiness is the resolver's obligation; it says the carrier keeps no
+    # answer of its own to serve instead of asking.
+    moved_thread = "1787961600.000606"
+    moved_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0002", thread_ts=moved_thread
+    )
+    second_resolver = _StaticPacketTargetResolver(
+        read={
+            (frame["consultation_id"], "QUESTION"): _p1r1_access(
+                moved_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
+    )
+    second_service = _p1r1_read_service(frame)
+    second_carrier = _p1r1_carrier(
+        binding=a_binding, resolver=second_resolver, service=second_service
+    )
+
+    reread = _run(second_carrier.get_question(frame["consultation_id"]))
+
+    assert reread is not None
+    assert second_resolver.read_calls == [(frame["consultation_id"], "QUESTION")]
+    second_args = second_service.calls[0]["request"]["args"]
+    assert second_args["thread_ts"] == moved_thread
+    assert second_args["context"]["session_ref"] == "asd-session-p1r1-b-0002"
 
 
 def test_p1r1_admitted_answer_read_reconstructs_requester_target() -> None:
@@ -8715,6 +8804,21 @@ def test_p1r1_adds_no_new_persistence_or_control_surface() -> None:
         assert banned not in source, banned
     # Production packet carriage stays declared unavailable.
     assert consultation_dispatch.PRODUCTION_PACKET_CARRIAGE == "UNAVAILABLE"
+    # The blacklist above is textual and cannot see the one process-level
+    # surface P1-R1 could plausibly grow: a module dict memoising resolved
+    # routes.  Pin the mutable-container globals exactly, so any new one has
+    # to be argued for here rather than appearing quietly.  (An ``lru_cache``
+    # leaves no module dict; the behavioural half of that proof lives in
+    # ``test_p1r1_admitted_question_read_reconstructs_target_without_cache``.)
+    mutable_globals = {
+        name
+        for name, value in vars(consultation_dispatch).items()
+        if isinstance(value, (dict, list, set)) and not name.startswith("__")
+    }
+    assert mutable_globals == {
+        "_DEFAULT_RESPONSE_BUDGET",
+        "_READ_DESTINATION_BY_PURPOSE",
+    }, mutable_globals
 
 
 class _CrossParentCountingCarrier(InMemoryConsultationPacketCarrier):
