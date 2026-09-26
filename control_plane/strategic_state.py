@@ -1,7 +1,8 @@
 """control_plane.strategic_state — validated read of config/strategic_state.yml.
 
 That file states what the company is currently trying to accomplish (phase, north
-star, P0 objectives, resource policy, standing constraints).  This module is the
+star, P0 objectives, resource policy, phase gates, standing constraints, and review
+triggers).  This module is the
 only supported way to read it: it parses, validates, and caches it, and raises
 :class:`StrategicStateError` on anything malformed.
 
@@ -52,12 +53,13 @@ REQUIRED_CONSTRAINTS = (
 
 _REQUIRED_KEYS = (
     "schema", "meta", "departments", "statuses", "constraint_levels",
-    "company_phase", "north_star", "p0", "resource_policy",
+    "company_phase", "north_star", "p0", "resource_policy", "phase_gates",
     "constraints", "review_triggers",
 )
 _P0_FIELDS = ("id", "department", "objective", "status")
 _VOCABULARIES = ("departments", "statuses", "constraint_levels")
 _STR_LISTS = ("north_star", "review_triggers")
+_PHASE_GATE_FIELDS = ("purpose", "criteria", "on_pass")
 
 #: Resource weights are hand-maintained shares; allow float dust, not real drift.
 RESOURCE_SUM_TOLERANCE = 0.01
@@ -111,6 +113,7 @@ def _validate(doc: Any, where: Path) -> dict[str, Any]:
 
     _validate_p0(doc, where)
     _validate_resource_policy(doc, where)
+    _validate_phase_gates(doc, where)
     _validate_constraints(doc, where)
     return doc
 
@@ -163,6 +166,32 @@ def _validate_resource_policy(doc: dict, where: Path) -> None:
     if abs(total - 1.0) > RESOURCE_SUM_TOLERANCE:
         _fail(where, f"resource_policy weights must sum to ~1.0 "
                      f"(tolerance {RESOURCE_SUM_TOLERANCE}), got {total:.4f}")
+
+
+def _validate_phase_gates(doc: dict, where: Path) -> None:
+    """Validate descriptive phase-review gates without making them executable."""
+    gates = doc["phase_gates"]
+    if not isinstance(gates, dict) or not gates:
+        _fail(where, "'phase_gates' must be a non-empty mapping")
+
+    for name, gate in gates.items():
+        if not isinstance(name, str) or not _ID_RE.match(name):
+            _fail(where, f"phase gate {name!r} must be UPPER_SNAKE_CASE")
+        if not isinstance(gate, dict):
+            _fail(where, f"phase_gates[{name!r}] must be a mapping")
+        for field in ("purpose", "on_pass"):
+            value = gate.get(field)
+            if not isinstance(value, str) or not value.strip():
+                _fail(where, f"phase_gates[{name!r}].{field} must be a non-empty string")
+        criteria = gate.get("criteria")
+        if not isinstance(criteria, list) or not criteria:
+            _fail(where, f"phase_gates[{name!r}].criteria must be a non-empty list")
+        for criterion in criteria:
+            if not isinstance(criterion, str) or not criterion.strip():
+                _fail(
+                    where,
+                    f"phase_gates[{name!r}].criteria entries must be non-empty strings",
+                )
 
 
 def _validate_constraints(doc: dict, where: Path) -> None:
