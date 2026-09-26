@@ -32,6 +32,10 @@ sys.path.insert(0, str(HERE))
 
 import private_service as svc  # noqa: E402
 
+PAPER_DESKTOP_DIR = HERE.parent / "paper_desktop"
+sys.path.insert(0, str(PAPER_DESKTOP_DIR))
+import runtime_stage as paper_runtime_stage  # noqa: E402
+
 
 PAPER_BRIDGE_FIXTURE = b"fixture-paper-bridge\n"
 PAPER_BRIDGE_FIXTURE_SHA = hashlib.sha256(PAPER_BRIDGE_FIXTURE).hexdigest()
@@ -373,6 +377,13 @@ class TestIdentity(unittest.TestCase):
     def test_private_runtime_timeouts_match_live_business_seats(self):
         self.assertEqual(svc.IDLE_TIMEOUT_MS, 1_800_000)
         self.assertEqual(svc.REQUEST_TIMEOUT_MS, 300_000)
+
+    def test_paper_runtime_pin_matches_reviewed_v4_generation(self):
+        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v4")
+        self.assertEqual(
+            svc.PAPER_BRIDGE_SHA256,
+            paper_runtime_stage.REVIEWED_GENERATIONS["v4"]["bridge.py"],
+        )
 
 
 # -------------------------------------------------------------------
