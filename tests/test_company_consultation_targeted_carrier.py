@@ -477,8 +477,23 @@ def test_a_non_destination_envelope_still_reconciles_as_unknown(operation):
     assert not isinstance(caught.value, api.ConsultationTargetConflict)
 
 
-def test_real_af_unix_inconsistent_destination_refuses_with_no_effect():
-    """The real service returns the engine envelope; nothing is written."""
+@pytest.mark.parametrize(
+    "kind, code",
+    [
+        ("context_mismatch", "THREAD_CONTEXT_MISMATCH"),
+        ("binding_ambiguous", "THREAD_BINDING_AMBIGUOUS"),
+    ],
+)
+def test_real_af_unix_inconsistent_destination_refuses_with_no_effect(kind, code):
+    """The real service returns the engine envelope; nothing is written.
+
+    BOTH deterministic destination refusals are provoked through the real
+    AF_UNIX service rather than a synthetic envelope: ``context_mismatch``
+    sends B's context down A's thread, and ``binding_ambiguous`` leaves two
+    parents carrying the destination identity so the engine's own parent scan
+    finds two exact matches (``_scan_parent_history``, ``len(matches) > 1``).
+    Neither is rigged absence: each is a destination the owner cannot name.
+    """
     api = _api()
     a, b, _, bindings = _parties()
     question = _packet_frame(a, b)
@@ -492,16 +507,26 @@ def test_real_af_unix_inconsistent_destination_refuses_with_no_effect():
             )
             for binding in bindings[:2]:
                 client.add_parent(_relay_parent(binding, _relay_policy()))
+            twin = None
+            if kind == "binding_ambiguous":
+                # A QUESTION is destined for bindings[1]; a second parent
+                # carrying that same identity makes the destination ambiguous.
+                twin = dataclasses.replace(
+                    _relay_parent(bindings[1], _relay_policy()),
+                    ts="1787962100.000009",
+                )
+                client.add_parent(twin)
             admitted = []
 
             async def gate():
                 admitted.append("INTENT")
 
             access = _ExactFixtureAccess(question, bindings)
-            # An internally inconsistent destination: B's context, A's thread.
-            access.transform = lambda acc, count: dataclasses.replace(
-                acc, target=dataclasses.replace(acc.target, thread_ts=bindings[0].thread_ts),
-            )
+            if kind == "context_mismatch":
+                # An internally inconsistent destination: B's context, A's thread.
+                access.transform = lambda acc, count: dataclasses.replace(
+                    acc, target=dataclasses.replace(acc.target, thread_ts=bindings[0].thread_ts),
+                )
             carrier = api.TargetedAgentDialogueConsultationPacketCarrier(
                 binding_resolver=_StaticDialogueBindingResolver(bindings[0]),
                 targets=access, socket_path=socket, timeout_seconds=5,
@@ -512,14 +537,17 @@ def test_real_af_unix_inconsistent_destination_refuses_with_no_effect():
                     await carrier.put_question(
                         question["consultation_id"], question, before_commit=gate,
                     )
-                assert "THREAD_CONTEXT_MISMATCH" in str(caught.value)
+                assert code in str(caught.value)
                 assert not isinstance(caught.value, ConsultationPacketCarrierUnknown)
                 # Zero INTENT, zero COMMIT, zero packet, zero Wake.
                 assert admitted == []
-                for binding in bindings[:2]:
+                threads = [binding.thread_ts for binding in bindings[:2]]
+                if twin is not None:
+                    threads.append(twin.ts)
+                for thread_ts in threads:
                     page = await client.fetch_thread(
                         channel_id=_relay_policy().channel_id,
-                        thread_ts=binding.thread_ts, limit=100,
+                        thread_ts=thread_ts, limit=100,
                     )
                     assert len(page.messages) == 1, "only the parent may exist"
             finally:

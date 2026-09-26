@@ -255,9 +255,11 @@ composed AF_UNIX journey are unchanged.
    a moved-on-but-readable current Attempt are adjudicated as
    `ConsultationTargetConflict`. Owner-reader refusals become
    `ConsultationTargetEvidenceUnavailable`, a `ConsultationPacketCarrierUnknown`
-   subtype: typed so the target is reconciled rather than re-resolved onto a
-   different parent, but still unknown, because real observation uncertainty
-   must not become a safe refusal.
+   subtype: still unknown, because real observation uncertainty must not become
+   a safe refusal. **The type enforces nothing.** It is typed only so a consumer
+   *can* tell unreadable owner evidence from a dead transport and reconcile on
+   the same target; nothing in the code prevents re-resolution onto a different
+   parent, and this line must not be cited as though it did.
 
    **Measured limit, deliberately not papered over:** the owner readers carry
    exactly one code, `WorkspaceReturnError("BINDING_UNAVAILABLE")`, for a
