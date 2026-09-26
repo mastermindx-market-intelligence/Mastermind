@@ -100,7 +100,9 @@ from integrations.company_consultation_dispatch import (
     RecipientBinding,
     REFUSAL_CODES,
     RuntimeConsultationDispatcher,
+    TargetedAgentDialogueConsultationPacketCarrier,
     _require_same_dialogue_carrier,
+    _require_trusted_caller_binding,
 )
 
 
@@ -8068,3 +8070,779 @@ def test_canonical_lost_answer_return_uncertain_readback_keeps_barrier(
     assert carrier.put_answer_calls == 1
     assert carrier.get_answer_calls == 1
     assert len(_answer_attention_requested_records(runtime)) == 0
+
+
+# ---------------------------------------------------------------------------
+# IAC P1-R1 — cross-parent consultation packet targeting.
+#
+# Sender authority and physical destination are separate authorities. Nothing
+# below the carrier re-checks the destination (the Relay engine's send/read
+# paths and the service request path are context-parametric, and the service
+# authenticates an OS peer uid rather than a binding), so these tests are the
+# only place the destination authority is proven.
+# ---------------------------------------------------------------------------
+
+_P1R1_A = ("JOB-P1R1-A", "ATT-P1R1-A", "codex-requester-a", _binding("p1r1-a"))
+_P1R1_B = ("JOB-P1R1-B", "ATT-P1R1-B", "codex-recipient-b", _binding("p1r1-b"))
+# Same stable peer worker, a NEW Attempt: models peer rotation.
+_P1R1_B_ROTATED = (
+    "JOB-P1R1-B2",
+    "ATT-P1R1-B2",
+    "codex-recipient-b",
+    _binding("p1r1-b2"),
+)
+_P1R1_C = ("JOB-P1R1-C", "ATT-P1R1-C", "codex-third-c", _binding("p1r1-c"))
+
+_P1R1_A_THREAD = "1787961600.000101"
+_P1R1_B_THREAD = "1787961600.000202"
+_P1R1_B_ROTATED_THREAD = "1787961600.000303"
+_P1R1_C_THREAD = "1787961600.000404"
+
+
+def _p1r1_actor_key(actor_ref: Mapping[str, Any]) -> tuple[str, str, str]:
+    actor = dict(actor_ref)
+    return (actor["job_id"], actor["attempt_id"], actor["worker_id"])
+
+
+def _delivery_target(
+    worker: tuple,
+    *,
+    session_ref: str,
+    thread_ts: str,
+) -> consultation_dispatch.ConsultationDeliveryTarget:
+    job_id, attempt_id, worker_id, _runtime_binding = worker
+    return consultation_dispatch.ConsultationDeliveryTarget(
+        actor_ref={
+            "kind": "worker_attempt",
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "worker_id": worker_id,
+        },
+        applies_to={
+            "kind": "executive_attempt",
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "worker_id": worker_id,
+        },
+        work_ref="WS:EXECUTIVE-CAPACITY-FABRIC",
+        commission_ref={
+            "repository": "mastermindx-market-intelligence/Mastermind",
+            "commit": "1" * 40,
+            "path": "docs/superpowers/plans/iac1-p1.md",
+            "content_sha256": "2" * 64,
+        },
+        session_ref=session_ref,
+        operation_key="iac1-cross-session-targeted-carrier-p1r1-20260926-sol-001",
+        watch_mode="turn_watch_v1",
+        thread_ts=thread_ts,
+        evidence_digest="d" * 64,
+    )
+
+
+class _StaticPacketTargetResolver:
+    """Trusted-host stand-in: maps a destination Attempt to its exact parent."""
+
+    def __init__(
+        self,
+        *,
+        send: Mapping[tuple[str, str, str], Any] | None = None,
+        read: Mapping[tuple[str, str], Any] | None = None,
+        send_error: BaseException | None = None,
+        read_error: BaseException | None = None,
+    ) -> None:
+        self._send = dict(send or {})
+        self._read = dict(read or {})
+        self.send_error = send_error
+        self.read_error = read_error
+        self.send_calls: list[dict[str, Any]] = []
+        self.read_calls: list[tuple[str, str]] = []
+
+    def resolve_target(self, actor_ref: Mapping[str, Any]) -> Any:
+        self.send_calls.append(dict(actor_ref))
+        if self.send_error is not None:
+            raise self.send_error
+        return self._send.get(_p1r1_actor_key(actor_ref))
+
+    def resolve_read_target(self, consultation_id: str, purpose: str) -> Any:
+        self.read_calls.append((consultation_id, purpose))
+        if self.read_error is not None:
+            raise self.read_error
+        return self._read.get((consultation_id, purpose))
+
+
+def _p1r1_send_service(target: Any, frame: Mapping[str, Any]) -> _RecordingPacketService:
+    return _RecordingPacketService(
+        response={
+            "ok": True,
+            "result": {
+                "action": "POSTED",
+                "message_key": frame["message_key"],
+                "fingerprint": frame["fingerprint"],
+                "message_ts": "1787961600.000002",
+                "duplicate_timestamps": [],
+                "thread_ts": target.thread_ts,
+                "parent_author_user_id": "U00000002",
+                "parent_fingerprint": "a" * 64,
+            },
+        }
+    )
+
+
+def _p1r1_read_service(frame: Mapping[str, Any]) -> _RecordingPacketService:
+    return _RecordingPacketService(
+        response={
+            "ok": True,
+            "result": {
+                "packet": dict(frame),
+                "primary_ts": "1787961600.000002",
+                "duplicate_timestamps": [],
+            },
+        }
+    )
+
+
+def _p1r1_carrier(
+    *,
+    binding: DialogueBinding,
+    resolver: _StaticPacketTargetResolver,
+    service: _RecordingPacketService,
+) -> Any:
+    return consultation_dispatch.TargetedAgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(binding),
+        target_resolver=resolver,
+        socket_path=Path("/private/tmp/iac1-p1r1-agent-relay.sock"),
+        service_call=service,
+        timeout_seconds=7.5,
+    )
+
+
+async def _noop_before_commit() -> None:
+    return None
+
+
+def test_p1r1_question_is_delivered_only_on_the_recipient_distinct_parent() -> None:
+    """Acceptance 1: A and B share no parent; one post on B, zero on A."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(b_target.actor_ref): b_target}
+    )
+    service = _p1r1_send_service(b_target, frame)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    _run(
+        carrier.put_question(
+            frame["consultation_id"], frame, before_commit=_noop_before_commit
+        )
+    )
+
+    assert len(service.calls) == 1
+    args = service.calls[0]["request"]["args"]
+    assert args["thread_ts"] == _P1R1_B_THREAD
+    assert args["context"]["session_ref"] == "asd-session-p1r1-b-0001"
+    assert args["context"]["actor_ref"] == dict(b_target.actor_ref)
+    # Zero posts on the requester's own parent.
+    assert all(
+        call["request"]["args"]["thread_ts"] != _P1R1_A_THREAD
+        for call in service.calls
+    )
+    # The destination resolved was B, and only B.
+    assert resolver.send_calls == [dict(b_target.actor_ref)]
+
+
+def test_p1r1_answer_is_delivered_only_on_the_requester_distinct_parent() -> None:
+    """Acceptance 2: B's ANSWER lands once on A, nothing extra on B."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="ANSWER")
+    b_binding = _dialogue_binding(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    a_target = _delivery_target(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(a_target.actor_ref): a_target}
+    )
+    service = _p1r1_send_service(a_target, frame)
+    carrier = _p1r1_carrier(binding=b_binding, resolver=resolver, service=service)
+
+    _run(
+        carrier.put_answer(
+            frame["consultation_id"], frame, before_commit=_noop_before_commit
+        )
+    )
+
+    assert len(service.calls) == 1
+    args = service.calls[0]["request"]["args"]
+    assert args["thread_ts"] == _P1R1_A_THREAD
+    assert args["context"]["session_ref"] == "asd-session-p1r1-a-0001"
+    assert all(
+        call["request"]["args"]["thread_ts"] != _P1R1_B_THREAD
+        for call in service.calls
+    )
+
+
+def test_p1r1_question_sender_must_be_the_requester_self_binding() -> None:
+    """Acceptance 3: holding B's binding does not let B send A's QUESTION."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    b_binding = _dialogue_binding(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(b_target.actor_ref): b_target}
+    )
+    service = _p1r1_send_service(b_target, frame)
+    carrier = _p1r1_carrier(binding=b_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"], frame, before_commit=_noop_before_commit
+            )
+        )
+    # A target never grants the sender authority: no effect, no resolution.
+    assert service.calls == []
+    assert resolver.send_calls == []
+
+
+def test_p1r1_answer_sender_must_be_the_recipient_self_binding() -> None:
+    """Acceptance 4: holding A's binding does not let A send B's ANSWER."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="ANSWER")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    a_target = _delivery_target(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(a_target.actor_ref): a_target}
+    )
+    service = _p1r1_send_service(a_target, frame)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict):
+        _run(
+            carrier.put_answer(
+                frame["consultation_id"], frame, before_commit=_noop_before_commit
+            )
+        )
+    assert service.calls == []
+
+
+def test_p1r1_target_actor_mismatch_refuses_before_any_effect() -> None:
+    """Acceptance 5: a target for a third party refuses pre-effect."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    c_target = _delivery_target(
+        _P1R1_C, session_ref="asd-session-p1r1-c-0001", thread_ts=_P1R1_C_THREAD
+    )
+    # The resolver answers B's actor with C's parent.
+    resolver = _StaticPacketTargetResolver(
+        send={
+            _p1r1_actor_key(
+                {
+                    "kind": "worker_attempt",
+                    "job_id": _P1R1_B[0],
+                    "attempt_id": _P1R1_B[1],
+                    "worker_id": _P1R1_B[2],
+                }
+            ): c_target
+        }
+    )
+    service = _p1r1_send_service(c_target, frame)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    committed: list[str] = []
+
+    async def before_commit() -> None:
+        committed.append("commit")
+
+    with pytest.raises(StateConflict):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"], frame, before_commit=before_commit
+            )
+        )
+    assert service.calls == []
+    assert committed == []
+
+
+def test_p1r1_carrier_exposes_no_caller_supplied_destination() -> None:
+    """Acceptance 6: no packet method accepts a destination from its caller."""
+    carrier_cls = consultation_dispatch.TargetedAgentDialogueConsultationPacketCarrier
+    forbidden = {
+        "thread_ts",
+        "context",
+        "session_ref",
+        "binding",
+        "target",
+        "provider",
+        "operation_key",
+        "actor_ref",
+    }
+    for name in ("put_question", "put_answer", "get_question", "get_answer"):
+        params = set(inspect.signature(getattr(carrier_cls, name)).parameters)
+        assert not (params & forbidden), (name, params & forbidden)
+
+
+def test_p1r1_same_parent_carrier_path_is_unchanged() -> None:
+    """Acceptance 7: the incumbent carrier keeps the same-parent fence."""
+    assert not hasattr(
+        AgentDialogueConsultationPacketCarrier, "supports_cross_parent_target"
+    )
+    assert not hasattr(
+        InMemoryConsultationPacketCarrier, "supports_cross_parent_target"
+    )
+    # The same-parent fence itself still refuses two distinct parents.
+    a_binding = _dialogue_binding(_P1R1_A, session_ref="asd-session-p1r1-a-0001")
+    b_binding = _dialogue_binding(_P1R1_B, session_ref="asd-session-p1r1-b-0001")
+    with pytest.raises(StateConflict):
+        _require_same_dialogue_carrier(
+            a_binding,
+            b_binding,
+            caller_actor_ref=dict(a_binding.actor_ref),
+            recipient_actor_ref=dict(b_binding.actor_ref),
+        )
+
+
+def test_p1r1_admitted_question_read_reconstructs_target_without_cache() -> None:
+    """Acceptance 8: a fresh carrier reconstructs B's target from persisted facts."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={(frame["consultation_id"], "QUESTION"): b_target}
+    )
+    service = _p1r1_read_service(frame)
+    # A brand-new carrier instance stands in for a restarted process.
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    item = _run(carrier.get_question(frame["consultation_id"]))
+
+    assert item is not None
+    assert item["consultation_id"] == frame["consultation_id"]
+    assert resolver.read_calls == [(frame["consultation_id"], "QUESTION")]
+    args = service.calls[0]["request"]["args"]
+    assert args["thread_ts"] == _P1R1_B_THREAD
+    assert args["context"]["session_ref"] == "asd-session-p1r1-b-0001"
+    # No per-consultation route is retained anywhere on the carrier.
+    assert not any(
+        isinstance(value, (dict, list, set))
+        for key, value in vars(carrier).items()
+        if key not in {"_socket_path"}
+    )
+
+
+def test_p1r1_admitted_answer_read_reconstructs_requester_target() -> None:
+    """Acceptance 9: the ANSWER read target is the requester's parent."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="ANSWER")
+    b_binding = _dialogue_binding(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    a_target = _delivery_target(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={(frame["consultation_id"], "ANSWER"): a_target}
+    )
+    service = _p1r1_read_service(frame)
+    carrier = _p1r1_carrier(binding=b_binding, resolver=resolver, service=service)
+
+    item = _run(carrier.get_answer(frame["consultation_id"]))
+
+    assert item is not None
+    assert service.calls[0]["request"]["args"]["thread_ts"] == _P1R1_A_THREAD
+
+
+def test_p1r1_replay_after_peer_rotation_stays_on_the_original_target() -> None:
+    """Acceptance 10: an admitted replay never follows B to a new Attempt."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    original = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    rotated = _delivery_target(
+        _P1R1_B_ROTATED,
+        session_ref="asd-session-p1r1-b2-0001",
+        thread_ts=_P1R1_B_ROTATED_THREAD,
+    )
+    # "Current" resolution would return the rotated Attempt; the admitted read
+    # target still resolves to the original one.
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(rotated.actor_ref): rotated},
+        read={(frame["consultation_id"], "QUESTION"): original},
+    )
+    service = _p1r1_read_service(frame)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    _run(carrier.get_question(frame["consultation_id"]))
+
+    threads = [call["request"]["args"]["thread_ts"] for call in service.calls]
+    assert threads == [_P1R1_B_THREAD]
+    assert _P1R1_B_ROTATED_THREAD not in threads
+    # The rotated Attempt was never even resolved for this admitted packet.
+    assert resolver.send_calls == []
+
+
+def test_p1r1_new_consultation_may_resolve_the_current_peer_target() -> None:
+    """Acceptance 11: a genuinely new consultation reaches B's new Attempt."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B_ROTATED, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    rotated = _delivery_target(
+        _P1R1_B_ROTATED,
+        session_ref="asd-session-p1r1-b2-0001",
+        thread_ts=_P1R1_B_ROTATED_THREAD,
+    )
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(rotated.actor_ref): rotated}
+    )
+    service = _p1r1_send_service(rotated, frame)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    _run(
+        carrier.put_question(
+            frame["consultation_id"], frame, before_commit=_noop_before_commit
+        )
+    )
+
+    assert service.calls[0]["request"]["args"]["thread_ts"] == _P1R1_B_ROTATED_THREAD
+
+
+@pytest.mark.parametrize(
+    "resolver_kwargs",
+    [
+        {"send": {}},
+        {"send_error": StateConflict("physical source is ambiguous")},
+    ],
+    ids=["missing_physical_source", "ambiguous_physical_source"],
+)
+def test_p1r1_missing_or_ambiguous_physical_source_refuses(
+    resolver_kwargs: dict[str, Any],
+) -> None:
+    """Acceptance 12: refuse rather than choose a newest/latest parent."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(**resolver_kwargs)
+    service = _RecordingPacketService()
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"], frame, before_commit=_noop_before_commit
+            )
+        )
+    assert service.calls == []
+
+
+def test_p1r1_read_whose_packet_names_another_destination_refuses() -> None:
+    """Acceptance 13: a target that stops matching the packet refuses."""
+    # The read target is C's parent, but the packet that comes back is A<->B.
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    c_target = _delivery_target(
+        _P1R1_C, session_ref="asd-session-p1r1-c-0001", thread_ts=_P1R1_C_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={(frame["consultation_id"], "QUESTION"): c_target}
+    )
+    service = _p1r1_read_service(frame)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict):
+        _run(carrier.get_question(frame["consultation_id"]))
+
+
+def test_p1r1_delivery_target_refuses_fabricated_identity() -> None:
+    """A target may not be minted with a synthesized ``applies_to``."""
+    job_id, attempt_id, worker_id, _rb = _P1R1_B
+    actor = {
+        "kind": "worker_attempt",
+        "job_id": job_id,
+        "attempt_id": attempt_id,
+        "worker_id": worker_id,
+    }
+    common = {
+        "actor_ref": actor,
+        "work_ref": "WS:EXECUTIVE-CAPACITY-FABRIC",
+        "commission_ref": {"repository": "r", "commit": "1" * 40},
+        "session_ref": "asd-session-p1r1-b-0001",
+        "operation_key": "op",
+        "watch_mode": "turn_watch_v1",
+        "thread_ts": _P1R1_B_THREAD,
+        "evidence_digest": "d" * 64,
+    }
+    # applies_to carrying the wrong kind, or disagreeing on identity, refuses.
+    with pytest.raises(StateConflict):
+        consultation_dispatch.ConsultationDeliveryTarget(
+            applies_to=dict(actor), **common
+        )
+    with pytest.raises(StateConflict):
+        consultation_dispatch.ConsultationDeliveryTarget(
+            applies_to={
+                "kind": "executive_attempt",
+                "job_id": "JOB-OTHER",
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+            },
+            **common,
+        )
+    with pytest.raises(StateConflict):
+        consultation_dispatch.ConsultationDeliveryTarget(
+            applies_to={
+                "kind": "executive_attempt",
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+            },
+            **{**common, "thread_ts": ""},
+        )
+
+
+def test_p1r1_adds_no_new_persistence_or_control_surface() -> None:
+    """Acceptance 14: no table, registry, queue, retry controller or arm."""
+    source = Path(consultation_dispatch.__file__).read_text()
+    for banned in (
+        "CREATE TABLE",
+        "sqlite3",
+        "asyncio.create_task",
+        "threading",
+        "socket.socket",
+    ):
+        assert banned not in source, banned
+    # Production packet carriage stays declared unavailable.
+    assert consultation_dispatch.PRODUCTION_PACKET_CARRIAGE == "UNAVAILABLE"
+
+
+class _CrossParentCountingCarrier(InMemoryConsultationPacketCarrier):
+    """Cross-parent-capable carrier that counts COMMIT-authorized writes."""
+
+    requires_dialogue_binding = True
+    requires_packet_wire = True
+    supports_cross_parent_target = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.put_question_calls = 0
+
+    async def put_question(self, consultation_id, frame, *, before_commit):
+        await before_commit()
+        self.put_question_calls += 1
+        self._questions[consultation_id] = dict(frame)
+
+
+def _cross_parent_dispatcher(
+    runtime: Runtime,
+    repository_root: Path,
+    *,
+    requester: tuple,
+    recipient: tuple,
+    carrier: Any,
+    invocations: Any,
+    caller_dialogue_binding: DialogueBinding | None,
+) -> RuntimeConsultationDispatcher:
+    """A dispatcher whose caller and recipient sit in DISTINCT parents."""
+    recipient_binding = _dialogue_binding(
+        recipient,
+        session_ref="asd-session-p1r1-b-0001",
+        thread_ts=_P1R1_B_THREAD,
+    )
+    caller = CallerIdentity(
+        job_id=requester[0],
+        worker_id=requester[2],
+        attempt_id=requester[1],
+        reasoning_surface="codex",
+        binding=requester[3],
+        dialogue_binding=caller_dialogue_binding,
+    )
+
+    def resolve(_peer_ref: str) -> RecipientBinding:
+        return RecipientBinding(
+            actor_ref={
+                "kind": "worker_attempt",
+                "job_id": recipient[0],
+                "attempt_id": recipient[1],
+                "worker_id": recipient[2],
+            },
+            recipient_binding=dict(recipient[3]),
+            dialogue_binding=recipient_binding,
+        )
+
+    return RuntimeConsultationDispatcher(
+        runtime=runtime,
+        repository_root=repository_root,
+        caller=caller,
+        recipients=resolve,
+        packets=carrier,
+        invocations=invocations,
+        _clock=_ManualClock("2026-09-14T00:00:00Z"),
+    )
+
+
+def test_p1r1_lost_return_reconciles_to_one_packet_and_one_wake(
+    tmp_path: Path,
+) -> None:
+    """Acceptance 15: cross-parent consult, then replay → 1 packet, 1 Wake.
+
+    This is also the only dispatcher-level proof that the cross-parent
+    fence ADMITS a genuinely distinct-parent consult, where the incumbent
+    same-parent fence refuses it (see
+    ``test_same_parent_carrier_drift_refuses_before_runtime_or_wake``).
+    """
+    runtime = _runtime_at(tmp_path / "p1r1-lost-return")
+    _consultations(runtime, tmp_path / "p1r1-lost-return")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "p1r1-lr-repo")
+    invocations = _p1_invocations()
+    caller_binding = _dialogue_binding(
+        requester,
+        session_ref="asd-session-p1r1-a-0001",
+        thread_ts=_P1R1_A_THREAD,
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Does a cross-parent consult reconcile to one packet?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+
+    first_carrier = _CrossParentCountingCarrier()
+    first = _run_dispatcher(
+        _cross_parent_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            carrier=first_carrier,
+            invocations=invocations,
+            caller_dialogue_binding=caller_binding,
+        ),
+        "company.consult",
+        envelope,
+    )
+    data = first["result"]
+    consultation_id = data["consultation_ref"]
+    assert data["state"] == "INTENDED"
+    assert first_carrier.put_question_calls == 1
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+    wake_after_first = len(WakeLedgerRepository(runtime).list_wake_events())
+
+    # Lost return: the response never reached the caller. A restarted
+    # dispatcher whose carrier already holds the exact packet replays the
+    # identical consult.
+    restarted_carrier = _CrossParentCountingCarrier()
+    restarted_carrier._questions[consultation_id] = dict(
+        _run(first_carrier.get_question(consultation_id))
+    )
+    replay = _run_dispatcher(
+        _cross_parent_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            carrier=restarted_carrier,
+            invocations=invocations,
+            caller_dialogue_binding=caller_binding,
+        ),
+        "company.consult",
+        envelope,
+    )
+    replay_data = replay["result"]
+    assert replay_data["consultation_ref"] == consultation_id
+    assert replay_data["state"] == "ALREADY_INTENDED"
+    assert restarted_carrier.put_question_calls == 0
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+    assert len(WakeLedgerRepository(runtime).list_wake_events()) == wake_after_first
+
+
+@pytest.mark.parametrize(
+    "binding_kind", ["absent", "not_the_caller"], ids=["absent", "foreign"]
+)
+def test_p1r1_cross_parent_still_requires_a_trusted_caller_binding(
+    tmp_path: Path, binding_kind: str
+) -> None:
+    """Cross-parent relaxes the PEER check, never the caller's own binding."""
+    runtime = _runtime_at(tmp_path / f"p1r1-caller-{binding_kind}")
+    requester, recipient, third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / f"p1r1-caller-{binding_kind}-repo"
+    )
+    carrier = _CrossParentCountingCarrier()
+    caller_binding = (
+        None
+        if binding_kind == "absent"
+        else _dialogue_binding(
+            third, session_ref="asd-session-p1r1-c-0001", thread_ts=_P1R1_C_THREAD
+        )
+    )
+
+    with pytest.raises(ConsultationRefusal) as exc:
+        _run_dispatcher(
+            _cross_parent_dispatcher(
+                runtime,
+                fixture_repo,
+                requester=requester,
+                recipient=recipient,
+                carrier=carrier,
+                invocations=_p1_invocations(),
+                caller_dialogue_binding=caller_binding,
+            ),
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="An untrusted caller binding must never reach a packet.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert exc.value.code == "NOT_A_PARTY"
+    assert runtime.events.list_events(aggregate_type="consultation") == []
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+    assert carrier.put_question_calls == 0
+
+
+def test_p1r1_trusted_caller_binding_helper_refuses_untrusted_input() -> None:
+    """Unit teeth for the dispatcher's cross-parent caller check."""
+    caller_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    caller_actor_ref = dict(caller_binding.actor_ref)
+    # The exact self-binding is accepted.
+    _require_trusted_caller_binding(
+        caller_binding, caller_actor_ref=caller_actor_ref
+    )
+    with pytest.raises(StateConflict):
+        _require_trusted_caller_binding(None, caller_actor_ref=caller_actor_ref)
+    with pytest.raises(StateConflict):
+        _require_trusted_caller_binding(
+            object(), caller_actor_ref=caller_actor_ref
+        )
+    foreign = _dialogue_binding(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    with pytest.raises(StateConflict):
+        _require_trusted_caller_binding(
+            foreign, caller_actor_ref=caller_actor_ref
+        )

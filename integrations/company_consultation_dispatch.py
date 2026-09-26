@@ -272,6 +272,27 @@ def _require_same_dialogue_carrier(
         raise StateConflict("parties do not share the same exact parent carrier")
 
 
+def _require_trusted_caller_binding(
+    caller_binding: DialogueBinding | None,
+    *,
+    caller_actor_ref: Mapping[str, Any],
+) -> None:
+    """Prove the caller's own binding without requiring a shared parent.
+
+    Cross-parent carriage still needs the sender's authority to come from the
+    caller's own trusted binding. What it must NOT require is that the two
+    parties share one physical Relay parent, which is exactly the lawful
+    cross-session case ``_require_same_dialogue_carrier`` refuses.
+    """
+
+    if not isinstance(caller_binding, DialogueBinding):
+        raise StateConflict("caller dialogue binding is unavailable")
+    if dict(caller_binding.actor_ref) != dict(caller_actor_ref):
+        raise StateConflict("caller dialogue binding actor is not trusted")
+    # Reuse the incumbent applicability law for the caller's own parent.
+    _dialogue_carrier_identity(caller_binding)
+
+
 class AgentDialogueConsultationPacketCarrier:
     """Adapter over the incumbent authenticated Agent Relay AF_UNIX service."""
 
@@ -488,6 +509,409 @@ class AgentDialogueConsultationPacketCarrier:
                 "Agent Relay packet read is conflicting"
             )
         self._assert_current_party(binding, item)
+        return item
+
+    async def get_question(
+        self, consultation_id: str
+    ) -> Mapping[str, Any] | None:
+        return await self._get(consultation_id, purpose="QUESTION")
+
+    async def get_answer(
+        self, consultation_id: str
+    ) -> Mapping[str, Any] | None:
+        return await self._get(consultation_id, purpose="ANSWER")
+
+
+@dataclasses.dataclass(frozen=True)
+class ConsultationDeliveryTarget:
+    """Internal packet-routing projection of ONE destination Attempt.
+
+    This is not a Company Dialogue grant, not a model input, not a lifecycle
+    binding and not a persisted route. It names the exact physical Agent Relay
+    parent a packet must be delivered into, reconstructed by the trusted host
+    from existing Executive/Wake evidence.
+
+    ``applies_to`` is carried rather than derived. The carrier context needs
+    it, and ``_dialogue_carrier_identity`` independently requires it to agree
+    with ``actor_ref``; synthesizing it by swapping ``kind`` would fabricate
+    trusted identity instead of reconstructing it.
+    """
+
+    actor_ref: Mapping[str, Any]
+    applies_to: Mapping[str, Any]
+    work_ref: str
+    commission_ref: Mapping[str, Any]
+    session_ref: str
+    operation_key: str
+    watch_mode: str | None
+    thread_ts: str
+    evidence_digest: str
+
+    def __post_init__(self) -> None:
+        actor = dict(self.actor_ref)
+        applies_to = dict(self.applies_to)
+        if (
+            actor.get("kind") != "worker_attempt"
+            or applies_to.get("kind") != "executive_attempt"
+            or any(
+                not isinstance(actor.get(field), str)
+                or not actor.get(field)
+                or actor.get(field) != applies_to.get(field)
+                for field in ("job_id", "attempt_id", "worker_id")
+            )
+        ):
+            raise StateConflict("consultation delivery target identity is invalid")
+        if not isinstance(self.commission_ref, Mapping):
+            raise StateConflict("consultation delivery target identity is invalid")
+        if self.watch_mode is not None and not isinstance(self.watch_mode, str):
+            raise StateConflict("consultation delivery target identity is invalid")
+        for field in (
+            "work_ref",
+            "session_ref",
+            "operation_key",
+            "thread_ts",
+            "evidence_digest",
+        ):
+            value = getattr(self, field)
+            if not isinstance(value, str) or not value:
+                raise StateConflict(
+                    "consultation delivery target identity is invalid"
+                )
+
+
+class ConsultationPacketTargetResolver(Protocol):
+    """Host-owned packet destination resolver; no model input reaches it.
+
+    ``resolve_target`` maps one destination Attempt to its exact physical
+    dialogue source. ``resolve_read_target`` reconstructs the destination of
+    an already-admitted consultation from the persisted Consultation Runtime
+    party facts, which is what keeps an admitted target sticky across restart
+    and peer rotation. Both refuse rather than choose when the physical source
+    is missing or ambiguous.
+    """
+
+    def resolve_target(
+        self, actor_ref: Mapping[str, Any]
+    ) -> ConsultationDeliveryTarget: ...
+
+    def resolve_read_target(
+        self, consultation_id: str, purpose: str
+    ) -> ConsultationDeliveryTarget: ...
+
+
+class TargetedAgentDialogueConsultationPacketCarrier:
+    """Cross-parent adapter over the incumbent authenticated Agent Relay service.
+
+    Sender authority and physical destination are two separate authorities
+    here. The caller's own trusted binding still proves the semantic sender;
+    the injected target resolver alone supplies the destination parent.
+
+    Nothing below this class re-checks the destination. The Relay engine's
+    send/read paths and the service request path are context-parametric with
+    no actor-to-context coupling, and the service authenticates an OS peer uid
+    rather than a binding, so this resolution is the ONLY authority for
+    physical destination. A caller-supplied destination must remain
+    impossible by construction: no method here accepts a thread, context,
+    session or binding argument.
+    """
+
+    requires_dialogue_binding = True
+    requires_packet_wire = True
+    supports_cross_parent_target = True
+
+    def __init__(
+        self,
+        *,
+        binding_resolver: DialogueBindingResolver,
+        target_resolver: ConsultationPacketTargetResolver,
+        socket_path: Path,
+        service_call: ServiceCall = call_service,
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        if not isinstance(socket_path, Path) or not socket_path.is_absolute():
+            raise TypeError("socket_path must be an absolute Path")
+        if not callable(getattr(binding_resolver, "resolve", None)):
+            raise TypeError("binding_resolver must resolve the current binding")
+        if not callable(getattr(target_resolver, "resolve_target", None)) or not callable(
+            getattr(target_resolver, "resolve_read_target", None)
+        ):
+            raise TypeError(
+                "target_resolver must resolve send and read packet targets"
+            )
+        if not callable(service_call):
+            raise TypeError("service_call must be callable")
+        if not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        self._binding_resolver = binding_resolver
+        self._target_resolver = target_resolver
+        self._socket_path = socket_path
+        self._service_call = service_call
+        self._timeout_seconds = float(timeout_seconds)
+
+    def _binding(self) -> DialogueBinding:
+        try:
+            binding = self._binding_resolver.resolve()
+        except Exception as exc:
+            raise ConsultationPacketCarrierUnknown(
+                "current Agent Relay binding is unavailable"
+            ) from exc
+        if not isinstance(binding, DialogueBinding):
+            raise ConsultationPacketCarrierUnknown(
+                "current Agent Relay binding is unavailable"
+            )
+        return binding
+
+    @staticmethod
+    def _target_context(target: ConsultationDeliveryTarget) -> dict[str, Any]:
+        return DialogueContextV2(
+            work_ref=target.work_ref,
+            commission_ref=dict(target.commission_ref),
+            session_ref=target.session_ref,
+            operation_key=target.operation_key,
+            watch_mode=target.watch_mode,
+            actor_ref=dict(target.actor_ref),
+            applies_to=dict(target.applies_to),
+        ).normalized()
+
+    @staticmethod
+    def _sender_actor(frame: Mapping[str, Any]) -> Mapping[str, Any]:
+        if frame["purpose"] == "QUESTION":
+            return frame["requester_actor_ref"]
+        if frame["purpose"] == "ANSWER":
+            return frame["recipient_actor_ref"]
+        raise StateConflict("consultation packet purpose is not sendable")
+
+    @staticmethod
+    def _destination_actor(frame: Mapping[str, Any]) -> Mapping[str, Any]:
+        """The semantic destination is the party that is not the sender."""
+        if frame["purpose"] == "QUESTION":
+            return frame["recipient_actor_ref"]
+        if frame["purpose"] == "ANSWER":
+            return frame["requester_actor_ref"]
+        raise StateConflict("consultation packet purpose is not sendable")
+
+    @staticmethod
+    def _assert_current_party(
+        binding: DialogueBinding, frame: Mapping[str, Any]
+    ) -> None:
+        actor = dict(binding.actor_ref)
+        parties = (
+            dict(frame["requester_actor_ref"]),
+            dict(frame["recipient_actor_ref"]),
+        )
+        if actor not in parties:
+            raise StateConflict("current dialogue binding is not a packet party")
+
+    def _checked_target(
+        self,
+        target: Any,
+        *,
+        expected_actor_ref: Mapping[str, Any] | None,
+    ) -> ConsultationDeliveryTarget:
+        """Refuse before any effect unless the target is the exact destination."""
+        if not isinstance(target, ConsultationDeliveryTarget):
+            raise StateConflict("consultation packet target is unavailable")
+        if expected_actor_ref is not None:
+            try:
+                expected = _normalized_actor_ref(expected_actor_ref)
+            except KeyError as exc:
+                raise StateConflict(
+                    "consultation packet destination actor is invalid"
+                ) from exc
+            if _normalized_actor_ref(target.actor_ref) != expected:
+                raise StateConflict(
+                    "consultation packet target is not the semantic destination"
+                )
+        return target
+
+    def _send_target(self, frame: Mapping[str, Any]) -> ConsultationDeliveryTarget:
+        destination = self._destination_actor(frame)
+        try:
+            resolved = self._target_resolver.resolve_target(
+                _normalized_actor_ref(destination)
+            )
+        except StateConflict:
+            raise
+        except KeyError as exc:
+            raise StateConflict(
+                "consultation packet destination actor is invalid"
+            ) from exc
+        except Exception as exc:
+            raise ConsultationPacketCarrierUnknown(
+                "consultation packet target is unavailable"
+            ) from exc
+        return self._checked_target(resolved, expected_actor_ref=destination)
+
+    def _read_target(
+        self, consultation_id: str, purpose: str
+    ) -> ConsultationDeliveryTarget:
+        try:
+            resolved = self._target_resolver.resolve_read_target(
+                consultation_id, purpose
+            )
+        except StateConflict:
+            raise
+        except Exception as exc:
+            raise ConsultationPacketCarrierUnknown(
+                "consultation packet target is unavailable"
+            ) from exc
+        return self._checked_target(resolved, expected_actor_ref=None)
+
+    async def _call(
+        self,
+        request: Mapping[str, Any],
+        *,
+        before_write: PacketCommitHook | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return await self._service_call(
+                self._socket_path,
+                request,
+                timeout_seconds=self._timeout_seconds,
+                before_write=before_write,
+            )
+        except ConsultationPacketCommitAborted:
+            raise
+        except DialogueServiceError as exc:
+            if exc.code == "SEND_EFFECT_UNKNOWN":
+                raise ConsultationPacketEffectUnknown(
+                    "consultation packet effect remains unknown"
+                ) from exc
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet carrier is unavailable"
+            ) from exc
+
+    async def _put(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        purpose: str,
+        before_commit: PacketCommitHook,
+    ) -> None:
+        item = validate_consultation(frame)
+        if (
+            consultation_id != item["consultation_id"]
+            or item["purpose"] != purpose
+        ):
+            raise StateConflict("consultation packet identity disagrees")
+        binding = self._binding()
+        if dict(binding.actor_ref) != dict(self._sender_actor(item)):
+            raise StateConflict("current dialogue binding is not the packet sender")
+        # The destination is resolved and checked BEFORE any effect. A target
+        # never grants the sender authority; the sender check above already
+        # stands on the caller's own trusted binding.
+        target = self._send_target(item)
+        response = await self._call(
+            {
+                "version": CONTROL_VERSION_V2,
+                "operation": "send_consultation_packet",
+                "args": {
+                    "context": self._target_context(target),
+                    "thread_ts": target.thread_ts,
+                    "message": item,
+                    "send_protocol": EXACT_SEND_PROTOCOL,
+                },
+            },
+            before_write=before_commit,
+        )
+        result = response.get("result") if isinstance(response, Mapping) else None
+        if (
+            not isinstance(response, Mapping)
+            or response.get("ok") is not True
+            or not isinstance(result, Mapping)
+            or result.get("message_key") != item["message_key"]
+            or result.get("fingerprint") != item["fingerprint"]
+            or result.get("thread_ts") != target.thread_ts
+        ):
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet receipt is invalid"
+            )
+
+    async def put_question(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
+    ) -> None:
+        await self._put(
+            consultation_id,
+            frame,
+            purpose="QUESTION",
+            before_commit=before_commit,
+        )
+
+    async def put_answer(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
+    ) -> None:
+        await self._put(
+            consultation_id,
+            frame,
+            purpose="ANSWER",
+            before_commit=before_commit,
+        )
+
+    async def _get(
+        self, consultation_id: str, *, purpose: str
+    ) -> Mapping[str, Any] | None:
+        if _CONSULTATION_REF_RE.fullmatch(consultation_id) is None:
+            raise StateConflict("consultation packet identity is invalid")
+        binding = self._binding()
+        target = self._read_target(consultation_id, purpose)
+        response = await self._call(
+            {
+                "version": CONTROL_VERSION_V2,
+                "operation": "read_consultation_packet",
+                "args": {
+                    "context": self._target_context(target),
+                    "thread_ts": target.thread_ts,
+                    "consultation_id": consultation_id,
+                    "purpose": purpose,
+                },
+            }
+        )
+        if not isinstance(response, Mapping) or response.get("ok") is not True:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is invalid"
+            )
+        result = response.get("result")
+        if result is None:
+            return None
+        if not isinstance(result, Mapping) or set(result) != {
+            "packet",
+            "primary_ts",
+            "duplicate_timestamps",
+        }:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is invalid"
+            )
+        packet = result.get("packet")
+        try:
+            item = validate_consultation(packet)
+        except Exception as exc:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is invalid"
+            ) from exc
+        if (
+            item["consultation_id"] != consultation_id
+            or item["purpose"] != purpose
+            or result.get("duplicate_timestamps") != []
+        ):
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is conflicting"
+            )
+        # The reader's own binding must still be a packet party: a target
+        # grants delivery, never readership.
+        self._assert_current_party(binding, item)
+        # The packet that came back must belong to the destination we read.
+        self._checked_target(
+            target, expected_actor_ref=self._destination_actor(item)
+        )
         return item
 
     async def get_question(
@@ -1258,17 +1682,33 @@ class RuntimeConsultationDispatcher:
                 detail=f"recipient binding normalization failed: {type(exc).__name__}",
             ) from exc
 
-        if getattr(self.packets, "requires_dialogue_binding", False):
+        caller_actor_ref = {
+            "kind": "worker_attempt",
+            "job_id": self.caller.job_id,
+            "attempt_id": self.caller.attempt_id,
+            "worker_id": self.caller.worker_id,
+        }
+        if getattr(self.packets, "supports_cross_parent_target", False):
+            # A cross-parent carrier separates sender authority from physical
+            # destination: the caller's own binding proves the sender here, and
+            # the carrier's injected target resolver proves the destination.
+            # Requiring one shared parent would refuse the lawful case.
+            try:
+                _require_trusted_caller_binding(
+                    self.caller.dialogue_binding,
+                    caller_actor_ref=caller_actor_ref,
+                )
+            except StateConflict as exc:
+                raise ConsultationRefusal(
+                    "NOT_A_PARTY",
+                    detail="caller Agent Relay binding is not trusted",
+                ) from exc
+        elif getattr(self.packets, "requires_dialogue_binding", False):
             try:
                 _require_same_dialogue_carrier(
                     self.caller.dialogue_binding,
                     recipient.dialogue_binding,
-                    caller_actor_ref={
-                        "kind": "worker_attempt",
-                        "job_id": self.caller.job_id,
-                        "attempt_id": self.caller.attempt_id,
-                        "worker_id": self.caller.worker_id,
-                    },
+                    caller_actor_ref=caller_actor_ref,
                     recipient_actor_ref=recipient_actor_ref,
                 )
             except StateConflict as exc:
