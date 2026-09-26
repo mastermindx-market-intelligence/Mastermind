@@ -25,7 +25,7 @@
 
 ## Task 1 — Source regressions and native pressure inputs
 Files: tests/test_pro_continuity_reliability.py; research/fixtures/pro_continuity_reliability_2026-09-19.json.
-Consumes existing scripts.ohf.fresh_sol_eval.ScenarioPacket; produces 17 exact evaluator packets, not model results.
+Consumes existing scripts.ohf.fresh_sol_eval.ScenarioPacket; produces 19 exact evaluator packets, not model results.
 - [x] Write contract tests before modifying the procedure files.
 - [x] Run pytest --noconftest -p no:cacheprovider -q tests/test_pro_continuity_reliability.py on unchanged protected procedure; 14 expected assertions fail, no collection errors.
 - [x] Keep the existing active-execution baseline (28 tests) as the regression reference.

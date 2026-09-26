@@ -336,6 +336,35 @@ A missing or denied axis must not be rewritten as another. Technical availabilit
 organizational permission; unknown organizational permission never proves technical absence; and
 `EFFECT_UNKNOWN` remains an effect fact rather than a capability fact.
 
+### Step 6A — Gate action-bearing START on current capability proof
+
+Before a concrete ChatGPT/Web CEO/provider session emits `START`, derive the action families that
+THIS concrete receiver must itself perform or invoke from the accepted scope and validation contract,
+rather than from the provider, model, account or session label. Do not charge the principal session
+for downstream worker-local actions when an already-admitted worker route owns them; do include the
+dispatch/inspection/review actions the principal itself must execute to complete that route. Inspect
+the current effective action schema for that exact session/generation and use the existing safe
+non-effect permission/capability/binding or serviceability preflight for each required family when one
+exists.
+
+Schema exposure alone is not positive readiness. A successful unrelated READ does not prove
+WRITE/ADMIN permission or serviceability, and model self-attestation never grants a capability. If a
+required action is merely exposed while its current serviceability/permission/binding evidence is
+`UNKNOWN` / `UNPROBED`, do not emit action-bearing `START`; complete the safe preflight when
+possible or remain waiting on capability proof. Unknown evidence alone does not authorize receiver
+replacement.
+
+If a complete current effective schema proves a required action family absent, and the operation is
+`CAPACITY_SELECTABLE`, still `PRE_START`, has no prior operation effect and no
+`EFFECT_UNKNOWN`, the concrete receiver is ineligible for that work. Do not `START`; the existing
+placement owner may use the already-governed `PRESTART_REBIND` edge under the same operation,
+carrier, scope and responsibility. For `EXACT_SESSION_REQUIRED` work, absence blocks that exact
+session and never authorizes substitution.
+
+After `START`, capability loss never authorizes moving the modifying operation to another
+session/carrier. Keep the current RuntimeBinding sticky until canonical reconciliation; an
+`EFFECT_UNKNOWN` result freezes receiver change.
+
 A worker/COO `BLOCKED` or `DECISION_REQUEST` that rests on a negative capability claim is return
 evidence, not a self-authenticating Chairman/platform gate. Before escalating it, the action-authoritative
 Sol applies this Step 6 against the current generation. If required discovery/preflight evidence is
