@@ -23,6 +23,12 @@ from control_plane.claude_worker import (
     ClaudeWorkerContractError,
     attest_claude_code_binary,
 )
+from control_plane.claude_native_helper_projection import (
+    ClaudeNativeHelperDefinition,
+    project_claude_native_helpers,
+)
+from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+from control_plane.operator_harness_contract import ObservedTriState
 from control_plane.worker_adapter import (
     WorkerExecutionAdapter,
     adapter_descriptor,
@@ -479,6 +485,115 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
         "Agent,NotebookEdit,Skill,Task,WebFetch,WebSearch,mcp__*"
     )
 
+
+def _native_helper_projection():
+    registry = ExecutionCapabilityRegistry.load(
+        Path(
+            "tests/fixtures/"
+            "executive_agent_capabilities_claude_native_helper_v3.json"
+        ),
+        source_root=Path.cwd(),
+    )
+    profile = registry.resolve("operator.claude.readonly.native-helper.v1")
+    profile = dataclasses.replace(profile, mcp_server_grants=())
+    return project_claude_native_helpers(
+        profile,
+        helpers=(
+            ClaudeNativeHelperDefinition(
+                agent_id="code-reader",
+                description="Inspect bounded implementation evidence read-only.",
+                prompt="Read only. Return bounded findings and risks.",
+                max_turns=8,
+            ),
+        ),
+        permission_mode="dontAsk",
+        execution_mode="noninteractive",
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+    )
+
+
+def test_native_helper_candidate_compiler_composes_exact_cardless_parent_contract(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _spec(tmp_path)
+    projection = _native_helper_projection()
+
+    candidate = adapter.compile_native_helper_candidate_launch(spec, projection)
+
+    assert candidate.production_armed is False
+    assert candidate.runtime_ceiling_seconds == projection.runtime_ceiling_seconds
+    assert dict(candidate.environment_overrides) == projection.environment()
+    argv = candidate.argv
+    assert "--agents" in argv
+    assert argv[argv.index("--agents") + 1] == projection.cli_arguments()[-1]
+    assert set(argv[argv.index("--tools") + 1].split(",")) == {
+        "Agent", "Glob", "Grep", "Read"
+    }
+    allowed = argv[argv.index("--allowedTools") + 1].split(",")
+    denied = argv[argv.index("--disallowedTools") + 1].split(",")
+    assert "Agent" in allowed
+    assert "Agent" not in denied
+    assert {"SendMessage", "ListAgents", "TaskCreate", "TaskUpdate"} <= set(denied)
+    assert "mcp__*" in denied
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings["permissions"]["allow"] == allowed
+    assert settings["permissions"]["deny"][: len(denied)] == denied
+    assert settings["model"] == _EXACT_MODEL
+    assert settings["availableModels"] == [_EXACT_MODEL]
+
+
+def test_native_helper_candidate_does_not_change_live_start_compiler(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _spec(tmp_path)
+    projection = _native_helper_projection()
+
+    candidate = adapter.compile_native_helper_candidate_launch(spec, projection)
+    live = adapter.compile_launch(spec)
+
+    assert "--agents" in candidate.argv
+    assert "--agents" not in live.argv
+    assert "Agent" in live.argv[live.argv.index("--disallowedTools") + 1].split(",")
+    assert "Agent" not in live.argv[live.argv.index("--tools") + 1].split(",")
+    assert "native_helper_projection" not in inspect.signature(adapter.start).parameters
+
+
+def test_native_helper_candidate_refuses_write_parent_or_mcp_projection(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    projection = _native_helper_projection()
+    with pytest.raises(ClaudeWorkerContractError, match="read-only parent"):
+        adapter.compile_native_helper_candidate_launch(
+            _spec(
+                tmp_path,
+                authorities=("READ", "WRITE_BRANCH"),
+                allowed_artifact_paths=("src/allowed.py",),
+            ),
+            projection,
+        )
+
+    drifted = dataclasses.replace(
+        projection,
+        source_mcp_grant_digests=("a" * 64,),
+    )
+    with pytest.raises(ClaudeWorkerContractError, match="zero-MCP"):
+        adapter.compile_native_helper_candidate_launch(_spec(tmp_path), drifted)
+
+
+def test_native_helper_candidate_refuses_untyped_or_armed_projection(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _spec(tmp_path)
+    with pytest.raises(ClaudeWorkerContractError, match="typed native-helper projection"):
+        adapter.compile_native_helper_candidate_launch(spec, object())
+    projection = _native_helper_projection()
+    object.__setattr__(projection, "production_armed", True)
+    with pytest.raises(ClaudeWorkerContractError, match="production-inert"):
+        adapter.compile_native_helper_candidate_launch(spec, projection)
 
 def test_compiler_refuses_unknown_or_unmapped_capabilities(tmp_path: Path) -> None:
     adapter = _adapter(tmp_path)
