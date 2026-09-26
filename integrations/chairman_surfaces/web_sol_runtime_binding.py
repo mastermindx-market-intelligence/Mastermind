@@ -19,7 +19,16 @@ import re
 from typing import Any
 
 from control_plane import surface_bindings as sb
-from control_plane.session_targets import RuntimeBinding, SessionTarget
+from control_plane.session_targets import (
+    RuntimeBinding,
+    SessionTarget,
+    SessionTargetRegistry,
+)
+from control_plane.sol_action_target import (
+    ActionTargetState,
+    RuntimeBindingSnapshot,
+    resolve_sol_action_target,
+)
 
 from . import web_sol_census_protocol as census
 from . import web_sol_instance as instance
@@ -239,6 +248,128 @@ def exact_target_from_census(
     )
 
 
+def resolve_bound_target_from_census(
+    *,
+    root_job_id: str,
+    registry: SessionTargetRegistry,
+    binding_snapshot: RuntimeBindingSnapshot,
+    navigation_binding: dict[str, Any],
+    census_receipt: dict[str, Any],
+    boot_nonce: str,
+) -> WebSolRuntimeBindingLease:
+    """Resolve one canonical root binding inside a complete multi-chat census.
+
+    This is a read-only projection.  The root/CEO RuntimeBinding is elected by
+    the existing action-target owner; browser inventory may only prove which
+    conversation corresponds to that already-current binding.
+    """
+
+    resolution = resolve_sol_action_target(
+        root_job_id=root_job_id,
+        registry=registry,
+        binding_snapshot=binding_snapshot,
+        actor_binding=None,
+    )
+    if resolution.state is not ActionTargetState.RESOLVED or not resolution.session_alias:
+        _refuse("canonical_target_unresolved")
+    logical = _accepted_logical_target(registry.get(resolution.session_alias))
+    canonical = tuple(
+        value
+        for value in binding_snapshot.bindings
+        if value.session_alias == resolution.session_alias
+    )
+    if len(canonical) != 1:
+        _refuse("canonical_target_unresolved")
+    current = canonical[0]
+
+    binding = _accepted_navigation_binding(navigation_binding)
+    try:
+        accepted_receipt = census.validate_census_receipt(census_receipt)
+    except (protocol.WebSolProtocolError, TypeError, ValueError):
+        _refuse("census_invalid")
+    if accepted_receipt["status"] != "COLLECTED":
+        _refuse("census_not_collected")
+    try:
+        expected_instance = instance.adapter_instance_id(binding)
+    except instance.WebSolInstanceError:
+        _refuse("navigation_binding_invalid")
+    if accepted_receipt["adapter_instance_id"] != expected_instance:
+        _refuse("adapter_instance_mismatch")
+    try:
+        snapshot = census.decode_snapshot(accepted_receipt["snapshot"])
+    except (protocol.WebSolProtocolError, TypeError, ValueError):
+        _refuse("census_invalid")
+    if not (
+        snapshot["inventory_coverage"] == "COMPLETE_IN_SCOPE"
+        and snapshot["consistency"] == "STABLE_AT_BOUNDARIES"
+        and snapshot["reason"] == "NONE"
+        and snapshot["excluded_private_count"] == 0
+        and snapshot["omitted_tab_count"] == 0
+        and snapshot["unobserved_added_count"] == 0
+        and snapshot["probe_coverage"] in {"NONE", "COMPLETE_IN_SCOPE"}
+    ):
+        _refuse("census_incomplete")
+
+    matches: list[tuple[dict[str, Any], RuntimeBinding]] = []
+    for row in snapshot["rows"]:
+        fingerprint = row["conversation_fingerprint"]
+        if not _hex64(fingerprint):
+            continue
+        wire = derive_runtime_binding_wire(
+            adapter_instance_id=expected_instance,
+            conversation_fingerprint=fingerprint,
+            session_alias=logical.session_alias,
+            boot_nonce=boot_nonce,
+        )
+        candidate = RuntimeBinding(
+            session_alias=logical.session_alias,
+            binding_id=wire["runtime_binding_id"],
+            binding_generation=wire["runtime_binding_generation"],
+            native_handle=wire["native_handle"],
+            account_label=str(binding["seat_ref"]),
+            reasoning_surface=_RUNTIME_REASONING_SURFACE,
+        )
+        if candidate == current:
+            matches.append((row, candidate))
+
+    if not matches:
+        _refuse("exact_conversation_missing")
+    if len(matches) != 1:
+        _refuse("exact_conversation_ambiguous")
+    row, matched = matches[0]
+    if (
+        row["status"] != "OBSERVED"
+        or row["identity_evidence"] != "LOCATOR_AND_V1_PROBE"
+        or row["duplicate_count"] != 1
+        or row["duplicate_cue_disagreement"] is not False
+        or row["discarded"] is True
+        or row["frozen"] is True
+    ):
+        _refuse("exact_conversation_invalid")
+    if row["auth_required"] is not False:
+        _refuse("authentication_required")
+    if row["provider_error_present"] is not False:
+        _refuse("provider_error")
+    if row["generation_cue"] != "NOT_OBSERVED":
+        _refuse("generation_not_idle")
+
+    locator = binding["locator"]
+    target = ExactWebSolTarget(
+        adapter_instance_id=expected_instance,
+        seat_ref=str(binding["seat_ref"]),
+        env_manager=str(locator["env_manager"]),
+        folder_id=locator.get("folder_id"),
+        profile_id=str(locator["profile_id"]),
+        conversation_fingerprint=row["conversation_fingerprint"],
+        census_digest=_digest(accepted_receipt),
+    )
+    return WebSolRuntimeBindingLease(
+        target=target,
+        runtime_binding=matched,
+        runtime_binding_fingerprint=runtime_binding_fingerprint(matched, target),
+    )
+
+
 def _accepted_session_alias(value: Any) -> str:
     if not isinstance(value, str) or _SESSION_ALIAS_RE.fullmatch(value) is None:
         _refuse("session_alias_invalid")
@@ -420,5 +551,6 @@ __all__ = [
     "derive_runtime_binding_wire",
     "exact_target_from_census",
     "project_runtime_binding",
+    "resolve_bound_target_from_census",
     "runtime_binding_fingerprint",
 ]

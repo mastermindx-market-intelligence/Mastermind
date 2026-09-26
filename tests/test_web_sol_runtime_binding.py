@@ -8,7 +8,8 @@ import re
 import pytest
 
 from control_plane import surface_bindings as sb
-from control_plane.session_targets import RuntimeBinding, SessionTarget
+from control_plane.session_targets import RuntimeBinding, SessionTarget, SessionTargetRegistry
+from control_plane.sol_action_target import RuntimeBindingSnapshot
 from integrations.chairman_surfaces import web_sol_census_protocol as census
 from integrations.chairman_surfaces import web_sol_instance as instance
 from integrations.chairman_surfaces import web_sol_runtime_binding as runtime_binding
@@ -306,3 +307,245 @@ def test_runtime_binding_projection_detaches_inputs_and_never_embeds_navigation_
     assert CONVERSATION_URL not in repr(wire)
     assert "mutated-after-projection" not in repr(wire)
     assert projected.account_label == "chatgpt3"
+
+
+BOUND_ROOT_JOB_ID = "JOB-11001"
+UNRELATED_CONVERSATION_FINGERPRINT = "c" * 64
+
+
+def _bound_target_inputs():
+    navigation = _binding()
+    logical = _session_target()
+    adapter = instance.adapter_instance_id(navigation)
+    wire = runtime_binding.derive_runtime_binding_wire(
+        adapter_instance_id=adapter,
+        conversation_fingerprint=CONVERSATION_FINGERPRINT,
+        session_alias=logical.session_alias,
+        boot_nonce=BOOT_NONCE,
+    )
+    current = RuntimeBinding(
+        session_alias=logical.session_alias,
+        binding_id=wire["runtime_binding_id"],
+        binding_generation=wire["runtime_binding_generation"],
+        native_handle=wire["native_handle"],
+        account_label=navigation["seat_ref"],
+        reasoning_surface="chatgpt-sol",
+    )
+    registry = SessionTargetRegistry(
+        schema="mastermind.wake_session_targets.v2",
+        lifecycle_authority="executive_os",
+        production_armed=False,
+        policy_version="test-web-sol-bound-target-v1",
+        default_alias_by_seat={},
+        workstream_alias_by_seat={},
+        root_job_bindings={BOUND_ROOT_JOB_ID: {"ceo": logical.session_alias}},
+        targets={logical.session_alias: logical},
+    )
+    return navigation, registry, RuntimeBindingSnapshot.current((current,)), current
+
+
+def test_bound_target_selects_canonical_conversation_among_unrelated_chats_regardless_of_order():
+    navigation, registry, snapshot, current = _bound_target_inputs()
+
+    leases = [
+        runtime_binding.resolve_bound_target_from_census(
+            root_job_id=BOUND_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=snapshot,
+            navigation_binding=navigation,
+            census_receipt=_receipt(navigation, fingerprints=fingerprints),
+            boot_nonce=BOOT_NONCE,
+        )
+        for fingerprints in (
+            (UNRELATED_CONVERSATION_FINGERPRINT, CONVERSATION_FINGERPRINT),
+            (CONVERSATION_FINGERPRINT, UNRELATED_CONVERSATION_FINGERPRINT),
+        )
+    ]
+
+    assert [lease.runtime_binding for lease in leases] == [current, current]
+    assert [lease.target.conversation_fingerprint for lease in leases] == [
+        CONVERSATION_FINGERPRINT,
+        CONVERSATION_FINGERPRINT,
+    ]
+    assert leases[0].runtime_binding_fingerprint == leases[1].runtime_binding_fingerprint
+
+
+def _receipt_from_snapshot(navigation: dict, snapshot: dict) -> dict:
+    return {
+        "schema": census.RECEIPT_SCHEMA,
+        "adapter_instance_id": instance.adapter_instance_id(navigation),
+        "operation_key": "web-sol-r3-bound-census-fixture",
+        "nonce": "bound-census-nonce-fixture-0001",
+        "status": "COLLECTED",
+        "snapshot": census.encode_snapshot(snapshot),
+    }
+
+
+@pytest.mark.parametrize("registry_change", ["missing_root", "unknown_binding"])
+def test_bound_target_refuses_missing_or_unknown_canonical_root_binding(registry_change):
+    navigation, registry, snapshot, _ = _bound_target_inputs()
+    if registry_change == "missing_root":
+        registry = dataclasses.replace(registry, root_job_bindings={})
+    else:
+        snapshot = RuntimeBindingSnapshot.unknown()
+
+    with pytest.raises(runtime_binding.WebSolRuntimeBindingError) as excinfo:
+        runtime_binding.resolve_bound_target_from_census(
+            root_job_id=BOUND_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=snapshot,
+            navigation_binding=navigation,
+            census_receipt=_receipt(
+                navigation,
+                fingerprints=(UNRELATED_CONVERSATION_FINGERPRINT, CONVERSATION_FINGERPRINT),
+            ),
+            boot_nonce=BOOT_NONCE,
+        )
+    assert excinfo.value.code == "canonical_target_unresolved"
+
+
+def test_bound_target_refuses_duplicate_exact_conversation_but_allows_unrelated_chat():
+    navigation, registry, snapshot, _ = _bound_target_inputs()
+    with pytest.raises(runtime_binding.WebSolRuntimeBindingError) as excinfo:
+        runtime_binding.resolve_bound_target_from_census(
+            root_job_id=BOUND_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=snapshot,
+            navigation_binding=navigation,
+            census_receipt=_receipt(
+                navigation,
+                fingerprints=(
+                    UNRELATED_CONVERSATION_FINGERPRINT,
+                    CONVERSATION_FINGERPRINT,
+                    CONVERSATION_FINGERPRINT,
+                ),
+            ),
+            boot_nonce=BOOT_NONCE,
+        )
+    assert excinfo.value.code == "exact_conversation_ambiguous"
+
+
+@pytest.mark.parametrize(
+    ("navigation_change", "receipt_adapter", "boot_nonce", "code"),
+    [
+        (
+            {"locator": {
+                "env_manager": "multilogin",
+                "folder_id": FOLDER_ID,
+                "profile_id": "99999999-9999-4999-8999-999999999999",
+                "url": CONVERSATION_URL,
+            }},
+            None,
+            BOOT_NONCE,
+            "exact_conversation_missing",
+        ),
+        ({}, "f" * 64, BOOT_NONCE, "adapter_instance_mismatch"),
+        ({}, None, "boot-nonce-fixture-0000000099", "exact_conversation_missing"),
+    ],
+)
+def test_bound_target_refuses_wrong_profile_adapter_or_transport_boot(
+    navigation_change, receipt_adapter, boot_nonce, code
+):
+    navigation, registry, snapshot, _ = _bound_target_inputs()
+    if navigation_change:
+        navigation = copy.deepcopy(navigation)
+        navigation.update(navigation_change)
+    receipt = _receipt(
+        navigation,
+        adapter_instance_id=receipt_adapter,
+        fingerprints=(UNRELATED_CONVERSATION_FINGERPRINT, CONVERSATION_FINGERPRINT),
+    )
+
+    with pytest.raises(runtime_binding.WebSolRuntimeBindingError) as excinfo:
+        runtime_binding.resolve_bound_target_from_census(
+            root_job_id=BOUND_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=snapshot,
+            navigation_binding=navigation,
+            census_receipt=receipt,
+            boot_nonce=boot_nonce,
+        )
+    assert excinfo.value.code == code
+
+
+def test_bound_target_refuses_moving_inventory():
+    navigation, registry, binding_snapshot, _ = _bound_target_inputs()
+    snapshot = _snapshot(
+        adapter_instance_id=instance.adapter_instance_id(navigation),
+        fingerprints=(UNRELATED_CONVERSATION_FINGERPRINT, CONVERSATION_FINGERPRINT),
+    )
+    snapshot.update(
+        inventory_coverage="PARTIAL",
+        consistency="CHANGED",
+        reason="INVENTORY_CHANGED",
+        final_tab_count=3,
+        unobserved_added_count=1,
+    )
+
+    with pytest.raises(runtime_binding.WebSolRuntimeBindingError) as excinfo:
+        runtime_binding.resolve_bound_target_from_census(
+            root_job_id=BOUND_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=binding_snapshot,
+            navigation_binding=navigation,
+            census_receipt=_receipt_from_snapshot(navigation, snapshot),
+            boot_nonce=BOOT_NONCE,
+        )
+    assert excinfo.value.code == "census_incomplete"
+
+
+def test_bound_target_checks_health_only_on_the_canonical_conversation():
+    navigation, registry, binding_snapshot, current = _bound_target_inputs()
+    adapter = instance.adapter_instance_id(navigation)
+    unrelated_bad = _snapshot(
+        adapter_instance_id=adapter,
+        fingerprints=(UNRELATED_CONVERSATION_FINGERPRINT, CONVERSATION_FINGERPRINT),
+    )
+    unrelated_bad["rows"][0]["provider_error_present"] = True
+
+    lease = runtime_binding.resolve_bound_target_from_census(
+        root_job_id=BOUND_ROOT_JOB_ID,
+        registry=registry,
+        binding_snapshot=binding_snapshot,
+        navigation_binding=navigation,
+        census_receipt=_receipt_from_snapshot(navigation, unrelated_bad),
+        boot_nonce=BOOT_NONCE,
+    )
+    assert lease.runtime_binding == current
+    assert lease.target.conversation_fingerprint == CONVERSATION_FINGERPRINT
+
+    target_bad = _snapshot(
+        adapter_instance_id=adapter,
+        fingerprints=(UNRELATED_CONVERSATION_FINGERPRINT, CONVERSATION_FINGERPRINT),
+    )
+    target_bad["rows"][1]["provider_error_present"] = True
+    with pytest.raises(runtime_binding.WebSolRuntimeBindingError) as excinfo:
+        runtime_binding.resolve_bound_target_from_census(
+            root_job_id=BOUND_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=binding_snapshot,
+            navigation_binding=navigation,
+            census_receipt=_receipt_from_snapshot(navigation, target_bad),
+            boot_nonce=BOOT_NONCE,
+        )
+    assert excinfo.value.code == "provider_error"
+
+
+def test_bound_target_refuses_stale_runtime_binding_generation():
+    navigation, registry, snapshot, current = _bound_target_inputs()
+    stale = dataclasses.replace(current, binding_generation=current.binding_generation + 1)
+    snapshot = RuntimeBindingSnapshot.current((stale,))
+
+    with pytest.raises(runtime_binding.WebSolRuntimeBindingError) as excinfo:
+        runtime_binding.resolve_bound_target_from_census(
+            root_job_id=BOUND_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=snapshot,
+            navigation_binding=navigation,
+            census_receipt=_receipt(
+                navigation,
+                fingerprints=(UNRELATED_CONVERSATION_FINGERPRINT, CONVERSATION_FINGERPRINT),
+            ),
+            boot_nonce=BOOT_NONCE,
+        )
+    assert excinfo.value.code == "exact_conversation_missing"
