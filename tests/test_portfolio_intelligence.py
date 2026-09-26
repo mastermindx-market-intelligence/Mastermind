@@ -371,3 +371,62 @@ def test_every_catalog_surface_id_is_a_valid_bounded_request(macro_root):
         assert result["status"] in {"ok", "unavailable"}
         assert result["execution_authority"] is False
         assert len(json.dumps(result, ensure_ascii=False).encode()) <= 8_000
+
+
+# Active sector context: projection is not a ranking or execution permission.
+def _rotation_fixture(n=10):
+    return {"as_of": _day(), "market": {}, "sectors": [], "baskets": [
+        {"id": f"group-{i}", "ticker": "SMH", "name": f"Group {i}",
+         "rotation": {"rank": i, "stale": i < 2},
+         "conviction": {"score": 50}, "cycle": {}, "momentum": {}}
+        for i in range(n)]}
+
+
+def test_rotation_current_view_preserves_ids_and_discloses_excluded_rows(macro_root):
+    _write(macro_root, "site/sectordata/sector_central.json", _rotation_fixture())
+    out = pi.sector_rotation(limit=2)
+    assert [r["id"] for r in out["baskets"]] == ["group-2", "group-3"]
+    counts = out["coverage"]["baskets"]
+    assert counts["input"] == 10 and counts["current"] == 8 and counts["stale"] == 2
+    assert counts["returned"] == 2 and counts["remaining"] == 6
+    assert out["context_only"] is True and out["execution_authority"] is False
+    assert out["clock_basis"]["row_observation_time_verified"] is False
+    stale = pi.sector_rotation(view="stale", section="baskets")
+    assert [r["id"] for r in stale["baskets"]] == ["group-0", "group-1"]
+
+
+def test_rotation_pages_cover_every_native_id_without_proxy_dedup(macro_root):
+    _write(macro_root, "site/sectordata/sector_central.json", _rotation_fixture(20))
+    request = {"limit": 3, "view": "all", "section": "baskets"}
+    ids = []
+    for _ in range(20):
+        out = pi.sector_rotation(**request)
+        assert out["status"] == "ok" and out["sectors"] == []
+        ids.extend(r["id"] for r in out["baskets"])
+        request = out["continuation"]["baskets"]
+        if request is None:
+            break
+    assert ids == [f"group-{i}" for i in range(20)]
+
+
+def test_rotation_same_date_correction_refuses_mixed_generation(macro_root):
+    data = _rotation_fixture()
+    _write(macro_root, "site/sectordata/sector_central.json", data)
+    out = pi.sector_rotation(limit=1, section="baskets")
+    request = out["continuation"]["baskets"]
+    data["baskets"][-1]["name"] = "Corrected same date"
+    _write(macro_root, "site/sectordata/sector_central.json", data)
+    changed = pi.sector_rotation(**request)
+    assert changed["status"] == "source_changed"
+    assert changed["baskets"] == [] and changed["sectors"] == []
+    assert changed["execution_authority"] is False
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"offset": 1}, {"offset": -1}, {"offset": True}, {"section": "../../secret"},
+    {"view": "hot"}, {"generation": "wrong"}, {"limit": True}, {"limit": "2"},
+])
+def test_rotation_rejects_invalid_request_before_read(monkeypatch, kwargs):
+    monkeypatch.setattr(pi, "_read_vendor", lambda *a, **k: pytest.fail("unexpected read"))
+    out = pi.sector_rotation(**kwargs)
+    assert out["status"] == "invalid_request" and out["execution_authority"] is False
