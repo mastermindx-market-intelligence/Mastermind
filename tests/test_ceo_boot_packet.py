@@ -211,6 +211,9 @@ def test_packet_shape_and_embedded_brief(tmp_path):
     assert isinstance(packet["strategic_state"], dict)
     assert packet["strategic_state"]["company_phase"]
     assert isinstance(packet["strategic_state"]["north_star"], list)
+    assert isinstance(packet["strategic_state"]["resource_policy"], dict)
+    assert isinstance(packet["strategic_state"]["phase_gates"], dict)
+    assert isinstance(packet["strategic_state"]["review_triggers"], list)
     assert isinstance(packet["strategic_state"]["p0"], list)
     assert set(packet["strategic_state"]["p0"][0]) == {
         "id", "department", "objective", "status"
@@ -411,13 +414,13 @@ _LADDER = [
     ("legacy_unblocked_ignored", {"needs_ceo": [], "blocked": [],
                                   "unblocked": [{"workstream": "WS-C", "wave": "W2",
                                                  "title": "t", "next_action": "Draft the spec"}]},
-     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+     "Select the highest-leverage eligible work within the active company P0s (CORE_INTELLIGENCE_PRODUCTIZATION, PREMIUM_PRODUCT_EXPERIENCE, DISTRIBUTION_AND_REVENUE, AUTONOMY_FORCE_MULTIPLIER), using the current resource policy and phase gates. Use the Improvement Agenda only as the ranked domain source for portfolio/intelligence self-improvement candidates."),
     ("legacy_unblocked_title_ignored", {"needs_ceo": [], "blocked": [],
                                         "unblocked": [{"workstream": "WS-C", "wave": "W2",
                                                        "title": "Cut the arc"}]},
-     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+     "Select the highest-leverage eligible work within the active company P0s (CORE_INTELLIGENCE_PRODUCTIZATION, PREMIUM_PRODUCT_EXPERIENCE, DISTRIBUTION_AND_REVENUE, AUTONOMY_FORCE_MULTIPLIER), using the current resource policy and phase gates. Use the Improvement Agenda only as the ranked domain source for portfolio/intelligence self-improvement candidates."),
     ("quiet", {"needs_ceo": [], "blocked": [], "unblocked": []},
-     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+     "Select the highest-leverage eligible work within the active company P0s (CORE_INTELLIGENCE_PRODUCTIZATION, PREMIUM_PRODUCT_EXPERIENCE, DISTRIBUTION_AND_REVENUE, AUTONOMY_FORCE_MULTIPLIER), using the current resource policy and phase gates. Use the Improvement Agenda only as the ranked domain source for portfolio/intelligence self-improvement candidates."),
 ]
 
 
