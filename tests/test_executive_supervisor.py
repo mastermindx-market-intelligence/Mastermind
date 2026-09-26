@@ -439,10 +439,14 @@ def _runtime_and_routed_job(
     tmp_path: Path,
     *,
     profile_id: str = "sealed.worker.write.no-extensions.v1",
+    provider: str = "codex",
+    worker_type: str = "codex-cli",
+    quota_class: str = "codex-native",
 ) -> tuple[Runtime, str, Path]:
     registry = ExecutionCapabilityRegistry.load()
     profile = registry.resolve(profile_id)
     capability_identity = {
+        "adapter_id": worker_type,
         "execution_profile_id": profile.profile_id,
         "execution_profile_digest": profile.profile_digest,
         "capability_policy_version": registry.policy_version,
@@ -451,14 +455,15 @@ def _runtime_and_routed_job(
     runtime = Runtime.at(tmp_path)
     runtime.workers.register_worker(
         "codex-routed-01",
-        provider="codex",
+        provider=provider,
         account_label="dedicated-worker-account",
-        worker_type="codex-cli",
+        worker_type=worker_type,
         capabilities=["code", "tests"],
         quota_classes={
-            "codex-native": {
+            quota_class: {
+                "provider": provider,
                 "capabilities": ["code", "tests"],
-                "model": "gpt-5.6-sol",
+                "model": "fixture-exact-model",
                 "effort": "xhigh",
                 "cost_class": "standard",
                 "metadata": capability_identity,
@@ -474,12 +479,12 @@ def _runtime_and_routed_job(
         allowed_write_paths=["control_plane/proof.py"],
         validation_commands=[["/usr/bin/true"]],
         constraints={
-            "provider": "codex",
-            "model": "gpt-5.6-sol",
+            "provider": provider,
+            "model": "fixture-exact-model",
             "effort": "xhigh",
             "cost_class": "standard",
             "base_sha": "c" * 40,
-            "eligible_quota_classes": ["codex-native"],
+            "eligible_quota_classes": [quota_class],
             "required_capabilities": ["code", "tests"],
             "routing_policy_version": "2026-08-24.stage2",
             **capability_identity,
@@ -507,6 +512,50 @@ def test_routed_job_launches_only_with_exact_installed_capability_profile(
         "sealed.worker.write.no-extensions.v1"
     )
 
+
+
+def test_native_claude_profile_reaches_supervisor_admission_without_arming_provider(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _ = _runtime_and_routed_job(
+        tmp_path,
+        profile_id="sealed.worker.claude.write.no-extensions.v1",
+        provider="anthropic",
+        worker_type="claude-code",
+        quota_class="claude-native",
+    )
+    inspector = FakeInspector()
+    adapter = FakeAdapter(inspector)
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+
+    active = asyncio.run(supervisor.start_job(job_id))
+
+    assert adapter.spec is not None
+    assert active.lease.attempt.status is AttemptStatus.CLAIMED
+    persisted = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert persisted is not None and persisted.status is AttemptStatus.CHECKPOINTED
+    assert persisted.launch_metadata["routing"]["adapter_id"] == "claude-code"
+    assert persisted.launch_metadata["routing"]["execution_profile_id"] == (
+        "sealed.worker.claude.write.no-extensions.v1"
+    )
+
+
+def test_supervisor_refuses_cross_provider_execution_surface_before_start(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _ = _runtime_and_routed_job(
+        tmp_path,
+        profile_id="sealed.worker.claude.write.no-extensions.v1",
+        provider="codex",
+        worker_type="codex-cli",
+    )
+    inspector = FakeInspector()
+    adapter = FakeAdapter(inspector)
+
+    with pytest.raises(SupervisorError, match="incompatible execution profile"):
+        asyncio.run(_supervisor(runtime, tmp_path, adapter).start_job(job_id))
+
+    assert adapter.spec is None
 
 def test_routed_job_refuses_capacity_profile_drift_before_provider_start(
     tmp_path: Path,

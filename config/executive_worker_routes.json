@@ -9,6 +9,11 @@
       "enabled": true,
       "autonomous_allowed": true
     },
+    "anthropic": {
+      "adapter_id": "claude-code",
+      "enabled": false,
+      "autonomous_allowed": false
+    },
     "qwen": {
       "adapter_id": "openai-compatible",
       "enabled": false,

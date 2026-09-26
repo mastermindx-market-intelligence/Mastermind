@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from control_plane import worker_adapter as worker_adapter_module
 from control_plane.executive_runtime import Runtime
 from control_plane.model_router import (
     DEFAULT_POLICY_PATH,
@@ -92,7 +93,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
     assert implementation.required_capabilities == ("code",)
     assert implementation.execution_profile_id == "sealed.worker.write.no-extensions.v1"
     assert len(implementation.execution_profile_digest) == 64
-    assert implementation.capability_policy_version == "2026-09-18.browser-b1-runtime-r2"
+    assert implementation.capability_policy_version == "2026-09-22.native-claude-admission-p0"
     assert len(implementation.capability_policy_digest) == 64
 
     elevated = router.route(WorkRequest("implementation", risk="elevated"))
@@ -131,6 +132,12 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
 
     assert router.providers["codex"].enabled
     assert router.providers["codex"].autonomous_allowed
+    assert router.providers["anthropic"] == ProviderAlias(
+        "anthropic",
+        "claude-code",
+        False,
+        False,
+    )
     for provider in ("qwen", "glm", "xai"):
         assert not router.providers[provider].enabled
         assert not router.providers[provider].autonomous_allowed
@@ -145,6 +152,7 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
     assert terra.execution_profile_id == "sealed.worker.readonly.no-extensions.v1"
 
     assert adapter_descriptor("codex-cli").implemented
+    assert not adapter_descriptor("claude-code").implemented
     assert not adapter_descriptor("openai-compatible").implemented
 
 
@@ -164,6 +172,47 @@ def test_policy_refuses_production_arming_or_an_unimplemented_live_provider(tmp_
     with pytest.raises(RoutingPolicyError, match="unimplemented adapter"):
         ModelRouter.load(unimplemented)
 
+
+
+def test_native_claude_worker_alias_requires_reviewed_surface_and_arming(
+    tmp_path, monkeypatch
+):
+    raw = _v2_policy()
+    raw["providers"]["anthropic"]["enabled"] = True
+    raw["providers"]["anthropic"]["autonomous_allowed"] = True
+    raw["model_aliases"]["claude.native.fixture"] = {
+        "provider_alias": "anthropic",
+        "execution_profile_id": "sealed.worker.claude.write.no-extensions.v1",
+        "model": "claude-fixture-exact",
+        "effort": "high",
+        "cost_class": "small",
+        "capabilities": ["code", "tests"],
+        "worker_eligible": True,
+    }
+
+    with pytest.raises(RoutingPolicyError, match="unimplemented adapter"):
+        _load_policy(tmp_path, raw)
+
+    descriptor = adapter_descriptor("claude-code")
+    monkeypatch.setitem(
+        worker_adapter_module.ADAPTER_DESCRIPTORS,
+        "claude-code",
+        dataclasses.replace(descriptor, implemented=True),
+    )
+    router = _load_policy(tmp_path, raw)
+    alias = router.resolve_model_alias("claude.native.fixture")
+    assert alias.adapter_id == "claude-code"
+    assert alias.execution_profile_id == "sealed.worker.claude.write.no-extensions.v1"
+
+    mismatched = json.loads(json.dumps(raw))
+    mismatched["model_aliases"]["claude.native.fixture"][
+        "execution_profile_id"
+    ] = "sealed.worker.write.no-extensions.v1"
+    with pytest.raises(
+        RoutingPolicyError,
+        match="adapter/execution-surface mismatch",
+    ):
+        _load_policy(tmp_path, mismatched)
 
 def test_heterogeneous_pair_does_not_arm_general_routing_or_bypass_capacity(tmp_path):
     checked_in = ModelRouter.load()

@@ -11,6 +11,7 @@ from control_plane.executive_agent_capabilities import (
     CAPABILITY_POLICY_SCHEMA_V4,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
     app_server_security_config_digest,
     app_server_security_config_projection,
     observed_mcp_tool_schema_digest,
@@ -64,7 +65,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-09-18.browser-b1-runtime-r2"
+    assert registry.policy_version == "2026-09-22.native-claude-admission-p0"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -72,6 +73,23 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert sealed.write_capable is True
     assert sealed.native_helper_policy is NativeHelperPolicy.DISABLED
     assert sealed.required_capability_names == ()
+
+    claude_read = registry.resolve("sealed.worker.claude.readonly.no-extensions.v1")
+    assert claude_read.execution_surface == "claude-code"
+    assert claude_read.write_capable is False
+    assert claude_read.required_capability_names == ()
+
+    claude_write = registry.resolve("sealed.worker.claude.write.no-extensions.v1")
+    assert claude_write.execution_surface == "claude-code"
+    assert claude_write.write_capable is True
+    assert claude_write.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert claude_write.required_capability_names == ()
+
+    assert adapter_supports_execution_surface("codex-cli", "codex-exec")
+    assert adapter_supports_execution_surface("codex-cli", "codex-app-server")
+    assert not adapter_supports_execution_surface("codex-cli", "claude-code")
+    assert adapter_supports_execution_surface("claude-code", "claude-code")
+    assert not adapter_supports_execution_surface("claude-code", "codex-exec")
 
     operator = registry.resolve("operator.appserver.readonly.v1")
     assert operator.execution_surface == "codex-app-server"
@@ -96,6 +114,18 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert helper.native_helper.hide_spawn_agent_metadata is True
     assert helper.mcp_servers == ("openai-developer-docs-v1",)
 
+
+
+def test_native_claude_sealed_surface_refuses_extension_capabilities(tmp_path):
+    raw = _raw_policy()
+    profile = raw["profiles"]["sealed.worker.claude.readonly.no-extensions.v1"]
+    profile["mcp_servers"] = ["openai-developer-docs-v1"]
+
+    with pytest.raises(
+        CapabilityPolicyError,
+        match="sealed worker execution surface",
+    ):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 def test_profile_compiles_exact_mcp_manifest_and_secret_free_config():
     profile = ExecutionCapabilityRegistry.load().resolve(
@@ -598,7 +628,7 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact():
     assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
     assert registry.capability_packages == {}
     assert registry.policy_digest == (
-        "daac5b9a290156b2b96bf562ed69ffd79d93ba753d3017799bef303aac2b38ed"
+        "bab6bb7410b071a233c2ff859883098c13d5803b007b8464bda2a1e9e1b04c86"
     )
     assert registry.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"

@@ -40,7 +40,11 @@ from common.redaction import sanitize_external_text
 from control_plane import ceo_intent
 from control_plane import executive_dialogue_observation as dialogue_observation
 from control_plane import executive_ceo_ingress as ceo_ingress
-from control_plane.executive_agent_capabilities import CapabilityPolicyError
+from control_plane.executive_agent_capabilities import (
+    CapabilityPolicyError,
+    adapter_supports_execution_surface,
+    is_sealed_worker_execution_surface,
+)
 from control_plane.executive_coo_cycle import CooCycle, CooCycleOutcome
 from control_plane.executive_runtime import (
     AttemptStatus,
@@ -2044,8 +2048,10 @@ class ExecutiveControlService:
             raise ValueError(f"configured COO execution alias is invalid: {exc}") from exc
         if (
             not alias.worker_eligible
-            or alias.adapter_id != "codex-cli"
-            or profile.execution_surface != "codex-exec"
+            or not is_sealed_worker_execution_surface(profile.execution_surface)
+            or not adapter_supports_execution_surface(
+                alias.adapter_id, profile.execution_surface
+            )
             or not profile.write_capable
             or profile.auth_realm != "dedicated-worker-account"
             or profile.approval_policy != "never"
@@ -2056,7 +2062,7 @@ class ExecutiveControlService:
             or profile.plugins
         ):
             raise ValueError(
-                "configured COO alias must be a sealed, extension-free, write-capable Codex worker"
+                "configured COO alias must be a sealed, extension-free, write-capable worker"
             )
         if (
             not operator_alias.worker_eligible
