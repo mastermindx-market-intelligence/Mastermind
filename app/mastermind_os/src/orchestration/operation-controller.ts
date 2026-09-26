@@ -114,6 +114,7 @@ export interface PendingPointerStore {
 type SafeReason =
   | "IDLE"
   | "SUBMITTING"
+  | "OPERATION_BUSY"
   | "CLEARED"
   | "OWNER_ABSENT"
   | "INVALID_KIND"
@@ -309,10 +310,16 @@ export class OperationController {
   /**
    * Begin a new operation.
    *
-   * Ordering matters: identity, then intent shape, then the in-flight join,
-   * then the pending hint. A hint already held by the store for this scope
-   * means an operation may already exist whose outcome is unknown, so no new
-   * intent is submitted — the caller must `recover()` to resolve it.
+   * Ordering matters: identity, then intent shape, then the in-flight busy
+   * gate, then the pending hint. A hint already held by the store for this
+   * scope means an operation may already exist whose outcome is unknown, so
+   * no new intent is submitted — the caller must `recover()` to resolve it.
+   *
+   * A begin that arrives while another operation is in flight is refused
+   * locally (`OPERATION_BUSY`) without joining that promise, even when the
+   * intents match. The original operation is left running. This is a
+   * before-effect local refusal, not a backend refusal, and it does not
+   * copy, compare, or store the caller's payload.
    */
   async begin(intent: CommandIntent): Promise<OperationState> {
     const ctx = this._port.context();
@@ -332,8 +339,7 @@ export class OperationController {
       return this._idle("INVALID_TARGET");
     }
 
-    // Duplicate synchronous / racing begin joins the one in-flight operation.
-    if (this._inflight) return this._inflight;
+    if (this._inflight) return this._busy();
 
     const scope = ctx.principalScope;
     const stored = this._readStored(scope);
@@ -374,12 +380,28 @@ export class OperationController {
 
   /**
    * Resolve the pending hint through `readOperation` only. Never submits.
+   *
+   * Recover is observation only. It may join an in-flight promise only when
+   * the live principal and generation match the captured tracked context.
+   * A foreign or changed context is refused locally (`OPERATION_BUSY`)
+   * without leaking the original pointer or selection, without publishing,
+   * and without clearing the original-scope hint.
    */
   async recover(): Promise<OperationState> {
     const ctx = this._port.context();
     if (!ctx) return this._idle("OWNER_ABSENT");
 
-    if (this._inflight) return this._inflight;
+    if (this._inflight) {
+      const tracked = this._tracked;
+      if (
+        tracked &&
+        ctx.principalScope === tracked.scope &&
+        ctx.generation === tracked.generation
+      ) {
+        return this._inflight;
+      }
+      return this._busy();
+    }
 
     const scope = ctx.principalScope;
     const stored = this._readStored(scope);
@@ -651,5 +673,14 @@ export class OperationController {
     const state: IdleState = { status: "idle", pointer: null, reason };
     this._state = state;
     return state;
+  }
+
+  /**
+   * Before-effect local refusal for a caller that is not the in-flight
+   * operation. Does not publish, does not mutate epoch/tracked/store/abort,
+   * and does not expose the original pointer or selection.
+   */
+  private _busy(): RefusedState {
+    return { status: "refused", pointer: null, reason: "OPERATION_BUSY" };
   }
 }

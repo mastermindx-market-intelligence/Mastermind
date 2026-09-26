@@ -185,12 +185,45 @@ function deferredSubmit(): {
   };
 }
 
+/** Watch whether a promise has settled without awaiting it. */
+function watchSettled(p: Promise<unknown>): { readonly settled: () => boolean } {
+  let settled = false;
+  void p.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  return { settled: () => settled };
+}
+
+function expectLocalBusy(result: OperationState): void {
+  expect(result.status).toBe("refused");
+  expect(result.reason).toBe("OPERATION_BUSY");
+  expect(result.pointer).toBeNull();
+  expect(result).not.toHaveProperty("missionSelection");
+}
+
 // ── Test intents ───────────────────────────────────────────────────────────────
 
 const LAUNCH_INTENT: CommandIntent = {
   kind: "launch",
   payload: { key: "value" },
   targetKey: null,
+};
+
+const MESSAGE_INTENT: CommandIntent = {
+  kind: "message",
+  payload: { text: "hi" },
+  targetKey: "t-1",
+};
+
+const STOP_INTENT: CommandIntent = {
+  kind: "stop",
+  payload: {},
+  targetKey: "t-1",
 };
 
 const BASE_POINTER: OperationPointer = {
@@ -281,57 +314,90 @@ describe("OperationController", () => {
       expect(order).toEqual(["write", "submit"]);
     });
 
-    it("concurrent duplicate begin joins same in-flight promise", async () => {
+    it("same-intent duplicate begin is local OPERATION_BUSY; original continues", async () => {
       const { store } = makeStoreWithState();
       const { submitFn, resolve } = deferredSubmit();
       const portState = makePort({ _submit: submitFn });
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
-      const p2 = ctrl.begin(LAUNCH_INTENT);
-      resolve(acceptedEcho(SUBMITTED_POINTER));
-      const [r1, r2] = await Promise.all([p1, p2]);
+      const watch = watchSettled(p1);
+      const p2 = await ctrl.begin(LAUNCH_INTENT);
+      await Promise.resolve();
 
+      expectLocalBusy(p2);
+      expect(watch.settled()).toBe(false);
+      expect(ctrl.getState().status).toBe("submitting");
+      expect(ctrl.getState().pointer).toEqual(SUBMITTED_POINTER);
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
       expect(submitFn).toHaveBeenCalledTimes(1);
-      expect(r1.status).toBe("accepted");
-      expect(r2.status).toBe("accepted");
-    });
-
-    it("racing (non-synchronous) begin does not submit twice", async () => {
-      const { store } = makeStoreWithState();
-      const { submitFn, resolve } = deferredSubmit();
-      const portState = makePort({ _submit: submitFn });
-      const ctrl = new OperationController(buildPort(portState), store);
-
-      const p1 = ctrl.begin(LAUNCH_INTENT);
-      // Started without awaiting p1, so the first operation is still in flight.
-      // A different kind entirely must not sneak in a second submit.
-      const p2 = ctrl.begin({ kind: "message", payload: {}, targetKey: "t-1" });
-      expect(submitFn).toHaveBeenCalledTimes(1);
+      expect(portState._prepare).toHaveBeenCalledTimes(1);
 
       resolve(acceptedEcho(SUBMITTED_POINTER));
-      const [r1, r2] = await Promise.all([p1, p2]);
-
-      // Both callers joined one operation and observe one shared resolution.
-      expect(r1).toBe(r2);
+      const r1 = await p1;
       expect(r1.status).toBe("accepted");
+      expect(r1.reason).toBe("ACCEPTED");
+      expect(ctrl.getState().status).toBe("accepted");
       expect(submitFn).toHaveBeenCalledTimes(1);
     });
 
-    it("same-key differing payload while unresolved never resubmits", async () => {
+    it("mixed-kind/target begin is local OPERATION_BUSY (launch vs stop)", async () => {
       const { store } = makeStoreWithState();
       const { submitFn, resolve } = deferredSubmit();
       const portState = makePort({ _submit: submitFn });
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
-      const p2 = ctrl.begin({ kind: "launch", payload: { different: true }, targetKey: null });
-      resolve(acceptedEcho(SUBMITTED_POINTER));
-      const [r1, r2] = await Promise.all([p1, p2]);
+      const watch = watchSettled(p1);
+      const p2 = await ctrl.begin(STOP_INTENT);
+      const p3 = await ctrl.begin(MESSAGE_INTENT);
+      await Promise.resolve();
 
+      expectLocalBusy(p2);
+      expectLocalBusy(p3);
+      expect(watch.settled()).toBe(false);
+      expect(ctrl.getState().status).toBe("submitting");
+      expect(ctrl.getState().pointer).toEqual(SUBMITTED_POINTER);
+      expect(ctrl.getState().reason).toBe("SUBMITTING");
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
       expect(submitFn).toHaveBeenCalledTimes(1);
+      expect(portState._prepare).toHaveBeenCalledTimes(1);
+
+      resolve(acceptedEcho(SUBMITTED_POINTER));
+      const r1 = await p1;
       expect(r1.status).toBe("accepted");
-      expect(r2.status).toBe("accepted");
+      expect(r1.reason).toBe("ACCEPTED");
+      expect(ctrl.getState().status).toBe("accepted");
+      expect(submitFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("different-payload begin is local OPERATION_BUSY; original continues", async () => {
+      const { store } = makeStoreWithState();
+      const { submitFn, resolve } = deferredSubmit();
+      const portState = makePort({ _submit: submitFn });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const p1 = ctrl.begin(LAUNCH_INTENT);
+      const watch = watchSettled(p1);
+      const p2 = await ctrl.begin({
+        kind: "launch",
+        payload: { different: true },
+        targetKey: null,
+      });
+      await Promise.resolve();
+
+      expectLocalBusy(p2);
+      expect(watch.settled()).toBe(false);
+      expect(ctrl.getState().status).toBe("submitting");
+      expect(ctrl.getState().pointer).toEqual(SUBMITTED_POINTER);
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+      expect(submitFn).toHaveBeenCalledTimes(1);
+
+      resolve(acceptedEcho(SUBMITTED_POINTER));
+      const r1 = await p1;
+      expect(r1.status).toBe("accepted");
+      expect(ctrl.getState().status).toBe("accepted");
+      expect(submitFn).toHaveBeenCalledTimes(1);
     });
 
     it("if store has pointer, begin returns checking requiring recover", async () => {
@@ -473,19 +539,170 @@ describe("OperationController", () => {
       expect(result.reason).toBe("INVALID_PAYLOAD");
     });
 
-    it("racing begin joins the one in-flight submit", async () => {
+    it("racing begin is local OPERATION_BUSY; original submit count stays 1", async () => {
       const { store } = makeStoreWithState();
       const first = deferredSubmit();
       const portState = makePort({ _submit: first.submitFn });
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
-      const p2 = ctrl.begin(LAUNCH_INTENT);
-      first.resolve(acceptedEcho(SUBMITTED_POINTER));
-      await Promise.all([p1, p2]);
+      const watch = watchSettled(p1);
+      const p2 = await ctrl.begin(LAUNCH_INTENT);
+      await Promise.resolve();
 
+      expectLocalBusy(p2);
+      expect(watch.settled()).toBe(false);
+      expect(ctrl.getState().status).toBe("submitting");
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+      expect(first.submitFn).toHaveBeenCalledTimes(1);
+
+      first.resolve(acceptedEcho(SUBMITTED_POINTER));
+      const r1 = await p1;
+      expect(r1.status).toBe("accepted");
       expect(ctrl.getState().status).toBe("accepted");
       expect(first.submitFn).toHaveBeenCalledTimes(1);
+    });
+
+    const KIND_PAIRS: ReadonlyArray<{ first: OperationKind; second: OperationKind }> = (
+      ["launch", "message", "stop"] as const
+    ).flatMap((first) =>
+      (["launch", "message", "stop"] as const).map((second) => ({ first, second })),
+    );
+
+    it.each(KIND_PAIRS)(
+      "in-flight $first begin refuses a concurrent $second begin",
+      async ({ first, second }) => {
+        const { store } = makeStoreWithState();
+        const held = deferredSubmit();
+        const portState = makePort({ _submit: held.submitFn });
+        const ctrl = new OperationController(buildPort(portState), store);
+        const firstIntent: CommandIntent = {
+          kind: first,
+          payload: { n: 1 },
+          targetKey: first === "launch" ? null : "t-first",
+        };
+        const secondIntent: CommandIntent = {
+          kind: second,
+          payload: { n: 2 },
+          targetKey: second === "launch" ? null : "t-second",
+        };
+        const submitted: OperationPointer = {
+          operationKey: `op-${first}-1`,
+          kind: first,
+          targetKey: firstIntent.targetKey,
+        };
+
+        const p1 = ctrl.begin(firstIntent);
+        const watch = watchSettled(p1);
+        const p2 = await ctrl.begin(secondIntent);
+        await Promise.resolve();
+
+        expectLocalBusy(p2);
+        expect(watch.settled()).toBe(false);
+        expect(ctrl.getState().status).toBe("submitting");
+        expect(ctrl.getState().pointer).toEqual(submitted);
+        expect(store.read("scope-A")).toEqual(submitted);
+        expect(held.submitFn).toHaveBeenCalledTimes(1);
+        expect(portState._prepare).toHaveBeenCalledTimes(1);
+
+        held.resolve(acceptedEcho(submitted));
+        const r1 = await p1;
+        expect(r1.status).toBe("accepted");
+        expect(held.submitFn).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it("changed-principal begin is local OPERATION_BUSY without leaking or submitting", async () => {
+      const { store } = makeStoreWithState();
+      const { submitFn, resolve } = deferredSubmit();
+      const portState = makePort({ _submit: submitFn });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const p1 = ctrl.begin(LAUNCH_INTENT);
+      const watch = watchSettled(p1);
+      portState._ctx = { principalScope: "scope-B", generation: "gen-1" };
+      const p2 = await ctrl.begin(LAUNCH_INTENT);
+      await Promise.resolve();
+
+      expectLocalBusy(p2);
+      expect(JSON.stringify(p2)).not.toContain("op-launch-1");
+      expect(watch.settled()).toBe(false);
+      expect(ctrl.getState().status).toBe("submitting");
+      expect(ctrl.getState().pointer).toEqual(SUBMITTED_POINTER);
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+      expect(store.read("scope-B")).toBeNull();
+      expect(submitFn).toHaveBeenCalledTimes(1);
+      expect(portState._prepare).toHaveBeenCalledTimes(1);
+
+      portState._ctx = { principalScope: "scope-A", generation: "gen-1" };
+      resolve(acceptedEcho(SUBMITTED_POINTER));
+      const r1 = await p1;
+      expect(r1.status).toBe("accepted");
+      expect(store.read("scope-A")).toBeNull();
+      expect(store.read("scope-B")).toBeNull();
+      expect(submitFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("changed-generation begin is local OPERATION_BUSY without joining", async () => {
+      const { store } = makeStoreWithState();
+      const { submitFn, resolve } = deferredSubmit();
+      const portState = makePort({ _submit: submitFn });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const p1 = ctrl.begin(LAUNCH_INTENT);
+      portState._ctx = { principalScope: "scope-A", generation: "gen-2" };
+      const p2 = await ctrl.begin(LAUNCH_INTENT);
+
+      expectLocalBusy(p2);
+      expect(ctrl.getState().status).toBe("submitting");
+      expect(ctrl.getState().pointer).toEqual(SUBMITTED_POINTER);
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+      expect(submitFn).toHaveBeenCalledTimes(1);
+
+      portState._ctx = { principalScope: "scope-A", generation: "gen-1" };
+      resolve(acceptedEcho(SUBMITTED_POINTER));
+      const r1 = await p1;
+      expect(r1.status).toBe("accepted");
+      expect(submitFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("invalid intent still precedes the in-flight busy gate", async () => {
+      const { store } = makeStoreWithState();
+      const { submitFn, resolve } = deferredSubmit();
+      const portState = makePort({ _submit: submitFn });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const p1 = ctrl.begin(LAUNCH_INTENT);
+      const bad = await ctrl.begin({
+        kind: "restart" as OperationKind,
+        payload: {},
+        targetKey: null,
+      });
+
+      expect(bad.status).toBe("idle");
+      expect(bad.reason).toBe("INVALID_KIND");
+      expect(submitFn).toHaveBeenCalledTimes(1);
+
+      resolve(acceptedEcho(SUBMITTED_POINTER));
+      await p1;
+    });
+
+    it("owner absence still precedes the in-flight busy gate", async () => {
+      const { store } = makeStoreWithState();
+      const { submitFn, resolve } = deferredSubmit();
+      const portState = makePort({ _submit: submitFn });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const p1 = ctrl.begin(LAUNCH_INTENT);
+      portState._ctx = null;
+      const absent = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(absent.status).toBe("idle");
+      expect(absent.reason).toBe("OWNER_ABSENT");
+      expect(submitFn).toHaveBeenCalledTimes(1);
+
+      resolve(acceptedEcho(SUBMITTED_POINTER));
+      await p1;
     });
   });
 
@@ -570,9 +787,82 @@ describe("OperationController", () => {
       const p1 = ctrl.recover();
       const p2 = ctrl.recover();
       resolveRead();
-      await Promise.all([p1, p2]);
+      const [r1, r2] = await Promise.all([p1, p2]);
 
       expect(readFn).toHaveBeenCalledTimes(1);
+      expect(r1).toBe(r2);
+    });
+
+    it("same-owner recover still joins the in-flight begin", async () => {
+      const { store } = makeStoreWithState();
+      const { submitFn, resolve } = deferredSubmit();
+      const readFn = vi.fn();
+      const portState = makePort({ _submit: submitFn, _readOp: readFn });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const p1 = ctrl.begin(LAUNCH_INTENT);
+      const recovered = ctrl.recover();
+      resolve(acceptedEcho(SUBMITTED_POINTER));
+      const [r1, r2] = await Promise.all([p1, recovered]);
+
+      expect(r1).toBe(r2);
+      expect(r1.status).toBe("accepted");
+      expect(submitFn).toHaveBeenCalledTimes(1);
+      expect(readFn).not.toHaveBeenCalled();
+    });
+
+    it("foreign-principal recover during in-flight is local OPERATION_BUSY without leaking", async () => {
+      const { store } = makeStoreWithState();
+      const { submitFn, resolve } = deferredSubmit();
+      const readFn = vi.fn();
+      const portState = makePort({ _submit: submitFn, _readOp: readFn });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const p1 = ctrl.begin(LAUNCH_INTENT);
+      const watch = watchSettled(p1);
+      portState._ctx = { principalScope: "scope-B", generation: "gen-1" };
+      const recovered = await ctrl.recover();
+      await Promise.resolve();
+
+      expectLocalBusy(recovered);
+      expect(JSON.stringify(recovered)).not.toContain("op-launch-1");
+      expect(recovered).not.toHaveProperty("missionSelection");
+      expect(watch.settled()).toBe(false);
+      expect(ctrl.getState().status).toBe("submitting");
+      expect(ctrl.getState().pointer).toEqual(SUBMITTED_POINTER);
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+      expect(store.read("scope-B")).toBeNull();
+      expect(submitFn).toHaveBeenCalledTimes(1);
+      expect(readFn).not.toHaveBeenCalled();
+
+      resolve(acceptedEcho(SUBMITTED_POINTER));
+      await p1;
+    });
+
+    it("changed-generation recover during in-flight is local OPERATION_BUSY without leaking", async () => {
+      const { store } = makeStoreWithState();
+      const { submitFn, resolve } = deferredSubmit();
+      const readFn = vi.fn();
+      const portState = makePort({ _submit: submitFn, _readOp: readFn });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const p1 = ctrl.begin(LAUNCH_INTENT);
+      portState._ctx = { principalScope: "scope-A", generation: "gen-2" };
+      const recovered = await ctrl.recover();
+
+      expectLocalBusy(recovered);
+      expect(JSON.stringify(recovered)).not.toContain("op-launch-1");
+      expect(ctrl.getState().status).toBe("submitting");
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+      expect(submitFn).toHaveBeenCalledTimes(1);
+      expect(readFn).not.toHaveBeenCalled();
+
+      portState._ctx = { principalScope: "scope-A", generation: "gen-1" };
+      resolve(acceptedEcho(SUBMITTED_POINTER));
+      const r1 = await p1;
+      expect(r1.status).toBe("accepted");
+      expect(submitFn).toHaveBeenCalledTimes(1);
+      expect(readFn).not.toHaveBeenCalled();
     });
 
     it("lost response then NEW controller recover uses readOperation only", async () => {
