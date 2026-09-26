@@ -1,8 +1,8 @@
 """control_plane.strategic_state — validated read of config/strategic_state.yml.
 
 That file states what the company is currently trying to accomplish (phase, north
-star, P0 objectives, resource policy, phase gates, standing constraints, and review
-triggers).  This module is the
+star, P0 objectives, resource policy, the core-product value/readiness model, phase
+gates, standing constraints, and review triggers).  This module is the
 only supported way to read it: it parses, validates, and caches it, and raises
 :class:`StrategicStateError` on anything malformed.
 
