@@ -139,8 +139,9 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
   law (Charter P7) behind `duplicate_control_planes`.
 - **Boundaries (Agent OS invariant I1).** It is a knowledge plane, never a control
   plane: it never decides whether work may run, never dispatches or schedules, and
-  never ranks company priorities — the strategic state and the improvement agenda own
-  priority; this repo's `control_plane/` owns execution, leases, and liveness. A
+  never ranks company priorities — Strategic State owns company-level portfolio
+  orientation, while the Improvement Agenda ranks only its portfolio/intelligence
+  self-improvement domain; this repo's `control_plane/` owns execution, leases, and liveness. A
   workstream `claim:` note is an author's note in git, never evidence a worker is
   currently alive. Decisions do not live in `governance.jsonl`: an
   `executive_decision` event there cites the durable `DEC:<KEY>`, one direction, no
@@ -150,8 +151,12 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
   `agentos.py brief --json --no-remember`, and there is no write path back. Keep it
   one-way. Phase 2b reuses that resolver/collector in `brain/improvement_agenda.py`:
   only an explicit `{workstream, wave}` reference may receive Agent OS readiness,
-  and the join happens after ranking. The Improvement Agenda remains the sole priority
-  queue; the boot packet does not render or recommend from legacy `brief.unblocked`.
+  and the join happens after ranking. The Improvement Agenda remains the sole ranked
+  queue for its portfolio/intelligence self-improvement domain; it is not the
+  company-wide portfolio. The boot packet does not render or recommend from legacy
+  `brief.unblocked`. New company work must map to an active Strategic State P0 (or a
+  mandatory safety/maintenance obligation); a strategy reset does not silently cancel
+  a STARTed/effect-unknown operation or seize another carrier's source custody.
 
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole
