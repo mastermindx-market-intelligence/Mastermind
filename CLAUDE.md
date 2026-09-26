@@ -119,8 +119,11 @@ ranking and only through explicit `{workstream, wave}` references. The Improveme
 Agenda remains the sole ranked queue for its portfolio/intelligence self-improvement
 domain, not the company-wide portfolio. The boot packet ignores legacy
 `brief.unblocked` for rendering and recommendations. New company work maps to an
-active Strategic State P0 or a mandatory safety/maintenance obligation; strategy
-changes do not silently cancel STARTed/effect-unknown work or seize source custody.
+active Strategic State P0 or a mandatory safety/maintenance obligation by naming the
+concrete customer/machine capability it advances; a label-only relabel is not admission.
+Unstarted/draft work that no longer maps returns to portfolio review before expansion.
+Strategy changes do not silently cancel STARTed/effect-unknown work or seize source
+custody; reconcile/reclassify it at the next safe checkpoint.
 
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole
