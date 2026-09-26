@@ -24,6 +24,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Protocol
 
 from common.agent_dialogue_contract import DialogueContractError
@@ -62,6 +63,7 @@ from integrations.mastermind_company_mcp.adapter import (
 from integrations.mastermind_company_mcp.consultation import (
     validate_company_consult_dispatch_request,
 )
+from integrations.slack_agent_dialogue.engine import DialogueEngineError
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
 from integrations.slack_agent_dialogue.service import (
     CONTROL_VERSION_V2,
@@ -535,6 +537,14 @@ class ConsultationDeliveryTarget:
     it, and ``_dialogue_carrier_identity`` independently requires it to agree
     with ``actor_ref``; synthesizing it by swapping ``kind`` would fabricate
     trusted identity instead of reconstructing it.
+
+    ``evidence_digest`` is the digest of the host evidence this reconstruction
+    stands on -- the same value ``DialogueSourceCandidate.evidence_digest``
+    carries in ``control_plane.dialogue_source_resolution``. It is REQUIRED so
+    that a target always names its provenance, and it is deliberately not
+    verified here: the carrier holds no evidence to verify it against. Treat it
+    as the host's own reconciliation handle, never as proof the target is
+    right.
     """
 
     actor_ref: Mapping[str, Any]
@@ -548,6 +558,22 @@ class ConsultationDeliveryTarget:
     evidence_digest: str
 
     def __post_init__(self) -> None:
+        # ``frozen=True`` binds the fields, not the contents. The mappings are
+        # snapshotted behind read-only views so a host that mutates what it
+        # passed cannot change the context this target puts on the wire after
+        # the identity gate below has already run.
+        object.__setattr__(
+            self, "actor_ref", MappingProxyType(dict(self.actor_ref))
+        )
+        object.__setattr__(
+            self, "applies_to", MappingProxyType(dict(self.applies_to))
+        )
+        if isinstance(self.commission_ref, Mapping):
+            object.__setattr__(
+                self,
+                "commission_ref",
+                MappingProxyType(dict(self.commission_ref)),
+            )
         actor = dict(self.actor_ref)
         applies_to = dict(self.applies_to)
         if (
@@ -579,24 +605,152 @@ class ConsultationDeliveryTarget:
                 )
 
 
+@dataclasses.dataclass(frozen=True)
+class ConsultationPacketAccess:
+    """Host-owned READ authority for one already-admitted consultation.
+
+    A ``ConsultationDeliveryTarget`` names a physical parent, and that is all
+    it can prove. On its own it cannot establish that the current caller may
+    read the packet, and it cannot make the transport's ``result=None`` mean
+    "this consultation has no such packet" rather than "the parent I was
+    pointed at is not where this packet lives". This projection therefore
+    carries the persisted Consultation Runtime party facts alongside the
+    target, so readership AND destination are both proven before any physical
+    read is issued. Absence is only authoritative once they are.
+    """
+
+    target: ConsultationDeliveryTarget
+    requester_actor_ref: Mapping[str, Any]
+    recipient_actor_ref: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.target, ConsultationDeliveryTarget):
+            raise StateConflict("consultation packet access target is invalid")
+        if not isinstance(self.requester_actor_ref, Mapping) or not isinstance(
+            self.recipient_actor_ref, Mapping
+        ):
+            raise StateConflict("consultation packet access identity is invalid")
+        for field in ("requester_actor_ref", "recipient_actor_ref"):
+            object.__setattr__(
+                self, field, MappingProxyType(dict(getattr(self, field)))
+            )
+        try:
+            requester = _normalized_actor_ref(self.requester_actor_ref)
+            recipient = _normalized_actor_ref(self.recipient_actor_ref)
+        except KeyError as exc:
+            raise StateConflict(
+                "consultation packet access identity is invalid"
+            ) from exc
+        if requester == recipient:
+            raise StateConflict(
+                "consultation packet access parties are not distinct"
+            )
+
+
+# Which persisted party a purpose is read out of. A QUESTION lives in the
+# recipient's parent and an ANSWER in the requester's. This mirrors
+# ``_destination_actor`` but is derived from the PERSISTED parties rather than
+# from a packet the transport has not returned yet, which is what lets the
+# destination be checked before the read instead of after it.
+_READ_DESTINATION_BY_PURPOSE = {
+    "QUESTION": "recipient_actor_ref",
+    "ANSWER": "requester_actor_ref",
+}
+
+
 class ConsultationPacketTargetResolver(Protocol):
     """Host-owned packet destination resolver; no model input reaches it.
 
     ``resolve_target`` maps one destination Attempt to its exact physical
-    dialogue source. ``resolve_read_target`` reconstructs the destination of
-    an already-admitted consultation from the persisted Consultation Runtime
-    party facts, which is what keeps an admitted target sticky across restart
-    and peer rotation. Both refuse rather than choose when the physical source
-    is missing or ambiguous.
+    dialogue source. ``resolve_read_access`` reconstructs an admitted
+    consultation's READ authority -- its destination target together with the
+    persisted requester/recipient party facts -- from the Consultation Runtime
+    and the exact historical Wake/Dialogue source, which is what keeps an
+    admitted target sticky across restart and peer rotation. Both refuse
+    rather than choose when the physical source is missing or ambiguous.
+
+    IRREDUCIBLE RESIDUAL, owned here rather than by the carrier. The carrier
+    can prove that a target names the intended Attempt and that the caller is
+    a persisted party, because both are identity comparisons it can make. It
+    cannot prove that the ``session_ref``/``work_ref``/``commission_ref`` in a
+    target actually belong to that Attempt: Relay selects a parent from
+    ``session_ref`` + ``commission_ref`` + ``work_ref`` + ``applies_to``'s
+    ``job_id`` and never consults ``actor_ref`` at all
+    (``engine_v2._message_matches_history_parent`` /
+    ``_same_applicability_carrier``), so a target pairing one Attempt's
+    identity with another's session would still address a real, wrong parent.
+    Relay's own ``THREAD_CONTEXT_MISMATCH`` catches only the subset where the
+    carried ``thread_ts`` then disagrees with what that context resolves to.
+    Closing the rest is this resolver's obligation, discharged by its own
+    evidence, not something the carrier can re-derive.
+
+    ASYMMETRY BETWEEN THE TWO EDGES, and why it is not an oversight. On the
+    READ edge the consultation is already admitted, so ``resolve_read_access``
+    can reconstruct BOTH parties and the destination from persisted facts and
+    the carrier can fence the read before issuing it. On the SEND edge the
+    first QUESTION's canonical INTENT is recorded inside the carrier's own
+    commit hook -- ``RuntimeConsultationDispatcher._dispatch_consult`` passes
+    ``_commit_intent_after_ready`` as ``before_commit`` -- precisely so Runtime
+    admission and Relay COMMIT are ordered exactly once. At the moment
+    ``_send_target`` needs a destination there is therefore nothing admitted to
+    resolve against, and the destination necessarily originates in the frame
+    being admitted. ``resolve_send_target`` is handed the consultation id and
+    purpose anyway so a host that HAS an independent grant can bind the
+    destination to it; what the carrier itself proves is narrower: the sender
+    is the caller's own trusted binding, and the resolved target's identity is
+    the frame's destination actor. In the only production path the frame's
+    recipient is host-derived as well -- ``_dispatch_consult`` takes it from
+    ``recipients(peer_ref)``, not from the caller -- and the send receipt check
+    plus Relay's own context-to-parent bind are what close delivery into some
+    other thread.
+
+    NOT YET IMPLEMENTABLE, named as the next dependency rather than assumed. No
+    persisted record in this repository currently yields every field
+    ``ConsultationDeliveryTarget`` requires. What exists, and is canonical
+    already, is the two halves of the join:
+    ``control_plane.dialogue_source_resolution.ConsultationSourceIdentity``
+    carries ``consultation_id`` with both parties at Job/Attempt granularity,
+    and ``PhysicalDialogueSourceIdentity`` carries ``thread_ts``,
+    ``operation_key``, ``parent_fingerprint`` and a candidate bearing
+    ``evidence_digest``. What neither carries is ``work_ref``,
+    ``commission_ref``, ``session_ref`` or ``watch_mode`` -- nor a party
+    ``worker_id`` -- and the admitted consultation INTENT payload
+    (``control_plane.consultation_runtime._consultation_intent_payload``) has
+    none of them either, while ``recipient_binding`` is held to exactly
+    ``{binding_id, binding_generation, reasoning_surface}``. So a production
+    resolver needs the physical-source record extended to carry the dialogue
+    context tuple; until then this Protocol has no production implementation
+    and this carrier stays SOURCE_ONLY. Resolving a peer's CURRENT parent
+    instead is not a substitute: it violates the stickiness acceptance
+    directly.
     """
 
-    def resolve_target(
-        self, actor_ref: Mapping[str, Any]
+    def resolve_send_target(
+        self,
+        consultation_id: str,
+        purpose: str,
+        actor_ref: Mapping[str, Any],
     ) -> ConsultationDeliveryTarget: ...
 
-    def resolve_read_target(
+    def resolve_read_access(
         self, consultation_id: str, purpose: str
-    ) -> ConsultationDeliveryTarget: ...
+    ) -> ConsultationPacketAccess: ...
+
+
+# Relay refusals that name an internally inconsistent destination rather than a
+# carrier outage. ``THREAD_CONTEXT_MISMATCH`` means the context and the thread
+# this carrier passed do not reconcile to one parent; ``THREAD_BINDING_AMBIGUOUS``
+# means the thread history admits more than one parent. Both are deterministic
+# properties of the resolved target, and Relay can only raise them before it
+# crosses its provider boundary: once ``post_reply`` has been invoked every
+# engine error collapses into ``SEND_EFFECT_UNKNOWN``
+# (``engine_v2._reconcile_post_effect``), so either code arriving here also
+# proves no packet was written. Retrying would refuse identically at best and
+# bind a different parent at worst, so these surface as a conflict the host must
+# reconcile, never as a retryable carrier outage.
+_DESTINATION_REFUSAL_CODES = frozenset(
+    {"THREAD_BINDING_AMBIGUOUS", "THREAD_CONTEXT_MISMATCH"}
+)
 
 
 class TargetedAgentDialogueConsultationPacketCarrier:
@@ -632,11 +786,13 @@ class TargetedAgentDialogueConsultationPacketCarrier:
             raise TypeError("socket_path must be an absolute Path")
         if not callable(getattr(binding_resolver, "resolve", None)):
             raise TypeError("binding_resolver must resolve the current binding")
-        if not callable(getattr(target_resolver, "resolve_target", None)) or not callable(
-            getattr(target_resolver, "resolve_read_target", None)
+        if not callable(
+            getattr(target_resolver, "resolve_send_target", None)
+        ) or not callable(
+            getattr(target_resolver, "resolve_read_access", None)
         ):
             raise TypeError(
-                "target_resolver must resolve send and read packet targets"
+                "target_resolver must resolve send targets and read access"
             )
         if not callable(service_call):
             raise TypeError("service_call must be callable")
@@ -663,15 +819,29 @@ class TargetedAgentDialogueConsultationPacketCarrier:
 
     @staticmethod
     def _target_context(target: ConsultationDeliveryTarget) -> dict[str, Any]:
-        return DialogueContextV2(
-            work_ref=target.work_ref,
-            commission_ref=dict(target.commission_ref),
-            session_ref=target.session_ref,
-            operation_key=target.operation_key,
-            watch_mode=target.watch_mode,
-            actor_ref=dict(target.actor_ref),
-            applies_to=dict(target.applies_to),
-        ).normalized()
+        """Build the wire context, refusing rather than escaping untyped.
+
+        The identity gate on ``ConsultationDeliveryTarget`` checks shape and
+        agreement; ``DialogueContextV2.normalized()`` enforces the engine's own
+        exact key sets and raises ``DialogueEngineError``. That happens while
+        the request literal is built, outside ``_call``, so without this guard
+        it would leave the carrier as an untyped error that no caller's refusal
+        vocabulary covers.
+        """
+        try:
+            return DialogueContextV2(
+                work_ref=target.work_ref,
+                commission_ref=dict(target.commission_ref),
+                session_ref=target.session_ref,
+                operation_key=target.operation_key,
+                watch_mode=target.watch_mode,
+                actor_ref=dict(target.actor_ref),
+                applies_to=dict(target.applies_to),
+            ).normalized()
+        except DialogueEngineError as exc:
+            raise StateConflict(
+                "consultation packet target is not a valid dialogue context"
+            ) from exc
 
     @staticmethod
     def _sender_actor(frame: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -724,11 +894,15 @@ class TargetedAgentDialogueConsultationPacketCarrier:
                 )
         return target
 
-    def _send_target(self, frame: Mapping[str, Any]) -> ConsultationDeliveryTarget:
+    def _send_target(
+        self, consultation_id: str, purpose: str, frame: Mapping[str, Any]
+    ) -> ConsultationDeliveryTarget:
         destination = self._destination_actor(frame)
         try:
-            resolved = self._target_resolver.resolve_target(
-                _normalized_actor_ref(destination)
+            resolved = self._target_resolver.resolve_send_target(
+                consultation_id,
+                purpose,
+                _normalized_actor_ref(destination),
             )
         except StateConflict:
             raise
@@ -742,20 +916,50 @@ class TargetedAgentDialogueConsultationPacketCarrier:
             ) from exc
         return self._checked_target(resolved, expected_actor_ref=destination)
 
-    def _read_target(
+    def _read_access(
         self, consultation_id: str, purpose: str
-    ) -> ConsultationDeliveryTarget:
+    ) -> ConsultationPacketAccess:
+        """Reconstruct read authority and prove it BEFORE any physical read."""
+        field = _READ_DESTINATION_BY_PURPOSE.get(purpose)
+        if field is None:
+            raise StateConflict("consultation packet purpose is not readable")
         try:
-            resolved = self._target_resolver.resolve_read_target(
+            resolved = self._target_resolver.resolve_read_access(
                 consultation_id, purpose
             )
         except StateConflict:
             raise
         except Exception as exc:
             raise ConsultationPacketCarrierUnknown(
-                "consultation packet target is unavailable"
+                "consultation packet access is unavailable"
             ) from exc
-        return self._checked_target(resolved, expected_actor_ref=None)
+        if not isinstance(resolved, ConsultationPacketAccess):
+            raise StateConflict("consultation packet access is unavailable")
+        # The purpose fixes which persisted party the read must physically
+        # reach. A target that names anyone else is refused here, before the
+        # service call, so a wrong target can never come back as absence.
+        self._checked_target(
+            resolved.target, expected_actor_ref=getattr(resolved, field)
+        )
+        return resolved
+
+    @staticmethod
+    def _assert_access_party(
+        binding: DialogueBinding, access: ConsultationPacketAccess
+    ) -> None:
+        """Prove readership against the PERSISTED parties, pre-read."""
+        try:
+            actor = _normalized_actor_ref(binding.actor_ref)
+            parties = (
+                _normalized_actor_ref(access.requester_actor_ref),
+                _normalized_actor_ref(access.recipient_actor_ref),
+            )
+        except KeyError as exc:
+            raise StateConflict(
+                "consultation packet access identity is invalid"
+            ) from exc
+        if actor not in parties:
+            raise StateConflict("current dialogue binding is not a packet party")
 
     async def _call(
         self,
@@ -781,6 +985,27 @@ class TargetedAgentDialogueConsultationPacketCarrier:
                 "Agent Relay packet carrier is unavailable"
             ) from exc
 
+    @staticmethod
+    def _destination_refusal(response: Any) -> str | None:
+        """Name a deterministic destination refusal in a Relay error envelope."""
+        if not isinstance(response, Mapping) or response.get("ok") is not False:
+            return None
+        error = response.get("error")
+        if not isinstance(error, Mapping) or set(error) != {"code"}:
+            return None
+        code = error.get("code")
+        if not isinstance(code, str) or code not in _DESTINATION_REFUSAL_CODES:
+            return None
+        return code
+
+    def _refuse_inconsistent_destination(self, response: Any) -> None:
+        code = self._destination_refusal(response)
+        if code is None:
+            return
+        raise StateConflict(
+            "Agent Relay refused the consultation packet destination: " + code
+        )
+
     async def _put(
         self,
         consultation_id: str,
@@ -801,7 +1026,7 @@ class TargetedAgentDialogueConsultationPacketCarrier:
         # The destination is resolved and checked BEFORE any effect. A target
         # never grants the sender authority; the sender check above already
         # stands on the caller's own trusted binding.
-        target = self._send_target(item)
+        target = self._send_target(consultation_id, item["purpose"], item)
         response = await self._call(
             {
                 "version": CONTROL_VERSION_V2,
@@ -815,6 +1040,10 @@ class TargetedAgentDialogueConsultationPacketCarrier:
             },
             before_write=before_commit,
         )
+        # A destination refusal is the transport reporting that the target this
+        # carrier supplied was internally inconsistent. It is not an outage and
+        # must not degrade into one.
+        self._refuse_inconsistent_destination(response)
         result = response.get("result") if isinstance(response, Mapping) else None
         if (
             not isinstance(response, Mapping)
@@ -862,7 +1091,13 @@ class TargetedAgentDialogueConsultationPacketCarrier:
         if _CONSULTATION_REF_RE.fullmatch(consultation_id) is None:
             raise StateConflict("consultation packet identity is invalid")
         binding = self._binding()
-        target = self._read_target(consultation_id, purpose)
+        access = self._read_access(consultation_id, purpose)
+        # Readership is proven before the first physical read: a foreign reader
+        # issues ZERO service calls, and because the destination was proven in
+        # ``_read_access`` too, a ``result=None`` from Relay below is absence
+        # from the parent this consultation is actually persisted against.
+        self._assert_access_party(binding, access)
+        target = access.target
         response = await self._call(
             {
                 "version": CONTROL_VERSION_V2,
@@ -875,6 +1110,7 @@ class TargetedAgentDialogueConsultationPacketCarrier:
                 },
             }
         )
+        self._refuse_inconsistent_destination(response)
         if not isinstance(response, Mapping) or response.get("ok") is not True:
             raise ConsultationPacketCarrierUnknown(
                 "Agent Relay packet read is invalid"
@@ -905,10 +1141,12 @@ class TargetedAgentDialogueConsultationPacketCarrier:
             raise ConsultationPacketCarrierUnknown(
                 "Agent Relay packet read is conflicting"
             )
-        # The reader's own binding must still be a packet party: a target
-        # grants delivery, never readership.
+        # Defence in depth. ``_assert_access_party`` and ``_read_access``
+        # already fenced this read on the persisted party facts; these two
+        # re-check the same authority against the packet Relay actually
+        # returned, so a resolver whose reconstruction disagrees with the
+        # stored packet is still caught rather than trusted.
         self._assert_current_party(binding, item)
-        # The packet that came back must belong to the destination we read.
         self._checked_target(
             target, expected_actor_ref=self._destination_actor(item)
         )
@@ -3369,10 +3607,13 @@ def _body_status_for(
 __all__ = [
     "AgentDialogueConsultationPacketCarrier",
     "CallerIdentity",
+    "ConsultationDeliveryTarget",
+    "ConsultationPacketAccess",
     "ConsultationPacketCarrier",
     "ConsultationPacketCarrierUnknown",
     "ConsultationPacketCommitAborted",
     "ConsultationPacketEffectUnknown",
+    "ConsultationPacketTargetResolver",
     "ConsultationRefusal",
     "InMemoryConsultationPacketCarrier",
     "InvocationContext",
@@ -3383,4 +3624,5 @@ __all__ = [
     "RecipientBinding",
     "RecipientResolver",
     "RuntimeConsultationDispatcher",
+    "TargetedAgentDialogueConsultationPacketCarrier",
 ]

@@ -8091,17 +8091,57 @@ _P1R1_B_ROTATED = (
     "codex-recipient-b",
     _binding("p1r1-b2"),
 )
+# The SAME Job, a NEW Attempt. This is the rotation Relay itself cannot see:
+# ``engine_v2._same_applicability_carrier`` separates ``executive_attempt``
+# parents on ``job_id`` alone and never compares ``attempt_id``/``worker_id``,
+# so these two Attempts address the same physical parent as far as the
+# transport is concerned. Only this carrier's own target gate tells them apart.
+_P1R1_B_REATTEMPT = (
+    "JOB-P1R1-B",
+    "ATT-P1R1-B3",
+    "codex-recipient-b",
+    _binding("p1r1-b3"),
+)
 _P1R1_C = ("JOB-P1R1-C", "ATT-P1R1-C", "codex-third-c", _binding("p1r1-c"))
 
 _P1R1_A_THREAD = "1787961600.000101"
 _P1R1_B_THREAD = "1787961600.000202"
 _P1R1_B_ROTATED_THREAD = "1787961600.000303"
 _P1R1_C_THREAD = "1787961600.000404"
+_P1R1_B_REATTEMPT_THREAD = "1787961600.000505"
 
 
 def _p1r1_actor_key(actor_ref: Mapping[str, Any]) -> tuple[str, str, str]:
     actor = dict(actor_ref)
     return (actor["job_id"], actor["attempt_id"], actor["worker_id"])
+
+
+def _p1r1_actor_ref(worker: tuple) -> dict[str, str]:
+    job_id, attempt_id, worker_id, _runtime_binding = worker
+    return {
+        "kind": "worker_attempt",
+        "job_id": job_id,
+        "attempt_id": attempt_id,
+        "worker_id": worker_id,
+    }
+
+
+def _p1r1_access(
+    target: Any,
+    *,
+    requester: tuple,
+    recipient: tuple,
+) -> consultation_dispatch.ConsultationPacketAccess:
+    """The host's persisted party facts for one already-admitted consultation.
+
+    These come from the Consultation Runtime, never from the target and never
+    from a packet the transport has not returned yet.
+    """
+    return consultation_dispatch.ConsultationPacketAccess(
+        target=target,
+        requester_actor_ref=_p1r1_actor_ref(requester),
+        recipient_actor_ref=_p1r1_actor_ref(recipient),
+    )
 
 
 def _delivery_target(
@@ -8157,13 +8197,24 @@ class _StaticPacketTargetResolver:
         self.send_calls: list[dict[str, Any]] = []
         self.read_calls: list[tuple[str, str]] = []
 
-    def resolve_target(self, actor_ref: Mapping[str, Any]) -> Any:
-        self.send_calls.append(dict(actor_ref))
+    def resolve_send_target(
+        self,
+        consultation_id: str,
+        purpose: str,
+        actor_ref: Mapping[str, Any],
+    ) -> Any:
+        self.send_calls.append(
+            {
+                "consultation_id": consultation_id,
+                "purpose": purpose,
+                "actor_ref": dict(actor_ref),
+            }
+        )
         if self.send_error is not None:
             raise self.send_error
         return self._send.get(_p1r1_actor_key(actor_ref))
 
-    def resolve_read_target(self, consultation_id: str, purpose: str) -> Any:
+    def resolve_read_access(self, consultation_id: str, purpose: str) -> Any:
         self.read_calls.append((consultation_id, purpose))
         if self.read_error is not None:
             raise self.read_error
@@ -8251,8 +8302,16 @@ def test_p1r1_question_is_delivered_only_on_the_recipient_distinct_parent() -> N
         call["request"]["args"]["thread_ts"] != _P1R1_A_THREAD
         for call in service.calls
     )
-    # The destination resolved was B, and only B.
-    assert resolver.send_calls == [dict(b_target.actor_ref)]
+    # The destination resolved was B, and only B -- and the host was told
+    # WHICH consultation and purpose it is resolving for, so it can bind the
+    # destination to a grant of its own rather than to the actor alone.
+    assert resolver.send_calls == [
+        {
+            "consultation_id": frame["consultation_id"],
+            "purpose": "QUESTION",
+            "actor_ref": dict(b_target.actor_ref),
+        }
+    ]
 
 
 def test_p1r1_answer_is_delivered_only_on_the_requester_distinct_parent() -> None:
@@ -8424,7 +8483,11 @@ def test_p1r1_admitted_question_read_reconstructs_target_without_cache() -> None
         _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
     )
     resolver = _StaticPacketTargetResolver(
-        read={(frame["consultation_id"], "QUESTION"): b_target}
+        read={
+            (frame["consultation_id"], "QUESTION"): _p1r1_access(
+                b_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
     )
     service = _p1r1_read_service(frame)
     # A brand-new carrier instance stands in for a restarted process.
@@ -8456,7 +8519,11 @@ def test_p1r1_admitted_answer_read_reconstructs_requester_target() -> None:
         _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
     )
     resolver = _StaticPacketTargetResolver(
-        read={(frame["consultation_id"], "ANSWER"): a_target}
+        read={
+            (frame["consultation_id"], "ANSWER"): _p1r1_access(
+                a_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
     )
     service = _p1r1_read_service(frame)
     carrier = _p1r1_carrier(binding=b_binding, resolver=resolver, service=service)
@@ -8485,7 +8552,11 @@ def test_p1r1_replay_after_peer_rotation_stays_on_the_original_target() -> None:
     # target still resolves to the original one.
     resolver = _StaticPacketTargetResolver(
         send={_p1r1_actor_key(rotated.actor_ref): rotated},
-        read={(frame["consultation_id"], "QUESTION"): original},
+        read={
+            (frame["consultation_id"], "QUESTION"): _p1r1_access(
+                original, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        },
     )
     service = _p1r1_read_service(frame)
     carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
@@ -8555,8 +8626,13 @@ def test_p1r1_missing_or_ambiguous_physical_source_refuses(
 
 
 def test_p1r1_read_whose_packet_names_another_destination_refuses() -> None:
-    """Acceptance 13: a target that stops matching the packet refuses."""
-    # The read target is C's parent, but the packet that comes back is A<->B.
+    """Acceptance 13: a target that is not the persisted destination refuses.
+
+    The refusal is now PRE-read. The persisted parties say this QUESTION lives
+    in B's parent, so a reconstruction pointing at C is refused before any
+    service call rather than caught afterwards on the returned packet.
+    """
+    # The read target is C's parent, but the persisted packet is A<->B.
     frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
     a_binding = _dialogue_binding(
         _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
@@ -8565,13 +8641,19 @@ def test_p1r1_read_whose_packet_names_another_destination_refuses() -> None:
         _P1R1_C, session_ref="asd-session-p1r1-c-0001", thread_ts=_P1R1_C_THREAD
     )
     resolver = _StaticPacketTargetResolver(
-        read={(frame["consultation_id"], "QUESTION"): c_target}
+        read={
+            (frame["consultation_id"], "QUESTION"): _p1r1_access(
+                c_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
     )
     service = _p1r1_read_service(frame)
     carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
 
     with pytest.raises(StateConflict):
         _run(carrier.get_question(frame["consultation_id"]))
+    # Pre-effect: the wrong parent was never physically read.
+    assert service.calls == []
 
 
 def test_p1r1_delivery_target_refuses_fabricated_identity() -> None:
@@ -8846,3 +8928,588 @@ def test_p1r1_trusted_caller_binding_helper_refuses_untrusted_input() -> None:
         _require_trusted_caller_binding(
             foreign, caller_actor_ref=caller_actor_ref
         )
+
+
+def _p1r1_refusal_service(code: str) -> _RecordingPacketService:
+    """Relay's own error envelope, exactly as ``call_service`` hands it back.
+
+    The wire fidelity here is not assumed. ``tests/test_slack_agent_dialogue_
+    service.py::test_exact_send_refuses_request_thread_not_owned_by_verified_
+    relay_parent`` pins that the real service, over a real socket, answers an
+    exact-send request whose ``thread_ts`` does not reconcile with its
+    ``context`` by RETURNING ``{"ok": False, "error": {"code": ...}}`` rather
+    than by raising ``DialogueServiceError`` -- engine codes are deliberately
+    exempted from the post-commit ``SEND_EFFECT_UNKNOWN`` collapse in
+    ``call_service``. The sibling
+    ``test_exact_send_pre_ready_refusal_never_runs_callback`` pins that the
+    commit callback never runs on that refusal, so it carries no effect.
+    """
+    return _RecordingPacketService(response={"ok": False, "error": {"code": code}})
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["THREAD_CONTEXT_MISMATCH", "THREAD_BINDING_AMBIGUOUS"],
+)
+def test_p1r1_send_destination_refusal_is_a_conflict_not_a_retryable_unknown(
+    code: str,
+) -> None:
+    """Relay reporting an inconsistent destination must not read as an outage.
+
+    Under P1-R1 these two codes are the transport's ONLY report that the
+    target this carrier supplied did not reconcile to one parent. Relay raises
+    them only before it crosses its provider boundary, so they also prove no
+    packet was written. Degrading them to ``ConsultationPacketCarrierUnknown``
+    would invite a retry that either refuses identically or -- because
+    ``engine_v2._same_applicability_carrier`` separates parents on ``job_id``
+    and never on ``actor_ref`` -- binds a DIFFERENT parent the second time.
+    This is the same standard acceptance 12 applies to an ambiguous resolver.
+    """
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(b_target.actor_ref): b_target}
+    )
+    service = _p1r1_refusal_service(code)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict) as excinfo:
+        _run(
+            carrier.put_question(
+                frame["consultation_id"], frame, before_commit=_noop_before_commit
+            )
+        )
+    assert code in str(excinfo.value)
+    assert not isinstance(
+        excinfo.value, consultation_dispatch.ConsultationPacketCarrierUnknown
+    )
+    assert not isinstance(
+        excinfo.value, consultation_dispatch.ConsultationPacketEffectUnknown
+    )
+    # Exactly one attempt: the refusal is terminal at this carrier.
+    assert len(service.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["THREAD_CONTEXT_MISMATCH", "THREAD_BINDING_AMBIGUOUS"],
+)
+def test_p1r1_read_destination_refusal_is_a_conflict_not_a_retryable_unknown(
+    code: str,
+) -> None:
+    """The read edge classifies an inconsistent destination the same way."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="ANSWER")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    a_target = _delivery_target(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={
+            (frame["consultation_id"], "ANSWER"): _p1r1_access(
+                a_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
+    )
+    service = _p1r1_refusal_service(code)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict) as excinfo:
+        _run(carrier.get_answer(frame["consultation_id"]))
+    assert code in str(excinfo.value)
+    assert not isinstance(
+        excinfo.value, consultation_dispatch.ConsultationPacketCarrierUnknown
+    )
+    assert len(service.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["TRANSPORT_UNAVAILABLE", "THREAD_HISTORY_INCOMPLETE", "RESPONSE_TOO_LARGE"],
+)
+def test_p1r1_genuine_outage_still_degrades_to_a_retryable_carrier_unknown(
+    code: str,
+) -> None:
+    """The boundary of the refusal set, pinned from the other side.
+
+    Only a code that names an inconsistent DESTINATION is reclassified. A
+    transport outage, an incomplete history read and an oversized response are
+    all statements about the carrier, not about the target, and must keep their
+    retryable classification -- otherwise the repair above would convert every
+    Relay hiccup into a permanent conflict.
+    """
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(b_target.actor_ref): b_target}
+    )
+    service = _p1r1_refusal_service(code)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(
+        consultation_dispatch.ConsultationPacketCarrierUnknown
+    ):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"], frame, before_commit=_noop_before_commit
+            )
+        )
+
+
+def _p1r1_absent_read_service() -> _RecordingPacketService:
+    """Relay answering that the thread it was pointed at holds no such packet."""
+    return _RecordingPacketService(response={"ok": True, "result": None})
+
+
+def test_p1r1_foreign_reader_issues_zero_service_calls() -> None:
+    """Readership is proven before the read, not after it.
+
+    A target grants delivery, never readership. C is bound to neither side of
+    this consultation, so no physical read may be issued on its behalf at all
+    -- the packet must not be fetched and then refused.
+    """
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    c_binding = _dialogue_binding(
+        _P1R1_C, session_ref="asd-session-p1r1-c-0001", thread_ts=_P1R1_C_THREAD
+    )
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={
+            (frame["consultation_id"], "QUESTION"): _p1r1_access(
+                b_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
+    )
+    service = _p1r1_read_service(frame)
+    carrier = _p1r1_carrier(binding=c_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict, match="party"):
+        _run(carrier.get_question(frame["consultation_id"]))
+    assert service.calls == []
+
+
+def test_p1r1_wrong_read_target_never_comes_back_as_absence() -> None:
+    """A resolver/source error must not be laundered into proven absence.
+
+    Relay reports ``result=None`` for any thread that simply does not hold the
+    packet, including a thread that was never this consultation's destination.
+    If the destination were only checked on a RETURNED packet, that answer
+    would read as "this consultation has no QUESTION" -- which is what
+    restart and reconciliation then treat as truth. The destination is
+    therefore proven first, so absence can only ever be reported from the
+    parent the persisted parties name.
+    """
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    c_target = _delivery_target(
+        _P1R1_C, session_ref="asd-session-p1r1-c-0001", thread_ts=_P1R1_C_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={
+            (frame["consultation_id"], "QUESTION"): _p1r1_access(
+                c_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
+    )
+    service = _p1r1_absent_read_service()
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict):
+        _run(carrier.get_question(frame["consultation_id"]))
+    assert service.calls == []
+
+
+def test_p1r1_absence_is_reported_from_the_proven_destination() -> None:
+    """Positive control for the test above: real absence still returns ``None``.
+
+    Without this, refusing a wrong target would be indistinguishable from
+    refusing everything.
+    """
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={
+            (frame["consultation_id"], "QUESTION"): _p1r1_access(
+                b_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
+    )
+    service = _p1r1_absent_read_service()
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    assert _run(carrier.get_question(frame["consultation_id"])) is None
+    threads = [call["request"]["args"]["thread_ts"] for call in service.calls]
+    assert threads == [_P1R1_B_THREAD]
+
+
+def test_p1r1_read_reconstructs_access_exactly_once() -> None:
+    """No target/evidence drift window: one reconstruction read per packet read.
+
+    The carrier never double-reads its own source evidence, so there is no
+    interval in which the target could change between two reconstructions.
+    """
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="ANSWER")
+    b_binding = _dialogue_binding(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    a_target = _delivery_target(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={
+            (frame["consultation_id"], "ANSWER"): _p1r1_access(
+                a_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
+    )
+    service = _p1r1_read_service(frame)
+    carrier = _p1r1_carrier(binding=b_binding, resolver=resolver, service=service)
+
+    _run(carrier.get_answer(frame["consultation_id"]))
+
+    assert resolver.read_calls == [(frame["consultation_id"], "ANSWER")]
+    assert len(service.calls) == 1
+
+
+def test_p1r1_returned_packet_still_re_checked_against_the_access() -> None:
+    """Defence in depth: the pre-read fence does not retire the post-read one.
+
+    Here the reconstruction is internally consistent -- B's parent for an A<->B
+    QUESTION -- but Relay returns a packet addressed to C. A resolver whose
+    party facts disagree with the stored packet is caught, not trusted.
+    """
+    stored = _packet_frame(_P1R1_A, _P1R1_C, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={
+            (stored["consultation_id"], "QUESTION"): _p1r1_access(
+                b_target, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
+    )
+    service = _p1r1_read_service(stored)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict):
+        _run(carrier.get_question(stored["consultation_id"]))
+
+
+def test_p1r1_read_access_refuses_a_purpose_that_has_no_destination() -> None:
+    """Only QUESTION and ANSWER name a readable destination."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    resolver = _StaticPacketTargetResolver()
+    service = _p1r1_read_service(frame)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict, match="purpose"):
+        carrier._read_access(frame["consultation_id"], "CONSUME")
+    # The purpose is refused before the host's evidence is even consulted.
+    assert resolver.read_calls == []
+    assert service.calls == []
+
+
+def test_p1r1_access_projection_refuses_invalid_identity() -> None:
+    """The access projection may not be minted without real party facts."""
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    with pytest.raises(StateConflict):
+        consultation_dispatch.ConsultationPacketAccess(
+            target=object(),
+            requester_actor_ref=_p1r1_actor_ref(_P1R1_A),
+            recipient_actor_ref=_p1r1_actor_ref(_P1R1_B),
+        )
+    with pytest.raises(StateConflict):
+        consultation_dispatch.ConsultationPacketAccess(
+            target=b_target,
+            requester_actor_ref={"kind": "worker_attempt", "job_id": "JOB-A"},
+            recipient_actor_ref=_p1r1_actor_ref(_P1R1_B),
+        )
+    # A consultation cannot have one party on both sides.
+    with pytest.raises(StateConflict):
+        consultation_dispatch.ConsultationPacketAccess(
+            target=b_target,
+            requester_actor_ref=_p1r1_actor_ref(_P1R1_B),
+            recipient_actor_ref=_p1r1_actor_ref(_P1R1_B),
+        )
+
+
+def test_p1r1_target_gate_separates_attempts_the_transport_cannot() -> None:
+    """Acceptance 10, at the granularity that actually bites.
+
+    ``_P1R1_B_ROTATED`` changes Job as well as Attempt, so Relay would already
+    have separated it. The case Relay CANNOT separate is a second Attempt of
+    the same Job: its parent selection compares ``applies_to["job_id"]`` and
+    nothing else. That premise is asserted here against the real engine helper
+    rather than described, and then the carrier is required to refuse anyway --
+    which is what makes the target gate strictly stronger than the transport.
+    """
+    from integrations.slack_agent_dialogue.engine_v2 import (
+        _same_applicability_carrier,
+    )
+
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    original = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    reattempt = _delivery_target(
+        _P1R1_B_REATTEMPT,
+        session_ref="asd-session-p1r1-b3-0001",
+        thread_ts=_P1R1_B_REATTEMPT_THREAD,
+    )
+    # Premise: to Relay these two applicability carriers are the same one.
+    assert _same_applicability_carrier(
+        dict(original.applies_to), dict(reattempt.applies_to)
+    )
+    # Control: a different Job is separated, which is why the rotated fixture
+    # never exercised this case.
+    rotated = _delivery_target(
+        _P1R1_B_ROTATED,
+        session_ref="asd-session-p1r1-b2-0001",
+        thread_ts=_P1R1_B_ROTATED_THREAD,
+    )
+    assert not _same_applicability_carrier(
+        dict(original.applies_to), dict(rotated.applies_to)
+    )
+
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    # A host that followed the Job to its newest Attempt hands back the
+    # reattempt's parent for a packet addressed to the original Attempt.
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(_p1r1_actor_ref(_P1R1_B)): reattempt}
+    )
+    service = _RecordingPacketService()
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict, match="semantic destination"):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"], frame, before_commit=_noop_before_commit
+            )
+        )
+    assert service.calls == []
+
+
+def test_p1r1_read_access_separates_attempts_the_transport_cannot() -> None:
+    """The same Attempt-level separation on the read edge, pre-read."""
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    reattempt = _delivery_target(
+        _P1R1_B_REATTEMPT,
+        session_ref="asd-session-p1r1-b3-0001",
+        thread_ts=_P1R1_B_REATTEMPT_THREAD,
+    )
+    resolver = _StaticPacketTargetResolver(
+        read={
+            (frame["consultation_id"], "QUESTION"): _p1r1_access(
+                reattempt, requester=_P1R1_A, recipient=_P1R1_B
+            )
+        }
+    )
+    service = _p1r1_read_service(frame)
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict, match="semantic destination"):
+        _run(carrier.get_question(frame["consultation_id"]))
+    assert service.calls == []
+
+
+def test_p1r1_gate_valid_target_with_an_invalid_context_refuses_typed() -> None:
+    """A target the engine rejects must refuse, not escape untyped.
+
+    ``ConsultationDeliveryTarget.__post_init__`` checks identity agreement and
+    string shape; ``DialogueContextV2.normalized()`` separately enforces the
+    engine's exact key sets and raises ``DialogueEngineError``. That call
+    happens while the request literal is built, outside ``_call``'s mapping, so
+    without a guard it would leave the carrier as an error type no caller's
+    refusal vocabulary covers -- neither a refusal nor a carrier outage.
+    """
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    base = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+    # An extra key on actor_ref passes the identity gate and fails the engine's
+    # exact-key contract.
+    smuggled = consultation_dispatch.ConsultationDeliveryTarget(
+        actor_ref={**dict(base.actor_ref), "seat": "coo"},
+        applies_to=dict(base.applies_to),
+        work_ref=base.work_ref,
+        commission_ref=dict(base.commission_ref),
+        session_ref=base.session_ref,
+        operation_key=base.operation_key,
+        watch_mode=base.watch_mode,
+        thread_ts=base.thread_ts,
+        evidence_digest=base.evidence_digest,
+    )
+    resolver = _StaticPacketTargetResolver(
+        send={_p1r1_actor_key(base.actor_ref): smuggled}
+    )
+    service = _RecordingPacketService()
+    carrier = _p1r1_carrier(binding=a_binding, resolver=resolver, service=service)
+
+    with pytest.raises(StateConflict, match="dialogue context"):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"], frame, before_commit=_noop_before_commit
+            )
+        )
+    assert service.calls == []
+
+
+def test_p1r1_target_contents_are_frozen_against_post_construction_mutation() -> None:
+    """``frozen=True`` binds fields; the contents are snapshotted too.
+
+    The context is copied out of the target at WIRE-BUILD time, long after the
+    identity gate ran. A host that mutated the mapping it passed would
+    otherwise change what goes on the wire with the gate never re-running.
+    """
+    actor = {
+        "kind": "worker_attempt",
+        "job_id": _P1R1_B[0],
+        "attempt_id": _P1R1_B[1],
+        "worker_id": _P1R1_B[2],
+    }
+    commission = {
+        "repository": "mastermindx-market-intelligence/Mastermind",
+        "commit": "1" * 40,
+        "path": "docs/superpowers/plans/iac1-p1.md",
+        "content_sha256": "2" * 64,
+    }
+    target = consultation_dispatch.ConsultationDeliveryTarget(
+        actor_ref=actor,
+        applies_to={**actor, "kind": "executive_attempt"},
+        work_ref="WS:EXECUTIVE-CAPACITY-FABRIC",
+        commission_ref=commission,
+        session_ref="asd-session-p1r1-b-0001",
+        operation_key="op",
+        watch_mode="turn_watch_v1",
+        thread_ts=_P1R1_B_THREAD,
+        evidence_digest="d" * 64,
+    )
+    # Mutating what the host passed does not reach the target.
+    actor["job_id"] = "JOB-SOMEONE-ELSE"
+    commission["commit"] = "9" * 40
+    assert target.actor_ref["job_id"] == _P1R1_B[0]
+    assert target.commission_ref["commit"] == "1" * 40
+    # Nor can the mapping be written through the target.
+    with pytest.raises(TypeError):
+        target.actor_ref["job_id"] = "JOB-SOMEONE-ELSE"  # type: ignore[index]
+
+    access = _p1r1_access(target, requester=_P1R1_A, recipient=_P1R1_B)
+    with pytest.raises(TypeError):
+        access.recipient_actor_ref["worker_id"] = "someone-else"  # type: ignore[index]
+
+
+def test_p1r1_read_source_absence_refuses_and_outage_stays_retryable() -> None:
+    """The read edge's refusal/retry split, pinned in both directions.
+
+    An absent or invalid reconstruction is a refusal: retrying it could resolve
+    differently. A resolver that fails for its own reasons is an unavailable
+    source, which is retryable -- and the two must not be confused.
+    """
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    service = _p1r1_read_service(frame)
+
+    # (a) nothing reconstructed for this consultation -> refuse, zero reads
+    absent = _StaticPacketTargetResolver(read={})
+    carrier = _p1r1_carrier(binding=a_binding, resolver=absent, service=service)
+    with pytest.raises(StateConflict):
+        _run(carrier.get_question(frame["consultation_id"]))
+    assert service.calls == []
+
+    # (b) the host's own evidence source is down -> retryable, zero reads
+    broken = _StaticPacketTargetResolver(
+        read_error=RuntimeError("wake ledger unavailable")
+    )
+    carrier = _p1r1_carrier(binding=a_binding, resolver=broken, service=service)
+    with pytest.raises(
+        consultation_dispatch.ConsultationPacketCarrierUnknown
+    ):
+        _run(carrier.get_question(frame["consultation_id"]))
+    assert service.calls == []
+
+    # (c) the host names the ambiguity itself -> refuse
+    ambiguous = _StaticPacketTargetResolver(
+        read_error=StateConflict("two live attempts hold this consultation")
+    )
+    carrier = _p1r1_carrier(binding=a_binding, resolver=ambiguous, service=service)
+    with pytest.raises(StateConflict):
+        _run(carrier.get_question(frame["consultation_id"]))
+    assert service.calls == []
+
+
+def test_p1r1_trusted_caller_binding_enforces_applicability() -> None:
+    """The caller-binding gate keeps the incumbent applicability law.
+
+    Without this case the helper's tests pass even with
+    ``_dialogue_carrier_identity(caller_binding)`` deleted, which would accept
+    a caller binding whose ``applies_to`` is not an executive attempt.
+    """
+    job_id, attempt_id, worker_id, _rb = _P1R1_A
+    actor = {
+        "kind": "worker_attempt",
+        "job_id": job_id,
+        "attempt_id": attempt_id,
+        "worker_id": worker_id,
+    }
+    invalid = _dialogue_binding(
+        _P1R1_A,
+        session_ref="asd-session-p1r1-a-0001",
+        thread_ts=_P1R1_A_THREAD,
+        applies_to=dict(actor),
+    )
+    with pytest.raises(StateConflict):
+        _require_trusted_caller_binding(invalid, caller_actor_ref=actor)
+
+
+def test_p1r1_new_public_names_are_exported() -> None:
+    """A host wiring this carrier by ``import *`` must not silently miss it."""
+    for name in (
+        "ConsultationDeliveryTarget",
+        "ConsultationPacketAccess",
+        "ConsultationPacketTargetResolver",
+        "TargetedAgentDialogueConsultationPacketCarrier",
+    ):
+        assert name in consultation_dispatch.__all__
+        assert hasattr(consultation_dispatch, name)
+    assert consultation_dispatch.__all__ == sorted(
+        consultation_dispatch.__all__
+    )
