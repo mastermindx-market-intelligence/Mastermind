@@ -13,6 +13,7 @@ from typing import Any
 from common.agent_dialogue_contract import (
     DialogueContractError,
     MAX_EVIDENCE_REFS,
+    MAX_FRAME_BYTES,
     validate_evidence_ref,
 )
 from common.agent_dialogue_contract_v2 import (
@@ -26,6 +27,10 @@ from common.agent_dialogue_contract_v2 import (
 CONSULTATION_SCHEMA = "mastermind.agent_dialogue_consultation.v1"
 CONSULTATION_V2_SCHEMA = "mastermind.agent_dialogue_consultation.v2"
 GROK_CONSULTATION_SCHEMA = "mastermind.agent_dialogue_consultation.v3"
+CONSULTATION_PACKET_DISCRIMINATOR = (
+    "MMX/AGENT_DIALOGUE_CONSULTATION_PACKET_V1"
+)
+CONSULTATION_PACKET_MAX_BYTES = MAX_FRAME_BYTES
 CONSULTATION_PURPOSES = frozenset({"QUESTION", "ANSWER", "NOTICE", "CORRECTION"})
 CONSULTATION_KEYS = frozenset(
     {
@@ -426,6 +431,79 @@ def build_consultation(value: Any) -> dict[str, Any]:
     return item
 
 
+def _strict_packet_loads(raw: str) -> dict[str, Any]:
+    def reject_constant(_value: str) -> Any:
+        raise ValueError("non-finite JSON is not canonical")
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object key")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(
+            raw,
+            parse_constant=reject_constant,
+            object_pairs_hook=unique_object,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise DialogueContractError("FRAME_INVALID") from None
+    if not isinstance(value, dict):
+        raise DialogueContractError("FRAME_INVALID")
+    return value
+
+
+def _wire_packet(value: Any) -> dict[str, Any]:
+    item = validate_consultation(copy.deepcopy(value))
+    if item["purpose"] not in {"QUESTION", "ANSWER"}:
+        raise DialogueContractError("MESSAGE_INVALID")
+    if not item["fingerprint"]:
+        raise DialogueContractError("MESSAGE_INVALID")
+    return item
+
+
+def render_consultation_packet(value: Mapping[str, Any]) -> str:
+    packet = _wire_packet(value)
+    text = (
+        f"{CONSULTATION_PACKET_DISCRIMINATOR}\n"
+        f"{canonical_consultation_json(packet)}"
+    )
+    if len(text.encode("utf-8")) > CONSULTATION_PACKET_MAX_BYTES:
+        raise DialogueContractError("FRAME_TOO_LARGE")
+    return text
+
+
+def parse_consultation_packet(raw: str | bytes) -> dict[str, Any]:
+    if isinstance(raw, bytes):
+        try:
+            text = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            raise DialogueContractError("FRAME_INVALID") from None
+    elif isinstance(raw, str):
+        text = raw
+    else:
+        raise DialogueContractError("FRAME_INVALID")
+
+    lines = text.split("\n")
+    if (
+        len(lines) != 2
+        or lines[0] != CONSULTATION_PACKET_DISCRIMINATOR
+        or not lines[1]
+    ):
+        raise DialogueContractError("FRAME_INVALID")
+    if len(text.encode("utf-8")) > CONSULTATION_PACKET_MAX_BYTES:
+        raise DialogueContractError("FRAME_TOO_LARGE")
+
+    document = _strict_packet_loads(lines[1])
+    packet = _wire_packet(document)
+    if lines[1] != canonical_consultation_json(packet):
+        raise DialogueContractError("FRAME_INVALID")
+    return packet
+
+
 def classify_duplicate(
     original: Mapping[str, Any], replay: Mapping[str, Any]
 ) -> DuplicateClassification:
@@ -440,6 +518,8 @@ __all__ = [
     "ANSWER_KEYS",
     "ARTIFACT_REVISION_KEYS",
     "CONSULTATION_KEYS",
+    "CONSULTATION_PACKET_DISCRIMINATOR",
+    "CONSULTATION_PACKET_MAX_BYTES",
     "CONSULTATION_V2_KEYS",
     "CONSULTATION_V2_SCHEMA",
     "CONSULTATION_PURPOSES",
@@ -455,6 +535,8 @@ __all__ = [
     "build_consultation",
     "canonical_consultation_json",
     "classify_duplicate",
+    "parse_consultation_packet",
+    "render_consultation_packet",
     "consultation_schema_for_reasoning_surface",
     "consultation_semantic_fingerprint",
     "validate_consultation",
