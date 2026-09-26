@@ -9168,6 +9168,7 @@ def test_p1r1_lost_return_through_the_real_targeted_carrier(
     assert _intent_count(runtime, consultation_id) == 1
     assert _requested_count(runtime, consultation_id) == 1
     wake_after_first = len(WakeLedgerRepository(runtime).list_wake_events())
+    reads_after_first = len(relay.operations("read_consultation_packet"))
 
     # The one physical post landed on B's parent, carrying B's context.
     sent = relay.operations("send_consultation_packet")[0]["request"]["args"]
@@ -9193,6 +9194,10 @@ def test_p1r1_lost_return_through_the_real_targeted_carrier(
     replay_data = replay["result"]
     assert replay_data["consultation_ref"] == consultation_id
     assert replay_data["state"] == "ALREADY_INTENDED"
+    # Positive control for the tampered-readback case: a clean replay reports
+    # NO reconciliation blocker, so that signal discriminates rather than
+    # firing on every replay.
+    assert replay_data["blocker"] is None
     # Exactly one packet for the whole scenario, still only on B's parent.
     assert len(relay.operations("send_consultation_packet")) == 1
     assert relay.threads_posted_on() == {_P1R1_B_THREAD}
@@ -9201,12 +9206,185 @@ def test_p1r1_lost_return_through_the_real_targeted_carrier(
     assert _requested_count(runtime, consultation_id) == 1
     assert len(WakeLedgerRepository(runtime).list_wake_events()) == wake_after_first
     # The replay reached its verdict by reading B's parent, not by trusting
-    # in-process state: the read it issued names the consultation the first
-    # dispatch minted.
-    reads = relay.operations("read_consultation_packet")
-    assert reads, "the replay must physically read before concluding"
-    assert reads[-1]["request"]["args"]["thread_ts"] == _P1R1_B_THREAD
-    assert reads[-1]["request"]["args"]["consultation_id"] == consultation_id
+    # in-process state. Counted per phase, because a cumulative list would let
+    # the first dispatch's own absence probe satisfy this.
+    replay_reads = relay.operations("read_consultation_packet")[reads_after_first:]
+    assert replay_reads, "the replay must physically read before concluding"
+    for read in replay_reads:
+        assert read["request"]["args"]["thread_ts"] == _P1R1_B_THREAD
+        assert read["request"]["args"]["consultation_id"] == consultation_id
+
+
+@pytest.mark.parametrize(
+    "tampered_key",
+    ["requester_actor_ref", "recipient_actor_ref", "consultation_id"],
+)
+def test_p1r1_tampered_readback_is_refused_by_the_real_carrier(
+    tampered_key: str,
+) -> None:
+    """The other half of the composition falsifier, at the carrier.
+
+    Relay is authenticated but the packet it returns is still evidence, not
+    authority. Each tamper below is refused, and the control proves the same
+    read succeeds untampered -- without it, a carrier that refused every read
+    would pass.
+
+    This pins the CURRENT classification, ``ConsultationPacketCarrierUnknown``,
+    which is a retryable-outage code for what is in fact a deterministic
+    integrity failure that no retry can fix. The read edge has no effect to
+    protect, so this is much weaker than the send-edge defect Repair A fixed --
+    but it is the same defect class, it is reported as a finding, and pinning
+    the code here is deliberate so that changing it has to be a decision rather
+    than a drift. Any such change belongs on BOTH carriers at once; the
+    incumbent same-parent read has the identical exposure.
+    """
+    frame = _packet_frame(_P1R1_A, _P1R1_B, purpose="QUESTION")
+    consultation_id = frame["consultation_id"]
+    a_binding = _dialogue_binding(
+        _P1R1_A, session_ref="asd-session-p1r1-a-0001", thread_ts=_P1R1_A_THREAD
+    )
+    b_target = _delivery_target(
+        _P1R1_B, session_ref="asd-session-p1r1-b-0001", thread_ts=_P1R1_B_THREAD
+    )
+
+    def read(stored: Mapping[str, Any]) -> Any:
+        relay = _P1R1RelayStub()
+        relay.posted[(_P1R1_B_THREAD, consultation_id, "QUESTION")] = dict(stored)
+        carrier = _p1r1_carrier(
+            binding=a_binding,
+            resolver=_StaticPacketTargetResolver(
+                read={
+                    (consultation_id, "QUESTION"): _p1r1_access(
+                        b_target, requester=_P1R1_A, recipient=_P1R1_B
+                    )
+                }
+            ),
+            service=relay,
+        )
+        return _run(carrier.get_question(consultation_id))
+
+    # Positive control: untampered, the same wiring returns the packet.
+    control = read(frame)
+    assert control is not None
+    assert control["consultation_id"] == consultation_id
+
+    tampered = dict(frame)
+    if tampered_key == "consultation_id":
+        tampered[tampered_key] = "consult-" + "0" * 32
+    else:
+        tampered[tampered_key] = {
+            "kind": "worker_attempt",
+            "job_id": "JOB-P1R1-TAMPER",
+            "attempt_id": "ATT-P1R1-TAMPER",
+            "worker_id": "codex-tamper",
+        }
+
+    with pytest.raises(ConsultationPacketCarrierUnknown):
+        read(tampered)
+
+
+def test_p1r1_tampered_readback_produces_no_second_packet_and_no_wake(
+    tmp_path: Path,
+) -> None:
+    """The composition consequence of the refusal above.
+
+    Two separate facts, both measured rather than assumed:
+
+    ``state`` stays ``ALREADY_INTENDED`` -- it rests on Runtime's own intent
+    record, not on the packet Relay handed back, so the carrier's refusal does
+    not and should not change it. The dispatcher does not raise either.
+
+    The alarm is the ``blocker`` field: the replay reports
+    ``CARRIER_RECONCILIATION_REQUIRED``, and the untampered replay in
+    ``test_p1r1_lost_return_through_the_real_targeted_carrier`` reports
+    ``None``. That pair is the positive control -- without it, a dispatcher
+    that flagged reconciliation on every replay would pass here.
+
+    So the property is: a tampered readback creates no effect AND is reported.
+    ``_validated_question_frame`` against the canonical INTENT payload is what
+    makes that true, not anything the carrier decides on its own.
+    """
+    runtime = _runtime_at(tmp_path / "p1r1-tampered-replay")
+    _consultations(runtime, tmp_path / "p1r1-tampered-replay")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "p1r1-tamper-repo")
+    invocations = _p1_invocations()
+    caller_binding = _dialogue_binding(
+        requester,
+        session_ref="asd-session-p1r1-a-0001",
+        thread_ts=_P1R1_A_THREAD,
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Is a tampered readback ever consumed?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+    relay = _P1R1RelayStub()
+
+    def dispatch() -> Mapping[str, Any]:
+        carrier = consultation_dispatch.TargetedAgentDialogueConsultationPacketCarrier(
+            binding_resolver=_StaticDialogueBindingResolver(caller_binding),
+            target_resolver=_P1R1HostTargetResolver(
+                requester=requester, recipient=recipient
+            ),
+            socket_path=Path("/private/tmp/iac1-p1r1-agent-relay.sock"),
+            service_call=relay,
+            timeout_seconds=7.5,
+        )
+        return _run_dispatcher(
+            _cross_parent_dispatcher(
+                runtime,
+                fixture_repo,
+                requester=requester,
+                recipient=recipient,
+                carrier=carrier,
+                invocations=invocations,
+                caller_dialogue_binding=caller_binding,
+            ),
+            "company.consult",
+            envelope,
+        )
+
+    first = dispatch()
+    consultation_id = first["result"]["consultation_ref"]
+    assert first["result"]["state"] == "INTENDED"
+    wake_after_first = len(WakeLedgerRepository(runtime).list_wake_events())
+    sends_after_first = len(relay.operations("send_consultation_packet"))
+    assert sends_after_first == 1
+
+    # Relay now returns a packet whose recipient party has been rewritten --
+    # i.e. exactly the targeting fact P1-R1 exists to get right.
+    key = (_P1R1_B_THREAD, consultation_id, "QUESTION")
+    tampered = dict(relay.posted[key])
+    tampered["recipient_actor_ref"] = {
+        "kind": "worker_attempt",
+        "job_id": "JOB-P1R1-TAMPER",
+        "attempt_id": "ATT-P1R1-TAMPER",
+        "worker_id": "codex-tamper",
+    }
+    relay.posted[key] = tampered
+    reads_after_first = len(relay.operations("read_consultation_packet"))
+
+    replay = dispatch()
+
+    # The replay did attempt the physical read, so the tolerance below is the
+    # dispatcher declining to escalate -- not the dispatcher never looking.
+    assert len(relay.operations("read_consultation_packet")) > reads_after_first
+    assert replay["result"]["consultation_ref"] == consultation_id
+    assert replay["result"]["state"] == "ALREADY_INTENDED"
+    # The tamper IS reported -- as a reconciliation blocker, not an exception.
+    assert replay["result"]["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    # No effect of any kind was created from the tampered content.
+    assert len(relay.operations("send_consultation_packet")) == sends_after_first
+    assert relay.threads_posted_on() == {_P1R1_B_THREAD}
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+    assert len(WakeLedgerRepository(runtime).list_wake_events()) == wake_after_first
+    # And the tampered party never reached Relay as a new destination.
+    assert all(
+        call["request"]["args"]["thread_ts"] == _P1R1_B_THREAD
+        for call in relay.operations("send_consultation_packet")
+    )
 
 
 @pytest.mark.parametrize(
