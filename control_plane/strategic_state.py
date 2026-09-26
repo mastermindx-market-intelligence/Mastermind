@@ -53,13 +53,12 @@ REQUIRED_CONSTRAINTS = (
 
 _REQUIRED_KEYS = (
     "schema", "meta", "departments", "statuses", "constraint_levels",
-    "company_phase", "north_star", "p0", "resource_policy", "phase_gates",
-    "constraints", "review_triggers",
+    "company_phase", "north_star", "p0", "resource_policy",
+    "core_product_value_model", "phase_gates", "constraints", "review_triggers",
 )
 _P0_FIELDS = ("id", "department", "objective", "status")
 _VOCABULARIES = ("departments", "statuses", "constraint_levels")
 _STR_LISTS = ("north_star", "review_triggers")
-_PHASE_GATE_FIELDS = ("purpose", "criteria", "on_pass")
 
 #: Resource weights are hand-maintained shares; allow float dust, not real drift.
 RESOURCE_SUM_TOLERANCE = 0.01
@@ -113,6 +112,7 @@ def _validate(doc: Any, where: Path) -> dict[str, Any]:
 
     _validate_p0(doc, where)
     _validate_resource_policy(doc, where)
+    _validate_core_product_value_model(doc, where)
     _validate_phase_gates(doc, where)
     _validate_constraints(doc, where)
     return doc
@@ -166,6 +166,46 @@ def _validate_resource_policy(doc: dict, where: Path) -> None:
     if abs(total - 1.0) > RESOURCE_SUM_TOLERANCE:
         _fail(where, f"resource_policy weights must sum to ~1.0 "
                      f"(tolerance {RESOURCE_SUM_TOLERANCE}), got {total:.4f}")
+
+
+def _validate_core_product_value_model(doc: dict, where: Path) -> None:
+    """Validate the shared value/readiness rubric without granting promotion authority."""
+    model = doc["core_product_value_model"]
+    if not isinstance(model, dict):
+        _fail(where, "'core_product_value_model' must be a mapping")
+
+    products = model.get("products")
+    if not isinstance(products, list) or not products:
+        _fail(where, "core_product_value_model.products must be a non-empty list")
+    if any(not isinstance(item, str) or not item.strip() for item in products):
+        _fail(where, "core_product_value_model.products entries must be non-empty strings")
+    if len(set(products)) != len(products):
+        _fail(where, "core_product_value_model.products must be unique")
+
+    dimensions = model.get("dimensions")
+    if not isinstance(dimensions, dict) or not dimensions:
+        _fail(where, "core_product_value_model.dimensions must be a non-empty mapping")
+    total = 0.0
+    for name, raw in dimensions.items():
+        if not isinstance(name, str) or not name.strip():
+            _fail(where, "core_product_value_model dimension names must be non-empty strings")
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            _fail(where, f"core_product_value_model.dimensions[{name!r}] must be a number")
+        value = float(raw)
+        if value < 0:
+            _fail(where, f"core_product_value_model.dimensions[{name!r}] must not be negative")
+        total += value
+    if abs(total - 1.0) > RESOURCE_SUM_TOLERANCE:
+        _fail(where, f"core_product_value_model dimension weights sum to {total:.6f}, expected ~1.0")
+
+    evidence_rule = model.get("evidence_rule")
+    if not isinstance(evidence_rule, str) or not evidence_rule.strip():
+        _fail(where, "core_product_value_model.evidence_rule must be a non-empty string")
+    readiness = model.get("production_readiness")
+    if not isinstance(readiness, list) or not readiness:
+        _fail(where, "core_product_value_model.production_readiness must be a non-empty list")
+    if any(not isinstance(item, str) or not item.strip() for item in readiness):
+        _fail(where, "core_product_value_model.production_readiness entries must be non-empty strings")
 
 
 def _validate_phase_gates(doc: dict, where: Path) -> None:
