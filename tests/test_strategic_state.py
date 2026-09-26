@@ -5,7 +5,8 @@ Covers:
   2. P0 objective ids are unique and UPPER_SNAKE_CASE
   3. P0 department/status values come from the declared vocabularies
   4. Resource-policy weights sum to ~1.0
-  5. Descriptive phase gates are complete and remain non-runtime strategy data
+  5. Core-product value weights/readiness rubric are valid strategy data
+  6. Descriptive phase gates are complete and remain non-runtime strategy data
   6. Required constraint fields exist, and the standing prohibitions are prohibited
   6. The reader FAILS LOUD on every malformation class (its stated design law) —
      each case mutates a copy of the real document so the assertions cannot pass
@@ -86,6 +87,7 @@ def test_strategic_state_parses(state):
     assert state["schema"] == SCHEMA
     assert state["company_phase"].strip()
     assert state["north_star"], "north_star must not be empty"
+    assert state["core_product_value_model"], "core_product_value_model must not be empty"
     assert state["phase_gates"], "phase_gates must not be empty"
     assert state["meta"]["authority"] == "advisory_and_orientation_only", (
         "the strategic state must keep declaring itself advisory — a runtime "
@@ -129,6 +131,21 @@ def test_resource_weights_sum_to_one(state):
     assert total == pytest.approx(1.0, abs=ss.RESOURCE_SUM_TOLERANCE), (
         f"resource_policy weights sum to {total:.4f}, expected ~1.0"
     )
+
+
+def test_core_product_value_model_is_complete_and_balanced(state):
+    model = state["core_product_value_model"]
+    assert model["products"] == [
+        "Prophet",
+        "Macro Dashboard",
+        "Sector Intelligence",
+        "Research Vault",
+        "Terminal",
+        "Options Intelligence",
+    ]
+    assert sum(float(v) for v in model["dimensions"].values()) == pytest.approx(1.0)
+    assert model["evidence_rule"].strip()
+    assert len(model["production_readiness"]) >= 5
 
 
 def test_phase_gates_are_descriptive_and_complete(state):
@@ -227,7 +244,7 @@ def test_empty_mapping_does_not_read_as_empty_state(tmp_path):
         load_strategic_state(path)
 
 
-@pytest.mark.parametrize("key", ["company_phase", "p0", "resource_policy", "phase_gates", "constraints"])
+@pytest.mark.parametrize("key", ["company_phase", "p0", "resource_policy", "core_product_value_model", "phase_gates", "constraints"])
 def test_missing_required_key_raises(tmp_path, key):
     path = _mutated(tmp_path, lambda d: d.pop(key))
     with pytest.raises(StrategicStateError, match="missing required key"):
