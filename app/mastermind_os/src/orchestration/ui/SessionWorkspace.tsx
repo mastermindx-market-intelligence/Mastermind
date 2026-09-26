@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -10,6 +10,33 @@ export interface SessionMessage {
   text: string;
 }
 
+/** Explicit terminal outcome of one dispatched send or stop. */
+export type SessionOutcome = { status: "accepted" } | { status: "refused" };
+
+/**
+ * Correlated completion handle for exactly one dispatched send or stop.
+ *
+ * Host contract:
+ * - Call `onComplete` exactly once with the terminal outcome.
+ * - `"accepted"` on a send clears the submitted draft (only if the draft still
+ *   holds the submitted text) and releases the guard. On a stop it simply
+ *   releases the guard.
+ * - `"refused"` releases the guard and preserves the draft for an explicit
+ *   retry. Surface the reason via the `error` prop.
+ * - Never calling `onComplete` — a void/lost host — or throwing from the
+ *   callback leaves the action visibly in flight and does NOT authorize a
+ *   retry. There is no timer-based or inference-based unlock.
+ * - The handle is correlated to its own dispatch and to the session in whose
+ *   context it was dispatched: it stays valid across rerenders (an owner may
+ *   store it and reconcile the same pending action later without a remount),
+ *   but after a session switch it is a no-op, so a late promise or receipt for
+ *   session A can never complete — or clear a draft in — session B.
+ *
+ * `sending`, `stopping`, and `error` are display/owner-state inputs only.
+ * Neither a pending edge nor a changed error string ever releases a guard.
+ */
+export type SessionCompletion = (outcome: SessionOutcome) => void;
+
 export interface SessionWorkspaceProps {
   sessionKey: string;
   title: string;
@@ -18,13 +45,14 @@ export interface SessionWorkspaceProps {
   connection: "connected" | "disconnected" | "unknown";
   coverage: string;
   turnBusy: boolean;
+  /** Owner-side pending signal. Disables the form; never releases the guard. */
   sending: boolean;
   unavailableReason?: string;
   error?: string;
   stopLabel?: "Interrupt turn" | "Request stop";
   stopping?: boolean;
-  onSend: (text: string) => void;
-  onStop?: () => void;
+  onSend: (text: string, onComplete: SessionCompletion) => void;
+  onStop?: (onComplete: SessionCompletion) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,71 +102,96 @@ export function SessionWorkspace({
     setDraft(next);
   };
 
-  // Duplicate guards, one per outward action: armed when the action fires and
-  // released only by an observed owner signal (pending true->false cycle, or a
-  // changed error signal = refused outcome). Never by a timer, so a duplicate
-  // cannot slip through between event ticks before the owner makes progress.
-  const sendLatchRef = useRef(false);
+  // In-flight actions owned by this component: armed synchronously when the
+  // action is dispatched, resolved only by its correlated completion.
+  const [sendInFlight, setSendInFlight] = useState(false);
+  const [stopInFlight, setStopInFlight] = useState(false);
+  // Synchronous duplicate latches and correlation tokens. `null` means idle;
+  // a number is the token of the dispatch currently in flight. Each
+  // completion closure captures its token, so only the matching dispatch can
+  // release its guard — a stale or duplicated completion is a no-op.
+  const sendTokenRef = useRef<number | null>(null);
+  const stopTokenRef = useRef<number | null>(null);
+  const tokenSeqRef = useRef(0);
+
   const sentTextRef = useRef("");
-  const stopLatchRef = useRef(false);
-  const prevOwnerRef = useRef({ sending, stopping: !!stopping, error });
 
-  useEffect(() => {
-    const prev = prevOwnerRef.current;
-    prevOwnerRef.current = { sending, stopping: !!stopping, error };
-    const errorChanged = error !== prev.error;
-    if (prev.sending && !sending) {
-      // Owner completed the send cycle: release the latch, and only now drop
-      // the sent draft. An error on that cycle means the text is preserved.
-      sendLatchRef.current = false;
-      if (!error && draftRef.current === sentTextRef.current) setDraftText("");
-    } else if (errorChanged) {
-      sendLatchRef.current = false;
+  const completeSend = (token: number, outcome: SessionOutcome) => {
+    if (sendTokenRef.current !== token) return;
+    sendTokenRef.current = null;
+    setSendInFlight(false);
+    if (outcome.status === "accepted" && draftRef.current === sentTextRef.current) {
+      // Success clears only the text that was actually submitted; anything
+      // else in the box is preserved. A refusal keeps the draft.
+      setDraftText("");
     }
-    if ((prev.stopping && !stopping) || errorChanged) stopLatchRef.current = false;
-  });
+  };
 
-  // Session identity change: drop local state and every latch. This is a
-  // context switch, not a cancellation claim about the previous session.
+  // Session identity change: drop local state and every latch, and invalidate
+  // every local completion so a late promise/receipt for the previous session
+  // cannot resolve or clear anything for the new one. This is a context
+  // switch, not a cancellation claim about the previous session.
   const previousSessionKey = useRef(sessionKey);
   if (sessionKey !== previousSessionKey.current) {
     previousSessionKey.current = sessionKey;
     setDraftText("");
     sentTextRef.current = "";
-    sendLatchRef.current = false;
-    stopLatchRef.current = false;
-    prevOwnerRef.current = { sending, stopping: !!stopping, error };
+    sendTokenRef.current = null;
+    stopTokenRef.current = null;
+    setSendInFlight(false);
+    setStopInFlight(false);
   }
 
   const textBytes = utf8ByteLength(draft);
   const textTooLong = textBytes > MAX_TEXT_BYTES;
   const textBlank = draft.trim().length === 0;
 
+  const sendPending = sending || sendInFlight;
+
   const canSend =
     !unavailableReason &&
     connection === "connected" &&
     !turnBusy &&
-    !sending &&
+    !sendPending &&
     !textBlank &&
     !textTooLong;
 
   // Stop is offered only when the parent explicitly scopes it.
-  const canStop = !!stopLabel && !!onStop && !stopping;
+  const stopPending = !!stopping || stopInFlight;
+  const canStop = !!stopLabel && !!onStop && !stopPending;
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSend || sendLatchRef.current) return;
-    sendLatchRef.current = true;
+    if (!canSend || sendTokenRef.current !== null) return;
+    const token = ++tokenSeqRef.current;
+    sendTokenRef.current = token;
     sentTextRef.current = draft;
-    // Draft is kept until the owner reports the completed cycle, so an error
-    // never loses the user's text.
-    onSend(draft);
+    setSendInFlight(true);
+    // Draft is kept until the correlated completion reports the outcome, so a
+    // refusal never loses the user's text.
+    try {
+      onSend(draft, (outcome) => completeSend(token, outcome));
+    } catch {
+      // A thrown host callback is not an accepted or refused outcome: the
+      // send stays visibly in flight and does not authorize a retry.
+    }
   };
 
   const handleStop = () => {
-    if (!canStop || stopLatchRef.current) return;
-    stopLatchRef.current = true;
-    onStop();
+    if (!canStop || stopTokenRef.current !== null) return;
+    const token = ++tokenSeqRef.current;
+    stopTokenRef.current = token;
+    setStopInFlight(true);
+    try {
+      onStop?.((outcome) => {
+        if (stopTokenRef.current !== token) return;
+        stopTokenRef.current = null;
+        setStopInFlight(false);
+      });
+    } catch {
+      // A thrown stop callback is not an outcome: the stop stays visibly in
+      // flight and does not authorize a repeat.
+    }
   };
 
   const roleLabel = (role: SessionMessage["role"]): string => {
@@ -235,11 +288,11 @@ export function SessionWorkspace({
                 placeholder={
                   connection !== "connected"
                     ? "Connect to send messages."
-                    : turnBusy || sending
+                    : turnBusy || sendPending
                       ? "Wait for the current turn to complete."
                       : "Type a message…"
                 }
-                disabled={connection !== "connected" || turnBusy || sending}
+                disabled={connection !== "connected" || turnBusy || sendPending}
                 aria-describedby={textTooLong ? `${sendId}-length` : undefined}
                 aria-invalid={textTooLong}
               />
@@ -252,11 +305,11 @@ export function SessionWorkspace({
 
             <div className="form-actions">
               <button type="submit" disabled={!canSend} className="primary">
-                {sending ? "Sending…" : "Send"}
+                {sendPending ? "Sending…" : "Send"}
               </button>
               {stopLabel && (
                 <button type="button" onClick={handleStop} disabled={!canStop}>
-                  {stopping ? "Stopping…" : stopLabel}
+                  {stopPending ? "Stopping…" : stopLabel}
                 </button>
               )}
             </div>

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionWorkspace } from "./SessionWorkspace";
+import { SessionWorkspace, type SessionCompletion } from "./SessionWorkspace";
 
 const makeProps = (overrides = {}) =>
   ({
@@ -23,6 +24,8 @@ const makeProps = (overrides = {}) =>
   });
 
 const sendButton = () => screen.getByRole("button", { name: "Send" }) as HTMLButtonElement;
+const pendingSendButton = () =>
+  screen.getByRole("button", { name: "Sending…" }) as HTMLButtonElement;
 const messageBox = () => screen.getByLabelText("Message") as HTMLTextAreaElement;
 const sendForm = () => messageBox().closest("form") as HTMLFormElement;
 
@@ -205,44 +208,7 @@ describe("SessionWorkspace", () => {
       );
       await user.click(screen.getByRole("button", { name: "Interrupt turn" }));
       expect(onStop).toHaveBeenCalledTimes(1);
-    });
-
-    it("fires onStop once across event ticks until the owner reports the stop cycle", async () => {
-      const user = userEvent.setup();
-      const onStop = vi.fn();
-      const { rerender } = render(
-        <SessionWorkspace
-          {...makeProps({ stopLabel: "Interrupt turn" as const, onStop })}
-        />,
-      );
-      const stopBtn = screen.getByRole("button", { name: "Interrupt turn" });
-
-      await user.click(stopBtn);
-      expect(onStop).toHaveBeenCalledTimes(1);
-
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
-      await user.click(stopBtn);
-      expect(onStop).toHaveBeenCalledTimes(1);
-
-      // Owner progress: stopping true -> false re-arms stop.
-      rerender(
-        <SessionWorkspace
-          {...makeProps({
-            stopLabel: "Interrupt turn" as const,
-            onStop,
-            stopping: true,
-          })}
-        />,
-      );
-      rerender(
-        <SessionWorkspace
-          {...makeProps({ stopLabel: "Interrupt turn" as const, onStop })}
-        />,
-      );
-      await user.click(stopBtn);
-      expect(onStop).toHaveBeenCalledTimes(2);
+      expect(typeof onStop.mock.calls[0][0]).toBe("function");
     });
   });
 
@@ -277,7 +243,7 @@ describe("SessionWorkspace", () => {
       expect(messageBox().value).toBe("My draft message");
     });
 
-    it("keeps the draft until the owner reports a completed send cycle", async () => {
+    it("keeps the draft until the owner reports a completed send", async () => {
       const user = userEvent.setup();
       const onSend = vi.fn();
       render(<SessionWorkspace {...makeProps({ onSend })} />);
@@ -285,7 +251,7 @@ describe("SessionWorkspace", () => {
 
       await user.click(sendButton());
       expect(onSend).toHaveBeenCalledTimes(1);
-      // Firing onSend alone must not drop the text: no owner progress yet.
+      // Firing onSend alone must not drop the text: no completion yet.
       expect(messageBox().value).toBe("My message");
 
       await act(async () => {
@@ -294,48 +260,58 @@ describe("SessionWorkspace", () => {
       expect(messageBox().value).toBe("My message");
     });
 
-    it("clears the draft after a successful send cycle", async () => {
+    it("clears the draft after an accepted completion", async () => {
       const user = userEvent.setup();
-      const onSend = vi.fn();
-      const { rerender } = render(<SessionWorkspace {...makeProps({ onSend })} />);
+      let held: SessionCompletion | undefined;
+      const onSend = vi.fn((_text: string, onComplete: SessionCompletion) => {
+        held = onComplete;
+      });
+      render(<SessionWorkspace {...makeProps({ onSend })} />);
       fireEvent.change(messageBox(), { target: { value: "My message" } });
 
       await user.click(sendButton());
-      rerender(<SessionWorkspace {...makeProps({ onSend, sending: true })} />);
-      rerender(<SessionWorkspace {...makeProps({ onSend, sending: false })} />);
-
+      expect(onSend).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        held?.({ status: "accepted" });
+      });
       expect(onSend).toHaveBeenCalledTimes(1);
       expect(messageBox().value).toBe("");
       expect(sendButton().disabled).toBe(true);
     });
 
-    it("preserves the draft when the send cycle ends in an error", async () => {
+    it("preserves the draft when the send ends in a refusal shown as an error", async () => {
       const user = userEvent.setup();
-      const onSend = vi.fn();
+      let held: SessionCompletion | undefined;
+      const onSend = vi.fn((_text: string, onComplete: SessionCompletion) => {
+        held = onComplete;
+      });
       const { rerender } = render(<SessionWorkspace {...makeProps({ onSend })} />);
       fireEvent.change(messageBox(), { target: { value: "Do not lose me" } });
 
       await user.click(sendButton());
-      rerender(<SessionWorkspace {...makeProps({ onSend, sending: true })} />);
+      await act(async () => {
+        held?.({ status: "refused" });
+      });
       rerender(
-        <SessionWorkspace
-          {...makeProps({ onSend, sending: false, error: "Send failed" })}
-        />,
+        <SessionWorkspace {...makeProps({ onSend, error: "Send failed" })} />,
       );
 
       expect(onSend).toHaveBeenCalledTimes(1);
       expect(messageBox().value).toBe("Do not lose me");
       expect(screen.getByRole("alert").textContent).toBe("Send failed");
 
-      // Refused outcome released the latch, so the same text can be retried.
+      // The refusal released the guard, so the same text can be retried.
       await user.click(sendButton());
       expect(onSend).toHaveBeenCalledTimes(2);
-      expect(onSend).toHaveBeenNthCalledWith(2, "Do not lose me");
+      expect(onSend.mock.calls[1][0]).toBe("Do not lose me");
     });
 
-    it("releases the latch on a changed error signal without a send cycle", async () => {
+    it("a changed error string alone never unlocks the send guard", async () => {
       const user = userEvent.setup();
-      const onSend = vi.fn();
+      let held: SessionCompletion | undefined;
+      const onSend = vi.fn((_text: string, onComplete: SessionCompletion) => {
+        held = onComplete;
+      });
       const { rerender } = render(<SessionWorkspace {...makeProps({ onSend })} />);
       fireEvent.change(messageBox(), { target: { value: "Retry me" } });
 
@@ -345,13 +321,18 @@ describe("SessionWorkspace", () => {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
-      await user.click(sendButton());
-      expect(onSend).toHaveBeenCalledTimes(1);
-
+      // Uncorrelated error text is display-only: no retry authority.
       rerender(<SessionWorkspace {...makeProps({ onSend, error: "Rejected" })} />);
+      fireEvent.submit(sendForm());
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(pendingSendButton().disabled).toBe(true);
+
+      await act(async () => {
+        held?.({ status: "refused" });
+      });
       await user.click(sendButton());
       expect(onSend).toHaveBeenCalledTimes(2);
-      expect(onSend).toHaveBeenNthCalledWith(2, "Retry me");
+      expect(onSend.mock.calls[1][0]).toBe("Retry me");
     });
   });
 
@@ -394,71 +375,83 @@ describe("SessionWorkspace", () => {
       await user.click(sendButton());
       expect(onSend).toHaveBeenCalledTimes(1);
 
-      // No owner progress, then a new session identity.
+      // No completion, then a new session identity.
       rerender(<SessionWorkspace {...makeProps({ onSend, sessionKey: "session-2" })} />);
       expect(messageBox().value).toBe("");
 
       fireEvent.change(messageBox(), { target: { value: "Second" } });
       await user.click(sendButton());
       expect(onSend).toHaveBeenCalledTimes(2);
-      expect(onSend).toHaveBeenNthCalledWith(2, "Second");
+      expect(onSend.mock.calls[1][0]).toBe("Second");
     });
   });
 
   describe("duplicate send prevention", () => {
-    it("calls onSend only once across event ticks, then again after owner progress", async () => {
+    it("calls onSend only once across event ticks, then again after the explicit completion", async () => {
       const user = userEvent.setup();
-      const onSend = vi.fn();
-      const { rerender } = render(<SessionWorkspace {...makeProps({ onSend })} />);
+      let held: SessionCompletion | undefined;
+      const onSend = vi.fn((_text: string, onComplete: SessionCompletion) => {
+        held = onComplete;
+      });
+      render(<SessionWorkspace {...makeProps({ onSend })} />);
       fireEvent.change(messageBox(), { target: { value: "Hello" } });
 
       await user.click(sendButton());
-      await user.click(sendButton());
+      // A direct form submit probes the handler-level latch while the control
+      // is visibly pending ("Sending…", disabled).
+      fireEvent.submit(sendForm());
       expect(onSend).toHaveBeenCalledTimes(1);
-      expect(onSend).toHaveBeenCalledWith("Hello");
+      expect(onSend.mock.calls[0][0]).toBe("Hello");
 
-      // Ticks pass with no owner signal: still exactly one send.
+      // Ticks pass with no completion: still exactly one send.
       await act(async () => {
         await Promise.resolve();
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
-      await user.click(sendButton());
+      fireEvent.submit(sendForm());
       expect(onSend).toHaveBeenCalledTimes(1);
 
-      rerender(<SessionWorkspace {...makeProps({ onSend, sending: true })} />);
-      rerender(<SessionWorkspace {...makeProps({ onSend, sending: false })} />);
-      expect(messageBox().value).toBe("");
-
+      // The correlated completion is what re-arms the control.
+      await act(async () => {
+        held?.({ status: "refused" });
+      });
       fireEvent.change(messageBox(), { target: { value: "Second" } });
       await user.click(sendButton());
       expect(onSend).toHaveBeenCalledTimes(2);
-      expect(onSend).toHaveBeenNthCalledWith(2, "Second");
+      expect(onSend.mock.calls[1][0]).toBe("Second");
     });
   });
 
   describe("onSend payload", () => {
-    it("passes text to onSend", async () => {
+    it("passes text and a completion handle to onSend", async () => {
       const user = userEvent.setup();
       const onSend = vi.fn();
       render(<SessionWorkspace {...makeProps({ onSend })} />);
       fireEvent.change(messageBox(), { target: { value: "Hello world" } });
 
       await user.click(sendButton());
-      expect(onSend).toHaveBeenCalledWith("Hello world");
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend.mock.calls[0][0]).toBe("Hello world");
+      expect(typeof onSend.mock.calls[0][1]).toBe("function");
     });
 
     it("sends after a completed cycle for freshly typed text", async () => {
       const user = userEvent.setup();
-      const onSend = vi.fn();
-      const { rerender } = render(<SessionWorkspace {...makeProps({ onSend })} />);
+      let held: SessionCompletion | undefined;
+      const onSend = vi.fn((_text: string, onComplete: SessionCompletion) => {
+        held = onComplete;
+      });
+      render(<SessionWorkspace {...makeProps({ onSend })} />);
       fireEvent.change(messageBox(), { target: { value: "Hello" } });
       await user.click(sendButton());
-      rerender(<SessionWorkspace {...makeProps({ onSend, sending: true })} />);
-      rerender(<SessionWorkspace {...makeProps({ onSend, sending: false })} />);
+      await act(async () => {
+        held?.({ status: "accepted" });
+      });
 
       fireEvent.change(messageBox(), { target: { value: "Again" } });
       await user.click(sendButton());
-      expect(onSend).toHaveBeenLastCalledWith("Again");
+      expect(onSend).toHaveBeenCalledTimes(2);
+      expect(onSend.mock.calls[1][0]).toBe("Again");
     });
   });
 
@@ -571,5 +564,374 @@ describe("SessionWorkspace", () => {
       );
       expect(screen.getByRole("button", { name: "Interrupt turn" })).toBeTruthy();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Host completion contract — real wrapping hosts, not prop-driven harnesses.
+// ---------------------------------------------------------------------------
+
+describe("SessionWorkspace host completion contract", () => {
+  const base = {
+    sessionKey: "s1",
+    title: "T",
+    messages: [] as const,
+    observedAt: null,
+    connection: "connected" as const,
+    coverage: "Complete",
+    turnBusy: false,
+  };
+
+  it("synchronous acceptance clears the draft and re-arms after fresh input", async () => {
+    const sent: string[] = [];
+    function Host() {
+      return (
+        <SessionWorkspace
+          {...base}
+          sending={false}
+          onSend={(text, onComplete) => {
+            sent.push(text);
+            onComplete({ status: "accepted" });
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(messageBox(), { target: { value: "first" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(sent).toEqual(["first"]);
+    expect(messageBox().value).toBe("");
+    fireEvent.change(messageBox(), { target: { value: "second" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(sent).toEqual(["first", "second"]);
+  });
+
+  it("synchronous refusal resolves visibly, preserves the draft, and authorizes retry", async () => {
+    const sent: string[] = [];
+    function Host() {
+      return (
+        <SessionWorkspace
+          {...base}
+          sending={false}
+          onSend={(text, onComplete) => {
+            sent.push(text);
+            onComplete({ status: "refused" });
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(messageBox(), { target: { value: "keep me" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(sent).toEqual(["keep me"]);
+    expect(sendButton().textContent).toBe("Send");
+    expect(messageBox().value).toBe("keep me");
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(sent).toEqual(["keep me", "keep me"]);
+  });
+
+  it("an already-resolved promise with batched host state resolves and re-arms", async () => {
+    let calls = 0;
+    function Host() {
+      const [sending, setSending] = useState(false);
+      return (
+        <SessionWorkspace
+          {...base}
+          sending={sending}
+          onSend={(_text, onComplete) => {
+            calls += 1;
+            // React batches both updates away: pending is never observed.
+            setSending(true);
+            setSending(false);
+            Promise.resolve().then(() => onComplete({ status: "accepted" }));
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(messageBox(), { target: { value: "batched" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(calls).toBe(1);
+    // The microtask completion flushed inside act: draft cleared, reusable.
+    expect(messageBox().value).toBe("");
+    fireEvent.change(messageBox(), { target: { value: "again" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(calls).toBe(2);
+  });
+
+  it("ordinary async pending disables the action immediately and resolves on completion", async () => {
+    let settle: SessionCompletion | undefined;
+    function Host() {
+      return (
+        <SessionWorkspace
+          {...base}
+          sending={false}
+          onSend={(_text, onComplete) => {
+            settle = onComplete;
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(messageBox(), { target: { value: "async" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(pendingSendButton().disabled).toBe(true);
+    expect(messageBox().disabled).toBe(true);
+    await act(async () => {
+      settle?.({ status: "refused" });
+    });
+    expect(sendButton().textContent).toBe("Send");
+    expect(messageBox().value).toBe("async");
+  });
+
+  it("a void onSend that never completes stays visibly blocked and never authorizes retry", async () => {
+    const onSend = vi.fn();
+    function Host() {
+      return (
+        <SessionWorkspace
+          {...base}
+          sending={false}
+          onSend={onSend}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(messageBox(), { target: { value: "hello" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pendingSendButton().disabled).toBe(true);
+    await act(async () => {
+      fireEvent.submit(sendForm());
+    });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeTruthy();
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("a thrown onSend stays visibly blocked without authorizing retry", async () => {
+    const attempts: string[] = [];
+    function Host() {
+      return (
+        <SessionWorkspace
+          {...base}
+          sending={false}
+          onSend={(text) => {
+            attempts.push(text);
+            throw new Error("host exploded");
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(messageBox(), { target: { value: "boom" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(attempts).toEqual(["boom"]);
+    expect(pendingSendButton().disabled).toBe(true);
+    await act(async () => {
+      fireEvent.submit(sendForm());
+    });
+    expect(attempts).toEqual(["boom"]);
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeTruthy();
+  });
+
+  it("an uncorrelated error-string change is display-only and never unlocks the guard", async () => {
+    let calls = 0;
+    function Host() {
+      const [error, setError] = useState<string | undefined>(undefined);
+      return (
+        <SessionWorkspace
+          {...base}
+          sending={false}
+          error={error}
+          onSend={(_text, _onComplete) => {
+            calls += 1;
+            setError(`refused-${calls}`);
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(messageBox(), { target: { value: "err" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(calls).toBe(1);
+    expect(screen.getByRole("alert").textContent).toBe("refused-1");
+    await act(async () => {
+      fireEvent.submit(sendForm());
+    });
+    expect(calls).toBe(1);
+    expect(pendingSendButton().disabled).toBe(true);
+  });
+
+  it("send success clears only the submitted draft; text edited during flight is preserved", async () => {
+    let held: SessionCompletion | undefined;
+    function Host() {
+      return (
+        <SessionWorkspace
+          {...base}
+          sending={false}
+          onSend={(_text, onComplete) => {
+            held = onComplete;
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(messageBox(), { target: { value: "submitted" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(messageBox().disabled).toBe(true);
+    // The user force-edits the box while the send is still in flight.
+    fireEvent.change(messageBox(), { target: { value: "edited meanwhile" } });
+    await act(async () => {
+      held?.({ status: "accepted" });
+    });
+    // Only the submitted text may be cleared; the newer edit survives.
+    expect(messageBox().value).toBe("edited meanwhile");
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeTruthy();
+  });
+
+  it("a late completion from session A cannot resolve or clear session B", async () => {
+    let held: SessionCompletion | undefined;
+    const sent: { session: string; text: string }[] = [];
+    function Host({ sessionKey }: { sessionKey: string }) {
+      return (
+        <SessionWorkspace
+          {...base}
+          sessionKey={sessionKey}
+          sending={false}
+          onSend={(text, onComplete) => {
+            sent.push({ session: sessionKey, text });
+            held = onComplete;
+          }}
+        />
+      );
+    }
+    const { rerender } = render(<Host sessionKey="s1" />);
+    fireEvent.change(messageBox(), { target: { value: "From A" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(sent).toEqual([{ session: "s1", text: "From A" }]);
+
+    // Switch identity to session B and type a fresh draft.
+    rerender(<Host sessionKey="s2" />);
+    expect(messageBox().value).toBe("");
+    fireEvent.change(messageBox(), { target: { value: "From B" } });
+
+    // Session A's completion arrives late: it must be a no-op for B.
+    await act(async () => {
+      held?.({ status: "accepted" });
+    });
+    expect(messageBox().value).toBe("From B");
+    expect(sendButton().textContent).toBe("Send");
+
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(sent).toEqual([
+      { session: "s1", text: "From A" },
+      { session: "s2", text: "From B" },
+    ]);
+  });
+
+  it("a stored completion handle reconciles the same pending send across rerenders", async () => {
+    let held: SessionCompletion | undefined;
+    const onSend = vi.fn((_text: string, onComplete: SessionCompletion) => {
+      held = onComplete;
+    });
+    const { rerender } = render(
+      <SessionWorkspace {...base} sending={false} onSend={onSend} />,
+    );
+    fireEvent.change(messageBox(), { target: { value: "reconcile me" } });
+    await act(async () => {
+      sendButton().click();
+    });
+    expect(onSend).toHaveBeenCalledTimes(1);
+
+    // Unrelated rerenders do not remount the component or drop the pending
+    // action; the owner still holds the correlated handle.
+    rerender(
+      <SessionWorkspace
+        {...base}
+        sending={false}
+        error="unrelated display text"
+        onSend={onSend}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeTruthy();
+
+    // The owner resolves the same pending action out-of-band, no remount.
+    await act(async () => {
+      held?.({ status: "refused" });
+    });
+    expect(messageBox().value).toBe("reconcile me");
+    expect(sendButton().textContent).toBe("Send");
+  });
+
+  it("stop duplicate guard is visible while the host never reports, then re-arms on completion", async () => {
+    let held: SessionCompletion | undefined;
+    const onStop = vi.fn((onComplete: SessionCompletion) => {
+      held = onComplete;
+    });
+    function Host() {
+      return (
+        <SessionWorkspace
+          {...base}
+          sending={false}
+          onSend={() => undefined}
+          stopLabel="Interrupt turn"
+          onStop={onStop}
+        />
+      );
+    }
+    render(<Host />);
+    const stopBtn = screen.getByRole("button", { name: "Interrupt turn" }) as HTMLButtonElement;
+    await act(async () => {
+      stopBtn.click();
+    });
+    expect(onStop).toHaveBeenCalledTimes(1);
+    // The guard is visible even though the host never set `stopping`.
+    const pendingStop = screen.getByRole("button", { name: "Stopping…" }) as HTMLButtonElement;
+    expect(pendingStop.disabled).toBe(true);
+    await act(async () => {
+      fireEvent.click(pendingStop);
+    });
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      held?.({ status: "accepted" });
+    });
+    expect(screen.getByRole("button", { name: "Interrupt turn" })).toBeTruthy();
+    await act(async () => {
+      (screen.getByRole("button", { name: "Interrupt turn" }) as HTMLButtonElement).click();
+    });
+    expect(onStop).toHaveBeenCalledTimes(2);
   });
 });

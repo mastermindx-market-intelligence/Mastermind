@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,13 +16,39 @@ export interface LaunchForm {
   profileRef: string;
 }
 
+/** Explicit terminal outcome of one dispatched launch. */
+export type LaunchOutcome = { status: "accepted" } | { status: "refused" };
+
+/**
+ * Correlated completion handle for exactly one dispatched launch.
+ *
+ * Host contract:
+ * - Call `onComplete` exactly once with the terminal outcome.
+ * - `"accepted"`: the launch succeeded. The guard releases and the goal draft
+ *   is cleared, so a still-mounted parent cannot accidentally relaunch it.
+ * - `"refused"`: the launch was rejected. The guard releases and the draft is
+ *   preserved for an explicit retry. Surface the reason via the `error` prop.
+ * - Never calling `onComplete` — a void/lost host — or throwing from the
+ *   callback leaves the launch visibly in flight and does NOT authorize a
+ *   retry. There is no timer-based or inference-based unlock.
+ * - The handle is correlated to its own dispatch: it stays valid across
+ *   rerenders (an owner may store it and reconcile the same pending action
+ *   later without a remount), and a stale handle — superseded by a later
+ *   dispatch or completion — is a no-op.
+ *
+ * `submitting` and `error` are display/owner-state inputs only. Neither a
+ * pending edge nor a changed error string ever releases the guard.
+ */
+export type LaunchCompletion = (outcome: LaunchOutcome) => void;
+
 export interface LaunchOrchestratorProps {
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
+  /** Owner-side pending signal. Disables the form; never releases the guard. */
   submitting: boolean;
   unavailableReason?: string;
   error?: string;
-  onSubmit: (intent: LaunchForm) => void;
+  onSubmit: (intent: LaunchForm, onComplete: LaunchCompletion) => void;
   onCancel: () => void;
 }
 
@@ -65,22 +91,28 @@ export function LaunchOrchestrator({
   const [draftProject, setDraftProject] = useState("");
   const [draftProfile, setDraftProfile] = useState("");
 
-  // Duplicate-submit latch: armed when onSubmit fires, released only by an
-  // observed owner signal below. Never by a timer.
-  const submitLatchRef = useRef(false);
-  const prevOwnerRef = useRef({ submitting, error });
+  // In-flight launch owned by this component: armed synchronously when
+  // onSubmit is dispatched, resolved only by its correlated completion.
+  const [launchInFlight, setLaunchInFlight] = useState(false);
+  // Synchronous duplicate latch and correlation token. `null` means idle; a
+  // number is the token of the dispatch currently in flight. The completion
+  // closure captures that token, so only the matching dispatch can release
+  // the guard — a stale or duplicated completion is a no-op.
+  const launchTokenRef = useRef<number | null>(null);
+  const tokenSeqRef = useRef(0);
 
-  useEffect(() => {
-    const prev = prevOwnerRef.current;
-    prevOwnerRef.current = { submitting, error };
-    if (prev.submitting && !submitting) {
-      // Owner reported a completed submit cycle.
-      submitLatchRef.current = false;
-    } else if (error !== prev.error) {
-      // Owner reported a refused outcome.
-      submitLatchRef.current = false;
+  const launchPending = submitting || launchInFlight;
+
+  const completeLaunch = (token: number, outcome: LaunchOutcome) => {
+    if (launchTokenRef.current !== token) return;
+    launchTokenRef.current = null;
+    setLaunchInFlight(false);
+    if (outcome.status === "accepted") {
+      // Success consumes the goal so the same intent cannot be launched twice
+      // by a parent that stays mounted. A refusal keeps the draft.
+      setDraftGoal("");
     }
-  });
+  };
 
   // Default selection — first eligible choice, falling back to the first item
   // so an all-unavailable list still renders its options (and stays blocked).
@@ -102,7 +134,7 @@ export function LaunchOrchestrator({
 
   const canSubmit =
     !unavailableReason &&
-    !submitting &&
+    !launchPending &&
     !projectStale &&
     !profileStale &&
     !selectedProjectChoice?.unavailableReason &&
@@ -112,13 +144,23 @@ export function LaunchOrchestrator({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit || submitLatchRef.current) return;
-    submitLatchRef.current = true;
-    onSubmit({
-      goal: draftGoal,
-      projectRef: selectedProject,
-      profileRef: selectedProfile,
-    });
+    if (!canSubmit || launchTokenRef.current !== null) return;
+    const token = ++tokenSeqRef.current;
+    launchTokenRef.current = token;
+    setLaunchInFlight(true);
+    try {
+      onSubmit(
+        {
+          goal: draftGoal,
+          projectRef: selectedProject,
+          profileRef: selectedProfile,
+        },
+        (outcome) => completeLaunch(token, outcome),
+      );
+    } catch {
+      // A thrown host callback is not an accepted or refused outcome: the
+      // launch stays visibly in flight and does not authorize a retry.
+    }
   };
 
   const goalError = goalTooLong
@@ -158,7 +200,7 @@ export function LaunchOrchestrator({
               onChange={(e) => setDraftGoal(e.target.value)}
               rows={4}
               placeholder="Describe the objective for this launch…"
-              disabled={submitting}
+              disabled={launchPending}
               aria-describedby={goalTooLong ? `${goalId}-length` : undefined}
               aria-invalid={!!goalError}
             />
@@ -176,7 +218,7 @@ export function LaunchOrchestrator({
               id={projectId}
               value={selectedProject}
               onChange={(e) => setDraftProject(e.target.value)}
-              disabled={submitting}
+              disabled={launchPending}
             >
               {projects.map((p) => (
                 <option key={p.ref} value={p.ref} disabled={!!p.unavailableReason}>
@@ -198,7 +240,7 @@ export function LaunchOrchestrator({
               id={profileId}
               value={selectedProfile}
               onChange={(e) => setDraftProfile(e.target.value)}
-              disabled={submitting}
+              disabled={launchPending}
             >
               {profiles.map((p) => (
                 <option key={p.ref} value={p.ref} disabled={!!p.unavailableReason}>
@@ -229,9 +271,9 @@ export function LaunchOrchestrator({
           {/* Actions */}
           <div className="form-actions">
             <button type="submit" disabled={!canSubmit} className="primary">
-              {submitting ? "Launching…" : "Launch"}
+              {launchPending ? "Launching…" : "Launch"}
             </button>
-            <button type="button" onClick={onCancel} disabled={submitting}>
+            <button type="button" onClick={onCancel} disabled={launchPending}>
               Cancel
             </button>
           </div>

@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LaunchOrchestrator } from "./LaunchOrchestrator";
+import {
+  LaunchOrchestrator,
+  type LaunchCompletion,
+  type LaunchForm,
+} from "./LaunchOrchestrator";
 
 const makeProps = (overrides = {}) => ({
   projects: [
@@ -22,6 +27,9 @@ const makeProps = (overrides = {}) => ({
 });
 
 const launchButton = () => screen.getByRole("button", { name: "Launch" }) as HTMLButtonElement;
+const pendingLaunchButton = () =>
+  screen.getByRole("button", { name: "Launching…" }) as HTMLButtonElement;
+const goalForm = () => screen.getByLabelText("Goal").closest("form") as HTMLFormElement;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -246,16 +254,19 @@ describe("LaunchOrchestrator", () => {
       act(() => { submitBtn.click(); });
 
       expect(onSubmit).toHaveBeenCalledTimes(1);
-      expect(onSubmit).toHaveBeenCalledWith({
+      expect(onSubmit.mock.calls[0][0]).toEqual({
         goal: "Valid goal",
         projectRef: "proj-alpha",
         profileRef: "prof-1",
       });
     });
 
-    it("keeps the latch across event ticks until the owner reports progress", async () => {
+    it("keeps the latch across event ticks and host busy edges until the explicit completion", async () => {
       const user = userEvent.setup();
-      const onSubmit = vi.fn();
+      let held: LaunchCompletion | undefined;
+      const onSubmit = vi.fn((_intent: LaunchForm, onComplete: LaunchCompletion) => {
+        held = onComplete;
+      });
       const { rerender } = render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
       fireEvent.change(textarea, { target: { value: "Valid goal" } });
@@ -268,21 +279,36 @@ describe("LaunchOrchestrator", () => {
         await Promise.resolve();
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
-      await user.click(launchButton());
+      fireEvent.submit(goalForm());
       expect(onSubmit).toHaveBeenCalledTimes(1);
 
-      // Owner progress: a submitting true -> false cycle releases the latch.
+      // Host pending edges alone no longer release the guard: the component's
+      // own in-flight state keeps the control visibly blocked.
       rerender(<LaunchOrchestrator {...makeProps({ onSubmit, submitting: true })} />);
       rerender(<LaunchOrchestrator {...makeProps({ onSubmit, submitting: false })} />);
+      expect(pendingLaunchButton().disabled).toBe(true);
+      fireEvent.submit(goalForm());
+      expect(onSubmit).toHaveBeenCalledTimes(1);
 
-      fireEvent.change(textarea, { target: { value: "Valid goal again" } });
+      // The correlated completion is what re-arms the control.
+      await act(async () => {
+        held?.({ status: "refused" });
+      });
       await user.click(launchButton());
       expect(onSubmit).toHaveBeenCalledTimes(2);
+      expect(onSubmit.mock.calls[1][0]).toEqual({
+        goal: "Valid goal",
+        projectRef: "proj-alpha",
+        profileRef: "prof-1",
+      });
     });
 
-    it("releases the latch on a changed error signal and preserves the draft", async () => {
+    it("a refused completion releases the latch and preserves the draft; a changed error string alone does not", async () => {
       const user = userEvent.setup();
-      const onSubmit = vi.fn();
+      let held: LaunchCompletion | undefined;
+      const onSubmit = vi.fn((_intent: LaunchForm, onComplete: LaunchCompletion) => {
+        held = onComplete;
+      });
       const { rerender } = render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
       fireEvent.change(textarea, { target: { value: "Retry goal" } });
@@ -290,18 +316,18 @@ describe("LaunchOrchestrator", () => {
       await user.click(launchButton());
       expect(onSubmit).toHaveBeenCalledTimes(1);
 
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
-      await user.click(launchButton());
-      expect(onSubmit).toHaveBeenCalledTimes(1);
-
+      // An uncorrelated error-string change is display-only: no retry authority.
       rerender(<LaunchOrchestrator {...makeProps({ onSubmit, error: "Launch refused" })} />);
       expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Retry goal");
+      fireEvent.submit(goalForm());
+      expect(onSubmit).toHaveBeenCalledTimes(1);
 
+      await act(async () => {
+        held?.({ status: "refused" });
+      });
       await user.click(launchButton());
       expect(onSubmit).toHaveBeenCalledTimes(2);
-      expect(onSubmit).toHaveBeenLastCalledWith({
+      expect(onSubmit.mock.calls[1][0]).toEqual({
         goal: "Retry goal",
         projectRef: "proj-alpha",
         profileRef: "prof-1",
@@ -330,7 +356,7 @@ describe("LaunchOrchestrator", () => {
       await user.click(launchButton());
 
       expect(onSubmit).toHaveBeenCalledTimes(1);
-      expect(onSubmit).toHaveBeenCalledWith({
+      expect(onSubmit.mock.calls[0][0]).toEqual({
         goal: "Goal via keyboard",
         projectRef: "proj-alpha",
         profileRef: "prof-1",
@@ -356,7 +382,7 @@ describe("LaunchOrchestrator", () => {
   });
 
   describe("onSubmit payload", () => {
-    it("passes correct LaunchForm to onSubmit", async () => {
+    it("passes correct LaunchForm plus a completion handle to onSubmit", async () => {
       const user = userEvent.setup();
       const onSubmit = vi.fn();
       render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
@@ -366,11 +392,13 @@ describe("LaunchOrchestrator", () => {
       await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
       await user.click(launchButton());
 
-      expect(onSubmit).toHaveBeenCalledWith({
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+      expect(onSubmit.mock.calls[0][0]).toEqual({
         goal: "My goal",
         projectRef: "proj-gamma",
         profileRef: "prof-2",
       });
+      expect(typeof onSubmit.mock.calls[0][1]).toBe("function");
     });
 
     it("passes opaque refs unchanged without interpretation", async () => {
@@ -382,7 +410,7 @@ describe("LaunchOrchestrator", () => {
       })} />);
       fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Opaque" } });
       await userEvent.setup().click(launchButton());
-      expect(onSubmit).toHaveBeenCalledWith({
+      expect(onSubmit.mock.calls[0][0]).toEqual({
         goal: "Opaque",
         projectRef: "ws:special/ref",
         profileRef: "profile:with:colons",
@@ -427,5 +455,275 @@ describe("LaunchOrchestrator", () => {
       );
       expect(document.querySelector("img")).toBeNull();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Host completion contract — real wrapping hosts, not prop-driven harnesses.
+// ---------------------------------------------------------------------------
+
+describe("LaunchOrchestrator host completion contract", () => {
+  const catalog = {
+    projects: [{ ref: "p1", label: "P1" }],
+    profiles: [{ ref: "f1", label: "F1" }],
+  };
+  const noop = () => undefined;
+  const goalBox = () => screen.getByLabelText("Goal") as HTMLTextAreaElement;
+  const fillGoal = (value: string) => fireEvent.change(goalBox(), { target: { value } });
+
+  it("synchronous refusal resolves visibly, keeps the draft, and authorizes retry", async () => {
+    const intents: LaunchForm[] = [];
+    function Host() {
+      return (
+        <LaunchOrchestrator
+          {...catalog}
+          submitting={false}
+          onCancel={noop}
+          onSubmit={(intent, onComplete) => {
+            intents.push(intent);
+            onComplete({ status: "refused" });
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fillGoal("Sync refused");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(intents).toHaveLength(1);
+    // Resolved within the same event: not stuck pending, draft intact.
+    expect(launchButton().textContent).toBe("Launch");
+    expect(launchButton().disabled).toBe(false);
+    expect(goalBox().value).toBe("Sync refused");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(intents).toHaveLength(2);
+  });
+
+  it("synchronous acceptance clears the goal so a still-mounted parent cannot relaunch", async () => {
+    const intents: LaunchForm[] = [];
+    function Host() {
+      return (
+        <LaunchOrchestrator
+          {...catalog}
+          submitting={false}
+          onCancel={noop}
+          onSubmit={(intent, onComplete) => {
+            intents.push(intent);
+            onComplete({ status: "accepted" });
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fillGoal("Launch once");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(intents).toHaveLength(1);
+    expect(goalBox().value).toBe("");
+    // Blank goal blocks any accidental second launch of the same intent.
+    expect(launchButton().disabled).toBe(true);
+    await act(async () => {
+      fireEvent.submit(goalForm());
+    });
+    expect(intents).toHaveLength(1);
+  });
+
+  it("an already-resolved promise with batched host state resolves and re-arms", async () => {
+    let calls = 0;
+    function Host() {
+      const [submitting, setSubmitting] = useState(false);
+      return (
+        <LaunchOrchestrator
+          {...catalog}
+          submitting={submitting}
+          onCancel={noop}
+          onSubmit={(_intent, onComplete) => {
+            calls += 1;
+            // React batches both updates away: pending is never observed.
+            setSubmitting(true);
+            setSubmitting(false);
+            Promise.resolve().then(() => onComplete({ status: "refused" }));
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fillGoal("Batched");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(calls).toBe(1);
+    // The microtask completion flushed inside act: reusable, not stuck.
+    expect(launchButton().textContent).toBe("Launch");
+    fillGoal("Batched again");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(calls).toBe(2);
+  });
+
+  it("ordinary async pending disables the action immediately and resolves on completion", async () => {
+    let settle: LaunchCompletion | undefined;
+    function Host() {
+      return (
+        <LaunchOrchestrator
+          {...catalog}
+          submitting={false}
+          onCancel={noop}
+          onSubmit={(_intent, onComplete) => {
+            settle = onComplete;
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fillGoal("Async goal");
+    await act(async () => {
+      launchButton().click();
+    });
+    // Pending is visible immediately after the dispatch.
+    expect(pendingLaunchButton().disabled).toBe(true);
+    expect(goalBox().disabled).toBe(true);
+    await act(async () => {
+      settle?.({ status: "refused" });
+    });
+    expect(launchButton().textContent).toBe("Launch");
+    expect(goalBox().value).toBe("Async goal");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(screen.getByRole("button", { name: "Launching…" })).toBeTruthy();
+  });
+
+  it("a void host that never completes stays visibly blocked and never authorizes retry", async () => {
+    const onSubmit = vi.fn();
+    function Host() {
+      return (
+        <LaunchOrchestrator
+          {...catalog}
+          submitting={false}
+          onCancel={noop}
+          onSubmit={onSubmit}
+        />
+      );
+    }
+    render(<Host />);
+    fillGoal("Void");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(pendingLaunchButton().disabled).toBe(true);
+    // A direct form submit probes the handler-level latch, bypassing the
+    // disabled button.
+    await act(async () => {
+      fireEvent.submit(goalForm());
+    });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByRole("button", { name: "Launching…" })).toBeTruthy();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("a thrown host callback stays visibly blocked without authorizing retry", async () => {
+    const attempts: string[] = [];
+    function Host() {
+      return (
+        <LaunchOrchestrator
+          {...catalog}
+          submitting={false}
+          onCancel={noop}
+          onSubmit={(intent) => {
+            attempts.push(intent.goal);
+            throw new Error("host exploded");
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fillGoal("Boom");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(attempts).toHaveLength(1);
+    expect(pendingLaunchButton().disabled).toBe(true);
+    await act(async () => {
+      fireEvent.submit(goalForm());
+    });
+    expect(attempts).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Launching…" })).toBeTruthy();
+  });
+
+  it("an uncorrelated error-string change is display-only and never unlocks the guard", async () => {
+    let calls = 0;
+    function Host() {
+      const [error, setError] = useState<string | undefined>(undefined);
+      return (
+        <LaunchOrchestrator
+          {...catalog}
+          submitting={false}
+          error={error}
+          onCancel={noop}
+          onSubmit={(_intent, onComplete) => {
+            calls += 1;
+            setError(`refused-${calls}`);
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    fillGoal("Err");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(calls).toBe(1);
+    expect(screen.getByRole("alert").textContent).toBe("refused-1");
+    // Distinct error strings keep arriving, but none of them is authority.
+    await act(async () => {
+      fireEvent.submit(goalForm());
+    });
+    expect(calls).toBe(1);
+    expect(pendingLaunchButton().disabled).toBe(true);
+  });
+
+  it("a stored completion handle reconciles the same pending launch across rerenders", async () => {
+    let held: LaunchCompletion | undefined;
+    const onSubmit = vi.fn((_intent: LaunchForm, onComplete: LaunchCompletion) => {
+      held = onComplete;
+    });
+    const { rerender } = render(
+      <LaunchOrchestrator {...catalog} submitting={false} onCancel={noop} onSubmit={onSubmit} />,
+    );
+    fillGoal("Reconcile");
+    await act(async () => {
+      launchButton().click();
+    });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    // Unrelated rerenders do not remount the component or drop the pending
+    // action; the owner still holds the correlated handle.
+    rerender(
+      <LaunchOrchestrator
+        {...catalog}
+        submitting={false}
+        error="unrelated display text"
+        onCancel={noop}
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Launching…" })).toBeTruthy();
+
+    // The owner resolves the same pending action out-of-band, no remount.
+    await act(async () => {
+      held?.({ status: "accepted" });
+    });
+    expect(goalBox().value).toBe("");
+    expect(launchButton().textContent).toBe("Launch");
   });
 });
