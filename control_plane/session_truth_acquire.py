@@ -39,6 +39,12 @@ _WS_RE = re.compile(r"^WS:[A-Z0-9][A-Z0-9-]*$")
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _GIT_TIMEOUT = 10.0
 _AGENTOS_READ_TIMEOUT = 120.0
+_CANONICAL_AGENTOS_SOURCE_PATHS = (
+    "agentos",
+    "scripts/agentos.py",
+    "scripts/audit_stranded_work.py",
+    "config/mastermind_programs.yml",
+)
 
 
 class AcquisitionError(RuntimeError):
@@ -68,6 +74,41 @@ def _git_text(repo_root: Path, *args: str) -> str | None:
         return None
     return proc.stdout if proc.stdout else None
 
+
+def _canonical_agentos_worktree_clean(repo_root: Path) -> bool | None:
+    """Whether exact working-tree inputs to Agent OS source semantics are clean.
+
+    Macro's shared primary checkout is allowed to carry unrelated dirt. The
+    continuation may nevertheless not label uncommitted Agent OS records/compiler
+    bytes with the current commit SHA. Limit the check to the authored record
+    store, the canonical compiler and its local status helper, and the canonical
+    program registry consumed by that compiler.
+
+    Returns None when Git cannot prove the path-scoped status.
+    """
+
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "-C",
+                os.fspath(repo_root),
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--",
+                *_CANONICAL_AGENTOS_SOURCE_PATHS,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return not bool(proc.stdout.strip())
 
 def _read_scalar_frontmatter_text(text: str) -> dict[str, str]:
     """Parse only the four scalar fields owned by the protected Skillpack INDEX.
@@ -306,6 +347,20 @@ def collect_agentos(
             "contexts": [],
         }
 
+    source_clean = _canonical_agentos_worktree_clean(macro_root)
+    if source_clean is None:
+        return {
+            "available": False,
+            "reason": "AGENTOS_SOURCE_WORKTREE_STATUS_UNAVAILABLE",
+            "contexts": [],
+        }
+    if source_clean is False:
+        return {
+            "available": False,
+            "reason": "AGENTOS_SOURCE_WORKTREE_DIRTY",
+            "contexts": [],
+        }
+
     source_sha = git_sha(macro_root)
     if source_sha is None:
         return {
@@ -352,6 +407,34 @@ def collect_agentos(
         _validate_agentos_json_tree(context, "Agent OS compile-context")
         _validate_context(context, workstream)
         contexts.append(context)
+
+    final_source_sha = git_sha(macro_root)
+    if final_source_sha is None:
+        return {
+            "available": False,
+            "reason": "AGENTOS_SOURCE_SHA_UNAVAILABLE",
+            "contexts": [],
+        }
+    if final_source_sha != source_sha:
+        return {
+            "available": False,
+            "reason": "AGENTOS_SOURCE_MOVED_DURING_READ",
+            "contexts": [],
+        }
+
+    final_source_clean = _canonical_agentos_worktree_clean(macro_root)
+    if final_source_clean is None:
+        return {
+            "available": False,
+            "reason": "AGENTOS_SOURCE_WORKTREE_STATUS_UNAVAILABLE",
+            "contexts": [],
+        }
+    if final_source_clean is False:
+        return {
+            "available": False,
+            "reason": "AGENTOS_SOURCE_WORKTREE_DIRTY",
+            "contexts": [],
+        }
 
     return {
         "available": True,
