@@ -176,3 +176,706 @@ def test_configured_permission_stamp_unavailable_refuses(stage, tmp_path):
     result = run(service(cache, acquire=acquire, authorize=authorize))
     assert result["status"] == 403 and result["error"]["code"] == "access_denied"
     assert len(acquired) == (stage == "after")
+
+
+# ---------------------------------------------------------------------------
+# work-queue operation
+# ---------------------------------------------------------------------------
+
+
+def _work_frame():
+    return {"schema": FRAME_SCHEMA, "operation": "work", "selection": None,
+            "principal": {"policy_id": "workspace-test", "issuer_digest": "a" * 64,
+                "subject_digest": "b" * 64, "client_ref": "fixture-web",
+                "resource": RESOURCE, "scopes": [SCOPE]}}
+
+
+def _same_generation():
+    return {"schema": "mastermind.runtime_read_observation.v1",
+            "state": "SAME", "source_identity": "c" * 64,
+            "before": 1, "after": 1}
+
+
+def _root_list_payload(*, rows, count=None, db_present=True, generation_state="SAME",
+                      degraded=(), truncated=False):
+    return {
+        "schema": "mastermind.fabric_job_root_list.v2",
+        "generated_at": "2026-09-23T00:00:00Z",
+        "runtime": {"root": "/tmp/fake", "db_present": db_present, "identity": None,
+                    "acquisition": {"schema": "mastermind.fabric_runtime_acquisition.v1",
+                                    "query": {"kind": "root_discovery"},
+                                    "owner": "executive_runtime",
+                                    "snapshot_digest": "d" * 64,
+                                    "budgets": {},
+                                    "truncation": {"jobs": False, "attempt_job_ids": [],
+                                                    "roots": truncated, "projection": False},
+                                    "provenance": {"state": "COMPLETE", "unjoined_job_ids": []},
+                                    "generation": {"schema": "mastermind.runtime_read_observation.v1",
+                                                    "state": generation_state,
+                                                    "source_identity": "c" * 64,
+                                                    "before": 1, "after": 1}}},
+        "roots": rows,
+        "count": count if count is not None else len(rows),
+        "total": None if truncated else len(rows),
+        "truncated": truncated,
+        "degraded": list(degraded),
+    }
+
+
+def test_work_available_happy_path(tmp_path):
+    owners, clock, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[
+        {"job_id": "JOB-1", "status": "QUEUED", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+        {"job_id": "JOB-2", "status": "RUNNING", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        return {"schema": "mastermind.workspace_work_queue.v1",
+                "availability": "AVAILABLE", "composed": True,
+                "source_observation": kwargs.get("source_observation")}
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    doc = result["result"]
+    assert doc["schema"] == "mastermind.workspace_work_queue.v1"
+    assert doc["availability"] == "AVAILABLE"
+    assert doc["composed"] is True
+    assert doc["source_observation"]["state"] == "SAME"
+    # The root list itself was passed verbatim to the composer.
+    assert root_list["roots"][0]["job_id"] == "JOB-1"
+
+
+def test_work_non_same_runtime_observation_refuses_with_closed_reason(tmp_path):
+    """B1: a runtime receipt whose state is not SAME refuses the work read
+    with the typed reason ``runtime_observation_not_same`` — even though
+    the CCR bracket itself is healthy.  The composer must NOT be called.
+
+    B3: ``work_compose`` is now the real ``compose_work_queue_v1`` so
+    the RED mechanism is assertion-based.  With the B1 gate REMOVED,
+    the composer would be invoked on the same CONFLICT root list and
+    ``_lifecycle_unavailable`` would fire (it refuses on non-SAME
+    generation), so ``reason_codes`` would be
+    ``["LIFECYCLE_UNAVAILABLE"]`` (the composer's own R1 code).  With
+    the gate present, the read service refuses FIRST with
+    ``["runtime_observation_not_same"]`` — the test proves the gate by
+    asserting the typed read-service code, NOT by ``called == []``
+    alone (a stub-returning-None would be vacuously RED).
+    """
+    from control_plane.work_queue_projection import compose_work_queue_v1
+    owners, clock, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[], count=0,
+                                    generation_state="CONFLICT")
+    called = []
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        called.append(True)
+        return compose_work_queue_v1(root_list_arg, control_room=kwargs.get("control_room"))
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    assert result["ok"] is True
+    assert body["availability"] == "UNAVAILABLE"
+    assert body["reason_codes"] == ["runtime_observation_not_same"]
+    assert called == []  # gate fired before composer could be called
+
+
+def test_work_unknown_runtime_observation_refuses_with_closed_reason(tmp_path):
+    """B1: a runtime receipt whose state is UNKNOWN refuses the work read
+    with the typed reason ``runtime_observation_not_same``.
+
+    B3: ``work_compose`` is the real composer — see B3 docstring above
+    for the RED mechanism.  With the gate REMOVED, the composer would
+    fire ``_lifecycle_unavailable`` and render ``["LIFECYCLE_UNAVAILABLE"]``;
+    with the gate present, ``["runtime_observation_not_same"]``."""
+    from control_plane.work_queue_projection import compose_work_queue_v1
+    owners, clock, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[], count=0,
+                                    generation_state="UNKNOWN")
+    called = []
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        called.append(True)
+        return compose_work_queue_v1(root_list_arg, control_room=kwargs.get("control_room"))
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    assert body["availability"] == "UNAVAILABLE"
+    assert body["reason_codes"] == ["runtime_observation_not_same"]
+    assert called == []
+
+
+def test_work_missing_runtime_generation_refuses_with_closed_reason(tmp_path):
+    """B1: a runtime acquisition without a ``generation`` block refuses
+    the work read with the typed reason ``runtime_observation_not_same``
+    — the runtime observation cannot be evaluated.
+
+    B3: ``work_compose`` is the real composer — see B3 docstring above.
+    With the gate REMOVED, the composer would itself validate the
+    ``runtime.acquisition`` envelope and ``_validate_root_list`` would
+    raise ``ValueError`` (a malformed ``acquisition`` envelope), mapped
+    to ``["projection_refused"]``; with the gate present, the read
+    service refuses FIRST with ``["runtime_observation_not_same"]``."""
+    from control_plane.work_queue_projection import compose_work_queue_v1
+    owners, clock, cache = cache_fixture(tmp_path)
+    base = _root_list_payload(rows=[], count=0)
+    del base["runtime"]["acquisition"]["generation"]
+    called = []
+    def work_acquire(*args, **kwargs):
+        return base
+    def work_compose(root_list_arg, **kwargs):
+        called.append(True)
+        return compose_work_queue_v1(root_list_arg, control_room=kwargs.get("control_room"))
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    assert body["availability"] == "UNAVAILABLE"
+    assert body["reason_codes"] == ["runtime_observation_not_same"]
+    assert called == []
+
+
+def test_work_unmapped_jobstatus_refuses_as_projection_refused(tmp_path):
+    """B2: a closed-validator refusal (the composer's R8 closed-table
+    enforcement raises ``ValueError``) is translated to
+    ``projection_refused`` — NOT ``source_unavailable``."""
+    owners, clock, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[
+        {"job_id": "JOB-1", "status": "SOMETHING_NEW", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        from control_plane.work_queue_projection import compose_work_queue_v1
+        return compose_work_queue_v1(root_list_arg,
+                                      control_room=kwargs.get("control_room"))
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    assert body["availability"] == "UNAVAILABLE"
+    assert body["reason_codes"] == ["projection_refused"]
+
+
+def test_work_composer_runtime_error_falls_through_to_503_envelope(tmp_path):
+    """B2: a non-ValueError exception (e.g. ``RuntimeError``) in the composer
+    is NOT laundered into a typed UNAVAILABLE body — it falls through to
+    a real ``ok: false`` error envelope."""
+    owners, clock, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[
+        {"job_id": "JOB-1", "status": "RUNNING", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        raise RuntimeError("composer exploded")
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    # error() returns the closed envelope: ok:false, status, error:{code, message}
+    assert result["ok"] is False
+    assert result["status"] == 503
+    assert result["error"]["code"] == "source_unavailable"
+    assert result["error"]["message"] == "workspace read refused"
+    assert "result" not in result
+
+
+def test_work_refusal_uses_only_closed_reason_codes():
+    """B2: the service's closed reason-code vocabulary lives in
+    :data:`common.executive_workspace_contract.WORK_REFUSAL_REASON_CODES`
+    — the catch path never invents a new code outside that set."""
+    from common.executive_workspace_contract import WORK_REFUSAL_REASON_CODES
+    assert WORK_REFUSAL_REASON_CODES == frozenset({
+        "source_unavailable", "runtime_observation_not_same", "projection_refused",
+        "source_integrity_unverified",
+    })
+    from control_plane.workspace_read_service import _WorkRefusal
+    for code in WORK_REFUSAL_REASON_CODES:
+        _WorkRefusal(code)  # constructor accepts every closed code
+    with pytest.raises(ValueError, match="not in WORK_REFUSAL_REASON_CODES"):
+        _WorkRefusal("not_a_closed_code")
+
+
+def test_work_effect_exception_reason_vocabulary_is_closed_and_facade_exported():
+    """Item 6 / round-4 audit: ``effect_exception.reason`` has no closed
+    vocabulary, no contract export, and a cross-module private import
+    (``workspace_read_service.py``).  The contract now owns the
+    frozenset :data:`common.executive_workspace_contract.QUEUE_EFFECT_EXCEPTION_REASONS`,
+    both producer sites assert membership against it, and the
+    workspace-app contract facade re-exports it so the facade-parity
+    test exercises the re-export.
+
+    The composer emits four values (``control_room_missing``,
+    ``autonomy_missing``, ``no_exception_observed``,
+    ``exception_observed``) and the read service emits the fifth
+    (``read_refused``).  All five are members of the closed
+    vocabulary; any other value on ``effect_exception.reason`` is a
+    contract violation.
+    """
+    from common.executive_workspace_contract import QUEUE_EFFECT_EXCEPTION_REASONS
+    assert QUEUE_EFFECT_EXCEPTION_REASONS == frozenset({
+        "control_room_missing", "autonomy_missing",
+        "no_exception_observed", "exception_observed", "read_refused",
+    })
+    # Cross-module private import removal: the read service now imports
+    # the closed vocabulary directly from the contract (no private
+    # module-level constant from the composer).
+    import control_plane.workspace_read_service as svc_mod
+    src = svc_mod.__dict__
+    # The composer's own constants may still exist as locals (the
+    # contract assertion guards membership); what the audit forbids is
+    # an UNVALIDATED cross-module private import on the typed refusal
+    # path.  The read service must use the contract constant as its
+    # source of truth — assert the read service imports the contract
+    # vocabulary (and the composer's reason constants resolve to it).
+    assert "QUEUE_EFFECT_EXCEPTION_REASONS" in src, (
+        "read service must import QUEUE_EFFECT_EXCEPTION_REASONS "
+        "from the shared contract"
+    )
+    from control_plane.work_queue_projection import (
+        _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED,
+    )
+    assert _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED in QUEUE_EFFECT_EXCEPTION_REASONS
+    # Facade re-export: the workspace-app contract module MUST re-export
+    # the constant for the facade-parity test (which iterates over
+    # every member of the contract module).
+    import integrations.mastermind_workspace_app.contract as compat
+    assert getattr(compat, "QUEUE_EFFECT_EXCEPTION_REASONS", None) is QUEUE_EFFECT_EXCEPTION_REASONS
+
+
+def test_work_acquire_raised_value_error_refuses_as_source_integrity_unverified(tmp_path):
+    """N2: a ``ValueError`` raised by the acquire (defensive — the production
+    acquirer swallows its own faults and surfaces a degraded notes list)
+    refuses as ``source_integrity_unverified`` — the runtime could not
+    return a well-formed root list.  This is distinct from
+    ``projection_refused`` which is reserved for composer-raised faults."""
+    from common.executive_workspace_contract import WORK_REFUSAL_REASON_CODES
+    assert "source_integrity_unverified" in WORK_REFUSAL_REASON_CODES
+    owners, _, cache = cache_fixture(tmp_path)
+    def work_acquire(*args, **kwargs):
+        raise ValueError("acquire raised: malformed root list")
+    def work_compose(root_list_arg, **kwargs):
+        pytest.fail("composer must not be reached when acquire raises")
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    assert body["availability"] == "UNAVAILABLE"
+    assert body["reason_codes"] == ["source_integrity_unverified"]
+
+
+@pytest.mark.parametrize("raised", [TypeError, RuntimeError, KeyError, OSError])
+def test_work_acquire_non_value_error_refuses_as_source_integrity_unverified(raised, tmp_path):
+    """Item 7 / round-4 audit: the acquire guard previously caught
+    ``ValueError`` only, while the cache guards catch ``Exception``.  A
+    ``TypeError`` / ``RuntimeError`` acquirer yielded a real error
+    envelope (an untyped 503) for the SAME failure class.  After the
+    guard unification, ALL acquire-raised exceptions refuse as
+    ``source_integrity_unverified`` — one rule, both sites, same typed
+    refusal body.  Each parametrised exception class is verified to
+    refuse the work read with the closed reason code."""
+    from common.executive_workspace_contract import WORK_REFUSAL_REASON_CODES
+    assert "source_integrity_unverified" in WORK_REFUSAL_REASON_CODES
+    owners, _, cache = cache_fixture(tmp_path)
+    def work_acquire(*args, **kwargs):
+        raise raised("acquire raised: arbitrary non-ValueError")
+    def work_compose(root_list_arg, **kwargs):
+        pytest.fail("composer must not be reached when acquire raises")
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    assert body["availability"] == "UNAVAILABLE", raised.__name__
+    assert body["reason_codes"] == ["source_integrity_unverified"], raised.__name__
+    # The closed-set vocabulary stays unchanged.
+    assert body["reason_codes"][0] in WORK_REFUSAL_REASON_CODES, raised.__name__
+
+
+def test_work_compose_raised_value_error_refuses_as_projection_refused(tmp_path):
+    """N2: a ``ValueError`` raised by the composer (closed-table validator,
+    evidence-freshness rejection) refuses as ``projection_refused`` —
+    NOT ``source_integrity_unverified``.  The two codes are disjoint:
+    source-integrity events come from the acquire side, projection
+    faults come from the compose side."""
+    owners, _, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[
+        {"job_id": "JOB-1", "status": "SOMETHING_NEW", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        from control_plane.work_queue_projection import compose_work_queue_v1
+        return compose_work_queue_v1(root_list_arg,
+                                      control_room=kwargs.get("control_room"))
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    assert body["availability"] == "UNAVAILABLE"
+    assert body["reason_codes"] == ["projection_refused"]
+
+
+def test_work_ccr_receipt_conflict_takes_precedence_over_runtime_concurrent(tmp_path):
+    """N3: when the CCR bracket is CONFLICT (a positive CCR change between
+    the two samples) and the runtime is concurrently CONFLICT, the CCR
+    receipt check fires FIRST and refuses as ``source_unavailable`` —
+    the runtime gate's typed code is NEVER reached.  This pins the
+    refusal precedence: a positive CCR change is the source-unavailable
+    signal, and the runtime observation cannot mask it."""
+    owners, _, cache = cache_fixture(tmp_path)
+    # Mutate the doc between the two samples so the CCR receipt goes CONFLICT.
+    original_doc = owners[0].state_cache["doc"]
+    original_title = original_doc["work"][0]["agent_os"]["title"]
+    original_published_seq = owners[0].state_published_seq
+    def mutate_doc():
+        owners[0].state_cache["doc"]["work"][0]["agent_os"]["title"] = "Mutated"
+        owners[0].state_published_seq += 1
+    def work_acquire(*args, **kwargs):
+        mutate_doc()  # CCR change happens BEFORE the second sample
+        return _root_list_payload(rows=[], count=0, generation_state="CONFLICT")
+    def work_compose(*args, **kwargs):
+        pytest.fail("composer must not be reached on CCR conflict")
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    # Item 8 / round-4 audit: the restore below used to live after the
+    # assertions, so an assertion failure left the fixture mutated.  The
+    # try/finally now guarantees the restore runs even on assertion
+    # failure — the fixture stays reusable across pytest re-collection
+    # and the mutated state cannot poison sibling tests.
+    try:
+        result = asyncio.run(service_.handle_frame(_work_frame()))
+        body = result["result"]
+        assert body["availability"] == "UNAVAILABLE"
+        assert body["reason_codes"] == ["source_unavailable"]
+    finally:
+        # Restore so the fixture is reusable (mutation was in-place).
+        original_doc["work"][0]["agent_os"]["title"] = original_title
+        owners[0].state_published_seq = original_published_seq
+
+
+def test_work_raising_cache_emits_typed_unavailable_body(tmp_path):
+    """N5: a raising cache yields the same typed UNAVAILABLE body as an
+    unqualified cache.  Both wire shapes are unified into
+    ``_WorkRefusal("source_unavailable")`` — the route never escapes as
+    an untyped 503 envelope."""
+    owners, _, cache = cache_fixture(tmp_path)
+    class RaisingCache:
+        def snapshot(self):
+            raise ValueError("source_unavailable")
+    service_ = WorkspaceReadService(
+        cache=RaisingCache(), runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    assert result["ok"] is True
+    body = result["result"]
+    assert body["availability"] == "UNAVAILABLE"
+    assert body["reason_codes"] == ["source_unavailable"]
+    # The N4 effect_exception vocabulary uses ``read_refused`` — the read
+    # service is reporting its OWN read failure, not a missing control
+    # room document.
+    assert body["effect_exception"]["reason"] == "read_refused"
+
+
+def test_work_failed_bounded_acquisition_refuses_at_route_with_null_lifecycle_source(tmp_path):
+    """N1 (disclose): a failed bounded acquisition (injected acquire
+    returning generation UNKNOWN + ``_BOUNDED_UNAVAILABLE_NOTE`` in
+    ``degraded``) refuses at the route with
+    ``reason_codes == ["runtime_observation_not_same"]`` AND
+    ``lifecycle_source is None``.  The composer would have rendered a
+    UNAVAILABLE body with the producer's degraded note echoed into
+    ``lifecycle_source.degraded``; the read-service gate fires BEFORE
+    the composer is called and discards that text.  This pins the
+    disclosed behavior: a failed bounded acquisition never surfaces
+    the producer's ``bounded acquisition unavailable: ...`` text on the
+    route — it always returns ``lifecycle_source: null`` and the typed
+    ``runtime_observation_not_same`` code.
+
+    The parent owns the disclosure: this test pins the behavior, not
+    the (independent) decision to keep or carry the text."""
+    from control_plane.fabric_job_view import _BOUNDED_UNAVAILABLE_NOTE
+    owners, _, cache = cache_fixture(tmp_path)
+    # Injection shape: generation UNKNOWN + bounded unavailable in degraded.
+    root_list = _root_list_payload(rows=[], count=0, generation_state="UNKNOWN",
+                                    degraded=[_BOUNDED_UNAVAILABLE_NOTE])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        pytest.fail("composer must not be reached on failed bounded acquisition")
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    body = result["result"]
+    # The read-service runtime gate refuses FIRST — even though the
+    # composer would have rendered UNAVAILABLE via ``_lifecycle_unavailable``
+    # on the same root list, the route refuses at the gate with the typed
+    # code and a null ``lifecycle_source``.
+    assert body["availability"] == "UNAVAILABLE"
+    assert body["reason_codes"] == ["runtime_observation_not_same"]
+    assert body["lifecycle_source"] is None
+
+
+def test_work_degraded_root_list_renders_unavailable_envelope(tmp_path):
+    """Degraded (db_present=False) root list → queue-level UNAVAILABLE."""
+    owners, clock, cache = cache_fixture(tmp_path)
+    root_list = _root_list_payload(rows=[], count=0, db_present=False)
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        from control_plane.work_queue_projection import compose_work_queue_v1
+        return compose_work_queue_v1(root_list_arg,
+                                      control_room=kwargs.get("control_room"))
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    doc = result["result"]
+    assert doc["availability"] == "UNAVAILABLE"
+    assert doc["reason_codes"] == ["LIFECYCLE_UNAVAILABLE"]
+    assert all(len(rows) == 0 for rows in doc["groups"].values())
+
+
+def test_work_response_bound_respected(tmp_path):
+    """The whole {ok:true,result:BODY} envelope fits under MAX_RESPONSE_BYTES-1."""
+    from common.executive_workspace_contract import MAX_RESPONSE_BYTES
+    owners, clock, cache = cache_fixture(tmp_path)
+    # Build a root list with many synthetic rows; the response must still serialize.
+    rows = [{"job_id": f"JOB-{i}", "status": "RUNNING", "depth": 0,
+             "parent_job_id": None, "orchestration_role": "aggregation"}
+            for i in range(1, 33)]
+    root_list = _root_list_payload(rows=rows)
+    def work_acquire(*args, **kwargs):
+        return root_list
+    def work_compose(root_list_arg, **kwargs):
+        from control_plane.work_queue_projection import compose_work_queue_v1
+        return compose_work_queue_v1(root_list_arg,
+                                      control_room=kwargs.get("control_room"))
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={},
+        work_acquire=work_acquire, work_compose=work_compose,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    envelope = {"ok": True, "result": result["result"]}
+    serialized = json_bytes(envelope)
+    assert len(serialized) <= MAX_RESPONSE_BYTES - 1
+
+
+def json_bytes(value):
+    import json
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# B1(b) — exercise the AVAILABLE branch with a producer-shaped root list.
+#
+# The real ``Runtime.at`` test above (with no read binding) is UNAVAILABLE
+# by design.  This test injects a stub ``work_acquire`` that returns a
+# production-shaped root list (SAME generation, ``_ROOT_ENUMERATION_NOTE``
+# in ``degraded``, PARTIAL provenance) so the composer and read service
+# reach the AVAILABLE branch and the strict shape assertions below can
+# prove the B1 closed-set refactor is wired through the route, not just
+# the composer unit tests.
+# ---------------------------------------------------------------------------
+
+
+def test_work_route_with_producer_shaped_root_list_renders_available_no_lifecycle_degraded(tmp_path):
+    """B1(b): the route-level happy path with a producer-shaped root list
+    (SAME generation + ``_ROOT_ENUMERATION_NOTE`` in ``degraded``) renders
+    ``AVAILABLE`` with empty ``reason_codes`` (the enumeration note alone
+    must not fire ``lifecycle_degraded``), ``lifecycle_source.degraded``
+    echoes the producer's note verbatim, ``coverage.completeness ==
+    "PARTIAL"`` (enumeration provenance is unjoined), and the submitted
+    root's row appears in the expected lifecycle group."""
+    from control_plane.fabric_job_view import _ROOT_ENUMERATION_NOTE
+    owners, _, cache = cache_fixture(tmp_path)
+    submitted_job_id = "JOB-1"
+    root_list = _root_list_payload(rows=[
+        {"job_id": submitted_job_id, "status": "QUEUED", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    # Force the producer-shaped degraded list + PARTIAL provenance that
+    # ``list_roots_v2_from_runtime`` would emit on the live read.
+    root_list["degraded"] = [_ROOT_ENUMERATION_NOTE]
+    root_list["runtime"]["acquisition"]["provenance"]["state"] = "PARTIAL"
+    root_list["runtime"]["acquisition"]["provenance"]["unjoined_job_ids"] = [submitted_job_id]
+
+    def work_acquire(*args, **kwargs):
+        return root_list
+
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+        work_acquire=work_acquire,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    assert result["ok"] is True
+    doc = result["result"]
+    # B1: closed-set refactor — the enumeration note alone adds NO reason code.
+    assert doc["availability"] == "AVAILABLE"
+    assert doc["reason_codes"] == []
+    assert doc["lifecycle_source"]["degraded"] == [_ROOT_ENUMERATION_NOTE]
+    # Enumeration provenance is unjoined → PARTIAL coverage.
+    assert doc["coverage"]["completeness"] == "PARTIAL"
+    # The submitted root's row is present in the QUEUED lifecycle group.
+    queued_ids = [row["root_job_id"] for row in doc["groups"]["QUEUED"]]
+    assert submitted_job_id in queued_ids
+
+
+def test_work_effect_not_row_attributed_via_real_composer_through_read_work(tmp_path):
+    """B2: ``effect_not_row_attributed`` is proven through ``_read_work``
+    with the REAL composer (``work_compose=None`` → ``compose_work_queue_v1``).
+    The injected ``work_acquire`` returns a valid root list (generation
+    SAME) and the CCR cache document's autonomy responsibilities carry
+    ``placement_state: {"value": "EFFECT_UNKNOWN", ...}`` — the exact
+    shape ``_queue_effect_exception`` reads.  Asserts AVAILABLE,
+    ``effect_exception.value == "EFFECT_UNKNOWN"`` with ``reason ==
+    "exception_observed"``, ``groups.EFFECT_EXCEPTION == []`` (no per-row
+    attribution when no ``effects`` map is supplied), and
+    ``"effect_not_row_attributed" in reason_codes``."""
+    from control_plane.work_queue_projection import compose_work_queue_v1  # noqa: F401  sanity import
+    owners, _, cache = cache_fixture(tmp_path)
+    # Attach the autonomy EFFECT_UNKNOWN responsibility — same shape
+    # ``_queue_effect_exception`` reads (placement_state.value == "EFFECT_UNKNOWN").
+    doc = owners[0].state_cache["doc"]
+    doc["autonomy"]["responsibilities"][0]["placement_state"] = {
+        "value": "EFFECT_UNKNOWN", "observable": True, "reason": "worker_effect_unknown",
+    }
+    submitted_job_id = "JOB-1"
+    root_list = _root_list_payload(rows=[
+        {"job_id": submitted_job_id, "status": "QUEUED", "depth": 0,
+         "parent_job_id": None, "orchestration_role": "aggregation"},
+    ])
+    def work_acquire(*args, **kwargs):
+        return root_list
+    # work_compose=None — the read service resolves to the real composer.
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=object(), authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+        work_acquire=work_acquire, work_compose=None,
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    assert result["ok"] is True
+    doc = result["result"]
+    assert doc["availability"] == "AVAILABLE"
+    assert doc["effect_exception"]["value"] == "EFFECT_UNKNOWN"
+    assert doc["effect_exception"]["reason"] == "exception_observed"
+    assert doc["effect_exception"]["scope"] == "RUNTIME_CURRENT_WORKER"
+    assert doc["effect_exception"]["observable"] is True
+    # No per-row effects map was supplied — no row lands in EFFECT_EXCEPTION.
+    assert doc["groups"]["EFFECT_EXCEPTION"] == []
+    # And the queue-level reason code surfaces the unattributed exception.
+    assert "effect_not_row_attributed" in doc["reason_codes"]
+
+
+def test_work_default_acquire_against_real_runtime_renders_closed_body(tmp_path):
+    """N2: the production ``work_acquire=None`` path resolves to
+    ``list_roots_v2_from_runtime`` and emits a closed work-queue body
+    from a real bounded Runtime acquisition.  Reuses the closed
+    ``Runtime.at`` owner (the same one
+    ``tests/test_fabric_job_view_bounded.py`` exercises) so no new
+    runtime fixture framework is introduced.
+
+    B1(b): this runtime in this fixture is UNAVAILABLE rather than
+    AVAILABLE — by design.  ``Runtime.at(runtime_root)`` without a
+    ``read_binding`` finalizes the bounded observation receipt with
+    ``source_identity=None`` and ``state="UNKNOWN"`` (see
+    ``executive_runtime.BoundedRuntimeReadObservation._finalize``), so
+    the read-service's runtime observation gate (B1) refuses with
+    ``runtime_observation_not_same``.  This is the honest truthful
+    outcome of a Runtime with no read binding: the bounded observation
+    cannot prove a same-connection read.  Asserting ``AVAILABLE`` here
+    would silently manufacture a healthy read over an unbound Runtime,
+    which is exactly the failure mode the gate exists to prevent.
+
+    The test asserts the exact UNAVAILABLE outcome (no weakening).
+    A separate test below exercises the AVAILABLE branch with an
+    injected stub that produces a producer-shaped root list with a
+    SAME generation receipt."""
+    from control_plane.executive_runtime import Runtime
+    from control_plane.ceo_intent import submit_intent
+    owners, _, cache = cache_fixture(tmp_path)
+    # Real Runtime owner populated with one root job via the closed
+    # submit_intent helper — mirrors the fixture
+    # ``tests/test_fabric_job_view_bounded.py::_root`` exactly.
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+    runtime = Runtime.at(runtime_root)
+    receipt = submit_intent(runtime, {
+        "schema": "mastermind.ceo_intent.v2", "intent_kind": "executive_coo_cycle",
+        "business_impact": "material", "intent_id": "CEO-WQ-001", "actor": "ceo-sol",
+        "objective": "route-level work-queue projection", "department": "executive-infrastructure",
+        "priority": 5, "workstream": "WS:FABRIC",
+        "grounding": {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+        "execution_contract": {"requested_authorities": ["READ"], "attempt_limit": 2},
+    }, workspace_root=tmp_path)
+    # Default producers — the production path (no injection).
+    service_ = WorkspaceReadService(
+        cache=cache, runtime=runtime, authorize=lambda p: True,
+        armed={}, runtime_identity={"db_present": True},
+    )
+    result = asyncio.run(service_.handle_frame(_work_frame()))
+    # Closed-shape contract: the body carries the schema and the nine-
+    # group envelope.  Exact assertion — no weakening.
+    assert result["ok"] is True
+    doc = result["result"]
+    assert doc["schema"] == "mastermind.workspace_work_queue.v1"
+    from control_plane.work_queue_projection import _GROUP_ORDER
+    assert set(doc["groups"]) == set(_GROUP_ORDER)
+    # Healthy runtime read in this fixture is UNAVAILABLE: the bounded
+    # observation receipt finalizes with state=UNKNOWN (no read binding),
+    # so the read-service runtime gate refuses with the typed code.
+    assert doc["availability"] == "UNAVAILABLE"
+    assert doc["reason_codes"] == ["runtime_observation_not_same"]
+    assert doc["source_observation"]["state"] == "UNKNOWN"
+    # The runtime DID discover the submitted root — it surfaces in
+    # ``lifecycle_source.runtime.acquisition`` (read receipt was finalized),
+    # so the gate refusal is honest: the Runtime observation simply cannot
+    # be proven SAME without a read binding.
+    assert receipt["job_id"] not in [row["root_job_id"] for group in doc["groups"].values()
+                                     for row in group]

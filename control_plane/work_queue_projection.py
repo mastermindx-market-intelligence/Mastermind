@@ -1,0 +1,939 @@
+"""control_plane.work_queue_projection — read-only workspace work-queue view.
+
+PURE compositor over the Executive root-list (``mastermind.fabric_job_root_list.v2``).
+Encodes the eight binding truth rules (R1-R8) from the parent ruling 5805095742
+and the design freeze (Figma 138:8).  Never infers lifecycle, ownership,
+capacity, or acceptance from anything except its named inputs.
+
+Top-level document key set is closed; per-row keys are closed; the
+group list is closed and ordered.  Composing twice from the same inputs
+yields byte-identical canonical JSON.
+
+``generated_at`` is the composer wall-clock (or the caller-supplied value) —
+NOT a snapshot freshness fact.  The receipt of snapshot freshness is
+separately carried through the :class:`source_observation` envelope;
+``generated_at`` only records when this compositor ran.
+"""
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
+from datetime import datetime, timezone
+from typing import Any
+
+from control_plane.executive_runtime import JobStatus
+from control_plane.fabric_job_view import (
+    _BOUNDED_UNAVAILABLE_NOTE,
+    _GENERATION_CONFLICT_NOTE,
+    _ROOT_ENUMERATION_NOTE,
+)
+from common.executive_workspace_contract import QUEUE_EFFECT_EXCEPTION_REASONS
+
+WORK_QUEUE_SCHEMA = "mastermind.workspace_work_queue.v1"
+_ROOT_LIST_SCHEMA = "mastermind.fabric_job_root_list.v2"
+_AUTONOMY_SCHEMA = "mastermind.autonomy_control_room.v1"
+
+#: Evidence freshness: max age (seconds) admitted for an ``observed_at``
+#: against the caller-supplied ``evidence_as_of`` anchor.
+EVIDENCE_MAX_AGE_S = 900
+
+#: Strict RFC3339 UTC pattern required for every ``observed_at``.  Microsecond
+#: fraction is permitted but optional; trailing ``Z`` is mandatory.
+_OBSERVED_AT_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$"
+)
+
+#: Closed group list and its deterministic ordering.
+_GROUP_ORDER: tuple[str, ...] = (
+    "EFFECT_EXCEPTION",
+    "NEEDS_SOL",
+    "NEEDS_WORKER",
+    "WAITING_CAPACITY",
+    "RUNNING",
+    "QUEUED",
+    "COMPLETED_NOT_ACCEPTED",
+    "TERMINAL",
+    "UNKNOWN",
+)
+
+#: Job lifecycle pre-START set (R3, R8).
+_PRE_START_STATUSES = frozenset({"QUEUED"})
+
+#: Group names the next_actor override is allowed to act on (B4).  The
+#: override fires only when the lifecycle-group would be QUEUED or RUNNING;
+#: COMPLETED → COMPLETED_NOT_ACCEPTED and FAILED/LOST/CANCELLED → TERMINAL
+#: are terminal/completed and never re-classify under accountability.
+_OVERRIDE_APPLICABLE_GROUPS = frozenset({"QUEUED", "RUNNING"})
+
+#: Closed top-level document key set.
+OUTPUT_KEYS: frozenset[str] = frozenset({
+    "schema",
+    "generated_at",
+    "availability",
+    "lifecycle_source",
+    "effect_exception",
+    "coverage",
+    "groups",
+    "source_observation",
+    "reason_codes",
+})
+
+#: Closed coverage envelope keys.
+COVERAGE_KEYS: frozenset[str] = frozenset({"count", "total", "truncated", "completeness"})
+
+#: Closed per-row key set.
+ROW_KEYS: frozenset[str] = frozenset({
+    "root_job_id",
+    "lifecycle",
+    "next_actor",
+    "capacity",
+    "effect",
+    "acceptance",
+    "group",
+})
+
+#: Closed lifecycle column keys.
+_LIFECYCLE_KEYS: frozenset[str] = frozenset({
+    "status",
+    "source",
+    "orchestration_role",
+    "depth",
+})
+
+#: Closed next_actor / capacity / effect column keys — ``evidence_ref`` and
+#: ``observed_at`` carry the producer's receipt; both are null when no
+#: producer supplied evidence for the row.
+_NEXT_ACTOR_KEYS: frozenset[str] = frozenset({"value", "source", "reason", "evidence_ref", "observed_at"})
+_CAPACITY_KEYS: frozenset[str] = frozenset({"value", "source", "reason", "evidence_ref", "observed_at"})
+_EFFECT_KEYS: frozenset[str] = frozenset({"value", "source", "reason", "evidence_ref", "observed_at"})
+
+#: Closed acceptance column keys (mirrors fabric_job_view._acceptance_v2).
+ACCEPTANCE_KEYS: frozenset[str] = frozenset({"state", "producer_owner", "reason"})
+
+#: Closed queue-level effect_exception keys (N7: ``reason`` added).
+QUEUE_EFFECT_EXCEPTION_KEYS: frozenset[str] = frozenset({"value", "scope", "observable", "reason"})
+
+#: Closed queue-level effect_exception reason vocabulary.
+_QUEUE_EFFECT_EXCEPTION_REASON_CONTROL_ROOM_MISSING = "control_room_missing"
+_QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING = "autonomy_missing"
+_QUEUE_EFFECT_EXCEPTION_REASON_NO_EXCEPTION_OBSERVED = "no_exception_observed"
+_QUEUE_EFFECT_EXCEPTION_REASON_EXCEPTION_OBSERVED = "exception_observed"
+#: N4: emitted by the read service's typed refusal body when the CCR
+#: bracket itself refused before the composer could read autonomy — the
+#: composer's own vocabulary is preserved (``control_room_missing`` and
+#: ``autonomy_missing`` describe the composer's view of a missing or
+#: malformed control room document, not the read service's).
+_QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED = "read_refused"
+
+#: Root-list shape mirrors ``fabric_job_view.ROOT_LIST_KEYS``.
+_ROOT_LIST_KEYS: frozenset[str] = frozenset({
+    "schema",
+    "generated_at",
+    "runtime",
+    "roots",
+    "count",
+    "total",
+    "truncated",
+    "degraded",
+})
+_ROOT_LIST_RUNTIME_KEYS: frozenset[str] = frozenset({
+    "root",
+    "db_present",
+    "identity",
+    "acquisition",
+})
+_ROOT_ROW_KEYS: frozenset[str] = frozenset({
+    "job_id",
+    "status",
+    "depth",
+    "parent_job_id",
+    "orchestration_role",
+})
+
+#: Closed ``lifecycle_source.runtime.acquisition`` keys; verbatim echo.
+_ACQUISITION_KEYS: frozenset[str] = frozenset({
+    "schema",
+    "query",
+    "owner",
+    "snapshot_digest",
+    "budgets",
+    "truncation",
+    "provenance",
+    "generation",
+})
+
+#: Closed lifecycle→group table over the Executive JobStatus enum (R8, B4).
+#: Every enum member is mapped explicitly — the composer raises ``ValueError``
+#: on an unmapped status so the closed-table invariant can never be silently
+#: widened by a new enum member sneaking past the validator.
+_JOB_STATUS_GROUPS: dict[str, str] = {
+    JobStatus.QUEUED.value: "QUEUED",
+    JobStatus.RUNNING.value: "RUNNING",
+    JobStatus.CHECKPOINTED.value: "RUNNING",
+    JobStatus.RATE_LIMITED.value: "RUNNING",
+    JobStatus.CANCEL_REQUESTED.value: "RUNNING",
+    JobStatus.COMPLETED.value: "COMPLETED_NOT_ACCEPTED",
+    JobStatus.FAILED.value: "TERMINAL",
+    JobStatus.LOST.value: "TERMINAL",
+    JobStatus.CANCELLED.value: "TERMINAL",
+}
+
+_REASON_LIFECYCLE_UNAVAILABLE = "LIFECYCLE_UNAVAILABLE"
+#: B3: queue-level EFFECT_UNKNOWN but no per-row effect attribution.
+_REASON_EFFECT_NOT_ROW_ATTRIBUTED = "effect_not_row_attributed"
+#: N3: root-list degraded notes present on an AVAILABLE document.
+_REASON_LIFECYCLE_DEGRADED = "lifecycle_degraded"
+#: Shared prefix that distinguishes the producer's bounded-unavailable
+#: family.  Both :data:`fabric_job_view._BOUNDED_UNAVAILABLE_NOTE` and
+#: the legacy :func:`fabric_job_view.list_roots_v2` failure path
+#: (which appends the bounded first line of the underlying error after
+#: the colon) match by this prefix.  Used by the closed-set predicates
+#: below so the bounded-unavailable detection stays in ONE place.
+_BOUNDED_UNAVAILABLE_PHRASE = "bounded acquisition unavailable"
+
+#: Closed set of degraded-note phrases that warrant a ``lifecycle_degraded``
+#: reason code on an AVAILABLE document.  Sourced from
+#: :mod:`control_plane.fabric_job_view` constants so the composer never
+#: re-types the strings.  ``_ROOT_ENUMERATION_NOTE`` is informational only —
+#: every bounded acquisition surfaces it, so it never contributes to the
+#: reason code (the producer's degraded list still echoes it verbatim).
+#: The bounded-unavailable note is matched by the shared prefix phrase
+#: (:func:`_is_bounded_unavailable_note`), not by exact equality on the
+#: constant — the producer's legacy path appends arbitrary detail after
+#: the colon.
+_DEGRADATION_NOTES: tuple[str, ...] = (
+    _BOUNDED_UNAVAILABLE_NOTE,
+    "bounded root discovery truncated; omitted roots are not counted",
+    _GENERATION_CONFLICT_NOTE,
+)
+
+
+def _is_bounded_unavailable_note(entry: Any) -> bool:
+    """One closed-set predicate for the bounded-unavailable producer family.
+
+    The producer's exact emission is
+    :data:`fabric_job_view._BOUNDED_UNAVAILABLE_NOTE`; the legacy
+    :func:`fabric_job_view.list_roots_v2` failure path appends an
+    arbitrary failure first line after the colon.  Both share the prefix
+    :data:`_BOUNDED_UNAVAILABLE_PHRASE` — that is the closed-set
+    invariant.  Used by BOTH :func:`_lifecycle_unavailable` (drives the
+    UNAVAILABLE branch) and :func:`_is_degradation_note` (drives the
+    ``lifecycle_degraded`` reason code on AVAILABLE) so the two sites
+    cannot drift.
+    """
+    return isinstance(entry, str) and entry.startswith(_BOUNDED_UNAVAILABLE_PHRASE)
+
+
+def _is_degradation_note(entry: Any) -> bool:
+    """Closed-set predicate over the root list's ``degraded`` entries.
+
+    The bounded-unavailable family is matched by the shared prefix
+    :func:`_is_bounded_unavailable_note` (the producer appends detail
+    after the colon — anything from the canonical constant down to
+    ``"bounded acquisition unavailable: disk I/O error"`` counts).  The
+    other two notes are matched exactly.  Anything else is informational
+    only and is echoed in ``lifecycle_source.degraded`` without
+    contributing a reason code.
+    """
+    if _is_bounded_unavailable_note(entry):
+        return True
+    if not isinstance(entry, str):
+        return False
+    for phrase in _DEGRADATION_NOTES:
+        if entry == phrase:
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# small helpers
+# ---------------------------------------------------------------------------
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_observed_at(observed_at: str) -> datetime:
+    """Strict RFC3339 UTC parse — refuse anything outside the canonical shape.
+
+    A trailing ``Z`` is mandatory; an optional 1–6-digit microsecond fraction
+    is permitted.  Naive values, ``+00:00`` offsets, leap-second markers and
+    non-UTC locales never admit — anything else surfaces as ``ValueError``.
+
+    Calendar-invalid but pattern-valid values (e.g. ``2026-02-30T00:00:00Z``,
+    ``2026-01-01T23:59:60Z``) are wrapped to the module's own message so the
+    caller never sees ``strptime``'s text or leaks the day/month names.
+    """
+    if not isinstance(observed_at, str) or _OBSERVED_AT_PATTERN.fullmatch(observed_at) is None:
+        raise ValueError(
+            f"observed_at invalid: must match RFC3339 UTC like 2026-09-23T00:00:00Z, got {observed_at!r}"
+        )
+    try:
+        return datetime.strptime(observed_at, "%Y-%m-%dT%H:%M:%S.%fZ" if "." in observed_at
+                                  else "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise ValueError(
+            f"observed_at invalid: must match RFC3339 UTC like 2026-09-23T00:00:00Z, got {observed_at!r}"
+        ) from exc
+
+
+def _parse_evidence_as_of(evidence_as_of: str) -> datetime:
+    """Strict RFC3339 UTC parse for the evidence anchor.
+
+    N9: error message reads ``evidence_as_of invalid`` so callers can
+    distinguish evidence anchor from a per-row observed_at rejection.
+    """
+    if not isinstance(evidence_as_of, str) or _OBSERVED_AT_PATTERN.fullmatch(evidence_as_of) is None:
+        raise ValueError(
+            f"evidence_as_of invalid: must match RFC3339 UTC like 2026-09-23T00:00:00Z, got {evidence_as_of!r}"
+        )
+    try:
+        return datetime.strptime(evidence_as_of, "%Y-%m-%dT%H:%M:%S.%fZ" if "." in evidence_as_of
+                                  else "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise ValueError(
+            f"evidence_as_of invalid: must match RFC3339 UTC like 2026-09-23T00:00:00Z, got {evidence_as_of!r}"
+        ) from exc
+
+
+def _evidence_freshness(
+    observed_at: str,
+    *,
+    evidence_as_of: datetime,
+    evidence_max_age_s: int,
+) -> bool:
+    """Return ``True`` when ``observed_at`` is within the validity window.
+
+    Refuses (returns False) when ``observed_at`` is older than
+    ``evidence_as_of - evidence_max_age_s`` OR later than ``evidence_as_of``.
+    Callers must already have parsed ``observed_at`` through :func:`_parse_observed_at`.
+    """
+    observed_dt = _parse_observed_at(observed_at)
+    age_s = (evidence_as_of - observed_dt).total_seconds()
+    return 0 <= age_s <= evidence_max_age_s
+
+
+def _ensure_key_set(d: Mapping[str, Any], keys: frozenset[str], *, label: str) -> None:
+    if set(d) != keys:
+        raise ValueError(f"{label} keys must equal {sorted(keys)}, got {sorted(d)}")
+
+
+def _ensure_required_producers_evidence(
+    *,
+    accountability: Mapping[str, Mapping[str, Any]] | None,
+    placement: Mapping[str, Mapping[str, Any]] | None,
+    effects: Mapping[str, Mapping[str, Any]] | None,
+    evidence_as_of: str | None,
+) -> datetime | None:
+    """When any producer is non-None, ``evidence_as_of`` MUST be supplied.
+
+    Returns the parsed evidence anchor when supplied, else ``None``.
+    """
+    any_producer = any(value is not None for value in (accountability, placement, effects))
+    if any_producer and evidence_as_of is None:
+        raise ValueError("evidence_as_of is required when any producer is supplied")
+    if evidence_as_of is None:
+        return None
+    return _parse_evidence_as_of(evidence_as_of)
+
+
+def _validate_root_list(root_list: Any) -> Mapping[str, Any]:
+    """Strict shape validation; raise ValueError on anything else."""
+    if not isinstance(root_list, Mapping):
+        raise ValueError("root_list must be a mapping")
+    if root_list.get("schema") != _ROOT_LIST_SCHEMA:
+        raise ValueError(
+            f"root_list schema must equal {_ROOT_LIST_SCHEMA!r}, got {root_list.get('schema')!r}"
+        )
+    _ensure_key_set(root_list, _ROOT_LIST_KEYS, label="root_list")
+    runtime = root_list.get("runtime")
+    if not isinstance(runtime, Mapping) or set(runtime) != _ROOT_LIST_RUNTIME_KEYS:
+        raise ValueError("root_list runtime envelope malformed")
+    acquisition = runtime.get("acquisition")
+    if not isinstance(acquisition, Mapping) or set(acquisition) != _ACQUISITION_KEYS:
+        raise ValueError("root_list runtime.acquisition envelope malformed")
+    roots = root_list.get("roots")
+    if not isinstance(roots, list):
+        raise ValueError("root_list roots must be a list")
+    seen_job_ids: set[str] = set()
+    for row in roots:
+        if not isinstance(row, Mapping) or set(row) != _ROOT_ROW_KEYS:
+            raise ValueError(f"root row keys invalid: {row!r}")
+        job_id = row["job_id"]
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError(f"root row job_id invalid: {row!r}")
+        if job_id in seen_job_ids:
+            raise ValueError(f"root row duplicate job_id: {job_id!r}")
+        seen_job_ids.add(job_id)
+        if not isinstance(row["status"], str) or not row["status"]:
+            raise ValueError(f"root row status invalid: {row!r}")
+        if row["status"] not in _JOB_STATUS_GROUPS:
+            raise ValueError(f"root row status not mapped: {row['status']!r}")
+        if not isinstance(row["depth"], int) or row["depth"] < 0:
+            raise ValueError(f"root row depth invalid: {row!r}")
+    count, total, truncated, degraded = (
+        root_list.get("count"),
+        root_list.get("total"),
+        root_list.get("truncated"),
+        root_list.get("degraded"),
+    )
+    if not isinstance(count, int) or count < 0:
+        raise ValueError("root_list count invalid")
+    if total is not None and (not isinstance(total, int) or total < 0):
+        raise ValueError("root_list total invalid")
+    if not isinstance(truncated, bool):
+        raise ValueError("root_list truncated invalid")
+    if not isinstance(degraded, list) or not all(isinstance(d, str) for d in degraded):
+        raise ValueError("root_list degraded invalid")
+    return root_list
+
+
+def _validate_accountability(value: Any) -> Mapping[str, Mapping[str, Any]] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("accountability must be a mapping or None")
+    for ref, row in value.items():
+        if not isinstance(ref, str) or not ref:
+            raise ValueError("accountability key invalid")
+        if not isinstance(row, Mapping):
+            raise ValueError("accountability row must be a mapping")
+        if set(row) != {"next_actor", "evidence_ref", "observed_at"}:
+            raise ValueError("accountability row keys invalid")
+        if row["next_actor"] not in ("SOL", "WORKER"):
+            raise ValueError(f"accountability next_actor invalid: {row['next_actor']!r}")
+        for str_key in ("evidence_ref", "observed_at"):
+            if not isinstance(row[str_key], str) or not row[str_key]:
+                raise ValueError(f"accountability row {str_key} invalid")
+        # Observed_at must parse as strict RFC3339 UTC; a producer's evidence
+        # is rejected up front rather than later silently failing the row.
+        _parse_observed_at(row["observed_at"])
+    return value
+
+
+def _validate_placement(value: Any) -> Mapping[str, Mapping[str, Any]] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("placement must be a mapping or None")
+    for ref, row in value.items():
+        if not isinstance(ref, str) or not ref:
+            raise ValueError("placement key invalid")
+        if not isinstance(row, Mapping):
+            raise ValueError("placement row must be a mapping")
+        if set(row) != {"state", "evidence_ref", "observed_at"}:
+            raise ValueError("placement row keys invalid")
+        if row["state"] != "WAITING":
+            raise ValueError(f"placement row state invalid: {row['state']!r}")
+        for str_key in ("evidence_ref", "observed_at"):
+            if not isinstance(row[str_key], str) or not row[str_key]:
+                raise ValueError(f"placement row {str_key} invalid")
+        _parse_observed_at(row["observed_at"])
+    return value
+
+
+def _validate_effects(value: Any) -> Mapping[str, Mapping[str, Any]] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("effects must be a mapping or None")
+    for ref, row in value.items():
+        if not isinstance(ref, str) or not ref:
+            raise ValueError("effects key invalid")
+        if not isinstance(row, Mapping):
+            raise ValueError("effects row must be a mapping")
+        if set(row) != {"state", "carrier", "evidence_ref", "observed_at"}:
+            raise ValueError("effects row keys invalid")
+        if row["state"] not in ("EFFECT_UNKNOWN", "NONE"):
+            raise ValueError(f"effects row state invalid: {row['state']!r}")
+        if not isinstance(row["carrier"], str) or not row["carrier"]:
+            raise ValueError("effects row carrier invalid")
+        for str_key in ("evidence_ref", "observed_at"):
+            if not isinstance(row[str_key], str) or not row[str_key]:
+                raise ValueError(f"effects row {str_key} invalid")
+        _parse_observed_at(row["observed_at"])
+    return value
+
+
+def _lifecycle_unavailable(root_list: Mapping[str, Any]) -> bool:
+    """R1: refuse lifecycle when the Runtime is degraded or absent.
+
+    B1: the bounded-unavailable detection uses the SHARED predicate
+    :func:`_is_bounded_unavailable_note` — the same predicate the
+    reason-code gate (:func:`_is_degradation_note`) uses for the
+    ``lifecycle_degraded`` code on AVAILABLE documents.  One closed set,
+    one predicate, both sites.
+    """
+    runtime = root_list["runtime"]
+    if runtime.get("db_present") is not True:
+        return True
+    acquisition = runtime["acquisition"]
+    generation = acquisition.get("generation")
+    state = generation.get("state") if isinstance(generation, Mapping) else None
+    if state != "SAME":
+        return True
+    degraded = root_list.get("degraded") or []
+    return any(_is_bounded_unavailable_note(entry) for entry in degraded)
+
+
+def _lifecycle_source(root_list: Mapping[str, Any]) -> dict[str, Any]:
+    """Echo the root list's schema + runtime identity + acquisition receipt.
+
+    N3: ``degraded`` is echoed verbatim — the producer's degradation list
+    is not silently dropped.  The downstream caller decides whether a
+    non-empty list warrants a ``lifecycle_degraded`` reason code.
+    """
+    runtime = root_list["runtime"]
+    return {
+        "schema": root_list["schema"],
+        "runtime": {
+            "root": runtime.get("root"),
+            "db_present": runtime.get("db_present"),
+            "identity": runtime.get("identity"),
+            "acquisition": dict(runtime["acquisition"]),
+        },
+        "degraded": list(root_list.get("degraded") or []),
+    }
+
+
+def _coverage_for_unavailable(root_list: Mapping[str, Any]) -> dict[str, Any]:
+    """UNAVAILABLE branch coverage: zero rows, never claim COMPLETE (B2)."""
+    return {
+        "count": 0,
+        "total": None,
+        "truncated": bool(root_list["truncated"]),
+        "completeness": "PARTIAL",
+    }
+
+
+def _coverage(root_list: Mapping[str, Any]) -> dict[str, Any]:
+    """R7/N4: explicit count/total/truncated/completeness copy from the root list.
+
+    ``completeness`` is PARTIAL when the source is known to be incomplete —
+    the root list reports ``truncated: True``, ``provenance.state == "PARTIAL"``,
+    or ``total is None`` (the producer could not enumerate the universe).
+    """
+    count = int(root_list["count"])
+    truncated = bool(root_list["truncated"])
+    total: int | None = root_list["total"] if not truncated else None
+    acquisition = root_list["runtime"]["acquisition"]
+    provenance_state = acquisition.get("provenance", {}).get("state") if isinstance(
+        acquisition.get("provenance"), Mapping
+    ) else None
+    completeness = ("PARTIAL" if truncated or total is None
+                    or provenance_state == "PARTIAL" else "COMPLETE")
+    return {
+        "count": count,
+        "total": total,
+        "truncated": truncated,
+        "completeness": completeness,
+    }
+
+
+def _queue_effect_exception(control_room: Any) -> dict[str, Any]:
+    """R4/N7: queue-level effect_exception from control_room.autonomy.
+
+    ``reason`` distinguishes "could not look" (control_room or autonomy
+    absent) from "looked, found no exception" so the queue-level EFFECT_UNKNOWN
+    state is never confused with a healthy empty read.  The emitted
+    ``reason`` is asserted against the closed
+    :data:`common.executive_workspace_contract.QUEUE_EFFECT_EXCEPTION_REASONS`
+    vocabulary so the composer can never silently introduce a new member.
+    """
+    if not isinstance(control_room, Mapping):
+        result = {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                  "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_CONTROL_ROOM_MISSING}
+    else:
+        autonomy = control_room.get("autonomy")
+        if not isinstance(autonomy, Mapping) or autonomy.get("schema") != _AUTONOMY_SCHEMA:
+            result = {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                      "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING}
+        else:
+            responsibilities = autonomy.get("responsibilities")
+            if not isinstance(responsibilities, list):
+                result = {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                          "observable": False, "reason": _QUEUE_EFFECT_EXCEPTION_REASON_AUTONOMY_MISSING}
+            else:
+                observed = False
+                for row in responsibilities:
+                    if not isinstance(row, Mapping):
+                        continue
+                    placement = row.get("placement_state")
+                    if isinstance(placement, Mapping) and placement.get("value") == "EFFECT_UNKNOWN":
+                        observed = True
+                        break
+                if observed:
+                    result = {
+                        "value": "EFFECT_UNKNOWN",
+                        "scope": "RUNTIME_CURRENT_WORKER",
+                        "observable": True,
+                        "reason": _QUEUE_EFFECT_EXCEPTION_REASON_EXCEPTION_OBSERVED,
+                    }
+                else:
+                    result = {"value": "NONE", "scope": "RUNTIME_CURRENT_WORKER",
+                              "observable": False,
+                              "reason": _QUEUE_EFFECT_EXCEPTION_REASON_NO_EXCEPTION_OBSERVED}
+    # Closed-set guard: the composer's emitted ``reason`` MUST be a member
+    # of the contract's effect_exception reason vocabulary.
+    assert result["reason"] in QUEUE_EFFECT_EXCEPTION_REASONS, (
+        f"_queue_effect_exception emitted reason {result['reason']!r} "
+        f"not in QUEUE_EFFECT_EXCEPTION_REASONS="
+        f"{sorted(QUEUE_EFFECT_EXCEPTION_REASONS)}"
+    )
+    return result
+
+
+def _acceptance() -> dict[str, Any]:
+    """R5: acceptance is ALWAYS NOT_PROJECTED in this projection."""
+    return {
+        "state": "NOT_PROJECTED",
+        "producer_owner": None,
+        "reason": "product acceptance has no producer in this projection",
+    }
+
+
+def _no_producer_column(reason: str, source: str | None) -> dict[str, Any]:
+    """No-producer column shape: explicit source=None for closed-key-set guard."""
+    return {
+        "value": "UNKNOWN",
+        "source": source,
+        "reason": reason,
+        "evidence_ref": None,
+        "observed_at": None,
+    }
+
+
+def _next_actor(
+    ref: str,
+    accountability: Mapping[str, Mapping[str, Any]] | None,
+    *,
+    evidence_as_of: datetime | None,
+    evidence_max_age_s: int,
+) -> dict[str, Any]:
+    """R2: only the explicit Agent OS accountability input carries next_actor.
+
+    A stale or future-dated ``observed_at`` falls back to ``UNKNOWN`` with
+    ``reason: "evidence_stale"``; the ``evidence_ref``/``observed_at`` are
+    still carried so the staleness is auditable in the column dict.
+    """
+    if accountability is None or ref not in accountability:
+        return _no_producer_column("no_producer", source=None)
+    row = accountability[ref]
+    evidence_ref = row["evidence_ref"]
+    observed_at = row["observed_at"]
+    if evidence_as_of is None or not _evidence_freshness(
+        observed_at, evidence_as_of=evidence_as_of,
+        evidence_max_age_s=evidence_max_age_s,
+    ):
+        return {
+            "value": "UNKNOWN",
+            "source": None,
+            "reason": "evidence_stale",
+            "evidence_ref": evidence_ref,
+            "observed_at": observed_at,
+        }
+    if row["next_actor"] == "SOL":
+        return {
+            "value": "NEEDS_SOL", "source": "AGENT_OS", "reason": "evidence_supplied",
+            "evidence_ref": evidence_ref, "observed_at": observed_at,
+        }
+    return {
+        "value": "NEEDS_WORKER", "source": "AGENT_OS", "reason": "evidence_supplied",
+        "evidence_ref": evidence_ref, "observed_at": observed_at,
+    }
+
+
+def _capacity(
+    ref: str,
+    status: str,
+    placement: Mapping[str, Mapping[str, Any]] | None,
+    *,
+    evidence_as_of: datetime | None,
+    evidence_max_age_s: int,
+) -> dict[str, Any]:
+    """R3/B1: WAITING_CAPACITY only when pre-START AND placement evidence.
+
+    The lifecycle test fires FIRST: any post-START row is
+    ``NOT_APPLICABLE`` regardless of whether placement evidence was
+    supplied.  A pre-START row without placement evidence is
+    ``UNKNOWN`` (``no_producer``); with placement evidence, the
+    capacity is ``WAITING_CAPACITY``.  Stale placement evidence falls
+    back to ``UNKNOWN`` with ``reason: "evidence_stale"`` (so the row
+    cannot be promoted to ``WAITING_CAPACITY``).
+    """
+    if status not in _PRE_START_STATUSES:
+        # B4: provenance is the Executive Runtime lifecycle (the row's
+        # status, not placement evidence) — no Capacity producer was
+        # consulted; "AUTONOMY" mislabels who actually emitted this column.
+        return {
+            "value": "NOT_APPLICABLE", "source": "EXECUTIVE_RUNTIME",
+            "reason": "post_start_lifecycle",
+            "evidence_ref": None, "observed_at": None,
+        }
+    if placement is None or ref not in placement:
+        return _no_producer_column("no_producer", source=None)
+    row = placement[ref]
+    evidence_ref = row["evidence_ref"]
+    observed_at = row["observed_at"]
+    if evidence_as_of is None or not _evidence_freshness(
+        observed_at, evidence_as_of=evidence_as_of,
+        evidence_max_age_s=evidence_max_age_s,
+    ):
+        return {
+            "value": "UNKNOWN",
+            "source": None,
+            "reason": "evidence_stale",
+            "evidence_ref": evidence_ref,
+            "observed_at": observed_at,
+        }
+    return {
+        "value": "WAITING_CAPACITY", "source": "AUTONOMY",
+        "reason": "pre_start_placement_evidence",
+        "evidence_ref": evidence_ref, "observed_at": observed_at,
+    }
+
+
+def _effect(
+    ref: str,
+    effects: Mapping[str, Mapping[str, Any]] | None,
+    *,
+    evidence_as_of: datetime | None,
+    evidence_max_age_s: int,
+) -> dict[str, Any]:
+    """R4: only an explicit effects input carries effect state.
+
+    EFFECT_UNKNOWN is sticky: a stale ``observed_at`` does NOT clear the
+    exception (R4 — staleness never reverses a recorded effect), the
+    reason reads ``"evidence_supplied_stale"`` instead.  ``NONE`` from
+    a producer without evidence still falls back to ``UNKNOWN`` because
+    the producer's value carries no operational meaning on its own.
+    """
+    if effects is None or ref not in effects:
+        return _no_producer_column("no_producer", source=None)
+    row = effects[ref]
+    state = row["state"]
+    evidence_ref = row["evidence_ref"]
+    observed_at = row["observed_at"]
+    fresh = evidence_as_of is not None and _evidence_freshness(
+        observed_at, evidence_as_of=evidence_as_of,
+        evidence_max_age_s=evidence_max_age_s,
+    )
+    if not fresh:
+        if state == "EFFECT_UNKNOWN":
+            # R4 sticky: keep the exception, label the staleness.
+            return {
+                "value": state, "source": "EFFECT_PRODUCER",
+                "reason": "evidence_supplied_stale",
+                "evidence_ref": evidence_ref, "observed_at": observed_at,
+            }
+        # Stale NONE / other state: fall back to no-producer UNKNOWN.
+        return {
+            "value": "UNKNOWN", "source": None,
+            "reason": "evidence_stale",
+            "evidence_ref": evidence_ref, "observed_at": observed_at,
+        }
+    return {
+        "value": state, "source": "EFFECT_PRODUCER",
+        "reason": "evidence_supplied",
+        "evidence_ref": evidence_ref, "observed_at": observed_at,
+    }
+
+
+def _row_group(row: Mapping[str, Any]) -> str:
+    """Group precedence: EFFECT_EXCEPTION sticky → next_actor → capacity → lifecycle.
+
+    B4: the NEEDS_SOL/NEEDS_WORKER override fires ONLY when the
+    lifecycle-group is QUEUED or RUNNING.  COMPLETED → COMPLETED_NOT_ACCEPTED
+    and FAILED/LOST/CANCELLED → TERMINAL are terminal/completed groups and
+    are NEVER overridden by accountability — those rows may still carry a
+    ``next_actor`` column value for audit, but their group is decided by
+    the lifecycle alone.
+    """
+    effect = row["effect"]
+    next_actor = row["next_actor"]
+    capacity = row["capacity"]
+    status = row["lifecycle"]["status"]
+    if effect["value"] == "EFFECT_UNKNOWN":
+        return "EFFECT_EXCEPTION"
+    lifecycle_group = _JOB_STATUS_GROUPS[status]
+    if (lifecycle_group in _OVERRIDE_APPLICABLE_GROUPS
+            and next_actor["value"] in ("NEEDS_SOL", "NEEDS_WORKER")):
+        return next_actor["value"]
+    if capacity["value"] == "WAITING_CAPACITY":
+        return "WAITING_CAPACITY"
+    return lifecycle_group
+
+
+def _row(
+    ref: str,
+    row: Mapping[str, Any],
+    *,
+    accountability: Mapping[str, Mapping[str, Any]] | None,
+    placement: Mapping[str, Mapping[str, Any]] | None,
+    effects: Mapping[str, Mapping[str, Any]] | None,
+    evidence_as_of: datetime | None,
+    evidence_max_age_s: int,
+) -> dict[str, Any]:
+    lifecycle = {
+        "status": row["status"],
+        "source": "EXECUTIVE_RUNTIME",
+        "orchestration_role": row["orchestration_role"],
+        "depth": row["depth"],
+    }
+    built = {
+        "root_job_id": ref,
+        "lifecycle": lifecycle,
+        "next_actor": _next_actor(ref, accountability,
+                                  evidence_as_of=evidence_as_of,
+                                  evidence_max_age_s=evidence_max_age_s),
+        "capacity": _capacity(ref, row["status"], placement,
+                              evidence_as_of=evidence_as_of,
+                              evidence_max_age_s=evidence_max_age_s),
+        "effect": _effect(ref, effects,
+                          evidence_as_of=evidence_as_of,
+                          evidence_max_age_s=evidence_max_age_s),
+        "acceptance": _acceptance(),
+        "group": None,  # filled after we know all columns
+    }
+    built["group"] = _row_group(built)
+    _ensure_key_set(built, ROW_KEYS, label="row")
+    _ensure_key_set(built["lifecycle"], _LIFECYCLE_KEYS, label="lifecycle column")
+    _ensure_key_set(built["next_actor"], _NEXT_ACTOR_KEYS, label="next_actor column")
+    _ensure_key_set(built["capacity"], _CAPACITY_KEYS, label="capacity column")
+    _ensure_key_set(built["effect"], _EFFECT_KEYS, label="effect column")
+    _ensure_key_set(built["acceptance"], ACCEPTANCE_KEYS, label="acceptance column")
+    return built
+
+
+def _empty_groups() -> dict[str, list[dict[str, Any]]]:
+    return {key: [] for key in _GROUP_ORDER}
+
+
+# ---------------------------------------------------------------------------
+# public composer
+# ---------------------------------------------------------------------------
+
+
+def compose_work_queue_v1(
+    root_list: Mapping[str, Any],
+    *,
+    control_room: Mapping[str, Any] | None = None,
+    accountability: Mapping[str, Mapping[str, Any]] | None = None,
+    placement: Mapping[str, Mapping[str, Any]] | None = None,
+    effects: Mapping[str, Mapping[str, Any]] | None = None,
+    generated_at: str | None = None,
+    source_observation: Mapping[str, Any] | None = None,
+    evidence_as_of: str | None = None,
+    evidence_max_age_s: int = EVIDENCE_MAX_AGE_S,
+) -> dict[str, Any]:
+    """Pure: render the workspace work-queue from its named inputs only.
+
+    The composer never reads the Runtime; it consumes only the
+    ``mastermind.fabric_job_root_list.v2`` document passed in ``root_list``
+    plus optional Agent OS evidence inputs and the optional control-room
+    document for the queue-level ``effect_exception`` read.  When the
+    caller supplies ``source_observation`` (the existing CCR-and-Runtime
+    observation receipt), it is attached verbatim under that key.
+
+    B3: ``evidence_as_of`` is REQUIRED when any producer (accountability,
+    placement, effects) is supplied; ``observed_at`` values that are
+    older than ``evidence_as_of - evidence_max_age_s`` or later than
+    ``evidence_as_of`` are not admitted — the corresponding row falls
+    back to the no-producer value with ``reason: "evidence_stale"``.
+    Effects are the exception: a stale ``EFFECT_UNKNOWN`` STILL sticks
+    (R4); staleness never clears a recorded exception.
+    """
+    validated_root = _validate_root_list(root_list)
+    validated_accountability = _validate_accountability(accountability)
+    validated_placement = _validate_placement(placement)
+    validated_effects = _validate_effects(effects)
+    evidence_anchor = _ensure_required_producers_evidence(
+        accountability=validated_accountability,
+        placement=validated_placement,
+        effects=validated_effects,
+        evidence_as_of=evidence_as_of,
+    )
+    lifecycle_source = _lifecycle_source(validated_root)
+    effect_exception = _queue_effect_exception(control_room)
+    _ensure_key_set(effect_exception, QUEUE_EFFECT_EXCEPTION_KEYS, label="queue effect_exception")
+    document_generated_at = generated_at or _utc_now()
+
+    if _lifecycle_unavailable(validated_root):
+        unavailable = {
+            "schema": WORK_QUEUE_SCHEMA,
+            "generated_at": document_generated_at,
+            "availability": "UNAVAILABLE",
+            "lifecycle_source": lifecycle_source,
+            "effect_exception": effect_exception,
+            "coverage": _coverage_for_unavailable(validated_root),
+            "groups": _empty_groups(),
+            "source_observation": dict(source_observation) if isinstance(source_observation, Mapping) else None,
+            "reason_codes": [_REASON_LIFECYCLE_UNAVAILABLE],
+        }
+        _ensure_key_set(unavailable, OUTPUT_KEYS, label="unavailable document")
+        return unavailable
+
+    groups = _empty_groups()
+    for row in validated_root["roots"]:
+        built = _row(
+            str(row["job_id"]),
+            row,
+            accountability=validated_accountability,
+            placement=validated_placement,
+            effects=validated_effects,
+            evidence_as_of=evidence_anchor,
+            evidence_max_age_s=evidence_max_age_s,
+        )
+        groups[built["group"]].append(built)
+    # Deterministic order: sort each group by root_job_id ascending.
+    for key in _GROUP_ORDER:
+        groups[key] = sorted(groups[key], key=lambda item: item["root_job_id"])
+
+    # B3/N3: build the deterministic reason_codes list for the AVAILABLE
+    # branch.  ``effect_not_row_attributed`` fires when the queue-level
+    # EFFECT_UNKNOWN came from control_room.autonomy but no per-row
+    # effects producer carried one.  ``lifecycle_degraded`` fires when
+    # at least one entry of the root list's degraded list matches a
+    # closed-set degradation phrase (bounded acquisition unavailable,
+    # bounded discovery truncation, generation CONFLICT).  Informational
+    # notes (e.g. ``_ROOT_ENUMERATION_NOTE``) are echoed verbatim in
+    # ``lifecycle_source.degraded`` but never contribute a reason code.
+    reason_codes: list[str] = []
+    if (effect_exception.get("value") == "EFFECT_UNKNOWN"
+            and validated_effects is None):
+        reason_codes.append(_REASON_EFFECT_NOT_ROW_ATTRIBUTED)
+    if any(_is_degradation_note(entry) for entry in validated_root.get("degraded") or []):
+        reason_codes.append(_REASON_LIFECYCLE_DEGRADED)
+    reason_codes.sort()
+
+    document = {
+        "schema": WORK_QUEUE_SCHEMA,
+        "generated_at": document_generated_at,
+        "availability": "AVAILABLE",
+        "lifecycle_source": lifecycle_source,
+        "effect_exception": effect_exception,
+        "coverage": _coverage(validated_root),
+        "groups": groups,
+        "source_observation": dict(source_observation) if isinstance(source_observation, Mapping) else None,
+        "reason_codes": reason_codes,
+    }
+    _ensure_key_set(document, OUTPUT_KEYS, label="document")
+    _ensure_key_set(document["groups"], frozenset(_GROUP_ORDER), label="groups keys")
+    return document
+
+
+__all__ = [
+    "WORK_QUEUE_SCHEMA",
+    "OUTPUT_KEYS",
+    "ROW_KEYS",
+    "ACCEPTANCE_KEYS",
+    "COVERAGE_KEYS",
+    "EVIDENCE_MAX_AGE_S",
+    "compose_work_queue_v1",
+    "_DEGRADATION_NOTES",
+    "_is_degradation_note",
+    "_BOUNDED_UNAVAILABLE_NOTE",
+    "_GENERATION_CONFLICT_NOTE",
+    "_ROOT_ENUMERATION_NOTE",
+]

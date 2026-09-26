@@ -26,8 +26,11 @@ from common.executive_workspace_contract import (
     OBSERVATION_SCHEMA,
     PROGRAMS_SCHEMA,
     PROJECTION_SCHEMA,
+    QUEUE_EFFECT_EXCEPTION_REASONS,
     RESULT_BODY_SCHEMA,
     RESULT_OBSERVATION_SCHEMA,
+    WORK_REFUSAL_REASON_CODES,
+    WORK_SCHEMA,
     canonical,
     digest,
     error,
@@ -318,7 +321,7 @@ class WorkspaceReadService:
     def __init__(self, *, cache, runtime, authorize, armed, runtime_identity,
                  acquire=None, compose=None, bounded_runtime=None,
                  result_acquire=None, result_project=None, mission_v3_acquire=None,
-                 mission_v3_compose=None):
+                 mission_v3_compose=None, work_acquire=None, work_compose=None):
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -335,6 +338,12 @@ class WorkspaceReadService:
         self._result_project = result_project
         self._mission_v3_acquire = mission_v3_acquire
         self._mission_v3_compose = mission_v3_compose
+        # Work-queue producers — list_roots_v2_from_runtime and
+        # compose_work_queue_v1 by default.  Constructor-injected so the
+        # read service never reaches past the service boundary for a writer
+        # or an unfrozen schema.
+        self._work_acquire = work_acquire
+        self._work_compose = work_compose
 
     def _read(self, frame):
         selected = frame["selection"]
@@ -377,6 +386,122 @@ class WorkspaceReadService:
                              **selected, source_validity=after.validity,
                              cache_currentness=after.currentness, source_generation=None,
                              owner_observation=receipt)
+        response = {"ok": True, "result": result}
+        bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
+        return response
+
+    def _read_work(self, frame):
+        """Read the workspace work-queue projection through existing custody.
+
+        Mirrors the programs pipeline (cache bracket → SAME → no selection),
+        but inserts one bounded Runtime root-list acquisition between the
+        two cache samples and threads the acquisition receipt into the
+        observation.  The pure :func:`compose_work_queue_v1` compositor
+        owns all per-row grouping and the queue-level effect_exception
+        read; this method never re-derives them.
+
+        B2: failures split into typed refusal classes via
+        :class:`_WorkRefusal`.  CCR bracket / runtime-receipt /
+        observation-state refusals raise ``_WorkRefusal("source_unavailable")``
+        or ``_WorkRefusal("runtime_observation_not_same")``.
+
+        N2: an acquire-raised exception of ANY kind (defensive — the
+        production acquirer swallows its own faults and surfaces a
+        degraded notes list) becomes
+        ``_WorkRefusal("source_integrity_unverified")`` — the runtime
+        could not return a well-formed root list.  The same
+        ``Exception`` guard the cache bracket uses, so a
+        ``TypeError`` / ``RuntimeError`` acquirer yields the SAME typed
+        refusal body as a ``ValueError`` acquirer.  A compose-raised
+        ``ValueError`` (the composer's closed-table validator or
+        evidence-freshness rejection) stays
+        ``_WorkRefusal("projection_refused")``.  Anything else is a
+        real error envelope — never a typed UNAVAILABLE body.
+        """
+        # Work carries no selection (mirrors programs); the selection field
+        # is None by the closed-frame validator.  Anything else is a frame
+        # contract violation that should refuse 400 before reaching here.
+        # N5: a raising cache yields the same typed refusal body as an
+        # unqualified cache — both wire shapes are unified into
+        # ``_WorkRefusal("source_unavailable")``.
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            raise _WorkRefusal("source_unavailable") from None
+        if not _qualified(before, None):
+            raise _WorkRefusal("source_unavailable")
+        acquire = self._work_acquire
+        if acquire is None:
+            from control_plane.fabric_job_view import list_roots_v2_from_runtime
+            acquire = list_roots_v2_from_runtime
+        compose = self._work_compose
+        if compose is None:
+            from control_plane.work_queue_projection import compose_work_queue_v1
+            compose = compose_work_queue_v1
+        observed_runtime = (
+            self._bounded_runtime(self.runtime)
+            if self._bounded_runtime else self.runtime
+        )
+        try:
+            root_list = acquire(
+                observed_runtime,
+                armed=self.armed,
+                runtime_identity=self.runtime_identity,
+            )
+        except Exception:
+            # N2: the production acquirer swallows its own faults and
+            # surfaces a degraded notes list, so this branch is defensive
+            # only — if any acquirer raises ANY exception, it is a
+            # source-integrity event (the runtime could not return a
+            # well-formed root list), NOT a projection fault.  A
+            # projection fault comes from the composer below.  The same
+            # ``Exception`` guard the cache bracket uses
+            # (``self.cache.snapshot()`` raises ``Exception`` on failure)
+            # — one rule, both sites, so a ``TypeError`` /
+            # ``RuntimeError`` acquirer yields the SAME typed refusal
+            # body as a ``ValueError`` acquirer.
+            raise _WorkRefusal("source_integrity_unverified") from None
+        acquisition = root_list.get("runtime", {}).get("acquisition", {})
+        generation = acquisition.get("generation")
+        runtime_receipt = (
+            dict(generation, snapshot_digest=acquisition.get("snapshot_digest"))
+            if isinstance(generation, dict) else None
+        )
+        # N3: evaluate the CCR receipt state BEFORE the runtime gate.
+        # The runtime acquisition is finalized (namespace/close checks
+        # complete) before the second CCR sample, so a CCR change between
+        # the two samples is positively proven here.  The CCR half of the
+        # receipt must finalize SAME; missing/UNKNOWN/CONFLICT all refuse
+        # as ``source_unavailable`` — the runtime gate below does NOT
+        # subsume this check.
+        # N5: a raising cache yields the same typed refusal body as an
+        # unqualified cache.
+        try:
+            after = self.cache.snapshot()
+        except Exception:
+            raise _WorkRefusal("source_unavailable") from None
+        ccr_receipt = _observation(before, after, None, None)
+        if ccr_receipt["state"] != "SAME":
+            raise _WorkRefusal("source_unavailable")
+        if not _qualified(after, None):
+            raise _WorkRefusal("source_unavailable")
+        receipt = _observation(before, after, None, runtime_receipt)
+        # B1: runtime observation gates the work read.  The runtime half
+        # of the receipt must finalize SAME; missing/UNKNOWN/CONFLICT all
+        # refuse as ``runtime_observation_not_same`` so the route cannot
+        # silently claim a same-as-of read over a degraded runtime.
+        if not isinstance(runtime_receipt, dict) or runtime_receipt.get("state") != "SAME":
+            raise _WorkRefusal("runtime_observation_not_same")
+        if receipt["state"] != "SAME":
+            raise _WorkRefusal("source_unavailable")
+        try:
+            result = compose(
+                root_list,
+                control_room=before.document,
+                source_observation=receipt,
+            )
+        except ValueError:
+            raise _WorkRefusal("projection_refused") from None
         response = {"ok": True, "result": result}
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
@@ -674,7 +799,8 @@ class WorkspaceReadService:
             permission_before = permission_stamp(self.authorize, frame["principal"])
         except Exception:
             return error("access_denied", 403)
-        task = asyncio.create_task(asyncio.to_thread(self._read, frame))
+        worker = self._read_work if frame["operation"] == "work" else self._read
+        task = asyncio.create_task(asyncio.to_thread(worker, frame))
         try:
             result = await await_owned(task)
             try:
@@ -686,12 +812,67 @@ class WorkspaceReadService:
             return result
         except LookupError:
             return error("selection_not_found", 404)
+        except _WorkRefusal as refusal:
+            # B2: typed refusal from ``_read_work`` — emits a typed UNAVAILABLE
+            # body with the closed reason_code.  This branch fires BEFORE the
+            # generic ``except Exception`` so a projection/validator fault is
+            # never laundered into ``source_unavailable``.
+            if frame["operation"] != "work":
+                return error("source_unavailable", 503)
+            from control_plane.work_queue_projection import (
+                _GROUP_ORDER as _WQ_GROUPS, _utc_now as _wq_utc_now,
+                WORK_QUEUE_SCHEMA,
+                _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED,
+            )
+            receipt = {"schema": OBSERVATION_SCHEMA, "state": "UNKNOWN", "selection": None,
+                       "control_room": None, "runtime": None}
+            # Key-for-key shape parity with the composer's UNAVAILABLE branch
+            # (only generated_at / source_observation / reason_codes /
+            # lifecycle_source legitimately differ; the typed refusal carries
+            # the read-service's own reason code, not the composer's
+            # LIFECYCLE_UNAVAILABLE flag).
+            # N4: the effect_exception.reason uses ``read_refused`` — the
+            # read service is reporting that its OWN read failed (CCR
+            # bracket, runtime observation, projection fault), NOT that the
+            # composer's view of a missing control room document.  The
+            # composer's ``control_room_missing`` is its OWN vocabulary for
+            # a missing control room input; the read service must not
+            # mis-attribute its own failure to the composer's vocabulary.
+            # Closed-set guard: the read service's emitted ``reason`` MUST
+            # be a member of the contract's effect_exception vocabulary so
+            # the workspace read can never silently introduce a new reason.
+            assert _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED in QUEUE_EFFECT_EXCEPTION_REASONS, (
+                f"read-service emitted reason "
+                f"{_QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED!r} not in "
+                f"QUEUE_EFFECT_EXCEPTION_REASONS="
+                f"{sorted(QUEUE_EFFECT_EXCEPTION_REASONS)}"
+            )
+            return {"ok": True, "result": {"schema": WORK_QUEUE_SCHEMA,
+                "availability": "UNAVAILABLE",
+                "generated_at": _wq_utc_now(),
+                "lifecycle_source": None,
+                "effect_exception": {"value": "UNKNOWN", "scope": "RUNTIME_CURRENT_WORKER",
+                                     "observable": False,
+                                     "reason": _QUEUE_EFFECT_EXCEPTION_REASON_READ_REFUSED},
+                "coverage": {"count": 0, "total": None, "truncated": False,
+                             "completeness": "PARTIAL"},
+                "groups": {key: [] for key in _WQ_GROUPS},
+                "source_observation": receipt,
+                "reason_codes": [refusal.reason_code]}}
         except Exception:
             if frame["operation"] == "programs":
                 receipt = {"schema": OBSERVATION_SCHEMA, "state": "UNKNOWN", "selection": None,
                            "control_room": None, "runtime": None}
                 return {"ok": True, "result": {"schema": PROGRAMS_SCHEMA, "availability": "UNAVAILABLE",
                     "control_room": None, "source_observation": receipt, "reason_codes": ["source_unavailable"]}}
+            if frame["operation"] == "work":
+                # B2: a non-_WorkRefusal exception on the work path is a REAL
+                # error envelope — a 503 with the closed error shape.  A
+                # projection/validator fault would have come through as a
+                # _WorkRefusal above; reaching this branch means something
+                # unexpected happened and the route must NOT silently manufacture
+                # a typed UNAVAILABLE document.
+                return error("source_unavailable", 503)
             return error("source_unavailable", 503)
 
     async def _handle_v2_frame(self, frame):
@@ -751,6 +932,26 @@ class _ResultSourceUnavailable(Exception):
 
 class _ResultResponseOverBudget(Exception):
     """Typed refusal when neither shared document fits the 16384 ceiling."""
+
+
+class _WorkRefusal(Exception):
+    """Typed refusal for a work-queue read failure (B2).
+
+    ``reason_code`` must be a member of
+    :data:`common.executive_workspace_contract.WORK_REFUSAL_REASON_CODES`.
+    Anything else on this exception is a contract violation.  The catch
+    block in :meth:`WorkspaceReadService.handle_frame` translates this
+    into a typed UNAVAILABLE body — never into a 503 error envelope.
+    """
+
+    def __init__(self, reason_code):
+        if reason_code not in WORK_REFUSAL_REASON_CODES:
+            raise ValueError(
+                f"_WorkRefusal reason_code {reason_code!r} not in "
+                f"WORK_REFUSAL_REASON_CODES={sorted(WORK_REFUSAL_REASON_CODES)}"
+            )
+        super().__init__(reason_code)
+        self.reason_code = reason_code
 
 
 def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None):
