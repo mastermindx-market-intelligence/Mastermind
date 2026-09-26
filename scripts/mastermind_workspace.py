@@ -8,11 +8,18 @@ caller supplies only an operation identity, exact base SHA, and a closed lane.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import hashlib
 import json
 import os
+import plistlib
+import shutil
+import stat
 import subprocess
 import sys
+import uuid
 from pathlib import Path
+from xml.parsers.expat import ExpatError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -42,6 +49,166 @@ def _workspace_root() -> Path:
     if external.parent.is_dir():
         return external.resolve()
     return (Path.home() / ".mastermind" / "agent-workspaces").resolve()
+
+
+
+_STORAGE_POLICY_FIELDS = frozenset(
+    {"version", "mount_point", "volume_uuid", "root", "min_free_bytes"}
+)
+_STORAGE_POLICY_MAX_BYTES = 16 * 1024
+
+
+def _unique_policy_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate policy field")
+        result[key] = value
+    return result
+
+
+def _read_storage_policy(path: Path) -> tuple[dict[str, object], str]:
+    """Read the existing host policy without following a substituted file."""
+    descriptor = -1
+    try:
+        if not path.is_absolute():
+            raise ValueError("policy path is not absolute")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+        descriptor = os.open(path, flags)
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid not in {0, os.geteuid()}
+            or stat.S_IMODE(before.st_mode) & 0o022
+            or not 0 < before.st_size <= _STORAGE_POLICY_MAX_BYTES
+        ):
+            raise ValueError("policy file identity is invalid")
+        chunks: list[bytes] = []
+        remaining = _STORAGE_POLICY_MAX_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        after = os.fstat(descriptor)
+        named = path.lstat()
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
+                  "st_size", "st_mtime_ns", "st_ctime_ns")
+        if len(payload) != before.st_size or any(
+            getattr(before, key) != getattr(observed, key)
+            for observed in (after, named) for key in fields
+        ):
+            raise ValueError("policy changed while reading")
+        data = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_policy_pairs)
+        if not isinstance(data, dict) or set(data) != _STORAGE_POLICY_FIELDS:
+            raise ValueError("policy fields are not closed")
+        if type(data["version"]) is not int or data["version"] != 1:
+            raise ValueError("unsupported policy version")
+        minimum = data["min_free_bytes"]
+        if type(minimum) is not int or not 0 < minimum < 2**63:
+            raise ValueError("invalid storage floor")
+        for key in ("mount_point", "root"):
+            value = data[key]
+            if not isinstance(value, str) or "\x00" in value or not Path(value).is_absolute():
+                raise ValueError("invalid storage path")
+        identity = data["volume_uuid"]
+        if not isinstance(identity, str) or str(uuid.UUID(identity)).lower() != identity.lower():
+            raise ValueError("invalid volume identity")
+        return data, hashlib.sha256(payload).hexdigest()
+    except (OSError, ValueError, TypeError, UnicodeError) as exc:
+        raise WorkspaceError("STORAGE_POLICY_INVALID: enrolled host policy cannot be trusted") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _volume_identity(mount: Path) -> dict[str, object]:
+    """Observe macOS volume identity; do not infer UUIDs on other platforms."""
+    if sys.platform != "darwin":
+        raise WorkspaceError("STORAGE_IDENTITY_UNSUPPORTED: configured volume requires a qualified host probe")
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/diskutil", "info", "-plist", str(mount)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"},
+            timeout=5, check=False,
+        )
+        if result.returncode != 0 or len(result.stdout) > 1024 * 1024:
+            raise ValueError("volume probe failed")
+        value = plistlib.loads(result.stdout)
+        if not isinstance(value, dict):
+            raise ValueError("volume probe is not an object")
+        return value
+    except (OSError, ValueError, plistlib.InvalidFileException, ExpatError, subprocess.SubprocessError) as exc:
+        raise WorkspaceError("STORAGE_OBSERVATION_FAILED: volume identity unavailable") from exc
+
+
+def _storage_free_bytes(mount: Path) -> int:
+    return shutil.disk_usage(mount).free
+
+
+def _storage_status(root: Path) -> dict[str, object]:
+    """One current admission observation, never a disk reservation or lease."""
+    policy_path = os.environ.get("MASTERMIND_WORKSPACE_STORAGE_POLICY", "")
+    observation: dict[str, object] = {
+        "schema_version": "mastermind.workspace_storage/v1",
+        "observed_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+        "admission_check_only": True,
+        "state": "NOT_CONFIGURED", "admission_allowed": True,
+        "free_bytes": None, "min_free_bytes": None, "policy_sha256": None,
+    }
+    if not policy_path:
+        return observation
+    policy, digest = _read_storage_policy(Path(policy_path))
+    try:
+        mount = Path(str(policy["mount_point"]))
+        if mount.is_symlink() or not mount.is_dir() or not mount.is_mount():
+            raise WorkspaceError("STORAGE_MOUNT_UNAVAILABLE: enrolled volume is not mounted")
+        mount = mount.resolve()
+        configured_root = Path(str(policy["root"])).resolve()
+        if configured_root != root or root == mount or not root.is_relative_to(mount):
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: host policy does not name the selected workspace root")
+        before = mount.stat()
+        anchor = root
+        while not anchor.exists() and anchor != mount:
+            anchor = anchor.parent
+        if not anchor.is_dir() or anchor.stat().st_dev != before.st_dev:
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: workspace root is on another filesystem")
+        observed = _volume_identity(mount)
+        observed_uuid = observed.get("VolumeUUID")
+        if (
+            # APFS diskutil output omits Mounted; is_mount() and the exact
+            # MountPoint/UUID above and below supply the positive witness.
+            observed.get("Mounted", True) is not True
+            or observed.get("MountPoint") != str(mount)
+            or not isinstance(observed_uuid, str)
+            or observed_uuid.lower() != str(policy["volume_uuid"]).lower()
+        ):
+            raise WorkspaceError("STORAGE_VOLUME_IDENTITY_MISMATCH: mounted volume is not the enrolled volume")
+        if observed.get("Writable") is not True:
+            raise WorkspaceError("STORAGE_VOLUME_READ_ONLY: writable volume is not proven")
+        free = _storage_free_bytes(mount)
+        after = mount.stat()
+        if type(free) is not int or free < 0 or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise WorkspaceError("STORAGE_OBSERVATION_FAILED: storage observation is not stable")
+        minimum = int(policy["min_free_bytes"])
+        observation.update({
+            "state": "READY" if free >= minimum else "LOW_SPACE",
+            "admission_allowed": free >= minimum,
+            "free_bytes": free, "min_free_bytes": minimum,
+            "policy_sha256": digest,
+            "mount_point": str(mount), "workspace_root": str(root),
+            "volume_uuid": observed_uuid,
+        })
+        return observation
+    except WorkspaceError:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise WorkspaceError("STORAGE_OBSERVATION_FAILED: storage readiness unavailable") from exc
 
 
 def _branch(operation_id: str, lane: str) -> str:
@@ -81,6 +248,7 @@ def _parser() -> argparse.ArgumentParser:
     acquire.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
 
     sub.add_parser("census", help="read-only census of registered source worktrees")
+    sub.add_parser("storage", help="read-only enrolled volume and free-space admission check")
     prune = sub.add_parser("prune-missing", help="prune only registrations whose paths Git proves missing")
     prune.add_argument("--apply", action="store_true", help="apply; default is dry-run")
 
@@ -222,12 +390,16 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
     try:
+        if args.action == "storage":
+            return _emit("storage", _storage_status(root), effect="NOT_APPLIED")
         if args.action == "census":
             return _emit("census", _census(source, root), effect="NOT_APPLIED")
         if args.action == "prune-missing":
             receipt = _prune_missing(source, apply=args.apply)
             return _emit("prune-missing", receipt, effect="APPLIED" if args.apply and receipt["lines"] else "NOT_APPLIED")
         if args.action == "acquire":
+            if not _storage_status(root)["admission_allowed"]:
+                raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
             receipt = prepare_linked_worktree(
                 source,
                 root,
@@ -278,3 +450,58 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def installation_storage_profile(
+    home: Path, *, external_mount: Path = Path("/Volumes/Mastermind")
+) -> dict[str, str]:
+    """Choose host-owned launcher inputs, not runtime admission or a reservation."""
+    home = home.expanduser().resolve()
+    policy_path = home / ".config/mastermind/worktree-storage.json"
+    if policy_path.exists() or policy_path.is_symlink():
+        policy, _digest = _read_storage_policy(policy_path)
+        volume = Path(str(policy["mount_point"]))
+        root = Path(str(policy["root"])).resolve()
+        if volume.is_symlink():
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: enrolled volume is indirect")
+        volume = volume.resolve()
+        if root == volume or not root.is_relative_to(volume):
+            raise WorkspaceError("STORAGE_ROOT_MISMATCH: enrolled root escapes its volume")
+        # Keep an explicitly required mount pinned even while disconnected.
+        # The installed launcher and existing storage owner refuse use until ready.
+        return {
+            "root": str(root),
+            "mount_point": str(volume),
+            "policy_path": str(policy_path),
+        }
+
+    selected = {
+        "root": str((home / ".mastermind/agent-workspaces").resolve()),
+        "mount_point": "",
+        "policy_path": "",
+    }
+    if (
+        external_mount.is_symlink()
+        or not external_mount.is_dir()
+        or not external_mount.is_mount()
+    ):
+        return selected
+
+    volume = external_mount.resolve()
+    try:
+        observed = _volume_identity(volume)
+    except WorkspaceError:
+        return selected
+    filesystem = observed.get("FilesystemType")
+    if (
+        observed.get("MountPoint") != str(volume)
+        or observed.get("Writable") is not True
+        or not isinstance(filesystem, str)
+        or filesystem.lower() not in {"apfs", "hfs", "hfsx"}
+    ):
+        return selected
+    return {
+        "root": str((volume / "agent-workspaces").resolve()),
+        "mount_point": str(volume),
+        "policy_path": "",
+    }
