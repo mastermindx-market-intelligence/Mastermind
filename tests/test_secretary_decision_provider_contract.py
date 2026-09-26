@@ -811,3 +811,255 @@ if contract is not None:
         assert receipt.provider_result_attested is False
         assert receipt.requires_owner_admission is True
         assert receipt.execution_authorized is False
+
+
+def test_secretary_shadow_apis_are_available() -> None:
+    assert callable(getattr(contract, "derive_secretary_shadow_baseline", None))
+    assert callable(getattr(contract, "evaluate_secretary_shadow_return", None))
+
+
+if contract is not None:
+    def baseline(snap=None, now_ms=20_000):
+        return contract.derive_secretary_shadow_baseline(
+            snapshot() if snap is None else snap,
+            now_ms=now_ms,
+        )
+
+
+    def accepted_provider_return(snap, rec, now_ms=20_000):
+        request_receipt = contract.build_secretary_provider_request(snap, now_ms=now_ms)
+        return contract.validate_secretary_provider_return(
+            snap,
+            request_receipt,
+            rec,
+            now_ms=now_ms,
+        )
+
+
+    def assert_shadow_safe(value) -> None:
+        assert value.rule_promotion_authorized is False
+        assert value.execution_authorized is False
+        assert value.schema_version == "mastermind.secretary_shadow_baseline/v1"
+
+
+    def test_shadow_effect_unknown_is_forced_hold_without_provider_invocation() -> None:
+        value = baseline(
+            snapshot(effect_state="EFFECT_UNKNOWN", trigger="EFFECT_RECONCILIATION")
+        )
+        assert value.status == "READY"
+        assert value.baseline_class == "FORCED_ACTION"
+        assert value.forced_action == "HOLD_EFFECT_UNKNOWN"
+        assert value.forced_reason_code == "EFFECT_UNCERTAIN"
+        assert value.provider_invocation_required is False
+        assert_shadow_safe(value)
+
+
+    def test_shadow_human_gate_and_complete_mission_are_forced() -> None:
+        human = baseline(snapshot(human_gate="REQUIRED", trigger="HUMAN_GATE"))
+        assert human.forced_action == "ESCALATE_HUMAN"
+        assert human.forced_reason_code == "HUMAN_GATE"
+        assert human.provider_invocation_required is False
+
+        done = baseline(snapshot(mission_state="COMPLETE"))
+        assert done.forced_action == "STOP_COMPLETE"
+        assert done.forced_reason_code == "MISSION_COMPLETE"
+        assert done.provider_invocation_required is False
+
+
+    def test_shadow_checkpoint_before_rotation_and_ready_rotation_are_forced() -> None:
+        checkpoint = baseline(
+            snapshot(
+                context_state="ROTATION_REQUIRED",
+                checkpoint_state="NONE",
+                trigger="CONTEXT_HEALTH",
+            )
+        )
+        assert checkpoint.forced_action == "REQUEST_CHECKPOINT"
+        assert checkpoint.forced_reason_code == "CHECKPOINT_REQUIRED"
+
+        rotate = baseline(
+            snapshot(
+                context_state="ROTATION_REQUIRED",
+                checkpoint_state="READY",
+                trigger="CONTEXT_HEALTH",
+            )
+        )
+        assert rotate.forced_action == "ROTATE_TO_SUCCESSOR"
+        assert rotate.forced_reason_code == "ROTATION_REQUIRED"
+
+
+    def test_shadow_outstanding_children_without_return_forces_wait() -> None:
+        value = baseline(
+            snapshot(
+                outstanding_children=2,
+                ready_returns=0,
+                trigger="MATERIAL_RETURN",
+            )
+        )
+        assert value.forced_action == "WAIT_FOR_RETURN"
+        assert value.forced_reason_code == "CHILDREN_OUTSTANDING"
+        assert value.provider_invocation_required is False
+
+
+    def test_shadow_pending_mode_recommendation_forces_matching_switch() -> None:
+        value = baseline(
+            snapshot(
+                current_mode="PRO",
+                mode_recommendation="EXTRA_HIGH",
+                capability_state="REPROBE_REQUIRED",
+            )
+        )
+        assert value.forced_action == "SWITCH_MODE_THEN_CONTINUE"
+        assert value.forced_reason_code == "MODE_CHANGE_RECOMMENDED"
+        assert value.requested_mode == "EXTRA_HIGH"
+        assert value.provider_invocation_required is False
+
+
+    def test_shadow_ordinary_more_work_without_fanout_forces_continue() -> None:
+        value = baseline()
+        assert value.forced_action == "CONTINUE_CURRENT_SESSION"
+        assert value.forced_reason_code == "MORE_WORK"
+        assert value.provider_invocation_required is False
+
+
+    def test_shadow_prequalified_fanout_marks_ai_judgment_required() -> None:
+        value = baseline(
+            snapshot(
+                trigger="FANOUT_READY",
+                fanout_candidates=["lane-research", "lane-review"],
+            )
+        )
+        assert value.status == "READY"
+        assert value.baseline_class == "AI_JUDGMENT_REQUIRED"
+        assert value.forced_action is None
+        assert value.forced_reason_code is None
+        assert value.provider_invocation_required is True
+        assert_shadow_safe(value)
+
+
+    def test_shadow_nonterminal_stale_or_unserviceable_state_refuses() -> None:
+        active = baseline(snapshot(turn_state="ACTIVE"))
+        assert active.status == "REFUSED"
+        assert active.refusal_code == "TURN_NOT_TERMINAL"
+        assert active.provider_invocation_required is False
+
+        stale = baseline(
+            snapshot(observed_at_ms=1_000, expires_at_ms=10_000),
+            now_ms=10_001,
+        )
+        assert stale.status == "REFUSED"
+        assert stale.refusal_code == "SNAPSHOT_STALE"
+
+        denied = baseline(snapshot(capability_state="DENIED"))
+        assert denied.status == "REFUSED"
+        assert denied.refusal_code == "CAPABILITY_NOT_SERVICEABLE"
+
+
+    def test_shadow_evaluation_matches_forced_provider_return() -> None:
+        snap = snapshot(effect_state="EFFECT_UNKNOWN", trigger="EFFECT_RECONCILIATION")
+        base = baseline(snap)
+        returned = accepted_provider_return(
+            snap,
+            recommendation(
+                "HOLD_EFFECT_UNKNOWN",
+                "EFFECT_UNCERTAIN",
+                rationale="Hold the exact original effect pending reconciliation.",
+            ),
+        )
+        assert returned.status == "ACCEPTED"
+        result = contract.evaluate_secretary_shadow_return(base, returned)
+        assert result.status == "MATCHED_FORCED"
+        assert result.forced_action == "HOLD_EFFECT_UNKNOWN"
+        assert result.provider_action == "HOLD_EFFECT_UNKNOWN"
+        assert result.rule_promotion_authorized is False
+        assert result.execution_authorized is False
+        assert result.provider_result_attested is False
+
+
+    def test_shadow_evaluation_refuses_snapshot_mismatch() -> None:
+        base = baseline(snapshot())
+        changed = snapshot(
+            trigger="MATERIAL_RETURN",
+            observed_at_ms=11_000,
+            expires_at_ms=51_000,
+        )
+        returned = accepted_provider_return(changed, recommendation())
+        assert returned.status == "ACCEPTED"
+        result = contract.evaluate_secretary_shadow_return(base, returned)
+        assert result.status == "SHADOW_SNAPSHOT_MISMATCH"
+        assert result.execution_authorized is False
+
+
+    def test_shadow_evaluation_accepts_ai_choice_without_promoting_rule() -> None:
+        snap = snapshot(
+            trigger="FANOUT_READY",
+            fanout_candidates=["lane-research", "lane-review"],
+        )
+        base = baseline(snap)
+        assert base.baseline_class == "AI_JUDGMENT_REQUIRED"
+        returned = accepted_provider_return(
+            snap,
+            recommendation(
+                "FANOUT",
+                "INDEPENDENT_WORK_READY",
+                fanout_candidate_ids=["lane-research"],
+                rationale="The research lane is independent and pre-qualified.",
+            ),
+        )
+        assert returned.status == "ACCEPTED"
+        result = contract.evaluate_secretary_shadow_return(base, returned)
+        assert result.status == "AI_CHOICE_ACCEPTED"
+        assert result.provider_action == "FANOUT"
+        assert result.rule_promotion_authorized is False
+        assert result.execution_authorized is False
+
+
+    def test_shadow_evaluation_records_unaccepted_provider_return_without_rationale() -> None:
+        snap = snapshot(effect_state="EFFECT_UNKNOWN", trigger="EFFECT_RECONCILIATION")
+        base = baseline(snap)
+        returned = accepted_provider_return(
+            snap,
+            recommendation(
+                "CONTINUE_CURRENT_SESSION",
+                "MORE_WORK",
+                rationale="unsafe-shadow-private-rationale",
+            ),
+        )
+        assert returned.status == "REFUSED"
+        result = contract.evaluate_secretary_shadow_return(base, returned)
+        assert result.status == "PROVIDER_RETURN_NOT_ACCEPTED"
+        rendered = json.dumps(result.to_dict(), sort_keys=True)
+        assert "unsafe-shadow-private-rationale" not in rendered
+        assert result.execution_authorized is False
+
+
+    def test_shadow_ready_return_refuses_instead_of_waiting_or_invoking_ai() -> None:
+        value = baseline(
+            snapshot(
+                outstanding_children=1,
+                ready_returns=1,
+                trigger="MATERIAL_RETURN",
+            )
+        )
+        assert value.status == "REFUSED"
+        assert value.refusal_code == "RETURN_READY"
+        assert value.provider_invocation_required is False
+        assert value.rule_promotion_authorized is False
+        assert value.execution_authorized is False
+
+
+    def test_shadow_evaluation_surfaces_forced_divergence_without_promoting_it() -> None:
+        import dataclasses
+
+        snap = snapshot()
+        base = baseline(snap)
+        assert base.forced_action == "CONTINUE_CURRENT_SESSION"
+        returned = accepted_provider_return(snap, recommendation())
+        assert returned.status == "ACCEPTED"
+        corrupted = dataclasses.replace(returned, action="FANOUT")
+        result = contract.evaluate_secretary_shadow_return(base, corrupted)
+        assert result.status == "DIVERGED_FORCED"
+        assert result.forced_action == "CONTINUE_CURRENT_SESSION"
+        assert result.provider_action == "FANOUT"
+        assert result.rule_promotion_authorized is False
+        assert result.execution_authorized is False

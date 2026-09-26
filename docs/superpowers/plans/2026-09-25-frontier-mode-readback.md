@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- Branch base: 63555e1f9405c79405fc30682aa502a68d8abf80. Current protected procedure/source pin: 4fe76e8277963fa6306c2db4c874138eaf82d53d. Movement since the prior pin adds one Executive physical-reservation commit after the Paper-design/Skillpack-index release; both are path-disjoint from this candidate. One installed mmx-workspace allocation for mastermind-os-frontier-company-convergence-20260925-sol-001, lane web.
+- Branch base: 63555e1f9405c79405fc30682aa502a68d8abf80. Current protected procedure/source pin: 58c842d5ab99e29785ec9b4d16ccee67e85e19c4. Movement since the prior pin adds one Mastermind OS Tauri/UI auth/native-client commit; it is path-disjoint from this candidate. One installed mmx-workspace allocation for mastermind-os-frontier-company-convergence-20260925-sol-001, lane web.
 - Source ceiling: this plan, its spec, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_picker_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_transition_core.js`, `integrations/mastermind_secretary_mcp/decision_provider_contract.py`, `tests/web_sol_reasoning_mode_core.test.cjs`, `tests/web_sol_reasoning_mode_picker_core.test.cjs`, `tests/web_sol_reasoning_mode_transition_core.test.cjs`, and `tests/test_secretary_decision_provider_contract.py`.
 - No manifest/background/content/native-host/router/app modification, no production browser call, no mode selection, no provider turn, no lifecycle or custody transfer.
 - Reuse RuntimeBinding id/generation/fingerprint and document_epoch; no identity registry or stored mode state.
@@ -165,6 +165,46 @@ A semantically accepted provider return is still not an execution permit. Provid
 - [x] Run focused Secretary tests, incumbent Secretary MCP fences, Web-Sol regressions, syntax/diff/exact ten-file scope.
 - [x] Publish on #989, refresh exact-head review/CI; provider invocation remains held.
 
+## Task 7 — Secretary shadow baseline and evaluation receipt
+
+Extend the same pure contract/test files with:
+- `derive_secretary_shadow_baseline(snapshot, now_ms=...)`;
+- `evaluate_secretary_shadow_return(baseline, provider_return)`.
+
+The baseline classifies one valid fresh snapshot without invoking any model:
+- `FORCED_ACTION` when existing deterministic owner-qualified facts admit exactly the safe edge this v1 contract intends to enforce;
+- `AI_JUDGMENT_REQUIRED` when more than one semantically admissible course remains (initially healthy MORE_WORK with pre-qualified fanout candidates and no higher-priority forced edge);
+- `REFUSED` when the snapshot is stale/invalid or lacks the binding/capability/context facts needed even for shadow judgment.
+
+Forced v1 ordering:
+1. EFFECT_UNKNOWN -> HOLD_EFFECT_UNKNOWN;
+2. human gate -> ESCALATE_HUMAN;
+3. mission complete -> STOP_COMPLETE;
+4. nonterminal turn -> REFUSED;
+5. checkpoint/rotation pressure -> REQUEST_CHECKPOINT until READY, then ROTATE_TO_SUCCESSOR if the exact binding is current;
+6. outstanding children with zero ready returns -> WAIT_FOR_RETURN;
+7. a pending current-session mode recommendation differing from selected mode -> SWITCH_MODE_THEN_CONTINUE when its existing gates pass;
+8. ordinary healthy exact-bound SERVICEABLE MORE_WORK with no fanout candidates -> CONTINUE_CURRENT_SESSION;
+9. the same state with one or more supplied independent fanout candidates -> AI_JUDGMENT_REQUIRED.
+
+Derive forced actions by reusing Task-4 semantic validation, not by duplicating looser action admission. A forced baseline keeps `provider_invocation_required=false`; AI judgment keeps it true. Both keep `rule_promotion_authorized=false` and `execution_authorized=false`.
+
+Shadow evaluation compares a correlated Task-6 provider-return receipt to the same snapshot digest:
+- forced action + accepted matching return -> `MATCHED_FORCED`;
+- forced action + accepted different action -> `DIVERGED_FORCED`;
+- AI judgment + accepted return -> `AI_CHOICE_ACCEPTED`;
+- refused/unaccepted provider return -> `PROVIDER_RETURN_NOT_ACCEPTED`;
+- mismatched snapshot -> `SHADOW_SNAPSHOT_MISMATCH`.
+
+No counters, thresholds, promotion state, model score, persistence or execution are added.
+
+- [x] Write RED tests for absent baseline/evaluation APIs.
+- [x] Add forced HOLD/ESCALATE/STOP/checkpoint/rotate/wait/switch/continue cases plus AI fanout choice.
+- [x] Add shadow matched/mismatched/refused/diverged return cases and prove no promotion/execution authority.
+- [x] Implement minimal baseline by reusing Task-4 validation and pure shadow comparison.
+- [x] Run focused Secretary + incumbent fences + Web-Sol regressions, syntax/diff/exact ten-file scope.
+- [ ] Publish on #989; keep live provider invocation and deterministic promotion held.
+
 ## Held integration task — not granted by this leaf
 
 The next source owner is #836 for actual DOM normalization, native bridge wiring and mode actuation. Consume this leaf only after #836 current custody and its merge conflict are reconciled, and the closed mode action is reviewed under the browser/context-rotation laws. Authenticate the observation producer, fence exact RuntimeBinding/document generations and mode effect identity, and prove no-send selector canaries before a turn is allowed. The #890 capability producer/consumer and #936/#953/#958 read-only limitations remain explicit dependencies. Do not edit these carriers from this workspace.
@@ -191,3 +231,4 @@ Task 5 RED: process 79024, provider-request API absent; eight Task-5 assertions 
 Task 5 publication: source/docs commit `8b803999371837219fe13c19c0f3b79fabaae8d0` action `c87a0c864f33426129ded2ede3123b06a8cebf4ce16c09a75c4f381af37afcd5` returned APPLIED; push action `7f35ade73c5c92678a0b2d884872a6fe0fce0e82e019e1a673665647a179a86f` returned APPLIED with local=remote and clean=true. Provider invocation/model selection/worker placement remain unimplemented and held to existing owners.
 Task 6 RED: process 86846, 10 new return-correlation cases failed solely because `validate_secretary_provider_return` was absent while the prior 35 contract/renderer tests remained green. Focused GREEN: process 88591, 45/45 pass. Cross-surface process 89752: Secretary aggregate 341/341 (45 new/current + 296 incumbent MCP/gateway/static-fence), Web-Sol 183/183, syntax/diff/exact ten-file scope PASS. Accepted return receipts explicitly keep `provider_result_attested=false`, `execution_authorized=false`, and `requires_owner_admission=true`; real WorkerResult/run provenance remains external and unclaimed.
 Task 6 publication: source/docs commit `02171a1ba3e144a53045d7523ce63c75dcf86d57` action `968e78d662e79b84d326f056078274d04cf7d932322a92bfc5ae51052cfc2720` returned APPLIED; push action `70e013ec4629a4dd0e132c16322755433c1d8c3c3f5f35b6cfba168966962a93` returned APPLIED with local=remote and clean=true. This still does not attest any provider/worker run or authorize execution.
+Task 7 RED: process 9684, 13 shadow cases failed because both shadow APIs were absent while prior Secretary cases stayed green. Initial GREEN: process 12843, focused Secretary contract passed; two adverse cases were then added for ready-return refusal and forced-action divergence. Final focused process 14329 = 60/60. Cross-surface process 15817: Secretary aggregate 356/356 (60 current + 296 incumbent MCP/gateway/static-fence), Web-Sol 183/183, Python/JS syntax + `git diff --check` + exact ten-file scope PASS. Shadow baseline/evaluation persist no counters, thresholds, promotion state, model score or execution authority; `rule_promotion_authorized=false` and `execution_authorized=false` remain fixed.

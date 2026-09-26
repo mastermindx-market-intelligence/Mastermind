@@ -816,8 +816,347 @@ def validate_secretary_provider_return(
     )
 
 
+SECRETARY_SHADOW_BASELINE_SCHEMA = "mastermind.secretary_shadow_baseline/v1"
+SECRETARY_SHADOW_EVALUATION_SCHEMA = "mastermind.secretary_shadow_evaluation/v1"
+
+
+@dataclasses.dataclass(frozen=True)
+class SecretaryShadowBaseline:
+    status: str
+    baseline_class: str | None
+    forced_action: str | None
+    forced_reason_code: str | None
+    requested_mode: str | None
+    snapshot_digest: str | None
+    refusal_code: str | None
+    provider_invocation_required: bool
+    rule_promotion_authorized: bool = False
+    execution_authorized: bool = False
+    schema_version: str = SECRETARY_SHADOW_BASELINE_SCHEMA
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "status": self.status,
+            "baseline_class": self.baseline_class,
+            "forced_action": self.forced_action,
+            "forced_reason_code": self.forced_reason_code,
+            "requested_mode": self.requested_mode,
+            "snapshot_digest": self.snapshot_digest,
+            "refusal_code": self.refusal_code,
+            "provider_invocation_required": self.provider_invocation_required,
+            "rule_promotion_authorized": self.rule_promotion_authorized,
+            "execution_authorized": self.execution_authorized,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class SecretaryShadowEvaluation:
+    status: str
+    baseline_snapshot_digest: str | None
+    provider_snapshot_digest: str | None
+    forced_action: str | None
+    provider_action: str | None
+    provider_result_attested: bool
+    rule_promotion_authorized: bool = False
+    execution_authorized: bool = False
+    schema_version: str = SECRETARY_SHADOW_EVALUATION_SCHEMA
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "status": self.status,
+            "baseline_snapshot_digest": self.baseline_snapshot_digest,
+            "provider_snapshot_digest": self.provider_snapshot_digest,
+            "forced_action": self.forced_action,
+            "provider_action": self.provider_action,
+            "provider_result_attested": self.provider_result_attested,
+            "rule_promotion_authorized": self.rule_promotion_authorized,
+            "execution_authorized": self.execution_authorized,
+        }
+
+
+def _shadow_refusal(
+    code: str,
+    *,
+    snapshot_digest: str | None,
+) -> SecretaryShadowBaseline:
+    return SecretaryShadowBaseline(
+        status="REFUSED",
+        baseline_class=None,
+        forced_action=None,
+        forced_reason_code=None,
+        requested_mode=None,
+        snapshot_digest=snapshot_digest,
+        refusal_code=code,
+        provider_invocation_required=False,
+    )
+
+
+def _shadow_candidate_recommendation(
+    action: str,
+    *,
+    requested_mode: str | None = None,
+    fanout_candidate_ids: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    return {
+        "schema": RECOMMENDATION_SCHEMA,
+        "action": action,
+        "reason_code": _ACTION_REASON[action],
+        "requested_mode": requested_mode,
+        "fanout_candidate_ids": list(fanout_candidate_ids),
+        "rationale": "Deterministic shadow baseline candidate only.",
+    }
+
+
+def _forced_shadow_action(
+    snapshot: dict[str, Any],
+    *,
+    now_ms: int,
+    snapshot_digest: str,
+    action: str,
+    requested_mode: str | None = None,
+) -> SecretaryShadowBaseline:
+    recommendation = _shadow_candidate_recommendation(
+        action,
+        requested_mode=requested_mode,
+    )
+    semantic = validate_secretary_recommendation(
+        snapshot,
+        recommendation,
+        now_ms=now_ms,
+    )
+    if semantic.status != "ACCEPTED":
+        return _shadow_refusal(
+            semantic.refusal_code or "BASELINE_ACTION_REFUSED",
+            snapshot_digest=snapshot_digest,
+        )
+    return SecretaryShadowBaseline(
+        status="READY",
+        baseline_class="FORCED_ACTION",
+        forced_action=action,
+        forced_reason_code=_ACTION_REASON[action],
+        requested_mode=requested_mode,
+        snapshot_digest=snapshot_digest,
+        refusal_code=None,
+        provider_invocation_required=False,
+    )
+
+
+def derive_secretary_shadow_baseline(
+    snapshot: object,
+    *,
+    now_ms: int,
+) -> SecretaryShadowBaseline:
+    """Derive a no-model shadow baseline from owner-qualified snapshot facts."""
+
+    request = build_secretary_provider_request(snapshot, now_ms=now_ms)
+    if request.status != "READY":
+        return _shadow_refusal(
+            request.refusal_code or "SNAPSHOT_INVALID",
+            snapshot_digest=request.snapshot_digest,
+        )
+    assert isinstance(snapshot, dict)
+    snap = json.loads(
+        json.dumps(
+            snapshot,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+    )
+    digest = request.snapshot_digest
+    assert digest is not None
+
+    if snap["effect_state"] == "EFFECT_UNKNOWN":
+        return _forced_shadow_action(
+            snap,
+            now_ms=now_ms,
+            snapshot_digest=digest,
+            action="HOLD_EFFECT_UNKNOWN",
+        )
+    if snap["human_gate"] == "REQUIRED":
+        return _forced_shadow_action(
+            snap,
+            now_ms=now_ms,
+            snapshot_digest=digest,
+            action="ESCALATE_HUMAN",
+        )
+    if snap["mission_state"] == "COMPLETE":
+        return _forced_shadow_action(
+            snap,
+            now_ms=now_ms,
+            snapshot_digest=digest,
+            action="STOP_COMPLETE",
+        )
+    if snap["turn_state"] != "TERMINAL":
+        return _shadow_refusal(
+            "TURN_NOT_TERMINAL",
+            snapshot_digest=digest,
+        )
+
+    if snap["context_state"] in {"CHECKPOINT_REQUIRED", "ROTATION_REQUIRED"}:
+        if snap["checkpoint_state"] != "READY":
+            return _forced_shadow_action(
+                snap,
+                now_ms=now_ms,
+                snapshot_digest=digest,
+                action="REQUEST_CHECKPOINT",
+            )
+        if snap["context_state"] == "ROTATION_REQUIRED":
+            return _forced_shadow_action(
+                snap,
+                now_ms=now_ms,
+                snapshot_digest=digest,
+                action="ROTATE_TO_SUCCESSOR",
+            )
+        return _shadow_refusal(
+            "CHECKPOINT_READY_AWAITING_OWNER_EDGE",
+            snapshot_digest=digest,
+        )
+
+    if snap["outstanding_children"] > 0:
+        if snap["ready_returns"] > 0:
+            return _shadow_refusal(
+                "RETURN_READY",
+                snapshot_digest=digest,
+            )
+        return _forced_shadow_action(
+            snap,
+            now_ms=now_ms,
+            snapshot_digest=digest,
+            action="WAIT_FOR_RETURN",
+        )
+
+    recommended_mode = snap["mode_recommendation"]
+    if recommended_mode in _REQUESTED_MODES and recommended_mode != snap["current_mode"]:
+        return _forced_shadow_action(
+            snap,
+            now_ms=now_ms,
+            snapshot_digest=digest,
+            action="SWITCH_MODE_THEN_CONTINUE",
+            requested_mode=recommended_mode,
+        )
+
+    continue_semantic = validate_secretary_recommendation(
+        snap,
+        _shadow_candidate_recommendation("CONTINUE_CURRENT_SESSION"),
+        now_ms=now_ms,
+    )
+    if continue_semantic.status != "ACCEPTED":
+        return _shadow_refusal(
+            continue_semantic.refusal_code or "CONTINUE_NOT_ADMISSIBLE",
+            snapshot_digest=digest,
+        )
+
+    if snap["fanout_candidates"]:
+        fanout_ids = tuple(snap["fanout_candidates"])
+        fanout_semantic = validate_secretary_recommendation(
+            snap,
+            _shadow_candidate_recommendation(
+                "FANOUT",
+                fanout_candidate_ids=fanout_ids,
+            ),
+            now_ms=now_ms,
+        )
+        if fanout_semantic.status != "ACCEPTED":
+            return _shadow_refusal(
+                fanout_semantic.refusal_code or "FANOUT_NOT_ADMISSIBLE",
+                snapshot_digest=digest,
+            )
+        return SecretaryShadowBaseline(
+            status="READY",
+            baseline_class="AI_JUDGMENT_REQUIRED",
+            forced_action=None,
+            forced_reason_code=None,
+            requested_mode=None,
+            snapshot_digest=digest,
+            refusal_code=None,
+            provider_invocation_required=True,
+        )
+
+    return SecretaryShadowBaseline(
+        status="READY",
+        baseline_class="FORCED_ACTION",
+        forced_action="CONTINUE_CURRENT_SESSION",
+        forced_reason_code="MORE_WORK",
+        requested_mode=None,
+        snapshot_digest=digest,
+        refusal_code=None,
+        provider_invocation_required=False,
+    )
+
+
+def evaluate_secretary_shadow_return(
+    baseline: object,
+    provider_return: object,
+) -> SecretaryShadowEvaluation:
+    """Compare one correlated provider return with one immutable shadow baseline."""
+
+    if type(baseline) is not SecretaryShadowBaseline:
+        return SecretaryShadowEvaluation(
+            status="PROVIDER_RETURN_NOT_ACCEPTED",
+            baseline_snapshot_digest=None,
+            provider_snapshot_digest=None,
+            forced_action=None,
+            provider_action=None,
+            provider_result_attested=False,
+        )
+    if type(provider_return) is not SecretaryProviderReturnValidation:
+        return SecretaryShadowEvaluation(
+            status="PROVIDER_RETURN_NOT_ACCEPTED",
+            baseline_snapshot_digest=baseline.snapshot_digest,
+            provider_snapshot_digest=None,
+            forced_action=baseline.forced_action,
+            provider_action=None,
+            provider_result_attested=False,
+        )
+
+    if baseline.snapshot_digest != provider_return.snapshot_digest:
+        return SecretaryShadowEvaluation(
+            status="SHADOW_SNAPSHOT_MISMATCH",
+            baseline_snapshot_digest=baseline.snapshot_digest,
+            provider_snapshot_digest=provider_return.snapshot_digest,
+            forced_action=baseline.forced_action,
+            provider_action=provider_return.action if provider_return.status == "ACCEPTED" else None,
+            provider_result_attested=provider_return.provider_result_attested,
+        )
+
+    if baseline.status != "READY" or provider_return.status != "ACCEPTED":
+        return SecretaryShadowEvaluation(
+            status="PROVIDER_RETURN_NOT_ACCEPTED",
+            baseline_snapshot_digest=baseline.snapshot_digest,
+            provider_snapshot_digest=provider_return.snapshot_digest,
+            forced_action=baseline.forced_action,
+            provider_action=None,
+            provider_result_attested=provider_return.provider_result_attested,
+        )
+
+    if baseline.baseline_class == "AI_JUDGMENT_REQUIRED":
+        return SecretaryShadowEvaluation(
+            status="AI_CHOICE_ACCEPTED",
+            baseline_snapshot_digest=baseline.snapshot_digest,
+            provider_snapshot_digest=provider_return.snapshot_digest,
+            forced_action=None,
+            provider_action=provider_return.action,
+            provider_result_attested=provider_return.provider_result_attested,
+        )
+
+    matched = provider_return.action == baseline.forced_action
+    return SecretaryShadowEvaluation(
+        status="MATCHED_FORCED" if matched else "DIVERGED_FORCED",
+        baseline_snapshot_digest=baseline.snapshot_digest,
+        provider_snapshot_digest=provider_return.snapshot_digest,
+        forced_action=baseline.forced_action,
+        provider_action=provider_return.action,
+        provider_result_attested=provider_return.provider_result_attested,
+    )
+
+
 __all__ = [
     "MAX_SNAPSHOT_WINDOW_MS",
+    "SECRETARY_SHADOW_BASELINE_SCHEMA",
+    "SECRETARY_SHADOW_EVALUATION_SCHEMA",
     "PROVIDER_REQUEST_SCHEMA",
     "PROVIDER_RETURN_VALIDATION_SCHEMA",
     "RECOMMENDATION_SCHEMA",
@@ -825,8 +1164,12 @@ __all__ = [
     "SecretaryDecisionValidation",
     "SecretaryProviderRequest",
     "SecretaryProviderReturnValidation",
+    "SecretaryShadowBaseline",
+    "SecretaryShadowEvaluation",
     "VALIDATION_SCHEMA",
     "build_secretary_provider_request",
+    "derive_secretary_shadow_baseline",
+    "evaluate_secretary_shadow_return",
     "validate_secretary_provider_return",
     "validate_secretary_recommendation",
 ]
