@@ -156,8 +156,11 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
   queue for its portfolio/intelligence self-improvement domain; it is not the
   company-wide portfolio. The boot packet does not render or recommend from legacy
   `brief.unblocked`. New company work must map to an active Strategic State P0 (or a
-  mandatory safety/maintenance obligation); a strategy reset does not silently cancel
-  a STARTed/effect-unknown operation or seize another carrier's source custody.
+  mandatory safety/maintenance obligation) by naming the concrete customer/machine
+  capability it advances; a label-only relabel is not admission. Unstarted/draft work
+  that no longer maps returns to portfolio review before expansion. A strategy reset
+  does not silently cancel a STARTed/effect-unknown operation or seize another carrier's
+  source custody; reconcile/reclassify it at the next safe checkpoint.
 
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole
