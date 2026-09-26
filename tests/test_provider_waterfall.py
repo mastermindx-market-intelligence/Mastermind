@@ -41,6 +41,70 @@ def test_provider_rungs_are_codex_first_and_respect_shared_cooling(monkeypatch):
     ]
 
 
+def test_available_short_circuits_on_codex_without_ranking_pool(monkeypatch):
+    from brain import codex_bridge, provider_waterfall as pw
+
+    monkeypatch.setattr(codex_bridge, "available", lambda: True)
+
+    def forbidden_ranking(*_args, **_kwargs):
+        raise AssertionError("availability must not build/rank provider_rungs")
+
+    monkeypatch.setattr(pw, "provider_rungs", forbidden_ranking)
+    assert pw.available() is True
+
+
+def test_available_oauth_path_uses_presence_and_lane_not_ranking(monkeypatch):
+    from brain import codex_bridge, provider_waterfall as pw
+
+    monkeypatch.setattr(codex_bridge, "available", lambda: False)
+
+    class KeyPool:
+        @staticmethod
+        def discover_present_keys():
+            return ["claude_code_oauth_3", "claude_code_oauth_5"]
+
+    class Broker:
+        @staticmethod
+        def resolve(capability_id, *, lane):
+            assert lane == "brain-pro"
+            return {
+                "allowed": capability_id == "claude_code_oauth_5",
+                "ref_name": "CLAUDE_CODE_OAUTH_TOKEN_5",
+            }
+
+    monkeypatch.setattr(
+        pw, "_shared_availability_modules", lambda: (Broker, KeyPool), raising=False
+    )
+
+    def forbidden_ranking(*_args, **_kwargs):
+        raise AssertionError("availability must not compute cooling/load ordering")
+
+    monkeypatch.setattr(pw, "provider_rungs", forbidden_ranking)
+    assert pw.available() is True
+
+
+def test_available_false_without_codex_or_lane_allowed_oauth(monkeypatch):
+    from brain import codex_bridge, provider_waterfall as pw
+
+    monkeypatch.setattr(codex_bridge, "available", lambda: False)
+
+    class KeyPool:
+        @staticmethod
+        def discover_present_keys():
+            return ["claude_code_oauth_3"]
+
+    class Broker:
+        @staticmethod
+        def resolve(_capability_id, *, lane):
+            assert lane == "brain-pro"
+            return {"allowed": False, "ref_name": "CLAUDE_CODE_OAUTH_TOKEN_3"}
+
+    monkeypatch.setattr(
+        pw, "_shared_availability_modules", lambda: (Broker, KeyPool), raising=False
+    )
+    assert pw.available() is False
+
+
 def test_successful_codex_stops_before_oauth(monkeypatch):
     from brain import cli_bridge, provider_waterfall as pw
 
