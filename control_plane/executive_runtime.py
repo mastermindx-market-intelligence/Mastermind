@@ -300,6 +300,7 @@ _C2_R1A_CHECKPOINTS = (
     "after_carrier_attempt_insert",
     "after_carrier_job_transition",
     "after_carrier_job_claimed",
+    "after_physical_reservation_insert",
     "before_capacity_placement_committed",
 )
 
@@ -1738,6 +1739,11 @@ class CapacityCommitmentOutcome:
     carrier_disposition: str
     mutation_disposition: CapacityMutationDisposition
     fresh_attempt_lease: AttemptLease | None = dataclasses.field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    physical_reservation_receipt: dict[str, Any] | None = dataclasses.field(
         default=None,
         repr=False,
         compare=False,
@@ -20283,6 +20289,260 @@ class ResourceBroker:
                                 payload=payload, command_id=reservation["command_id"], timestamp_ms=timestamp)
         return self.store.get_event_by_command_id(reservation["command_id"], connection=connection)
 
+    def _physical_current_charges(self, connection, host_id: str) -> list[dict[str, Any]]:
+        """Read the incumbent same-store physical debit view in one transaction."""
+        from . import executive_physical_resources as physical
+
+        for table in ("physical_resource_commitments", "physical_resource_demands"):
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone() is None:
+                raise physical.PhysicalResourceRefusal(
+                    "RESOURCE_SCHEMA_UNAVAILABLE",
+                    "physical resource schema is not active in this Runtime",
+                )
+        return [
+            dict(row)
+            for row in connection.execute(
+                "SELECT d.* FROM physical_resource_demands d "
+                "JOIN physical_resource_commitments c USING(commitment_id,allocation_generation) "
+                "WHERE c.host_id=? AND c.state IN "
+                "('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED') "
+                "ORDER BY d.commitment_id,d.allocation_generation,d.dimension,d.capacity_pool_id",
+                (host_id,),
+            )
+        ]
+
+    def _persist_prevalidated_physical_reservation(
+        self,
+        connection,
+        request: Mapping[str, Any],
+        *,
+        evaluation: Mapping[str, Any],
+        timestamp: int,
+        progress: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        """One physical reservation persistence implementation.
+
+        The incumbent public reserve path and C2 atomic composition both call
+        this after the same physical predicate has admitted the exact request.
+        It owns Event/header/demand creation and nothing upstream of admission.
+        """
+        from . import executive_physical_resources as physical
+        reservation = physical.validate_physical_request(dict(request))
+        fingerprint = physical.physical_request_fingerprint(reservation)
+        if (
+            not isinstance(evaluation, Mapping)
+            or evaluation.get("admitted") is not True
+            or evaluation.get("code") != "RESERVED"
+            or evaluation.get("fresh_begin") is not False
+            or evaluation.get("request_fingerprint") != fingerprint
+            or not isinstance(evaluation.get("charges"), list)
+        ):
+            raise physical.PhysicalResourceRefusal(
+                "PREVALIDATED_RESERVATION_INVALID",
+                "selected physical reservation result is not the incumbent RESERVED proof",
+            )
+        replay = self.store.get_event_by_command_id(
+            reservation["command_id"], connection=connection
+        )
+        if replay is not None:
+            raise physical.PhysicalResourceRefusal(
+                "COMMAND_IDENTITY_CONFLICT",
+                "atomic C2 reservation command already has a durable outcome",
+            )
+        headers = self._physical_headers(connection, reservation)
+        if any(row is not None for row in headers):
+            raise physical.PhysicalResourceRefusal(
+                "PHASE_IDENTITY_CONFLICT",
+                "atomic C2 reservation cannot adopt an existing physical bundle",
+            )
+        aggregate_id = hashlib.sha256(
+            _json_dumps([reservation["host_id"], reservation["operation_key"]]).encode()
+        ).hexdigest()
+        command_fingerprint = hashlib.sha256(
+            _json_dumps(
+                {
+                    "action": "reserve",
+                    "request": fingerprint,
+                    "commitments": None,
+                    "evidence": None,
+                }
+            ).encode()
+        ).hexdigest()
+        generation = connection.execute(
+            "SELECT COALESCE(MAX(sequence),0)+1 FROM events "
+            "WHERE aggregate_type='physical_resource_operation' AND aggregate_id=?",
+            (aggregate_id,),
+        ).fetchone()[0]
+        planned: list[dict[str, Any]] = []
+        for phase in reservation["phases"]:
+            demands = [
+                {
+                    **demand,
+                    "remaining_charge": demand["qualified_incremental_peak"],
+                    "attributed_materialized_or_active": 0,
+                    "attribution": {},
+                }
+                for demand in phase["demands"]
+            ]
+            demands.sort(key=lambda item: (item["dimension"], item["capacity_pool_id"]))
+            planned.append(
+                {
+                    "commitment_id": uuid4().hex,
+                    "allocation_generation": generation,
+                    "revision": 1,
+                    "phase_key": phase["phase_key"],
+                    "state": "RESERVED",
+                    "demands": demands,
+                }
+            )
+        receipt = {
+            "operation_key": reservation["operation_key"],
+            "request_fingerprint": fingerprint,
+            "commitments": planned,
+        }
+        event = self._physical_event(
+            connection,
+            reservation,
+            aggregate_id,
+            "reserve",
+            command_fingerprint,
+            receipt,
+            timestamp,
+        )
+        if event.sequence != generation:
+            raise physical.PhysicalResourceRefusal(
+                "GENERATION_CONFLICT", "existing Event sequence moved"
+            )
+        if progress is not None:
+            progress("after_event")
+        manifest = _json_dumps(reservation["phases"])
+        bundle = hashlib.sha256(manifest.encode()).hexdigest()
+        for phase, plan in zip(reservation["phases"], planned):
+            connection.execute(
+                """INSERT INTO physical_resource_commitments(
+                    commitment_id,host_id,operation_key,phase_key,owner_id,carrier_id,
+                    allocation_generation,revision,state,request_fingerprint,bundle_fingerprint,
+                    bundle_manifest_json,caller_binding_json,source_binding_json,policy_binding_json,
+                    pool_binding_json,phase_scope_json,decision_event_id,created_at_ms,updated_at_ms)
+                    VALUES(?,?,?,?,?,?,?,1,'RESERVED',?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    plan["commitment_id"],
+                    reservation["host_id"],
+                    reservation["operation_key"],
+                    phase["phase_key"],
+                    reservation["owner_id"],
+                    reservation["carrier_id"],
+                    generation,
+                    fingerprint,
+                    bundle,
+                    manifest,
+                    _json_dumps(reservation["caller_binding"]),
+                    _json_dumps(reservation["source_binding"]),
+                    _json_dumps(reservation["policy_binding"]),
+                    _json_dumps(phase["demands"]),
+                    _json_dumps(
+                        {
+                            "profile": phase["profile"],
+                            "duration_ms": phase["duration_ms"],
+                            "effect_scope": phase["effect_scope"],
+                        }
+                    ),
+                    event.event_id,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            if progress is not None:
+                progress("after_header:" + phase["phase_key"])
+            for index, demand in enumerate(plan["demands"]):
+                connection.execute(
+                    """INSERT INTO physical_resource_demands(
+                        commitment_id,allocation_generation,dimension,capacity_pool_id,
+                        window_binding_json,qualified_incremental_peak,remaining_charge,
+                        attributed_materialized_or_active,attribution_json,observed_revision)
+                        VALUES(?,?,?,?,?,?,?,0,'{}',1)""",
+                    (
+                        plan["commitment_id"],
+                        generation,
+                        demand["dimension"],
+                        demand["capacity_pool_id"],
+                        _json_dumps(demand["window_binding"]),
+                        demand["qualified_incremental_peak"],
+                        demand["remaining_charge"],
+                    ),
+                )
+                if progress is not None:
+                    progress(f"after_demand:{phase['phase_key']}:{index}")
+        return receipt
+
+    def _commit_prevalidated_physical_reservation(
+        self,
+        connection,
+        request: Mapping[str, Any],
+        *,
+        evaluation: Mapping[str, Any],
+        timestamp: int,
+        _c2_capability: object,
+    ) -> dict[str, Any]:
+        if _c2_capability is not _CAPACITY_C2_R1A_CAPABILITY:
+            raise StateConflict("C2_PHYSICAL_RESERVATION_CAPABILITY_REQUIRED")
+        return self._persist_prevalidated_physical_reservation(
+            connection, request, evaluation=evaluation, timestamp=timestamp
+        )
+
+    def _physical_reservation_receipt_for_request(
+        self,
+        connection,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate and project an already-durable physical reservation."""
+        from . import executive_physical_resources as physical
+
+        reservation = physical.validate_physical_request(dict(request))
+        fingerprint = physical.physical_request_fingerprint(reservation)
+        headers = self._physical_headers(connection, reservation)
+        if not headers or any(row is None for row in headers):
+            raise physical.PhysicalResourceRefusal(
+                "COMMITMENT_NOT_FOUND", "durable physical reservation is incomplete"
+            )
+        if any(row["request_fingerprint"] != fingerprint for row in headers):
+            raise physical.PhysicalResourceRefusal(
+                "PHASE_IDENTITY_CONFLICT", "durable physical reservation drifted"
+            )
+        event_ids = {row["decision_event_id"] for row in headers}
+        if len(event_ids) != 1:
+            raise physical.PhysicalResourceRefusal(
+                "PHASE_IDENTITY_CONFLICT", "physical reservation has divergent decisions"
+            )
+        event_row = connection.execute(
+            "SELECT * FROM events WHERE event_id=?", (event_ids.pop(),)
+        ).fetchone()
+        if event_row is None:
+            raise physical.PhysicalResourceRefusal(
+                "COMMITMENT_NOT_FOUND", "physical reservation decision event is missing"
+            )
+        try:
+            payload = _strict_canonical_json_loads(
+                str(event_row["payload_json"]), name="physical reservation Event payload"
+            )
+        except PersistenceError as exc:
+            raise physical.PhysicalResourceRefusal(
+                "PHASE_IDENTITY_CONFLICT", "physical reservation Event is invalid"
+            ) from exc
+        if (
+            event_row["aggregate_type"] != "physical_resource_operation"
+            or event_row["event_type"] != "PHYSICAL_RESOURCE_RESERVE"
+            or event_row["command_id"] != reservation["command_id"]
+            or not isinstance(payload, dict)
+            or payload.get("receipt", {}).get("request_fingerprint") != fingerprint
+        ):
+            raise physical.PhysicalResourceRefusal(
+                "PHASE_IDENTITY_CONFLICT", "physical reservation decision does not match"
+            )
+        return self._physical_receipt(connection, reservation, fingerprint, headers)
+
     def _physical_command(self, action, request, caller_context):
         import time
         from . import executive_physical_resources as physical
@@ -20350,9 +20610,9 @@ class ResourceBroker:
                     self._physical_guard(request, caller_context, connection, "after_event", epoch)
                     code = "RECONCILED"
                 elif action == "reserve":
-                    charges = [dict(row) for row in connection.execute(
-                        "SELECT d.* FROM physical_resource_demands d JOIN physical_resource_commitments c USING(commitment_id,allocation_generation) "
-                        "WHERE c.host_id=? AND c.state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED')", (reservation["host_id"],))]
+                    charges = self._physical_current_charges(
+                        connection, reservation["host_id"]
+                    )
                     prior_refusal = connection.execute(
                         "SELECT payload_json FROM events WHERE aggregate_type='physical_resource_operation' AND aggregate_id=? "
                         "AND event_type='PHYSICAL_RESOURCE_RESERVE_REFUSED' "
@@ -20362,8 +20622,13 @@ class ResourceBroker:
                         if prior_refusal is not None:
                             prior_code = json.loads(prior_refusal[0])["receipt"]["refusal_code"]
                             raise physical.PhysicalResourceRefusal(prior_code, "original no-debit decision remains binding")
-                        physical.evaluate_reservation(reservation, policy=context["policy"], current_charges=charges,
-                                                      observations=context["observations"], decision_time_ms=timestamp)
+                        evaluation = physical.evaluate_reservation(
+                            reservation,
+                            policy=context["policy"],
+                            current_charges=charges,
+                            observations=context["observations"],
+                            decision_time_ms=timestamp,
+                        )
                     except physical.PhysicalResourceRefusal as refusal:
                         # No headers or demands have been written. Preserve the
                         # decision in existing Events; this command or another
@@ -20374,41 +20639,15 @@ class ResourceBroker:
                         self._physical_guard(request, caller_context, connection, "after_event", epoch)
                         code = refusal.code
                     else:
-                        generation = connection.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM events WHERE aggregate_type='physical_resource_operation' AND aggregate_id=?", (aggregate_id,)).fetchone()[0]
-                        planned = []
-                        for phase in reservation["phases"]:
-                            demands = [{**d, "remaining_charge": d["qualified_incremental_peak"],
-                                        "attributed_materialized_or_active": 0, "attribution": {}} for d in phase["demands"]]
-                            demands.sort(key=lambda d: (d["dimension"], d["capacity_pool_id"]))
-                            planned.append({"commitment_id": uuid4().hex, "allocation_generation": generation, "revision": 1,
-                                            "phase_key": phase["phase_key"], "state": "RESERVED", "demands": demands})
-                        receipt = {"operation_key": reservation["operation_key"], "request_fingerprint": fingerprint, "commitments": planned}
-                        event = self._physical_event(connection, reservation, aggregate_id, action, command_fingerprint, receipt, timestamp)
-                        if event.sequence != generation:
-                            raise physical.PhysicalResourceRefusal("GENERATION_CONFLICT", "existing Event sequence moved")
-                        self._physical_guard(request, caller_context, connection, "after_event", epoch)
-                        manifest = _json_dumps(reservation["phases"])
-                        bundle = hashlib.sha256(manifest.encode()).hexdigest()
-                        for phase, plan in zip(reservation["phases"], planned):
-                            connection.execute("""INSERT INTO physical_resource_commitments(
-                                commitment_id,host_id,operation_key,phase_key,owner_id,carrier_id,allocation_generation,revision,state,
-                                request_fingerprint,bundle_fingerprint,bundle_manifest_json,caller_binding_json,source_binding_json,
-                                policy_binding_json,pool_binding_json,phase_scope_json,decision_event_id,created_at_ms,updated_at_ms)
-                                VALUES(?,?,?,?,?,?,?,1,'RESERVED',?,?,?,?,?,?,?,?,?,?,?)""",
-                                (plan["commitment_id"], reservation["host_id"], reservation["operation_key"], phase["phase_key"],
-                                 reservation["owner_id"], reservation["carrier_id"], generation, fingerprint, bundle, manifest,
-                                 _json_dumps(reservation["caller_binding"]), _json_dumps(reservation["source_binding"]),
-                                 _json_dumps(reservation["policy_binding"]), _json_dumps(phase["demands"]),
-                                 _json_dumps({"profile": phase["profile"], "duration_ms": phase["duration_ms"], "effect_scope": phase["effect_scope"]}), event.event_id, timestamp, timestamp))
-                            self._physical_guard(request, caller_context, connection, "after_header:" + phase["phase_key"], epoch)
-                            for index, demand in enumerate(plan["demands"]):
-                                connection.execute("""INSERT INTO physical_resource_demands(
-                                  commitment_id,allocation_generation,dimension,capacity_pool_id,window_binding_json,
-                                  qualified_incremental_peak,remaining_charge,attributed_materialized_or_active,attribution_json,observed_revision)
-                                  VALUES(?,?,?,?,?,?,?,0,'{}',1)""", (plan["commitment_id"], generation, demand["dimension"],
-                                    demand["capacity_pool_id"], _json_dumps(demand["window_binding"]),
-                                    demand["qualified_incremental_peak"], demand["remaining_charge"]))
-                                self._physical_guard(request, caller_context, connection, f"after_demand:{phase['phase_key']}:{index}", epoch)
+                        receipt = self._persist_prevalidated_physical_reservation(
+                            connection,
+                            reservation,
+                            evaluation=evaluation,
+                            timestamp=timestamp,
+                            progress=lambda point: self._physical_guard(
+                                request, caller_context, connection, point, epoch
+                            ),
+                        )
                         code = "RESERVED"
                 else:
                     if not present:
@@ -20444,9 +20683,9 @@ class ResourceBroker:
                         if action == "begin":
                             if any(row["state"] != "RESERVED" for row in headers):
                                 raise physical.PhysicalResourceRefusal("STALE_COMMITMENT", "BEGIN requires the reserved bundle")
-                            charges = [dict(row) for row in connection.execute(
-                                "SELECT d.* FROM physical_resource_demands d JOIN physical_resource_commitments c USING(commitment_id,allocation_generation) "
-                                "WHERE c.host_id=? AND c.state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED')", (reservation["host_id"],))]
+                            charges = self._physical_current_charges(
+                                connection, reservation["host_id"]
+                            )
                             for header, phase in zip(headers, reservation["phases"]):
                                 own = self._physical_demands(connection, header)
                                 expected = {(d["dimension"], d["capacity_pool_id"]): d for d in phase["demands"]}
@@ -20817,13 +21056,13 @@ def _validated_capacity_source_root(
     )
 
 
-def _capacity_c1_selection(
+def _capacity_c1_inputs(
     connection: sqlite3.Connection,
     *,
     source: _CapacitySourceRootMaterial,
     target: Mapping[str, Any],
     now_ms: int,
-) -> tuple[Any, sqlite3.Row, dict[str, Any]]:
+) -> tuple[Any, Any, Any, tuple[Any, ...], dict[tuple[str, str], sqlite3.Row]]:
     selection_contract = _capacity_selection_contract()
     steward_contract = _capacity_steward_contract()
     source_constraints = _normalise_constraints(
@@ -20879,8 +21118,11 @@ def _capacity_c1_selection(
             raise StateConflict("C2_CAPACITY_IDENTITY_CONFLICT")
         worker_id = str(row["worker_id"])
         quota_token = str(row["quota_class"])
+        # Candidate evidence records when the authoritative Worker/quota facts
+        # were actually observed.  Sampling the decision clock here would make
+        # otherwise unchanged content-addressed C1 evidence drift on every call.
         observed_at_ms = max(
-            int(row["last_seen_at_ms"]), int(row["worker_last_seen_at_ms"]), now_ms
+            int(row["last_seen_at_ms"]), int(row["worker_last_seen_at_ms"])
         )
         observed_at = _iso(observed_at_ms)
         capabilities = frozenset(
@@ -20934,6 +21176,31 @@ def _capacity_c1_selection(
             raise StateConflict("C2_CAPACITY_FACT_INVALID") from exc
         candidates.append(candidate)
         rows_by_identity[(worker_id, quota_token)] = row
+    return (
+        selection_contract,
+        responsibility,
+        demand,
+        tuple(candidates),
+        rows_by_identity,
+    )
+
+
+def _capacity_c1_selection(
+    connection: sqlite3.Connection,
+    *,
+    source: _CapacitySourceRootMaterial,
+    target: Mapping[str, Any],
+    now_ms: int,
+) -> tuple[Any, sqlite3.Row, dict[str, Any]]:
+    (
+        selection_contract,
+        responsibility,
+        demand,
+        candidates,
+        rows_by_identity,
+    ) = _capacity_c1_inputs(
+        connection, source=source, target=target, now_ms=now_ms
+    )
     try:
         decision = select_placement(
             responsibility=responsibility,
@@ -20965,7 +21232,7 @@ def _capacity_c1_selection(
     if selected_row is None:
         raise StateConflict("C2_SELECTED_CAPACITY_NOT_CURRENT")
     carrier_constraints: dict[str, Any] = {
-        "eligible_quota_classes": [quota_class],
+        "eligible_quota_classes": [demand.quota_class],
         "provider": str(selected_row["provider"]),
         "required_capabilities": sorted(demand.required_capabilities),
     }
@@ -20973,6 +21240,120 @@ def _capacity_c1_selection(
         if selected_row[field]:
             carrier_constraints[field] = str(selected_row[field])
     return decision, selected_row, _normalise_constraints(carrier_constraints)
+
+
+def _capacity_fp4_current_selection(
+    connection: sqlite3.Connection,
+    *,
+    source: _CapacitySourceRootMaterial,
+    target: Mapping[str, Any],
+    now_ms: int,
+    placement_selection_v2: Any,
+    qualified_host_candidates: tuple[Any, ...],
+) -> tuple[sqlite3.Row, dict[str, Any], Any, Any, tuple[Any, ...]]:
+    """Rebind one v2 preference to current Runtime candidates and quota metadata."""
+    try:
+        from control_plane.executive_capacity_join import validate_capacity_join
+        from control_plane.executive_host_placement_preference import QualifiedHostCandidate
+        from control_plane.executive_placement_preference import PlacementSelectionDecisionV2
+    except ModuleNotFoundError as exc:
+        raise StateConflict("C2_PHYSICAL_CONTRACT_UNAVAILABLE") from exc
+
+    (
+        selection_contract,
+        responsibility,
+        demand,
+        candidates,
+        rows_by_identity,
+    ) = _capacity_c1_inputs(
+        connection, source=source, target=target, now_ms=now_ms
+    )
+    try:
+        current_base = select_placement(
+            responsibility=responsibility,
+            demand=demand,
+            candidates=candidates,
+        )
+    except (TypeError, ValueError, OrchestrationPrincipalError) as exc:
+        raise StateConflict("C2_PLACEMENT_SELECTION_INVALID") from exc
+    if not isinstance(placement_selection_v2, PlacementSelectionDecisionV2):
+        raise StateConflict("C2_PHYSICAL_SELECTION_TYPE_INVALID")
+    if placement_selection_v2.base_v1.to_dict() != current_base.to_dict():
+        raise StateConflict("C2_PHYSICAL_BASE_SELECTION_MOVED")
+    if (
+        placement_selection_v2.state is not selection_contract.SelectionState.SELECTED
+        or placement_selection_v2.selected is None
+        or placement_selection_v2.selected_mode
+        is not selection_contract.PlacementMode.NEW_SESSION_MATERIALIZATION
+    ):
+        raise StateConflict("C2_PHYSICAL_SELECTION_NOT_SELECTED")
+
+    if (
+        not qualified_host_candidates
+        or len(qualified_host_candidates) != len(candidates)
+        or any(
+            not isinstance(candidate, QualifiedHostCandidate)
+            for candidate in qualified_host_candidates
+        )
+    ):
+        raise StateConflict("C2_PHYSICAL_QUALIFIED_SET_INVALID")
+    current_worker_ids = {candidate.worker_id for candidate in candidates}
+    qualified_worker_ids = {candidate.worker_id for candidate in qualified_host_candidates}
+    if (
+        len(qualified_worker_ids) != len(qualified_host_candidates)
+        or qualified_worker_ids != current_worker_ids
+    ):
+        raise StateConflict("C2_PHYSICAL_QUALIFIED_SET_MOVED")
+
+    for qualified in qualified_host_candidates:
+        identity = (qualified.worker_id, qualified.quota_class)
+        row = rows_by_identity.get(identity)
+        if row is None:
+            raise StateConflict("C2_PHYSICAL_QUALIFIED_SET_MOVED")
+        if (
+            str(row["provider"]) != qualified.provider
+            or str(row["worker_provider"]) != qualified.provider
+        ):
+            raise StateConflict("C2_PHYSICAL_PROVIDER_BINDING_MOVED")
+        metadata = _strict_canonical_json_loads(
+            str(row["metadata_json"]), name="FP4 quota metadata"
+        )
+        if not isinstance(metadata, dict) or "capacity_join" not in metadata:
+            raise StateConflict("C2_PHYSICAL_CAPACITY_JOIN_MISSING")
+        try:
+            join = validate_capacity_join(metadata["capacity_join"])
+        except (TypeError, ValueError) as exc:
+            raise StateConflict("C2_PHYSICAL_CAPACITY_JOIN_INVALID") from exc
+        if (
+            join.host_ref != qualified.host_ref
+            or join.capacity_capability_id != qualified.capacity_capability_id
+            or join.worker_source_config_digest
+            != qualified.worker_source_config_digest
+        ):
+            raise StateConflict("C2_PHYSICAL_CAPACITY_JOIN_MOVED")
+
+    selected_identity = (
+        str(placement_selection_v2.selected["worker_id"]),
+        str(placement_selection_v2.selected["quota_class"]),
+    )
+    selected_row = rows_by_identity.get(selected_identity)
+    if selected_row is None:
+        raise StateConflict("C2_SELECTED_CAPACITY_NOT_CURRENT")
+    carrier_constraints: dict[str, Any] = {
+        "eligible_quota_classes": [demand.quota_class],
+        "provider": str(selected_row["provider"]),
+        "required_capabilities": sorted(demand.required_capabilities),
+    }
+    for field in ("model", "effort", "cost_class"):
+        if selected_row[field]:
+            carrier_constraints[field] = str(selected_row[field])
+    return (
+        selected_row,
+        _normalise_constraints(carrier_constraints),
+        responsibility,
+        demand,
+        candidates,
+    )
 
 
 def _carrier_claim_command_id(
@@ -22242,14 +22623,37 @@ class Runtime:
         source_root_job_id: str,
         *,
         expected_source_root_revision: int,
+        selected_physical_package: Any | None = None,
+        placement_selection_v2: Any | None = None,
+        host_preference_artifact: Any | None = None,
+        qualified_host_candidates: Sequence[Any] | None = None,
+        physical_policy: Mapping[str, Any] | None = None,
+        physical_observations: Mapping[str, Any] | None = None,
     ) -> CapacityCommitmentOutcome:
         """Atomically create and claim the first protected CEO alias carrier."""
 
         source_token = str(source_root_job_id or "").strip()
         if type(expected_source_root_revision) is not int:
             raise StateConflict("EXPECTED_SOURCE_ROOT_REVISION_INVALID")
+        physical_values = (
+            selected_physical_package,
+            placement_selection_v2,
+            host_preference_artifact,
+            qualified_host_candidates,
+            physical_policy,
+            physical_observations,
+        )
+        physical_requested = any(value is not None for value in physical_values)
+        if physical_requested and any(value is None for value in physical_values):
+            raise StateConflict("C2_PHYSICAL_CONTEXT_INCOMPLETE")
+        frozen_qualified = (
+            tuple(qualified_host_candidates)
+            if physical_requested and qualified_host_candidates is not None
+            else ()
+        )
         fresh_lease: AttemptLease | None = None
         committed_event: Event | None = None
+        physical_reservation_receipt: dict[str, Any] | None = None
         with self.store.transaction() as connection:
             timestamp = self.store.now_ms()
             commitment_contract = _capacity_commitment_contract()
@@ -22261,6 +22665,68 @@ class Runtime:
                 now_ms=timestamp,
             )
             if existing_material is not None:
+                replay_physical_receipt: dict[str, Any] | None = None
+                if physical_requested:
+                    try:
+                        from control_plane.executive_selected_physical_reservation import (
+                            SelectedPhysicalReservationPackage,
+                        )
+                        from control_plane.executive_host_placement_preference import (
+                            HostCapacityPreferenceArtifact,
+                        )
+                        from control_plane.executive_placement_preference import (
+                            PlacementSelectionDecisionV2,
+                        )
+                        from control_plane import executive_physical_resources as physical
+                    except ModuleNotFoundError as exc:
+                        raise StateConflict("C2_PHYSICAL_CONTRACT_UNAVAILABLE") from exc
+                    if (
+                        not isinstance(
+                            selected_physical_package, SelectedPhysicalReservationPackage
+                        )
+                        or not isinstance(
+                            placement_selection_v2, PlacementSelectionDecisionV2
+                        )
+                        or not isinstance(
+                            host_preference_artifact, HostCapacityPreferenceArtifact
+                        )
+                    ):
+                        raise StateConflict("C2_PHYSICAL_CONTEXT_INVALID")
+                    package_wire = selected_physical_package.to_dict()
+                    selection_wire = placement_selection_v2.to_dict()
+                    if package_wire["selection_v2"] != selection_wire:
+                        raise StateConflict("C2_PHYSICAL_REPLAY_SELECTION_MISMATCH")
+                    try:
+                        source_wire = _strict_canonical_json_loads(
+                            host_preference_artifact.source_bytes.decode("ascii"),
+                            name="FP4 replay Capacity source",
+                        )
+                    except (UnicodeDecodeError, PersistenceError) as exc:
+                        raise StateConflict("C2_PHYSICAL_REPLAY_SOURCE_INVALID") from exc
+                    if source_wire != package_wire["capacity_source"]:
+                        raise StateConflict("C2_PHYSICAL_REPLAY_SOURCE_MISMATCH")
+                    qualified_wires = sorted(
+                        (candidate.to_dict() for candidate in frozen_qualified),
+                        key=lambda item: item["worker_id"],
+                    )
+                    if qualified_wires != package_wire["qualified_candidates"]:
+                        raise StateConflict("C2_PHYSICAL_REPLAY_QUALIFIED_SET_MISMATCH")
+                    if (
+                        existing_material.payload.get("selection_document_digest")
+                        != orchestration_digest(selection_wire)
+                        or existing_material.attempt.worker_id
+                        != selected_physical_package.selected_worker_id
+                    ):
+                        raise StateConflict("C2_PHYSICAL_REPLAY_COMMITMENT_MISMATCH")
+                    request = package_wire["reservation_input"]["request"]
+                    try:
+                        replay_physical_receipt = (
+                            self.broker._physical_reservation_receipt_for_request(
+                                connection, request
+                            )
+                        )
+                    except physical.PhysicalResourceRefusal as exc:
+                        raise StateConflict(f"C2_PHYSICAL_{exc.code}") from exc
                 return CapacityCommitmentOutcome(
                     commitment_event=existing_material.event,
                     carrier_job_id=existing_material.carrier.job_id,
@@ -22270,6 +22736,7 @@ class Runtime:
                         CapacityMutationDisposition.REPLAYED_EXISTING
                     ),
                     fresh_attempt_lease=None,
+                    physical_reservation_receipt=replay_physical_receipt,
                 )
 
             # The carrier is a distinct root: its shared insertion/claim
@@ -22313,23 +22780,101 @@ class Runtime:
                     alias_carriers.append(event_row)
             if alias_carriers:
                 raise StateConflict("HELD_MAT_S1_CURRENT_WRITER_OWNER")
-            decision, selected_capacity, carrier_constraints = _capacity_c1_selection(
-                connection,
-                source=source,
-                target=target,
-                now_ms=timestamp,
-            )
-            try:
-                plan = (
-                    commitment_contract.build_commitment_plan_from_selection_decision(
+            physical_commit_result: dict[str, Any] | None = None
+            if physical_requested:
+                try:
+                    from control_plane.executive_selected_physical_reservation import (
+                        SelectedPhysicalReservationPackage,
+                        SelectedPhysicalReservationError,
+                    )
+                    from control_plane.executive_host_placement_preference import (
+                        HostCapacityPreferenceArtifact,
+                    )
+                    from control_plane.executive_placement_preference import (
+                        PlacementSelectionDecisionV2,
+                    )
+                    from control_plane import executive_physical_resources as physical
+                except ModuleNotFoundError as exc:
+                    raise StateConflict("C2_PHYSICAL_CONTRACT_UNAVAILABLE") from exc
+                if (
+                    not isinstance(
+                        selected_physical_package, SelectedPhysicalReservationPackage
+                    )
+                    or not isinstance(placement_selection_v2, PlacementSelectionDecisionV2)
+                    or not isinstance(host_preference_artifact, HostCapacityPreferenceArtifact)
+                    or not isinstance(physical_policy, Mapping)
+                    or not isinstance(physical_observations, Mapping)
+                ):
+                    raise StateConflict("C2_PHYSICAL_CONTEXT_INVALID")
+                (
+                    selected_capacity,
+                    carrier_constraints,
+                    _responsibility,
+                    _demand,
+                    _candidates,
+                ) = _capacity_fp4_current_selection(
+                    connection,
+                    source=source,
+                    target=target,
+                    now_ms=timestamp,
+                    placement_selection_v2=placement_selection_v2,
+                    qualified_host_candidates=frozen_qualified,
+                )
+                current_charges = self.broker._physical_current_charges(
+                    connection, selected_physical_package.host_ref
+                )
+                try:
+                    physical_commit_result = selected_physical_package.evaluate_for_commit(
+                        selection=placement_selection_v2,
+                        artifact=host_preference_artifact,
+                        qualified_candidates=frozen_qualified,
+                        policy=physical_policy,
+                        current_charges=current_charges,
+                        observations=physical_observations,
+                        decision_time_ms=timestamp,
+                    )
+                    plan = commitment_contract.build_commitment_plan_from_selection_decision_v2(
                         source_root_job_id=source_token,
                         expected_source_root_revision=expected_source_root_revision,
-                        placement_selection=decision,
+                        placement_selection=placement_selection_v2,
+                        resolved_capacity_sources=(
+                            host_preference_artifact.resolved_capacity_sources()
+                        ),
                         validated_target_facts=target,
                     )
+                except SelectedPhysicalReservationError as exc:
+                    raise StateConflict(f"C2_PHYSICAL_{exc.code}") from exc
+                except physical.PhysicalResourceRefusal as exc:
+                    raise StateConflict(f"C2_PHYSICAL_{exc.code}") from exc
+                except commitment_contract.PlacementCommitmentError as exc:
+                    raise StateConflict(exc.code) from exc
+                if (
+                    physical_commit_result.get("selected_worker_id")
+                    != plan.selected_worker_id
+                    or physical_commit_result.get("host_ref")
+                    != selected_physical_package.host_ref
+                    or physical_commit_result.get("boot_ref")
+                    != selected_physical_package.boot_ref
+                ):
+                    raise StateConflict("C2_PHYSICAL_SELECTION_BINDING_MISMATCH")
+            else:
+                decision, selected_capacity, carrier_constraints = _capacity_c1_selection(
+                    connection,
+                    source=source,
+                    target=target,
+                    now_ms=timestamp,
                 )
-            except commitment_contract.PlacementCommitmentError as exc:
-                raise StateConflict(exc.code) from exc
+                try:
+                    plan = (
+                        commitment_contract.build_commitment_plan_from_selection_decision(
+                            source_root_job_id=source_token,
+                            expected_source_root_revision=expected_source_root_revision,
+                            placement_selection=decision,
+                            validated_target_facts=target,
+                        )
+                    )
+                except commitment_contract.PlacementCommitmentError as exc:
+                    raise StateConflict(exc.code) from exc
             if (
                 plan.placement_mode
                 != selection_contract.PlacementMode.NEW_SESSION_MATERIALIZATION.value
@@ -22462,6 +23007,23 @@ class Runtime:
             )
             if fresh_lease is None:  # pragma: no cover - C2 helper fails closed
                 raise StateConflict("C2_SELECTED_CAPACITY_NOT_CURRENT")
+            if physical_commit_result is not None:
+                try:
+                    physical_reservation_receipt = (
+                        self.broker._commit_prevalidated_physical_reservation(
+                            connection,
+                            physical_commit_result["request"],
+                            evaluation=physical_commit_result["reservation"],
+                            timestamp=timestamp,
+                            _c2_capability=_CAPACITY_C2_R1A_CAPABILITY,
+                        )
+                    )
+                except Exception as exc:
+                    from control_plane import executive_physical_resources as physical
+                    if isinstance(exc, physical.PhysicalResourceRefusal):
+                        raise StateConflict(f"C2_PHYSICAL_{exc.code}") from exc
+                    raise
+                _c2_r1a_test_checkpoint("after_physical_reservation_insert")
             runtime_facts = {
                 "source_root_job_id": source_token,
                 "source_root_revision": int(source.row["version"]),
@@ -22519,6 +23081,7 @@ class Runtime:
             carrier_disposition="created",
             mutation_disposition=CapacityMutationDisposition.CREATED_THIS_CALL,
             fresh_attempt_lease=fresh_lease,
+            physical_reservation_receipt=physical_reservation_receipt,
         )
 
     def current_capacity_commitment(
