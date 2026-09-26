@@ -164,6 +164,37 @@ p0:
       capabilities rather than a separate company objective.
     status: retired
 
+# One common rubric for the six sellable intelligence products. This is a prioritization
+# model, not a marketing claim or automated promotion rule. Scores begin as explicit
+# hypotheses and are replaced by observed product telemetry and user evidence.
+core_product_value_model:
+  products:
+    - Prophet
+    - Macro Dashboard
+    - Sector Intelligence
+    - Research Vault
+    - Terminal
+    - Options Intelligence
+  dimensions:
+    decision_impact_and_time_saved: 0.25
+    frequency_of_useful_use: 0.15
+    differentiation_vs_alternatives: 0.20
+    trust_and_evidence_quality: 0.10
+    cross_product_compounding: 0.15
+    activation_and_retention_contribution: 0.15
+  evidence_rule: >
+    Use observed behavior, user research, activation/retention telemetry, and real-path
+    task outcomes where available. Mark unmeasured dimensions as hypotheses with
+    confidence rather than inventing precision. A high value score cannot waive
+    production-readiness or evidence/trust failures.
+  production_readiness:
+    - data correctness, freshness, coverage, and null/failure behavior are explicit
+    - desktop and mobile task journeys meet performance and usability acceptance
+    - explanations expose source, as-of time, uncertainty, and material limitations
+    - the product has a clear recurring user job and instrumentation for that job
+    - cross-product handoffs preserve context instead of forcing the user to restart
+    - the real production path has acceptance evidence, not only source or CI proof
+
 # Current allocation bias during PRE_REVENUE_LAUNCH_CONVERGENCE. These are planning
 # shares, not execution quotas and not authority. The SELL_READY/AUTONOMY_BASELINE
 # gates trigger explicit review; they never mutate these weights automatically.
