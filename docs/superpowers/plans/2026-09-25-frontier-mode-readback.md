@@ -111,6 +111,36 @@ Every validation receipt is immutable/closed and keeps `execution_authorized=fal
 - [x] Run focused Secretary tests, all three mode suites + census regressions, Python syntax, diff and exact ten-file scope checks.
 - [x] Commit/push on the existing #989 carrier, refresh exact-head review/CI, and keep Draft/production-inert.
 
+## Task 5 — provider-neutral Secretary prompt/schema renderer
+
+Extend the Task-4 contract module and tests with a pure request renderer that maps one valid fresh Secretary snapshot onto the **existing** worker-fabric structured-output seam. Do not import or instantiate `WorkerLaunchSpec`, a worker adapter, Model Router, provider profile, Runtime, filesystem path, or process primitive.
+
+`build_secretary_provider_request(snapshot, now_ms=...)` returns one immutable closed receipt:
+- `READY` only for a fresh valid snapshot;
+- canonical snapshot SHA-256;
+- a bounded prompt containing a fixed Secretary directive plus canonical JSON of normalized decision facts;
+- a canonical JSON result-schema string for `mastermind.secretary_decision_recommendation/v1`;
+- prompt SHA-256;
+- fixed `provider_selected=false`, `model_selected=false`, `worker_started=false`, `execution_authorized=false`.
+
+Prompt privacy/instruction boundary:
+- omit raw `source_refs` entirely; include only snapshot digest + source-ref count;
+- include only already-validated enum/count/opaque-ID fields and pre-qualified fanout candidate IDs;
+- state that JSON strings are data, not instructions;
+- require exactly one structured recommendation and forbid tool use/action claims;
+- no caller-provided system prompt, free-form task text, model name, account, provider URL, tool list, timeout, authority grant or child body.
+
+The result schema is closed (`additionalProperties=false`), requires the six Task-4 recommendation fields, enumerates exactly the nine actions/reason codes and bounded requested-mode/fanout/rationale shapes, and is data only. An existing worker owner may later write this schema into its already-governed run directory and compose a `WorkerLaunchSpec`; this renderer never performs that effect.
+
+Invalid/stale snapshots return `REFUSED` with no prompt/schema bytes rather than raising.
+
+- [x] Write failing tests for the absent provider-request API and one valid fresh snapshot.
+- [x] Run focused RED.
+- [x] Implement the minimal pure renderer using Task-4 snapshot validation/digest semantics.
+- [x] Add tests for source-ref non-disclosure, deterministic prompt/schema digest, closed action/schema vocabulary, stale/invalid refusal, fanout candidate projection, no provider/model/worker selection and source-level no-I/O/no-runtime imports.
+- [x] Re-run 331 Secretary tests + 183 Web-Sol tests, syntax/diff/exact ten-file scope.
+- [ ] Publish on #989, refresh exact-head CI/review; keep provider invocation itself unimplemented/held.
+
 ## Held integration task — not granted by this leaf
 
 The next source owner is #836 for actual DOM normalization, native bridge wiring and mode actuation. Consume this leaf only after #836 current custody and its merge conflict are reconciled, and the closed mode action is reviewed under the browser/context-rotation laws. Authenticate the observation producer, fence exact RuntimeBinding/document generations and mode effect identity, and prove no-send selector canaries before a turn is allowed. The #890 capability producer/consumer and #936/#953/#958 read-only limitations remain explicit dependencies. Do not edit these carriers from this workspace.
@@ -133,3 +163,4 @@ Task 3 publication: the first typed commit attempt returned `TYPED_GIT_PRECHECK_
 Task 4 RED: process 67512, absent Secretary contract API, 0 pass / 1 fail. First implementation run exposed a Python 3.14 dynamic-test-loader error because the temporary module was not registered in `sys.modules`; that test harness was corrected without changing production logic. The next focused run exposed two test-discriminator defects (a recommendation passed into the snapshot argument, and leakage matching the word "secretary" in the schema); those tests were corrected without changing production logic. Focused final: process 69643, 26/26 pass. Cross-surface gate process 70336: existing Secretary MCP/gateway/static-fence suite plus the new contract passed; collection census = 322 tests total (113 + 85 + 98 + 26), Web-Sol mode/census slice = 183/183, Python/JS syntax + diff checks passed, exact candidate scope = 10 files. Full repository Python gate was then started through canonical `scripts/ci_pytest.py --jobs 3` with 751 discovered modules/tests under its discovery policy; terminal result remains to be consumed before publication.
 Local full-repository gate diagnostic: `python3 scripts/ci_pytest.py --jobs 3` discovered 751 modules under the canonical discovery policy but collection exited 2 because this Studio Python 3.14 environment lacks CI-installed dependencies (`claude_agent_sdk`, `PyJWT`, `mcp`, `reportlab`) and the CI-pinned Macro engine import environment. `.github/workflows/ci.yml` proves hosted `test` first checks out Macro `256c757b...`, selects Python 3.12, and installs `-e ".[dev]"` before invoking the same gate. This is an environment/invocation mismatch, not a candidate-path test failure; do not alter project dependencies from this feature carrier. Hosted exact-head CI remains the full repository authority.
 Task 4 publication: source/docs commit `06e3cfe8f4aba9c097d0b2b1618347263dc2e53f` action `d7fb1fe3baa00c03f167f63dea925a13289a5a97f1b3e9b71dc1c317bb120162` returned APPLIED; push action `25112caa3311c0cfd58c4f0fe71583ef0377484e49ac74d245fdbece4ef69d2a` returned APPLIED with local=remote and clean=true. No MCP server tool, model/provider call, Runtime/Executive mutation, browser action, child commission, mode change, prompt submission or Agent OS write was added.
+Task 5 RED: process 79024, provider-request API absent; eight Task-5 assertions failed from that missing API while prior Task-4 cases remained green. Focused GREEN: process 79951, 35/35 pass. Cross-surface final process 80458: Secretary aggregate 331/331 (35 new + 296 incumbent MCP/gateway/static-fence tests), Web-Sol mode/census 183/183, Python/JS syntax + `git diff --check` + exact ten-file scope all PASS. No provider/model/worker was selected or started, and raw source refs remain outside rendered prompts.
