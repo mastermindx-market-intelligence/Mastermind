@@ -887,6 +887,19 @@ def load_strategic_summary() -> tuple[dict[str, Any] | None, str | None]:
         "resource_policy": {
             name: float(weight) for name, weight in state["resource_policy"].items()
         },
+        "core_product_value_model": {
+            "products": list(state["core_product_value_model"]["products"]),
+            "dimensions": {
+                name: float(weight)
+                for name, weight in state["core_product_value_model"]["dimensions"].items()
+            },
+            "evidence_rule": " ".join(
+                str(state["core_product_value_model"]["evidence_rule"]).split()
+            ),
+            "production_readiness": list(
+                state["core_product_value_model"]["production_readiness"]
+            ),
+        },
         "phase_gates": {
             name: {
                 "purpose": " ".join(str(gate["purpose"]).split()),
@@ -1171,6 +1184,8 @@ def render_packet(packet: dict[str, Any]) -> str:
             "resource bias:",
             [f"{name} {float(weight):.0%}" for name, weight in resources.items()],
         ))
+        value_model = strategic.get("core_product_value_model") or {}
+        out.extend(_labeled("core products:", list(value_model.get("products") or [])))
         p0_rows = list(strategic.get("p0") or [])
         active_p0 = [
             obj for obj in p0_rows
