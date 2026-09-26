@@ -224,8 +224,12 @@ def _service_with_ingress(
     peer_uid: int | None = None,
     ceo_ingress_socket_path: Path | None = None,
     ceo_ingress_activated_socket: socket.socket | None = None,
+    shutdown_grace_seconds: float | None = None,
 ) -> ExecutiveControlService:
-    config = _config(tmp_path, socket_root=socket_root)
+    config_overrides = {}
+    if shutdown_grace_seconds is not None:
+        config_overrides["shutdown_grace_seconds"] = shutdown_grace_seconds
+    config = _config(tmp_path, socket_root=socket_root, **config_overrides)
 
     def factory(_runtime: Runtime) -> _FakeSupervisor:
         return _FakeSupervisor()
@@ -1253,7 +1257,16 @@ def test_paused_submit_survives_client_disconnect_and_close_holds_lock_until_ter
     async def exercise():
         grounding = _FakeGrounding(sequence=[GROUNDING_A])
         service = _service_with_ingress(
-            tmp_path, socket_root=short_socket_root, grounding=grounding
+            tmp_path,
+            socket_root=short_socket_root,
+            grounding=grounding,
+            # This test deliberately blocks a physical sync worker, then proves
+            # close() retains custody until that worker reaches a real terminal
+            # outcome. The suite-wide 200 ms fixture grace is intentionally tiny
+            # for ordinary tests and is below observed hosted-shard scheduling
+            # jitter; using it here turns the custody proof into a wall-clock
+            # race. Production keeps its fail-closed timeout unchanged.
+            shutdown_grace_seconds=2.0,
         )
         await service.start()
 
@@ -1299,7 +1312,7 @@ def test_paused_submit_survives_client_disconnect_and_close_holds_lock_until_ter
         assert service.running_marker_path.exists()
 
         release.set()
-        await asyncio.wait_for(close_task, timeout=2)
+        await asyncio.wait_for(close_task, timeout=3)
 
         assert not service.running_marker_path.exists()
         jobs = service.runtime.jobs.list_jobs()
@@ -1519,7 +1532,16 @@ def test_close_holds_lock_even_when_server_wait_closed_is_a_no_op(
     async def exercise():
         grounding = _FakeGrounding(sequence=[GROUNDING_A])
         service = _service_with_ingress(
-            tmp_path, socket_root=short_socket_root, grounding=grounding
+            tmp_path,
+            socket_root=short_socket_root,
+            grounding=grounding,
+            # This test deliberately blocks a physical sync worker, then proves
+            # close() retains custody until that worker reaches a real terminal
+            # outcome. The suite-wide 200 ms fixture grace is intentionally tiny
+            # for ordinary tests and is below observed hosted-shard scheduling
+            # jitter; using it here turns the custody proof into a wall-clock
+            # race. Production keeps its fail-closed timeout unchanged.
+            shutdown_grace_seconds=2.0,
         )
         await service.start()
 
@@ -1561,7 +1583,7 @@ def test_close_holds_lock_even_when_server_wait_closed_is_a_no_op(
         assert service.running_marker_path.exists()
 
         release.set()
-        await asyncio.wait_for(close_task, timeout=2)
+        await asyncio.wait_for(close_task, timeout=3)
         assert not service.running_marker_path.exists()
 
         writer.close()
