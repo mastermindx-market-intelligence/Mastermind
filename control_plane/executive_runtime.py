@@ -17654,6 +17654,13 @@ class OperatorHarnessRegistry:
                     expected_generation_count=2,
                     allowed_successor_turn_command_id=operation_id.command_id,
                 )
+            if connection.execute(
+                """SELECT 1 FROM events WHERE event_type='OHF_SEMANTIC_YIELD_OBSERVED'
+                   AND attempt_id=? LIMIT 1""", (row["attempt_id"],),
+            ).fetchone() is not None:
+                # Phase A has no response-consumption authority. Preserve the
+                # obligation; only the existing owners may later define release.
+                raise StateConflict("pending semantic yield requires authorized resolution")
             existing_intent = self._event(connection, operation_id.command_id)
             if existing_intent is not None:
                 payload = _json_loads(existing_intent["payload_json"], fallback={})
@@ -17964,6 +17971,247 @@ class OperatorHarnessRegistry:
             )
             return True
 
+    def record_semantic_yield(
+        self, *, turn: TurnRef, events: Sequence[NormalizedEvent], cursor: EventCursor,
+        fence_generation: int, lease_token: str,
+    ) -> str:
+        """Accept one material completed-turn observation, never a decision.
+
+        Uses the existing leased Runtime transaction and exact TX-5 provenance.
+        An unresolved target remains explicitly unprojected. Phase A supplies no
+        authority to consume this observation or resume the worker.
+        """
+        from common.agent_dialogue_contract import DialogueContractError, validate_body
+
+        events = tuple(events)
+        if (not isinstance(turn, TurnRef) or not isinstance(cursor, EventCursor)
+                or not 2 <= len(events) <= 64
+                or any(not isinstance(event, NormalizedEvent) for event in events)):
+            raise StateConflict("semantic yield requires a bounded typed native batch")
+        if (cursor.attempt_id != turn.attempt_id
+                or cursor.session_epoch_id != turn.session_epoch_id
+                or cursor.process_generation_id != turn.process_generation_id
+                or cursor.turn_id != turn.turn_id
+                or type(cursor.local_sequence) is not int
+                or cursor.local_sequence < len(events)):
+            raise StateConflict("semantic yield cursor is outside the exact turn")
+        for event in events:
+            if (event.attempt_id != turn.attempt_id
+                    or event.session_epoch_id != turn.session_epoch_id
+                    or event.process_generation_id != turn.process_generation_id
+                    or event.turn_id != turn.turn_id
+                    or event.native_subordinate_id is not None):
+                raise StateConflict("semantic yield event is outside the exact parent turn")
+        material = [event for event in events if event.kind in {"BLOCKED", "DECISION_REQUEST"}]
+        if (len(material) != 1 or events[-1].kind != "turn/completed"
+                or sum(event.kind == "turn/completed" for event in events) != 1
+                or any(event.kind in {"RESULT", "RULING", "CONTINUE", "STOP"} for event in events)):
+            raise StateConflict("semantic yield requires one material completed native boundary")
+        event = material[0]
+        source_id = event.provider_event_id
+        if (not isinstance(source_id, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", source_id) is None
+                or redact_evidence_text(source_id) != source_id):
+            raise StateConflict("semantic yield requires an exact safe source event identity")
+        if sum(item.provider_event_id == source_id for item in events) != 1:
+            raise StateConflict("semantic yield source event identity is ambiguous")
+        # Reject key coercion, recursive/non-JSON values and excessive nesting
+        # before canonical hashing. Do not let redaction/serialization collapse
+        # distinct original source payloads into the same accepted identity.
+        stack = [(item.payload_redacted, 0) for item in events]
+        nodes = 0
+        while stack:
+            value, depth = stack.pop()
+            nodes += 1
+            if depth > 8 or nodes > 4096:
+                raise StateConflict("semantic yield source structure exceeds bounds")
+            if isinstance(value, Mapping):
+                if len(value) > 4096 or any(type(key) is not str for key in value):
+                    raise StateConflict("semantic yield source keys are not bounded JSON")
+                stack.extend((item, depth + 1) for item in value.values())
+            elif isinstance(value, (list, tuple)):
+                if len(value) > 4096:
+                    raise StateConflict("semantic yield source array exceeds bounds")
+                stack.extend((item, depth + 1) for item in value)
+            elif value is not None and type(value) not in {str, int, float, bool}:
+                raise StateConflict("semantic yield source is not JSON data")
+        raw = event.payload_redacted
+        if (not isinstance(raw, Mapping)
+                or set(raw) != {"body", "source_event_time_ms", "replaces_event_id"}
+                or raw["replaces_event_id"] is not None):
+            raise StateConflict("semantic yield payload is closed; correction authority unavailable")
+        source_time = raw["source_event_time_ms"]
+        if source_time is not None and (
+            type(source_time) is not int or not 0 <= source_time <= 2**63 - 1
+        ):
+            raise StateConflict("semantic yield source event time is invalid")
+        try:
+            body = validate_body(event.kind, raw["body"])
+            encoded, batch_digest = _ohf_json_digest(events)
+        except (DialogueContractError, TypeError, ValueError, RecursionError) as exc:
+            raise StateConflict("semantic yield body or batch is invalid") from exc
+        if body["work_paused"] is not True or len(encoded.encode("utf-8")) > 65536:
+            raise StateConflict("semantic yield requires bounded material paused work")
+        timestamp = self.store.now_ms()
+        command_id = f"ohf-semantic-yield:{turn.turn_id}"
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection, attempt_id=turn.attempt_id,
+                fence_generation=fence_generation, lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+            )
+            self._require_active_orchestration_generation(
+                connection, row=row, generation_id=turn.process_generation_id,
+            )
+            intent, applied = self._verified_turn_evidence(connection, row=row, turn=turn)
+            generation = connection.execute(
+                """SELECT g.*,e.attempt_id AS epoch_attempt,e.worker_id AS epoch_worker,
+                          e.state AS epoch_state,e.provider_session_id AS epoch_session
+                   FROM process_generations g JOIN harness_session_epochs e
+                     ON e.session_epoch_id=g.session_epoch_id
+                   WHERE g.process_generation_id=? AND e.session_epoch_id=?""",
+                (turn.process_generation_id, turn.session_epoch_id),
+            ).fetchone()
+            if (generation is None or generation["epoch_attempt"] != row["attempt_id"]
+                    or generation["worker_id"] != row["worker_id"]
+                    or generation["epoch_worker"] != row["worker_id"]
+                    or generation["epoch_state"] != SessionEpochState.CURRENT.value
+                    or not generation["executive_writer_held"]
+                    or generation["ended_at_ms"] is not None
+                    or generation["provider_session_id"] != intent["provider_session_id"]
+                    or generation["epoch_session"] != intent["provider_session_id"]
+                    or not applied.get("provider_native_turn_id")):
+                raise StateConflict("semantic yield source generation is not current and owned")
+            profile = _json_loads(row["requested_execution_profile_json"], fallback={})
+            revision = profile.get("workspace", {}).get("base_sha")
+            if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+                raise StateConflict("semantic yield lacks sealed worker source revision")
+            job = connection.execute(
+                "SELECT root_job_id FROM jobs WHERE job_id=?", (row["job_id"],),
+            ).fetchone()
+            payload = {
+                "schema_version": "mastermind.operator_semantic_yield/v1",
+                "root_job_id": job["root_job_id"], "job_id": str(row["job_id"]),
+                "attempt_id": str(row["attempt_id"]), "worker_id": str(row["worker_id"]),
+                "turn": _ohf_jsonable(turn), "cursor": _ohf_jsonable(cursor),
+                "provider_session_id": intent["provider_session_id"],
+                "provider_native_turn_id": applied["provider_native_turn_id"],
+                "source_revision": revision,
+                "source_event_id": source_id, "source_event_time_ms": source_time,
+                "replaces_event_id": None, "batch_digest": batch_digest,
+                "kind": event.kind, "body": redact_evidence(body),
+                "requires_response": True, "routing_state": "PENDING_ACTION_TARGET",
+                "action_target": None, "authority_granted": False,
+                "delivery_state": "NOT_PROJECTED", "consumption_receipt": None,
+            }
+            existing = self._event(connection, command_id)
+            if existing is not None:
+                if (existing["event_type"] == "OHF_SEMANTIC_YIELD_OBSERVED"
+                        and existing["aggregate_type"] == "operator_turn"
+                        and existing["aggregate_id"] == turn.turn_id
+                        and existing["attempt_id"] == turn.attempt_id
+                        and existing["worker_id"] == row["worker_id"]
+                        and _json_loads(existing["payload_json"], fallback={}) == payload):
+                    return command_id
+                raise StateConflict("semantic yield identity already recorded differently")
+            if self._event(connection, f"ohf-candidate:{turn.turn_id}") is not None:
+                raise StateConflict("semantic yield conflicts with an accepted candidate")
+            self.store.append_event(
+                connection, aggregate_type="operator_turn", aggregate_id=turn.turn_id,
+                event_type="OHF_SEMANTIC_YIELD_OBSERVED", command_id=command_id,
+                actor="supervisor", job_id=str(row["job_id"]), attempt_id=turn.attempt_id,
+                worker_id=str(row["worker_id"]), quota_class=str(row["quota_class"]),
+                payload=payload, timestamp_ms=timestamp,
+            )
+        return command_id
+
+    def _verified_turn_evidence(
+        self, connection: sqlite3.Connection, *, row: sqlite3.Row, turn: TurnRef,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Shared exact TX-5 provenance for candidate and semantic evidence."""
+
+        generation = connection.execute(
+            """
+            SELECT 1 FROM process_generations
+            WHERE process_generation_id=? AND session_epoch_id=?
+            """,
+            (turn.process_generation_id, turn.session_epoch_id),
+        ).fetchone()
+        if generation is None:
+            raise StateConflict("candidate generation does not exist")
+        matching_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+        for intent in connection.execute(
+            """SELECT * FROM events
+               WHERE aggregate_type='operator_operation'
+                 AND event_type=? AND attempt_id=?""",
+            (OperationReceiptKind.INTENT.value, turn.attempt_id),
+        ):
+            intent_payload = _json_loads(intent["payload_json"], fallback={})
+            if intent_payload.get("turn_id") == turn.turn_id:
+                matching_intents.append((intent, intent_payload))
+        if len(matching_intents) != 1:
+            raise StateConflict(
+                "candidate requires exactly one matching TX-5 INTENT"
+            )
+        intent, intent_payload = matching_intents[0]
+        expected_intent = {
+            "schema_version": "mastermind.operator_harness_turn_intent/v1",
+            "operation_kind": OperationKind.BEGIN_TURN.value,
+            "attempt_id": turn.attempt_id,
+            "session_epoch_id": turn.session_epoch_id,
+            "process_generation_id": turn.process_generation_id,
+            "worker_id": str(row["worker_id"]),
+            "provider_session_id": intent_payload.get("provider_session_id"),
+            "turn_id": turn.turn_id,
+        }
+        if (
+            intent["aggregate_id"] != intent["command_id"]
+            or intent["worker_id"] != row["worker_id"]
+            or not intent_payload.get("provider_session_id")
+            or intent_payload != expected_intent
+        ):
+            raise StateConflict("candidate TX-5 INTENT provenance mismatch")
+        operation = OperationId(str(intent["command_id"]))
+        applied = self._event(
+            connection,
+            operation_receipt_command_id(operation, OperationReceiptKind.APPLIED),
+        )
+        applied_payload = (
+            _json_loads(applied["payload_json"], fallback={}) if applied else {}
+        )
+        if (
+            applied is None
+            or applied["aggregate_type"] != "operator_operation"
+            or applied["aggregate_id"] != operation.command_id
+            or applied["event_type"] != OperationReceiptKind.APPLIED.value
+            or applied["attempt_id"] != turn.attempt_id
+            or applied["worker_id"] != row["worker_id"]
+            or applied_payload.get("schema_version")
+            != "mastermind.operator_harness_turn_applied/v1"
+            or applied_payload.get("operation_kind")
+            != OperationKind.BEGIN_TURN.value
+            or applied_payload.get("attempt_id") != turn.attempt_id
+            or applied_payload.get("session_epoch_id") != turn.session_epoch_id
+            or applied_payload.get("process_generation_id")
+            != turn.process_generation_id
+            or applied_payload.get("turn_id") != turn.turn_id
+            or applied_payload.get("acknowledged") is not True
+            or set(applied_payload)
+            != {
+                "schema_version",
+                "operation_kind",
+                "attempt_id",
+                "session_epoch_id",
+                "process_generation_id",
+                "turn_id",
+                "provider_native_turn_id",
+                "acknowledged",
+            }
+        ):
+            raise StateConflict("candidate requires exact matching TX-5 APPLIED")
+        return intent_payload, applied_payload
+
     def record_candidate_evidence(
         self,
         *,
@@ -18039,85 +18287,9 @@ class OperatorHarnessRegistry:
                 row=row,
                 generation_id=turn.process_generation_id,
             )
-            generation = connection.execute(
-                """
-                SELECT 1 FROM process_generations
-                WHERE process_generation_id=? AND session_epoch_id=?
-                """,
-                (turn.process_generation_id, turn.session_epoch_id),
-            ).fetchone()
-            if generation is None:
-                raise StateConflict("candidate generation does not exist")
-            matching_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
-            for intent in connection.execute(
-                """SELECT * FROM events
-                   WHERE aggregate_type='operator_operation'
-                     AND event_type=? AND attempt_id=?""",
-                (OperationReceiptKind.INTENT.value, turn.attempt_id),
-            ):
-                intent_payload = _json_loads(intent["payload_json"], fallback={})
-                if intent_payload.get("turn_id") == turn.turn_id:
-                    matching_intents.append((intent, intent_payload))
-            if len(matching_intents) != 1:
-                raise StateConflict(
-                    "candidate requires exactly one matching TX-5 INTENT"
-                )
-            intent, intent_payload = matching_intents[0]
-            expected_intent = {
-                "schema_version": "mastermind.operator_harness_turn_intent/v1",
-                "operation_kind": OperationKind.BEGIN_TURN.value,
-                "attempt_id": turn.attempt_id,
-                "session_epoch_id": turn.session_epoch_id,
-                "process_generation_id": turn.process_generation_id,
-                "worker_id": str(row["worker_id"]),
-                "provider_session_id": intent_payload.get("provider_session_id"),
-                "turn_id": turn.turn_id,
-            }
-            if (
-                intent["aggregate_id"] != intent["command_id"]
-                or intent["worker_id"] != row["worker_id"]
-                or not intent_payload.get("provider_session_id")
-                or intent_payload != expected_intent
-            ):
-                raise StateConflict("candidate TX-5 INTENT provenance mismatch")
-            operation = OperationId(str(intent["command_id"]))
-            applied = self._event(
-                connection,
-                operation_receipt_command_id(operation, OperationReceiptKind.APPLIED),
-            )
-            applied_payload = (
-                _json_loads(applied["payload_json"], fallback={}) if applied else {}
-            )
-            if (
-                applied is None
-                or applied["aggregate_type"] != "operator_operation"
-                or applied["aggregate_id"] != operation.command_id
-                or applied["event_type"] != OperationReceiptKind.APPLIED.value
-                or applied["attempt_id"] != turn.attempt_id
-                or applied["worker_id"] != row["worker_id"]
-                or applied_payload.get("schema_version")
-                != "mastermind.operator_harness_turn_applied/v1"
-                or applied_payload.get("operation_kind")
-                != OperationKind.BEGIN_TURN.value
-                or applied_payload.get("attempt_id") != turn.attempt_id
-                or applied_payload.get("session_epoch_id") != turn.session_epoch_id
-                or applied_payload.get("process_generation_id")
-                != turn.process_generation_id
-                or applied_payload.get("turn_id") != turn.turn_id
-                or applied_payload.get("acknowledged") is not True
-                or set(applied_payload)
-                != {
-                    "schema_version",
-                    "operation_kind",
-                    "attempt_id",
-                    "session_epoch_id",
-                    "process_generation_id",
-                    "turn_id",
-                    "provider_native_turn_id",
-                    "acknowledged",
-                }
-            ):
-                raise StateConflict("candidate requires exact matching TX-5 APPLIED")
+            self._verified_turn_evidence(connection, row=row, turn=turn)
+            if self._event(connection, f"ohf-semantic-yield:{turn.turn_id}") is not None:
+                raise StateConflict("candidate conflicts with a pending semantic yield")
             existing = self._event(connection, command_id)
             if existing is not None:
                 if _json_loads(existing["payload_json"], fallback={}) == payload:
