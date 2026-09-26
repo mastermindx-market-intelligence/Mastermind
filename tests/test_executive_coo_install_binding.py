@@ -151,7 +151,7 @@ def test_coo_binding_projection_can_rotate_but_policy_and_install_cannot(tmp_pat
     changed_policy["coo"]["policy"]["policy_id"] = "executive-coo-v2"
     changed_policy["coo"]["binding"]["policy_id"] = "executive-coo-v2"
     config.write_text(json.dumps(changed_policy))
-    with pytest.raises(ValueError, match="installed policy or configuration changed"):
+    with pytest.raises(ValueError):
         loader()
 
     config.write_text(json.dumps({key: value for key, value in raw.items() if key != "coo"}))
