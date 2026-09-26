@@ -934,4 +934,126 @@ describe("SessionWorkspace host completion contract", () => {
     });
     expect(onStop).toHaveBeenCalledTimes(2);
   });
+
+  const invalidSessionOutcomes: Array<{
+    name: string;
+    invoke: (complete: (outcome?: unknown) => void) => void;
+  }> = [
+    { name: "missing argument", invoke: (complete) => complete() },
+    { name: "null", invoke: (complete) => complete(null) },
+    { name: "array", invoke: (complete) => complete(["accepted"]) },
+    { name: "unknown status", invoke: (complete) => complete({ status: "nope" }) },
+    { name: "nonstring status", invoke: (complete) => complete({ status: 1 }) },
+    {
+      name: "throwing getter",
+      invoke: (complete) =>
+        complete({
+          get status() {
+            throw new Error("status getter exploded");
+          },
+        }),
+    },
+    {
+      name: "proxy value",
+      invoke: (complete) =>
+        complete(
+          new Proxy({ status: "accepted" as const }, {
+            get() {
+              return "nope";
+            },
+          }),
+        ),
+    },
+  ];
+
+  it.each(invalidSessionOutcomes)(
+    "invalid send $name stays pending, does not throw, then valid refused reconciles without duplicate dispatch",
+    async ({ invoke }) => {
+      let held: SessionCompletion | undefined;
+      const onSend = vi.fn((_text: string, onComplete: SessionCompletion) => {
+        held = onComplete;
+      });
+      function Host() {
+        return (
+          <SessionWorkspace {...base} sending={false} onSend={onSend} />
+        );
+      }
+      render(<Host />);
+      fireEvent.change(messageBox(), { target: { value: "keep after invalid" } });
+      await act(async () => {
+        sendButton().click();
+      });
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(pendingSendButton().disabled).toBe(true);
+
+      await act(async () => {
+        invoke(held as (outcome?: unknown) => void);
+      });
+      expect(pendingSendButton().disabled).toBe(true);
+      expect(messageBox().value).toBe("keep after invalid");
+      await act(async () => {
+        fireEvent.submit(sendForm());
+      });
+      expect(onSend).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        held?.({ status: "refused" });
+      });
+      expect(sendButton().textContent).toBe("Send");
+      expect(messageBox().value).toBe("keep after invalid");
+      await act(async () => {
+        sendButton().click();
+      });
+      expect(onSend).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(invalidSessionOutcomes)(
+    "invalid stop $name stays pending, does not throw, then valid refused reconciles without duplicate dispatch",
+    async ({ invoke }) => {
+      let held: SessionCompletion | undefined;
+      const onStop = vi.fn((onComplete: SessionCompletion) => {
+        held = onComplete;
+      });
+      function Host() {
+        return (
+          <SessionWorkspace
+            {...base}
+            sending={false}
+            onSend={() => undefined}
+            stopLabel="Interrupt turn"
+            onStop={onStop}
+          />
+        );
+      }
+      render(<Host />);
+      const stopBtn = screen.getByRole("button", { name: "Interrupt turn" }) as HTMLButtonElement;
+      await act(async () => {
+        stopBtn.click();
+      });
+      expect(onStop).toHaveBeenCalledTimes(1);
+      const pendingStop = screen.getByRole("button", { name: "Stopping…" }) as HTMLButtonElement;
+      expect(pendingStop.disabled).toBe(true);
+
+      await act(async () => {
+        invoke(held as (outcome?: unknown) => void);
+      });
+      const stillPending = screen.getByRole("button", { name: "Stopping…" }) as HTMLButtonElement;
+      expect(stillPending.disabled).toBe(true);
+      await act(async () => {
+        fireEvent.click(stillPending);
+      });
+      expect(onStop).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        held?.({ status: "refused" });
+      });
+      const rearmed = screen.getByRole("button", { name: "Interrupt turn" }) as HTMLButtonElement;
+      expect(rearmed.disabled).toBe(false);
+      await act(async () => {
+        rearmed.click();
+      });
+      expect(onStop).toHaveBeenCalledTimes(2);
+    },
+  );
 });

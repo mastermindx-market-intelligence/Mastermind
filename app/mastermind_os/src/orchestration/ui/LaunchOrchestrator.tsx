@@ -24,6 +24,11 @@ export type LaunchOutcome = { status: "accepted" } | { status: "refused" };
  *
  * Host contract:
  * - Call `onComplete` exactly once with the terminal outcome.
+ * - Only an object whose `status` is exactly `"accepted"` or `"refused"` is
+ *   terminal. The outcome is validated before any latch, pending, or draft
+ *   mutation. Missing, null, array, unknown, non-string, throwing-getter, or
+ *   proxy values stay visibly in flight; the same handle remains usable for a
+ *   later valid reconciliation and does not throw.
  * - `"accepted"`: the launch succeeded. The guard releases and the goal draft
  *   is cleared, so a still-mounted parent cannot accidentally relaunch it.
  * - `"refused"`: the launch was rejected. The guard releases and the draft is
@@ -68,6 +73,24 @@ function utf8ByteLength(s: string): number {
   return new TextEncoder().encode(s).length;
 }
 
+/**
+ * Snapshot a terminal status from a completion argument.
+ * Reads `status` once; a throw, missing value, array, or any other shape is
+ * not terminal. Extra own fields are ignored when status is exact.
+ */
+function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
+  try {
+    if (typeof outcome !== "object" || outcome === null || Array.isArray(outcome)) {
+      return null;
+    }
+    const status = Reflect.get(outcome, "status");
+    if (status === "accepted" || status === "refused") return status;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -103,11 +126,13 @@ export function LaunchOrchestrator({
 
   const launchPending = submitting || launchInFlight;
 
-  const completeLaunch = (token: number, outcome: LaunchOutcome) => {
+  const completeLaunch = (token: number, outcome: unknown) => {
+    const status = readTerminalStatus(outcome);
+    if (status === null) return;
     if (launchTokenRef.current !== token) return;
     launchTokenRef.current = null;
     setLaunchInFlight(false);
-    if (outcome.status === "accepted") {
+    if (status === "accepted") {
       // Success consumes the goal so the same intent cannot be launched twice
       // by a parent that stays mounted. A refusal keeps the draft.
       setDraftGoal("");
@@ -155,7 +180,14 @@ export function LaunchOrchestrator({
           projectRef: selectedProject,
           profileRef: selectedProfile,
         },
-        (outcome) => completeLaunch(token, outcome),
+        (outcome) => {
+          try {
+            completeLaunch(token, outcome);
+          } catch {
+            // A throw while reading or applying the outcome is not terminal:
+            // the launch stays in flight and the handle remains usable.
+          }
+        },
       );
     } catch {
       // A thrown host callback is not an accepted or refused outcome: the

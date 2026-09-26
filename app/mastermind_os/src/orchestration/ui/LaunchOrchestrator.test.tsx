@@ -726,4 +726,82 @@ describe("LaunchOrchestrator host completion contract", () => {
     expect(goalBox().value).toBe("");
     expect(launchButton().textContent).toBe("Launch");
   });
+
+  const invalidLaunchOutcomes: Array<{
+    name: string;
+    invoke: (complete: (outcome?: unknown) => void) => void;
+  }> = [
+    { name: "missing argument", invoke: (complete) => complete() },
+    { name: "null", invoke: (complete) => complete(null) },
+    { name: "array", invoke: (complete) => complete(["accepted"]) },
+    { name: "unknown status", invoke: (complete) => complete({ status: "nope" }) },
+    { name: "nonstring status", invoke: (complete) => complete({ status: 1 }) },
+    {
+      name: "throwing getter",
+      invoke: (complete) =>
+        complete({
+          get status() {
+            throw new Error("status getter exploded");
+          },
+        }),
+    },
+    {
+      name: "proxy value",
+      invoke: (complete) =>
+        complete(
+          new Proxy({ status: "accepted" as const }, {
+            get() {
+              return "nope";
+            },
+          }),
+        ),
+    },
+  ];
+
+  it.each(invalidLaunchOutcomes)(
+    "invalid launch $name stays pending, does not throw, then valid refused reconciles without duplicate dispatch",
+    async ({ invoke }) => {
+      let held: LaunchCompletion | undefined;
+      const onSubmit = vi.fn((_intent: LaunchForm, onComplete: LaunchCompletion) => {
+        held = onComplete;
+      });
+      function Host() {
+        return (
+          <LaunchOrchestrator
+            {...catalog}
+            submitting={false}
+            onCancel={noop}
+            onSubmit={onSubmit}
+          />
+        );
+      }
+      render(<Host />);
+      fillGoal("Invalid then valid");
+      await act(async () => {
+        launchButton().click();
+      });
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+      expect(pendingLaunchButton().disabled).toBe(true);
+
+      await act(async () => {
+        invoke(held as (outcome?: unknown) => void);
+      });
+      expect(pendingLaunchButton().disabled).toBe(true);
+      expect(goalBox().value).toBe("Invalid then valid");
+      await act(async () => {
+        fireEvent.submit(goalForm());
+      });
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        held?.({ status: "refused" });
+      });
+      expect(launchButton().textContent).toBe("Launch");
+      expect(goalBox().value).toBe("Invalid then valid");
+      await act(async () => {
+        launchButton().click();
+      });
+      expect(onSubmit).toHaveBeenCalledTimes(2);
+    },
+  );
 });

@@ -18,6 +18,11 @@ export type SessionOutcome = { status: "accepted" } | { status: "refused" };
  *
  * Host contract:
  * - Call `onComplete` exactly once with the terminal outcome.
+ * - Only an object whose `status` is exactly `"accepted"` or `"refused"` is
+ *   terminal. The outcome is validated before any latch, pending, or draft
+ *   mutation. Missing, null, array, unknown, non-string, throwing-getter, or
+ *   proxy values stay visibly in flight; the same handle remains usable for a
+ *   later valid reconciliation and does not throw. Stop uses this same gate.
  * - `"accepted"` on a send clears the submitted draft (only if the draft still
  *   holds the submitted text) and releases the guard. On a stop it simply
  *   releases the guard.
@@ -71,6 +76,24 @@ function utf8ByteLength(s: string): number {
   return new TextEncoder().encode(s).length;
 }
 
+/**
+ * Snapshot a terminal status from a completion argument.
+ * Reads `status` once; a throw, missing value, array, or any other shape is
+ * not terminal. Extra own fields are ignored when status is exact.
+ */
+function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
+  try {
+    if (typeof outcome !== "object" || outcome === null || Array.isArray(outcome)) {
+      return null;
+    }
+    const status = Reflect.get(outcome, "status");
+    if (status === "accepted" || status === "refused") return status;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -116,15 +139,25 @@ export function SessionWorkspace({
 
   const sentTextRef = useRef("");
 
-  const completeSend = (token: number, outcome: SessionOutcome) => {
+  const completeSend = (token: number, outcome: unknown) => {
+    const status = readTerminalStatus(outcome);
+    if (status === null) return;
     if (sendTokenRef.current !== token) return;
     sendTokenRef.current = null;
     setSendInFlight(false);
-    if (outcome.status === "accepted" && draftRef.current === sentTextRef.current) {
+    if (status === "accepted" && draftRef.current === sentTextRef.current) {
       // Success clears only the text that was actually submitted; anything
       // else in the box is preserved. A refusal keeps the draft.
       setDraftText("");
     }
+  };
+
+  const completeStop = (token: number, outcome: unknown) => {
+    const status = readTerminalStatus(outcome);
+    if (status === null) return;
+    if (stopTokenRef.current !== token) return;
+    stopTokenRef.current = null;
+    setStopInFlight(false);
   };
 
   // Session identity change: drop local state and every latch, and invalidate
@@ -170,7 +203,14 @@ export function SessionWorkspace({
     // Draft is kept until the correlated completion reports the outcome, so a
     // refusal never loses the user's text.
     try {
-      onSend(draft, (outcome) => completeSend(token, outcome));
+      onSend(draft, (outcome) => {
+        try {
+          completeSend(token, outcome);
+        } catch {
+          // A throw while reading or applying the outcome is not terminal:
+          // the send stays in flight and the handle remains usable.
+        }
+      });
     } catch {
       // A thrown host callback is not an accepted or refused outcome: the
       // send stays visibly in flight and does not authorize a retry.
@@ -184,9 +224,12 @@ export function SessionWorkspace({
     setStopInFlight(true);
     try {
       onStop?.((outcome) => {
-        if (stopTokenRef.current !== token) return;
-        stopTokenRef.current = null;
-        setStopInFlight(false);
+        try {
+          completeStop(token, outcome);
+        } catch {
+          // A throw while reading the outcome is not terminal: the stop
+          // stays in flight and the handle remains usable.
+        }
       });
     } catch {
       // A thrown stop callback is not an outcome: the stop stays visibly in
