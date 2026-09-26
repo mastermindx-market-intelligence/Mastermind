@@ -384,3 +384,195 @@ def test_targeted_adapters_add_no_second_control_plane():
         assert "sqlite3" not in imported
         if name.endswith("_resolution.py"):
             assert "integrations.workspace_agent_runtime_binding" in imported
+
+
+# ---------------------------------------------------------------------------
+# P1-R1 repair: deterministic destination conflicts are not carrier outages
+# ---------------------------------------------------------------------------
+
+
+class _EnvelopeService:
+    """Return a Relay error envelope verbatim, as ``call_service`` really does.
+
+    ``terminal_response`` returns ``{"ok": false, "error": {"code": ...}}`` for
+    any engine code, on the read edge and after COMMIT alike, so a carrier that
+    only inspects raised ``DialogueServiceError`` never sees these at all.
+    """
+
+    def __init__(self, code, *, operation):
+        self.code = code
+        self.operation = operation
+        self.calls = []
+        self.commits = 0
+
+    async def __call__(self, socket_path, request, *, before_write=None, **kwargs):
+        self.calls.append(copy.deepcopy(request))
+        if before_write is not None:
+            await before_write()
+            self.commits += 1
+        if request["operation"] == self.operation:
+            return {"ok": False, "error": {"code": self.code}}
+        return {"ok": True, "result": None}
+
+
+def _envelope_setup(code, *, operation, purpose="QUESTION"):
+    a, b, _, bindings = _parties()
+    packet = _packet_frame(a, b, purpose=purpose)
+    service = _EnvelopeService(code, operation=operation)
+    carrier = _api().TargetedAgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            bindings[0 if purpose == "QUESTION" else 1]
+        ),
+        targets=_ExactFixtureAccess(_packet_frame(a, b), bindings),
+        socket_path=Path("/tmp/iac-p1r1-test-only.sock"), service_call=service,
+    )
+    return carrier, service, packet
+
+
+@pytest.mark.parametrize("code", ["THREAD_CONTEXT_MISMATCH", "THREAD_BINDING_AMBIGUOUS"])
+def test_returned_destination_refusal_is_deterministic_on_the_send_edge(code):
+    api = _api()
+    carrier, service, packet = _envelope_setup(code, operation="send_consultation_packet")
+    admitted = []
+
+    async def admit():
+        admitted.append("INTENT")
+
+    with pytest.raises(api.ConsultationTargetConflict) as caught:
+        asyncio.run(carrier.put_question(
+            packet["consultation_id"], packet, before_commit=admit,
+        ))
+    # A closed owner adjudication, never the retryable carrier-outage bucket.
+    assert isinstance(caught.value, StateConflict)
+    assert not isinstance(caught.value, ConsultationPacketCarrierUnknown)
+    assert not isinstance(caught.value, ConsultationPacketEffectUnknown)
+    assert code in str(caught.value)
+    assert len(service.calls) == 1
+
+
+@pytest.mark.parametrize("code", ["THREAD_CONTEXT_MISMATCH", "THREAD_BINDING_AMBIGUOUS"])
+def test_returned_destination_refusal_is_deterministic_on_the_read_edge(code):
+    api = _api()
+    carrier, service, packet = _envelope_setup(code, operation="read_consultation_packet")
+    with pytest.raises(api.ConsultationTargetConflict) as caught:
+        asyncio.run(carrier.get_question(packet["consultation_id"]))
+    assert isinstance(caught.value, StateConflict)
+    assert not isinstance(caught.value, ConsultationPacketCarrierUnknown)
+    assert code in str(caught.value)
+    assert service.commits == 0
+
+
+@pytest.mark.parametrize("operation", ["send_consultation_packet", "read_consultation_packet"])
+def test_a_non_destination_envelope_still_reconciles_as_unknown(operation):
+    """Positive control: the closed mapping was not widened to every envelope."""
+    api = _api()
+    carrier, service, packet = _envelope_setup("THREAD_NOT_FOUND", operation=operation)
+    call = (
+        carrier.put_question(packet["consultation_id"], packet, before_commit=_noop)
+        if operation == "send_consultation_packet"
+        else carrier.get_question(packet["consultation_id"])
+    )
+    with pytest.raises(ConsultationPacketCarrierUnknown) as caught:
+        asyncio.run(call)
+    assert not isinstance(caught.value, api.ConsultationTargetConflict)
+
+
+def test_real_af_unix_inconsistent_destination_refuses_with_no_effect():
+    """The real service returns the engine envelope; nothing is written."""
+    api = _api()
+    a, b, _, bindings = _parties()
+    question = _packet_frame(a, b)
+
+    async def scenario():
+        with tempfile.TemporaryDirectory(prefix="iac-r1-conflict-", dir="/tmp") as root:
+            socket = Path(root) / "r.sock"
+            client = _BoundedInMemorySlackClient(
+                relay_bot_user_id=_relay_policy().relay_bot_user_id,
+                next_timestamp=Decimal("1787962200.000001"),
+            )
+            for binding in bindings[:2]:
+                client.add_parent(_relay_parent(binding, _relay_policy()))
+            admitted = []
+
+            async def gate():
+                admitted.append("INTENT")
+
+            access = _ExactFixtureAccess(question, bindings)
+            # An internally inconsistent destination: B's context, A's thread.
+            access.transform = lambda acc, count: dataclasses.replace(
+                acc, target=dataclasses.replace(acc.target, thread_ts=bindings[0].thread_ts),
+            )
+            carrier = api.TargetedAgentDialogueConsultationPacketCarrier(
+                binding_resolver=_StaticDialogueBindingResolver(bindings[0]),
+                targets=access, socket_path=socket, timeout_seconds=5,
+            )
+            service, task = await _start_relay_service(socket_path=socket, client=client)
+            try:
+                with pytest.raises(api.ConsultationTargetConflict) as caught:
+                    await carrier.put_question(
+                        question["consultation_id"], question, before_commit=gate,
+                    )
+                assert "THREAD_CONTEXT_MISMATCH" in str(caught.value)
+                assert not isinstance(caught.value, ConsultationPacketCarrierUnknown)
+                # Zero INTENT, zero COMMIT, zero packet, zero Wake.
+                assert admitted == []
+                for binding in bindings[:2]:
+                    page = await client.fetch_thread(
+                        channel_id=_relay_policy().channel_id,
+                        thread_ts=binding.thread_ts, limit=100,
+                    )
+                    assert len(page.messages) == 1, "only the parent may exist"
+            finally:
+                await _stop_relay_service(service, task)
+
+    asyncio.run(scenario())
+
+
+def test_production_composition_cannot_grant_an_arbitrary_resolver():
+    """R4 pin: production stays disarmed, and no arbitrary read grant can ship.
+
+    The Protocol seam stays open for tests. What is pinned is that no
+    non-test module composes the targeted carrier with anything but the
+    canonical resolver built from the incumbent owners.
+    """
+    import ast
+
+    from integrations.company_consultation_dispatch import PRODUCTION_PACKET_CARRIAGE
+
+    assert PRODUCTION_PACKET_CARRIAGE == "UNAVAILABLE"
+
+    root = Path(__file__).resolve().parents[1]
+    carrier_name = "TargetedAgentDialogueConsultationPacketCarrier"
+    canonical = "ExecutiveConsultationPacketTargetResolver"
+    compositions = 0
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        if relative.parts[0] in {"tests", "vendor", "build"} or "test_" in relative.name:
+            continue
+        try:
+            tree = ast.parse(path.read_text())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name != carrier_name:
+                continue
+            compositions += 1
+            targets = [kw.value for kw in node.keywords if kw.arg == "targets"]
+            assert len(targets) == 1, (str(relative), node.lineno)
+            supplied = targets[0]
+            assert isinstance(supplied, ast.Call), (str(relative), node.lineno)
+            supplied_func = supplied.func
+            supplied_name = (
+                supplied_func.attr if isinstance(supplied_func, ast.Attribute)
+                else getattr(supplied_func, "id", None)
+            )
+            assert supplied_name == canonical, (str(relative), node.lineno, supplied_name)
+    # Truthful today: the seam is pinned before it exists, not asserted to exist.
+    assert compositions == 0, (
+        "a production composition appeared; the carriage marker must be "
+        "re-adjudicated before arming"
+    )

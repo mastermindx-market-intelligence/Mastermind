@@ -227,3 +227,136 @@ def test_existing_intent_parties_override_a_conflicting_candidate(tmp_path, monk
     changed = build_consultation(changed)
     with pytest.raises((StateConflict, ConsultationPacketCarrierUnknown)):
         _resolver(seed).resolve(frame["consultation_id"], purpose="QUESTION", frame=changed)
+
+
+# ---------------------------------------------------------------------------
+# P1-R1 repair: resolver evidence failures leave the carrier-outage bucket
+# ---------------------------------------------------------------------------
+
+
+def _targets():
+    return importlib.import_module("integrations.company_consultation_targets")
+
+
+@pytest.mark.parametrize("kind,expected", [
+    # Adjudicated by the resolver itself against the host's own exact scope.
+    ("wrong_channel", "conflict"),
+    ("wrong_workspace", "conflict"),
+    # The owner readers collapse these into one code, so they stay unknown.
+    ("missing", "unavailable"),
+    ("ambiguous", "unavailable"),
+    ("root_absent", "unavailable"),
+])
+def test_resolver_evidence_failures_are_classified_not_pooled(tmp_path, monkeypatch, kind, expected):
+    """Each of missing/ambiguous/foreign gets its exact class, not one bucket.
+
+    The incumbent acceptance for these five kinds accepts either class, so it
+    cannot distinguish a deterministic target conflict from a dead carrier.
+    This pins which is which, and records that ``missing``/``ambiguous`` are
+    honestly undecidable here rather than pretending otherwise.
+    """
+    targets = _targets()
+    _api()
+    seed = _seed(
+        tmp_path, monkeypatch,
+        physical=kind not in ("missing", "wrong_channel", "wrong_workspace"),
+        root_source=kind != "root_absent",
+    )
+    if kind == "ambiguous":
+        _physical(seed, seed.b, "1787961800.000001", "asd-other-thread-0001")
+    if kind == "wrong_channel":
+        _physical(seed, seed.b, THREAD_B, "asd-wrong-channel-0001", channel="C0BSBM78V1N")
+    if kind == "wrong_workspace":
+        _physical(seed, seed.b, THREAD_B, "asd-wrong-workspace-0001", workspace="T000000001")
+    frame = fixtures._packet_frame(seed.a, seed.b)
+    before = _event_count(seed)
+
+    if expected == "conflict":
+        with pytest.raises(targets.ConsultationTargetConflict) as caught:
+            _resolver(seed).resolve(frame["consultation_id"], purpose="QUESTION", frame=frame)
+        # A closed adjudication: never retried or re-resolved as an outage.
+        assert isinstance(caught.value, StateConflict)
+        assert not isinstance(caught.value, ConsultationPacketCarrierUnknown)
+    else:
+        with pytest.raises(targets.ConsultationTargetEvidenceUnavailable) as caught:
+            _resolver(seed).resolve(frame["consultation_id"], purpose="QUESTION", frame=frame)
+        # Real observation uncertainty must never become a safe refusal.
+        assert isinstance(caught.value, ConsultationPacketCarrierUnknown)
+        assert not isinstance(caught.value, StateConflict)
+    assert "BINDING_UNAVAILABLE" not in str(caught.value)
+    assert _event_count(seed) == before
+
+
+@pytest.mark.parametrize("rotation", ["valid_other_attempt", "absent_attempt"])
+def test_sticky_target_rotation_classification_boundary(tmp_path, monkeypatch, rotation):
+    """A peer that moved on is a conflict; an unreadable peer stays unknown.
+
+    Both are "sticky-target" in prose, and they classify differently for a
+    real reason. When the owner can still name a current Attempt and it is not
+    the admitted one, the resolver adjudicates that itself. When the rotation
+    leaves no readable Attempt at all, the owner's single conflated code is all
+    that exists and honesty requires unknown.
+    """
+    targets = _targets()
+    api = _api()
+    seed = _seed(tmp_path, monkeypatch)
+    fresh = fixtures._packet_frame(seed.a, seed.b)
+
+    if rotation == "valid_other_attempt":
+        original = api._read_current_target
+        monkeypatch.setattr(
+            api, "_read_current_target",
+            lambda runtime, operation_key: dataclasses.replace(
+                original(runtime, operation_key), attempt_id="ATT-" + "e" * 32,
+            ),
+        )
+        with pytest.raises(targets.ConsultationTargetConflict) as caught:
+            _resolver(seed).resolve(fresh["consultation_id"], purpose="QUESTION", frame=fresh)
+        assert not isinstance(caught.value, ConsultationPacketCarrierUnknown)
+    else:
+        get_job = seed.runtime.jobs.get_job
+        rotated = dataclasses.replace(
+            get_job(seed.b[0]), current_attempt_id="ATT-" + "d" * 32,
+        )
+        monkeypatch.setattr(
+            seed.runtime.jobs, "get_job",
+            lambda job_id: rotated if job_id == seed.b[0] else get_job(job_id),
+        )
+        with pytest.raises(targets.ConsultationTargetEvidenceUnavailable) as caught:
+            _resolver(seed).resolve(fresh["consultation_id"], purpose="QUESTION", frame=fresh)
+        assert not isinstance(caught.value, StateConflict)
+    assert "BINDING_UNAVAILABLE" not in str(caught.value)
+
+
+def test_owner_readers_carry_exactly_one_conflated_refusal_code():
+    """Why ``missing``/``ambiguous`` cannot be adjudicated here — and a falsifier.
+
+    ``_refuse()`` is the single refusal in the owner module and raises one
+    code for a missing fact, an ambiguous one, a foreign scope and an
+    unreadable store alike. If an owner ever adds a distinguishing code this
+    fails, which is the signal to refine the mapping above rather than leave
+    genuine conflicts sitting in the unknown bucket.
+    """
+    import ast
+    import pathlib
+    import re
+
+    from integrations import workspace_agent_runtime_binding as owner
+
+    source = pathlib.Path(owner.__file__).read_text()
+    codes = set(re.findall(r'WorkspaceReturnError\(\s*"([A-Z_]+)"\s*\)', source))
+    assert codes == {"BINDING_UNAVAILABLE"}, codes
+
+    # ... and the ambiguity branch really does route through that one code.
+    tree = ast.parse(source)
+    refusals = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and any(
+            isinstance(sub, ast.Call)
+            and getattr(sub.func, "id", None) == "WorkspaceReturnError"
+            for sub in ast.walk(node)
+        )
+    }
+    assert refusals == {"_refuse"}, refusals

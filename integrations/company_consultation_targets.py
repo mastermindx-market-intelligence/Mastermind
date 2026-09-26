@@ -43,6 +43,14 @@ from integrations.slack_agent_dialogue.service import (
     call_service,
 )
 
+# Closed set of Relay engine codes that name a deterministic destination
+# conflict. The service returns these verbatim in an error envelope on both
+# the send and read edges, including after COMMIT, because they are engine
+# codes rather than service ``ERROR_CODES``.
+_DESTINATION_REFUSAL_CODES = frozenset(
+    {"THREAD_BINDING_AMBIGUOUS", "THREAD_CONTEXT_MISMATCH"}
+)
+
 _ACTOR_KEYS = frozenset({"kind", "job_id", "attempt_id", "worker_id"})
 _CONSULTATION_ID = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
 _THREAD_TS = re.compile(r"\A[0-9]{10,16}\.[0-9]{6}\Z")
@@ -58,6 +66,25 @@ def _actor(value: Mapping[str, Any]) -> Mapping[str, str]:
     ):
         raise StateConflict("exact consultation actor is unavailable")
     return MappingProxyType(dict(value))
+
+
+class ConsultationTargetConflict(StateConflict):
+    """Deterministic target adjudication: missing, ambiguous, foreign or sticky.
+
+    A ``StateConflict`` subtype so every incumbent handler keeps working. It
+    exists so a closed owner adjudication is never mistaken for a carrier
+    outage and retried or re-resolved onto a different parent.
+    """
+
+
+class ConsultationTargetEvidenceUnavailable(ConsultationPacketCarrierUnknown):
+    """Owner evidence could not be observed; the target is NOT re-resolvable.
+
+    A ``ConsultationPacketCarrierUnknown`` subtype: genuine observation
+    uncertainty must never become a safe refusal. It is typed only so a
+    consumer can tell unreadable owner evidence from a dead transport and
+    reconcile on the same target instead of choosing a new one.
+    """
 
 
 @dataclasses.dataclass(frozen=True)
@@ -220,6 +247,10 @@ class TargetedAgentDialogueConsultationPacketCarrier(AgentDialogueConsultationPa
             )
         except StateConflict:
             raise
+        except ConsultationPacketCarrierUnknown:
+            # Keep the resolver's closed classification; re-wrapping here would
+            # erase the owner-evidence distinction it just established.
+            raise
         except Exception:
             raise ConsultationPacketCarrierUnknown(
                 "exact consultation target facts are unavailable"
@@ -255,6 +286,27 @@ class TargetedAgentDialogueConsultationPacketCarrier(AgentDialogueConsultationPa
         if current != expected:
             raise StateConflict("consultation identity changed before effect or readback")
 
+    @staticmethod
+    def _destination_refusal(response: Any) -> str | None:
+        """Name a deterministic destination refusal in a Relay error envelope."""
+        if not isinstance(response, Mapping) or response.get("ok") is not False:
+            return None
+        error = response.get("error")
+        if not isinstance(error, Mapping) or set(error) != {"code"}:
+            return None
+        code = error.get("code")
+        if not isinstance(code, str) or code not in _DESTINATION_REFUSAL_CODES:
+            return None
+        return code
+
+    def _refuse_inconsistent_destination(self, response: Any) -> None:
+        code = self._destination_refusal(response)
+        if code is None:
+            return
+        raise ConsultationTargetConflict(
+            "Agent Relay refused the consultation packet destination: " + code
+        )
+
     async def _put(
         self,
         consultation_id: str,
@@ -289,6 +341,10 @@ class TargetedAgentDialogueConsultationPacketCarrier(AgentDialogueConsultationPa
                 "send_protocol": EXACT_SEND_PROTOCOL,
             },
         }, before_write=commit_gate)
+        # The transport is reporting that the destination this carrier supplied
+        # was internally inconsistent. That is deterministic, not an outage, and
+        # must not degrade into one that a caller may retry or re-resolve.
+        self._refuse_inconsistent_destination(response)
         result = response.get("result") if isinstance(response, Mapping) else None
         if (
             not isinstance(response, Mapping)
@@ -324,6 +380,8 @@ class TargetedAgentDialogueConsultationPacketCarrier(AgentDialogueConsultationPa
         # Suppress even absence if the exact caller/target changed during I/O.
         self._fence(snapshot, consultation_id, purpose=purpose, frame=frame,
                     sender_required=frame is not None)
+        # Fence first, then classify: identity drift outranks a stale refusal.
+        self._refuse_inconsistent_destination(response)
         if not isinstance(response, Mapping) or response.get("ok") is not True:
             raise ConsultationPacketCarrierUnknown("Agent Relay packet read is invalid")
         result = response.get("result")

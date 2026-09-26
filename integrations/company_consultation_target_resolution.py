@@ -29,9 +29,12 @@ from integrations.company_consultation_dispatch import (
 from integrations.company_consultation_targets import (
     ConsultationDeliveryTarget,
     ConsultationPacketAccess,
+    ConsultationTargetConflict,
+    ConsultationTargetEvidenceUnavailable,
     TargetedAgentDialogueConsultationPacketCarrier,
     _actor,
 )
+from integrations.workspace_agent_return import WorkspaceReturnError
 from integrations.workspace_agent_runtime_binding import (
     _read_current_target,
     _read_dialogue_source,
@@ -74,7 +77,7 @@ class ExecutiveConsultationPacketTargetResolver:
             or attempt.worker_id != actor["worker_id"]
             or worker.worker_id != actor["worker_id"]
         ):
-            raise StateConflict("exact consultation target lineage is unavailable")
+            raise ConsultationTargetConflict("exact consultation target lineage is unavailable")
         return derive_delegation_identity(job)
 
     @staticmethod
@@ -95,6 +98,15 @@ class ExecutiveConsultationPacketTargetResolver:
             return self._resolve(consultation_id, purpose=purpose, frame=frame)
         except (StateConflict, ConsultationPacketCarrierUnknown):
             raise
+        except WorkspaceReturnError:
+            # The owner readers carry exactly one code, BINDING_UNAVAILABLE, for
+            # a missing fact, an ambiguous one, a foreign scope AND an
+            # unreadable store. Those are not separable here, so this stays
+            # unknown rather than becoming a refusal; it is typed only so the
+            # target is reconciled instead of re-resolved to another parent.
+            raise ConsultationTargetEvidenceUnavailable(
+                "canonical consultation target evidence is unavailable"
+            ) from None
         except Exception:
             # Preserve missing/ambiguous owner evidence as unknown, not absence;
             # do not expose SQL, provider identifiers, or dependency diagnostics.
@@ -114,16 +126,16 @@ class ExecutiveConsultationPacketTargetResolver:
         if item is not None and (
             item["consultation_id"] != consultation_id or item["purpose"] != purpose
         ):
-            raise StateConflict("consultation target request identity disagrees")
+            raise ConsultationTargetConflict("consultation target request identity disagrees")
         intent = _find_consultation_event(self._runtime, consultation_id, "INTENT")
         if intent is None:
             if item is None or purpose != "QUESTION":
-                raise StateConflict("consultation target has no admitted party facts")
+                raise ConsultationTargetConflict("consultation target has no admitted party facts")
             parties = self._parties(item)
         else:
             parties = self._parties(intent.payload)
             if item is not None and self._parties(item) != parties:
-                raise StateConflict("candidate disagrees with admitted consultation parties")
+                raise ConsultationTargetConflict("candidate disagrees with admitted consultation parties")
 
         actor = parties[1 if purpose == "QUESTION" else 0]
         identity = self._exact_identity(actor)
@@ -137,7 +149,7 @@ class ExecutiveConsultationPacketTargetResolver:
                 or current.worker_id != actor["worker_id"]
                 or current.session_ref != identity.session_ref
             ):
-                raise StateConflict("new consultation target is not the exact current Attempt")
+                raise ConsultationTargetConflict("new consultation target is not the exact current Attempt")
 
         source = _read_dialogue_source(self._runtime, identity.root_job_id)
         physical_source = _read_physical_source(
@@ -154,16 +166,16 @@ class ExecutiveConsultationPacketTargetResolver:
             or physical.candidate.attempt_id != actor["attempt_id"]
             or physical.candidate.worker_id != actor["worker_id"]
         ):
-            raise StateConflict("physical consultation source disagrees with exact target")
+            raise ConsultationTargetConflict("physical consultation source disagrees with exact target")
         if self._exact_identity(actor) != identity:
-            raise StateConflict("consultation target lineage changed during reconstruction")
+            raise ConsultationTargetConflict("consultation target lineage changed during reconstruction")
         if current is not None and _read_current_target(self._runtime, identity.operation_key) != current:
-            raise StateConflict("current consultation target changed during reconstruction")
+            raise ConsultationTargetConflict("current consultation target changed during reconstruction")
         latest_intent = _find_consultation_event(self._runtime, consultation_id, "INTENT")
         if (intent is not None and latest_intent is None) or (
             latest_intent is not None and self._parties(latest_intent.payload) != parties
         ):
-            raise StateConflict("consultation parties changed during reconstruction")
+            raise ConsultationTargetConflict("consultation parties changed during reconstruction")
 
         facts = {
             "actor_ref": dict(actor),

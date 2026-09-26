@@ -225,3 +225,119 @@ old review workspaces. Do not merge a historical donor branch. Do not replace
 Executive lifecycle/admission, Agent OS continuity, RuntimeBinding, Capacity
 placement or Wake with another communications control plane. Parent mission
 remains incomplete; this checkpoint records a verified source boundary.
+
+---
+
+## Repair round R1 — deterministic destination and resolver-evidence classification
+
+Consumed ruling `#600 5846064875` (one source carrier, Fable integration
+principal) and independent review `#1001 5325831719` (`REQUEST_CHANGES`).
+Source custody for this round is Fable's on this branch only. The donor branch
+`claude/iac1-p1r1-targeted-carrier-20260926` head
+`6a8a3c78e2629ffc2dfac183c80fd2f15b5dbe05` stays donor evidence and was not
+transplanted, cherry-picked or merged; only the smallest missing semantics from
+`3547843e` were consumed. #1001's resolver, stickiness, double-read/fence and
+composed AF_UNIX journey are unchanged.
+
+### What changed
+
+1. **Deterministic destination conflicts leave the outage bucket.** The Relay
+   service *returns* `{"ok": false, "error": {"code": ...}}` verbatim for engine
+   codes — `terminal_response` returns it, and the post-COMMIT collapse narrows
+   only service `ERROR_CODES` — so `THREAD_CONTEXT_MISMATCH` and
+   `THREAD_BINDING_AMBIGUOUS` never arrive as a raised `DialogueServiceError`.
+   Both are now mapped to `ConsultationTargetConflict` (a `StateConflict`) on
+   the send and read edges. Genuine unavailability and `SEND_EFFECT_UNKNOWN`
+   remain reconcile-only; the read edge still fences before classifying, so
+   identity drift continues to outrank a stale refusal.
+
+2. **Resolver evidence failures are classified, not pooled.** Foreign scope and
+   a moved-on-but-readable current Attempt are adjudicated as
+   `ConsultationTargetConflict`. Owner-reader refusals become
+   `ConsultationTargetEvidenceUnavailable`, a `ConsultationPacketCarrierUnknown`
+   subtype: typed so the target is reconciled rather than re-resolved onto a
+   different parent, but still unknown, because real observation uncertainty
+   must not become a safe refusal.
+
+   **Measured limit, deliberately not papered over:** the owner readers carry
+   exactly one code, `WorkspaceReturnError("BINDING_UNAVAILABLE")`, for a
+   missing fact, an ambiguous one, a foreign scope *and* an unreadable store.
+   So `missing`, `ambiguous` and a rotation that leaves no readable Attempt
+   are **not separable here** and stay unknown by construction, not by choice.
+   `test_owner_readers_carry_exactly_one_conflated_refusal_code` pins that
+   conflation and fails the moment an owner adds a distinguishing code, which
+   is the signal to refine the mapping.
+
+3. **Structural guard restored to the incumbent surface.** Both P1-R1 production
+   modules joined `_P1_PRODUCTION_PATHS`. They are absent at
+   `_P1_PROTECTED_BASE`, so `_p1_base_source` now resolves an absent path to an
+   empty base — and *proves* absence with `git cat-file -e` so a `git show`
+   failing for any other reason breaks the guard loudly instead of reading as
+   an empty base.
+
+4. **Production composition pinned, not armed.** No non-test module composes the
+   targeted carrier anywhere in the tree, and `PRODUCTION_PACKET_CARRIAGE`
+   remains `"UNAVAILABLE"`. The pin asserts both, and asserts that any future
+   composition must pass the canonical
+   `ExecutiveConsultationPacketTargetResolver`. The Protocol seam stays open for
+   tests. Production remains disarmed.
+
+### Mutation teeth — eight mutants, all four send/read edges, all killed
+
+Each mutant was proven to change the bytes before its result was trusted, and
+every file was restored byte-identical (asserted, not assumed).
+
+| Deliberate defect | Required discriminator | Verdict |
+| --- | --- | --- |
+| Send-edge refusal check removed | Both codes on `_put`, plus the real AF_UNIX journey | KILLED |
+| Read-edge refusal check removed | Both codes on `_get_targeted` | KILLED |
+| Code set narrowed to one code | `THREAD_BINDING_AMBIGUOUS` on both edges | KILLED |
+| Mapping widened to any code | A non-destination envelope still reconciles | KILLED |
+| Conflict retyped as carrier-unknown | Refusal is not the retryable bucket | KILLED |
+| Owner-evidence handler removed | Reader refusals keep their typed class | KILLED |
+| Unavailable retyped as a refusal | Uncertainty is never a safe refusal | KILLED |
+| Production composition planted | Pin refuses a non-canonical read grant | KILLED |
+
+### Guard reach — measured, not asserted
+
+A `token_file` plant in `company_consultation_targets.py`, run against three
+instruments on the same bytes:
+
+| Instrument | Verdict |
+| --- | --- |
+| Incumbent guard, extended by this repair | **CAUGHT** (rc=1) |
+| #1001's own local adapter guard | MISSED (rc=0) |
+| Incumbent guard with the two paths removed | MISSED (rc=0) |
+
+The second row is why the extension was required rather than optional; the third
+shows the added paths are the load-bearing part.
+
+### Command manifest
+
+```text
+# focused (158 passed)
+python3 -m pytest tests/test_company_consultation_targeted_carrier.py \
+  tests/test_company_consultation_target_resolution.py \
+  tests/test_company_consultation_targeted_dispatch.py \
+  tests/test_company_inbox_iac1.py -rA -p no:randomly
+
+# owning dialogue/consultation/wake/workspace set, 55 files
+# 1871 passed, 3 skipped, 57 subtests passed, rc=0, zero outcome-shaped failures
+python3 -m pytest <55 files> -rA -p no:randomly
+```
+
+Three owning-set files are excluded and named rather than silently dropped:
+`test_workspace_agent_profiles.py` (host lacks `mcp`),
+`test_workspace_agent_return_app.py` and `test_workspace_agent_return_service.py`
+(host lacks `jwt`/PyJWT). They abort collection on import of unrelated
+integrations and touch nothing in this repair. This is not a full-suite receipt.
+
+Source SHA-256 after mutation restoration:
+
+```text
+b7027489e6dab1e6b0d75d1d9413a57d50efd8579f77b548f903df8b60e7d283  integrations/company_consultation_targets.py
+624160db7efcaa4439a1868e1cd061af3fa067b1e2097dc9dcaae9e496946801  integrations/company_consultation_target_resolution.py
+d0061c145360cdba6327aeb3836ca1b3c617dda125f9a9dbb0e07725ecff5538  integrations/company_consultation_dispatch.py
+```
+
+`company_consultation_dispatch.py` is **unchanged** by this round.
