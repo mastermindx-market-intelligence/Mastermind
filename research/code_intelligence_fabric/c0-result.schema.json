@@ -1,0 +1,1218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mastermind.invalid/schema/mastermind.codeintel_c0_result.v2.json",
+  "title": "Mastermind Code Intelligence C0 semantic falsifier result",
+  "description": "Immutable result of the C0 exact-worktree semantic backend falsifier. A decision enum may only be published when BOTH candidates carry non-synthetic coverage of every required language, case and phase: a stand-in server can never produce a backend selection. Winner-consistency that JSON Schema cannot express is enforced by cross_check_result().",
+  "$defs": {
+    "digestTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "packageTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "ecosystem", "package", "version", "binding"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "ecosystem": {"enum": ["python", "npm", "stand_in"]},
+        "package": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "binding": {
+          "type": "string",
+          "pattern": "^(launcher|verified_bundle|argv_file:[1-9][0-9]*)$"
+        }
+      }
+    },
+    "backendIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind", "source_version", "source_commit", "executable_sha256",
+        "language_servers", "configuration_digest", "launcher_name",
+        "canonical_argv", "argv_file_digests", "targets",
+        "dependency_manifests", "provenance"
+      ],
+      "properties": {
+        "kind": {"enum": ["direct_lsp", "serena"]},
+        "source_version": {"type": "string"},
+        "source_commit": {"type": "string"},
+        "executable_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "language_servers": {
+          "type": "array",
+          "items": {
+            "type": "array", "prefixItems": [
+              {"type": "string"},
+              {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            ], "items": false, "minItems": 2, "maxItems": 2
+          }
+        },
+        "configuration_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "launcher_name": {"type": "string", "minLength": 1},
+        "canonical_argv": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "argv_file_digests": {
+          "type": "array",
+          "items": {
+            "type": "array", "prefixItems": [
+              {"type": "integer", "minimum": 1},
+              {"type": "string", "minLength": 1},
+              {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            ], "items": false, "minItems": 3, "maxItems": 3
+          }
+        },
+        "targets": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "array", "prefixItems": [
+              {"type": "string", "minLength": 1},
+              {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              {"enum": ["python", "npm", "stand_in"]},
+              {"type": "string", "minLength": 1},
+              {"type": "string", "minLength": 1},
+              {"type": "string", "pattern": "^(launcher|verified_bundle|argv_file:[1-9][0-9]*)$"}
+            ], "items": false, "minItems": 6, "maxItems": 6
+          }
+        },
+        "dependency_manifests": {
+          "type": "array",
+          "items": {
+            "type": "array", "prefixItems": [
+              {"enum": ["python", "npm"]},
+              {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            ], "items": false, "minItems": 2, "maxItems": 2
+          }
+        },
+        "provenance": {"enum": ["real", "stand_in"]}
+      }
+    },
+    "executionIdentity": {
+      "type": "object",
+      "required": [
+        "candidate", "corpus_id", "language", "provenance", "launcher",
+        "canonical_argv", "argv_file_digests", "targets", "dependency_manifests", "backend_identity",
+        "backend_identity_digest"
+      ],
+      "properties": {
+        "candidate": {"enum": ["direct_lsp", "serena"]},
+        "corpus_id": {"type": "string", "minLength": 1},
+        "language": {"enum": ["python", "typescript"]},
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "derived"],
+          "properties": {
+            "kind": {"enum": ["real", "stand_in"]},
+            "derived": {"const": true}
+          }
+        },
+        "launcher": {"$ref": "#/$defs/digestTarget"},
+        "canonical_argv": {
+          "type": "array", "minItems": 1,
+          "items": {"type": "string", "pattern": "^(?!/).*"}
+        },
+        "argv_file_digests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["index", "name", "sha256"],
+            "properties": {
+              "index": {"type": "integer", "minimum": 1},
+              "name": {"type": "string", "minLength": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "targets": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "#/$defs/packageTarget"}
+        },
+        "dependency_manifests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ecosystem", "sha256"],
+            "properties": {
+              "ecosystem": {"enum": ["python", "npm"]},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "backend_identity": {"$ref": "#/$defs/backendIdentity"},
+        "backend_identity_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_version",
+    "operation_key",
+    "generated_unix_ms",
+    "wave_status",
+    "source",
+    "environment",
+    "corpora",
+    "toolchain",
+    "binding_receipt",
+    "exposed_tool_census",
+    "candidates",
+    "candidate_summaries",
+    "hostile_results",
+    "mutation_kills",
+    "decision_state",
+    "decision_gates",
+    "tie_break",
+    "materiality_band",
+    "primary_cases",
+    "cleanup",
+    "semantic_evidence_digest",
+    "residual_risks",
+    "next_action"
+  ],
+  "properties": {
+    "artifact_version": {
+      "const": "mastermind.codeintel_c0_result.v2"
+    },
+    "operation_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_unix_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "wave_status": {
+      "const": "DISPOSABLE FALSIFIER / PRODUCTION_INERT"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "branch",
+        "head_sha",
+        "base_sha",
+        "changed_paths"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "base_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "protected_pickup_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "changed_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "python_version",
+        "network_policy",
+        "sandbox"
+      ],
+      "properties": {
+        "platform": {
+          "type": "string"
+        },
+        "python_version": {
+          "type": "string"
+        },
+        "network_policy": {
+          "enum": [
+            "enforced_and_attested",
+            "unattested"
+          ]
+        },
+        "sandbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "profile_digest": {
+              "type": "string"
+            },
+            "network_denied": {
+              "type": "boolean"
+            },
+            "attestation": {
+              "type": "string"
+            },
+            "enforced_limits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unenforced_limits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "code": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "corpora": {
+      "type": "array",
+      "minItems": 2,
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "language"
+            ],
+            "properties": {
+              "language": {
+                "const": "python"
+              }
+            }
+          }
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "language"
+            ],
+            "properties": {
+              "language": {
+                "const": "typescript"
+              }
+            }
+          }
+        }
+      ],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "corpus_id",
+          "language",
+          "manifest_digest",
+          "ground_truth"
+        ],
+        "properties": {
+          "corpus_id": {
+            "type": "string"
+          },
+          "language": {
+            "enum": [
+              "python",
+              "typescript"
+            ]
+          },
+          "manifest_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "ground_truth": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "enum": ["committed_answer_key", "derived_external_git_source"]
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "source": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["repository", "commit", "tree", "path", "blob"],
+                "properties": {
+                  "repository": {"type": "string"},
+                  "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                  "tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                  "path": {"type": "string"},
+                  "blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"kind": {"const": "committed_answer_key"}}},
+                "then": {"required": ["sha256"]}
+              },
+              {
+                "if": {"properties": {"kind": {"const": "derived_external_git_source"}}},
+                "then": {"required": ["source"], "not": {"required": ["sha256"]}}
+              }
+            ]
+          }
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python_packages", "npm_packages", "resolution_manifests", "executions"],
+      "properties": {
+        "python_packages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version", "files", "tree_sha256"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "version": {"type": "string", "minLength": 1},
+              "tree_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "files": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "sha256"],
+                  "properties": {
+                    "name": {"type": "string", "minLength": 1},
+                    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "npm_packages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version", "resolved", "integrity"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "version": {"type": "string", "minLength": 1},
+              "resolved": {"type": "string", "minLength": 1},
+              "integrity": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "resolution_manifests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ecosystem", "sha256", "closure_sha256", "provenance"],
+            "properties": {
+              "ecosystem": {"enum": ["python", "npm"]},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "closure_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "provenance": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "executions": {
+          "type": "array",
+          "items": {
+            "allOf": [{"$ref": "#/$defs/executionIdentity"}],
+            "unevaluatedProperties": false
+          }
+        }
+      }
+    },
+    "binding_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_binding_digest",
+        "facade_source_digest",
+        "semantic_schema_digest",
+        "per_execution"
+      ],
+      "properties": {
+        "workspace_binding_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "facade_source_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "semantic_schema_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "per_execution": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {"$ref": "#/$defs/executionIdentity"},
+              {
+                "type": "object",
+                "required": [
+                  "workspace_binding_digest", "facade_source_digest",
+                  "semantic_schema_digest", "backend_kind", "language_server_digests",
+                  "startup_unix_ms", "candidate_tree_before", "candidate_tree_after"
+                ],
+                "properties": {
+                  "workspace_binding_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "facade_source_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "semantic_schema_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "backend_kind": {"enum": ["direct_lsp", "serena"]},
+                  "language_server_digests": {
+                    "type": "array",
+                    "items": {
+                      "type": "array", "prefixItems": [
+                        {"type": "string"},
+                        {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                      ], "items": false, "minItems": 2, "maxItems": 2
+                    }
+                  },
+                  "startup_unix_ms": {"type": "integer", "minimum": 0},
+                  "candidate_tree_before": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                  "candidate_tree_after": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          }
+        }
+      }
+    },
+    "exposed_tool_census": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "string"
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "status",
+          "identity_complete",
+          "identity_failures",
+          "trials",
+          "hard_failures"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "serena",
+              "direct_lsp"
+            ]
+          },
+          "status": {
+            "enum": [
+              "EXERCISED",
+              "UNEXERCISED_MISSING_BUNDLE",
+              "REJECTED_BY_C0"
+            ]
+          },
+          "identity": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "source_version": {
+                "type": "string"
+              },
+              "source_commit": {
+                "type": "string"
+              },
+              "executable_sha256": {
+                "type": "string"
+              },
+              "configuration_digest": {
+                "type": "string"
+              },
+              "launcher_name": {"type": "string"},
+              "canonical_argv": {"type": "array", "items": {"type": "string"}},
+              "argv_file_digests": {
+                "type": "array",
+                "items": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["index", "name", "sha256"],
+                  "properties": {
+                    "index": {"type": "integer", "minimum": 1},
+                    "name": {"type": "string"},
+                    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                  }
+                }
+              },
+              "targets": {"type": "array", "items": {"$ref": "#/$defs/packageTarget"}},
+              "dependency_manifests": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["ecosystem", "sha256"],
+                  "properties": {
+                    "ecosystem": {"enum": ["python", "npm"]},
+                    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                  }
+                }
+              },
+              "provenance": {"enum": ["real", "stand_in"]}
+            }
+          },
+          "identity_complete": {"type": "boolean"},
+          "identity_failures": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "advertised_tool_census": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "case",
+                "corpus_id",
+                "language",
+                "phase",
+                "correct",
+                "expected",
+                "actual",
+                "latency_ms",
+                "synthetic"
+              ],
+              "properties": {
+                "case": {
+                  "enum": [
+                    "O1_definition_live_implementation",
+                    "W1_references_across_files",
+                    "A3_implementations_of_protocol",
+                    "overview_single_file",
+                    "diagnostics_planted_undefined_name",
+                    "terminal_migrate_legacy"
+                  ]
+                },
+                "corpus_id": {"type": "string", "minLength": 1},
+                "language": {
+                  "enum": [
+                    "python",
+                    "typescript"
+                  ]
+                },
+                "phase": {
+                  "enum": [
+                    "cold",
+                    "warm"
+                  ]
+                },
+                "correct": {
+                  "type": "boolean"
+                },
+                "expected": {},
+                "actual": {},
+                "latency_ms": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "synthetic": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "hard_failures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "serena"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "direct_lsp"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "candidate_summaries": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "complete",
+          "identity_complete",
+          "identity_failures",
+          "correctness",
+          "hard_failures"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "serena",
+              "direct_lsp"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "primary_trials": {
+            "type": "integer"
+          },
+          "primary_correct": {
+            "type": "integer"
+          },
+          "useful": {
+            "type": "boolean"
+          },
+          "non_synthetic_trials": {
+            "type": "integer"
+          },
+          "correct": {
+            "type": "integer"
+          },
+          "correctness": {
+            "type": "number"
+          },
+          "hard_failures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "identity_complete": {"type": "boolean"},
+          "identity_failures": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "median_latency_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "hostile_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "check",
+          "outcome"
+        ],
+        "properties": {
+          "check": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "REFUSED_AS_REQUIRED",
+              "ALLOWED",
+              "NOT_RUN"
+            ]
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "mutation_kills": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mutation",
+          "killed_by"
+        ],
+        "properties": {
+          "mutation": {
+            "type": "string"
+          },
+          "killed_by": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "decision_state": {
+      "enum": [
+        "DECIDED",
+        "NON_DECISION"
+      ]
+    },
+    "decision": {
+      "enum": [
+        "SERENA",
+        "DIRECT_LSP",
+        "NO_SAFE_BACKEND"
+      ]
+    },
+    "decision_gates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tie_break": {
+      "type": "string"
+    },
+    "materiality_band": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "primary_cases": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "string"
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scratch_files_before",
+        "removed",
+        "retained_paths"
+      ],
+      "properties": {
+        "scratch_files_before": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scratch_bytes_before": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "retained_paths": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "semantic_evidence_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "blocking_reason": {
+      "type": "string"
+    },
+    "residual_risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_action": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision_state": {
+            "const": "DECIDED"
+          }
+        },
+        "required": [
+          "decision_state"
+        ]
+      },
+      "then": {
+        "required": [
+          "decision",
+          "tie_break"
+        ],
+        "properties": {
+          "candidates": {
+            "items": {
+              "required": ["identity_complete", "identity_failures"],
+              "properties": {
+                "identity_complete": {"const": true},
+                "identity_failures": {"maxItems": 0},
+                "trials": {
+                  "items": {
+                    "properties": {"synthetic": {"const": false}},
+                    "required": ["synthetic"]
+                  },
+                  "allOf": [
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "language",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "language": {
+                            "const": "python"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "language",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "language": {
+                            "const": "typescript"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "phase",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "phase": {
+                            "const": "cold"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "phase",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "phase": {
+                            "const": "warm"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "O1_definition_live_implementation"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "W1_references_across_files"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "A3_implementations_of_protocol"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "overview_single_file"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "case",
+                          "synthetic"
+                        ],
+                        "properties": {
+                          "synthetic": {
+                            "const": false
+                          },
+                          "case": {
+                            "const": "diagnostics_planted_undefined_name"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": ["case", "corpus_id", "language", "phase", "synthetic"],
+                        "properties": {
+                          "synthetic": {"const": false},
+                          "case": {"const": "terminal_migrate_legacy"},
+                          "corpus_id": {"const": "terminal_migrate_legacy"},
+                          "language": {"const": "typescript"},
+                          "phase": {"const": "cold"}
+                        }
+                      }
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "required": ["case", "corpus_id", "language", "phase", "synthetic"],
+                        "properties": {
+                          "synthetic": {"const": false},
+                          "case": {"const": "terminal_migrate_legacy"},
+                          "corpus_id": {"const": "terminal_migrate_legacy"},
+                          "language": {"const": "typescript"},
+                          "phase": {"const": "warm"}
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "required": ["identity_complete", "identity_failures", "trials"]
+            }
+          },
+          "toolchain": {
+            "properties": {
+              "python_packages": {"minItems": 1},
+              "npm_packages": {"minItems": 1},
+              "resolution_manifests": {
+                "allOf": [
+                  {"contains": {"properties": {"ecosystem": {"const": "python"}}, "required": ["ecosystem"]}},
+                  {"contains": {"properties": {"ecosystem": {"const": "npm"}}, "required": ["ecosystem"]}}
+                ]
+              },
+              "executions": {"minItems": 6}
+            }
+          },
+          "corpora": {
+            "contains": {
+              "type": "object",
+              "required": ["corpus_id", "language", "ground_truth"],
+              "properties": {
+                "corpus_id": {"const": "terminal_migrate_legacy"},
+                "language": {"const": "typescript"},
+                "ground_truth": {
+                  "type": "object",
+                  "required": ["kind", "source"],
+                  "properties": {
+                    "kind": {"const": "derived_external_git_source"},
+                    "source": {
+                      "type": "object",
+                      "required": ["repository", "commit", "tree", "path", "blob"],
+                      "properties": {
+                        "repository": {"const": "mastermindx-market-intelligence/mastermind-terminal"},
+                        "commit": {"const": "fadd8b82f03ecaabe8a86d693da89f27be096d9f"},
+                        "tree": {"const": "2ef6840d07c24456fc39e67029c45131fed53b1f"},
+                        "path": {"const": "terminal/lib/workspaceMigrate.ts"},
+                        "blob": {"const": "3b6feb5295d77cefa4f609b4cbafe5e6a68b5565"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision_state": {
+            "const": "NON_DECISION"
+          }
+        },
+        "required": [
+          "decision_state"
+        ]
+      },
+      "then": {
+        "required": [
+          "blocking_reason"
+        ],
+        "not": {
+          "required": [
+            "decision"
+          ]
+        }
+      }
+    }
+  ]
+}
