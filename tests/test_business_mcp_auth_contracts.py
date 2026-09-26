@@ -13,6 +13,7 @@ from integrations.business_mcp_auth.contracts import (
     AuthErrorCode,
     ResourcePolicy,
     VerifiedPrincipal,
+    client_ref_digest,
     load_resource_policy,
     subject_digest,
 )
@@ -49,6 +50,36 @@ def test_subject_digest_is_exact_issuer_subject_sha256() -> None:
     subject = "chairman-opaque"
     expected = hashlib.sha256(f"{issuer}\n{subject}".encode("utf-8")).hexdigest()
     assert subject_digest(issuer=issuer, subject=subject) == expected
+
+
+def test_client_ref_digest_is_exact_issuer_client_sha256() -> None:
+    issuer = "https://identity.example.test/"
+    client_id = "chatgpt-personal-pro"
+    expected = hashlib.sha256(
+        f"{issuer}\nclient\n{client_id}".encode("utf-8")
+    ).hexdigest()
+    assert client_ref_digest(issuer=issuer, client_id=client_id) == expected
+
+
+@pytest.mark.parametrize(
+    ("issuer", "client_id"),
+    [
+        ("", "client"),
+        (" https://identity.example.test/", "client"),
+        ("https://identity.example.test/", ""),
+        ("https://identity.example.test/", " client"),
+        ("https://identity.example.test/", "client "),
+        ("https://identity.example.test/", "bad\nclient"),
+        ("https://identity.example.test/", "x" * 1025),
+    ],
+)
+def test_client_ref_digest_refuses_ambiguous_or_unsafe_text(
+    issuer: str, client_id: str
+) -> None:
+    with pytest.raises(AuthError) as caught:
+        client_ref_digest(issuer=issuer, client_id=client_id)
+    assert caught.value.code is AuthErrorCode.INVALID_POLICY
+    assert caught.value.public_message == "authentication policy refused"
 
 
 @pytest.mark.parametrize(
