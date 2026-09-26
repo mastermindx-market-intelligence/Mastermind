@@ -85,7 +85,7 @@ These are dependency edges, not an all-PR merge barrier. Work/N9 app defects and
 
 ## First production vertical and the capability-probe ordering gap
 
-Keep the Chairman's full vertical as the acceptance scenario. Isolate it with a no-send mode canary, then an already-admitted read/research-only exact-turn/result/restart canary, before enabling autonomous write-capable continuation.
+Keep the Chairman's full mode-adaptive vertical as a later acceptance scenario, not a prerequisite for the first usable conversation. First prove one already-admitted, fixed-mode READ/RESEARCH exact-turn -> canonical result -> selected app result -> restart/reacquisition slice. A no-send mode canary is required before any mode actuation, but mode automation and Secretary invocation must not block this fixed-mode slice. Autonomous write-capable continuation remains a separately reviewed admission extension.
 
 #890 explicitly consumes serviceability receipts and does not discover tools. A browser selector read cannot prove current connector WRITE permission. If no qualified out-of-turn producer can probe the new exact action surface, use exactly one capability-gated continuation: its first work is bounded no-effect discovery/serviceability probing, and effectful work remains prohibited until current positive proof and existing admission are satisfied. A provider turn beginning is not action-bearing worker START. Do not solve the cycle with a dummy write, a hidden extra continuation, or a false schema-presence proof.
 
@@ -125,3 +125,59 @@ Adverse production cases include wrong conversation, duplicate titles, hidden/st
 These upstream source snapshots and author-described capabilities are research evidence, not an assertion that their current systems or this integration were independently production-tested. No upstream implementation or credential material was imported.
 
 Before consuming a positive result, the native owner must recheck its expiry against current time and the exact current binding/document/authority/effect state. Hashing is asynchronous and a returned evidence object is not an enduring send permit. A visible composer with no stop button must not be promoted to positive IDLE evidence; the current census tests already preserve that uncertainty.
+
+## 2026-09-26 integration ruling: selected result first, not a second window system
+
+Current Chairman assignment is end-to-end recovery by Sol after the predecessor chat became inaccessible. The same operation and #989 carrier continue. This ruling changes the implementation sequence, not protected browser/authentication law, another source writer's lease, or production admission.
+
+### Two different content products
+
+The protected `readCurrentWindow({signal})` API is not a selected-ChatGPT-conversation read. `InstalledWindowSource` binds one `ContentObserverProfile` to `job_id`, `attempt_id`, `session_epoch_id`, `process_generation_id`, and `local_turn_id`. `ContentObserverProfiles.web` and `.mac` are different viewer credentials for the SAME admitted source/turn. App selection is compared afterwards by `observedMissionAssociation`; it does not select the source before the read. Preserve these guards. Do not repurpose the two slots into browser accounts, mutate installation profiles on every UI click, or counterfeit native process/turn grants for ChatGPT Web content.
+
+There is already a separate exact selected result product: `WorkspaceReadService._read_result` -> bounded Runtime role-result acquisition -> `project_fabric_role_result` -> `mastermind.workspace_role_result.v1` -> `MissionHost.readResult` / `decodeResultEnvelope`. Its selector is exactly `(work_ref, root_job_id, job_id, attempt_id, result_envelope_digest)`. Use it for the first persisted, completed Web-Sol answer after lawful result sealing. It does not supply live token streaming or arbitrary chat history; those remain later, separately governed bounded observations.
+
+### Source composition experiment
+
+At #989 head `17d9df67464ac7f0d16d152dd2ec215b3a2561f8`, the exact #933 `web_sol_cognition_result.py` from `073646dbd4ae6f7d00fa6e543cdd9cd029f01d05` was loaded without copying or editing its carrier. Its SHA-256 was `afb1029d69e756660ecde8124d2bc64eb93cbb4cc6f137cd8f4df19b5f23b931`.
+
+The existing `tests.test_workspace_result_service.result_owner` fixture produced an actual temporary SQLite Runtime. Only the fixture's work/review raw-result construction was replaced by #933's `build_raw_role_result_observation`; all existing Runtime sealing, completion, bounded acquisition, service projection and frontend decoding remained real implementation code. Process/provider admission remained the existing SYNTHETIC test fixture, not a browser or live provider attestation.
+
+Observed: work and review raw observations were byte/field equivalent to the incumbent form; both crossed canonical Runtime sealing. The selected service read and a repeat read returned the same role content. An incorrect result digest suppressed content. The unmodified TypeScript decoder accepted the real service/socket envelope (3,251 UTF-8 bytes), rejected a wrong work selection, a wrong digest and an oversized response, and preserved the review verdict `reject` with `acceptance=NOT_PROJECTED`.
+
+This proves source/schema interoperability, not browser submission, installed app rendering, actual viewer authorization, runtime-provider qualification or production acceptance. The decisive Runtime/result/service/decoder/fixture blobs are byte-identical between this tested #989 head and protected `58c842d5ab99e29785ec9b4d16ccee67e85e19c4`.
+
+Evidence lives under the existing operation's host evidence directory `result-spine-20260926`: Python process 48913, decoder process 50497. SHA-256: `probe.py` = `f79d40fefebe4c55c33bad97474cc73757b9cb30effebd1c0be1f7d999b1fcbb`; `python-receipt.json` = `a507869eeb6b1d244799def64d6fbfe12f6980bed70349978ee57d7cab298c61`; `decoder-probe.mjs` = `22ab5f2934895ddc3fce1224b1213d10cada390953c9f3e7539997963fead516`; `decoder-receipt.json` = `51254f0e725df0fb0775796d71e90ddaf151287e8aa180fe4723340b51899af6`; `result.json` = `32d4b47161dd9155fd64ee97cbedcf44fcaa9dc216f9766dae57342872cc287e`. These are finite qualification artifacts, not a state store or another provider adapter.
+
+### Remaining production boundary, explicitly not hidden by the experiment
+
+`seal_orchestration_role_result` requires the actual admitted Attempt, lease/fence, session epoch, process-generation identity, TX-5 applied turn, candidate digest and provider-native turn to agree. #933 only constructs the typed observation. It cannot manufacture the missing Web-Sol provider/principal admission. The incumbent Web-Sol/OHF/Runtime owners must specify and qualify the real browser/native-host generation mapping; do not use fixture identities in installation or relax the canonical completion validator.
+
+The first end-to-end cut therefore has four separate checkpoints: (1) real exact browser/runtime admission and fixed-mode turn; (2) one correlated canonical result sealed through its existing owner; (3) the existing selected-result read reaches the authenticated app; (4) app restart re-resolves that result without resubmitting the turn. A pure result bridge is no longer an open schema question, but these real-path obligations remain open.
+
+### Chairman messages, continuation and recovery
+
+A Chairman-authored message is not an extra read scope, a generic browser SEND_TEXT operation, or a fabricated new CEO job for every keystroke. Its eventual closed command must bind the current responsibility, expected RuntimeBinding generation, one immutable operation identity and message digest to the authenticated Chairman principal. Existing Executive admission/effect owners reserve the operation BEFORE browser dispatch; Web-Sol performs only the admitted exact action. Status/result reads reconcile the original operation after uncertain delivery. UI abort, navigation, app restart and token loss do not cancel a possibly dispatched turn.
+
+The initial canary uses the already-bounded READ/RESEARCH assignment/result contracts. General Chairman compose and engineering-capable continuation need their explicit source-law and authorization extension; #953 is not silently widened. The installed read-only app and #836 closed browser command vocabulary remain unchanged until their owners accept that extension.
+
+Preserve the 24,576-byte Web-Sol input limit and the 16,384-byte whole workspace response limit independently. The existing content-over-budget/refusal ladder must remain explicit; do not enlarge limits, silently truncate an answer, or describe omitted content as complete. The first product can show a completed bounded result; live streaming, full-history navigation, two-host operation, Secretary invocation, mode automation, succession and fanout have separate later proofs.
+
+No browser scraping or generic model-output export is authorized by this draft. Any bounded Web-Sol result observation must use the separately reviewed closed contract while preserving the protected generic-action prohibition. The current Pro session selection similarly does not change fleet-wide Pro routing policy.
+
+### Multi-conversation target selection is a separate missing production capability
+
+At #836 `e8d54e6423b3d8a8f450740a9db0c7eff92828ae`, `exact_target_from_census(navigation_binding, census_receipt)` requires cardinality exactly `(1,1,1,0,1,1)`: one initial/final tab, one unique conversation, zero duplicate tabs, one probed tab and one row. It deliberately refuses a profile containing another normal ChatGPT conversation. It also derives its concrete runtime projection from the transport boot nonce. This is a safe single-target canary, not yet the 30–40-chat product.
+
+#546's C3 design already permits content-free inventory/navigation over multiple conversations inside up to four profile adapters. Reuse its census and navigation-match evidence, but do not confuse a navigation match with action authority. For acting on a selected responsibility, `resolve_sol_action_target` already requires the exact Runtime-owned root/CEO alias and current binding snapshot; defaults, titles, recency and caller-supplied aliases do not elect that target.
+
+The production multi-chat extension belongs in #836's existing resolver/transport, consuming the canonical current target before filtering the bounded profile census. It must distinguish multiple UNRELATED conversations (allowed after the explicit extension) from multiple matches for the EXACT bound conversation (refused). The default single-target API must not simply have its cardinality guard removed. A new explicit exact-bound input contract, producer authentication and current-generation checks are required. Missing binding persistence/enrollment must be exposed and repaired through the existing RuntimeBinding owner; a second browser registry or a URL copied out of navigation is not the repair.
+
+Required adverse cases: two different chats in one profile preserve the requested target; duplicate tabs for that same target refuse; wrong profile/adapter refuses; absent/stale canonical root binding refuses; partial or changing census refuses; unrelated tabs never supply the requested chat's auth/generation evidence; transport restart invalidates prior boot-bound evidence; observation refresh never elects a new responsibility owner.
+
+### Completed role result is not an ongoing CEO conversation
+
+The source composition above proves the answer path for one bounded completed work/review role. It does not prove that an arbitrary assistant turn completes the CEO's job, releases its worker, or makes its entire mission terminal. The protected OHF binding projector currently accepts `openai-codex` only; #836 separately provides a storeless `chatgpt-sol` browser binding projection. Do not relabel ChatGPT as Codex to connect them.
+
+For the full Conversation experience, add a reviewed Web-Sol current-turn source variant through the EXISTING content permission/reader owners, carrying the canonical root/session binding, exact admitted turn and visible-response provenance rather than fabricated native-process coordinates. Keep the present native source variant intact. Session selection and per-turn content authorization must be checked before acquisition, again before release, and after UI selection/authentication changes. The app may show a verified terminal turn while the responsibility remains active. No full-history copy, hidden reasoning, generic model-output export or new transcript database is required.
+
+The first bounded role-result canary is a useful early proof, not a reduction of the commissioned product to a worker-results dashboard. Direct Chairman compose, selected live conversation state and controlled multi-turn continuation remain mandatory acceptance items before the program can be called complete.

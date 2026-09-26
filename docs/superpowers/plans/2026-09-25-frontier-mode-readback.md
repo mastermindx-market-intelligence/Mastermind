@@ -295,3 +295,62 @@ Task 8 RED: process 33900, bridge API absent, 0 pass / 1 fail. Initial implement
 Task 8 publication: source/docs commit `9dab78af6d09223cca5fa577da029e51f28c96fd` action `596f885353acdad63120578d3ae9f766b3460b1094ab1ba80fac535318037323` returned APPLIED; push action `832ae8b386d8553bd84ebd512a8a3dc58107064a46b7bb93e884997bd3d72cf5` returned APPLIED with local=remote and clean=true. The protected Secretary static fence remained unchanged; actual worker dispatch/provider invocation and provider/model attestation remain existing-owner responsibilities.
 Task 9 RED: receipt `af7f0a10-dae3-4933-82c2-b3f6e2de9191`, transition suite 47 total = 24 prior PASS / 23 new FAIL solely because `prepareModeEffortActionCandidate` was absent. Focused GREEN: process 54450, 47/47. Cross-surface process 54896: Secretary/worker aggregate 368/368, Web-Sol mode/census 206/206, Python/JS syntax + `git diff --check` + exact twelve-file scope PASS. READY candidates remain `action_authorized=false`, `browser_mutation_performed=false`, `post_action_readback_required=true`, `capability_reprobe_required=true`, `exact_owner_admission_required=true`; no #836 protocol/background/content/native path was changed.
 Task 9 publication: source/docs commit `f1b3b1a6816c1f16e88f1c534923078a05b02e33` action `f621019457456f7fd310da81b0c2b3a5a097ba392d265be38fba7b41dd04ee77` returned APPLIED; push action `96adfb3325a6e122598ea39078e12fd749d169cd324b2262e0e8c167a387232d` returned APPLIED with local=remote and clean=true. No `SurfaceAction`, manifest, background, content, native-host, RuntimeBinding or browser effect was changed; #836 remains the sole future action-integration owner.
+
+## Integration-first continuation — 2026-09-26
+
+This continuation implements the new sections in `docs/superpowers/specs/2026-09-25-frontier-company-convergence.md`. Tasks 1–9 remain preserved. The next work is consumer/provider integration, not another independent Secretary or mode reducer. Existing source custody and protected law still gate each modifying path; this plan does not transfer #836, app, content-reader or Runtime writers.
+
+### Task 10 — prove the existing selected-result path (completed, source-only)
+
+Inputs: #933 `web_sol_cognition_result.py` at `073646dbd4ae6f7d00fa6e543cdd9cd029f01d05`; #989 consumer/test source at `17d9df67464ac7f0d16d152dd2ec215b3a2561f8`, with decisive blobs verified identical to protected `58c842d5ab99e29785ec9b4d16ccee67e85e19c4`.
+
+- [x] Substitute only the existing fixture's work/review raw-observation constructor with #933 `build_raw_role_result_observation`; assert exact equality with the incumbent raw form.
+- [x] Complete through actual temporary SQLite Runtime sealing and the unchanged workspace selected-result service. Preserve the existing synthetic process/provider-admission fixture label.
+- [x] Prove repeat read returns the same content and a wrong digest releases no content.
+- [x] Feed the real service body through unmodified `decodeResultEnvelope` and `decodeResultSocketEnvelope`; prove wrong selection/digest and oversized-body refusal, and preserve review reject / acceptance NOT_PROJECTED.
+- [x] Retain executable probes, result and hashed receipts under the existing operation evidence directory `result-spine-20260926`. Python 48913 and Node 50497 passed.
+
+This is a compatibility experiment, not newly implemented production behavior, a repository-wide regression run, installed UI proof, or permission to fake Web provider admission.
+
+### Task 11 — exact bound conversation inside a multi-chat profile (#836 owner)
+
+Source paths: `integrations/chairman_surfaces/web_sol_runtime_binding.py`, `tests/test_web_sol_runtime_binding.py`, and the incumbent native/client call sites only after current source-custody recovery. Inputs remain the existing `SessionTargetRegistry`, `RuntimeBindingSnapshot`, navigation profile, census receipt and native boot nonce. No new registry, persistent selection file, browser controller or alternate branch is needed.
+
+Proposed source API for review: `resolve_bound_target_from_census(*, root_job_id, registry, binding_snapshot, navigation_binding, census_receipt, boot_nonce) -> WebSolRuntimeBindingLease`. This is a read-only target projection, not action admission. First call the existing `resolve_sol_action_target(..., actor_binding=None)` and require a RESOLVED exact root/CEO binding. Do not accept a caller-elected alias or fingerprint as authority.
+
+For each bounded census row, reuse `derive_runtime_binding_wire` with the canonical alias and current native boot nonce. Match its complete identity against the current canonical binding; never reverse a hash, choose the first/latest row, or promote a navigation URL. Require exactly one matching conversation and retain duplicate-target, profile/adapter, completeness, freshness and selected-row health gates. Preserve the existing one-conversation API as-is until all incumbent callers deliberately adopt the new exact-bound contract. A projection does not authorize a send; re-resolve current owner/effect/surface state immediately before action.
+
+- [ ] Recover the existing #836 workspace/writer through its current owner; preserve all bytes and unresolved effects. Reconcile the known stale local registration and sole test conflict without replacement branch or blind reset. A technical writer-gate evidence receipt is not a writer release.
+- [ ] Write failing tests for canonical target B in a profile containing unrelated A and B; row order/title changes must not change B. Include wrong/missing/stale root binding, duplicate B, wrong adapter/profile, incomplete/moving inventory and old boot nonce.
+- [ ] Implement the exact-bound projection in the incumbent file using the existing target resolver and binding derivation, with no I/O and no authority claim. Prove that another chat's health never qualifies the target.
+- [ ] Run existing `test_web_sol_runtime_binding.py`, transport/census/continuation suites and the new cases; preserve the original single-target refusals. Publish through the same #836 source carrier with its current review obligations.
+
+This task removes a real product blocker: the current #836 cardinality guard rejects every profile with two distinct ChatGPT conversations. #546 C3 inventory/navigation is complementary evidence, not authority and not a substitute for this exact-target action qualification.
+
+### Task 12 — fixed-mode submit/result through incumbent admission and transport
+
+Source owners: #836 `_web_sol_protocol_impl.py`, `_web_sol_native_host_impl.py`, `web_sol_client.py`, extension `background.js` / `content.js`; #936 assignment; #953 `web_sol_cognition_transport.py`; #958 `cognition_transport_core.js`; #933 `web_sol_cognition_result.py`. Runtime sealing remains `OperatorHarnessRegistry.seal_orchestration_role_result`, not a new completion writer.
+
+Consumes: Task 11 exact target; existing admitted READ/RESEARCH assignment; `build_assignment_submit_payload(...)`; `renderAssignmentPrompt(...)`; `reduceConversation(...)`; `build_raw_role_result_observation(...)`. Produces: one existing-owner operation/result identity and a canonical result seal, NOT a second transcript store.
+
+- [ ] Reconcile the closed browser-law extension through #473/#836 and the real Web-Sol-to-Runtime admission mapping. The protected OHF projector currently accepts openai-codex, while Web-Sol uses a separate chatgpt-sol projection: never falsify provider, process, principal or generation evidence. Preserve the existing Runtime completion validator.
+- [ ] Add failing tests for exact admitted assignment dispatch and correlated return using the incumbent extension/native integration harness, including wrong binding/turn, prior active turn, duplicate response, expired admission and restart after uncertain dispatch.
+- [ ] Extend the incumbent closed protocol for the reviewed assignment/result operations; carry existing #953 payloads, invoke #958 reduction, and feed #933 output into the existing result owner. Never expose generic SEND_TEXT, READ_TRANSCRIPT, EXECUTE_JS or caller-selected URLs.
+- [ ] On pre-dispatch refusal report no effect. Once dispatch may have occurred, retain the same operation and reconcile it; UI abort or native disconnect cannot create a second send. Complete the existing owner transition only after matching native evidence, never from rendered text alone.
+- [ ] Verify the full current-head tests and exact browser canary only after installation/admission permissions are proven. The prior explicitly refused live-census action stays held until genuine permitted recovery, not merely a mode change.
+
+### Task 13 — authenticated selected conversation consumer, without confusing job and turn
+
+Existing paths: `app/mastermind_os/src/host.ts`, `App.tsx`, `result.ts`, `workspace-contract.ts`, web/native auth and Rust commands; `control_plane/workspace_read_service.py`; `common/executive_content_contract.py`; `integrations/mastermind_steward_app/installed.py`, `installed_profiles.py`, `live_window.py`. These have separate current owners; acquire/reconcile their source custody rather than editing them from the #989 leaf workspace. Preserve #956's denied repair lane and unrelated Work/N9 work.
+
+- [ ] For the early bounded completed-role canary, obtain the exact five-field result selector from the existing Mission result_refs and call `MissionHost.readResult`; prove the actual authenticated app renders that same result. Do not infer read permission from a successful fixture.
+- [ ] Add test-first selected Web-Sol current-turn content as a separately reviewed variant in the existing content permission/reader contracts. Bind exact canonical responsibility/session/turn before acquisition and before release; retain the native profile variant unchanged. A terminal assistant turn must not mark the ongoing CEO mission COMPLETE.
+- [ ] Add the reviewed fixed Chairman-message command to the existing authenticated host/backend path with a separate, explicitly admitted write permission. Bind principal + expected current target + immutable operation/message digest. Read/content tokens never grant send permission, and a browser action result is not lifecycle acceptance.
+- [ ] Add UI tests for changing responsibility while a read/send is pending, sign-out, stale generation, unknown dispatch effect, denial, and bounded/over-budget response. Cancel rendering of stale reads, not a possibly dispatched provider effect.
+- [ ] Prove installed app restart re-resolves the selected responsibility and original operation/result with no resubmission. Then show two distinct conversations in one managed profile without title/recency routing. This is not yet two-host fleet proof.
+
+### Later acceptance, not prerequisites for the first round trip
+
+After the fixed-mode interaction is real: Secretary shadow invocation over actual completed-turn cases; guarded same-session continuation; separately qualified mode actuation/readback and capability re-probe; one-successor recovery; two-child fanout; then multi-host placement. All remain mandatory for full autonomy, but a Secretary evaluator or mode planner must not be the substitute for a usable conversation path.
+
+Review focus across Tasks 11–13: multiple unrelated chats versus duplicate exact target; authentic Web binding versus fabricated native/Codex admission; completed role versus completed turn; aborted UI versus uncertain provider effect; and 24,576-byte Web result versus 16,384-byte workspace response. Each has explicit tests above. Every evidence claim must identify source-only, installed, provider-observed or production-accepted scope.
