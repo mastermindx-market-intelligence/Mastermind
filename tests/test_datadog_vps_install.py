@@ -72,7 +72,9 @@ def test_installer_never_enables_high_authority_datadog_features() -> None:
     assert "DD_APM_INSTRUMENTATION_ENABLED=host" in text
     assert "DD_APM_INSTRUMENTATION_LIBRARIES" in text
     assert "SSI_PREEXISTING" in text
-    assert "dd-host-install --uninstall" in text
+    assert "DD_HOST_INSTALL_BIN" in text
+    assert "--uninstall" in text
+    assert "ensure_ssi_armed" in text
     assert "ssi_is_armed" in text
     assert "grep -Fq '/opt/datadog/apm/inject/launcher.preload.so'" not in text
     assert "ROLLBACK_ARMED=1" in text
@@ -119,6 +121,61 @@ def test_ssi_detection_rejects_unrelated_preload_library(tmp_path: Path) -> None
     )
     assert result.returncode == 1
     assert result.stdout.strip() == "not_armed"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_ssi_rearm_invokes_datadog_host_installer_when_packages_are_already_present(tmp_path: Path) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("", encoding="utf-8")
+    marker = tmp_path / "invoked"
+    installer = tmp_path / "dd-host-install"
+    installer.write_text(
+        "#!/bin/sh\nprintf '%s\n' '/run/datadog-apm-inject/launcher.preload.so' > \"$SSI_PRELOAD_FILE\"\n"
+        "printf invoked > \"$MARKER\"\n",
+        encoding="utf-8",
+    )
+    installer.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--ensure-ssi-only"],
+        cwd=ROOT,
+        env={**os.environ, "SSI_PRELOAD_FILE": preload.as_posix(), "DD_HOST_INSTALL_BIN": installer.as_posix(), "MARKER": marker.as_posix()},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == "armed"
+    assert marker.read_text(encoding="utf-8") == "invoked"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_ssi_rearm_does_not_reinstrument_when_preload_is_already_armed(tmp_path: Path) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("/run/datadog-apm-inject/launcher.preload.so\n", encoding="utf-8")
+    installer = tmp_path / "must-not-run"
+    installer.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+    installer.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--ensure-ssi-only"], cwd=ROOT,
+        env={**os.environ, "SSI_PRELOAD_FILE": preload.as_posix(), "DD_HOST_INSTALL_BIN": installer.as_posix()},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "armed"
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
+def test_ssi_rearm_fails_if_host_installer_returns_success_without_arming_preload(tmp_path: Path) -> None:
+    preload = tmp_path / "ld.so.preload"
+    preload.write_text("", encoding="utf-8")
+    installer = tmp_path / "false-success"
+    installer.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    installer.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "scripts/install_datadog_vps.sh", "--ensure-ssi-only"], cwd=ROOT,
+        env={**os.environ, "SSI_PRELOAD_FILE": preload.as_posix(), "DD_HOST_INSTALL_BIN": installer.as_posix()},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 1
+    assert result.stdout.splitlines()[-1] == "not_armed"
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash required")
