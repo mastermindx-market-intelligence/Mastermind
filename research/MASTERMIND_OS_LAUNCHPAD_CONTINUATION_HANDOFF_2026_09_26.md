@@ -6,7 +6,7 @@ Source carrier: [PR #1007](https://github.com/mastermindx-market-intelligence/Ma
 Protected source refreshed to `a31f49f4056943124cc0e7e42349e46feee444c7` on 2026-09-26.
 The same-commit Skillpack procedures were reread; the protected refresh changed only an unrelated recovery test.
 
-**Mission incomplete.** This carrier prepares isolated client components. It does not install an application, expose an executable launch route, activate a runtime, or prove a product journey. `App.tsx`, `host.ts`, native registration, current-window capabilities and all backend/service paths remain outside this source delta.
+**Mission incomplete.** This carrier contains reviewed client components and their App/host composition. It does not install an application, activate a runtime, or prove a product journey. Native registration, current-window capabilities and backend/service paths remain outside this source delta. The production command binding is still absent.
 
 ## Delivery and ownership
 
@@ -28,6 +28,12 @@ Do not persist prompt text or credentials in a pending-operation hint. An accept
 
 ## Missing production bindings
 
+The existing product integrator released six client paths on this same carrier: `App.tsx`/test, `host.ts`/test and the new `orchestration/host-command-bindings.ts`/test. `main.tsx` remains unchanged. The optional complete binding injects the accepted command port, pointer store, current owner view/subscription and effect-free launch/message/stop intent mappers. The App never invents a catalog, target key or repository grant. Commands require a complete binding, signed-in owner context and current scope/generation. Absent composition presents `COMMAND_ROUTE_UNAVAILABLE`.
+
+Independent external GLM review R5 approved the final candidate after two bounded App repairs. Its terminal process receipt `rs_20260926T225508Z_43589` records completion at 23:02:23Z, full capture and zero residual processes. Ten source hashes remained stable. Verification: 84 focused tests, 522 candidate tests plus one inherited skip, 24 private regressions (546 combined plus one skip), typecheck and both web/native-mode Vite builds. These builds are not native application installation evidence. Report SHA-256: `61e2ad0b39b838f928a23da2b350f296579ed92943eabc8e7d8d3370fc004b56`; authoritative raw hash receipts correct a transcription typo in the report's `main.tsx` row.
+
+App guards bind recovery to the current command-binding identity and let a stale completion release only its own pending action. Independent mounted tests prove mismatched operation keys remain unknown and exact-key recovery sends no extra submit. Binding replacement with a different store cannot recover an orphaned old-store pointer; production owners must preserve the required store/epoch semantics. Review approval does not supply that owner implementation.
+
 The external source census traced real producer paths, rather than searching only for proposed method names:
 
 | Needed capability | Current evidence | Required owner return |
@@ -41,22 +47,24 @@ The external source census traced real producer paths, rather than searching onl
 
 Existing `MissionHost` has five read operations. The current-window projection explicitly has `send:false`, `provider_control:false`, and `history:false`; preserve them. Preserve the full result selector: `workRef`, `rootJobId`, `jobId`, `attemptId`, `resultEnvelopeDigest`. Do not submit one intent across multiple transport identity namespaces.
 
-The narrow request to the actual backend owner is [#600 comment 5846736912](https://github.com/mastermindx-market-intelligence/Mastermind/pull/600#issuecomment-5846736912). It asks for the existing producer or precise missing composition owner; it does not authorize a competing backend or transfer custody.
+The actual backend owner's [producer contract](https://github.com/mastermindx-market-intelligence/Mastermind/pull/600#issuecomment-5850406467) and subsequent corrections are consumed. Existing v3 mission reads support selection of the same root without new submission; result reads require all five identity fields. Limits are 2,000,000 decimal bytes for mission responses, 16,384 for results and 8,192 for requests. A queued submit is not a dispatched parent; unknown submit effects require exact reconciliation without blind retry.
+
+The existing product integrator owns the runtime source lane and dependency #996. Its accepted architecture direction uses one aggregation root and the sole plan-role child with explicit read-only profile `operator.appserver.interactive.v1`. That profile alone permits a finite eight sequential turns through existing BEGIN_TURN; ordinary planner rules remain unchanged. An unknown or applied-but-uncollected turn blocks another turn. Sealed plan identity remains immutable. Repository work runs in a separate sealed worker with atomic worker/physical reservation and a broker UID different from the parent. Supervisor/COO/service ownership fences and the later admitted ingress remain necessary. Architecture review and a dependency merge are source evidence, not runtime installation or admission. No second backend/root or Wake-as-user-message shortcut is authorized.
 
 ## Installed/authentication boundary
 
 Read-only checks found the registered Codex Executive MCP at loopback port 8443, but initialize returned 401. The product owner separately reported the installed MCP release `bf764f494b9cd0ecede6234bb472c3344c8e77cc`, disabled control service, and no installed Mastermind app. None is an admitted launch path.
 
-The legacy #633 DCR attempt remains `EFFECT_UNKNOWN`. Its marker must not be deleted or retried, and no alternate client/account may substitute for reconciliation. The required next auth evidence is an authoritative tenant-admin census for that exact uncertain client. The existing browser is at Auth0 login; authentication has not been completed. #999 and #1000 are source-only adjacent carriers, not installed permissions.
+The correct Auth0 tenant administrator browser session is authenticated. The current eight-client census, 236 historical events across five pages, and original Keychain metadata timestamp (2026-09-14T18:26:28Z) are receipted. They do not prove historical absence of the exact uncertain registration. The legacy #633 DCR attempt remains `ABSENCE_UNPROVEN / EFFECT_UNKNOWN`; original-owner adjudication is still required. Do not redo login/census, delete its marker, retry registration, extract credentials, mutate clients/grants or substitute accounts. #999 and #1000 are source-only adjacent carriers, not installed permissions. No current human sign-in action is pending.
 
 ## Continuation
 
 1. Consume the exact-head independent review and CI evidence on #1007; repair on this same carrier. Keep source acceptance separate from product acceptance.
 2. Obtain the narrow producer/runtime/grant binding from its current owner. Resolve the legacy auth effect through the approved owner before any retry.
-3. Adapt the existing app host to that single route after shared-path custody is confirmed. No additional queue, scheduler, worker lifecycle or transcript store.
+3. Supply the reviewed App/host composition with that single admitted production route after source/runtime custody is confirmed. No additional queue, scheduler, worker lifecycle or transcript store.
 4. Prove the actual app journey and adverse cases on one supported target. Include same-root reopen, duplicate/unknown submission, stale auth/selection, result identity, scoped stop and parent consumption.
 5. Publish exact build/install/runtime receipts and close worker/source custody truthfully. Until then, do not mark the mission complete.
 
-Coordination is the existing [#mastermindosbuild thread](https://mastermindxgroup.slack.com/archives/C0C47UNNF3R/p1790428520458669). The native hourly heartbeat `mastermind-os-build-coordination` is registered and active; its future scheduled execution is not itself proven. It stays quiet on unchanged state and resumes coordination on material owner returns.
+Coordination is the existing [#mastermindosbuild thread](https://mastermindxgroup.slack.com/archives/C0C47UNNF3R/p1790428520458669). The same heartbeat `mastermind-os-build-coordination` temporarily runs every five minutes while external actors execute; restore hourly when only external gates remain. Scheduled Slack reads have succeeded; future delivery is not guaranteed. It stays quiet on unchanged state and resumes authorized work on material returns. The durable local `CHECKPOINT.md` is chronological: use its latest section for current worker identity, CI, cursors and next action.
 
 Detailed immutable worker reports, hashes, test logs and process receipts are retained on the external volume at `/Volumes/Mastermind/transfers/mastermind-os-orchestrator-launchpad-20260926-sol-001`. They are local evidence, not portable runtime authority. PR comments carry the source review verdicts and exact candidate identities.

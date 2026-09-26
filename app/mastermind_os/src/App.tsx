@@ -6,6 +6,28 @@ import type {
 import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  OperationController,
+  type OperationKind,
+  type OperationState,
+} from "./orchestration/operation-controller";
+import {
+  LaunchOrchestrator,
+  type LaunchForm,
+} from "./orchestration/ui/LaunchOrchestrator";
+import { SessionWorkspace } from "./orchestration/ui/SessionWorkspace";
+import {
+  COMMAND_ROUTE_UNAVAILABLE,
+  completeOrchestratorCommandBinding,
+  launchIntentFromBinding,
+  messageIntentFromBinding,
+  readCommandView,
+  readOwnerContext,
+  sessionMatchesSelection,
+  stopIntentFromBinding,
+  subscribeCommandView,
+  type OrchestratorCommandBinding,
+} from "./orchestration/host-command-bindings";
+import {
   allEvidence,
   decodeMission,
   decodeMissionv3,
@@ -928,6 +950,30 @@ export function App() {
     ),
     invalidation = useRef(0),
     pairAbort = useRef<AbortController | null>(null),
+    selectionSeq = useRef(0),
+    commandSlot = useRef<{
+      controller: OperationController;
+      /** Binding object this controller was created from; identity matters. */
+      binding: OrchestratorCommandBinding;
+      principalScope: string;
+      generation: string;
+    } | null>(null),
+    pendingCommand = useRef<{
+      generation: string;
+      principalScope: string;
+      /** Binding this pending was dispatched under; identity matters. */
+      binding: OrchestratorCommandBinding;
+      kind: OperationKind;
+      selectionSeq: number;
+      complete: (outcome: { status: "accepted" } | { status: "refused" }) => void;
+    } | null>(null),
+    [viewTick, setViewTick] = useState(0),
+    [commandStatus, setCommandStatus] = useState<OperationState | null>(null),
+    [heldKind, setHeldKind] = useState<OperationKind | null>(null),
+    // True only while a Check-status recover() is actually in flight. A
+    // static checking/PENDING_POINTER hold (a persisted pointer with no
+    // recovery promise) is NOT busy — its recovery control stays usable.
+    [recoverInFlight, setRecoverInFlight] = useState(false),
     previousAuth = useRef<string | null>(
       authState ? JSON.stringify(authState) : null,
     ),
@@ -959,6 +1005,66 @@ export function App() {
     () => ({ selection, authRevision, missionV3 }),
     [selection, authRevision, missionV3],
   );
+  const commandBinding = completeOrchestratorCommandBinding(
+    window.MastermindMissionHost?.commandBinding,
+  );
+  const commandView = commandBinding ? readCommandView(commandBinding) : null;
+  void viewTick;
+  const signedIn = authState?.status === "signed_in";
+  const ownerContext =
+    signedIn && commandBinding
+      ? readOwnerContext(commandBinding.port)
+      : null;
+  const commandReady = !!commandBinding && signedIn && !!ownerContext;
+  const canLaunch =
+    commandReady &&
+    !!commandView &&
+    commandView.projects.length > 0 &&
+    commandView.profiles.length > 0;
+  const sessionExact =
+    commandReady &&
+    sessionMatchesSelection(commandView?.session ?? null, selection);
+  useEffect(() => {
+    if (!commandBinding) return;
+    return subscribeCommandView(commandBinding, () =>
+      setViewTick((n) => n + 1),
+    );
+  }, [commandBinding]);
+  useEffect(() => {
+    if (!commandBinding || !ownerContext) {
+      if (commandSlot.current) {
+        commandSlot.current.controller.invalidate();
+        commandSlot.current = null;
+      }
+      return;
+    }
+    const cur = commandSlot.current;
+    // One controller per owner epoch AND per binding object: a replaced
+    // binding supersedes the route it carried even when the owner context it
+    // reports is unchanged, so view churn on the same binding keeps this
+    // controller while a swap invalidates it before the next dispatch.
+    if (
+      cur &&
+      cur.principalScope === ownerContext.principalScope &&
+      cur.generation === ownerContext.generation &&
+      cur.binding === commandBinding
+    )
+      return;
+    if (cur) cur.controller.invalidate();
+    commandSlot.current = {
+      controller: new OperationController(
+        commandBinding.port,
+        commandBinding.store,
+      ),
+      binding: commandBinding,
+      principalScope: ownerContext.principalScope,
+      generation: ownerContext.generation,
+    };
+  }, [
+    commandBinding,
+    ownerContext?.principalScope,
+    ownerContext?.generation,
+  ]);
   const currentResultContext = useRef(resultContext);
   currentResultContext.current = resultContext;
   const resultController = useRef<AbortController | null>(null);
@@ -987,6 +1093,13 @@ export function App() {
         const serialized = JSON.stringify(state);
         if (serialized === previousAuth.current) return;
         previousAuth.current = serialized;
+        commandSlot.current?.controller.invalidate();
+        const pending = pendingCommand.current;
+        if (pending) {
+          pending.complete({ status: "refused" });
+          pendingCommand.current = null;
+        }
+        setHeldKind(null);
         bumpInvalidation();
         setAuthState(state);
         setAuthRevision((n) => n + 1);
@@ -1194,6 +1307,8 @@ export function App() {
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
+      selectionSeq.current += 1;
+      commandSlot.current?.controller.invalidate();
       bumpInvalidation();
       setWindowDocument(null);
       setAssociation(null);
@@ -1409,6 +1524,8 @@ export function App() {
           : notice,
     open = (w: string, r: string | null) => {
       if (r) {
+        selectionSeq.current += 1;
+        commandSlot.current?.controller.invalidate();
         bumpInvalidation();
         setWindowDocument(null);
         setAssociation(null);
@@ -1430,6 +1547,321 @@ export function App() {
         setActive("Mission Workspace");
       }
     };
+  const settleCommand = (
+    state: OperationState,
+    bindingAtStart: OrchestratorCommandBinding,
+  ) => {
+    const pending = pendingCommand.current;
+    // Adjudicate against the live route, not the captured one: a binding
+    // object that was replaced — even by one carrying the same owner scope
+    // and generation — supersedes the dispatch it received. Its receipt may
+    // not navigate, may not complete a newer action, and may not publish a
+    // terminal admission over the route the user now sees.
+    const liveBinding = completeOrchestratorCommandBinding(
+      window.MastermindMissionHost?.commandBinding,
+    );
+    if (liveBinding !== bindingAtStart) {
+      // A superseded route's receipt may release only the pending it
+      // dispatched. A newer pending started under the replacement binding
+      // belongs to its own route's receipt: publish nothing and release
+      // nothing here.
+      if (pending && pending.binding === bindingAtStart) {
+        pending.complete({ status: "refused" });
+        pendingCommand.current = null;
+        setHeldKind(null);
+      }
+      return;
+    }
+    setCommandStatus(state);
+    if (!pending) return;
+    const liveAuth = window.MastermindMissionHost?.auth?.getState();
+    const ctx = readOwnerContext(bindingAtStart.port);
+    if (liveAuth?.status !== "signed_in" || !ctx) return;
+    if (
+      ctx.generation !== pending.generation ||
+      ctx.principalScope !== pending.principalScope
+    ) {
+      pending.complete({ status: "refused" });
+      pendingCommand.current = null;
+      setHeldKind(null);
+      return;
+    }
+    if (state.status !== "accepted" && state.status !== "refused") {
+      setHeldKind(pending.kind);
+      return;
+    }
+    if (state.status === "accepted" && pending.kind === "launch") {
+      if (pending.selectionSeq !== selectionSeq.current) {
+        pending.complete({ status: "refused" });
+        pendingCommand.current = null;
+        setHeldKind(null);
+        return;
+      }
+      const sel = state.missionSelection
+        ? normalizeSelection(state.missionSelection)
+        : null;
+      if (sel) open(sel.workRef, sel.rootJobId);
+    }
+    pending.complete({ status: state.status });
+    pendingCommand.current = null;
+    setHeldKind(null);
+  };
+  const beginCommand = (
+    kind: OperationKind,
+    intent: ReturnType<typeof launchIntentFromBinding>,
+    onComplete: (outcome: { status: "accepted" } | { status: "refused" }) => void,
+  ) => {
+    const binding = completeOrchestratorCommandBinding(
+      window.MastermindMissionHost?.commandBinding,
+    );
+    const liveAuth = window.MastermindMissionHost?.auth?.getState();
+    const ctx = binding ? readOwnerContext(binding.port) : null;
+    if (!binding || liveAuth?.status !== "signed_in" || !ctx || !intent) {
+      onComplete({ status: "refused" });
+      return;
+    }
+    if (pendingCommand.current) {
+      // Another action is already held for this composition: refuse the NEW
+      // callback exactly once so its own guard releases immediately. The
+      // original held callback, pointer, and guard are never replaced or
+      // released here — only its own receipt may settle them.
+      onComplete({ status: "refused" });
+      return;
+    }
+    let controller = commandSlot.current?.controller ?? null;
+    if (
+      !commandSlot.current ||
+      commandSlot.current.binding !== binding ||
+      commandSlot.current.principalScope !== ctx.principalScope ||
+      commandSlot.current.generation !== ctx.generation
+    ) {
+      commandSlot.current?.controller.invalidate();
+      controller = new OperationController(binding.port, binding.store);
+      commandSlot.current = {
+        controller,
+        binding,
+        principalScope: ctx.principalScope,
+        generation: ctx.generation,
+      };
+    }
+    if (!controller) {
+      onComplete({ status: "refused" });
+      return;
+    }
+    pendingCommand.current = {
+      generation: ctx.generation,
+      principalScope: ctx.principalScope,
+      binding,
+      kind,
+      selectionSeq: selectionSeq.current,
+      complete: onComplete,
+    };
+    setHeldKind(kind);
+    void Promise.resolve()
+      .then(() => controller.begin(intent))
+      .then((state) => settleCommand(state, binding))
+      .catch(() => {
+        const current = controller.getState();
+        if (current.status === "unknown") settleCommand(current, binding);
+        else setHeldKind(kind);
+      });
+  };
+  const checkCommandStatus = () => {
+    if (recoverInFlight) return;
+    const binding = completeOrchestratorCommandBinding(
+      window.MastermindMissionHost?.commandBinding,
+    );
+    const liveAuth = window.MastermindMissionHost?.auth?.getState();
+    const ctx = binding ? readOwnerContext(binding.port) : null;
+    const slot = commandSlot.current;
+    if (!binding || liveAuth?.status !== "signed_in" || !ctx || !slot) return;
+    if (
+      slot.generation !== ctx.generation ||
+      slot.principalScope !== ctx.principalScope ||
+      slot.binding !== binding
+    )
+      return;
+    // Read-only recovery: recover() resolves through readOperation only and
+    // never prepares or submits. The control is disabled exactly while this
+    // asynchronous recovery is in flight — not for a static held pointer.
+    setRecoverInFlight(true);
+    void Promise.resolve()
+      .then(() => slot.controller.recover())
+      .then((state) => settleCommand(state, binding))
+      .catch(() => {})
+      .finally(() => setRecoverInFlight(false));
+  };
+  const commandBusy =
+    commandStatus?.status === "submitting" ||
+    commandStatus?.status === "checking";
+  const showCheckStatus =
+    !!heldKind &&
+    commandStatus?.status !== "accepted" &&
+    commandStatus?.status !== "refused" &&
+    commandStatus?.status !== "submitting";
+  const checkStatusControl = showCheckStatus ? (
+    <div className="form-actions">
+      {commandStatus?.reason ? <code>{commandStatus.reason}</code> : null}
+      <button type="button" onClick={checkCommandStatus} disabled={recoverInFlight}>
+        Check status
+      </button>
+    </div>
+  ) : null;
+  const commandPanel =
+    canLaunch && commandView ? (
+      <>
+        <LaunchOrchestrator
+          projects={commandView.projects}
+          profiles={commandView.profiles}
+          submitting={heldKind === "launch" && commandBusy}
+          error={
+            commandStatus?.status === "refused"
+              ? commandStatus.reason
+              : undefined
+          }
+          onSubmit={(form: LaunchForm, onComplete) => {
+            const binding = completeOrchestratorCommandBinding(
+              window.MastermindMissionHost?.commandBinding,
+            );
+            const liveAuth = window.MastermindMissionHost?.auth?.getState();
+            const ctx = binding ? readOwnerContext(binding.port) : null;
+            if (!binding || liveAuth?.status !== "signed_in" || !ctx) {
+              onComplete({ status: "refused" });
+              return;
+            }
+            const intent = launchIntentFromBinding(binding, form);
+            beginCommand("launch", intent, onComplete);
+          }}
+          onCancel={() => {}}
+        />
+        {heldKind === "launch" ? checkStatusControl : null}
+      </>
+    ) : (
+      <section className="card">
+        <div className="section-title">
+          <div>
+            <h2>Launch Orchestrator</h2>
+          </div>
+          <span className="state state-unavailable">UNAVAILABLE</span>
+        </div>
+        <p className="muted">Command route is not available.</p>
+        <details className="reason-details">
+          <summary>Technical details</summary>
+          <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
+        </details>
+        {heldKind === "launch" ? checkStatusControl : null}
+      </section>
+    );
+  const sessionUnavailableCard = (
+    <section className="card">
+      <div className="section-title">
+        <div>
+          <h2>Session Workspace</h2>
+        </div>
+        <span className="state state-unavailable">UNAVAILABLE</span>
+      </div>
+      <p className="muted">
+        Session is unavailable for the exact selected mission.
+      </p>
+      <details className="reason-details">
+        <summary>Technical details</summary>
+        <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
+      </details>
+    </section>
+  );
+  const sessionPanel = commandBinding ? (
+    sessionExact && commandView?.session ? (
+      <>
+        <SessionWorkspace
+          sessionKey={commandView.session.sessionKey}
+          title={commandView.session.title}
+          messages={commandView.session.messages}
+          observedAt={commandView.session.observedAt}
+          connection={commandView.session.connection}
+          coverage={commandView.session.coverage}
+          turnBusy={commandView.session.turnBusy}
+          sending={heldKind === "message" && commandBusy}
+          unavailableReason={commandView.session.unavailableReason}
+          stopLabel={commandView.session.stopLabel}
+          stopping={heldKind === "stop" && commandBusy}
+          onSend={(text, onComplete) => {
+            const presented = commandView.session;
+            const binding = completeOrchestratorCommandBinding(
+              window.MastermindMissionHost?.commandBinding,
+            );
+            const liveAuth = window.MastermindMissionHost?.auth?.getState();
+            const ctx = binding ? readOwnerContext(binding.port) : null;
+            const view = binding ? readCommandView(binding) : null;
+            const current = selection;
+            if (
+              !presented ||
+              !binding ||
+              liveAuth?.status !== "signed_in" ||
+              !ctx ||
+              !sessionMatchesSelection(view?.session ?? null, current) ||
+              view?.session?.sessionKey !== presented.sessionKey
+            ) {
+              onComplete({ status: "refused" });
+              return;
+            }
+            const intent = messageIntentFromBinding(
+              binding,
+              presented.sessionKey,
+              text,
+            );
+            beginCommand("message", intent, onComplete);
+          }}
+          onStop={
+            commandView.session.stopLabel
+              ? (onComplete) => {
+                  const presented = commandView.session;
+                  const binding = completeOrchestratorCommandBinding(
+                    window.MastermindMissionHost?.commandBinding,
+                  );
+                  const liveAuth =
+                    window.MastermindMissionHost?.auth?.getState();
+                  const ctx = binding ? readOwnerContext(binding.port) : null;
+                  const view = binding ? readCommandView(binding) : null;
+                  if (
+                    !presented ||
+                    !binding ||
+                    liveAuth?.status !== "signed_in" ||
+                    !ctx ||
+                    !sessionMatchesSelection(
+                      view?.session ?? null,
+                      selection,
+                    ) ||
+                    view?.session?.sessionKey !== presented.sessionKey
+                  ) {
+                    onComplete({ status: "refused" });
+                    return;
+                  }
+                  const intent = stopIntentFromBinding(
+                    binding,
+                    presented.sessionKey,
+                  );
+                  beginCommand("stop", intent, onComplete);
+                }
+              : undefined
+          }
+        />
+        {heldKind === "message" || heldKind === "stop"
+          ? checkStatusControl
+          : null}
+      </>
+    ) : (
+      <>
+        {sessionUnavailableCard}
+        {heldKind === "message" || heldKind === "stop"
+          ? checkStatusControl
+          : null}
+      </>
+    )
+  ) : (
+    // No command route is installed at all: Conversation shows the same fixed
+    // unavailable code as Work, with no fabricated session or dispatch state.
+    sessionUnavailableCard
+  );
   let content: React.ReactNode;
   if (active === "Today")
     content = (
@@ -1573,6 +2005,8 @@ export function App() {
     );
   else if (active === "Work")
     content = (
+      <>
+      {commandPanel}
       <section className="card source-gap">
         <div className="section-title">
           <div>
@@ -1599,6 +2033,7 @@ export function App() {
           <code>WORK_QUEUE_SOURCE_NOT_CONNECTED</code>
         </details>
       </section>
+      </>
     );
   else if (active === "Fleet & Capacity")
     content = (
@@ -1626,6 +2061,8 @@ export function App() {
     );
   else if (active === "Conversation")
     content = (
+      <>
+      {sessionPanel}
       <Conversation
         document={authState?.content ? windowDocument : null}
         pending={windowPending}
@@ -1637,6 +2074,7 @@ export function App() {
         association={association}
         contentAvailable={!!authState?.content}
       />
+      </>
     );
   else if (!d)
     content = (
