@@ -7,8 +7,8 @@ Covers:
   4. Resource-policy weights sum to ~1.0
   5. Core-product value weights/readiness rubric are valid strategy data
   6. Descriptive phase gates are complete and remain non-runtime strategy data
-  6. Required constraint fields exist, and the standing prohibitions are prohibited
-  6. The reader FAILS LOUD on every malformation class (its stated design law) —
+  7. Required constraint fields exist, and the standing prohibitions are prohibited
+  8. The reader FAILS LOUD on every malformation class (its stated design law) —
      each case mutates a copy of the real document so the assertions cannot pass
      for the wrong reason
   7. The reader stays decoupled from the Phase 1B worker runtime (AST import check)
@@ -175,6 +175,30 @@ def test_active_company_portfolio_is_exactly_four_p0s(state):
         "EXECUTIVE_OS",
         "CHAIRMAN_COGNITION_AUTONOMY",
     } <= retired
+
+
+def test_value_model_bad_weight_sum_raises(tmp_path):
+    def mutate(doc):
+        doc["core_product_value_model"]["dimensions"]["decision_impact_and_time_saved"] = 0.9
+    path = _mutated(tmp_path, mutate)
+    with pytest.raises(StrategicStateError, match="dimension weights sum"):
+        load_strategic_state(path)
+
+
+def test_value_model_duplicate_product_raises(tmp_path):
+    def mutate(doc):
+        doc["core_product_value_model"]["products"].append("Prophet")
+    path = _mutated(tmp_path, mutate)
+    with pytest.raises(StrategicStateError, match="products must be unique"):
+        load_strategic_state(path)
+
+
+def test_value_model_malformed_readiness_raises(tmp_path):
+    def mutate(doc):
+        doc["core_product_value_model"]["production_readiness"][0] = ""
+    path = _mutated(tmp_path, mutate)
+    with pytest.raises(StrategicStateError, match="production_readiness entries"):
+        load_strategic_state(path)
 
 
 def test_required_constraints_exist(state):
