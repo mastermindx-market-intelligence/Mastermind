@@ -48,8 +48,9 @@ def test_included_chat_defaults_to_non_pro_and_pro_mode_requires_a_complete_exce
         "CROSS_SYSTEM_ARCHITECTURE",
         "HARD_DEBUGGING",
         "ADVERSARIAL_JUDGMENT",
-        "at least 80 minutes",
-        "between 80 and 1440 minutes",
+        "Duration is a planning estimate, not a minimum run time",
+        "between 1 and 1440 minutes",
+        "Short substantive work is eligible under the same task-class and justification gates",
         "`CHAT_PRO_DEFAULT` is deprecated and ambiguous",
         "grants no Pro-mode authorization",
         "PRO_MODE_REFUSED / USE_NON_PRO_MODE",
@@ -57,6 +58,10 @@ def test_included_chat_defaults_to_non_pro_and_pro_mode_requires_a_complete_exce
     for phrase in required:
         assert phrase in law, f"missing Chat reasoning-mode law: {phrase}"
         assert phrase in routing, f"mandatory routing addendum omits reasoning-mode law: {phrase}"
+
+    for text in (law, routing):
+        assert "at least 80 minutes" not in text
+        assert "between 80 and 1440 minutes" not in text
 
     refused_work = (
         "handoffs",
@@ -67,7 +72,7 @@ def test_included_chat_defaults_to_non_pro_and_pro_mode_requires_a_complete_exce
         "routing / placement / foregrounding",
         "mechanical edits or tests",
         "simple reviews",
-        "short bounded work",
+        "routine administrative work",
     )
     for phrase in refused_work:
         assert phrase in law, f"missing categorical Pro-mode refusal: {phrase}"
