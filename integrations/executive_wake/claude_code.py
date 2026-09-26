@@ -139,7 +139,7 @@ class ClaudeCodeWakeDispatcher:
         return self._canonical_session_id(wake.native_handle)
 
     async def _discover(self, native_handle: str) -> bool:
-        argv = (self._binary, "agents", "--json", "--all")
+        argv = (self._binary, "agents", "--json")
         try:
             result = await self._runner.run(
                 argv=argv,
