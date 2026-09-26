@@ -40,7 +40,8 @@ These role descriptions do not themselves grant authority.
 1. **Charter / constitution** — `research/MASTERMIND_CHARTER_V2.md` (P1–P10).
    `DOCTRINE.md` is tactical doctrine beneath it.
 2. **Strategic state** — `config/strategic_state.yml`: current phase, north star, P0
-   objectives, resource policy, standing constraints. Read it through
+   objectives, resource policy, core-product value/readiness model, descriptive phase
+   gates, review triggers, and standing constraints. Read it through
    `control_plane.strategic_state.load_strategic_state()`, which fails loud rather
    than handing you an empty state.
 3. **Authority map** — `config/authority_map.yml`.
