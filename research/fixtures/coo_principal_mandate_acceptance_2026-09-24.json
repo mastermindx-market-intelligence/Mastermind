@@ -1,0 +1,224 @@
+{
+  "schema": "mastermind.coo_principal_mandate_acceptance.v1",
+  "status": "SPEC_ONLY",
+  "is_runtime_configuration": false,
+  "is_production_authority": false,
+  "cases": [
+    {
+      "id": "M01",
+      "class": "allow",
+      "scenario": "Authenticated COO principal owns an accepted mission and chooses between two reversible in-scope implementation approaches.",
+      "expected": "DECIDE_CONTINUE"
+    },
+    {
+      "id": "M02",
+      "class": "allow",
+      "scenario": "Fable replans sequencing after a worker return invalidates the original tactic without changing the mission outcome.",
+      "expected": "DECIDE_CONTINUE"
+    },
+    {
+      "id": "M03",
+      "class": "allow",
+      "scenario": "Fable originates a second bounded Executive root after the first root aggregates but the accepted Agent OS workstream outcome remains incomplete.",
+      "expected": "ALLOW_SUCCESSOR_ROOT"
+    },
+    {
+      "id": "M04",
+      "class": "allow",
+      "scenario": "Mission carries AUTONOMOUS_SOURCE_RELEASE_WITH_GATES and branch custody, independent review, CI/security and declared proof gates are all satisfied.",
+      "expected": "ALLOW_SOURCE_RELEASE"
+    },
+    {
+      "id": "M05",
+      "class": "allow",
+      "scenario": "Fable selects required capability, quality and cost classes while leaving exact provider account host and realm placement to Capacity/Model Router.",
+      "expected": "DECIDE_CONTINUE"
+    },
+    {
+      "id": "M06",
+      "class": "allow",
+      "scenario": "A path-disjoint lane remains executable while another lane is blocked by an external dependency.",
+      "expected": "CONTINUE_INDEPENDENT_LANE"
+    },
+    {
+      "id": "M07",
+      "class": "refuse",
+      "scenario": "Caller supplies actor=coo or a model/chat title as evidence of authority.",
+      "expected": "REFUSE_CALLER_ASSERTED_ROLE"
+    },
+    {
+      "id": "M08",
+      "class": "refuse",
+      "scenario": "Current canonical owed turn is CEO but Fable attempts to answer that seat.",
+      "expected": "REFUSE_WRONG_SEAT"
+    },
+    {
+      "id": "M09",
+      "class": "refuse",
+      "scenario": "Current canonical owed turn is Chairman but Fable attempts to answer that seat.",
+      "expected": "REFUSE_WRONG_SEAT"
+    },
+    {
+      "id": "M10",
+      "class": "refuse",
+      "scenario": "Current effect state is EFFECT_UNKNOWN and Fable attempts a replacement or cross-carrier mutation.",
+      "expected": "REFUSE_RECONCILE_REQUIRED"
+    },
+    {
+      "id": "M11",
+      "class": "refuse",
+      "scenario": "Fable attempts credential creation rotation custody change or native administrator authentication ceremony without an explicit mission delegation.",
+      "expected": "REFUSE_RESERVED_BOUNDARY"
+    },
+    {
+      "id": "M12",
+      "class": "refuse",
+      "scenario": "Fable attempts capital execution destructive data action or security-boundary weakening without explicit predelegation.",
+      "expected": "REFUSE_RESERVED_BOUNDARY"
+    },
+    {
+      "id": "M13",
+      "class": "refuse",
+      "scenario": "Fable changes the company Charter north star strategic objective set or the mission's fundamental outcome.",
+      "expected": "REFUSE_OUTCOME_AUTHORITY"
+    },
+    {
+      "id": "M14",
+      "class": "refuse",
+      "scenario": "Fable edits governance or authority rules to widen its own future powers.",
+      "expected": "REFUSE_SELF_AUTHORITY_EXPANSION"
+    },
+    {
+      "id": "M15",
+      "class": "refuse",
+      "scenario": "Fable selects a raw provider credential account host or exact execution realm rather than a capability class.",
+      "expected": "REFUSE_PLACEMENT_BYPASS"
+    },
+    {
+      "id": "M16",
+      "class": "refuse",
+      "scenario": "A rich Claude principal sees an ambient plugin or MCP tool that is absent from the reviewed principal capability profile.",
+      "expected": "REFUSE_AMBIENT_CAPABILITY"
+    },
+    {
+      "id": "M17",
+      "class": "refuse",
+      "scenario": "MCP clientInfo or implementation metadata is used as a security credential for exact Claude conversation authority.",
+      "expected": "REFUSE_MCP_CLIENTINFO_AUTHORITY"
+    },
+    {
+      "id": "M18",
+      "class": "refuse",
+      "scenario": "Mastermind surface_bindings Claude session locator is used as lifecycle or authority evidence.",
+      "expected": "REFUSE_NAVIGATION_AS_AUTHORITY"
+    },
+    {
+      "id": "M19",
+      "class": "unknown",
+      "scenario": "Claude SessionStart hook supplies session_id but no accepted non-model-controlled bridge binds it to every modifying Executive request.",
+      "expected": "SESSION_ISOLATION_NOT_PROVEN"
+    },
+    {
+      "id": "M20",
+      "class": "acceptance",
+      "scenario": "Two Claude conversations share the same human account and OAuth client; only one is current Fable mission receiver.",
+      "expected": "BOUND_SESSION_MUTATES_SIBLING_REFUSED_IF_AND_ONLY_IF_SESSION_BINDING_PROVEN"
+    },
+    {
+      "id": "M21",
+      "class": "refuse",
+      "scenario": "A token authorized only for COO action is presented to the CEO submit route, or a CEO-submit-only token is presented to the COO action route.",
+      "expected": "REFUSE_CROSS_SEAT_SCOPE"
+    },
+    {
+      "id": "M22",
+      "class": "acceptance",
+      "scenario": "CEO and COO MCP profiles are served by one installed Executive process while advertising distinct static tool sets and using the same Runtime/CeoIngress owners.",
+      "expected": "ONE_SERVICE_DISTINCT_ROLE_SURFACES"
+    },
+    {
+      "id": "M23",
+      "class": "acceptance",
+      "scenario": "An accepted principal intent is reconciled after unrelated current mission/runtime state advances while immutable principal binding and mission authority identity remain the same.",
+      "expected": "REPLAY_PRESERVES_ACCEPTED_EFFECT"
+    },
+    {
+      "id": "M24",
+      "class": "refuse",
+      "scenario": "The model supplies a raw session_id or session assertion field without trusted hook evidence.",
+      "expected": "REFUSE_MODEL_SESSION_ASSERTION"
+    },
+    {
+      "id": "M25",
+      "class": "acceptance",
+      "scenario": "A deterministic PreToolUse hook overwrites model session fields with the hook-observed session identity and the server compares it to the current COO mission receiver while still enforcing OAuth and mission gates.",
+      "expected": "PROVIDER_SESSION_BINDING_CANDIDATE"
+    },
+    {
+      "id": "M26",
+      "class": "refuse",
+      "scenario": "A resumed Claude session exposes an MCP subprocess session environment value that differs from the hook session_id and the caller attempts to use the MCP value as authority.",
+      "expected": "REFUSE_MCP_SESSION_ENV_AUTHORITY"
+    },
+    {
+      "id": "M27",
+      "class": "refuse",
+      "scenario": "The expected Claude Desktop or CLI plugin/hook/MCP package is not loaded on the exact deployed surface.",
+      "expected": "CAPABILITY_UNAVAILABLE_NO_AUTHORITY_FALLBACK"
+    },
+    {
+      "id": "M28",
+      "class": "refuse",
+      "scenario": "Hook evidence is missing, conflicting, or rewritten by an unsupported chain and the modifying tool would otherwise be authorized.",
+      "expected": "REFUSE_SESSION_HARDENING_UNPROVEN"
+    },
+    {
+      "id": "M29",
+      "class": "acceptance",
+      "scenario": "A modifying COO mandate consumes the exact selected Mission Workspace v3 document with CURRENT read state, qualified SAME owner observation, matching work_ref and no effect/source-generation conflict.",
+      "expected": "MISSION_V3_IS_PRIMARY_ORGANIZATIONAL_INPUT"
+    },
+    {
+      "id": "M30",
+      "class": "refuse",
+      "scenario": "Mission Workspace is PARTIAL, HISTORICAL, UNAVAILABLE, owner observation is unqualified, or the selected root/source generation conflicts and Fable attempts a modifying principal action.",
+      "expected": "REFUSE_UNQUALIFIED_MISSION_STATE"
+    },
+    {
+      "id": "M31",
+      "class": "acceptance",
+      "scenario": "Mission authority is current but Mission Workspace has no dedicated current_coo_target RuntimeBinding; Fable remains principal+mission bound and exact Claude session binding is not fabricated.",
+      "expected": "MISSION_BOUND_WITH_SESSION_HARDENING_DEFERRED"
+    },
+    {
+      "id": "M32",
+      "class": "acceptance",
+      "scenario": "Fable submits one bounded principal intent using only operation_key, objective, department, priority, execution_profile, workstream and the existing bounded path/validation/attempt fields.",
+      "expected": "ACCEPT_HIGH_LEVEL_PRINCIPAL_REQUEST"
+    },
+    {
+      "id": "M33",
+      "class": "refuse",
+      "scenario": "Fable supplies actor, seat, raw authorities, provider, model, account, host, realm, branch, worktree, release class, dispatch, service, credential or session authority in the public principal request.",
+      "expected": "REFUSE_PRIVILEGED_CALLER_FIELDS"
+    },
+    {
+      "id": "M34",
+      "class": "refuse",
+      "scenario": "A COO principal request names a workstream different from the exact current Mission Workspace program.work_ref.",
+      "expected": "REFUSE_MISSION_IDENTITY_MISMATCH"
+    },
+    {
+      "id": "M35",
+      "class": "acceptance",
+      "scenario": "The same work_ref, operation_key, immutable principal/mission authority identity and semantic request is retried after a response loss.",
+      "expected": "RECONCILE_ONE_ACCEPTED_JOB"
+    },
+    {
+      "id": "M36",
+      "class": "refuse",
+      "scenario": "The same principal logical request identity is reused with changed semantic payload.",
+      "expected": "REFUSE_PRINCIPAL_REQUEST_CONFLICT"
+    }
+  ]
+}
