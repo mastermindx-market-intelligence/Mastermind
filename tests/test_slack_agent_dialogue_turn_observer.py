@@ -495,6 +495,37 @@ def test_observer_refuses_malformed_consultation_packet() -> None:
     asyncio.run(scenario())
 
 
+def test_observer_ignores_malformed_consultation_packet_from_unauthorized_writer() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        client = _client(parent)
+        client.add_reply(
+            SlackMessage(
+                ts="1787961600.000006",
+                author_user_id="U0UNTRUSTED",
+                text=CONSULTATION_PACKET_DISCRIMINATOR + "\n{not-json}",
+                thread_ts=PARENT_TS,
+            )
+        )
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=client,
+            registry=_registry(),
+            wake_carrier=RecordingWakeCarrier(),
+        )
+
+        accepted = await observer._accepted_history(_context(parent))
+
+        assert len(accepted) == 4
+        observed_parent, messages, thread_ts, packet_count = accepted
+        assert observed_parent == parent
+        assert messages == ()
+        assert thread_ts == PARENT_TS
+        assert packet_count == 0
+
+    asyncio.run(scenario())
+
+
 def test_observer_packet_mutation_without_creation_is_incomplete() -> None:
     async def scenario() -> None:
         parent = _parent()

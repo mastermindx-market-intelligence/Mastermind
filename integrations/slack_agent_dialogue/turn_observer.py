@@ -234,12 +234,16 @@ class DialogueTurnObserver:
                 continue
             raw = self._created_text(transport)
             if raw.startswith(CONSULTATION_PACKET_DISCRIMINATOR):
+                # Packet physical-origin authority is established before body
+                # parsing. Unauthorized packet-shaped frames are definitive
+                # non-evidence and cannot poison trusted observer history.
+                if transport.author_user_id != self.policy.relay_bot_user_id:
+                    continue
                 try:
                     parse_consultation_packet(raw)
                 except DialogueContractError:
                     raise _HistoryRefused("THREAD_MESSAGE_INVALID") from None
-                if transport.author_user_id == self.policy.relay_bot_user_id:
-                    consultation_packet_count += 1
+                consultation_packet_count += 1
                 continue
             if not raw.startswith(MESSAGE_DISCRIMINATOR_V2):
                 continue
