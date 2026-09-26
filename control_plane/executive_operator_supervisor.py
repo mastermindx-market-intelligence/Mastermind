@@ -38,6 +38,8 @@ from control_plane.executive_supervisor import (
     ExecutiveSupervisor,
     ReconcileReceipt,
     ReconcileStatus,
+    VerifiedCommission,
+    verify_commission_for_job,
     worker_result_schema,
 )
 from control_plane.operator_harness_contract import (
@@ -274,7 +276,12 @@ class ExecutiveOperatorSupervisor:
             write_capable=False,
         )
 
-    def _prompt(self, job: Job, lease: AttemptLease) -> str:
+    def _prompt(
+        self,
+        job: Job,
+        lease: AttemptLease,
+        commission: VerifiedCommission | None = None,
+    ) -> str:
         grant = ExecutiveSupervisor._effective_grant(job, lease.attempt)
         schema = worker_result_schema(
             job_id=job.job_id,
@@ -284,8 +291,19 @@ class ExecutiveOperatorSupervisor:
             orchestration_role="plan",
             root_job_id=job.root_job_id,
         )
-        return (
+        base_prompt = (
             self.prompt_source._prompt(job, lease.attempt, grant)
+            if commission is None
+            else self.prompt_source._prompt(
+                job,
+                lease.attempt,
+                grant,
+                commission=commission.ref_dict(),
+                inline_commission=commission.content.decode("utf-8"),
+            )
+        )
+        return (
+            base_prompt
             + "\n\nThe output schema is embedded below because this App Server lane "
             "has no separate schema-file argument. Return exactly one minified, "
             "UTF-8 JSON object with keys recursively sorted lexicographically, no "
@@ -711,7 +729,21 @@ class ExecutiveOperatorSupervisor:
         self, job: Job, lease: AttemptLease
     ) -> OrchestrationDispatchOutcome:
         requested = self._requested_profile(job, lease)
-        prompt_by_turn: dict[str, str] = {}
+        if not job.worktree:
+            raise ExecutiveOperatorSupervisorError(
+                "operator planner has no assigned workspace"
+            )
+        try:
+            verified_commission = verify_commission_for_job(
+                self.runtime, job, Path(job.worktree).resolve(strict=True)
+            )
+        except Exception as exc:
+            raise ExecutiveOperatorSupervisorError(
+                f"operator immutable commission verification failed: {exc}"
+            ) from exc
+        prompt_by_turn: dict[str, str] = {
+            "pending": self._prompt(job, lease, verified_commission)
+        }
 
         def load_turn(turn: Any) -> str:
             try:
@@ -734,7 +766,6 @@ class ExecutiveOperatorSupervisor:
                 requested=requested,
                 operation_id=start_operation,
             )
-            prompt_by_turn["pending"] = self._prompt(job, lease)
 
             def bound_prompt(turn: Any) -> str:
                 value = prompt_by_turn.pop("pending")
@@ -919,7 +950,23 @@ class ExecutiveOperatorSupervisor:
                 lease,
                 require_turn=False,
             )
-            prompt = self._prompt(job, lease)
+            verified_commission = None
+            if lease.attempt.status is not AttemptStatus.CANCEL_REQUESTED:
+                try:
+                    verified_commission = verify_commission_for_job(
+                        self.runtime,
+                        job,
+                        (Path(job.worktree).resolve(strict=True) if job.worktree else None),
+                    )
+                except Exception as exc:
+                    raise ExecutiveOperatorSupervisorError(
+                        f"operator immutable commission verification failed: {exc}"
+                    ) from exc
+            # Cancellation/containment of an already-live writer must never depend
+            # on later availability of the immutable commission.  No new/resumed
+            # turn is permitted without verification; the source-free prompt here
+            # is only a loader placeholder for reconcile/cancel mechanics.
+            prompt = self._prompt(job, lease, verified_commission)
             adapter = self.adapter_factory(lambda _turn: prompt)
             orchestrator = self._orchestrator(lease, adapter)
             port = ExecutiveOperatorHarnessPort(self.runtime, lease)
