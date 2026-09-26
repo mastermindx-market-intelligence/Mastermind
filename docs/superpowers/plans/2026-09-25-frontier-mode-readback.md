@@ -163,7 +163,7 @@ A semantically accepted provider return is still not an execution permit. Provid
 - [x] Add stale/mixed snapshot-request correlation tests, tampered request/prompt/schema tests, malformed output, incompatible recommendation, rationale non-echo, digest determinism, and no provider/run attestation claim.
 - [x] Implement minimal correlation + Task-4 validation reuse.
 - [x] Run focused Secretary tests, incumbent Secretary MCP fences, Web-Sol regressions, syntax/diff/exact ten-file scope.
-- [ ] Publish on #989, refresh exact-head review/CI; provider invocation remains held.
+- [x] Publish on #989, refresh exact-head review/CI; provider invocation remains held.
 
 ## Held integration task — not granted by this leaf
 
@@ -190,3 +190,4 @@ Task 4 publication: source/docs commit `06e3cfe8f4aba9c097d0b2b1618347263dc2e53f
 Task 5 RED: process 79024, provider-request API absent; eight Task-5 assertions failed from that missing API while prior Task-4 cases remained green. Focused GREEN: process 79951, 35/35 pass. Cross-surface final process 80458: Secretary aggregate 331/331 (35 new + 296 incumbent MCP/gateway/static-fence tests), Web-Sol mode/census 183/183, Python/JS syntax + `git diff --check` + exact ten-file scope all PASS. No provider/model/worker was selected or started, and raw source refs remain outside rendered prompts.
 Task 5 publication: source/docs commit `8b803999371837219fe13c19c0f3b79fabaae8d0` action `c87a0c864f33426129ded2ede3123b06a8cebf4ce16c09a75c4f381af37afcd5` returned APPLIED; push action `7f35ade73c5c92678a0b2d884872a6fe0fce0e82e019e1a673665647a179a86f` returned APPLIED with local=remote and clean=true. Provider invocation/model selection/worker placement remain unimplemented and held to existing owners.
 Task 6 RED: process 86846, 10 new return-correlation cases failed solely because `validate_secretary_provider_return` was absent while the prior 35 contract/renderer tests remained green. Focused GREEN: process 88591, 45/45 pass. Cross-surface process 89752: Secretary aggregate 341/341 (45 new/current + 296 incumbent MCP/gateway/static-fence), Web-Sol 183/183, syntax/diff/exact ten-file scope PASS. Accepted return receipts explicitly keep `provider_result_attested=false`, `execution_authorized=false`, and `requires_owner_admission=true`; real WorkerResult/run provenance remains external and unclaimed.
+Task 6 publication: source/docs commit `02171a1ba3e144a53045d7523ce63c75dcf86d57` action `968e78d662e79b84d326f056078274d04cf7d932322a92bfc5ae51052cfc2720` returned APPLIED; push action `70e013ec4629a4dd0e132c16322755433c1d8c3c3f5f35b6cfba168966962a93` returned APPLIED with local=remote and clean=true. This still does not attest any provider/worker run or authorize execution.
