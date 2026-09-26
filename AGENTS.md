@@ -46,7 +46,7 @@ session spawned with no context beyond this file.
 - **Workers — Claude / Codex / routed specialist models.** Execute assigned objectives.
 - **Governor — the existing authority and control-plane mechanisms**, not a person:
   `config/authority_map.yml` (the A0–A7 ladder), `control_plane/packet_gate.py`,
-  `control_plane/governance.py`, and the fleet guards in the
+  `control_plane/governance.py` (append-only ledger), and the fleet guards in the
   Macro repo. Authority is what those enforce, never what a session asserts.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
