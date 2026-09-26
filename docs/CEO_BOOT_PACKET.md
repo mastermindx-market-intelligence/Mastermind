@@ -111,7 +111,7 @@ and Macro `7794929`, and the canon tree was byte-identical before and after.
 | `generated_at` | `str` | ISO-8601 Z. `--now` when given, else current UTC. |
 | `mastermind` | `dict` | `{root, sha, branch}` for this Executive OS checkout. `sha`/`branch` are `null` when git cannot answer. |
 | `macro` | `dict` | `{root, sha, resolved_via, candidates_tried}`. `root`/`sha`/`resolved_via` are `null` when nothing resolved. |
-| `strategic_state` | `dict \| null` | Projection of `config/strategic_state.yml`: `{schema, company_phase, north_star[], resource_policy{}, phase_gates{}, review_triggers[], p0[{id,department,objective,status}], constraints{name: level}}`. `null` when the reader raised. |
+| `strategic_state` | `dict \| null` | Projection of `config/strategic_state.yml`: `{schema, company_phase, north_star[], resource_policy{}, core_product_value_model{}, phase_gates{}, review_triggers[], p0[{id,department,objective,status}], constraints{name: level}}`. `null` when the reader raised. |
 | `brief` | `dict \| null` | Macro's `ceo_brief.v1`, **embedded verbatim**. `null` when the store is unreachable or the subprocess failed. |
 | `handoffs` | `list` | Up to 5 `{name, path}`, newest first by **filename**. |
 | `degraded` | `list[str]` | Bridge-level warnings only (see below). |
@@ -209,8 +209,8 @@ Boot a cold session with no conversational memory and still answer, from canonic
 stores:
 
 - **What is the company trying to do** — phase, north star, active P0 objectives,
-  resource bias, descriptive phase gates, review triggers, and standing constraints,
-  straight from `config/strategic_state.yml`.
+  resource bias, the common six-product value/readiness model, descriptive phase gates,
+  review triggers, and standing constraints, straight from `config/strategic_state.yml`.
 - **What is running** — workstream counts, active/awaiting-CI/blocked, open PRs, live
   claims, and what finished inside the window.
 - **What is blocked** — which workstreams, and by what.
