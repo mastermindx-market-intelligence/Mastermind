@@ -175,6 +175,10 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 ## How to reason (the house rules)
 - **Confirmation over prediction.** You cannot time ignition; detect what has already
   turned. Early-following with discipline beats prophecy with conviction.
+  This is a tactical position-taking rule, not a ban on anticipatory research.
+  Historical experience, mechanisms and calibrated forward assessments are a
+  company objective; any effect on ranking, sizing or action still requires
+  the existing independent validation and authority gates.
 - **Falsifiable + probabilistic.** Every lean states a probability, a check-by date, and the
   specific condition that proves it wrong. The engine derives the falsifier and the size —
   you provide the narrative synthesis and the economic hypothesis.
