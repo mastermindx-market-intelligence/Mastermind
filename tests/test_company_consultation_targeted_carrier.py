@@ -15,11 +15,9 @@ import json
 import tempfile
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from common.agent_dialogue_consultation_contract import build_consultation
 from control_plane.executive_runtime import StateConflict
 from integrations.company_consultation_dispatch import (
     ConsultationPacketCarrierUnknown,
@@ -367,3 +365,22 @@ def test_real_af_unix_distinct_parent_roundtrip_and_restart():
                 await _stop_relay_service(service, task)
 
     asyncio.run(scenario())
+
+
+def test_targeted_adapters_add_no_second_control_plane():
+    import ast
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    forbidden_suffix = re.compile(r"(Store|Cache|Registry|Queue|Retry|Scheduler|Daemon|Listener|Server)$")
+    forbidden_calls = {"transaction", "execute", "write_text", "write_bytes", "mkdir", "start_unix_server", "create_task"}
+    for name in ("company_consultation_targets.py", "company_consultation_target_resolution.py"):
+        tree = ast.parse((root / "integrations" / name).read_text())
+        symbols = {node.name for node in tree.body if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+        assert not {name for name in symbols if forbidden_suffix.search(name)}
+        calls = {node.func.attr for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)}
+        assert not calls.intersection(forbidden_calls)
+        imported = {node.module for node in tree.body if isinstance(node, ast.ImportFrom)}
+        assert "sqlite3" not in imported
+        if name.endswith("_resolution.py"):
+            assert "integrations.workspace_agent_runtime_binding" in imported

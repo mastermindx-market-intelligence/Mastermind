@@ -1244,8 +1244,36 @@ class RuntimeConsultationDispatcher:
                 detail="semantic.to must equal peer.peer_ref",
             )
 
+        targeted = getattr(self.packets, "supports_targeted_delivery", False) is True
+        targeted_context = None
+        admitted_target = None
+        if targeted:
+            if not callable(getattr(self.packets, "get_question_for", None)):
+                raise ConsultationRefusal(
+                    "CARRIER_UNAVAILABLE", detail="targeted QUESTION lookup is unavailable"
+                )
+            targeted_context = self.invocations.current()
+            if targeted_context is None:
+                raise ConsultationRefusal(
+                    "INVOCATION_CONTEXT_UNAVAILABLE",
+                    detail="invocations.current() returned None",
+                )
+            replay_id, _ = _build_deterministic_ids(_mint_request_identity(
+                caller=self.caller, peer_ref=peer_ref,
+                invocation_id=targeted_context.invocation_id,
+            ))
+            admitted_target = _find_consultation_event(self.runtime, replay_id, "INTENT")
+
         try:
-            recipient = self.recipients(peer_ref)
+            # Once admitted, resolve the original party, not a stable peer's
+            # newer current session. New invocations still use the host resolver.
+            recipient = (
+                RecipientBinding(
+                    actor_ref=admitted_target.payload["recipient_actor_ref"],
+                    recipient_binding=admitted_target.payload["recipient_binding"],
+                )
+                if admitted_target is not None else self.recipients(peer_ref)
+            )
             recipient_actor_ref = _normalized_actor_ref(recipient.actor_ref)
             normalized_recipient_binding = dict(recipient.recipient_binding)
         except NoSuchRecipient as exc:
@@ -1260,21 +1288,30 @@ class RuntimeConsultationDispatcher:
 
         if getattr(self.packets, "requires_dialogue_binding", False):
             try:
-                _require_same_dialogue_carrier(
-                    self.caller.dialogue_binding,
-                    recipient.dialogue_binding,
-                    caller_actor_ref={
-                        "kind": "worker_attempt",
-                        "job_id": self.caller.job_id,
-                        "attempt_id": self.caller.attempt_id,
-                        "worker_id": self.caller.worker_id,
-                    },
-                    recipient_actor_ref=recipient_actor_ref,
-                )
+                caller_dialogue_actor = {
+                    "kind": "worker_attempt",
+                    "job_id": self.caller.job_id,
+                    "attempt_id": self.caller.attempt_id,
+                    "worker_id": self.caller.worker_id,
+                }
+                if targeted:
+                    # Destination facts are reconstructed by the target carrier,
+                    # not borrowed from a recipient's Company Dialogue send grant.
+                    _dialogue_carrier_identity(self.caller.dialogue_binding)
+                    if dict(self.caller.dialogue_binding.actor_ref) != caller_dialogue_actor:
+                        raise StateConflict("caller dialogue actor disagrees")
+                else:
+                    _require_same_dialogue_carrier(
+                        self.caller.dialogue_binding,
+                        recipient.dialogue_binding,
+                        caller_actor_ref=caller_dialogue_actor,
+                        recipient_actor_ref=recipient_actor_ref,
+                    )
             except StateConflict as exc:
                 raise ConsultationRefusal(
                     "NOT_A_PARTY",
-                    detail="consultation parties do not share one Agent Relay parent",
+                    detail=("caller does not match the exact Agent Relay sender" if targeted
+                            else "consultation parties do not share one Agent Relay parent"),
                 ) from exc
 
         if recipient_actor_ref["worker_id"] == self.caller.worker_id:
@@ -1283,7 +1320,7 @@ class RuntimeConsultationDispatcher:
                 detail="requester and recipient worker_ids must differ",
             )
 
-        ctx = self.invocations.current()
+        ctx = targeted_context if targeted else self.invocations.current()
         if ctx is None:
             raise ConsultationRefusal(
                 "INVOCATION_CONTEXT_UNAVAILABLE",
@@ -1376,7 +1413,13 @@ class RuntimeConsultationDispatcher:
             self.runtime, consultation_id, "INTENT"
         )
         try:
-            carrier_question_frame = await self.packets.get_question(consultation_id)
+            if targeted and existing_intent is None:
+                question_lookup = getattr(self.packets, "get_question_for", None)
+                if not callable(question_lookup):
+                    raise ConsultationPacketCarrierUnknown("targeted QUESTION lookup is unavailable")
+                carrier_question_frame = await question_lookup(question_frame)
+            else:
+                carrier_question_frame = await self.packets.get_question(consultation_id)
         except (
             ConsultationPacketCarrierUnknown,
             ConsultationPacketEffectUnknown,

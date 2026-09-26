@@ -5,9 +5,10 @@ belongs. The injected host resolver supplies destination and party facts from
 existing Executive/Consultation/Wake owners. Neither target objects nor their
 evidence digests confer permission or constitute Company Dialogue grants.
 
-This source-only seam installs nothing. It has no production resolver, route
-cache, peer registry, persistence, retry loop, socket server, or model-facing
-routing fields. Historical reads must resolve the admitted exact parties;
+This source-only seam installs nothing. It has no route cache, peer registry,
+persistence, retry loop, socket server, or model-facing routing fields. The
+canonical target resolver is a separate read-only host adapter; production
+composition remains gated. Historical reads resolve the admitted exact parties;
 resolver implementations must never substitute a peer's newer current session.
 """
 from __future__ import annotations
