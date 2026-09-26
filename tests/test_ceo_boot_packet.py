@@ -527,6 +527,16 @@ def test_text_render_carries_every_section(tmp_path, frozen_git):
     assert "schema mastermind.ceo_boot_packet.v1" in text
     assert "STRATEGY — " in text
     assert "north star:" in text
+    assert "resource bias:" in text
+    assert "core products:" in text
+    assert "P0 CORE_INTELLIGENCE_PRODUCTIZATION [active]" in text
+    assert "P0 PREMIUM_PRODUCT_EXPERIENCE [active]" in text
+    assert "P0 DISTRIBUTION_AND_REVENUE [active]" in text
+    assert "P0 AUTONOMY_FORCE_MULTIPLIER [active]" in text
+    assert "P0 US_PROPHET_ENTRY_TIMING" not in text
+    assert "retired P0 identities preserved; not shown" in text
+    assert "GATE AUTONOMY_BASELINE" in text
+    assert "GATE SELL_READY" in text
     assert "AGENT OS — ceo_brief.v1 @" in text
     assert "WS-CN-LIMIT-ALPHA" in text
     assert "NEEDS CEO (1)" in text
