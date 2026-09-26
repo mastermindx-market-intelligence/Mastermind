@@ -4,7 +4,7 @@ Date: 2026-09-25
 Operation: mastermind-os-frontier-company-convergence-20260925-sol-001
 Integration parent: Mastermind #600 / agent-fabric-end-to-end-fable-integration-20260913-sol-001
 Organizational home: WS:CHAIRMAN-CONTROL-ROOM, project-active-build-control
-Branch base: Mastermind 63555e1f9405c79405fc30682aa502a68d8abf80. Current protected law re-pinned at continuation to 87777e2e4705abe2cc4175738e0f3bd68134b66a; Skillpack 1.0.1 / bootstrap 1. The one protected-base delta is Paper-design/Skillpack-index only and touches none of this candidate's Web-Sol paths.
+Branch base: Mastermind 63555e1f9405c79405fc30682aa502a68d8abf80. Current protected law re-pinned at continuation to 4fe76e8277963fa6306c2db4c874138eaf82d53d; Skillpack 1.0.1 / bootstrap 1. Since the prior pin, protected moved through a Paper-design/Skillpack-index commit and one Executive physical-reservation commit; neither touches this candidate's Web-Sol or Secretary-contract paths.
 Status: DRAFT architecture reconciliation and production-inert source candidate. This document does not amend protected law, release another writer, or authorize a production action.
 
 ## Outcome
@@ -31,6 +31,16 @@ Extend the incumbent Web-Sol/native-message boundary and existing Mastermind OS 
 The Secretary is a stateless decision provider per invocation: bounded owner-qualified observations -> one closed recommendation -> deterministic owner validation -> execution or refusal -> existing-owner evidence. It does not own inbox scans, cursors, a state DB, retry counters, a queue, source custody or lifecycle. The incumbent detector and existing provider/routing owners invoke it; the Secretary neither spawns itself nor selects credentials. Routine decisions use the least-scarce eligible provider; Fable is not routine labor. Evidence goes to existing Executive events/results and Agent OS decisions when material, not secretary_state.db.
 
 Start in shadow. Promote guarded actions only after positive and adverse evaluations, including missing sources, stale identity, no-delta loops, explicit denial, uncertain effects, delayed returns and duplicate completion events. Confidence is not admission. Existing return/finalization vocabulary remains canonical; proposed UI directive names map onto it rather than creating another lifecycle enum.
+
+### Bounded Secretary decision-provider contract
+
+The first AI Secretary implementation is a **provider contract, not a service**. Existing event detectors/owners assemble one short-lived owner-qualified snapshot and an eligible existing cognition route may return one recommendation. A deterministic validator admits only the closed Chairman action vocabulary:
+
+`CONTINUE_CURRENT_SESSION`, `SWITCH_MODE_THEN_CONTINUE`, `REQUEST_CHECKPOINT`, `ROTATE_TO_SUCCESSOR`, `FANOUT`, `WAIT_FOR_RETURN`, `HOLD_EFFECT_UNKNOWN`, `ESCALATE_HUMAN`, or `STOP_COMPLETE`.
+
+The validator owns no lifecycle fact and performs no action. It fail-closes stale/malformed snapshots and recommendation contradictions. Hard owner facts dominate AI preference: `EFFECT_UNKNOWN` may only recommend `HOLD_EFFECT_UNKNOWN`; an exact human gate may only recommend `ESCALATE_HUMAN`; owner-proven completion may only recommend `STOP_COMPLETE`. Rotation requires a ready checkpoint. Mode switching requires the session's bounded requested mode and never clears a denial/effect uncertainty. Fanout may select only caller-provided independent candidate IDs; it cannot author child bodies, place workers, or create a queue. Raw AI rationale is hashed for audit and is not forwarded as an execution instruction.
+
+Every validated result keeps `execution_authorized=false`, `lifecycle_mutation_performed=false`, `browser_mutation_performed=false`, and `requires_owner_admission=true`. Existing Executive/RuntimeBinding/Capacity/Dialogue owners must independently re-read current state and admit or refuse the recommended action immediately before any effect. Repeated recommendations may later inform deterministic-rule promotion, but this contract creates no promotion registry or learning state.
 
 ## Narrow source-law reconciliation
 

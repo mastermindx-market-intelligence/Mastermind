@@ -12,8 +12,8 @@
 
 ## Global constraints
 
-- Branch base: 63555e1f9405c79405fc30682aa502a68d8abf80. Current protected procedure/source pin: 87777e2e4705abe2cc4175738e0f3bd68134b66a; its one-commit delta is Paper-design/Skillpack-index-only and path-disjoint from this candidate. One installed mmx-workspace allocation for mastermind-os-frontier-company-convergence-20260925-sol-001, lane web.
-- Source ceiling: this plan, its spec, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_picker_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_transition_core.js`, `tests/web_sol_reasoning_mode_core.test.cjs`, `tests/web_sol_reasoning_mode_picker_core.test.cjs`, and `tests/web_sol_reasoning_mode_transition_core.test.cjs`.
+- Branch base: 63555e1f9405c79405fc30682aa502a68d8abf80. Current protected procedure/source pin: 4fe76e8277963fa6306c2db4c874138eaf82d53d. Movement since the prior pin adds one Executive physical-reservation commit after the Paper-design/Skillpack-index release; both are path-disjoint from this candidate. One installed mmx-workspace allocation for mastermind-os-frontier-company-convergence-20260925-sol-001, lane web.
+- Source ceiling: this plan, its spec, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_picker_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_transition_core.js`, `integrations/mastermind_secretary_mcp/decision_provider_contract.py`, `tests/web_sol_reasoning_mode_core.test.cjs`, `tests/web_sol_reasoning_mode_picker_core.test.cjs`, `tests/web_sol_reasoning_mode_transition_core.test.cjs`, and `tests/test_secretary_decision_provider_contract.py`.
 - No manifest/background/content/native-host/router/app modification, no production browser call, no mode selection, no provider turn, no lifecycle or custody transfer.
 - Reuse RuntimeBinding id/generation/fingerprint and document_epoch; no identity registry or stored mode state.
 - Lifetime ceiling is 30,000 ms for candidate observation evidence only, never a provider/session time limit.
@@ -82,13 +82,42 @@ Every result is immutable and contains only semantic fields: current/requested f
 - [x] Run all three mode suites plus incumbent census suites; run syntax, diff and exact eight-file scope checks.
 - [x] Commit/push only this bounded delta on the existing #989 branch; keep Draft and refresh exact-head review/CI metadata without claiming integration or production proof.
 
+## Task 4 — bounded AI Secretary recommendation contract
+
+Add `integrations/mastermind_secretary_mcp/decision_provider_contract.py` and its tests. This module is **not** an MCP tool, service, scheduler, model caller, queue, state store or executor. It validates one short-lived owner-qualified snapshot and one AI-provider recommendation, then emits a sanitized deterministic validation receipt.
+
+Snapshot v1 is a closed projection with: operation/responsibility identity; material trigger; mission/turn/effect/context/checkpoint/binding/capability/human-gate states; current mode plus the current CEO session's bounded mode recommendation; outstanding-child and ready-return counts; up to eight pre-qualified independent fanout candidate IDs; owner-native source refs; and a bounded observed/expires window. It is evidence input, not newly owned truth.
+
+Recommendation v1 carries only the nine closed actions, one closed reason code, optional requested mode, a bounded subset of supplied fanout candidate IDs, and bounded rationale prose. The deterministic validator hashes but does not echo the rationale.
+
+Safety semantics:
+- `EFFECT_UNKNOWN` -> only `HOLD_EFFECT_UNKNOWN`;
+- exact human gate -> only `ESCALATE_HUMAN`;
+- owner-proven mission complete -> only `STOP_COMPLETE`;
+- `SWITCH_MODE_THEN_CONTINUE` requires terminal MORE_WORK, healthy context, exact current binding, no denial, a session-supplied `EXTRA_HIGH|PRO` recommendation matching the requested mode, and current mode different;
+- `CONTINUE_CURRENT_SESSION` requires terminal MORE_WORK, healthy context, exact current binding and no unresolved denial;
+- `REQUEST_CHECKPOINT` requires checkpoint/rotation pressure without a ready checkpoint;
+- `ROTATE_TO_SUCCESSOR` requires rotation pressure plus checkpoint READY;
+- `FANOUT` requires terminal MORE_WORK, healthy context, exact current binding, zero outstanding children, and a non-empty subset of supplied fanout candidates;
+- `WAIT_FOR_RETURN` requires outstanding children and zero ready returns;
+- recommendation contradictions/refusal never mutate or echo opaque source content.
+
+Every validation receipt is immutable/closed and keeps `execution_authorized=false`, `lifecycle_mutation_performed=false`, `browser_mutation_performed=false`, `requires_owner_admission=true`. This contract does not select a model/account, create child commissions, switch a mode, submit a prompt, or write Agent OS.
+
+- [x] Write failing tests for the absent contract and a valid terminal MORE_WORK -> CONTINUE recommendation.
+- [x] Run the focused test and record RED from missing implementation.
+- [x] Implement strict closed-shape/freshness validation, canonical snapshot/recommendation digests and action compatibility.
+- [x] Add discriminating tests for effect-unknown precedence, human gate, completion, switch-mode matching, checkpoint/rotation ordering, fanout subset/child count, wait/ready-return behavior, stale/unknown binding/capability denial, rationale non-echo, input immutability and no execution surface.
+- [x] Run focused Secretary tests, all three mode suites + census regressions, Python syntax, diff and exact ten-file scope checks.
+- [ ] Commit/push on the existing #989 carrier, refresh exact-head review/CI, and keep Draft/production-inert.
+
 ## Held integration task — not granted by this leaf
 
 The next source owner is #836 for actual DOM normalization, native bridge wiring and mode actuation. Consume this leaf only after #836 current custody and its merge conflict are reconciled, and the closed mode action is reviewed under the browser/context-rotation laws. Authenticate the observation producer, fence exact RuntimeBinding/document generations and mode effect identity, and prove no-send selector canaries before a turn is allowed. The #890 capability producer/consumer and #936/#953/#958 read-only limitations remain explicit dependencies. Do not edit these carriers from this workspace.
 
 ## Completion evidence for this task
 
-Exact source commit, eight-path PR scope, observed RED/GREEN test receipts, incumbent regression receipts, no manifest change and published draft readback. Classification can be BUILT_NOT_PROVEN only; this task does not satisfy the parent production vertical. Continue through the parent checkpoint #600/5829163043 without replaying prior archaeology.
+Exact source commit, ten-path PR scope, observed RED/GREEN test receipts, incumbent regression receipts, no manifest/server wiring change and published draft readback. Classification can be BUILT_NOT_PROVEN only; this task does not satisfy the parent production vertical. Continue through the parent checkpoint #600/5829163043 without replaying prior archaeology.
 
 ## Observed execution evidence
 
@@ -100,3 +129,6 @@ Direct implementation reason: CRITICAL_PATH_SHORTCUT for frozen, provider-free s
 
 Task 3 RED: process 24091, absent transition API, 0 pass / 1 fail. Focused GREEN: process 25616, 24 pass / 0 fail. Combined bounded gate: process 26615, 183 pass / 0 fail across three mode suites plus the three incumbent census suites; all three mode source files passed `node --check`, `git diff --check` passed, and exact eight-file candidate scope matched. Current protected re-pin is `87777e2e4705abe2cc4175738e0f3bd68134b66a`; its only movement from the prior pin is Paper-design/Skillpack-index source and is path-disjoint from this candidate. Prior #989 CI success at `b6ef7381...` is historical once Task 3 publishes; full repository acceptance for the new head remains owed to hosted CI.
 Task 3 publication: the first typed commit attempt returned `TYPED_GIT_PRECHECK_REFUSED / NOT_APPLIED`; no ref/object/publication uncertainty was introduced. One bounded diagnostic reproduced the publisher's private-index/read-tree/add/write-tree/commit-tree path in isolated temporary Git objects and completed successfully in 10.95s, under the configured 15s command bound. The single evidence-backed retry then returned APPLIED: commit action `73dd2df8b42c88495a78454e2d33ceed1988a392b82aff7504a951fa57bacb3a`, exact source/docs head `92de19e56b6f6475351b6535885305b817e70211`; push action `be5fa0024520b25d39c0f453438269fc073d43379f025d0cfa1bb334d93ff742` returned APPLIED with local=remote and clean=true. Do not replay the refused precheck or diagnostic absent changed evidence.
+
+Task 4 RED: process 67512, absent Secretary contract API, 0 pass / 1 fail. First implementation run exposed a Python 3.14 dynamic-test-loader error because the temporary module was not registered in `sys.modules`; that test harness was corrected without changing production logic. The next focused run exposed two test-discriminator defects (a recommendation passed into the snapshot argument, and leakage matching the word "secretary" in the schema); those tests were corrected without changing production logic. Focused final: process 69643, 26/26 pass. Cross-surface gate process 70336: existing Secretary MCP/gateway/static-fence suite plus the new contract passed; collection census = 322 tests total (113 + 85 + 98 + 26), Web-Sol mode/census slice = 183/183, Python/JS syntax + diff checks passed, exact candidate scope = 10 files. Full repository Python gate was then started through canonical `scripts/ci_pytest.py --jobs 3` with 751 discovered modules/tests under its discovery policy; terminal result remains to be consumed before publication.
+Local full-repository gate diagnostic: `python3 scripts/ci_pytest.py --jobs 3` discovered 751 modules under the canonical discovery policy but collection exited 2 because this Studio Python 3.14 environment lacks CI-installed dependencies (`claude_agent_sdk`, `PyJWT`, `mcp`, `reportlab`) and the CI-pinned Macro engine import environment. `.github/workflows/ci.yml` proves hosted `test` first checks out Macro `256c757b...`, selects Python 3.12, and installs `-e ".[dev]"` before invoking the same gate. This is an environment/invocation mismatch, not a candidate-path test failure; do not alter project dependencies from this feature carrier. Hosted exact-head CI remains the full repository authority.
