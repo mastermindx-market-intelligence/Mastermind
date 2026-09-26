@@ -67,7 +67,7 @@ from integrations.executive_mcp.schemas import (
     validate_tool_arguments,
 )
 
-__all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "run_stdio"]
+__all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "run_stdio"]
 
 _E1_READ_NAMES = tuple(path.rsplit("/", 1)[-1] for path in sorted(E1_READ_PATHS))
 _E1_ENVELOPE_FIELDS = frozenset(
@@ -302,6 +302,179 @@ def build_e1_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
         outer_app,
         fenced_app=_RawPathFence(
             outer_app, metadata_path=metadata_path, read_gateway=inner_app
+        ),
+    )
+
+
+def build_personal_read_tools() -> list[mcp_types.Tool]:
+    """Installed Personal profile: exactly four read-only Executive tools."""
+
+    from integrations.executive_mcp.personal_read import PERSONAL_READ_TOOL_SPECS
+
+    return [
+        mcp_types.Tool(
+            name=spec.name,
+            description=spec.description,
+            inputSchema=spec.input_schema,
+            annotations=mcp_types.ToolAnnotations(**spec.annotations),
+        )
+        for spec in PERSONAL_READ_TOOL_SPECS
+    ]
+
+
+def build_personal_read_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+    """Publish only installed CeoIngress-v1 readers over authenticated MCP HTTP.
+
+    This edge is intentionally smaller than the Business/Web-CEO composition:
+    it has no submit or reconcile route, no optional workspace/Steward/OS
+    mounts, and no direct Runtime/filesystem reader.  The existing Executive
+    Control process remains the sole owner of canonical read projection.
+    """
+
+    from integrations.executive_mcp.personal_read import (
+        PERSONAL_READ_SERVER_NAME,
+        PERSONAL_READ_SERVER_VERSION,
+        PERSONAL_READ_TOOL_NAMES,
+        validate_personal_read_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.app import (
+        _RawPathFence,
+        _metadata_policy_and_path,
+    )
+    from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
+    from integrations.mastermind_executive_app.gateway import (
+        CeoIngressClient,
+        CeoIngressReadGateway,
+        _default_jwks_cache,
+    )
+
+    if getattr(settings, "read_only", False) or not getattr(
+        settings, "read_from_ceo_ingress", False
+    ):
+        raise ValueError("Personal read MCP requires installed CeoIngress settings")
+    _, metadata_path = _metadata_policy_and_path(settings.policies)
+    if metadata_path == "/mcp":
+        raise ValueError("metadata route collides with MCP transport")
+
+    read_authenticator = JwtAuthenticator(
+        policy=settings.policies.read,
+        jwks_cache=(settings.jwks_cache or _default_jwks_cache(settings.policies.read)),
+    )
+    verifier = MastermindTokenVerifier(
+        authenticator=read_authenticator,
+        policy=settings.policies.read,
+        now=settings.clock,
+        audit_sink=audit_sink,
+    )
+    client = CeoIngressClient(
+        connect_timeout=settings.connect_timeout,
+        read_timeout=settings.read_timeout,
+    )
+    gateway = CeoIngressReadGateway(settings.ceo_ingress_socket_path, client)
+    server: Server = Server(PERSONAL_READ_SERVER_NAME, version=PERSONAL_READ_SERVER_VERSION)
+    schemes = oauth_security_schemes(settings.policies.read.required_scopes)
+    tools = tuple(
+        tool.model_copy(
+            update={
+                "securitySchemes": schemes,
+                "meta": {"securitySchemes": schemes},
+            }
+        )
+        for tool in build_personal_read_tools()
+    )
+
+    @server.list_tools()
+    async def list_tools() -> list[mcp_types.Tool]:
+        return list(tools)
+
+    def profile_error(tool: str, code: str, message: str) -> dict[str, Any]:
+        payload = _e1_error(settings, tool, code, message)
+        payload["server_version"] = PERSONAL_READ_SERVER_VERSION
+        return payload
+
+    @server.call_tool(validate_input=False)
+    async def call_tool(
+        name: str, arguments: dict[str, Any] | None
+    ) -> list[mcp_types.TextContent]:
+        try:
+            request = server.request_context.request
+        except LookupError as exc:
+            raise ValueError("current MCP request is unavailable") from exc
+        if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
+            raise ValueError("current unambiguous MCP authorization is unavailable")
+        if name not in PERSONAL_READ_TOOL_NAMES:
+            payload = profile_error(name, "not_found", "Personal read tool is unavailable")
+        else:
+            try:
+                validated = validate_personal_read_tool_arguments(name, arguments)
+                payload = await gateway.call(name, validated)
+                if not _is_e1_envelope(payload, name, SERVER_VERSION):
+                    raise ValueError("installed Executive response has no legacy read envelope")
+                payload = dict(payload)
+                payload["server_version"] = PERSONAL_READ_SERVER_VERSION
+            except GatewayError as exc:
+                payload = profile_error(name, exc.code, exc.message)
+            except Exception:
+                payload = profile_error(
+                    name,
+                    "backend_unavailable",
+                    "installed Executive response is unavailable",
+                )
+        return [
+            mcp_types.TextContent(
+                type="text", text=canonical_json(payload).decode("utf-8")
+            )
+        ]
+
+    manager = StreamableHTTPSessionManager(
+        server,
+        stateless=True,
+        json_response=True,
+        security_settings=TransportSecuritySettings(
+            allowed_hosts=[
+                "127.0.0.1",
+                "127.0.0.1:*",
+                "localhost",
+                "localhost:*",
+                "::1",
+                "[::1]",
+                "[::1]:*",
+            ],
+            allowed_origins=[],
+        ),
+    )
+    protected = RequireAuthMiddleware(
+        BoundedRequestApp(manager.handle_request),
+        required_scopes=list(settings.policies.read.required_scopes),
+        resource_metadata_url=settings.policies.read.resource_metadata_url,
+    )
+    authenticated = PreAuthMcpBodyApp(
+        AuthenticationMiddleware(protected, backend=BearerAuthBackend(verifier))
+    )
+
+    @asynccontextmanager
+    async def lifespan(_app: Any):
+        try:
+            async with manager.run():
+                yield
+        finally:
+            await gateway.aclose()
+
+    async def metadata(_request: Request) -> JSONResponse:
+        return JSONResponse(protected_resource_metadata(settings.policies.read))
+
+    outer_app = Starlette(
+        routes=[
+            Route(metadata_path, metadata, methods=["GET"]),
+            Route("/mcp", authenticated, methods=["POST"]),
+        ],
+        lifespan=lifespan,
+    )
+    outer_app.router.redirect_slashes = False
+    return _DuplicateAuthorizationGuard(
+        outer_app,
+        fenced_app=_RawPathFence(
+            outer_app, metadata_path=metadata_path, read_gateway=gateway
         ),
     )
 
