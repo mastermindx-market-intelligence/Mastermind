@@ -43,8 +43,9 @@ from integrations.chairman_surfaces import mas115_multilogin_port_policy as port
 
 
 WORK_REF = "WS:CHAIRMAN-CONTROL-ROOM"
-SEAT_REFS = ("chatgpt1", "chatgpt2", "chatgpt3")
-_CONFIRM_ENROLL = "ENROLL THREE CHAIRMAN SEATS"
+SEAT_REFS = ("chatgpt1", "chatgpt2", "chatgpt3", "chatgpt4")
+SEAT_COUNT = len(SEAT_REFS)
+_CONFIRM_ENROLL = "ENROLL FOUR CHAIRMAN SEATS"
 _CONFIRM_BOOTSTRAP_PEER = "BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE"
 _CONFIRM_CREATE_PEER = "CREATE ONE DISPOSABLE PEER PROFILE"
 _CONFIRM_ROLLBACK_PEER = "REMOVE THE OPERATION-CREATED PEER PROFILE"
@@ -108,9 +109,9 @@ def _locator(row: dict, url: str) -> dict:
 
 
 def build_enrollment_document(existing: dict | None, selections: dict[str, tuple[dict, str]], *, observed_at: str) -> dict:
-    """Replace the three CCR initial destinations while preserving other chats."""
+    """Replace the four CCR initial destinations while preserving other chats."""
     if set(selections) != set(SEAT_REFS):
-        raise SetupRefusal("all three Chairman ChatGPT seats must be selected in one enrollment")
+        raise SetupRefusal(f"all {SEAT_COUNT} Chairman ChatGPT seats must be selected in one enrollment")
     identities = [_identity(selections[seat][0]) for seat in SEAT_REFS]
     if len(set(identities)) != len(SEAT_REFS):
         raise SetupRefusal("one managed-browser environment cannot be assigned to two Chairman seats")
@@ -211,7 +212,7 @@ def assert_current_nonseat(
     bound_doc: dict, row: dict, *, now: datetime,
     current_environment_snapshot=None,
 ) -> None:
-    """Require the canonical fresh three-seat census before any provision write."""
+    """Require the canonical fresh four-seat census before any provision write."""
     manager, folder_id, profile_id = _identity(row)
     census = canary._current_chairman_profile_census(  # noqa: SLF001 — reuse the canary's load-bearing gate
         bound_doc,
@@ -225,7 +226,7 @@ def assert_current_nonseat(
         raise SetupRefusal("the selected disposable profile collides with a Chairman seat")
     if census != "clear":
         raise SetupRefusal(
-            "all three current Chairman seat bindings are required before a disposable profile can be prepared"
+            f"all {SEAT_COUNT} current Chairman seat bindings are required before a disposable profile can be prepared"
         )
 
 
@@ -484,14 +485,14 @@ def enroll_interactive() -> int:
         used.add(_identity(selected))
         print(f"Seat {index} captured securely.")
 
-    if input(f"\nType {_CONFIRM_ENROLL!r} to write all three bindings atomically: ").strip() != _CONFIRM_ENROLL:
+    if input(f"\nType {_CONFIRM_ENROLL!r} to write all {SEAT_COUNT} bindings atomically: ").strip() != _CONFIRM_ENROLL:
         raise SetupRefusal("enrollment confirmation did not match; nothing was written")
     existing, problems = sb.load_bindings()
     if problems:
         raise SetupRefusal("the existing surface-bindings file has problems; nothing was written")
     doc = build_enrollment_document(existing, selections, observed_at=_utc_now_z())
     sb.save_bindings(doc)
-    print("All three Chairman ChatGPT seat navigation destinations are enrolled.")
+    print(f"All {SEAT_COUNT} Chairman ChatGPT seat navigation destinations are enrolled.")
     print("They do not define Sol identity; other chats remain independently bindable.")
     print("No profile was started or stopped by this tool.")
     return 0
@@ -500,7 +501,7 @@ def enroll_interactive() -> int:
 def provision_interactive() -> int:
     bound_doc, problems = sb.load_bindings()
     if problems or bound_doc is None:
-        raise SetupRefusal("enroll all three Chairman ChatGPT seats before preparing a disposable profile")
+        raise SetupRefusal(f"enroll all {SEAT_COUNT} Chairman ChatGPT seats before preparing a disposable profile")
     print("In the vendor profile list, use Copy profile ID on the disposable non-Chairman profile.")
     current_environment_snapshot = _acquire_current_environment_snapshot()
     candidates = [dict(row) for row in current_environment_snapshot.rows]
@@ -534,7 +535,7 @@ def provision_interactive() -> int:
 
 def _matching_local_row(bound_doc: dict) -> dict:
     """Re-identify the anchor provision's exact profile in the fresh local
-    census, then re-run the three-seat exclusion against it. Raises
+    census, then re-run the four-seat exclusion against it. Raises
     :class:`SetupRefusal` on any missing/ambiguous/colliding state."""
     current_environment_snapshot = _acquire_current_environment_snapshot()
     loaded, code = _load_current_provision(
@@ -595,7 +596,7 @@ def create_peer_interactive() -> int:
         raise SetupRefusal("peer lifecycle paths are unsafe or inconsistent")
     bound_doc, problems = sb.load_bindings()
     if problems or bound_doc is None:
-        raise SetupRefusal("enroll all three Chairman ChatGPT seats before preparing a disposable peer profile")
+        raise SetupRefusal(f"enroll all {SEAT_COUNT} Chairman ChatGPT seats before preparing a disposable peer profile")
     _matching_local_row(bound_doc)
     if input(f"Type {_CONFIRM_CREATE_PEER!r} to create one disposable peer profile: ").strip() != _CONFIRM_CREATE_PEER:
         raise SetupRefusal("peer-create confirmation did not match; nothing was dispatched")
@@ -615,7 +616,7 @@ def bootstrap_peer_interactive() -> int:
     bound_doc, problems = sb.load_bindings()
     if problems or bound_doc is None:
         raise SetupRefusal(
-            "enroll all three Chairman ChatGPT seats before bootstrapping "
+            f"enroll all {SEAT_COUNT} Chairman ChatGPT seats before bootstrapping "
             "the disposable peer lifecycle"
         )
     anchor_row = _matching_local_row(bound_doc)
@@ -663,7 +664,7 @@ def rollback_peer_interactive() -> int:
         raise SetupRefusal("trusted fresh downstream ownership release receipt is required")
     bound_doc, problems = sb.load_bindings()
     if problems or bound_doc is None:
-        raise SetupRefusal("enroll all three Chairman ChatGPT seats before rolling back a disposable peer profile")
+        raise SetupRefusal(f"enroll all {SEAT_COUNT} Chairman ChatGPT seats before rolling back a disposable peer profile")
     _matching_local_row(bound_doc)
     if input(f"Type {_CONFIRM_ROLLBACK_PEER!r} to remove the operation-created peer profile: ").strip() != _CONFIRM_ROLLBACK_PEER:
         raise SetupRefusal("peer-rollback confirmation did not match; nothing was dispatched")
@@ -703,7 +704,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="mas115_setup")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status", help="show only sanitized local readiness counts")
-    sub.add_parser("enroll-seats", help="securely enroll ChatGPT Seat 1/2/3")
+    sub.add_parser("enroll-seats", help=f"securely enroll {SEAT_COUNT} named ChatGPT seats")
     sub.add_parser("prepare-disposable", help="prepare one stopped non-Chairman profile")
     credential_parser = sub.add_parser("credential", help="open the native Keychain password prompt")
     credential_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
