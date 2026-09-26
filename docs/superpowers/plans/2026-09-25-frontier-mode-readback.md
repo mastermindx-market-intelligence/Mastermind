@@ -13,7 +13,7 @@
 ## Global constraints
 
 - Branch base: 63555e1f9405c79405fc30682aa502a68d8abf80. Current protected procedure/source pin: 58c842d5ab99e29785ec9b4d16ccee67e85e19c4. Movement since the prior pin adds one Mastermind OS Tauri/UI auth/native-client commit; it is path-disjoint from this candidate. One installed mmx-workspace allocation for mastermind-os-frontier-company-convergence-20260925-sol-001, lane web.
-- Source ceiling: this plan, its spec, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_picker_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_transition_core.js`, `integrations/mastermind_secretary_mcp/decision_provider_contract.py`, `tests/web_sol_reasoning_mode_core.test.cjs`, `tests/web_sol_reasoning_mode_picker_core.test.cjs`, `tests/web_sol_reasoning_mode_transition_core.test.cjs`, and `tests/test_secretary_decision_provider_contract.py`.
+- Source ceiling: this plan, its spec, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_picker_core.js`, `integrations/chairman_surfaces/web_sol_extension/reasoning_mode_transition_core.js`, `integrations/mastermind_secretary_mcp/decision_provider_contract.py`, `integrations/secretary_worker_bridge.py`, `tests/web_sol_reasoning_mode_core.test.cjs`, `tests/web_sol_reasoning_mode_picker_core.test.cjs`, `tests/web_sol_reasoning_mode_transition_core.test.cjs`, `tests/test_secretary_decision_provider_contract.py`, and `tests/test_secretary_worker_bridge.py`.
 - No manifest/background/content/native-host/router/app modification, no production browser call, no mode selection, no provider turn, no lifecycle or custody transfer.
 - Reuse RuntimeBinding id/generation/fingerprint and document_epoch; no identity registry or stored mode state.
 - Lifetime ceiling is 30,000 ms for candidate observation evidence only, never a provider/session time limit.
@@ -205,13 +205,43 @@ No counters, thresholds, promotion state, model score, persistence or execution 
 - [x] Run focused Secretary + incumbent fences + Web-Sol regressions, syntax/diff/exact ten-file scope.
 - [x] Publish on #989; keep live provider invocation and deterministic promotion held.
 
+## Task 8 — existing-worker launch/collection composition bridge
+
+Add `integrations/secretary_worker_bridge.py` and `tests/test_secretary_worker_bridge.py`. This bridge reuses the accepted provider-neutral worker contract; it creates no Job, Attempt, Worker, process, queue, provider route, credential, schema file or artifact.
+
+`bind_secretary_worker_launch(provider_request, worker_launch_spec, output_schema_json)`:
+- requires a READY `SecretaryProviderRequest`;
+- requires an existing `WorkerLaunchSpec`;
+- requires the launch prompt bytes to equal the exact Secretary provider prompt;
+- requires caller-supplied schema bytes to equal the exact Secretary output schema;
+- requires the effective authority set to be exactly `READ`, with zero allowed artifact paths;
+- binds existing `worker_launch_spec_sha256(spec)` plus snapshot/prompt/schema digests and run/job/worker IDs;
+- returns a frozen transient binding with `worker_started=false`, `execution_authorized=false`.
+
+`validate_secretary_worker_collection(current_snapshot, provider_request, launch_binding, collection_receipt, now_ms)`:
+- rebuilds/compares the current Secretary provider request;
+- requires the exact transient launch binding to match it;
+- consumes an existing typed `CollectionReceipt` only;
+- requires process/result run identity and result job/worker identity to match the binding;
+- requires `WorkerRunStatus.SUCCEEDED`, exit code 0, no result error, non-null structured output, valid collection hashes, zero artifact manifest, and no reported changed paths;
+- recursively projects the frozen structured output to ordinary JSON data and passes it through Task 6 correlation/Task 4 semantics;
+- emits a frozen validation receipt with `worker_collection_correlated=true` only on success, while keeping `provider_result_attested=false`, `execution_authorized=false`, and `requires_owner_admission=true`.
+
+This bridge does **not** prove that the provider/model identity was what routing expected; existing adapter/provider attestation remains authoritative for that. It also does not read the filesystem or rerun schema validation; the existing worker adapter already owns launch/collection and result-schema enforcement.
+
+- [x] Write RED tests for absent bridge APIs and one exact READ-only launch + successful collection.
+- [x] Add prompt/schema tamper, write-authority/artifact, run/job/worker mismatch, failed/invalid result, collection-hash, changed-path and unsafe recommendation cases.
+- [x] Implement minimal composition using existing worker contract types/digests and Task-6 validator.
+- [x] Run bridge + Secretary fences + Web-Sol regressions, syntax/diff/exact twelve-file scope.
+- [ ] Publish on #989; keep actual worker dispatch/provider invocation under existing owners.
+
 ## Held integration task — not granted by this leaf
 
 The next source owner is #836 for actual DOM normalization, native bridge wiring and mode actuation. Consume this leaf only after #836 current custody and its merge conflict are reconciled, and the closed mode action is reviewed under the browser/context-rotation laws. Authenticate the observation producer, fence exact RuntimeBinding/document generations and mode effect identity, and prove no-send selector canaries before a turn is allowed. The #890 capability producer/consumer and #936/#953/#958 read-only limitations remain explicit dependencies. Do not edit these carriers from this workspace.
 
 ## Completion evidence for this task
 
-Exact source commit, ten-path PR scope, observed RED/GREEN test receipts, incumbent regression receipts, no manifest/server wiring change and published draft readback. Classification can be BUILT_NOT_PROVEN only; this task does not satisfy the parent production vertical. Continue through the parent checkpoint #600/5829163043 without replaying prior archaeology.
+Exact source commit, twelve-path PR scope, observed RED/GREEN test receipts, incumbent regression receipts, no manifest/server wiring change and published draft readback. Classification can be BUILT_NOT_PROVEN only; this task does not satisfy the parent production vertical. Continue through the parent checkpoint #600/5829163043 without replaying prior archaeology.
 
 ## Observed execution evidence
 
@@ -233,3 +263,4 @@ Task 6 RED: process 86846, 10 new return-correlation cases failed solely because
 Task 6 publication: source/docs commit `02171a1ba3e144a53045d7523ce63c75dcf86d57` action `968e78d662e79b84d326f056078274d04cf7d932322a92bfc5ae51052cfc2720` returned APPLIED; push action `70e013ec4629a4dd0e132c16322755433c1d8c3c3f5f35b6cfba168966962a93` returned APPLIED with local=remote and clean=true. This still does not attest any provider/worker run or authorize execution.
 Task 7 RED: process 9684, 13 shadow cases failed because both shadow APIs were absent while prior Secretary cases stayed green. Initial GREEN: process 12843, focused Secretary contract passed; two adverse cases were then added for ready-return refusal and forced-action divergence. Final focused process 14329 = 60/60. Cross-surface process 15817: Secretary aggregate 356/356 (60 current + 296 incumbent MCP/gateway/static-fence), Web-Sol 183/183, Python/JS syntax + `git diff --check` + exact ten-file scope PASS. Shadow baseline/evaluation persist no counters, thresholds, promotion state, model score or execution authority; `rule_promotion_authorized=false` and `execution_authorized=false` remain fixed.
 Task 7 publication: source/docs commit `ec3cda1ab9e655ce37cd483e624457447dbff71d` action `11e234d9fb102ec7130f23d84c113695baf19818cfcf7ebe32d5f18c8398dc39` returned APPLIED; push action `92d99d421e09e1f3cbbcdbadd6f1dad6eb04ab2b776b165070e2c2945be4fcf5` returned APPLIED with local=remote and clean=true. No provider turn, rule promotion, counter persistence, lifecycle action or browser effect was introduced.
+Task 8 RED: process 33900, bridge API absent, 0 pass / 1 fail. Initial implementation focused run 36603 passed bridge behavior but exposed one source-fence test-string false positive (`requests` matched English `Secretary requests`); the test was narrowed to the actual API token `requests.` without production changes. The first cross-surface process 38174 then exposed a real architecture violation: placing the bridge inside `integrations/mastermind_secretary_mcp/**` imported `control_plane.worker_execution_contract`, violating the protected sealed-package static fence. That fence was preserved. The bridge was moved to the accepted outer integration boundary `integrations/secretary_worker_bridge.py`; no fence was weakened. Focused bridge + Secretary static fence process 40869 passed. Corrected full bounded process 41180: Secretary/bridge aggregate 368/368 (12 bridge + 60 decision/shadow + 296 incumbent MCP/gateway/static-fence), Web-Sol 183/183, Python/JS syntax + `git diff --check` + exact twelve-file scope PASS. The bridge creates no lifecycle/process/provider effect and keeps provider identity unattested.
