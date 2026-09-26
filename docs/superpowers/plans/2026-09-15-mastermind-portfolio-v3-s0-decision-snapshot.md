@@ -30,7 +30,7 @@
 - A missing source is not an empty complete source. A stale source is not calm. An unknown clock remains unknown.
 - External source content with a qualified `known_at` after the decision cutoff is excluded as `FUTURE_AT_CUTOFF`.
 - The snapshot carries `write_permitted=false`, `execution_authority=false`, and `numeric_target_authority=false`.
-- `COMPLETE`, `PARTIAL`, `BLOCKED`, `INVALID`, and `CORRECTED_GENERATION_AVAILABLE` remain distinct.
+- Root `state` (`COMPLETE | PARTIAL | BLOCKED | INVALID`), `coverage_state`, and `correction.status` (`ORIGINAL | CORRECTED_GENERATION_AVAILABLE`) are orthogonal; a corrected snapshot still reports its actual completeness.
 - PR #548 owns native IDs, bounded paging, coverage, and correction-safe retrieval for Sector Central. S0 captures its raw artifact receipt only and marks the market-structure section partial until that owner is protected and consumed.
 - PR #398 is an open Outcome Learning candidate. S0 neither imports it nor recreates its contracts.
 - Existing `portfolio/shadow_books.py` remains the counterfactual book owner. S0 adds immutable evidence under the same `data/shadow/` estate but does not alter policy books, accounts, NAV, or leaderboard behavior.
@@ -275,6 +275,7 @@ Stop if source ownership, protected design publication, or workspace identity is
   - `SECTION_SCHEMA = "mastermind.portfolio_snapshot_section.v1"`
   - `SNAPSHOT_STATES`
   - `COVERAGE_STATES`
+  - `CORRECTION_STATES`
   - `SOURCE_STATUSES`
   - `SECTION_IDS`
   - `DecisionSnapshotContractError`
@@ -417,6 +418,22 @@ def test_source_receipt_refuses_unqualified_digest_and_authority_escalation():
         c.validate_source_receipt(bad_authority)
 
 
+def test_correction_lineage_is_orthogonal_to_partial_coverage():
+    value = _unsealed()
+    value["state"] = "PARTIAL"
+    value["coverage_state"] = "PARTIAL"
+    value["sections"]["book_truth"]["coverage_state"] = "PARTIAL"
+    value["correction"] = {
+        "status": "CORRECTED_GENERATION_AVAILABLE",
+        "same_cutoff_prior_snapshot_ids": ["sha256:" + "b" * 64],
+    }
+    sealed = c.seal_snapshot(value)
+    assert sealed["state"] == "PARTIAL"
+    assert sealed["coverage_state"] == "PARTIAL"
+    assert sealed["correction"]["status"] == "CORRECTED_GENERATION_AVAILABLE"
+    c.verify_snapshot(sealed)
+
+
 def test_contract_reuses_canonical_json_owner_and_has_no_hidden_io():
     source = Path(c.__file__).read_text(encoding="utf-8")
     assert "from control_plane.wake_events import canonical_json_bytes" in source
@@ -461,9 +478,9 @@ SNAPSHOT_STATES = frozenset({
     "PARTIAL",
     "BLOCKED",
     "INVALID",
-    "CORRECTED_GENERATION_AVAILABLE",
 })
 COVERAGE_STATES = frozenset({"COMPLETE", "PARTIAL", "BLOCKED", "UNKNOWN"})
+CORRECTION_STATES = frozenset({"ORIGINAL", "CORRECTED_GENERATION_AVAILABLE"})
 SOURCE_STATUSES = frozenset({
     "AVAILABLE",
     "ABSENT_OPTIONAL",
@@ -713,6 +730,9 @@ Do not mark Ready, enable auto-merge, deploy, or add implementation commits to P
   - `control_plane.contracts.contract(key)`;
   - `portfolio.registry.data_dir("autonomous")`.
 - Produces:
+  - `ACCEPTED_SETTLEMENT_RECEIPT_SCHEMA = "paper_settlement_receipt.v2"`
+  - `InternalSourceSpec`
+  - `INTERNAL_SOURCE_SPECS`
   - `SourceSpec`
   - `EXTERNAL_SOURCE_SPECS`
   - `capture_all(book: str, *, decision_cutoff: str, recorded_at: str) -> dict[str, Any]`
@@ -775,6 +795,81 @@ def test_capture_reads_fixed_sources_without_account_recovery(
         "posture": "SELECTIVE"
     }
     assert not any(gap["code"] == "ACCOUNT_RECOVERY_CALLED" for gap in result["gaps"])
+```
+
+Add the load-bearing historical-memory journey:
+
+```python
+def test_historical_memory_has_explicit_closed_internal_sources(repo_roots):
+    repo, _ = repo_roots
+    book = repo / "data/portfolios/autonomous"
+    _write_json(book / "account.json", {
+        "starting_nav": 1_000_000.0,
+        "cash": 800_000.0,
+        "positions": {},
+    })
+    (book / "decisions.jsonl").write_text(
+        json.dumps({"decision_id": "d1", "asof": "2026-09-15"}) + "\n",
+        encoding="utf-8",
+    )
+    (book / "fills.jsonl").write_text(
+        json.dumps({
+            "fill_id": "f1", "date": "2026-09-15", "ticker": "AAPL",
+            "side": "buy", "shares": 10.0, "price": 200.0, "value": 2000.0,
+        }) + "\n",
+        encoding="utf-8",
+    )
+    _write_json(book / "positions_ledger.json", {
+        "brain:AAPL": {
+            "ticker": "AAPL", "sleeve": "brain", "still_open": True,
+            "history": [{"event": "open", "as_of": "2026-09-15"}],
+        },
+    })
+    _write_json(book / "settlement_receipts" / ("a" * 64 + ".json"), {
+        "schema": "paper_settlement_receipt.v2",
+        "portfolio_id": "autonomous",
+        "transaction_id": "a" * 64,
+        "committed_at": "2026-09-15T19:59:00Z",
+        "target_sha256": "b" * 64,
+        "fills": [],
+    })
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    from portfolio import paper_account
+    assert (
+        sources.ACCEPTED_SETTLEMENT_RECEIPT_SCHEMA
+        == paper_account.PAPER_SETTLEMENT_RECEIPT_SCHEMA
+        == "paper_settlement_receipt.v2"
+    )
+    memory = result["sections"]["historical_memory"]
+    assert memory["coverage_state"] == "COMPLETE"
+    assert memory["source_ids"] == [
+        "book.decisions",
+        "book.fills",
+        "book.positions_ledger",
+        "book.settlement_receipts",
+    ]
+    assert {row["kind"] for row in memory["rows"]} == {
+        "decision", "fill", "position_lifecycle", "settlement_receipt",
+    }
+    truth = result["sections"]["book_truth"]
+    assert "book.settlement_receipts" in truth["source_ids"]
+    outstanding = [
+        row for row in truth["rows"]
+        if row.get("kind") == "outstanding_settlement_receipt"
+    ]
+    assert outstanding == [{
+        "kind": "outstanding_settlement_receipt",
+        "transaction_id": "a" * 64,
+        "committed_at": "2026-09-15T19:59:00Z",
+        "target_sha256": "b" * 64,
+        "fill_count": 0,
+    }]
+    assert _by_id(result["sources"])["book.settlement_receipts"]["rows_total"] == 1
 ```
 
 Add:
@@ -951,9 +1046,61 @@ Expected: import failure because `portfolio.decision_snapshot_sources` does not 
 
 - [ ] **Step 3: Implement the closed source registry**
 
-Create:
+Create the closed internal and external source registries:
 
 ```python
+# Compatibility pin to the current canonical writer-owned schema. The focused
+# source test compares this literal with paper_account.PAPER_SETTLEMENT_RECEIPT_SCHEMA
+# so writer movement cannot silently drift the read contract.
+ACCEPTED_SETTLEMENT_RECEIPT_SCHEMA = "paper_settlement_receipt.v2"
+
+
+@dataclass(frozen=True)
+class InternalSourceSpec:
+    source_id: str
+    relative_path: str
+    domains: tuple[str, ...]
+    required: bool
+    projection: str
+    format: str
+
+
+INTERNAL_SOURCE_SPECS = (
+    InternalSourceSpec(
+        "book.account", "account.json", ("book_truth",),
+        True, "account", "json",
+    ),
+    InternalSourceSpec(
+        "book.latest", "latest.json", ("book_truth", "priceability"),
+        False, "latest", "json",
+    ),
+    InternalSourceSpec(
+        "book.pending_orders", "pending_orders.json", ("book_truth",),
+        False, "pending_orders", "json",
+    ),
+    InternalSourceSpec(
+        "book.pending_target", "pending_target.json", ("book_truth",),
+        False, "pending_target", "json",
+    ),
+    InternalSourceSpec(
+        "book.decisions", "decisions.jsonl", ("historical_memory",),
+        False, "decision_tail", "jsonl_tail",
+    ),
+    InternalSourceSpec(
+        "book.fills", "fills.jsonl", ("historical_memory",),
+        False, "fill_tail", "jsonl_tail",
+    ),
+    InternalSourceSpec(
+        "book.positions_ledger", "positions_ledger.json", ("historical_memory",),
+        False, "position_lifecycle", "json",
+    ),
+    InternalSourceSpec(
+        "book.settlement_receipts", "settlement_receipts", ("book_truth", "historical_memory"),
+        False, "settlement_receipts", "json_collection",
+    ),
+)
+
+
 @dataclass(frozen=True)
 class SourceSpec:
     source_id: str
@@ -1128,18 +1275,17 @@ def _read_json_file(path: Path) -> tuple[bytes | None, Any | None, str | None]:
 
 Implement a JSONL tail reader that reads no more than 8 MiB and returns at most the last 100 valid object rows. Invalid rows must increment `omitted_rows`; they may not vanish from coverage.
 
-Internal book source paths are exact literals beneath `registry.data_dir("autonomous")`:
+`INTERNAL_SOURCE_SPECS` is the sole internal path table beneath `registry.data_dir("autonomous")`. Each `relative_path` is a fixed literal from the tuple above. `json_collection` means only direct, non-symlink `*.json` files below the fixed `settlement_receipts/` directory; no caller-supplied glob, recursion, or alternate directory is accepted.
+
+The collection receipt uses:
 
 ```text
-account.json                 required
-latest.json                  optional
-pending_orders.json          optional known absence
-pending_target.json          optional known absence
-decisions.jsonl              optional history
-fills.jsonl                  optional history
-positions_ledger.json        optional history
-settlement_receipts/*.json   optional, sorted, metadata-bounded
+artifact = data/portfolios/autonomous/settlement_receipts/*.json
+artifact_digest = sha256(canonical_json_bytes([{name, digest}, ...]))
+rows_total = number of direct receipt files observed
 ```
+
+The list is sorted by filename before digesting; each child file is stably read and independently bounded. A malformed or unstable child makes the collection `PARTIAL` and contributes no row for that child.
 
 For internal canonical Portfolio files only, use a stable first-party read:
 
@@ -1176,6 +1322,8 @@ status = UNQUALIFIED_CLOCK
 
 - [ ] **Step 5: Implement bounded projections**
 
+Projection functions return domain-specific rows. A single source may contribute different bounded row shapes to different domains, but every domain row retains the same `source_id` and source-generation receipt.
+
 Projection rules:
 
 - `risk_envelope`: carry only schema/definition/clocks/data_state/measured_state/hazard_summary/capital_policy/coherence/authority.
@@ -1187,17 +1335,24 @@ Projection rules:
 - `neural_web`: carry authority declaration/effective hard-false fence, market summary, and held-ticker candidate rows only.
 - `portfolio_context`: carry metadata and held-ticker rows only, split into fundamental/positioning/event/priceability sections.
 - `intelligence`, `altdata`, and `news`: reuse their existing contracts; carry metadata plus held-ticker rows only into fundamental/positioning/event sections; preserve producer order and report omitted counts.
-- internal decisions/fills: last 100 rows, preserve source order.
+- `book.decisions`: last 100 valid object rows as `kind="decision"`; preserve source line order and carry bounded decision identity, as-of, target/effect state, selected/rejected summary, falsifiers, and source references.
+- `book.fills`: last 100 valid object rows as `kind="fill"`; preserve source line order and carry fill identity, date, ticker, side, shares, price, value, transaction/receipt lineage, and portfolio ID.
+- `book.positions_ledger`: one `kind="position_lifecycle"` row per native ledger key, sorted by that key, capped at 100; carry native key, ticker, sleeve, open/close clocks, still-open state, weights, thesis/time-stop fields, published entry levels, and at most the last 20 bounded history events. Report omitted position and history counts.
+- `book.settlement_receipts`: direct child receipts are canonical outstanding-outbox entries by directory membership: the sole writer keeps a committed receipt in the fixed `settlement_receipts/` directory until acknowledgement removes it. Require each direct filename to equal `<transaction_id>.json`, schema to equal `ACCEPTED_SETTLEMENT_RECEIPT_SCHEMA` (`paper_settlement_receipt.v2` at this plan revision), and `portfolio_id="autonomous"`; an invalid child makes the collection partial and contributes no row.
+  - `historical_memory` receives `kind="settlement_receipt"` rows sorted by `(committed_at, transaction_id)`, capped at 100, carrying schema, transaction ID, portfolio ID, committed clock, target digest, decision snapshot reference, fill IDs/count, and bounded execution-constraint metadata.
+  - `book_truth` receives a separate `kind="outstanding_settlement_receipt"` row for every valid direct child, sorted identically and capped at 100, carrying exactly `transaction_id`, `committed_at`, `target_sha256`, and `fill_count`. Directory membership after identity validation is the outstanding predicate; no field inside the receipt is invented for it.
+  - Never call `pending_settlement_receipts()` because it validates through mutable account code.
+- The four historical projections above populate `historical_memory` with source IDs exactly `book.decisions`, `book.fills`, `book.positions_ledger`, and `book.settlement_receipts`. The separate outstanding-receipt projection populates `book_truth` under the same `book.settlement_receipts` source receipt.
 - account/latest: carry cash, position identity, shares/cost/weight, and published mark/identity fields; never request a fresh quote.
 
-Every projection returns rows plus exact `rows_total`, `rows_returned`, and `omitted_rows`.
+Every projection returns rows plus exact `rows_total`, `rows_returned`, and `omitted_rows`. Known absence of an optional internal history file is `ABSENT_OPTIONAL` with complete knowledge of zero rows; malformed, oversize, unstable, or unreadable history makes `historical_memory` `PARTIAL` and emits a named gap.
 
 - [ ] **Step 6: Implement source receipt generation**
 
-`artifact_digest` is the SHA-256 of raw bytes. `correction_generation` is:
+For a single file, `artifact_digest` is the SHA-256 of raw bytes. For `book.settlement_receipts`, it is the canonical sorted collection digest defined in Step 4. `correction_generation` is:
 
 1. a declared `revision`, `bundle_id`, or `content_generation` when present and scalar;
-2. otherwise the artifact digest.
+2. otherwise the single-file or collection artifact digest.
 
 A source with `known_at > decision_cutoff` receives `FUTURE_AT_CUTOFF` and contributes no rows.
 
@@ -1352,13 +1507,41 @@ def test_same_cutoff_new_generation_is_explicit_correction():
         capture=_capture(generation="sha256:" + "b" * 64),
         same_cutoff_prior_snapshot_ids=[original["snapshot_id"]],
     )
-    assert corrected["state"] == "CORRECTED_GENERATION_AVAILABLE"
+    assert corrected["state"] == "COMPLETE"
     assert corrected["coverage_state"] == "COMPLETE"
     assert corrected["correction"] == {
         "status": "CORRECTED_GENERATION_AVAILABLE",
         "same_cutoff_prior_snapshot_ids": [original["snapshot_id"]],
     }
     assert corrected["snapshot_id"] != original["snapshot_id"]
+
+
+def test_corrected_partial_snapshot_preserves_both_axes():
+    original = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+        capture=_capture(generation="sha256:" + "a" * 64),
+        same_cutoff_prior_snapshot_ids=[],
+    )
+    capture = _capture(generation="sha256:" + "b" * 64)
+    capture["sections"]["risk_truth"]["coverage_state"] = "PARTIAL"
+    capture["gaps"].append({
+        "code": "UNQUALIFIED_CLOCK",
+        "source_id": "macro.risk_envelope",
+        "owner": "macro",
+        "detail": "known_at unavailable",
+    })
+    corrected = snapshots.compose_snapshot(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:10:00Z",
+        capture=capture,
+        same_cutoff_prior_snapshot_ids=[original["snapshot_id"]],
+    )
+    assert corrected["state"] == "PARTIAL"
+    assert corrected["coverage_state"] == "PARTIAL"
+    assert corrected["correction"]["status"] == "CORRECTED_GENERATION_AVAILABLE"
 ```
 
 - [ ] **Step 2: Write RED tests for immutable persistence**
@@ -1429,7 +1612,7 @@ Expected: import failure because `portfolio.decision_snapshot` does not exist.
 
 - [ ] **Step 4: Implement state derivation and composition**
 
-State law:
+Coverage and correction are independent axes:
 
 ```python
 def _coverage_state(sections: Mapping[str, Mapping[str, Any]]) -> str:
@@ -1439,7 +1622,17 @@ def _coverage_state(sections: Mapping[str, Mapping[str, Any]]) -> str:
     if values == {"COMPLETE"}:
         return "COMPLETE"
     return "PARTIAL"
+
+
+def _correction_status(prior_snapshot_ids: Sequence[str]) -> str:
+    return (
+        "CORRECTED_GENERATION_AVAILABLE"
+        if prior_snapshot_ids
+        else "ORIGINAL"
+    )
 ```
+
+For every valid composed snapshot, root `state` equals the derived `coverage_state`. `INVALID` is returned only by verification/read projections for malformed contract, identity, or digest state; normal composition never hides coverage behind correction lineage. `correction.status` is set independently.
 
 `compose_snapshot` must:
 
@@ -1512,7 +1705,7 @@ Write canonical bytes with `os.open(path, O_WRONLY | O_CREAT | O_EXCL, 0o600)`, 
 3. compare the sorted `source_generation_set`;
 4. exact same generation + same clocks -> exact retry/no new identity;
 5. same cutoff plus the same sorted `source_generation_set` -> return the existing verified snapshot even when the new operator `recorded_at` is later; do not mint a duplicate identity;
-6. changed generation at the same cutoff -> include all prior same-cutoff IDs and produce `CORRECTED_GENERATION_AVAILABLE`;
+6. changed generation at the same cutoff -> include all prior same-cutoff IDs and set `correction.status=CORRECTED_GENERATION_AVAILABLE` while leaving root `state` coverage-derived;
 7. persist only the genuinely new sealed snapshot.
 
 Do not rewrite the original.
@@ -2072,10 +2265,19 @@ State colors:
 
 ```text
 COMPLETE -> var(--up)
-PARTIAL / CORRECTED_GENERATION_AVAILABLE -> var(--warn)
+PARTIAL -> var(--warn)
 BLOCKED / INVALID -> var(--down)
 NO_SNAPSHOT / unavailable -> var(--muted)
 ```
+
+Render correction lineage as a separate chip:
+
+```text
+ORIGINAL -> var(--muted)
+CORRECTED_GENERATION_AVAILABLE -> var(--warn)
+```
+
+A corrected partial snapshot therefore shows both `PARTIAL` coverage and `CORRECTED_GENERATION_AVAILABLE` lineage; neither label replaces the other.
 
 The renderer must use `esc()` for every server string and cap displayed sources/gaps to 40 rows even if the API contract regresses.
 
@@ -2119,7 +2321,7 @@ git commit -m "feat(ui): add V3 decision evidence inspector"
 
 - [ ] **Step 1: Write a full before/after state-hash test**
 
-Create fixed fixture bytes for:
+Create fixed fixture bytes for every existing Portfolio state source S0 reads or must prove untouched:
 
 ```text
 data/portfolios/autonomous/account.json
@@ -2129,9 +2331,60 @@ data/portfolios/autonomous/decisions.jsonl
 data/portfolios/autonomous/pending_orders.json
 data/portfolios/autonomous/pending_target.json
 data/portfolios/autonomous/_pending_decision.json
+data/portfolios/autonomous/positions_ledger.json
+data/portfolios/autonomous/settlement_receipts/*.json
 ```
 
-Hash all seven before the call.
+Define the test helper explicitly:
+
+```python
+from control_plane.wake_events import canonical_json_bytes
+
+STATE_FILES = (
+    "account.json",
+    "latest.json",
+    "fills.jsonl",
+    "nav_history.jsonl",
+    "decisions.jsonl",
+    "pending_orders.json",
+    "pending_target.json",
+    "_pending_decision.json",
+    "positions_ledger.json",
+)
+
+
+def _state_hashes(book: Path) -> dict[str, str]:
+    out = {
+        name: (
+            hashlib.sha256((book / name).read_bytes()).hexdigest()
+            if (book / name).is_file()
+            else "ABSENT"
+        )
+        for name in STATE_FILES
+    }
+    receipt_dir = book / "settlement_receipts"
+    children = []
+    if receipt_dir.exists():
+        for path in sorted(receipt_dir.glob("*.json")):
+            assert path.is_file() and not path.is_symlink()
+            children.append({
+                "name": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            })
+    out["settlement_receipts/*.json"] = (
+        hashlib.sha256(canonical_json_bytes(children)).hexdigest()
+        if receipt_dir.exists()
+        else "ABSENT"
+    )
+    return out
+```
+
+Hash all nine fixed files plus the canonical settlement-receipt collection before the call:
+
+```python
+book_dir = root / "data/portfolios/autonomous"
+before = _state_hashes(book_dir)
+```
 
 Call:
 
@@ -2146,7 +2399,7 @@ receipt = decision_snapshot.create_snapshot(
 Assert:
 
 ```python
-assert _hashes(state_paths) == before
+assert _state_hashes(book_dir) == before
 created = list(
     (root / "data/shadow/decision_snapshots/autonomous").glob("*.json")
 )
@@ -2432,22 +2685,45 @@ python3 - <<'PY' > /tmp/v3-s0-before.sha256
 from pathlib import Path
 import hashlib
 
-paths = (
-    Path("data/portfolios/autonomous/account.json"),
-    Path("data/portfolios/autonomous/fills.jsonl"),
-    Path("data/portfolios/autonomous/nav_history.jsonl"),
-    Path("data/portfolios/autonomous/decisions.jsonl"),
-    Path("data/portfolios/autonomous/pending_orders.json"),
-    Path("data/portfolios/autonomous/pending_target.json"),
-    Path("data/portfolios/autonomous/_pending_decision.json"),
+from control_plane.wake_events import canonical_json_bytes
+
+book = Path("data/portfolios/autonomous")
+files = (
+    "account.json",
+    "latest.json",
+    "fills.jsonl",
+    "nav_history.jsonl",
+    "decisions.jsonl",
+    "pending_orders.json",
+    "pending_target.json",
+    "_pending_decision.json",
+    "positions_ledger.json",
 )
-for path in paths:
+for name in files:
+    path = book / name
     digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "ABSENT"
     print(f"{path.as_posix()} {digest}")
+
+receipt_dir = book / "settlement_receipts"
+children = []
+if receipt_dir.exists():
+    for path in sorted(receipt_dir.glob("*.json")):
+        if not path.is_file() or path.is_symlink():
+            raise SystemExit(f"invalid settlement receipt path: {path}")
+        children.append({
+            "name": path.name,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        })
+collection = (
+    hashlib.sha256(canonical_json_bytes(children)).hexdigest()
+    if receipt_dir.exists()
+    else "ABSENT"
+)
+print(f"{receipt_dir.as_posix()}/*.json {collection}")
 PY
 ```
 
-The receipt records missing optional files as `ABSENT` without creating them or causing the command to fail.
+The receipt records missing optional files and the optional receipt directory as `ABSENT` without creating them or causing the command to fail. It covers every canonical Portfolio source S0 reads, including position lifecycle and outstanding settlement lineage.
 
 - [ ] **Step 3: Compose exactly one real snapshot with explicit clocks**
 
@@ -2586,7 +2862,7 @@ The plan maps every S0 requirement to an implementation task:
 - immutable, content-addressed snapshot -> Tasks 1 and 3;
 - canonical JSON owner reuse -> Task 1;
 - explicit point-in-time clocks -> Tasks 1 and 2;
-- book/risk/opportunity/source coverage -> Task 2;
+- book/risk/opportunity/source coverage, including explicit decisions/fills/position-lifecycle/settlement historical memory -> Task 2;
 - complete/partial/blocked/corrected states -> Tasks 1 and 3;
 - same-date correction without rewrite -> Task 3;
 - bounded closed payloads and pages -> Tasks 1, 2, 3, and 5;
