@@ -2844,6 +2844,13 @@ html[data-theme="light"] body.page-mm {
   </div>
 </div>
 
+<!-- ── V3-S0 DECISION SNAPSHOT — read-only evidence available to the future PM ──── -->
+<div class="mm-section">
+  <div class="panel span12 mm-collapsible mm-collapsed" id="decision-snapshot" style="grid-column:span 12">
+    <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading V3 decision evidence…</span><span class="l-zh">加载 V3 决策证据中…</span></div>
+  </div>
+</div>
+
 <!-- ── SHADOW BOOKS (Policy A/B) ──────────────────────────────────────────── -->
 <div class="mm-section">
   <div class="panel span12 mm-collapsible mm-collapsed" id="shadow-books" style="grid-column:span 12">
@@ -3656,6 +3663,7 @@ var _factorZoo = null;            // advanced factor-alpha lab verdict (/api/fac
 var _fundamentals = null;         // PIT fundamental (value/quality) factor verdict (/api/fundamentals)
 var _student = null;              // CatBoost return-predicting student (/api/student)
 var _distill = null;              // CatBoost Opus-mimic distillation model (/api/distill)
+var _decisionSnapshot = null;     // V3-S0 read-only decision-snapshot evidence manifest (/api/decision-snapshot)
 // paged-feed state (Brain Log + Research Feed) — preserved across re-renders, clamped on reload
 var _brainPage = 0, _researchPage = 0;
 // brain rows are compact, research cards are tall — bias counts so the two columns end ~level
@@ -3719,9 +3727,9 @@ var DECISION_PREVIEW_COUNT = 5, _decisionsExpanded = false;
 var _runLogCache = {};
 
 // ── collapsible panels (Brain Activity / Evaluated): default collapsed, click to toggle, persisted ──
-var _collapsed = { runs: true, rejected: true, brainlog: false, research: false, 'shadow-books': true, 'xsec': true, 'engine-bt': true, 'factor-zoo': true, 'fundamentals': true };
+var _collapsed = { runs: true, rejected: true, brainlog: false, research: false, 'decision-snapshot': true, 'shadow-books': true, 'xsec': true, 'engine-bt': true, 'factor-zoo': true, 'fundamentals': true };
 try {
-  ['runs', 'rejected', 'brainlog', 'research', 'shadow-books', 'xsec', 'engine-bt', 'factor-zoo', 'fundamentals'].forEach(function (id) {
+  ['runs', 'rejected', 'brainlog', 'research', 'decision-snapshot', 'shadow-books', 'xsec', 'engine-bt', 'factor-zoo', 'fundamentals'].forEach(function (id) {
     var v = localStorage.getItem('mm_coll_' + id);
     if (v !== null) _collapsed[id] = (v === '1');
   });
@@ -6242,6 +6250,9 @@ window.showView = function(view) {
 var PF_GATED_ONLY = ['alloc', 'brainlog', 'runs', 'rejected',
                      'shadow-books', 'xsec', 'engine-bt', 'factor-zoo', 'fundamentals', 'learning-models'];
 var PF_AUTO_ONLY  = ['auto-banner', 'decisions'];
+// V3-S0 Decision Snapshot: US `autonomous` book only. Deliberately its own list rather than
+// reusing _isBrainBook/PF_AUTO_ONLY — the CN/HK/archived Brain books have no V3 snapshot data.
+var PF_US_V3_ONLY = ['decision-snapshot'];
 
 function _fmtPctSigned(v) {
   if (v == null || isNaN(v)) return '—';
@@ -6316,6 +6327,12 @@ function applyPortfolioScope() {
   PF_AUTO_ONLY.forEach(function(id) {
     var p = E(id); if (!p) return;
     var s = p.closest('.mm-section'); if (s) s.style.display = (auto && !self) ? '' : 'none';
+  });
+  var usV3 = _portfolio === 'autonomous';
+  PF_US_V3_ONLY.forEach(function(id) {
+    var p = E(id); if (!p) return;
+    var s = p.closest('.mm-section');
+    if (s) s.style.display = usV3 ? '' : 'none';
   });
   var nr = E('nav-research'); if (nr) nr.style.display = flagship ? '' : 'none';
   var nd = E('nav-desk'); if (nd) nd.style.display = flagship ? '' : 'none';
@@ -6811,6 +6828,206 @@ function _renderRunTrace(run) {
     }
     return '';
   }).join('') + '</div>';
+}
+
+// ── V3-S0 DECISION SNAPSHOT (US-only, read-only evidence inspector) ─────────────────
+// Shows what evidence existed for the future PM at a recorded decision cutoff. This is a
+// bounded manifest view over one already-hydrated GET — never a target, ranking, forecast,
+// or execution signal, and write_permitted/execution_authority/numeric_target_authority are
+// always displayed hard-false regardless of what a (corrupt) payload claims.
+var DECISION_SNAPSHOT_STATE_COLOR = {
+  COMPLETE: 'var(--up)',
+  PARTIAL: 'var(--warn)',
+  CORRECTED_GENERATION_AVAILABLE: 'var(--warn)',
+  BLOCKED: 'var(--down)',
+  INVALID: 'var(--down)'
+};
+function _dsChip(label, color) {
+  return '<span class="mm-chip" style="background:color-mix(in srgb, ' + color + ' 16%, var(--panel2));color:' + color + '">' + esc(label) + '</span>';
+}
+// Conservative source coverage by domain, derived only from source receipts (never from
+// section truth): a BLOCKED receipt wins the domain; all-COMPLETE receipts make it COMPLETE;
+// anything else (including an unrecognized coverage_state) is PARTIAL. A domain absent from
+// every receipt is omitted rather than assumed complete.
+function _dsDomainCoverage(sources) {
+  var byDomain = {};
+  sources.forEach(function(r) {
+    if (!r || typeof r !== 'object') return;
+    var domains = Array.isArray(r.domains) ? r.domains : [];
+    var cov = typeof r.coverage_state === 'string' ? r.coverage_state : 'UNKNOWN';
+    domains.forEach(function(dom) {
+      if (typeof dom !== 'string' || !dom) return;
+      if (!byDomain[dom]) byDomain[dom] = [];
+      byDomain[dom].push(cov);
+    });
+  });
+  return Object.keys(byDomain).sort().map(function(dom) {
+    var covs = byDomain[dom];
+    // UNKNOWN is a distinct COVERAGE_STATES member (coverage not known), not a weaker
+    // synonym for PARTIAL (coverage genuinely partial) — reporting UNKNOWN as PARTIAL would
+    // claim more knowledge than the receipts support. Precedence: BLOCKED wins outright;
+    // all-COMPLETE is COMPLETE; any other non-COMPLETE/non-PARTIAL value (UNKNOWN or an
+    // unrecognized future token) makes the domain UNKNOWN; otherwise PARTIAL.
+    var agg = covs.some(function(c) { return c === 'BLOCKED'; }) ? 'BLOCKED'
+      : covs.every(function(c) { return c === 'COMPLETE'; }) ? 'COMPLETE'
+      : covs.some(function(c) { return c !== 'COMPLETE' && c !== 'PARTIAL'; }) ? 'UNKNOWN'
+      : 'PARTIAL';
+    return { domain: dom, coverage: agg };
+  });
+}
+// Sealed snapshot gaps are canonical-JSON strings (decision_snapshot_contracts.py: "gaps
+// must be a list of strings"; decision_snapshot.py's _seal_gaps serializes each gap dict to
+// one string). Recover code/owner/detail when the string parses as an object; on parse
+// failure (or any other shape) fall back to the raw escaped value — a gap must never
+// silently render as an empty row, or the displayed count stops matching the caption.
+function _dsGapRow(g) {
+  if (typeof g === 'string') {
+    var parsed = null;
+    try { parsed = JSON.parse(g); } catch (e) { parsed = null; }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      var pcode = typeof parsed.code === 'string' ? parsed.code : '—';
+      var powner = typeof parsed.owner === 'string' ? parsed.owner : '';
+      var pdetail = typeof parsed.detail === 'string' ? parsed.detail : '';
+      return '<tr><td>' + esc(pcode) + '</td><td>' + esc(powner) + '</td><td>' + esc(pdetail) + '</td></tr>';
+    }
+    return '<tr><td colspan="3">' + esc(g) + '</td></tr>';
+  }
+  if (g && typeof g === 'object') {
+    var code = typeof g.code === 'string' ? g.code : '—';
+    var owner = typeof g.owner === 'string' ? g.owner : '';
+    var detail = typeof g.detail === 'string' ? g.detail : '';
+    return '<tr><td>' + esc(code) + '</td><td>' + esc(owner) + '</td><td>' + esc(detail) + '</td></tr>';
+  }
+  return '<tr><td colspan="3">' + esc(String(g)) + '</td></tr>';
+}
+function renderDecisionSnapshot() {
+  var el = E('decision-snapshot');
+  if (!el) return;
+  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  var head = collH2('decision-snapshot', 'V3 Decision Snapshot', 'V3 决策快照',
+    isZh ? '面向未来 PM 的只读证据清单 · 无执行权限' : 'read-only evidence manifest for a future PM · no execution authority');
+  var d = _decisionSnapshot;
+  var degraded = '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
+    + '<span class="l-en">Decision-snapshot evidence unavailable — degraded read, not retried.</span>'
+    + '<span class="l-zh">决策快照证据不可用 — 已降级显示，不会重试。</span></div>';
+  if (!d || typeof d !== 'object' || typeof d.status !== 'string') { el.innerHTML = head + degraded; return; }
+  var status = d.status;
+  if (status === 'NO_SNAPSHOT') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
+      + '<span class="l-en">No V3 decision snapshot has been recorded yet.</span>'
+      + '<span class="l-zh">尚未记录任何 V3 决策快照。</span></div>';
+    return;
+  }
+  var snap = d.snapshot;
+  if (!snap || typeof snap !== 'object') { el.innerHTML = head + degraded; return; }
+
+  var stateColor = DECISION_SNAPSHOT_STATE_COLOR[status] || 'var(--muted)';
+  var coverageState = typeof snap.coverage_state === 'string' ? snap.coverage_state : 'UNKNOWN';
+  var coverageColor = DECISION_SNAPSHOT_STATE_COLOR[coverageState] || 'var(--muted)';
+  var snapshotId = typeof snap.snapshot_id === 'string' ? snap.snapshot_id : '';
+  var shortId = snapshotId.indexOf('sha256:') === 0 ? snapshotId.slice(7, 23) : snapshotId.slice(0, 16);
+  var cutoff = typeof snap.decision_cutoff === 'string' ? snap.decision_cutoff : '—';
+  var recordedAt = typeof snap.recorded_at === 'string' ? snap.recorded_at : '—';
+  var summary = (snap.summary && typeof snap.summary === 'object') ? snap.summary : {};
+  var srcTotal = Number.isFinite(summary.sources_total) ? summary.sources_total : 0;
+  var srcAvail = Number.isFinite(summary.sources_available) ? summary.sources_available : 0;
+  var correction = (snap.correction && typeof snap.correction === 'object') ? snap.correction : {};
+  var correctionStatus = typeof correction.status === 'string' ? correction.status : 'ORIGINAL';
+
+  // The three authority flags are never read off the payload — a tampered/corrupt snapshot
+  // must not be able to flip this fence to anything other than hard-false.
+  var chips = _dsChip(status, stateColor) + ' ' + _dsChip('coverage: ' + coverageState, coverageColor);
+  var authorityLine = '<div style="font-size:11px;color:var(--muted);margin-top:6px">'
+    + '<span class="l-en">write_permitted=false · execution_authority=false · numeric_target_authority=false — evidence only, no execution authority.</span>'
+    + '<span class="l-zh">write_permitted=false · execution_authority=false · numeric_target_authority=false — 仅证据，无执行权限。</span>'
+    + '</div>';
+  var metaLine = '<div style="font-size:12px;color:var(--muted);margin:6px 0">'
+    + '<span class="l-en">cutoff ' + esc(cutoff) + ' · recorded ' + esc(recordedAt) + ' · id ' + esc(shortId)
+    + ' · sources ' + srcAvail + '/' + srcTotal + ' · correction ' + esc(correctionStatus) + '</span>'
+    + '<span class="l-zh">截止 ' + esc(cutoff) + ' · 记录于 ' + esc(recordedAt) + ' · ID ' + esc(shortId)
+    + ' · 来源 ' + srcAvail + '/' + srcTotal + ' · 修正状态 ' + esc(correctionStatus) + '</span>'
+    + '</div>';
+
+  var sourcesArr = Array.isArray(snap.sources) ? snap.sources : [];
+  var gapsArr = Array.isArray(snap.gaps) ? snap.gaps : [];
+  var th2 = function(en, zh) { return '<th><span class="l-en">' + en + '</span><span class="l-zh">' + zh + '</span></th>'; };
+
+  var domainRows = _dsDomainCoverage(sourcesArr);
+  var domainTable = '';
+  if (domainRows.length) {
+    var domBody = domainRows.map(function(row) {
+      var c = DECISION_SNAPSHOT_STATE_COLOR[row.coverage] || 'var(--muted)';
+      return '<tr><td>' + esc(row.domain) + '</td><td style="color:' + c + '">' + esc(row.coverage) + '</td></tr>';
+    }).join('');
+    domainTable = '<div style="font-weight:600;margin:10px 0 4px;font-size:12px">'
+      + '<span class="l-en">Source coverage by domain (receipt-derived, not canonical section truth)</span>'
+      + '<span class="l-zh">按领域的来源覆盖（源自回执，非权威区块真值）</span></div>'
+      + '<div class="mm-table-wrap"><table><thead><tr>' + th2('Domain', '领域') + th2('Coverage', '覆盖状态')
+      + '</tr></thead><tbody>' + domBody + '</tbody></table></div>';
+  }
+
+  var MAX_ROWS = 40;
+  var srcShown = sourcesArr.slice(0, MAX_ROWS);
+  var srcOmitted = Math.max(0, sourcesArr.length - srcShown.length);
+  var srcBody = srcShown.map(function(r) {
+    // A non-object entry still consumes a visible row rather than silently vanishing —
+    // otherwise the "Sources (N)" caption and the 40-row/omitted-count arithmetic would
+    // both keep counting it while no row for it ever renders.
+    if (!r || typeof r !== 'object') return '<tr><td colspan="4">' + esc('MALFORMED: ' + String(r)) + '</td></tr>';
+    var sid = typeof r.source_id === 'string' ? r.source_id : '—';
+    var st = typeof r.status === 'string' ? r.status : '—';
+    var errCode = typeof r.error_code === 'string' ? r.error_code : '';
+    var doms = Array.isArray(r.domains) ? r.domains.filter(function(x) { return typeof x === 'string'; }).join(', ') : '';
+    return '<tr><td>' + esc(sid) + '</td><td>' + esc(st) + '</td><td>' + esc(doms) + '</td><td>' + esc(errCode) + '</td></tr>';
+  }).join('');
+  var srcOmittedLine = srcOmitted > 0
+    ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">'
+      + '<span class="l-en">' + srcOmitted + ' additional source row(s) omitted.</span>'
+      + '<span class="l-zh">另有 ' + srcOmitted + ' 条来源记录未显示。</span></div>'
+    : '';
+  var sourceTable = '<div style="font-weight:600;margin:14px 0 4px;font-size:12px">'
+    + '<span class="l-en">Sources (' + sourcesArr.length + ')</span><span class="l-zh">来源（' + sourcesArr.length + '）</span></div>'
+    + '<div class="mm-table-wrap"><table><thead><tr>' + th2('source_id', 'source_id') + th2('status', '状态')
+    + th2('domains', '领域') + th2('error_code', 'error_code') + '</tr></thead><tbody>' + srcBody + '</tbody></table></div>'
+    + srcOmittedLine;
+
+  // #548 (Sector Central) is surfaced whenever the real macro.sector_rotation receipt is
+  // DEPENDENCY_PARTIAL (identified by source_id — its domain is always market_structure,
+  // never "macro.sector_rotation" itself) or any gap — shown or omitted — names PR #548.
+  // Gaps are sealed strings, so the string form is checked directly rather than requiring a
+  // (rejected) object shape. Never claim it is fixed.
+  var pr548 = sourcesArr.some(function(r) {
+    return !!r && typeof r === 'object'
+      && r.source_id === 'macro.sector_rotation' && r.status === 'DEPENDENCY_PARTIAL';
+  }) || gapsArr.some(function(g) {
+    if (typeof g === 'string') return g.indexOf('#548') !== -1;
+    if (!g || typeof g !== 'object') return false;
+    var owner = typeof g.owner === 'string' ? g.owner : '';
+    var detail = typeof g.detail === 'string' ? g.detail : '';
+    return owner.indexOf('#548') !== -1 || detail.indexOf('#548') !== -1;
+  });
+
+  var gapShown = gapsArr.slice(0, MAX_ROWS);
+  var gapOmitted = Math.max(0, gapsArr.length - gapShown.length);
+  var gapBody = gapShown.map(_dsGapRow).join('');
+  var gapOmittedLine = gapOmitted > 0
+    ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">'
+      + '<span class="l-en">' + gapOmitted + ' additional gap row(s) omitted.</span>'
+      + '<span class="l-zh">另有 ' + gapOmitted + ' 条缺口记录未显示。</span></div>'
+    : '';
+  var gapTable = '<div style="font-weight:600;margin:14px 0 4px;font-size:12px">'
+    + '<span class="l-en">Gaps (' + gapsArr.length + ')</span><span class="l-zh">缺口（' + gapsArr.length + '）</span></div>'
+    + '<div class="mm-table-wrap"><table><thead><tr>' + th2('code', 'code') + th2('owner', 'owner') + th2('detail', 'detail')
+    + '</tr></thead><tbody>' + gapBody + '</tbody></table></div>'
+    + gapOmittedLine;
+
+  var pr548Note = pr548
+    ? '<div style="font-size:11px;color:var(--warn);margin-top:8px">'
+      + '<span class="l-en">Sector Central market-structure evidence is bounded by open dependency PR #548 (receipt/gap only — not repaired).</span>'
+      + '<span class="l-zh">市场结构证据受限于未合并依赖 PR #548（仅回执/缺口 — 尚未修复）。</span></div>'
+    : '';
+
+  el.innerHTML = head + chips + metaLine + authorityLine + domainTable + sourceTable + gapTable + pr548Note;
 }
 
 // ── SHADOW BOOKS (Policy A/B) ───────────────────────────────────────────────────
@@ -7370,6 +7587,7 @@ function _renderAll() {
   _renderScoped();
   var steps = [
     ['brainLog', renderBrainLog], ['research', renderResearch], ['runs', renderRuns],
+    ['decisionSnapshot', renderDecisionSnapshot],
     ['shadowBooks', renderShadowBooks], ['xsec', renderXsec], ['engineBacktest', renderEngineBacktest],
     ['factorZoo', renderFactorZoo], ['fundamentals', renderFundamentals],
     ['learningModels', renderLearningModels],
@@ -7720,11 +7938,12 @@ function _hydrateShared() {
       fetch('/api/fundamentals').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
       fetch('/api/student').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
       fetch('/api/distill').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
+      fetch('/api/decision-snapshot?book=autonomous').then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; }),
     ]);
   }).then(function(s) {
     var actRes = s[0], researchRes = s[1], shadowRes = s[2], predRes = s[3],
         ebtRes = s[4], fzRes = s[5], fundRes = s[6],
-        studentRes = s[7], distillRes = s[8];
+        studentRes = s[7], distillRes = s[8], decisionSnapshotRes = s[9];
     _activity    = (actRes.status    === 'fulfilled' ? actRes.value     : null) || [];
     _research    = (researchRes.status === 'fulfilled' ? researchRes.value : null) || [];
     _shadowBooks    = shadowRes.status === 'fulfilled' ? shadowRes.value : null;
@@ -7734,6 +7953,7 @@ function _hydrateShared() {
     _fundamentals   = fundRes.status   === 'fulfilled' ? fundRes.value   : null;
     _student        = studentRes.status === 'fulfilled' ? studentRes.value : null;
     _distill        = distillRes.status === 'fulfilled' ? distillRes.value : null;
+    _decisionSnapshot = decisionSnapshotRes.status === 'fulfilled' ? decisionSnapshotRes.value : null;
     _sharedLoaded = true;
     _renderAll();
     _schedulePortfolioPrefetch();
@@ -7782,6 +8002,7 @@ async function fetchAll(opts) {
     _hydrateShared();
     applyColl('runs');
     applyColl('rejected');
+    applyColl('decision-snapshot');
     applyColl('shadow-books');
     applyColl('xsec');
     applyColl('engine-bt');
