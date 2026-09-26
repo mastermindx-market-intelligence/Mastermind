@@ -8963,6 +8963,252 @@ def test_p1r1_lost_return_reconciles_to_one_packet_and_one_wake(
     assert len(WakeLedgerRepository(runtime).list_wake_events()) == wake_after_first
 
 
+class _P1R1RelayStub:
+    """A stateful Agent Relay stand-in, keyed the way Relay itself is keyed.
+
+    ``_CrossParentCountingCarrier`` stands in for the *carrier*, so the
+    dispatcher-level acceptance above never exercises the real one: its target
+    resolution, its wire request, its pre-read access proof and its receipt
+    validation are all absent from that composition. This stub stands in one
+    layer lower instead -- for the service -- so the real
+    ``TargetedAgentDialogueConsultationPacketCarrier`` runs on top of it.
+
+    Storage is keyed on ``(thread_ts, consultation_id, purpose)``, which is what
+    makes the composition meaningful: a read aimed at the wrong parent returns
+    absence exactly as Relay would, rather than helpfully finding the packet.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.posted: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def operations(self, name: str) -> list[dict[str, Any]]:
+        return [
+            call for call in self.calls if call["request"]["operation"] == name
+        ]
+
+    def threads_posted_on(self) -> set[str]:
+        return {thread_ts for thread_ts, _cid, _purpose in self.posted}
+
+    async def __call__(
+        self,
+        socket_path: Path,
+        request: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {"socket_path": socket_path, "request": dict(request), **kwargs}
+        )
+        operation = request["operation"]
+        args = request["args"]
+        if operation == "send_consultation_packet":
+            # Relay runs the caller's commit hook inside its own write, which is
+            # what orders canonical INTENT against the physical post.
+            before_write = kwargs.get("before_write")
+            if before_write is not None:
+                await before_write()
+            message = dict(args["message"])
+            key = (
+                args["thread_ts"],
+                message["consultation_id"],
+                message["purpose"],
+            )
+            self.posted[key] = message
+            return {
+                "ok": True,
+                "result": {
+                    "action": "POSTED",
+                    "message_key": message["message_key"],
+                    "fingerprint": message["fingerprint"],
+                    "message_ts": "1787961600.000002",
+                    "duplicate_timestamps": [],
+                    "thread_ts": args["thread_ts"],
+                    "parent_author_user_id": "U00000002",
+                    "parent_fingerprint": "a" * 64,
+                },
+            }
+        if operation == "read_consultation_packet":
+            key = (
+                args["thread_ts"],
+                args["consultation_id"],
+                args["purpose"],
+            )
+            stored = self.posted.get(key)
+            if stored is None:
+                return {"ok": True, "result": None}
+            return {
+                "ok": True,
+                "result": {
+                    "packet": dict(stored),
+                    "primary_ts": "1787961600.000002",
+                    "duplicate_timestamps": [],
+                },
+            }
+        raise AssertionError(f"unexpected operation {operation!r}")
+
+
+class _P1R1HostTargetResolver:
+    """Host stand-in for a composition whose consultation id is minted later.
+
+    ``_StaticPacketTargetResolver`` keys its read map on a literal
+    consultation id, which a dispatcher-level test cannot know in advance. The
+    parents themselves are per-Attempt facts, so they are fixed here and the
+    consultation id is simply recorded.
+    """
+
+    def __init__(self, *, requester: tuple, recipient: tuple) -> None:
+        self._requester_ref = _p1r1_actor_ref(requester)
+        self._recipient_ref = _p1r1_actor_ref(recipient)
+        self._targets = {
+            _p1r1_actor_key(self._requester_ref): _delivery_target(
+                requester,
+                session_ref="asd-session-p1r1-a-0001",
+                thread_ts=_P1R1_A_THREAD,
+            ),
+            _p1r1_actor_key(self._recipient_ref): _delivery_target(
+                recipient,
+                session_ref="asd-session-p1r1-b-0001",
+                thread_ts=_P1R1_B_THREAD,
+            ),
+        }
+        self.send_calls: list[dict[str, Any]] = []
+        self.read_calls: list[tuple[str, str]] = []
+
+    def resolve_send_target(
+        self,
+        consultation_id: str,
+        purpose: str,
+        actor_ref: Mapping[str, Any],
+    ) -> Any:
+        self.send_calls.append(
+            {
+                "consultation_id": consultation_id,
+                "purpose": purpose,
+                "actor_ref": dict(actor_ref),
+            }
+        )
+        return self._targets[_p1r1_actor_key(actor_ref)]
+
+    def resolve_read_access(
+        self, consultation_id: str, purpose: str
+    ) -> consultation_dispatch.ConsultationPacketAccess:
+        self.read_calls.append((consultation_id, purpose))
+        destination = (
+            self._recipient_ref if purpose == "QUESTION" else self._requester_ref
+        )
+        return consultation_dispatch.ConsultationPacketAccess(
+            target=self._targets[_p1r1_actor_key(destination)],
+            requester_actor_ref=dict(self._requester_ref),
+            recipient_actor_ref=dict(self._recipient_ref),
+        )
+
+
+def test_p1r1_lost_return_through_the_real_targeted_carrier(
+    tmp_path: Path,
+) -> None:
+    """Acceptance 15b: the composition above, with the REAL carrier.
+
+    Sol's discriminator 4. The stand-in carrier proves the *dispatcher* is
+    idempotent across a lost return; it cannot prove the real carrier is,
+    because the real one reaches its verdict through a physical read whose
+    destination it has to reconstruct first. Here the same lost-return replay
+    runs against one durable Relay stub shared by both dispatchers -- which is
+    the actual scenario: Relay kept the packet, the caller's return did not
+    arrive -- and the packet must still be written exactly once, on B's parent
+    and never on A's, with one Wake.
+    """
+    runtime = _runtime_at(tmp_path / "p1r1-real-lost-return")
+    _consultations(runtime, tmp_path / "p1r1-real-lost-return")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "p1r1-real-lr-repo")
+    invocations = _p1_invocations()
+    caller_binding = _dialogue_binding(
+        requester,
+        session_ref="asd-session-p1r1-a-0001",
+        thread_ts=_P1R1_A_THREAD,
+    )
+    envelope = _dispatch_consult_envelope(
+        question="Does the real targeted carrier survive a lost return?",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+
+    # ONE Relay for the whole scenario: the packet outlives the caller.
+    relay = _P1R1RelayStub()
+
+    def build_carrier() -> Any:
+        """A brand-new carrier per dispatcher, as a restart would give."""
+        return consultation_dispatch.TargetedAgentDialogueConsultationPacketCarrier(
+            binding_resolver=_StaticDialogueBindingResolver(caller_binding),
+            target_resolver=_P1R1HostTargetResolver(
+                requester=requester, recipient=recipient
+            ),
+            socket_path=Path("/private/tmp/iac1-p1r1-agent-relay.sock"),
+            service_call=relay,
+            timeout_seconds=7.5,
+        )
+
+    first = _run_dispatcher(
+        _cross_parent_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            carrier=build_carrier(),
+            invocations=invocations,
+            caller_dialogue_binding=caller_binding,
+        ),
+        "company.consult",
+        envelope,
+    )
+    data = first["result"]
+    consultation_id = data["consultation_ref"]
+    assert data["state"] == "INTENDED"
+    assert len(relay.operations("send_consultation_packet")) == 1
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+    wake_after_first = len(WakeLedgerRepository(runtime).list_wake_events())
+
+    # The one physical post landed on B's parent, carrying B's context.
+    sent = relay.operations("send_consultation_packet")[0]["request"]["args"]
+    assert sent["thread_ts"] == _P1R1_B_THREAD
+    assert sent["context"]["session_ref"] == "asd-session-p1r1-b-0001"
+    assert relay.threads_posted_on() == {_P1R1_B_THREAD}
+
+    # Lost return: the caller never saw the response. A restarted dispatcher
+    # with a fresh carrier replays the identical consult against the same Relay.
+    replay = _run_dispatcher(
+        _cross_parent_dispatcher(
+            runtime,
+            fixture_repo,
+            requester=requester,
+            recipient=recipient,
+            carrier=build_carrier(),
+            invocations=invocations,
+            caller_dialogue_binding=caller_binding,
+        ),
+        "company.consult",
+        envelope,
+    )
+    replay_data = replay["result"]
+    assert replay_data["consultation_ref"] == consultation_id
+    assert replay_data["state"] == "ALREADY_INTENDED"
+    # Exactly one packet for the whole scenario, still only on B's parent.
+    assert len(relay.operations("send_consultation_packet")) == 1
+    assert relay.threads_posted_on() == {_P1R1_B_THREAD}
+    assert len(relay.posted) == 1
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+    assert len(WakeLedgerRepository(runtime).list_wake_events()) == wake_after_first
+    # The replay reached its verdict by reading B's parent, not by trusting
+    # in-process state: the read it issued names the consultation the first
+    # dispatch minted.
+    reads = relay.operations("read_consultation_packet")
+    assert reads, "the replay must physically read before concluding"
+    assert reads[-1]["request"]["args"]["thread_ts"] == _P1R1_B_THREAD
+    assert reads[-1]["request"]["args"]["consultation_id"] == consultation_id
+
+
 @pytest.mark.parametrize(
     "binding_kind", ["absent", "not_the_caller"], ids=["absent", "foreign"]
 )
