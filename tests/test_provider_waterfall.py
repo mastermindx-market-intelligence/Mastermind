@@ -150,3 +150,58 @@ def test_codex_refresh_failure_falls_back_to_oauth(monkeypatch):
     out = asyncio.run(pw.reason("test", role="pm"))
     assert out["text"] == "claude"
     assert calls == ["codex", "cli"]
+
+
+def test_failed_write_tool_result_never_advances_to_oauth(monkeypatch):
+    """Consumer proof for #538 with the REAL shared classifier (engine.llm_auth).
+
+    A Codex turn whose submit_book failed with a quota-flavoured tool message must come back
+    ok=False, must not be resent to a Claude OAuth slot, and must not cool the Codex account:
+    the write's effect is unknown and only auth/quota failures authorise replay.
+    """
+    import bot  # noqa: F401  # vendored engine on sys.path
+    from engine import llm_auth
+    from brain import cli_bridge, codex_bridge, provider_waterfall as pw
+
+    cooled = []
+
+    class _Pool:
+        def is_cooling(self, key_id):
+            return False
+
+        def mark_cooling(self, key_id, cool_kind=None):
+            cooled.append((key_id, cool_kind))
+
+        def record_session(self, *args, **kwargs):
+            raise AssertionError("a failed write tool must not be recorded as a good session")
+
+    monkeypatch.setattr(pw, "_shared_modules", lambda: (llm_auth, _Pool()))
+    monkeypatch.setattr(pw, "provider_rungs", lambda _role: [
+        {"provider": "codex", "key_id": "codex_account", "env_name": None, "cooling": False},
+        {"provider": "oauth", "key_id": "claude_code_oauth_3",
+         "env_name": "CLAUDE_CODE_OAUTH_TOKEN_3", "cooling": False},
+    ])
+    calls = []
+
+    async def fake_reason(_prompt, **kwargs):
+        calls.append(kwargs["_backend_override"])
+        return {
+            "ok": False, "text": "The submission was refused.", "backend": "codex",
+            "tools_used": ["mcp__desk__submit_book"],
+            "failed_write_tools": [{"tool": "mcp__desk__submit_book",
+                                    "error": "book quota exceeded (429 rate limit)"}],
+            "error": codex_bridge.WRITE_TOOL_FAILURE_ERROR,
+        }
+
+    monkeypatch.setattr(cli_bridge, "_reason", fake_reason)
+    # The fixed string is what makes the non-replay hold; pin it against the live classifier.
+    assert pw._failure_kind(codex_bridge.WRITE_TOOL_FAILURE_ERROR) is None
+    out = asyncio.run(pw.reason("govern autonomous", role="deep"))
+
+    assert calls == ["codex"]
+    assert out["ok"] is False
+    assert out["error"] == codex_bridge.WRITE_TOOL_FAILURE_ERROR
+    assert out["provider_attempts"] == [
+        {"provider": "codex", "key_id": "codex_account", "ok": False, "cooling": False},
+    ]
+    assert cooled == []

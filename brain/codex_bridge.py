@@ -73,6 +73,17 @@ _DELEGATION_AGENT_NAMES = frozenset({
     # Override the built-ins too: an omitted/alternate agent_type must not recover parent writes.
     "default", "explorer", "worker",
 })
+# Result truth for explicitly failed WRITE tools (#538). A failed write may already have partial
+# effects, so the result never claims NOT_APPLIED: it only refuses to be green and keeps the
+# attempted name plus the tool's own error text for reconciliation. ``error`` is a fixed string
+# because provider_waterfall._failure_kind classifies by substring — a quota/auth word from the
+# tool's text or a turn-level error would otherwise authorise resending the prompt to another
+# provider after a write of unknown effect.
+_WRITE_TOOL_LEAVES = frozenset({"submit_book"})
+WRITE_TOOL_FAILURE_ERROR = (
+    "codex reported a failed write tool call; its effect is unknown - reconcile the book "
+    "before any resubmission"
+)
 _MCP_SECRET_FILE_ENV = "MASTERMIND_CODEX_MCP_SECRET_FILE"
 _MCP_BOOK_ENV = "MASTERMIND_CODEX_BOOK"
 _MCP_PYTHON_ENV = "MASTERMIND_CODEX_PYTHON"
@@ -393,12 +404,18 @@ def _compose_prompt(prompt: str, *, system: str | None,
     return "\n".join(sections)
 
 
+def _tool_leaf(name: object) -> str:
+    """Normalize any MCP tool spelling (``mcp__desk__x``, ``desk.x``, ``mcp::china::x``) to ``x``."""
+    return str(name).replace("::", "__").rsplit("__", 1)[-1].rsplit(".", 1)[-1]
+
+
 def _parse_jsonl(raw: str) -> dict[str, Any]:
     text: str | None = None
     thread_id: str | None = None
     usage: dict[str, Any] = {}
     tools: list[str] = []
     errors: list[str] = []
+    failed_write_tools: list[dict[str, Any]] = []
     for line in raw.splitlines():
         try:
             event = json.loads(line)
@@ -416,6 +433,12 @@ def _parse_jsonl(raw: str) -> dict[str, Any]:
                 name = item.get("tool") or item.get("name")
                 if name:
                     tools.append(str(name))
+                    if item.get("status") == "failed" and _tool_leaf(name) in _WRITE_TOOL_LEAVES:
+                        err = item.get("error")
+                        msg = err.get("message") if isinstance(err, dict) else err
+                        failed_write_tools.append(
+                            {"tool": str(name), "error": str(msg)[:1000] if msg else None}
+                        )
         elif et == "turn.completed":
             usage = event.get("usage") or usage
         elif et in {"turn.failed", "error"}:
@@ -428,6 +451,7 @@ def _parse_jsonl(raw: str) -> dict[str, Any]:
         "usage": usage if isinstance(usage, dict) else {},
         "tools_used": tools,
         "error": "; ".join(errors)[:1000] or None,
+        "failed_write_tools": failed_write_tools,
     }
 
 
@@ -630,16 +654,22 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
     if proc.returncode != 0 and not error:
         error = stderr[-1000:] or f"codex exited {proc.returncode}"
     text = parsed["text"]
+    failed_write_tools = parsed["failed_write_tools"]
+    if failed_write_tools:
+        # Fixed string on purpose; see WRITE_TOOL_FAILURE_ERROR. The tool's text stays in
+        # ``failed_write_tools``; a turn-level error is deliberately not merged in here.
+        error = WRITE_TOOL_FAILURE_ERROR
     result = {
         **base,
-        "ok": proc.returncode == 0 and bool(text),
+        "ok": proc.returncode == 0 and bool(text) and not failed_write_tools,
         "text": text,
         "tools_used": parsed["tools_used"],
+        "failed_write_tools": failed_write_tools,
         "cost_usd": None,
         "session_id": parsed["session_id"],
         "usage": parsed["usage"],
         "backend": "codex",
-        "error": error if (proc.returncode != 0 or not text) else None,
+        "error": error if (proc.returncode != 0 or not text or failed_write_tools) else None,
         "latency_ms": int((time.monotonic() - started) * 1000),
     }
     if not delegation or not result["ok"]:
@@ -689,8 +719,7 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
     submitted["delegated_research_completed"] = True
     submit_calls = [
         tool for tool in (submitted.get("tools_used") or [])
-        if str(tool).replace("::", "__").rsplit("__", 1)[-1].rsplit(".", 1)[-1]
-        == "submit_book"
+        if _tool_leaf(tool) == "submit_book"
     ]
     if len(submit_calls) != 1:
         submitted["ok"] = False

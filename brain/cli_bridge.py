@@ -226,7 +226,10 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
     Pass `mcp_servers` (with a matching `allowed_tools`) to arm a CUSTOM tool surface — e.g. the
     autonomous desk's free-form trade tools — instead of the default gated bot server. Returns
     {ok, text, model, role, armed, tools_used, cost_usd, session_id, usage, backend, error,
-     key_id}.
+     key_id}. The codex backend adds ``failed_write_tools`` (attempted write tools whose call
+    status was "failed"); when non-empty, ``ok`` is False, ``error`` is the fixed
+    ``codex_bridge.WRITE_TOOL_FAILURE_ERROR`` and the tool effect is UNKNOWN — reconcile the
+    book state rather than treating the turn as not applied or replaying it.
 
     book: when the caller will record cost against cost_guard themselves (e.g. bot/autonomous.py
     which knows its exact PORTFOLIO_ID book name), pass the book name here so cli_bridge skips
