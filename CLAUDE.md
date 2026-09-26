@@ -31,7 +31,8 @@ These role descriptions do not themselves grant authority.
 **Source-of-truth order** — higher layer wins on conflict:
 1. Charter — `research/MASTERMIND_CHARTER_V2.md` (P1–P10); `DOCTRINE.md` beneath it.
 2. Strategic state — `config/strategic_state.yml` (phase, north star, P0 objectives,
-   resource policy, standing constraints). Read via
+   resource policy, core-product value/readiness model, descriptive phase gates,
+   review triggers, and standing constraints). Read via
    `control_plane.strategic_state.load_strategic_state()`.
 3. Authority map — `config/authority_map.yml`.
 4. Your current assigned Job / Directive.
