@@ -281,13 +281,31 @@ ensure_root_directory() {
 }
 
 assert_runtime_not_in_use() {
-  local active_path observed_pids active_python_pids=""
+  local active_path observed_pids lsof_status active_python_pids=""
   for active_path in "$RUNTIME_ROOT/Python" "$PYTHON_BINARY"; do
     if [ -e "$active_path" ] && [ ! -L "$active_path" ]; then
-      observed_pids="$(/usr/sbin/lsof -t "$active_path" 2>/dev/null || true)"
-      if [ -n "$observed_pids" ]; then
-        active_python_pids="${active_python_pids}${active_python_pids:+ }$(/bin/echo "$observed_pids" | /usr/bin/tr '\n' ' ')"
+      if observed_pids="$(/usr/sbin/lsof -t "$active_path" 2>&1)"; then
+        lsof_status=0
+      else
+        lsof_status=$?
       fi
+      # Darwin lsof returns 1 with no output when an existing path has no open
+      # users. That exact observation is the only negative proof we accept.
+      if [ "$lsof_status" -eq 1 ] && [ -z "$observed_pids" ]; then
+        continue
+      fi
+      if [ "$lsof_status" -ne 0 ] || [ -z "$observed_pids" ]; then
+        /bin/echo "Python runtime use inspection failed; retry after lsof is healthy" >&2
+        return 75
+      fi
+      if ! /bin/echo "$observed_pids" | /usr/bin/awk '
+        NF != 1 || $1 !~ /^[0-9]+$/ || $1 == "0" { bad=1 }
+        END { exit bad }
+      '; then
+        /bin/echo "Python runtime use inspection failed; retry after lsof is healthy" >&2
+        return 75
+      fi
+      active_python_pids="${active_python_pids}${active_python_pids:+ }$(/bin/echo "$observed_pids" | /usr/bin/tr '\n' ' ')"
     fi
   done
   [ -z "$active_python_pids" ] || {
