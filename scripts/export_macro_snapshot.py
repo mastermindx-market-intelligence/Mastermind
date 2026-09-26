@@ -15,8 +15,9 @@ The scheduler calls ``run()`` twice a day (see ``app/scheduler.py``). Manual use
     python -m scripts.export_macro_snapshot --no-push    # build only (dry run / tests)
     python -m scripts.export_macro_snapshot --dest /path/to/site   # write elsewhere, no push
 
-SAFETY: it only commits/pushes when the macro checkout is on ``main`` — never a feature
-branch. Resilient: it logs and returns rather than raising into the scheduler.
+SAFETY: it only commits/pushes when the Macro-owned checkout is on ``main`` — never a
+feature branch. A missing owner checkout or failed push returns ``None`` so the scheduler records
+an error; local-only bytes are never reported as a public delivery.
 """
 from __future__ import annotations
 
@@ -239,9 +240,14 @@ def run(no_push: bool = False, dest: str | Path | None = None) -> Path | None:
     # Auto-push only the default write into the macro working tree; a custom --dest or
     # --no-push is build-only.
     push = (not no_push) and (dest is None)
+    if push and root is None:
+        print("[export_macro_snapshot] no Macro-owned checkout is available — "
+              "refusing to create local-only bytes or report a publication.")
+        return None
     try:
-        if push and root is not None:
-            dest = root / "site"   # write straight into the macro tree so the commit picks it up
+        if push:
+            assert root is not None  # guarded above; narrows the publication path
+            dest = root / "site"
         out = macro_snapshot.write(dest)
         print(f"[export_macro_snapshot] wrote {out}")
     except Exception as exc:
@@ -272,16 +278,14 @@ def run(no_push: bool = False, dest: str | Path | None = None) -> Path | None:
         if no_push:
             print("[export_macro_snapshot] --no-push: skipped commit/push.")
         return out
-    if root is None:
-        print("[export_macro_snapshot] no macro git checkout behind vendor/macro — "
-              "wrote snapshot but skipped push.")
-        return out
-
+    # root is guaranteed for the default publish path by the guard above.
+    assert root is not None
     try:
-        _commit_and_push(root)
+        published = _commit_and_push(root)
     except Exception as exc:
         print(f"[export_macro_snapshot] push failed (non-fatal): {exc}")
-    return out
+        return None
+    return out if published else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -290,8 +294,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dest", default=None,
                     help="write the snapshot under this site/ dir instead of the macro repo (implies no push)")
     args = ap.parse_args(argv)
-    run(no_push=args.no_push, dest=args.dest)
-    return 0
+    out = run(no_push=args.no_push, dest=args.dest)
+    return 0 if out is not None else 1
 
 
 if __name__ == "__main__":
