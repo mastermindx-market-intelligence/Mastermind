@@ -32,6 +32,7 @@ from integrations.slack_agent_dialogue.engine import ERROR_CODES as DialogueEngi
 from integrations.slack_agent_dialogue.engine_v2 import (
     DialogueContextV2,
     DialogueEngineV2,
+    DialogueFrameKind,
     PreparedMessageSend,
 )
 from integrations.slack_agent_dialogue.turn_runtime_primitives import (
@@ -41,6 +42,10 @@ from integrations.slack_agent_dialogue.turn_runtime_primitives import (
 CONTROL_VERSION = "mastermind.agent_dialogue_control.v1"
 CONTROL_VERSION_V2 = "mastermind.agent_dialogue_control.v2"
 EXACT_SEND_PROTOCOL = "mastermind.agent_dialogue_exact_send.v1"
+_EXACT_SEND_OPERATIONS = {
+    "send_message": DialogueFrameKind.LIFECYCLE,
+    "send_consultation_packet": DialogueFrameKind.CONSULTATION_PACKET,
+}
 RELAY_PARENT_ATTESTATION = "mastermind.agent_dialogue.relay_parent/v1"
 DEFAULT_MAX_REQUEST_BYTES = 32 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024
@@ -516,7 +521,8 @@ class AgentDialogueService:
         return (
             isinstance(request, dict)
             and request.get("version") == CONTROL_VERSION_V2
-            and request.get("operation") == "send_message"
+            and isinstance(request.get("operation"), str)
+            and request.get("operation") in _EXACT_SEND_OPERATIONS
             and isinstance(request.get("args"), dict)
             and request["args"].get("send_protocol") == EXACT_SEND_PROTOCOL
         )
@@ -533,7 +539,8 @@ class AgentDialogueService:
         if engine is None:
             raise DialogueServiceError("REQUEST_INVALID")
         item = _exact_mapping(request, {"version", "operation", "args"})
-        if item["version"] != CONTROL_VERSION_V2 or item["operation"] != "send_message":
+        frame_kind = _EXACT_SEND_OPERATIONS.get(item["operation"])
+        if item["version"] != CONTROL_VERSION_V2 or frame_kind is None:
             raise DialogueServiceError("REQUEST_INVALID")
         values = _exact_mapping(
             item["args"],
@@ -576,11 +583,18 @@ class AgentDialogueService:
                 raise DialogueServiceError("INTERNAL_ERROR")
             return {**value, **parent}
 
-        prepared = await engine.prepare_send_message(
-            thread_ts=values["thread_ts"],
-            context=context,
-            message=values["message"],
-        )
+        if frame_kind is DialogueFrameKind.LIFECYCLE:
+            prepared = await engine.prepare_send_message(
+                thread_ts=values["thread_ts"],
+                context=context,
+                message=values["message"],
+            )
+        else:
+            prepared = await engine.prepare_send_consultation_packet(
+                thread_ts=values["thread_ts"],
+                context=context,
+                packet=values["message"],
+            )
         if isinstance(prepared, MessageReceipt):
             await self._send(
                 writer,
@@ -616,10 +630,16 @@ class AgentDialogueService:
             or commit["fingerprint"] != prepared.fingerprint
         ):
             raise DialogueServiceError("REQUEST_INVALID")
-        result = await engine.commit_send_message(
-            prepared,
-            fingerprint=commit["fingerprint"],
-        )
+        if frame_kind is DialogueFrameKind.LIFECYCLE:
+            result = await engine.commit_send_message(
+                prepared,
+                fingerprint=commit["fingerprint"],
+            )
+        else:
+            result = await engine.commit_send_consultation_packet(
+                prepared,
+                fingerprint=commit["fingerprint"],
+            )
         await self._send(
             writer,
             {"ok": True, "result": parent_bound_receipt(result)},
@@ -821,6 +841,26 @@ class AgentDialogueService:
                     context=_context_v2(values["context"]),
                 )
             )
+        if operation == "read_consultation_packet":
+            values = _exact_mapping(
+                args,
+                {"context", "thread_ts", "consultation_id", "purpose"},
+            )
+            if (
+                not isinstance(values["thread_ts"], str)
+                or not isinstance(values["consultation_id"], str)
+                or not isinstance(values["purpose"], str)
+                or values["purpose"] not in {"QUESTION", "ANSWER"}
+            ):
+                raise DialogueServiceError("REQUEST_INVALID")
+            return self.engine_result(
+                await engine.read_consultation_packet(
+                    thread_ts=values["thread_ts"],
+                    context=_context_v2(values["context"]),
+                    consultation_id=values["consultation_id"],
+                    purpose=values["purpose"],
+                )
+            )
         if operation == "wait_for_reply":
             values = _exact_mapping(
                 args,
@@ -882,7 +922,8 @@ async def call_service(
     args = request_snapshot.get("args")
     exact_send = (
         request_snapshot.get("version") == CONTROL_VERSION_V2
-        and request_snapshot.get("operation") == "send_message"
+        and isinstance(request_snapshot.get("operation"), str)
+        and request_snapshot.get("operation") in _EXACT_SEND_OPERATIONS
         and isinstance(args, Mapping)
         and args.get("send_protocol") == EXACT_SEND_PROTOCOL
     )
@@ -895,7 +936,8 @@ async def call_service(
     send_effect_code = (
         "SEND_EFFECT_UNKNOWN"
         if request_snapshot.get("version") == CONTROL_VERSION_V2
-        and request_snapshot.get("operation") == "send_message"
+        and isinstance(request_snapshot.get("operation"), str)
+        and request_snapshot.get("operation") in _EXACT_SEND_OPERATIONS
         else "SERVICE_UNAVAILABLE"
     )
     try:

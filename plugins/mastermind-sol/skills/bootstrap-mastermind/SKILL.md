@@ -1,6 +1,6 @@
 ---
 name: bootstrap-mastermind
-description: Use when entering any substantial Mastermind task, fresh Sol chat, architecture review, modifying CEO action, or material closeout.
+description: Use when entering any substantial Mastermind task, fresh CEO session, architecture review, modifying CEO action, or material closeout.
 ---
 
 # Bootstrap Mastermind

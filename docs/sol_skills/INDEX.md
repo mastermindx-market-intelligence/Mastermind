@@ -91,6 +91,21 @@ Mandatory after current-state recovery for substantial continuing or modifying C
 active session. It keeps Sol on the highest-leverage unblocked critical-path dependency, prevents
 status/artifact substitution and repeated tool rediscovery, and applies the final-response gate.
 
+### `skills/paper-design-workflow/SKILL.md`
+Mandatory domain companion for any Mastermind request to inspect, edit, upgrade, review, migrate,
+or extract implementation from Paper.design. Although this domain skill lives outside
+`docs/sol_skills/`, load it plus `skills/paper-design-workflow/references/connection.md` from the
+**same pinned repository commit** before making Paper capability claims or effects. For attended
+ChatGPT work, discover the exact Paper action family first; generic Studio filesystem/process tools
+do not prove Paper unavailable. Studio Direct is the preferred Web carrier when its Paper actions are
+exposed. Studio Direct absence or degradation grants **no** Desktop Commander authority. Before any
+Paper mutation, Remote Desktop Commander may be selected only when the current Chairman assignment,
+delegated authority, or accepted canonical placement independently authorizes that exact host carrier
+and Paper action, the current RDC resource permission is observed, no explicit safety/permission denial
+applies, and no prior modifying effect is unresolved. Otherwise preserve the exact carrier gate.
+`EFFECT_UNKNOWN` never permits cross-carrier replay.
+
+
 ### `WEB_CEO_DELEGATION.md`
 Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires
 principal-duty selection, delegation economics, worker packets, capacity-aware routing, or

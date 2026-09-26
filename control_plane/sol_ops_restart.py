@@ -13,8 +13,11 @@ SCHEMA = "mastermind.sol_ops_restart.v1"
 ALLOWED_SERVICES = frozenset(
     {
         "studio-direct.chatgpt1",
-        "studio-direct.chatgpt2",
-        "studio-direct.chatgpt3",
+        "studio-direct.chatgpt2-personal",
+        "studio-direct.chatgpt2-business",
+        "studio-direct.admin-business",
+        "studio-direct.chatgpt3-w570f6f34",
+        "studio-direct.chatgpt3-wa2a9e6f9",
         "studio-direct.chatgpt4",
     }
 )

@@ -824,6 +824,102 @@ def _validate_membership(snapshot: dict) -> None:
     )
 
 
+def _relay_membership_snapshot() -> dict:
+    snapshot = copy.deepcopy(_membership_snapshot())
+    snapshot["users"]["_mastermind_agent_relay"] = {
+        "primary_gid": 457,
+        "unique_uid": 457,
+        "generated_uid": "00000000-0000-4000-8000-000000000007",
+    }
+    snapshot["groups"]["_mastermind_agent_relay"] = {
+        "primary_gid": 457,
+        "generated_uid": "00000000-0000-4000-8000-000000000008",
+        "name_members": ("_mastermind_exec",),
+        "uuid_members": ("00000000-0000-4000-8000-000000000001",),
+        "nested_groups": (),
+    }
+    snapshot["group_primary_gids"]["_mastermind_agent_relay"] = 457
+    return snapshot
+
+
+def _validate_relay_membership(snapshot: dict) -> None:
+    from ops.executive_os.acceptance import _validate_protected_membership_snapshot
+
+    _validate_protected_membership_snapshot(
+        snapshot,
+        control_user="_mastermind_exec",
+        worker_user="_mastermind_worker",
+        operator_user="operator",
+        control_uid=450,
+        worker_uid=451,
+        operator_uid=501,
+        control_gid=450,
+        worker_gid=451,
+        ops_gid=453,
+        agent_relay_present=True,
+    )
+
+
+def test_acceptance_protected_membership_accepts_exact_agent_relay_shape() -> None:
+    _validate_relay_membership(_relay_membership_snapshot())
+
+
+def test_acceptance_protected_membership_rejects_agent_relay_member_drift() -> None:
+    import pytest
+
+    snapshot = _relay_membership_snapshot()
+    snapshot["groups"]["_mastermind_agent_relay"]["name_members"] = ()
+    with pytest.raises(RuntimeError, match="named members drifted"):
+        _validate_relay_membership(snapshot)
+
+
+def test_acceptance_protected_membership_rejects_agent_relay_uuid_drift() -> None:
+    import pytest
+
+    snapshot = _relay_membership_snapshot()
+    snapshot["groups"]["_mastermind_agent_relay"]["uuid_members"] = (
+        "00000000-0000-4000-8000-000000000099",
+    )
+    with pytest.raises(RuntimeError, match="UUID-only or stale"):
+        _validate_relay_membership(snapshot)
+
+
+def test_acceptance_protected_membership_rejects_agent_relay_uid_or_gid_alias() -> None:
+    import pytest
+
+    uid_alias = _relay_membership_snapshot()
+    uid_alias["users"]["relay-alias"] = {"primary_gid": 20, "unique_uid": 457}
+    with pytest.raises(RuntimeError, match="duplicate or aliased owners"):
+        _validate_relay_membership(uid_alias)
+
+    gid_alias = _relay_membership_snapshot()
+    gid_alias["group_primary_gids"]["relay-alias"] = 457
+    with pytest.raises(RuntimeError, match="duplicate or aliased owners"):
+        _validate_relay_membership(gid_alias)
+
+
+def test_acceptance_absent_agent_relay_rejects_foreign_reserved_uid_owner() -> None:
+    import pytest
+
+    snapshot = _membership_snapshot()
+    snapshot["users"]["foreign-relay-uid-owner"] = {
+        "primary_gid": 20,
+        "unique_uid": 457,
+        "generated_uid": "00000000-0000-4000-8000-000000000099",
+    }
+    with pytest.raises(RuntimeError, match="reserved Agent Relay UID has unexpected owners"):
+        _validate_membership(snapshot)
+
+
+def test_acceptance_absent_agent_relay_rejects_foreign_reserved_gid_owner() -> None:
+    import pytest
+
+    snapshot = _membership_snapshot()
+    snapshot["group_primary_gids"]["foreign-relay-gid-owner"] = 457
+    with pytest.raises(RuntimeError, match="reserved Agent Relay GID has unexpected owners"):
+        _validate_membership(snapshot)
+
+
 def test_membership_census_rejects_hidden_primary_gid_user() -> None:
     import pytest
 
@@ -1236,6 +1332,77 @@ def test_host_word_sorting_avoids_bsd_awk_index_builtin() -> None:
         source = (OPS / name).read_text(encoding="utf-8")
         assert "for (index=" not in source
         assert "for (field_number=1; field_number<=NF; field_number++)" in source
+
+
+def test_acceptance_service_group_vector_allows_only_exact_reviewed_agent_relay_gid() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _validate_service_directory_group_sets,
+    )
+
+    system = {
+        "everyone": 12,
+        "localaccounts": 61,
+        "_lpoperator": 100,
+        "com.apple.access_disabled": 396,
+    }
+    with pytest.raises(AcceptanceError, match="control account"):
+        _validate_service_directory_group_sets(
+            system_group_gids=system,
+            control_groups=[450, 451, 457, 12, 61, 100],
+            worker_groups=[451, 12, 61, 100],
+            control_gid=450,
+            worker_gid=451,
+        )
+    assert _validate_service_directory_group_sets(
+        system_group_gids=system,
+        control_groups=[450, 451, 457, 12, 61, 100],
+        worker_groups=[451, 12, 61, 100],
+        control_gid=450,
+        worker_gid=451,
+        agent_relay_gid=457,
+    ) == {451, 12, 61, 100}
+    with pytest.raises(AcceptanceError, match="agent relay group identity"):
+        _validate_service_directory_group_sets(
+            system_group_gids=system,
+            control_groups=[450, 451, 999, 12, 61, 100],
+            worker_groups=[451, 12, 61, 100],
+            control_gid=450,
+            worker_gid=451,
+            agent_relay_gid=999,
+        )
+    with pytest.raises(AcceptanceError, match="control account"):
+        _validate_service_directory_group_sets(
+            system_group_gids=system,
+            control_groups=[450, 451, 457, 999, 12, 61, 100],
+            worker_groups=[451, 12, 61, 100],
+            control_gid=450,
+            worker_gid=451,
+            agent_relay_gid=457,
+        )
+
+
+def test_acceptance_agent_relay_constants_match_reviewed_a2_host_contract() -> None:
+    import ops.executive_os.a2_agent_relay_enrollment as relay
+    import ops.executive_os.acceptance as acceptance
+
+    assert acceptance.AGENT_RELAY_USER == relay.RELAY_USER
+    assert acceptance.AGENT_RELAY_GROUP == relay.RELAY_GROUP
+    assert acceptance.AGENT_RELAY_UID == relay.RELAY_UID
+    assert acceptance.AGENT_RELAY_GID == relay.RELAY_GID
+    assert acceptance.AGENT_RELAY_HOME == relay.RELAY_HOME
+
+    host_source = (OPS / "prepare-a2-agent-relay-host.sh").read_text(encoding="utf-8")
+    for literal in (
+        'RELAY_USER="_mastermind_agent_relay"',
+        'RELAY_GROUP="_mastermind_agent_relay"',
+        'RELAY_UID="457"',
+        'RELAY_GID="457"',
+        'EXEC_USER="_mastermind_exec"',
+    ):
+        assert literal in host_source
 
 
 def test_acceptance_requires_exact_reviewed_macos_directory_group_sets() -> None:
