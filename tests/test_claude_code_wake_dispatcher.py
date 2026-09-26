@@ -103,7 +103,7 @@ def test_exact_stopped_session_delivers_once_with_closed_cli_surface():
     assert len(runner.calls) == 2
     discovery_argv = runner.calls[0][0]
     delivery_argv = runner.calls[1][0]
-    assert discovery_argv == ("/opt/mastermind/bin/claude", "agents", "--json", "--all")
+    assert discovery_argv == ("/opt/mastermind/bin/claude", "agents", "--json")
     assert "--resume" in delivery_argv
     assert delivery_argv[delivery_argv.index("--resume") + 1] == SESSION_ID
     assert "--fork-session" not in delivery_argv
