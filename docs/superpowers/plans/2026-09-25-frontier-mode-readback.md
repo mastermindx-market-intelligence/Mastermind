@@ -141,6 +141,30 @@ Invalid/stale snapshots return `REFUSED` with no prompt/schema bytes rather than
 - [x] Re-run 331 Secretary tests + 183 Web-Sol tests, syntax/diff/exact ten-file scope.
 - [x] Publish on #989, refresh exact-head CI/review; keep provider invocation itself unimplemented/held.
 
+## Task 6 — correlated Secretary provider-return validator
+
+Extend the same pure contract/test files with `validate_secretary_provider_return(current_snapshot, provider_request, structured_output, now_ms=...)`.
+
+This function performs **correlation and semantic validation only**. It does not authenticate a provider, WorkerResult, process, account or model. The existing worker-execution owner must prove that the supplied structured output belongs to the exact admitted worker/run/launch before calling this function.
+
+The validator must:
+- rebuild `build_secretary_provider_request(current_snapshot, now_ms)`;
+- require the supplied `SecretaryProviderRequest` to equal that rebuilt READY request exactly, including snapshot digest, prompt bytes/digest and output schema;
+- refuse if the current snapshot has changed, expired or become invalid since launch;
+- require `structured_output` to be a closed JSON object satisfying the Task-4 recommendation shape;
+- hash the canonical structured output without echoing raw rationale;
+- call `validate_secretary_recommendation(current_snapshot, structured_output, now_ms)`;
+- distinguish correlation/shape refusal from semantic recommendation refusal;
+- emit a frozen closed receipt with current snapshot digest, prompt digest, recommendation digest, structured-output digest, accepted action/reason/mode/fanout IDs when semantically accepted, the semantic refusal code otherwise, plus fixed `provider_result_attested=false`, `execution_authorized=false`, `requires_owner_admission=true`.
+
+A semantically accepted provider return is still not an execution permit. Provider/run attestation, current owner state reread, placement/admission and action execution remain existing-owner responsibilities.
+
+- [x] Write RED tests for absent return-validator API and one exact current request/output pair.
+- [x] Add stale/mixed snapshot-request correlation tests, tampered request/prompt/schema tests, malformed output, incompatible recommendation, rationale non-echo, digest determinism, and no provider/run attestation claim.
+- [x] Implement minimal correlation + Task-4 validation reuse.
+- [x] Run focused Secretary tests, incumbent Secretary MCP fences, Web-Sol regressions, syntax/diff/exact ten-file scope.
+- [ ] Publish on #989, refresh exact-head review/CI; provider invocation remains held.
+
 ## Held integration task — not granted by this leaf
 
 The next source owner is #836 for actual DOM normalization, native bridge wiring and mode actuation. Consume this leaf only after #836 current custody and its merge conflict are reconciled, and the closed mode action is reviewed under the browser/context-rotation laws. Authenticate the observation producer, fence exact RuntimeBinding/document generations and mode effect identity, and prove no-send selector canaries before a turn is allowed. The #890 capability producer/consumer and #936/#953/#958 read-only limitations remain explicit dependencies. Do not edit these carriers from this workspace.
@@ -165,3 +189,4 @@ Local full-repository gate diagnostic: `python3 scripts/ci_pytest.py --jobs 3` d
 Task 4 publication: source/docs commit `06e3cfe8f4aba9c097d0b2b1618347263dc2e53f` action `d7fb1fe3baa00c03f167f63dea925a13289a5a97f1b3e9b71dc1c317bb120162` returned APPLIED; push action `25112caa3311c0cfd58c4f0fe71583ef0377484e49ac74d245fdbece4ef69d2a` returned APPLIED with local=remote and clean=true. No MCP server tool, model/provider call, Runtime/Executive mutation, browser action, child commission, mode change, prompt submission or Agent OS write was added.
 Task 5 RED: process 79024, provider-request API absent; eight Task-5 assertions failed from that missing API while prior Task-4 cases remained green. Focused GREEN: process 79951, 35/35 pass. Cross-surface final process 80458: Secretary aggregate 331/331 (35 new + 296 incumbent MCP/gateway/static-fence tests), Web-Sol mode/census 183/183, Python/JS syntax + `git diff --check` + exact ten-file scope all PASS. No provider/model/worker was selected or started, and raw source refs remain outside rendered prompts.
 Task 5 publication: source/docs commit `8b803999371837219fe13c19c0f3b79fabaae8d0` action `c87a0c864f33426129ded2ede3123b06a8cebf4ce16c09a75c4f381af37afcd5` returned APPLIED; push action `7f35ade73c5c92678a0b2d884872a6fe0fce0e82e019e1a673665647a179a86f` returned APPLIED with local=remote and clean=true. Provider invocation/model selection/worker placement remain unimplemented and held to existing owners.
+Task 6 RED: process 86846, 10 new return-correlation cases failed solely because `validate_secretary_provider_return` was absent while the prior 35 contract/renderer tests remained green. Focused GREEN: process 88591, 45/45 pass. Cross-surface process 89752: Secretary aggregate 341/341 (45 new/current + 296 incumbent MCP/gateway/static-fence), Web-Sol 183/183, syntax/diff/exact ten-file scope PASS. Accepted return receipts explicitly keep `provider_result_attested=false`, `execution_authorized=false`, and `requires_owner_admission=true`; real WorkerResult/run provenance remains external and unclaimed.

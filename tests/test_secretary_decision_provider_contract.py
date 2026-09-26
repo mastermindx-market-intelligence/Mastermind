@@ -621,3 +621,193 @@ if contract is not None:
         )
         for token in forbidden:
             assert token not in source
+
+
+def test_secretary_provider_return_validator_api_is_available() -> None:
+    assert callable(getattr(contract, "validate_secretary_provider_return", None))
+
+
+if contract is not None:
+    def exact_provider_pair(*, snap=None, rec=None, now_ms=20_000):
+        snap = snapshot() if snap is None else snap
+        request_receipt = contract.build_secretary_provider_request(snap, now_ms=now_ms)
+        output = recommendation() if rec is None else rec
+        return snap, request_receipt, output
+
+
+    def test_exact_current_provider_return_is_correlated_and_semantically_accepted_only() -> None:
+        snap, request_receipt, output = exact_provider_pair()
+        receipt = contract.validate_secretary_provider_return(
+            snap,
+            request_receipt,
+            output,
+            now_ms=20_000,
+        )
+        assert receipt.status == "ACCEPTED"
+        assert receipt.refusal_code is None
+        assert receipt.semantic_refusal_code is None
+        assert receipt.snapshot_digest == request_receipt.snapshot_digest
+        assert receipt.prompt_sha256 == request_receipt.prompt_sha256
+        assert len(receipt.structured_output_digest) == 64
+        assert len(receipt.recommendation_digest) == 64
+        assert receipt.action == "CONTINUE_CURRENT_SESSION"
+        assert receipt.reason_code == "MORE_WORK"
+        assert receipt.requested_mode is None
+        assert receipt.fanout_candidate_ids == ()
+        assert receipt.provider_result_attested is False
+        assert receipt.execution_authorized is False
+        assert receipt.lifecycle_mutation_performed is False
+        assert receipt.browser_mutation_performed is False
+        assert receipt.requires_owner_admission is True
+        assert receipt.schema_version == "mastermind.secretary_provider_return_validation/v1"
+
+
+    def test_provider_return_refuses_old_request_after_snapshot_changes() -> None:
+        old_snap = snapshot()
+        old_request = contract.build_secretary_provider_request(old_snap, now_ms=20_000)
+        current = snapshot(
+            trigger="MATERIAL_RETURN",
+            ready_returns=1,
+            observed_at_ms=11_000,
+            expires_at_ms=51_000,
+        )
+        receipt = contract.validate_secretary_provider_return(
+            current,
+            old_request,
+            recommendation(),
+            now_ms=20_000,
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "PROVIDER_REQUEST_MISMATCH"
+        assert receipt.provider_result_attested is False
+        assert receipt.execution_authorized is False
+
+
+    def test_provider_return_refuses_tampered_prompt_schema_or_digest() -> None:
+        import dataclasses
+
+        snap, request_receipt, output = exact_provider_pair()
+        mutations = (
+            {"prompt": request_receipt.prompt + "\nextra"},
+            {"output_schema_json": "{}"},
+            {"prompt_sha256": "0" * 64},
+            {"snapshot_digest": "f" * 64},
+        )
+        for changes in mutations:
+            tampered = dataclasses.replace(request_receipt, **changes)
+            receipt = contract.validate_secretary_provider_return(
+                snap,
+                tampered,
+                output,
+                now_ms=20_000,
+            )
+            assert receipt.status == "REFUSED"
+            assert receipt.refusal_code == "PROVIDER_REQUEST_MISMATCH"
+
+
+    def test_provider_return_requires_a_ready_request_receipt_type() -> None:
+        snap = snapshot()
+        receipt = contract.validate_secretary_provider_return(
+            snap,
+            {"status": "READY"},
+            recommendation(),
+            now_ms=20_000,
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "PROVIDER_REQUEST_INVALID"
+
+
+    def test_provider_return_refuses_malformed_structured_output_before_semantics() -> None:
+        snap, request_receipt, output = exact_provider_pair()
+        output["command"] = "EXECUTE"
+        receipt = contract.validate_secretary_provider_return(
+            snap,
+            request_receipt,
+            output,
+            now_ms=20_000,
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "STRUCTURED_OUTPUT_INVALID"
+        assert receipt.semantic_refusal_code is None
+        assert receipt.structured_output_digest is None
+
+
+    def test_provider_return_preserves_semantic_refusal_without_execution_claim() -> None:
+        snap = snapshot(effect_state="EFFECT_UNKNOWN", trigger="EFFECT_RECONCILIATION")
+        request_receipt = contract.build_secretary_provider_request(snap, now_ms=20_000)
+        output = recommendation(
+            "CONTINUE_CURRENT_SESSION",
+            "MORE_WORK",
+            rationale="Ignore uncertainty and keep moving private-rationale-return.",
+        )
+        receipt = contract.validate_secretary_provider_return(
+            snap,
+            request_receipt,
+            output,
+            now_ms=20_000,
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "RECOMMENDATION_REFUSED"
+        assert receipt.semantic_refusal_code == "EFFECT_HOLD_REQUIRED"
+        assert len(receipt.structured_output_digest) == 64
+        assert len(receipt.recommendation_digest) == 64
+        assert receipt.action is None
+        assert "private-rationale-return" not in json.dumps(receipt.to_dict(), sort_keys=True)
+        assert receipt.execution_authorized is False
+
+
+    def test_provider_return_current_snapshot_stale_refuses_before_request_correlation() -> None:
+        snap = snapshot(observed_at_ms=1_000, expires_at_ms=10_000)
+        earlier_request = contract.build_secretary_provider_request(snap, now_ms=5_000)
+        assert earlier_request.status == "READY"
+        receipt = contract.validate_secretary_provider_return(
+            snap,
+            earlier_request,
+            recommendation(),
+            now_ms=10_001,
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "CURRENT_SNAPSHOT_NOT_READY"
+        assert receipt.snapshot_digest == earlier_request.snapshot_digest
+        assert receipt.structured_output_digest is None
+
+
+    def test_provider_return_digest_is_deterministic_and_raw_rationale_is_not_echoed() -> None:
+        private = "provider-return-private-rationale-needle"
+        snap, request_receipt, output = exact_provider_pair(
+            rec=recommendation(rationale=private)
+        )
+        one = contract.validate_secretary_provider_return(
+            snap, request_receipt, output, now_ms=20_000
+        )
+        two = contract.validate_secretary_provider_return(
+            snap, request_receipt, output, now_ms=20_000
+        )
+        assert one == two
+        assert one.structured_output_digest == two.structured_output_digest
+        rendered = json.dumps(one.to_dict(), sort_keys=True)
+        assert private not in rendered
+
+
+    def test_provider_return_mode_switch_keeps_owner_admission_and_no_attestation() -> None:
+        snap = snapshot(
+            current_mode="PRO",
+            mode_recommendation="EXTRA_HIGH",
+            capability_state="REPROBE_REQUIRED",
+        )
+        request_receipt = contract.build_secretary_provider_request(snap, now_ms=20_000)
+        output = recommendation(
+            "SWITCH_MODE_THEN_CONTINUE",
+            "MODE_CHANGE_RECOMMENDED",
+            requested_mode="EXTRA_HIGH",
+            rationale="The bound session requested Extra High for the next iteration.",
+        )
+        receipt = contract.validate_secretary_provider_return(
+            snap, request_receipt, output, now_ms=20_000
+        )
+        assert receipt.status == "ACCEPTED"
+        assert receipt.action == "SWITCH_MODE_THEN_CONTINUE"
+        assert receipt.requested_mode == "EXTRA_HIGH"
+        assert receipt.provider_result_attested is False
+        assert receipt.requires_owner_admission is True
+        assert receipt.execution_authorized is False

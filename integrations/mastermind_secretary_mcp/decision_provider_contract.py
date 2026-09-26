@@ -659,14 +659,174 @@ def build_secretary_provider_request(
     )
 
 
+PROVIDER_RETURN_VALIDATION_SCHEMA = "mastermind.secretary_provider_return_validation/v1"
+
+
+@dataclasses.dataclass(frozen=True)
+class SecretaryProviderReturnValidation:
+    status: str
+    refusal_code: str | None
+    semantic_refusal_code: str | None
+    snapshot_digest: str | None
+    prompt_sha256: str | None
+    recommendation_digest: str | None
+    structured_output_digest: str | None
+    action: str | None
+    reason_code: str | None
+    requested_mode: str | None
+    fanout_candidate_ids: tuple[str, ...]
+    provider_result_attested: bool = False
+    execution_authorized: bool = False
+    lifecycle_mutation_performed: bool = False
+    browser_mutation_performed: bool = False
+    requires_owner_admission: bool = True
+    schema_version: str = PROVIDER_RETURN_VALIDATION_SCHEMA
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "status": self.status,
+            "refusal_code": self.refusal_code,
+            "semantic_refusal_code": self.semantic_refusal_code,
+            "snapshot_digest": self.snapshot_digest,
+            "prompt_sha256": self.prompt_sha256,
+            "recommendation_digest": self.recommendation_digest,
+            "structured_output_digest": self.structured_output_digest,
+            "action": self.action,
+            "reason_code": self.reason_code,
+            "requested_mode": self.requested_mode,
+            "fanout_candidate_ids": list(self.fanout_candidate_ids),
+            "provider_result_attested": self.provider_result_attested,
+            "execution_authorized": self.execution_authorized,
+            "lifecycle_mutation_performed": self.lifecycle_mutation_performed,
+            "browser_mutation_performed": self.browser_mutation_performed,
+            "requires_owner_admission": self.requires_owner_admission,
+        }
+
+
+def _provider_return_receipt(
+    *,
+    status: str,
+    refusal_code: str | None,
+    semantic_refusal_code: str | None = None,
+    snapshot_digest: str | None = None,
+    prompt_sha256: str | None = None,
+    recommendation_digest: str | None = None,
+    structured_output_digest: str | None = None,
+    semantic: SecretaryDecisionValidation | None = None,
+) -> SecretaryProviderReturnValidation:
+    accepted = status == "ACCEPTED" and semantic is not None and semantic.status == "ACCEPTED"
+    return SecretaryProviderReturnValidation(
+        status=status,
+        refusal_code=refusal_code,
+        semantic_refusal_code=semantic_refusal_code,
+        snapshot_digest=snapshot_digest,
+        prompt_sha256=prompt_sha256,
+        recommendation_digest=recommendation_digest,
+        structured_output_digest=structured_output_digest,
+        action=semantic.action if accepted else None,
+        reason_code=semantic.reason_code if accepted else None,
+        requested_mode=semantic.requested_mode if accepted else None,
+        fanout_candidate_ids=semantic.fanout_candidate_ids if accepted else (),
+    )
+
+
+def validate_secretary_provider_return(
+    current_snapshot: object,
+    provider_request: object,
+    structured_output: object,
+    *,
+    now_ms: int,
+) -> SecretaryProviderReturnValidation:
+    """Correlate one structured provider return to the exact current snapshot.
+
+    Provider/worker/run provenance is deliberately outside this function.
+    Existing worker-execution owners must attest those facts before this
+    correlation receipt can be considered for downstream admission.
+    """
+
+    current_request = build_secretary_provider_request(
+        current_snapshot,
+        now_ms=now_ms,
+    )
+    if current_request.status != "READY":
+        return _provider_return_receipt(
+            status="REFUSED",
+            refusal_code="CURRENT_SNAPSHOT_NOT_READY",
+            snapshot_digest=current_request.snapshot_digest,
+            prompt_sha256=current_request.prompt_sha256,
+        )
+
+    if type(provider_request) is not SecretaryProviderRequest:
+        return _provider_return_receipt(
+            status="REFUSED",
+            refusal_code="PROVIDER_REQUEST_INVALID",
+            snapshot_digest=current_request.snapshot_digest,
+            prompt_sha256=current_request.prompt_sha256,
+        )
+    if provider_request != current_request:
+        return _provider_return_receipt(
+            status="REFUSED",
+            refusal_code="PROVIDER_REQUEST_MISMATCH",
+            snapshot_digest=current_request.snapshot_digest,
+            prompt_sha256=current_request.prompt_sha256,
+        )
+
+    if not _valid_recommendation_shape(structured_output):
+        return _provider_return_receipt(
+            status="REFUSED",
+            refusal_code="STRUCTURED_OUTPUT_INVALID",
+            snapshot_digest=current_request.snapshot_digest,
+            prompt_sha256=current_request.prompt_sha256,
+        )
+    assert isinstance(structured_output, dict)
+    output = json.loads(
+        json.dumps(
+            structured_output,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+    )
+    output_digest = _canonical_digest(output)
+    semantic = validate_secretary_recommendation(
+        current_snapshot,
+        output,
+        now_ms=now_ms,
+    )
+    if semantic.status != "ACCEPTED":
+        return _provider_return_receipt(
+            status="REFUSED",
+            refusal_code="RECOMMENDATION_REFUSED",
+            semantic_refusal_code=semantic.refusal_code,
+            snapshot_digest=current_request.snapshot_digest,
+            prompt_sha256=current_request.prompt_sha256,
+            recommendation_digest=semantic.recommendation_digest,
+            structured_output_digest=output_digest,
+        )
+
+    return _provider_return_receipt(
+        status="ACCEPTED",
+        refusal_code=None,
+        snapshot_digest=current_request.snapshot_digest,
+        prompt_sha256=current_request.prompt_sha256,
+        recommendation_digest=semantic.recommendation_digest,
+        structured_output_digest=output_digest,
+        semantic=semantic,
+    )
+
+
 __all__ = [
     "MAX_SNAPSHOT_WINDOW_MS",
     "PROVIDER_REQUEST_SCHEMA",
+    "PROVIDER_RETURN_VALIDATION_SCHEMA",
     "RECOMMENDATION_SCHEMA",
     "SNAPSHOT_SCHEMA",
     "SecretaryDecisionValidation",
     "SecretaryProviderRequest",
+    "SecretaryProviderReturnValidation",
     "VALIDATION_SCHEMA",
     "build_secretary_provider_request",
+    "validate_secretary_provider_return",
     "validate_secretary_recommendation",
 ]
