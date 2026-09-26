@@ -37,12 +37,15 @@ class AttendedParentTests(unittest.TestCase):
         self.project = self.root / 'actual project'
         self.project.mkdir()
         self.census_args = ['--cd', str(self.project), 'mcp', 'list', '--json']
+        self.detail_args = ['--cd', str(self.project), 'mcp', 'get', 'mastermind-executive', '--json']
+        self.detail = self.root / 'detail.json'
         self.calls = self.root / 'calls.jsonl'
         self.census = self.root / 'census.json'
         self.row = {'name': 'mastermind-executive', 'enabled': True,
                     'transport': {'type': 'streamable_http', 'url': URL},
                     'auth_status': 'not_logged_in'}
         self.census.write_text(json.dumps([self.row]))
+        self.detail.write_text(json.dumps(dict(self.row, enabled_tools=None, disabled_tools=None)))
         self.codex = self.root / 'fake codex'
         self.codex.write_text('#!' + sys.executable + '\n' +
             'import json,pathlib,sys,os\n' +
@@ -50,6 +53,7 @@ class AttendedParentTests(unittest.TestCase):
             'with calls.open("a") as f: f.write(json.dumps(sys.argv[1:])+"\\n")\n')
         with self.codex.open('a') as f:
             f.write(f'if sys.argv[-3:]==["mcp","list","--json"]: print(pathlib.Path({str(self.census)!r}).read_text())\n')
+            f.write(f'elif sys.argv[-4:]==["mcp","get","mastermind-executive","--json"]: print(pathlib.Path({str(self.detail)!r}).read_text())\n')
             f.write('else: print(json.dumps({"executed":sys.argv[1:],"cwd":os.getcwd()}))\n')
         self.codex.chmod(0o700)
         self.python = self.root / 'fake python'
@@ -69,7 +73,7 @@ class AttendedParentTests(unittest.TestCase):
     def test_preflight_only_reads_census_and_builds_five_tool_invocation(self):
         before = self.profile.read_bytes()
         plan = self.prepare()
-        self.assertEqual(self.calls_read(), [self.census_args])
+        self.assertEqual(self.calls_read(), [self.census_args, self.detail_args])
         self.assertEqual(self.profile.read_bytes(), before)
         self.assertEqual(plan.argv[0], str(self.codex))
         self.assertEqual(plan.argv[1:3], ('--cd', str(self.project)))
@@ -116,7 +120,7 @@ class AttendedParentTests(unittest.TestCase):
                 with self.assertRaises(bootstrap.BootstrapError) as caught:
                     self.prepare()
                 self.assertNotIn('secret-sentinel', str(caught.exception))
-        self.assertTrue(all(call == self.census_args for call in self.calls_read()))
+        self.assertTrue(all(call in (self.census_args, self.detail_args) for call in self.calls_read()))
 
     def test_unsupported_auth_support_yields_an_explicit_held_plan(self):
         self.census.write_text(json.dumps([dict(self.row, auth_status='unsupported')]))
@@ -135,13 +139,60 @@ class AttendedParentTests(unittest.TestCase):
         result = self.cli('--launch')
         self.assertEqual(result.returncode, 2)
         self.assertIn('authentication status is unresolved', result.stderr)
-        self.assertEqual(self.calls_read(), [self.census_args])
+        self.assertEqual(self.calls_read(), [self.census_args, self.detail_args])
 
     def test_census_is_bound_to_the_same_project_as_launch(self):
         plan = self.prepare()
         self.assertEqual(self.calls_read()[0],
                          ['--cd', str(self.project), 'mcp', 'list', '--json'])
         self.assertEqual(plan.argv[1:3], ('--cd', str(self.project)))
+
+    def test_detailed_tool_restrictions_cannot_be_widened_by_bootstrap(self):
+        variants = [dict(self.row, enabled_tools=['executive_state'], disabled_tools=None),
+                    dict(self.row, enabled_tools=None, disabled_tools=['submit_ceo_intent'])]
+        for detail in variants:
+            with self.subTest(detail=detail):
+                self.detail.write_text(json.dumps(detail))
+                with self.assertRaises(bootstrap.BootstrapError):
+                    self.prepare()
+
+    def test_detailed_registration_drift_and_missing_fields_refuse(self):
+        baseline = dict(self.row, enabled_tools=None, disabled_tools=None)
+        variants = [dict(baseline, name='other-server'), dict(baseline, enabled=False),
+                    dict(baseline, transport=dict(self.row['transport'],
+                         url='http://127.0.0.1:19000/mcp')),
+                    {key: value for key, value in baseline.items() if key != 'enabled_tools'},
+                    dict(baseline, disabled_tools='submit_ceo_intent')]
+        for detail in variants:
+            with self.subTest(detail=detail):
+                self.detail.write_text(json.dumps(detail))
+                with self.assertRaises(bootstrap.BootstrapError):
+                    self.prepare()
+
+    def test_prepared_invocation_pins_validated_endpoint(self):
+        plan = self.prepare()
+        expected = 'mcp_servers.mastermind-executive.url=' + json.dumps(URL)
+        self.assertIn(expected, plan.argv)
+
+    def test_helper_preserves_the_selected_virtual_environment(self):
+        import venv
+        environment = self.root / 'selected venv'
+        venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+        interpreter = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+        (self.module_dir / 'executive_mcp_auth.py').write_text(
+            'import json,sys\nprint(json.dumps({"prefix":sys.prefix}))\n')
+        plan = self.prepare(python_bin=interpreter)
+        observed = subprocess.run(shlex.split(plan.helper_command), cwd=self.project,
+                                  capture_output=True, text=True, check=True, timeout=10)
+        self.assertEqual(Path(json.loads(observed.stdout)['prefix']).resolve(), environment)
+
+    def test_malformed_detailed_metadata_never_launches(self):
+        self.detail.write_text('private-sentinel malformed detail')
+        result = self.cli('--launch')
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
+        self.assertNotIn('private-sentinel', result.stderr)
+        self.assertEqual(self.calls_read(), [self.census_args, self.detail_args])
 
     def test_bad_url_refuses_before_census(self):
         for url in ['https://example.com/mcp', URL + '?secret=x',
@@ -181,7 +232,7 @@ class AttendedParentTests(unittest.TestCase):
         result = self.cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)['status'], 'PREPARED_NOT_AUTHENTICATED')
-        self.assertEqual(self.calls_read(), [self.census_args])
+        self.assertEqual(self.calls_read(), [self.census_args, self.detail_args])
 
     def test_explicit_launch_executes_prepared_argv_once(self):
         result = self.cli('--launch')
@@ -189,9 +240,10 @@ class AttendedParentTests(unittest.TestCase):
         executed = json.loads(result.stdout)['executed']
         self.assertEqual(executed[:2], ['--cd', str(self.project)])
         calls = self.calls_read()
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         self.assertEqual(calls[0], self.census_args)
-        self.assertEqual(calls[1], executed)
+        self.assertEqual(calls[1], self.detail_args)
+        self.assertEqual(calls[2], executed)
         self.assertNotIn('login', executed)
         self.assertNotIn('add', executed)
 
@@ -205,10 +257,10 @@ class AttendedParentTests(unittest.TestCase):
 
     def test_launch_exit_is_preserved_without_fallback_or_retry(self):
         with self.codex.open('a') as f:
-            f.write('if sys.argv[-3:] != ["mcp","list","--json"]: raise SystemExit(29)\n')
+            f.write('if sys.argv[-1:] != ["--json"]: raise SystemExit(29)\n')
         result = self.cli('--launch')
         self.assertEqual(result.returncode, 29)
-        self.assertEqual(len(self.calls_read()), 2)
+        self.assertEqual(len(self.calls_read()), 3)
 
 if __name__ == '__main__':
     unittest.main()

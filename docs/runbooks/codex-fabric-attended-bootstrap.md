@@ -20,7 +20,7 @@ python3 -m ops.codex_fabric.attended_parent \
   --project-dir "$TARGET_PROJECT"
 ```
 
-The default performs only a local `codex --cd <project> mcp list --json` census. It never adds a registration, invokes the header helper, logs in, exchanges a token, launches a model turn, or submits an Executive intent.
+The default performs two local metadata reads bound to the target project: `codex --cd <project> mcp list --json`, followed by `codex --cd <project> mcp get mastermind-executive --json`. Native list output omits per-tool restrictions; the detailed read must expose both tool-filter fields, and neither an existing allowlist nor a denylist may be widened by this bootstrap. It never adds a registration, invokes the header helper, logs in, exchanges a token, launches a model turn, or submits an Executive intent.
 
 For a known `not_logged_in` census, the JSON result is `PREPARED_NOT_AUTHENTICATED`, with explicit `authenticated_tool_discovery_proven=false`, prepared argv, source/project paths, and hashes of the profile/helper inputs. These hashes identify input bytes; they are not a signed release attestation, a whole-dependency-tree digest, or proof that the selected interpreter can authenticate.
 
@@ -30,7 +30,7 @@ Codex may report `unsupported` when authentication-status data is absent. This r
 
 ## Explicit attended launch after onboarding
 
-The same command with `--launch` performs a fresh preflight, then replaces the wrapper process with the prepared Codex invocation. No extra flags/prompts are passed through that could override the frozen client composition. A launch failure is returned without retry, provider fallback, or a second process attempt.
+The same command with `--launch` performs a fresh preflight, then replaces the wrapper process with the prepared Codex invocation. Its overrides carry the exact validated loopback URL rather than reselecting an endpoint from subsequently loaded configuration. The selected Python executable entry point is preserved, including a virtual environment's interpreter symlink; resolving that final symlink would silently discard the environment. No extra flags/prompts are passed through that could override the frozen client composition. A launch failure is returned without retry, provider fallback, or a second process attempt.
 
 The existing header helper remains the sole client credential consumer. Its interpreter/dependencies and macOS Keychain custody must be qualified through the existing enrollment path before launch. Unsupported hosts remain unqualified. Codex's `required=true` setting makes an unavailable Executive MCP a startup failure rather than silently continuing without Fabric.
 
@@ -42,4 +42,6 @@ The legacy Auth0 DCR `EFFECT_UNKNOWN` operation must not be retried, cleared, re
 
 ## Verification
 
-`python3 -m unittest tests.test_codex_fabric_attended_parent -v` uses temporary fake Codex/interpreter executables. It proves composition, refusal, actual helper cwd/quoting, default no-login behavior, project-bound census, and one-shot explicit launch mechanics without contacting an account or provider. It is not a real Codex protocol or end-to-end production canary.
+`python3 -m unittest tests.test_codex_fabric_attended_parent -v` uses temporary fake Codex/interpreter executables. It proves composition, refusal, actual helper cwd/quoting, default no-login behavior, project-bound census plus detailed tool-policy checks, endpoint pinning, selected virtual-environment preservation, and one-shot explicit launch mechanics without contacting an account or provider. It is not a real Codex protocol or end-to-end production canary.
+
+Native no-account R2 qualification on Codex 0.154.0: bare and complete-tool-filter fixtures produce a held preparation; a restricted allowlist and a required-tool denylist both refuse preparation. All four cases leave the temporary configuration byte-identical and launch no model or real authentication helper. These results do not establish authenticated tools or an atomic freeze of all concurrently editable host configuration.

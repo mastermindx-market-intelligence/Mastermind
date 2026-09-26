@@ -18,7 +18,7 @@ Direct execution rationale: CRITICAL_PATH_SHORTCUT / LOWER_TOTAL_OVERHEAD for th
 
 ## Constraints
 
-- Default preflight may perform only the existing local `codex --cd <project> mcp list --json` census; never add a server, log in, call the header helper, or start a provider.
+- Default preflight may perform only local `codex --cd <project> mcp list --json` and exact-server `mcp get mastermind-executive --json` metadata reads; never add a server, log in, call the header helper, or start a provider.
 - Explicit `--launch` is a future attended action after onboarding, not permission to launch in this turn.
 - Require one exact enabled bare loopback Executive registration; refuse native OAuth or ambiguous auth status rather than override credential precedence.
 - Preserve global Codex configuration and the separately attested repository `.codex/config.toml`.
@@ -38,7 +38,7 @@ Interface: `prepare_launch(server_url, *, codex_bin, python_bin, project_dir, so
 
 - [x] Write behavioral tests using a fake local Codex executable; observe missing implementation failure.
 - [x] Implement composition through the existing registration parser without authentication imports.
-- [x] Prove preflight calls only census; prove actual generated helper cwd/quoting with a fake interpreter; prove explicit launch executes only the prepared argv.
+- [x] Prove preflight calls only census and exact-server detail; prove actual generated helper cwd/quoting with a fake interpreter; prove explicit launch executes only the prepared argv.
 - [ ] Prove closed refusals and no fallback on malformed/conflicting input, plus unchanged existing candidate files.
 - [ ] Run targeted client regressions, compile check, and diff checks. Report unavailable full-suite dependencies truthfully.
 - [ ] Publish a Draft stacked source result and checkpoint exact evidence under #633; no merge, deployment, login, or live provider canary.
@@ -54,3 +54,15 @@ Verified: 103 tests and 18 subtests passed across all six client test modules, u
 Native no-account verification: Codex 0.154.0, temporary empty HOME/CODEX_HOME with file-only credential stores, one loopback fixture registration. Default preparation returns PREPARED_AUTH_STATUS_UNRESOLVED / launch_allowed=false. Native parsing of the prepared override shape succeeds after substituting /usr/bin/false for the real auth helper; the native census redacts the configured helper. No model turn, real header-helper invocation, login, token exchange, or provider effect occurred.
 
 Only four new paths are owned. Existing #633 candidate files, Auth0 uncertainty, global configuration and production services remain untouched. Mission incomplete; required full-repository CI, independent review, protected-source integration, installed client qualification and all real end-to-end gates remain open. No autonomous wake or execution custody transfer is claimed.
+
+## R2 continuation — native metadata and selected-environment repair
+
+Current Chairman continuation retains no-login/source scope. Fresh protected procedure pin: `763ec8f920177fdf48b18df1b8e37b61ab482ef0`; all previously loaded required Skillpack, AGENTS and delivery blobs were freshly fetched at this pin and byte-matched. Existing mmx-workspace was reused at `d688f8b8277ca3d30cf0f0f0fde6da6859c8cbcf`; no source writer or runtime custody changed. The preceding head's full hosted CI run `36234777888` completed SUCCESS, but that is not R2 CI proof.
+
+Native review found `mcp list --json` omits enabled_tools/disabled_tools while `mcp get mastermind-executive --json` exposes them. Ruling: require the detailed metadata before applying the five-tool allowlist, validate exact identity and transport again, and refuse absent filter fields, required-tool restrictions, malformed data or changed endpoint. Carry the validated endpoint explicitly in launch argv. Three tests demonstrated eight failing assertions before repair.
+
+A real symlink-based temporary venv demonstrated that resolving the Python executable to its base binary discards the selected environment. Ruling: validate the resolved executable but preserve its selected entry point in argv. The venv regression failed before this repair; the copied-binary fixture had passed and was not evidence of the symlink case.
+
+R2 local proof: **108 tests passed, 25 subtests passed** across all six client modules, including 18 bootstrap tests. Native Codex 0.154.0 passed four no-account fixtures: bare-held, complete-filter-held, restricted-allowlist refusal and required-tool-denylist refusal. Each temporary config remained byte-identical; no model, real auth helper or account effect occurred. The CLI emitted its known temporary-directory helper-alias warning on --version; it did not affect metadata results, and no helper launch was attempted.
+
+Current edits remain inside the same four child-owned paths; all 12 parent #633 paths remain untouched. Direct execution rationale remains LOWER_TOTAL_OVERHEAD for the tightly coupled source repair. Workbench discovery exposed file/canary recipes, not reviewer dispatch; no reviewer runtime is fabricated. Independent non-author review and exact updated-head full CI remain required before source integration. No Ready, merge, installation, account onboarding or background Web wake is authorized by this record.

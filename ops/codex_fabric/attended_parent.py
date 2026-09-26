@@ -56,11 +56,13 @@ def _path(value: Path | str, *, directory: bool = False) -> Path:
         path = Path(value)
         if not path.is_absolute() or any(ord(c) < 32 for c in str(path)):
             raise ValueError
-        path = path.resolve(strict=True)
-        valid = path.is_dir() if directory else path.is_file() and os.access(path, os.X_OK)
+        resolved = path.resolve(strict=True)
+        valid = resolved.is_dir() if directory else resolved.is_file() and os.access(path, os.X_OK)
         if not valid:
             raise ValueError
-        return path
+        # Preserve the selected executable entry point: resolving a venv's
+        # python symlink would silently switch to the base interpreter.
+        return resolved if directory else path.parent.resolve(strict=True) / path.name
     except (OSError, TypeError, ValueError):
         raise BootstrapError('required client path is unavailable') from None
 
@@ -137,15 +139,31 @@ def prepare_launch(server_url: str, *, codex_bin: Path | str,
         auth_status = _validate_existing(row, url)
         if auth_status not in {'not_logged_in', 'unsupported'}:
             raise RegistrationError('bare registration required')
-        allowed, disabled = row.get('enabled_tools'), row.get('disabled_tools')
-        if allowed is not None and (not isinstance(allowed, list)
-                or not all(isinstance(x, str) for x in allowed)
-                or not set(EXECUTIVE_TOOLS).issubset(allowed)):
-            raise RegistrationError('required tools restricted')
-        if disabled is not None and (not isinstance(disabled, list)
-                or not all(isinstance(x, str) for x in disabled)
-                or set(EXECUTIVE_TOOLS).intersection(disabled)):
-            raise RegistrationError('required tools restricted')
+        # Native `mcp list` omits tool filters. Read the exact server's
+        # detailed configuration before composing an allowlist override.
+        detailed = _run(str(codex), '--cd', str(project), 'mcp', 'get',
+                        SERVER_NAME, '--json')
+        if detailed.returncode != 0:
+            raise RegistrationError('detailed configuration unavailable')
+        try:
+            detail = json.loads(detailed.stdout)
+        except (ValueError, TypeError):
+            raise RegistrationError('detailed configuration malformed') from None
+        if (not isinstance(detail, dict) or detail.get('name') != SERVER_NAME
+                or not {'enabled_tools', 'disabled_tools'}.issubset(detail)):
+            raise RegistrationError('detailed configuration incomplete')
+        _validate_existing(detail, url)
+        for observed in (row, detail):
+            allowed = observed.get('enabled_tools')
+            disabled = observed.get('disabled_tools')
+            if allowed is not None and (not isinstance(allowed, list)
+                    or not all(isinstance(x, str) for x in allowed)
+                    or not set(EXECUTIVE_TOOLS).issubset(allowed)):
+                raise RegistrationError('required tools restricted')
+            if disabled is not None and (not isinstance(disabled, list)
+                    or not all(isinstance(x, str) for x in disabled)
+                    or set(EXECUTIVE_TOOLS).intersection(disabled)):
+                raise RegistrationError('required tools restricted')
     except RegistrationError:
         raise BootstrapError('Executive registration is missing, conflicting, or ambiguous') from None
     inner = ('cd ' + shlex.quote(str(source)) + ' && exec ' +
@@ -153,7 +171,8 @@ def prepare_launch(server_url: str, *, codex_bin: Path | str,
                          'ops.codex_fabric.executive_mcp_auth', 'headers']))
     helper = shlex.join(['/bin/sh', '-c', inner])
     prefix = 'mcp_servers.' + SERVER_NAME + '.'
-    overrides.update({prefix + 'http_headers_helper': helper,
+    overrides.update({prefix + 'url': url,
+                      prefix + 'http_headers_helper': helper,
                       prefix + 'enabled_tools': list(EXECUTIVE_TOOLS),
                       prefix + 'required': True})
     argv = [str(codex), '--cd', str(project)]
