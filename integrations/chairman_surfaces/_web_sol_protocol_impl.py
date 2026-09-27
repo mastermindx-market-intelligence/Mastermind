@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Any
 
 from control_plane.operator_harness_contract import ATTENTION_TURN_INSTRUCTION
+from . import web_sol_cognition_transport as cognition_transport
 
 PROBE_SCHEMA = "mastermind.web_sol_surface_probe.v1"
 ACTION_SCHEMA = "mastermind.web_sol_surface_action.v1"
@@ -25,7 +26,7 @@ HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1"
 INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1"
 TRANSPORT_CAPABILITY_SCHEMA = "mastermind.web_sol_transport_capabilities.v1"
 TRANSPORT_PROTOCOL_MAJOR = 1
-WEB_SOL_PACKAGE_VERSION = "0.5.0"
+WEB_SOL_PACKAGE_VERSION = "0.6.0"
 MAX_ACTION_TTL_SECONDS = 60
 ALLOWED_FUTURE_SKEW_SECONDS = 5
 CONTINUATION_DIRECTIVE_TEXT = (
@@ -53,6 +54,7 @@ class SurfaceAction(str, Enum):
     TYPED_REENTRY = "TYPED_REENTRY"
     SUBMIT_CONTINUATION = "SUBMIT_CONTINUATION"
     OBSERVE_CONTINUATION_ACK = "OBSERVE_CONTINUATION_ACK"
+    SUBMIT_COGNITION_ASSIGNMENT = "SUBMIT_COGNITION_ASSIGNMENT"
 
 
 class ReceiptStatus(str, Enum):
@@ -69,6 +71,9 @@ class ReceiptStatus(str, Enum):
     CONTINUATION_ACKNOWLEDGED = "CONTINUATION_ACKNOWLEDGED"
     CONTINUATION_ACK_PENDING = "CONTINUATION_ACK_PENDING"
     CONTINUATION_ACK_REFUSED = "CONTINUATION_ACK_REFUSED"
+    COGNITION_NOT_SUBMITTED = "COGNITION_NOT_SUBMITTED"
+    COGNITION_SUBMIT_EFFECT_UNKNOWN = "COGNITION_SUBMIT_EFFECT_UNKNOWN"
+    COGNITION_STARTED = "COGNITION_STARTED"
     TARGET_NOT_FOUND = "TARGET_NOT_FOUND"
     TARGET_CHANGED = "TARGET_CHANGED"
     AUTH_REQUIRED = "AUTH_REQUIRED"
@@ -114,6 +119,25 @@ _SUBMIT_CONTINUATION_PAYLOAD_KEYS = _CONTINUATION_IDENTITY_PAYLOAD_KEYS
 _OBSERVE_CONTINUATION_ACK_PAYLOAD_KEYS = _CONTINUATION_IDENTITY_PAYLOAD_KEYS
 _SUBMIT_CONTINUATION_KEYS = _REQUEST_KEYS | _SUBMIT_CONTINUATION_PAYLOAD_KEYS
 _OBSERVE_CONTINUATION_ACK_KEYS = _REQUEST_KEYS | _OBSERVE_CONTINUATION_ACK_PAYLOAD_KEYS
+_COGNITION_BINDING_PAYLOAD_KEYS = frozenset({
+    "session_alias",
+    "runtime_binding_id",
+    "runtime_binding_generation",
+    "runtime_binding_fingerprint",
+})
+_SUBMIT_COGNITION_ASSIGNMENT_KEYS = (
+    _REQUEST_KEYS | _COGNITION_BINDING_PAYLOAD_KEYS | frozenset({"cognition_payload"})
+)
+_COGNITION_IDENTITY_KEYS = frozenset({
+    "turn_id",
+    "assignment_digest",
+    "result_schema_digest",
+    "job_id",
+    "attempt_id",
+    "worker_id",
+    "root_job_id",
+    "role",
+})
 _RECEIPT_KEYS = frozenset(
     {
         "schema",
@@ -137,6 +161,9 @@ _SEMANTIC_ACK_RESULT_KEYS = frozenset({
 })
 _OBSERVE_CONTINUATION_ACK_RECEIPT_KEYS = (
     _RECEIPT_KEYS | _OBSERVE_CONTINUATION_ACK_PAYLOAD_KEYS | _SEMANTIC_ACK_RESULT_KEYS
+)
+_SUBMIT_COGNITION_ASSIGNMENT_RECEIPT_KEYS = (
+    _RECEIPT_KEYS | _COGNITION_BINDING_PAYLOAD_KEYS | frozenset({"cognition_identity"})
 )
 _PROBE_KEYS = frozenset(
     {
@@ -202,6 +229,7 @@ _NUDGE_ID_RE = re.compile(r"^NUDGE-[0-9a-f]{32}$")
 _TURN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 _SESSION_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 _RUNTIME_BINDING_ID_RE = re.compile(r"^bind-wsx-[0-9a-f]{48}$")
+_ENTITY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SEMVER_RE = re.compile(
     r"^(?:0|[1-9][0-9]*)\."
     r"(?:0|[1-9][0-9]*)\."
@@ -220,7 +248,13 @@ def _error(path: str, message: str) -> WebSolProtocolError:
     return WebSolProtocolError(f"{path}: {message}")
 
 
-def _walk_forbidden(value: Any, path: str = "$") -> None:
+def _walk_forbidden(
+    value: Any,
+    path: str = "$",
+    *,
+    allow_cognition_text: bool = False,
+    components: tuple[str | int, ...] = (),
+) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             key_path = (
@@ -230,12 +264,23 @@ def _walk_forbidden(value: Any, path: str = "$") -> None:
             )
             if not isinstance(key, str):
                 raise _error(key_path, "object keys must be strings")
-            if key.lower() in _FORBIDDEN_KEYS:
+            child_components = components + (key,)
+            typed_continuation_text = allow_cognition_text and child_components == (
+                "cognition_payload", "assignment", "continuation", "state",
+                "next_action", "text",
+            )
+            if key.lower() in _FORBIDDEN_KEYS and not typed_continuation_text:
                 raise _error(key_path, f"forbidden field {key!r}")
-            _walk_forbidden(child, key_path)
+            _walk_forbidden(
+                child, key_path, allow_cognition_text=allow_cognition_text,
+                components=child_components,
+            )
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            _walk_forbidden(child, f"{path}[{index}]")
+            _walk_forbidden(
+                child, f"{path}[{index}]", allow_cognition_text=allow_cognition_text,
+                components=components + (index,),
+            )
 
 
 def _require_exact_keys(
@@ -355,6 +400,11 @@ def _require_session_alias(value: Any, path: str) -> None:
 def _require_runtime_binding_id(value: Any, path: str) -> None:
     if not isinstance(value, str) or _RUNTIME_BINDING_ID_RE.fullmatch(value) is None:
         raise _error(path, "must be a canonical Web-Sol RuntimeBinding identity")
+
+
+def _require_entity_id(value: Any, path: str) -> None:
+    if not isinstance(value, str) or _ENTITY_ID_RE.fullmatch(value) is None:
+        raise _error(path, "must be a canonical bounded entity identity")
 
 
 def _require_runtime_binding_generation(value: Any, path: str) -> None:
@@ -521,7 +571,7 @@ def _require_action(value: Any, path: str) -> SurfaceAction:
         raise _error(
             path,
             "must be INSPECT, FOREGROUND, TYPED_REENTRY, SUBMIT_CONTINUATION, "
-            "or OBSERVE_CONTINUATION_ACK",
+            "OBSERVE_CONTINUATION_ACK, or SUBMIT_COGNITION_ASSIGNMENT",
         ) from exc
 
 
@@ -571,6 +621,20 @@ def _validate_identity_fields(
         )
         _require_hex64(value["runtime_binding_fingerprint"], "$.runtime_binding_fingerprint")
         _validate_wake_obligation_set(value)
+    if action is SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT:
+        for field in _COGNITION_BINDING_PAYLOAD_KEYS:
+            if field not in value:
+                raise _error(f"$.{field}", "required for SUBMIT_COGNITION_ASSIGNMENT")
+        _require_session_alias(value["session_alias"], "$.session_alias")
+        _require_runtime_binding_id(value["runtime_binding_id"], "$.runtime_binding_id")
+        _require_runtime_binding_generation(
+            value["runtime_binding_generation"],
+            "$.runtime_binding_generation",
+        )
+        _require_hex64(
+            value["runtime_binding_fingerprint"],
+            "$.runtime_binding_fingerprint",
+        )
     return action
 
 
@@ -640,7 +704,6 @@ def validate_probe(value: dict[str, Any]) -> dict[str, Any]:
 def validate_request(value: dict[str, Any]) -> dict[str, Any]:
     """Validate structure only and return a detached normalized copy."""
 
-    _walk_forbidden(value)
     action = value.get("action") if isinstance(value, dict) else None
     if action == SurfaceAction.TYPED_REENTRY.value:
         request_keys = _TYPED_REENTRY_KEYS
@@ -648,11 +711,40 @@ def validate_request(value: dict[str, Any]) -> dict[str, Any]:
         request_keys = _SUBMIT_CONTINUATION_KEYS
     elif action == SurfaceAction.OBSERVE_CONTINUATION_ACK.value:
         request_keys = _OBSERVE_CONTINUATION_ACK_KEYS
+    elif action == SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value:
+        request_keys = _SUBMIT_COGNITION_ASSIGNMENT_KEYS
     else:
         request_keys = _REQUEST_KEYS
     request = _require_exact_keys(value, request_keys, "$")
+    _walk_forbidden(
+        request,
+        allow_cognition_text=action == SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value,
+    )
     _require_schema(request["schema"], ACTION_SCHEMA, "$.schema")
     _validate_identity_fields(request, include_time=True)
+    if action == SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value:
+        inner = request["cognition_payload"]
+        # The transport owner validates the complete payload. Guard its enum's
+        # JSON type before dispatch so unhashable input stays a protocol refusal.
+        if isinstance(inner, dict) and "role" in inner:
+            _require_member(
+                inner["role"], frozenset({"work", "review"}),
+                "$.cognition_payload.role", "must be work or review",
+            )
+        try:
+            accepted_payload = cognition_transport.validate_assignment_submit_payload(inner)
+        except cognition_transport.WebSolCognitionTransportError as exc:
+            raise _error("$.cognition_payload", "assignment submit payload refused") from exc
+        for field in (
+            "runtime_binding_id",
+            "runtime_binding_generation",
+            "runtime_binding_fingerprint",
+        ):
+            if accepted_payload[field] != request[field]:
+                raise _error(
+                    f"$.cognition_payload.{field}",
+                    "must match the outer exact RuntimeBinding",
+                )
     return copy.deepcopy(request)
 
 
@@ -895,6 +987,50 @@ def _validate_receipt_semantics(
         )
         return
 
+    if status is ReceiptStatus.COGNITION_NOT_SUBMITTED:
+        _require_probe_truth(
+            action is SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT,
+            "$.status",
+            "COGNITION_NOT_SUBMITTED requires SUBMIT_COGNITION_ASSIGNMENT action",
+        )
+        return
+
+    if status is ReceiptStatus.COGNITION_SUBMIT_EFFECT_UNKNOWN:
+        _require_probe_truth(
+            action is SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT,
+            "$.status",
+            "COGNITION_SUBMIT_EFFECT_UNKNOWN requires SUBMIT_COGNITION_ASSIGNMENT action",
+        )
+        return
+
+    if status is ReceiptStatus.COGNITION_STARTED:
+        _require_probe_truth(
+            action is SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT,
+            "$.status",
+            "COGNITION_STARTED requires SUBMIT_COGNITION_ASSIGNMENT action",
+        )
+        _require_probe_truth(
+            probe["target_present"] and probe["exact_conversation_loaded"],
+            "$.observation.exact_conversation_loaded",
+            "COGNITION_STARTED requires the exact target to remain loaded",
+        )
+        _require_probe_truth(
+            probe["generation_state"] == "active",
+            "$.observation.generation_state",
+            "must be active for COGNITION_STARTED",
+        )
+        _require_probe_truth(
+            probe["auth_required"] is not True,
+            "$.observation.auth_required",
+            "must not be true for COGNITION_STARTED",
+        )
+        _require_probe_truth(
+            probe["provider_error_present"] is not True,
+            "$.observation.provider_error_present",
+            "must not report provider error for COGNITION_STARTED",
+        )
+        return
+
     if status in {
         ReceiptStatus.CONTINUATION_ACKNOWLEDGED,
         ReceiptStatus.CONTINUATION_ACK_PENDING,
@@ -967,11 +1103,44 @@ def validate_receipt(value: dict[str, Any]) -> dict[str, Any]:
         receipt_keys = _SUBMIT_CONTINUATION_RECEIPT_KEYS
     elif action == SurfaceAction.OBSERVE_CONTINUATION_ACK.value:
         receipt_keys = _OBSERVE_CONTINUATION_ACK_RECEIPT_KEYS
+    elif action == SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value:
+        receipt_keys = _SUBMIT_COGNITION_ASSIGNMENT_RECEIPT_KEYS
     else:
         receipt_keys = _RECEIPT_KEYS
     receipt = _require_exact_keys(value, receipt_keys, "$")
     _require_schema(receipt["schema"], RECEIPT_SCHEMA, "$.schema")
     action = _validate_identity_fields(receipt, include_time=False)
+    if action is SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT:
+        identity = _require_exact_keys(
+            receipt["cognition_identity"],
+            _COGNITION_IDENTITY_KEYS,
+            "$.cognition_identity",
+        )
+        for field in _COGNITION_IDENTITY_KEYS:
+            if field == "turn_id":
+                _require_turn_id(identity[field], f"$.cognition_identity.{field}")
+            elif field == "role":
+                _require_member(
+                    identity[field],
+                    frozenset({"work", "review"}),
+                    f"$.cognition_identity.{field}",
+                    "must be work or review",
+                )
+            elif field in {
+                "job_id",
+                "attempt_id",
+                "worker_id",
+                "root_job_id",
+            }:
+                _require_entity_id(
+                    identity[field],
+                    f"$.cognition_identity.{field}",
+                )
+            else:
+                _require_hex64(
+                    identity[field],
+                    f"$.cognition_identity.{field}",
+                )
     _parse_zulu(receipt["observed_at"], "$.observed_at")
     try:
         status = ReceiptStatus(receipt["status"])

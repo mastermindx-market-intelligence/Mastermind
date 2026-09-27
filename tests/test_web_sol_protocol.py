@@ -72,6 +72,7 @@ def test_schema_pins_and_action_surface_are_closed():
         "TYPED_REENTRY",
         "SUBMIT_CONTINUATION",
         "OBSERVE_CONTINUATION_ACK",
+        "SUBMIT_COGNITION_ASSIGNMENT",
     }
 
 
