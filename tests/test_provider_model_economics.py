@@ -96,6 +96,19 @@ def test_api_cash_estimates_are_exact_decimal_and_context_banded():
     ) == Decimal("16")
 
 
+def test_qwen38_flash_rate_uses_documented_price_cut_provenance():
+    import json
+
+    raw = json.loads(CATALOG.read_text())
+    rate = raw["models"]["alibaba.qwen3.8-flash"]["api_rates"][0]
+    assert rate["effective_from"] == "2026-08-27"
+    assert rate["source_id"] == "alibaba-qwen38flash-price-cut"
+    assert raw["sources"]["alibaba-qwen38flash-price-cut"]["url"] == (
+        "https://www.alibabacloud.com/en/notice/"
+        "model_studioqwen38flash_price_reduction_notice_859"
+    )
+
+
 def test_unknown_or_unreviewed_cash_rate_fails_closed():
     catalog = load_provider_model_catalog(CATALOG)
     with pytest.raises(ModelEconomicsError, match="no reviewed API rate"):

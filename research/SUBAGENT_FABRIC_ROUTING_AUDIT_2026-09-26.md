@@ -1,9 +1,9 @@
 # Subagent Fabric Routing Audit — 2026-09-26
 
 **Disposition:** source audit + production-inert calibration patch.  
-**Protected source pin:** `4c6b206d3fb7fbc6d077faf61ae361bedf259925`.  
+**Protected source pin:** `d7c949d31f3893d95822a4ee8e5e4be9edaf5593`.
 **Skillpack:** `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap major 1.  
-**Runtime proof ceiling:** current Executive V2 reader returned `backend_unavailable`; no live routing-frequency or quota-burn claims are made here. External subscription profiles remain non-autonomous / production-unarmed.
+**Runtime proof ceiling:** the original Executive V2 read returned `backend_unavailable`; the current continuation observed installed Executive service registration but no canonical routing-frequency or quota-burn runtime. External subscription profiles remain non-autonomous / production-unarmed.
 
 ## 1. Chairman job
 
@@ -60,8 +60,8 @@ The GLM profile already had the sounder shape: routine/fast/subagent -> GLM-5.3-
 ### D. Current provider data had already drifted
 
 Current public model surfaces have moved since the catalog's 2026-09-13 verification:
-- Alibaba now exposes qwen3.8-flash as the current fast multimodal/coding model, including Token Plan and Codex/Anthropic-compatible use.
-- xAI/Cursor now expose Grok 4.7 for difficult, long-running frontier work.
+- Alibaba now exposes qwen3.8-flash as the current fast multimodal/coding model, including Token Plan and Codex/Anthropic-compatible use. The Singapore rate used here is bound to Alibaba's Aug. 27, 2026 price-reduction notice rather than a guessed later effective date.
+- xAI/Cursor now expose Grok 4.7 for difficult, long-running frontier work; the catalog keeps the provider's 200k higher-rate threshold distinct from Cursor's 256k long-context threshold.
 - MiniMax M3 remains the current MiniMax workhorse/frontier-operator model; its useful efficiency lever is reasoning/thinking policy rather than a separate Flash sibling.
 
 A stale catalog makes otherwise-correct routing semantics less useful.
