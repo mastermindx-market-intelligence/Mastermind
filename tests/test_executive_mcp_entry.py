@@ -23,6 +23,33 @@ def _module():
     return module
 
 
+def test_additional_executive_resources_are_closed_exact_tunnel_urls():
+    module = _module()
+    first = (
+        "https://tunnel-service.gateway.unified-0.internal.api.openai.org/"
+        "v1/mcp/tunnel_" + "1" * 32
+    )
+    second = (
+        "https://tunnel-service.gateway.unified-0.internal.api.openai.org/"
+        "v1/mcp/tunnel_" + "2" * 32
+    )
+    assert module.validate_additional_resources(
+        {"executive_additional_resources": [first, second]}
+    ) == (first, second)
+
+    for values in (
+        [second, first],
+        [first, first],
+        ["https://example.test/v1/mcp/tunnel_" + "1" * 32],
+        ["https://tunnel-service.gateway.unified-0.internal.api.openai.org/"
+         "v1/mcp/not-a-tunnel"],
+    ):
+        with pytest.raises(ValueError, match="additional Executive OAuth resources"):
+            module.validate_additional_resources(
+                {"executive_additional_resources": values}
+            )
+
+
 def test_installed_launcher_refuses_user_owned_configuration(tmp_path):
     path=tmp_path/'policy.json'
     path.write_text('{}')

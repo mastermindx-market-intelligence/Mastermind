@@ -66,7 +66,7 @@ from integrations.mastermind_executive_app.gateway import (
     CeoIngressReadGateway,
     WebCeoCeoIngressReadGateway,
     WebCeoV2CeoIngressReadGateway,
-    make_jwt_authenticators,
+    make_jwt_authenticator_variants,
 )
 from integrations.executive_mcp.web_ceo import (
     build_web_ceo_read_gateway,
@@ -150,6 +150,10 @@ class AppSettings:
     allow_submit_authorized_reads: bool = False
     #: Installed composition reads only through the existing CeoIngress.
     read_from_ceo_ingress: bool = False
+    #: Additional exact OAuth resource variants for the same Executive app.
+    #: Each variant must be identical to ``policies`` except for ``resource``.
+    #: The tuple is host/operator configuration; request data never reaches it.
+    additional_policies: tuple[AppPolicies, ...] = ()
     #: E1's temporary runtime projection root.  It is required only for the
     #: read-only capability and never comes from a request body.
     runtime_root: "Path | str | None" = None
@@ -164,6 +168,25 @@ class AppSettings:
     read_timeout: float = 10.0
 
     def __post_init__(self) -> None:
+        if type(self.additional_policies) is not tuple or any(
+            type(item) is not AppPolicies for item in self.additional_policies
+        ):
+            raise ValueError("additional_policies must be a tuple of AppPolicies")
+        resources = {self.policies.read.resource}
+        for alternate in self.additional_policies:
+            _metadata_policy_and_path(alternate)
+            if alternate.read.resource in resources:
+                raise ValueError("Executive OAuth resources must be unique")
+            resources.add(alternate.read.resource)
+            for name in ("read", "submit"):
+                primary_policy = getattr(self.policies, name)
+                alternate_policy = getattr(alternate, name)
+                if dataclasses.replace(
+                    alternate_policy, resource=primary_policy.resource
+                ) != primary_policy:
+                    raise ValueError(
+                        "additional Executive policies may differ only by resource"
+                    )
         if type(self.read_only) is not bool:
             raise ValueError("read_only must be a bool")
         if type(self.allow_submit_authorized_reads) is not bool:
@@ -207,9 +230,51 @@ def _auth_header(request: Request) -> str | None:
     return values[0] if values else None
 
 
+def _authenticator_tuple(
+    value: JwtAuthenticator | tuple[JwtAuthenticator, ...],
+) -> tuple[JwtAuthenticator, ...]:
+    if isinstance(value, JwtAuthenticator):
+        return (value,)
+    if type(value) is not tuple or not value or any(
+        not isinstance(item, JwtAuthenticator) for item in value
+    ):
+        raise TypeError("authenticator set must contain JwtAuthenticator values")
+    return value
+
+
+async def _verify_exact_resource_set(
+    authenticators: JwtAuthenticator | tuple[JwtAuthenticator, ...],
+    header: object,
+    *,
+    now: int,
+) -> VerifiedPrincipal:
+    """Verify one token against a closed set of exact resource policies.
+
+    Only ``resource_refused`` advances to the next resource variant. Any
+    signature, issuer, lifetime, subject, scope, key, or internal refusal is
+    terminal because those contracts are identical across admitted variants.
+    """
+
+    values = _authenticator_tuple(authenticators)
+    last_resource_error: AuthError | None = None
+    for value in values:
+        try:
+            return await value.verify_authorization_header(header, now=now)
+        except AuthError as exc:
+            if exc.code.value != "resource_refused" or len(values) == 1:
+                raise
+            last_resource_error = exc
+    if last_resource_error is None:
+        raise RuntimeError("resource authenticator set produced no result")
+    raise last_resource_error
+
+
 async def _authenticate(
-    request: Request, authenticator: JwtAuthenticator, *, clock: Callable[[], int],
-    submit_fallback: JwtAuthenticator | None = None,
+    request: Request,
+    authenticator: JwtAuthenticator | tuple[JwtAuthenticator, ...],
+    *,
+    clock: Callable[[], int],
+    submit_fallback: JwtAuthenticator | tuple[JwtAuthenticator, ...] | None = None,
 ) -> VerifiedPrincipal | JSONResponse:
     now = clock()
     if type(now) is not int:
@@ -224,16 +289,18 @@ async def _authenticate(
             {"ok": False, "error": {"code": "authorization_malformed", "message": "authentication required"}},
             status_code=401,
         )
+    active = authenticator
     try:
         try:
-            return await authenticator.verify_authorization_header(header, now=now)
+            return await _verify_exact_resource_set(active, header, now=now)
         except AuthError as exc:
             if submit_fallback is None or exc.code.value != "scope_refused":
                 raise
-            authenticator = submit_fallback
-            return await authenticator.verify_authorization_header(header, now=now)
+            active = submit_fallback
+            return await _verify_exact_resource_set(active, header, now=now)
     except AuthError as exc:
-        challenge = mcp_auth_error_result(authenticator.policy, exc)
+        challenge_policy = _authenticator_tuple(active)[0].policy
+        challenge = mcp_auth_error_result(challenge_policy, exc)
         header_value = challenge["_meta"]["mcp/www_authenticate"][0]
         status_code = 403 if exc.code.value == "scope_refused" else 401
         return JSONResponse(
@@ -241,7 +308,6 @@ async def _authenticate(
             status_code=status_code,
             headers={"WWW-Authenticate": header_value},
         )
-
 
 async def _read_body_arguments(request: Request) -> dict[str, Any] | JSONResponse:
     body = await request.body()
@@ -370,9 +436,16 @@ def _create_profile_app(
     """
 
     metadata_policy, metadata_path = _metadata_policy_and_path(settings.policies)
-    read_authenticator, submit_authenticator = make_jwt_authenticators(
-        settings.policies, jwks_cache=settings.jwks_cache
+    authenticator_variants = make_jwt_authenticator_variants(
+        settings.policies,
+        settings.additional_policies,
+        primary_jwks_cache=settings.jwks_cache,
     )
+    if len(authenticator_variants) == 1:
+        read_authenticator, submit_authenticator = authenticator_variants[0]
+    else:
+        read_authenticator = tuple(pair[0] for pair in authenticator_variants)
+        submit_authenticator = tuple(pair[1] for pair in authenticator_variants)
     ceo_ingress_client = None
     if not settings.read_only:
         ceo_ingress_client = CeoIngressClient(

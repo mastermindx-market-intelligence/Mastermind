@@ -307,22 +307,27 @@ def build_e1_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
 
 
 class _ExecutivePolicyVerifiers:
-    """Compose the two existing A1 adapters without changing either policy.
+    """Compose exact-resource A1 adapters without widening any policy.
 
-    Each adapter independently verifies and audits an exact scope set. A read
-    token is never projected into a submit principal, and vice versa.
+    Every contained verifier still owns one immutable ResourcePolicy. The
+    composition only permits several explicitly configured resource variants
+    to reach the same Executive service; each verifier independently performs
+    full signature, issuer, audience, scope, subject and lifetime checks.
     """
 
-    def __init__(self, read: MastermindTokenVerifier, submit: MastermindTokenVerifier):
-        self._read = read
-        self._submit = submit
+    def __init__(self, *verifiers: MastermindTokenVerifier):
+        if not verifiers or any(
+            not isinstance(item, MastermindTokenVerifier) for item in verifiers
+        ):
+            raise TypeError("Executive verifier set requires MastermindTokenVerifier values")
+        self._verifiers = tuple(verifiers)
 
     async def verify_token(self, token: str) -> Any:
-        access = await self._read.verify_token(token)
-        if access is not None:
-            return access
-        return await self._submit.verify_token(token)
-
+        for verifier in self._verifiers:
+            access = await verifier.verify_token(token)
+            if access is not None:
+                return access
+        return None
 
 class _ExecutivePathFence:
     """Literal, query-free routes for the private stateless HTTP transport."""
@@ -583,7 +588,7 @@ def _build_profile_mcp_app(
         AdmissionOutcome, STATUS_EFFECT_UNKNOWN,
     )
     from integrations.mastermind_executive_app.gateway import (
-        make_jwt_authenticators, make_shared_jwks_cache,
+        make_jwt_authenticator_variants, make_shared_jwks_cache,
     )
 
     if settings.read_only:
@@ -596,11 +601,25 @@ def _build_profile_mcp_app(
         shared_cache = make_shared_jwks_cache(configured.policies)
         if shared_cache is not None:
             configured = dataclasses.replace(configured, jwks_cache=shared_cache)
-    authenticators = make_jwt_authenticators(configured.policies, jwks_cache=configured.jwks_cache)
+    policy_variants = (configured.policies, *configured.additional_policies)
+    authenticator_variants = make_jwt_authenticator_variants(
+        configured.policies,
+        configured.additional_policies,
+        primary_jwks_cache=configured.jwks_cache,
+    )
     verifier = _ExecutivePolicyVerifiers(*(
-        MastermindTokenVerifier(authenticator=authenticator, policy=policy,
-            now=configured.clock, audit_sink=audit_sink)
-        for authenticator, policy in zip(authenticators, (configured.policies.read, configured.policies.submit))
+        MastermindTokenVerifier(
+            authenticator=authenticator,
+            policy=policy,
+            now=configured.clock,
+            audit_sink=audit_sink,
+        )
+        for authenticator_pair, policy_pair in zip(
+            authenticator_variants, policy_variants
+        )
+        for authenticator, policy in zip(
+            authenticator_pair, (policy_pair.read, policy_pair.submit)
+        )
     ))
     # Reuse the bounded ASGI seam. Its generic failure body is never evidence
     # of no effect: all unrecognized submit replies become same-request UNKNOWN.
