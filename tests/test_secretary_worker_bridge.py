@@ -15,6 +15,7 @@ from control_plane.worker_execution_contract import (
     WorkerRunStatus,
 )
 from integrations.mastermind_secretary_mcp.decision_provider_contract import (
+    SNAPSHOT_SCHEMA_V2,
     build_secretary_provider_request,
 )
 
@@ -69,10 +70,11 @@ def recommendation(
     }
 
 
-def provider_request(snap=None, now_ms=20_000):
+def provider_request(snap=None, now_ms=20_000, budget=None):
     return build_secretary_provider_request(
-        snapshot() if snap is None else snap,
+        snap if snap is not None else snapshot(),
         now_ms=now_ms,
+        cognition_budget_ms=budget,
     )
 
 
@@ -170,6 +172,50 @@ def test_secretary_worker_bridge_apis_are_available() -> None:
 
 
 if worker_bridge is not None:
+    owner_material = {
+        "schema_version": "mastermind.secretary_snapshot_owner_material/v1",
+        "owner_id": "owner-001",
+        "owner_binding_id": "binding-001",
+        "owner_revision": "owner-rev-001",
+        "material_revision": "material-rev-001",
+    }
+
+    def snapshot_v2(**overrides):
+        value = snapshot(
+            schema="mastermind.secretary_decision_snapshot/v2",
+            owner_material=dict(owner_material),
+        )
+        value.update(overrides)
+        return value
+
+    def refresh(value, observed, expires):
+        return dict(value, observed_at_ms=observed, expires_at_ms=expires)
+
+    def v2_request(snap=None, *, now_ms=20_000, budget=200_000):
+        return provider_request(
+            snapshot_v2() if snap is None else snap,
+            now_ms=now_ms,
+            budget=budget,
+        )
+
+    def v2_launch_spec(request=None, **overrides):
+        request = v2_request() if request is None else request
+        return launch_spec(request, timeout_seconds=200.0, **overrides)
+
+    def bound_pair_v2(snap=None):
+        snap = snapshot_v2() if snap is None else snap
+        req = v2_request(snap)
+        spec = v2_launch_spec(req)
+        binding = worker_bridge.bind_secretary_worker_launch(
+            req,
+            spec,
+            req.output_schema_json,
+        )
+        return snap, req, spec, binding
+
+    def v2_collection(spec, *, output=None, **kwargs):
+        return collection(spec, output=output, **kwargs)
+
     def bound_pair(snap=None):
         snap = snapshot() if snap is None else snap
         req = provider_request(snap)
@@ -323,11 +369,7 @@ if worker_bridge is not None:
 
     def test_collection_refuses_current_snapshot_or_launch_binding_drift() -> None:
         snap, req, spec, binding = bound_pair()
-        changed_snapshot = snapshot(
-            trigger="MATERIAL_RETURN",
-            observed_at_ms=11_000,
-            expires_at_ms=51_000,
-        )
+        changed_snapshot = snapshot(trigger="MATERIAL_RETURN", observed_at_ms=11_000, expires_at_ms=51_000)
         receipt = worker_bridge.validate_secretary_worker_collection(
             changed_snapshot, req, binding, collection(spec), now_ms=20_000
         )
@@ -387,3 +429,187 @@ if worker_bridge is not None:
         )
         for token in forbidden:
             assert token not in source
+
+
+if worker_bridge is not None:
+    def test_v2_launch_binds_creation_budget_material_and_v2_schema() -> None:
+        _snap, req, spec, binding = bound_pair_v2()
+        assert binding.status == "READY"
+        assert binding.schema_version == "mastermind.secretary_worker_launch_binding/v2"
+        assert binding.basis_material_sha256 == req.basis_material_sha256
+        assert binding.cognition_budget_ms == 200_000
+        assert binding.cognition_deadline_ms == 220_000
+        assert binding.worker_started is False
+        assert binding.execution_authorized is False
+        assert spec.prompt == req.prompt
+
+    def test_v2_launch_requires_exact_creation_and_derived_budget() -> None:
+        _snap, req, spec, _binding = bound_pair_v2()
+        for timeout in (
+            0,
+            -1,
+            True,
+            float("inf"),
+            float("nan"),
+            199.999,
+            200.4,
+            10**1000,
+        ):
+            bad_spec = dataclasses.replace(spec, timeout_seconds=timeout)
+            refused = worker_bridge.bind_secretary_worker_launch(
+                req,
+                bad_spec,
+                req.output_schema_json,
+            )
+            assert refused.refusal_code == "COGNITION_BUDGET_MISMATCH"
+
+    def test_v2_collection_accepts_delayed_timestamp_only_refresh_and_replay() -> None:
+        original, req, spec, binding = bound_pair_v2()
+        current = refresh(original, 90_000, 130_000)
+        first = worker_bridge.validate_secretary_worker_collection(
+            current,
+            req,
+            binding,
+            v2_collection(spec),
+            now_ms=110_000,
+            worker_launch_spec=spec,
+        )
+        assert first.status == "ACCEPTED"
+        assert first.snapshot_digest == req.snapshot_digest
+        assert first.current_snapshot_digest != req.snapshot_digest
+        assert first.basis_material_sha256 == req.basis_material_sha256
+        assert first.execution_material_sha256 == req.basis_material_sha256
+        assert first.cognition_deadline_ms == 220_000
+        assert first.provider_result_attested is False
+        assert first.execution_authorized is False
+        assert first.requires_owner_admission is True
+        second = worker_bridge.validate_secretary_worker_collection(
+            current,
+            req,
+            binding,
+            v2_collection(spec),
+            now_ms=110_000,
+            worker_launch_spec=spec,
+        )
+        assert second.status == "ACCEPTED"
+
+    def test_v2_collection_refuses_stale_future_expired_or_drifted_current() -> None:
+        _original, req, spec, binding = bound_pair_v2()
+        cases = (
+            (refresh(snapshot_v2(), 5_000, 45_000), 30_000, "CURRENT_SNAPSHOT_BACKWARD"),
+            (refresh(snapshot_v2(), 90_000, 130_000), 80_000, "CURRENT_PROVIDER_REQUEST_NOT_READY"),
+            (refresh(snapshot_v2(), 200_000, 240_000), 220_001, "COGNITION_BUDGET_EXPIRED"),
+        )
+        for current, now, refusal in cases:
+            receipt = worker_bridge.validate_secretary_worker_collection(
+                current,
+                req,
+                binding,
+                v2_collection(spec),
+                now_ms=now,
+                worker_launch_spec=spec,
+            )
+        assert receipt.status == "REFUSED"
+        if refusal == "COGNITION_BUDGET_EXPIRED":
+            assert receipt.refusal_code == refusal
+        else:
+            assert receipt.refusal_code == "SECRETARY_RETURN_REFUSED"
+            assert receipt.return_refusal_code == refusal
+
+        changed = dict(
+            snapshot_v2(),
+            owner_material=dict(owner_material, material_revision="material-rev-002"),
+        )
+        receipt = worker_bridge.validate_secretary_worker_collection(
+            refresh(changed, 90_000, 130_000),
+            req,
+            binding,
+            v2_collection(spec),
+            now_ms=110_000,
+            worker_launch_spec=spec,
+        )
+        assert receipt.refusal_code == "SECRETARY_RETURN_REFUSED"
+        assert receipt.return_refusal_code == "PROVIDER_MATERIAL_DRIFT"
+
+    def test_v2_collection_requires_exact_worker_launch_spec() -> None:
+        _snap, req, binding_spec, binding = bound_pair_v2()
+        missing = worker_bridge.validate_secretary_worker_collection(
+            snapshot_v2(),
+            req,
+            binding,
+            v2_collection(binding_spec),
+            now_ms=30_000,
+        )
+        assert missing.refusal_code == "LAUNCH_SPEC_MISMATCH"
+
+        none = worker_bridge.validate_secretary_worker_collection(
+            snapshot_v2(),
+            req,
+            binding,
+            v2_collection(binding_spec),
+            now_ms=30_000,
+            worker_launch_spec=None,
+        )
+        assert none.refusal_code == "LAUNCH_SPEC_MISMATCH"
+
+        wrong_id = v2_launch_spec(req, worker_id="other")
+        wrong = worker_bridge.validate_secretary_worker_collection(
+            snapshot_v2(),
+            req,
+            binding,
+            v2_collection(binding_spec),
+            now_ms=30_000,
+            worker_launch_spec=wrong_id,
+        )
+        assert wrong.refusal_code == "LAUNCH_SPEC_MISMATCH"
+
+        tampered_binding = dataclasses.replace(binding, basis_material_sha256="0" * 64)
+        bad_binding = worker_bridge.validate_secretary_worker_collection(
+            snapshot_v2(),
+            req,
+            tampered_binding,
+            v2_collection(binding_spec),
+            now_ms=30_000,
+            worker_launch_spec=binding_spec,
+        )
+        assert bad_binding.refusal_code == "LAUNCH_BINDING_MISMATCH"
+
+    def test_v2_collection_refuses_replaced_request_core_fields() -> None:
+        _snap, req, spec, binding = bound_pair_v2()
+        for changes in (
+            {"request_created_at_ms": 20_001},
+            {"cognition_budget_ms": 200_001},
+            {"basis_material_sha256": "0" * 64},
+            {"request_integrity_sha256": "0" * 64},
+            {"prompt": req.prompt + "\nextra"},
+            {"output_schema_json": "{}"},
+            {"execution_authorized": True},
+        ):
+            tampered = dataclasses.replace(req, **changes)
+            receipt = worker_bridge.validate_secretary_worker_collection(
+                snapshot_v2(),
+                tampered,
+                binding,
+                v2_collection(spec),
+                now_ms=30_000,
+                worker_launch_spec=spec,
+            )
+            assert receipt.status == "REFUSED"
+
+    def test_v2_bridge_receipts_expose_no_authority_or_raw_source_refs() -> None:
+        original, req, spec, binding = bound_pair_v2(
+            snapshot_v2(source_refs=["secret:source-ref-needle"]),
+        )
+        receipt = worker_bridge.validate_secretary_worker_collection(
+            refresh(original, 90_000, 130_000),
+            req,
+            binding,
+            v2_collection(spec),
+            now_ms=110_000,
+            worker_launch_spec=spec,
+        )
+        assert receipt.status == "ACCEPTED"
+        assert receipt.provider_result_attested is False
+        assert receipt.execution_authorized is False
+        assert receipt.requires_owner_admission is True
+        assert "secret:source-ref-needle" not in json.dumps(receipt.to_dict())

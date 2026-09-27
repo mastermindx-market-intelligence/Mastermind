@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import dataclasses
 import sys
 
 import pytest
@@ -739,6 +740,300 @@ if contract is not None:
             assert token not in source
 
 
+if contract is not None:
+    owner_material = {
+        "schema_version": "mastermind.secretary_snapshot_owner_material/v1",
+        "owner_id": "owner-001",
+        "owner_binding_id": "binding-001",
+        "owner_revision": "owner-rev-001",
+        "material_revision": "material-rev-001",
+    }
+
+    def snapshot_v2(**overrides):
+        value = snapshot(
+            schema="mastermind.secretary_decision_snapshot/v2",
+            owner_material=dict(owner_material),
+        )
+        value.update(overrides)
+        return value
+
+    def v2_request(snap=None, *, now_ms=20_000, budget=200_000):
+        return contract.build_secretary_provider_request(
+            snapshot_v2() if snap is None else snap,
+            now_ms=now_ms,
+            cognition_budget_ms=budget,
+        )
+
+    def refresh(snap, observed, expires):
+        return dict(snap, observed_at_ms=observed, expires_at_ms=expires)
+
+    def test_snapshot_v2_is_closed_and_v1_rejects_budget() -> None:
+        assert contract.build_secretary_provider_request(
+            snapshot(),
+            now_ms=20_000,
+            cognition_budget_ms=1,
+        ).refusal_code == "SNAPSHOT_INVALID"
+        assert set(contract.build_secretary_provider_request(
+            snapshot(),
+            now_ms=20_000,
+        ).to_dict()) == {
+            "schema_version",
+            "status",
+            "refusal_code",
+            "snapshot_digest",
+            "prompt",
+            "output_schema_json",
+            "prompt_sha256",
+            "provider_selected",
+            "model_selected",
+            "worker_started",
+            "execution_authorized",
+        }
+        assert v2_request().schema_version == "mastermind.secretary_provider_request/v2"
+        assert set(snapshot_v2()) == set(snapshot()) | {"owner_material"}
+        assert set(snapshot_v2()["owner_material"]) == {
+            "schema_version",
+            "owner_id",
+            "owner_binding_id",
+            "owner_revision",
+            "material_revision",
+        }
+
+    def test_snapshot_v2_rejects_unknown_owner_or_redundant_worker_fields() -> None:
+        cases = (
+            dict(snapshot_v2(), owner_unknown="no"),
+            dict(snapshot_v2(), worker_authorities=["READ"]),
+            dict(
+                snapshot_v2(),
+                owner_material=dict(owner_material, schema_version="wrong"),
+            ),
+            dict(
+                snapshot_v2(),
+                owner_material=dict(owner_material, extra="no"),
+            ),
+            dict(
+                snapshot_v2(),
+                owner_material=dict(owner_material, owner_revision=""),
+            ),
+        )
+        for invalid in cases:
+            assert v2_request(invalid).status == "REFUSED"
+            assert v2_request(invalid).refusal_code == "SNAPSHOT_INVALID"
+
+    def test_v2_requires_positive_exact_integer_budget() -> None:
+        for budget in (None, 0, -1, True, 1.0, "1"):
+            request = contract.build_secretary_provider_request(
+                snapshot_v2(),
+                now_ms=20_000,
+                cognition_budget_ms=budget,
+            )
+            assert request.status == "REFUSED"
+
+    def test_v2_request_serializes_only_versioned_v2_fields() -> None:
+        request = v2_request()
+        assert set(request.to_dict()) == {
+            "schema_version",
+            "status",
+            "refusal_code",
+            "snapshot_digest",
+            "prompt",
+            "output_schema_json",
+            "prompt_sha256",
+            "provider_selected",
+            "model_selected",
+            "worker_started",
+            "execution_authorized",
+            "request_created_at_ms",
+            "basis_material_sha256",
+            "original_observed_at_ms",
+            "original_expires_at_ms",
+            "cognition_budget_ms",
+            "request_integrity_sha256",
+        }
+
+    def test_v2_material_hash_ignores_timestamps_only_and_binds_source_refs() -> None:
+        original = v2_request()
+        refreshed = v2_request(refresh(snapshot_v2(), 30_000, 70_000), now_ms=40_000)
+        assert refreshed.basis_material_sha256 == original.basis_material_sha256
+        assert refreshed.snapshot_digest != original.snapshot_digest
+        assert set(snapshot_v2()) - {"observed_at_ms", "expires_at_ms"} == {
+            "schema",
+            "operation_key",
+            "responsibility_ref",
+            "trigger",
+            "mission_state",
+            "turn_state",
+            "effect_state",
+            "context_state",
+            "checkpoint_state",
+            "binding_state",
+            "capability_state",
+            "human_gate",
+            "current_mode",
+            "mode_recommendation",
+            "outstanding_children",
+            "ready_returns",
+            "fanout_candidates",
+            "source_refs",
+            "owner_material",
+        }
+
+        for field, value in (
+            ("trigger", "MATERIAL_RETURN"),
+            ("mission_state", "UNKNOWN"),
+            ("turn_state", "ACTIVE"),
+            ("effect_state", "EFFECT_UNKNOWN"),
+            ("context_state", "UNKNOWN"),
+            ("checkpoint_state", "READY"),
+            ("binding_state", "STALE"),
+            ("capability_state", "DENIED"),
+            ("human_gate", "REQUIRED"),
+            ("current_mode", "OTHER"),
+            ("mode_recommendation", "PRO"),
+            ("outstanding_children", 1),
+            ("ready_returns", 1),
+        ):
+            changed = dict(snapshot_v2())
+            changed[field] = value
+            assert v2_request(changed).basis_material_sha256 != original.basis_material_sha256
+
+        changed_fanout = dict(snapshot_v2(), fanout_candidates=["child"])
+        changed_owner = dict(
+            snapshot_v2(),
+            owner_material=dict(owner_material, owner_revision="owner-rev-002"),
+        )
+        changed_material_revision = dict(
+            snapshot_v2(),
+            owner_material=dict(owner_material, material_revision="material-rev-002"),
+        )
+        changed_source = dict(snapshot_v2(), source_refs=["different-source"])
+        for changed in (
+            changed_fanout,
+            changed_owner,
+            changed_material_revision,
+            changed_source,
+        ):
+            assert v2_request(changed).basis_material_sha256 != original.basis_material_sha256
+
+    def test_v2_request_integrity_covers_creation_budget_prompt_schema_and_snapshot() -> None:
+        request = v2_request()
+        assert request.request_created_at_ms == 20_000
+        assert request.original_observed_at_ms == 10_000
+        assert request.original_expires_at_ms == 50_000
+        assert request.cognition_budget_ms == 200_000
+        assert contract.validate_secretary_provider_request(request)
+        for changes in (
+            {"request_created_at_ms": 20_001},
+            {"original_observed_at_ms": 10_001},
+            {"original_expires_at_ms": 50_001},
+            {"cognition_budget_ms": 200_001},
+            {"prompt_sha256": "0" * 64},
+            {"prompt": request.prompt + "\nextra"},
+            {"output_schema_json": "{}"},
+            {"snapshot_digest": "0" * 64},
+            {"basis_material_sha256": "0" * 64},
+            {"request_integrity_sha256": "0" * 64},
+            {"provider_selected": True},
+            {"worker_started": True},
+            {"execution_authorized": True},
+        ):
+            assert not contract.validate_secretary_provider_request(
+                dataclasses.replace(request, **changes)
+            )
+
+    def test_v2_return_accepts_delayed_timestamp_only_fresh_snapshot() -> None:
+        original = snapshot_v2()
+        request = v2_request(original)
+        current = refresh(original, 90_000, 130_000)
+        receipt = contract.validate_secretary_provider_return(
+            current,
+            request,
+            recommendation(),
+            now_ms=110_000,
+        )
+        assert receipt.status == "ACCEPTED"
+        assert receipt.snapshot_digest == receipt.current_snapshot_digest
+        assert receipt.current_snapshot_digest != request.snapshot_digest
+        assert receipt.basis_material_sha256 == request.basis_material_sha256
+        assert receipt.execution_material_sha256 == request.basis_material_sha256
+        assert receipt.request_integrity_sha256 == request.request_integrity_sha256
+        assert receipt.provider_result_attested is False
+        assert receipt.execution_authorized is False
+        assert receipt.requires_owner_admission is True
+        assert receipt.schema_version == "mastermind.secretary_provider_return_validation/v2"
+        assert set(receipt.to_dict()) == {
+            "schema_version",
+            "status",
+            "refusal_code",
+            "semantic_refusal_code",
+            "snapshot_digest",
+            "prompt_sha256",
+            "recommendation_digest",
+            "structured_output_digest",
+            "action",
+            "reason_code",
+            "requested_mode",
+            "fanout_candidate_ids",
+            "provider_result_attested",
+            "execution_authorized",
+            "lifecycle_mutation_performed",
+            "browser_mutation_performed",
+            "requires_owner_admission",
+            "basis_material_sha256",
+            "execution_material_sha256",
+            "current_snapshot_digest",
+            "request_integrity_sha256",
+        }
+
+    def test_v2_return_refuses_stale_future_backward_or_drifted_current() -> None:
+        request = v2_request()
+        cases = (
+            (refresh(snapshot_v2(), -100, 39_000), 0, "CURRENT_SNAPSHOT_NOT_READY"),
+            (refresh(snapshot_v2(), 90_000, 130_000), 80_000, "CURRENT_SNAPSHOT_NOT_READY"),
+            (refresh(snapshot_v2(), 5_000, 45_000), 30_000, "CURRENT_SNAPSHOT_BACKWARD"),
+            (refresh(snapshot_v2(), 10_000, 49_000), 30_000, "CURRENT_SNAPSHOT_BACKWARD"),
+        )
+        for current, now, refusal in cases:
+            receipt = contract.validate_secretary_provider_return(
+                current,
+                request,
+                recommendation(),
+                now_ms=now,
+            )
+            assert receipt.status == "REFUSED"
+            assert receipt.refusal_code == refusal
+
+        changed = dict(snapshot_v2(), owner_material=dict(owner_material, material_revision="next"))
+        receipt = contract.validate_secretary_provider_return(
+            refresh(changed, 30_000, 70_000),
+            request,
+            recommendation(),
+            now_ms=40_000,
+        )
+        assert receipt.refusal_code == "PROVIDER_MATERIAL_DRIFT"
+
+    def test_v2_return_refuses_expired_creation_budget() -> None:
+        request = v2_request()
+        receipt = contract.validate_secretary_provider_return(
+            refresh(snapshot_v2(), 220_000, 260_000),
+            request,
+            recommendation(),
+            now_ms=220_001,
+        )
+        assert receipt.refusal_code == "COGNITION_BUDGET_EXPIRED"
+
+    def test_v2_mixed_schema_request_is_not_treated_as_v1_or_v2() -> None:
+        request = v2_request()
+        tampered = dataclasses.replace(request, schema_version=request.schema_version.replace("v2", "v1"))
+        receipt = contract.validate_secretary_provider_return(
+            snapshot_v2(),
+            tampered,
+            recommendation(),
+            now_ms=30_000,
+        )
+        assert receipt.refusal_code == "PROVIDER_REQUEST_MISMATCH"
+
+
 def test_secretary_provider_return_validator_api_is_available() -> None:
     assert callable(getattr(contract, "validate_secretary_provider_return", None))
 
@@ -1055,27 +1350,6 @@ if contract is not None:
         assert done.forced_reason_code == "MISSION_COMPLETE"
         assert done.provider_invocation_required is False
 
-
-    @pytest.mark.parametrize(
-        ("outstanding_children", "ready_returns"),
-        [(1, 0), (0, 1), (2, 3)],
-    )
-    def test_shadow_complete_with_children_or_ready_returns_refuses_stop(
-        outstanding_children: int, ready_returns: int
-    ) -> None:
-        value = baseline(
-            snapshot(
-                mission_state="COMPLETE",
-                outstanding_children=outstanding_children,
-                ready_returns=ready_returns,
-            )
-        )
-        assert value.status == "REFUSED"
-        assert value.baseline_class is None
-        assert value.forced_action is None
-        assert value.refusal_code == "MISSION_NOT_COMPLETE"
-        assert value.provider_invocation_required is False
-        assert_shadow_safe(value)
 
     @pytest.mark.parametrize(
         ("outstanding_children", "ready_returns"),

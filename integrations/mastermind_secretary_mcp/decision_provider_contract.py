@@ -17,8 +17,12 @@ import json
 from typing import Any
 
 SNAPSHOT_SCHEMA = "mastermind.secretary_decision_snapshot/v1"
+SNAPSHOT_SCHEMA_V2 = "mastermind.secretary_decision_snapshot/v2"
+OWNER_MATERIAL_SCHEMA = "mastermind.secretary_snapshot_owner_material/v1"
 RECOMMENDATION_SCHEMA = "mastermind.secretary_decision_recommendation/v1"
 VALIDATION_SCHEMA = "mastermind.secretary_decision_validation/v1"
+PROVIDER_REQUEST_SCHEMA_V2 = "mastermind.secretary_provider_request/v2"
+PROVIDER_RETURN_VALIDATION_SCHEMA_V2 = "mastermind.secretary_provider_return_validation/v2"
 
 MAX_SNAPSHOT_WINDOW_MS = 60_000
 MAX_RATIONALE_CHARS = 600
@@ -77,6 +81,16 @@ _HUMAN_GATES = frozenset({"NONE", "REQUIRED"})
 _CURRENT_MODES = frozenset({"EXTRA_HIGH", "PRO", "OTHER", "UNKNOWN"})
 _MODE_RECOMMENDATIONS = frozenset({"NONE", "EXTRA_HIGH", "PRO"})
 _REQUESTED_MODES = frozenset({"EXTRA_HIGH", "PRO"})
+MAX_OWNER_ID_CHARS = 256
+_OWNER_MATERIAL_KEYS = frozenset(
+    {
+        "schema_version",
+        "owner_id",
+        "owner_binding_id",
+        "owner_revision",
+        "material_revision",
+    }
+)
 
 
 def _enum_member(value: object, members: frozenset[str]) -> bool:
@@ -107,6 +121,7 @@ _SNAPSHOT_KEYS = frozenset(
         "expires_at_ms",
     }
 )
+_SNAPSHOT_V2_KEYS = _SNAPSHOT_KEYS | {"owner_material"}
 _RECOMMENDATION_KEYS = frozenset(
     {
         "schema",
@@ -202,11 +217,17 @@ def _plain_closed_dict(value: object, keys: frozenset[str]) -> bool:
     return type(value) is dict and frozenset(value) == keys
 
 
-def _valid_snapshot_shape(value: object) -> bool:
-    if not _plain_closed_dict(value, _SNAPSHOT_KEYS):
+def _valid_snapshot_shape(value: object, *, schema_version: str) -> bool:
+    if schema_version == SNAPSHOT_SCHEMA:
+        if not _plain_closed_dict(value, _SNAPSHOT_KEYS):
+            return False
+    elif schema_version == SNAPSHOT_SCHEMA_V2:
+        if not _plain_closed_dict(value, _SNAPSHOT_V2_KEYS):
+            return False
+    else:
         return False
     assert isinstance(value, dict)
-    if value["schema"] != SNAPSHOT_SCHEMA:
+    if value["schema"] != schema_version:
         return False
     if not _text(value["operation_key"], maximum=256, allow_space=False):
         return False
@@ -257,7 +278,28 @@ def _valid_snapshot_shape(value: object) -> bool:
         return False
     if expires - observed > MAX_SNAPSHOT_WINDOW_MS:
         return False
+    if schema_version == SNAPSHOT_SCHEMA_V2:
+        owner_material = value["owner_material"]
+        if not _plain_closed_dict(owner_material, _OWNER_MATERIAL_KEYS):
+            return False
+        assert isinstance(owner_material, dict)
+        if owner_material["schema_version"] != OWNER_MATERIAL_SCHEMA:
+            return False
+        if not all(
+            _text(owner_material[key], maximum=MAX_OWNER_ID_CHARS, allow_space=False)
+            for key in ("owner_id", "owner_binding_id", "owner_revision", "material_revision")
+        ):
+            return False
     return True
+
+
+def _snapshot_v2_material(snapshot: dict[str, Any]) -> dict[str, Any]:
+    material_keys = _SNAPSHOT_V2_KEYS - {"observed_at_ms", "expires_at_ms"}
+    return {key: snapshot[key] for key in sorted(material_keys)}
+
+
+def _snapshot_v2_material_digest(snapshot: dict[str, Any]) -> str:
+    return _canonical_digest(_snapshot_v2_material(snapshot))
 
 
 def _valid_recommendation_shape(value: object) -> bool:
@@ -353,7 +395,11 @@ def validate_secretary_recommendation(
 
     if type(now_ms) is not int or now_ms <= 0:
         return _refuse("SNAPSHOT_INVALID", None, None)
-    if not _valid_snapshot_shape(snapshot):
+    snapshot_is_v2 = type(snapshot) is dict and snapshot.get("schema") == SNAPSHOT_SCHEMA_V2
+    if not _valid_snapshot_shape(
+        snapshot,
+        schema_version=SNAPSHOT_SCHEMA_V2 if snapshot_is_v2 else SNAPSHOT_SCHEMA,
+    ):
         return _refuse("SNAPSHOT_INVALID", None, None)
     assert isinstance(snapshot, dict)
     snap = json.loads(
@@ -558,6 +604,12 @@ class SecretaryProviderRequest:
     prompt: str | None
     output_schema_json: str | None
     prompt_sha256: str | None
+    request_created_at_ms: int | None = None
+    basis_material_sha256: str | None = None
+    original_observed_at_ms: int | None = None
+    original_expires_at_ms: int | None = None
+    cognition_budget_ms: int | None = None
+    request_integrity_sha256: str | None = None
     provider_selected: bool = False
     model_selected: bool = False
     worker_started: bool = False
@@ -565,7 +617,7 @@ class SecretaryProviderRequest:
     schema_version: str = PROVIDER_REQUEST_SCHEMA
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "status": self.status,
             "refusal_code": self.refusal_code,
@@ -578,6 +630,18 @@ class SecretaryProviderRequest:
             "worker_started": self.worker_started,
             "execution_authorized": self.execution_authorized,
         }
+        if self.schema_version == PROVIDER_REQUEST_SCHEMA_V2:
+            value.update(
+                {
+                    "request_created_at_ms": self.request_created_at_ms,
+                    "basis_material_sha256": self.basis_material_sha256,
+                    "original_observed_at_ms": self.original_observed_at_ms,
+                    "original_expires_at_ms": self.original_expires_at_ms,
+                    "cognition_budget_ms": self.cognition_budget_ms,
+                    "request_integrity_sha256": self.request_integrity_sha256,
+                }
+            )
+        return value
 
 
 def _provider_refusal(
@@ -595,10 +659,38 @@ def _provider_refusal(
     )
 
 
+def _provider_request_integrity(
+    *,
+    schema_version: str,
+    snapshot_digest: str,
+    basis_material_sha256: str,
+    request_created_at_ms: int,
+    original_observed_at_ms: int,
+    original_expires_at_ms: int,
+    prompt_sha256: str,
+    output_schema_sha256: str,
+    cognition_budget_ms: int,
+) -> str:
+    return _canonical_digest(
+        {
+            "schema_version": schema_version,
+            "snapshot_digest": snapshot_digest,
+            "basis_material_sha256": basis_material_sha256,
+            "request_created_at_ms": request_created_at_ms,
+            "original_observed_at_ms": original_observed_at_ms,
+            "original_expires_at_ms": original_expires_at_ms,
+            "prompt_sha256": prompt_sha256,
+            "output_schema_sha256": output_schema_sha256,
+            "cognition_budget_ms": cognition_budget_ms,
+        }
+    )
+
+
 def build_secretary_provider_request(
     snapshot: object,
     *,
     now_ms: int,
+    cognition_budget_ms: int | None = None,
 ) -> SecretaryProviderRequest:
     """Render one bounded provider-neutral prompt and result schema.
 
@@ -608,7 +700,13 @@ def build_secretary_provider_request(
 
     if type(now_ms) is not int or now_ms <= 0:
         return _provider_refusal("SNAPSHOT_INVALID")
-    if not _valid_snapshot_shape(snapshot):
+    snapshot_is_v2 = type(snapshot) is dict and snapshot.get("schema") == SNAPSHOT_SCHEMA_V2
+    schema_version = SNAPSHOT_SCHEMA_V2 if snapshot_is_v2 else SNAPSHOT_SCHEMA
+    if snapshot_is_v2 and (type(cognition_budget_ms) is not int or cognition_budget_ms <= 0):
+        return _provider_refusal("SNAPSHOT_INVALID")
+    if not snapshot_is_v2 and cognition_budget_ms is not None:
+        return _provider_refusal("SNAPSHOT_INVALID")
+    if not _valid_snapshot_shape(snapshot, schema_version=schema_version):
         return _provider_refusal("SNAPSHOT_INVALID")
     assert isinstance(snapshot, dict)
     snap = json.loads(
@@ -645,6 +743,27 @@ def build_secretary_provider_request(
         "snapshot_digest": digest,
         "source_ref_count": len(snap["source_refs"]),
     }
+    basis_material_sha256 = None
+    request_created_at_ms = None
+    original_observed_at_ms = None
+    original_expires_at_ms = None
+    if snapshot_is_v2:
+        assert cognition_budget_ms is not None
+        basis_material_sha256 = _snapshot_v2_material_digest(snap)
+        request_created_at_ms = now_ms
+        original_observed_at_ms = snap["observed_at_ms"]
+        original_expires_at_ms = snap["expires_at_ms"]
+        projected.update(
+            {
+                "owner_material": snap["owner_material"],
+                "worker_authorities": ["READ"],
+                "basis_material_sha256": basis_material_sha256,
+                "original_observed_at_ms": original_observed_at_ms,
+                "original_expires_at_ms": original_expires_at_ms,
+                "cognition_budget_ms": cognition_budget_ms,
+                "request_created_at_ms": request_created_at_ms,
+            }
+        )
     projected_json = json.dumps(
         projected,
         sort_keys=True,
@@ -658,6 +777,22 @@ def build_secretary_provider_request(
         + projected_json
     )
     prompt_digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    request_integrity_sha256 = None
+    if snapshot_is_v2:
+        assert cognition_budget_ms is not None
+        request_integrity_sha256 = _provider_request_integrity(
+            schema_version=PROVIDER_REQUEST_SCHEMA_V2,
+            snapshot_digest=digest,
+            basis_material_sha256=basis_material_sha256,
+            request_created_at_ms=request_created_at_ms,
+            original_observed_at_ms=original_observed_at_ms,
+            original_expires_at_ms=original_expires_at_ms,
+            prompt_sha256=prompt_digest,
+            output_schema_sha256=hashlib.sha256(
+                _PROVIDER_OUTPUT_SCHEMA_JSON.encode("utf-8")
+            ).hexdigest(),
+            cognition_budget_ms=cognition_budget_ms,
+        )
     return SecretaryProviderRequest(
         status="READY",
         refusal_code=None,
@@ -665,7 +800,91 @@ def build_secretary_provider_request(
         prompt=prompt,
         output_schema_json=_PROVIDER_OUTPUT_SCHEMA_JSON,
         prompt_sha256=prompt_digest,
+        request_created_at_ms=request_created_at_ms,
+        basis_material_sha256=basis_material_sha256,
+        original_observed_at_ms=original_observed_at_ms,
+        original_expires_at_ms=original_expires_at_ms,
+        cognition_budget_ms=cognition_budget_ms,
+        request_integrity_sha256=request_integrity_sha256,
+        schema_version=PROVIDER_REQUEST_SCHEMA_V2 if snapshot_is_v2 else PROVIDER_REQUEST_SCHEMA,
     )
+
+
+def _valid_hex64(value: object) -> bool:
+    return type(value) is str and len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def validate_secretary_provider_request(provider_request: object) -> bool:
+    if type(provider_request) is not SecretaryProviderRequest:
+        return False
+    if provider_request.status != "READY" or provider_request.refusal_code is not None:
+        return False
+    if type(provider_request.prompt) is not str or type(provider_request.output_schema_json) is not str:
+        return False
+    if not _valid_hex64(provider_request.snapshot_digest) or not _valid_hex64(
+        provider_request.prompt_sha256
+    ):
+        return False
+    if hashlib.sha256(provider_request.prompt.encode("utf-8")).hexdigest() != provider_request.prompt_sha256:
+        return False
+    if provider_request.provider_selected or provider_request.model_selected or provider_request.worker_started or provider_request.execution_authorized:
+        return False
+    if provider_request.schema_version == PROVIDER_REQUEST_SCHEMA:
+        return all(
+            getattr(provider_request, field) is None
+            for field in (
+                "request_created_at_ms",
+                "basis_material_sha256",
+                "original_observed_at_ms",
+                "original_expires_at_ms",
+                "cognition_budget_ms",
+                "request_integrity_sha256",
+            )
+        ) and hashlib.sha256(provider_request.output_schema_json.encode("utf-8")).hexdigest() == hashlib.sha256(_PROVIDER_OUTPUT_SCHEMA_JSON.encode("utf-8")).hexdigest()
+    if provider_request.schema_version != PROVIDER_REQUEST_SCHEMA_V2:
+        return False
+    timestamp_budget = (
+        provider_request.request_created_at_ms,
+        provider_request.original_observed_at_ms,
+        provider_request.original_expires_at_ms,
+        provider_request.cognition_budget_ms,
+    )
+    if any(type(value) is not int for value in timestamp_budget):
+        return False
+    assert provider_request.request_created_at_ms is not None
+    assert provider_request.original_observed_at_ms is not None
+    assert provider_request.original_expires_at_ms is not None
+    assert provider_request.cognition_budget_ms is not None
+    if provider_request.request_created_at_ms <= 0 or provider_request.cognition_budget_ms <= 0:
+        return False
+    if provider_request.original_observed_at_ms <= 0 or provider_request.original_expires_at_ms <= provider_request.original_observed_at_ms:
+        return False
+    if provider_request.original_expires_at_ms - provider_request.original_observed_at_ms > MAX_SNAPSHOT_WINDOW_MS:
+        return False
+    if not _valid_hex64(provider_request.basis_material_sha256) or not _valid_hex64(
+        provider_request.request_integrity_sha256
+    ):
+        return False
+    try:
+        output_schema_sha256 = hashlib.sha256(
+            provider_request.output_schema_json.encode("utf-8")
+        ).hexdigest()
+        expected = _provider_request_integrity(
+            schema_version=provider_request.schema_version,
+            snapshot_digest=provider_request.snapshot_digest,
+            basis_material_sha256=provider_request.basis_material_sha256,
+            request_created_at_ms=provider_request.request_created_at_ms,
+            original_observed_at_ms=provider_request.original_observed_at_ms,
+            original_expires_at_ms=provider_request.original_expires_at_ms,
+            prompt_sha256=provider_request.prompt_sha256,
+            output_schema_sha256=output_schema_sha256,
+            cognition_budget_ms=provider_request.cognition_budget_ms,
+        )
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return False
+    return provider_request.request_integrity_sha256 == expected
 
 
 PROVIDER_RETURN_VALIDATION_SCHEMA = "mastermind.secretary_provider_return_validation/v1"
@@ -684,6 +903,10 @@ class SecretaryProviderReturnValidation:
     reason_code: str | None
     requested_mode: str | None
     fanout_candidate_ids: tuple[str, ...]
+    basis_material_sha256: str | None = None
+    execution_material_sha256: str | None = None
+    current_snapshot_digest: str | None = None
+    request_integrity_sha256: str | None = None
     provider_result_attested: bool = False
     execution_authorized: bool = False
     lifecycle_mutation_performed: bool = False
@@ -692,7 +915,7 @@ class SecretaryProviderReturnValidation:
     schema_version: str = PROVIDER_RETURN_VALIDATION_SCHEMA
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "status": self.status,
             "refusal_code": self.refusal_code,
@@ -711,6 +934,16 @@ class SecretaryProviderReturnValidation:
             "browser_mutation_performed": self.browser_mutation_performed,
             "requires_owner_admission": self.requires_owner_admission,
         }
+        if self.schema_version == PROVIDER_RETURN_VALIDATION_SCHEMA_V2:
+            value.update(
+                {
+                    "basis_material_sha256": self.basis_material_sha256,
+                    "execution_material_sha256": self.execution_material_sha256,
+                    "current_snapshot_digest": self.current_snapshot_digest,
+                    "request_integrity_sha256": self.request_integrity_sha256,
+                }
+            )
+        return value
 
 
 def _provider_return_receipt(
@@ -722,9 +955,22 @@ def _provider_return_receipt(
     prompt_sha256: str | None = None,
     recommendation_digest: str | None = None,
     structured_output_digest: str | None = None,
+    basis_material_sha256: str | None = None,
+    execution_material_sha256: str | None = None,
+    current_snapshot_digest: str | None = None,
+    request_integrity_sha256: str | None = None,
     semantic: SecretaryDecisionValidation | None = None,
 ) -> SecretaryProviderReturnValidation:
     accepted = status == "ACCEPTED" and semantic is not None and semantic.status == "ACCEPTED"
+    v2_fields = any(
+        value is not None
+        for value in (
+            basis_material_sha256,
+            execution_material_sha256,
+            current_snapshot_digest,
+            request_integrity_sha256,
+        )
+    )
     return SecretaryProviderReturnValidation(
         status=status,
         refusal_code=refusal_code,
@@ -737,6 +983,20 @@ def _provider_return_receipt(
         reason_code=semantic.reason_code if accepted else None,
         requested_mode=semantic.requested_mode if accepted else None,
         fanout_candidate_ids=semantic.fanout_candidate_ids if accepted else (),
+        basis_material_sha256=basis_material_sha256 if accepted else None,
+        execution_material_sha256=execution_material_sha256 if accepted else None,
+        current_snapshot_digest=current_snapshot_digest if accepted else None,
+        request_integrity_sha256=request_integrity_sha256 if accepted else None,
+        schema_version=(
+            PROVIDER_RETURN_VALIDATION_SCHEMA_V2 if v2_fields else PROVIDER_RETURN_VALIDATION_SCHEMA
+        ),
+    )
+
+
+def _is_v2_provider_request(provider_request: object) -> bool:
+    return (
+        type(provider_request) is SecretaryProviderRequest
+        and provider_request.schema_version == PROVIDER_REQUEST_SCHEMA_V2
     )
 
 
@@ -754,9 +1014,29 @@ def validate_secretary_provider_return(
     correlation receipt can be considered for downstream admission.
     """
 
+    if type(provider_request) is not SecretaryProviderRequest:
+        return _provider_return_receipt(
+            status="REFUSED",
+            refusal_code="PROVIDER_REQUEST_INVALID",
+        )
+    request_is_v2 = _is_v2_provider_request(provider_request)
+    if not validate_secretary_provider_request(provider_request):
+        return _provider_return_receipt(
+            status="REFUSED",
+            refusal_code="PROVIDER_REQUEST_MISMATCH",
+            snapshot_digest=(
+                provider_request.snapshot_digest if request_is_v2 else None
+            ),
+            prompt_sha256=(
+                provider_request.prompt_sha256 if request_is_v2 else None
+            ),
+        )
     current_request = build_secretary_provider_request(
         current_snapshot,
         now_ms=now_ms,
+        cognition_budget_ms=(
+            provider_request.cognition_budget_ms if request_is_v2 else None
+        ),
     )
     if current_request.status != "READY":
         return _provider_return_receipt(
@@ -766,20 +1046,61 @@ def validate_secretary_provider_return(
             prompt_sha256=current_request.prompt_sha256,
         )
 
-    if type(provider_request) is not SecretaryProviderRequest:
-        return _provider_return_receipt(
-            status="REFUSED",
-            refusal_code="PROVIDER_REQUEST_INVALID",
-            snapshot_digest=current_request.snapshot_digest,
-            prompt_sha256=current_request.prompt_sha256,
-        )
-    if provider_request != current_request:
+    if provider_request.schema_version != current_request.schema_version:
         return _provider_return_receipt(
             status="REFUSED",
             refusal_code="PROVIDER_REQUEST_MISMATCH",
             snapshot_digest=current_request.snapshot_digest,
             prompt_sha256=current_request.prompt_sha256,
         )
+    if provider_request.schema_version == PROVIDER_REQUEST_SCHEMA:
+        if provider_request != current_request:
+            return _provider_return_receipt(
+                status="REFUSED",
+                refusal_code="PROVIDER_REQUEST_MISMATCH",
+                snapshot_digest=current_request.snapshot_digest,
+                prompt_sha256=current_request.prompt_sha256,
+            )
+    else:
+        assert provider_request.request_created_at_ms is not None
+        assert provider_request.cognition_budget_ms is not None
+        assert provider_request.basis_material_sha256 is not None
+        assert provider_request.original_observed_at_ms is not None
+        assert provider_request.original_expires_at_ms is not None
+        assert current_request.basis_material_sha256 is not None
+        if now_ms > provider_request.request_created_at_ms + provider_request.cognition_budget_ms:
+            return _provider_return_receipt(
+                status="REFUSED",
+                refusal_code="COGNITION_BUDGET_EXPIRED",
+                snapshot_digest=provider_request.snapshot_digest,
+                prompt_sha256=provider_request.prompt_sha256,
+                request_integrity_sha256=provider_request.request_integrity_sha256,
+            )
+        if current_request.basis_material_sha256 != provider_request.basis_material_sha256:
+            return _provider_return_receipt(
+                status="REFUSED",
+                refusal_code="PROVIDER_MATERIAL_DRIFT",
+                snapshot_digest=provider_request.snapshot_digest,
+                prompt_sha256=provider_request.prompt_sha256,
+                basis_material_sha256=provider_request.basis_material_sha256,
+                execution_material_sha256=current_request.basis_material_sha256,
+                current_snapshot_digest=current_request.snapshot_digest,
+                request_integrity_sha256=provider_request.request_integrity_sha256,
+            )
+        if (
+            current_request.original_observed_at_ms < provider_request.original_observed_at_ms
+            or current_request.original_expires_at_ms < provider_request.original_expires_at_ms
+        ):
+            return _provider_return_receipt(
+                status="REFUSED",
+                refusal_code="CURRENT_SNAPSHOT_BACKWARD",
+                snapshot_digest=provider_request.snapshot_digest,
+                prompt_sha256=provider_request.prompt_sha256,
+                basis_material_sha256=provider_request.basis_material_sha256,
+                execution_material_sha256=current_request.basis_material_sha256,
+                current_snapshot_digest=current_request.snapshot_digest,
+                request_integrity_sha256=provider_request.request_integrity_sha256,
+            )
 
     if not _valid_recommendation_shape(structured_output):
         return _provider_return_receipt(
@@ -822,6 +1143,26 @@ def validate_secretary_provider_return(
         recommendation_digest=semantic.recommendation_digest,
         structured_output_digest=output_digest,
         semantic=semantic,
+        basis_material_sha256=(
+            provider_request.basis_material_sha256
+            if provider_request.schema_version == PROVIDER_REQUEST_SCHEMA_V2
+            else None
+        ),
+        execution_material_sha256=(
+            current_request.basis_material_sha256
+            if provider_request.schema_version == PROVIDER_REQUEST_SCHEMA_V2
+            else None
+        ),
+        current_snapshot_digest=(
+            current_request.snapshot_digest
+            if request_is_v2
+            else None
+        ),
+        request_integrity_sha256=(
+            provider_request.request_integrity_sha256
+            if request_is_v2
+            else None
+        ),
     )
 
 
@@ -1167,9 +1508,12 @@ __all__ = [
     "SECRETARY_SHADOW_BASELINE_SCHEMA",
     "SECRETARY_SHADOW_EVALUATION_SCHEMA",
     "PROVIDER_REQUEST_SCHEMA",
+    "PROVIDER_REQUEST_SCHEMA_V2",
     "PROVIDER_RETURN_VALIDATION_SCHEMA",
+    "PROVIDER_RETURN_VALIDATION_SCHEMA_V2",
     "RECOMMENDATION_SCHEMA",
     "SNAPSHOT_SCHEMA",
+    "SNAPSHOT_SCHEMA_V2",
     "SecretaryDecisionValidation",
     "SecretaryProviderRequest",
     "SecretaryProviderReturnValidation",
@@ -1181,4 +1525,5 @@ __all__ = [
     "evaluate_secretary_shadow_return",
     "validate_secretary_provider_return",
     "validate_secretary_recommendation",
+    "validate_secretary_provider_request",
 ]

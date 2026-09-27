@@ -22,13 +22,17 @@ from control_plane.worker_execution_contract import (
     worker_launch_spec_sha256,
 )
 from integrations.mastermind_secretary_mcp.decision_provider_contract import (
+    PROVIDER_REQUEST_SCHEMA_V2,
     SecretaryProviderRequest,
     build_secretary_provider_request,
+    validate_secretary_provider_request,
     validate_secretary_provider_return,
 )
 
 LAUNCH_BINDING_SCHEMA = "mastermind.secretary_worker_launch_binding/v1"
+LAUNCH_BINDING_SCHEMA_V2 = "mastermind.secretary_worker_launch_binding/v2"
 COLLECTION_VALIDATION_SCHEMA = "mastermind.secretary_worker_collection_validation/v1"
+COLLECTION_VALIDATION_SCHEMA_V2 = "mastermind.secretary_worker_collection_validation/v2"
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_ID_CHARS = 256
@@ -45,6 +49,9 @@ class SecretaryWorkerLaunchBinding:
     run_id: str | None
     job_id: str | None
     worker_id: str | None
+    basis_material_sha256: str | None = None
+    cognition_budget_ms: int | None = None
+    cognition_deadline_ms: int | None = None
     worker_started: bool = False
     execution_authorized: bool = False
     schema_version: str = LAUNCH_BINDING_SCHEMA
@@ -68,6 +75,11 @@ class SecretaryWorkerCollectionValidation:
     requested_mode: str | None
     fanout_candidate_ids: tuple[str, ...]
     worker_collection_correlated: bool
+    basis_material_sha256: str | None = None
+    execution_material_sha256: str | None = None
+    current_snapshot_digest: str | None = None
+    request_integrity_sha256: str | None = None
+    cognition_deadline_ms: int | None = None
     provider_result_attested: bool = False
     execution_authorized: bool = False
     requires_owner_admission: bool = True
@@ -121,7 +133,22 @@ def _request_is_ready(value: object) -> bool:
         or value.execution_authorized
     ):
         return False
+    if value.schema_version == PROVIDER_REQUEST_SCHEMA_V2:
+        return validate_secretary_provider_request(value)
     return hashlib.sha256(value.prompt.encode("utf-8")).hexdigest() == value.prompt_sha256
+
+
+def _launch_budget_ms(timeout_seconds: object) -> int | None:
+    if type(timeout_seconds) not in (int, float):
+        return None
+    try:
+        timeout = float(timeout_seconds)
+        budget_ms = timeout * 1000
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not math.isfinite(timeout) or not math.isfinite(budget_ms) or timeout <= 0:
+        return None
+    return math.ceil(budget_ms)
 
 
 def bind_secretary_worker_launch(
@@ -136,6 +163,11 @@ def bind_secretary_worker_launch(
     assert isinstance(provider_request, SecretaryProviderRequest)
     if not isinstance(worker_launch_spec, WorkerLaunchSpec):
         return _launch_refusal("WORKER_LAUNCH_SPEC_INVALID")
+    request_is_v2 = provider_request.schema_version == PROVIDER_REQUEST_SCHEMA_V2
+    if request_is_v2:
+        required_budget = _launch_budget_ms(worker_launch_spec.timeout_seconds)
+        if required_budget is None or required_budget != provider_request.cognition_budget_ms:
+            return _launch_refusal("COGNITION_BUDGET_MISMATCH")
     if type(output_schema_json) is not str:
         return _launch_refusal("LAUNCH_SCHEMA_INVALID")
     if worker_launch_spec.prompt != provider_request.prompt:
@@ -180,6 +212,20 @@ def bind_secretary_worker_launch(
         run_id=worker_launch_spec.run_id,
         job_id=worker_launch_spec.job_id,
         worker_id=worker_launch_spec.worker_id,
+        basis_material_sha256=(
+            provider_request.basis_material_sha256 if request_is_v2 else None
+        ),
+        cognition_budget_ms=(
+            provider_request.cognition_budget_ms if request_is_v2 else None
+        ),
+        cognition_deadline_ms=(
+            provider_request.request_created_at_ms + provider_request.cognition_budget_ms
+            if request_is_v2
+            else None
+        ),
+        schema_version=(
+            LAUNCH_BINDING_SCHEMA_V2 if request_is_v2 else LAUNCH_BINDING_SCHEMA
+        ),
     )
 
 
@@ -215,6 +261,11 @@ def _collection_receipt(
     reason_code: str | None = None,
     requested_mode: str | None = None,
     fanout_candidate_ids: tuple[str, ...] = (),
+    basis_material_sha256: str | None = None,
+    execution_material_sha256: str | None = None,
+    current_snapshot_digest: str | None = None,
+    request_integrity_sha256: str | None = None,
+    cognition_deadline_ms: int | None = None,
     worker_collection_correlated: bool = False,
 ) -> SecretaryWorkerCollectionValidation:
     return SecretaryWorkerCollectionValidation(
@@ -232,7 +283,17 @@ def _collection_receipt(
         reason_code=reason_code,
         requested_mode=requested_mode,
         fanout_candidate_ids=fanout_candidate_ids,
+        basis_material_sha256=basis_material_sha256,
+        execution_material_sha256=execution_material_sha256,
+        current_snapshot_digest=current_snapshot_digest,
+        request_integrity_sha256=request_integrity_sha256,
+        cognition_deadline_ms=cognition_deadline_ms,
         worker_collection_correlated=worker_collection_correlated,
+        schema_version=(
+            COLLECTION_VALIDATION_SCHEMA_V2
+            if request_integrity_sha256 is not None
+            else COLLECTION_VALIDATION_SCHEMA
+        ),
     )
 
 
@@ -251,7 +312,30 @@ def _binding_matches_request(
         or not all(_valid_id(value) for value in (binding.run_id, binding.job_id, binding.worker_id))
     ):
         return False
-    return not binding.worker_started and not binding.execution_authorized
+    if binding.worker_started or binding.execution_authorized:
+        return False
+    if request.schema_version != PROVIDER_REQUEST_SCHEMA_V2:
+        return True
+    return (
+        binding.basis_material_sha256 == request.basis_material_sha256
+        and binding.cognition_budget_ms == request.cognition_budget_ms
+    )
+
+
+def _binding_matches_launch(
+    binding: SecretaryWorkerLaunchBinding,
+    request: SecretaryProviderRequest,
+    worker_launch_spec: WorkerLaunchSpec,
+) -> bool:
+    required_budget = _launch_budget_ms(worker_launch_spec.timeout_seconds)
+    if required_budget is None or required_budget != request.cognition_budget_ms:
+        return False
+    expected = bind_secretary_worker_launch(
+        request,
+        worker_launch_spec,
+        request.output_schema_json,
+    )
+    return expected == binding
 
 
 def validate_secretary_worker_collection(
@@ -261,25 +345,43 @@ def validate_secretary_worker_collection(
     collection_receipt: object,
     *,
     now_ms: int,
+    worker_launch_spec: object | None = None,
 ) -> SecretaryWorkerCollectionValidation:
     """Correlate one existing worker collection with the current Secretary request."""
 
+    request_is_v2 = (
+        type(provider_request) is SecretaryProviderRequest
+        and provider_request.schema_version == PROVIDER_REQUEST_SCHEMA_V2
+    )
     current_request = build_secretary_provider_request(
         current_snapshot,
         now_ms=now_ms,
+        cognition_budget_ms=(
+            provider_request.cognition_budget_ms if request_is_v2 else None
+        ),
     )
     if current_request.status != "READY":
         return _collection_receipt(
             status="REFUSED",
             refusal_code="CURRENT_PROVIDER_REQUEST_NOT_READY",
         )
-    if type(provider_request) is not SecretaryProviderRequest or provider_request != current_request:
+    if type(provider_request) is not SecretaryProviderRequest:
+        return _collection_receipt(
+            status="REFUSED",
+            refusal_code="PROVIDER_REQUEST_MISMATCH",
+        )
+    if not request_is_v2 and provider_request != current_request:
+        return _collection_receipt(
+            status="REFUSED",
+            refusal_code="PROVIDER_REQUEST_MISMATCH",
+        )
+    if request_is_v2 and not validate_secretary_provider_request(provider_request):
         return _collection_receipt(
             status="REFUSED",
             refusal_code="PROVIDER_REQUEST_MISMATCH",
         )
     if type(launch_binding) is not SecretaryWorkerLaunchBinding or not _binding_matches_request(
-        launch_binding, current_request
+        launch_binding, provider_request
     ):
         return _collection_receipt(
             status="REFUSED",
@@ -287,6 +389,30 @@ def validate_secretary_worker_collection(
             binding=launch_binding if type(launch_binding) is SecretaryWorkerLaunchBinding else None,
         )
     assert isinstance(launch_binding, SecretaryWorkerLaunchBinding)
+    if request_is_v2:
+        if not isinstance(worker_launch_spec, WorkerLaunchSpec):
+            return _collection_receipt(
+                status="REFUSED",
+                refusal_code="LAUNCH_SPEC_MISMATCH",
+                binding=launch_binding,
+            )
+        if not _binding_matches_launch(
+            launch_binding,
+            provider_request,
+            worker_launch_spec,
+        ):
+            return _collection_receipt(
+                status="REFUSED",
+                refusal_code="LAUNCH_SPEC_MISMATCH",
+                binding=launch_binding,
+            )
+        assert launch_binding.cognition_deadline_ms is not None
+        if now_ms > launch_binding.cognition_deadline_ms:
+            return _collection_receipt(
+                status="REFUSED",
+                refusal_code="COGNITION_BUDGET_EXPIRED",
+                binding=launch_binding,
+            )
     if type(collection_receipt) is not CollectionReceipt:
         return _collection_receipt(
             status="REFUSED",
@@ -371,7 +497,7 @@ def validate_secretary_worker_collection(
 
     secretary_return = validate_secretary_provider_return(
         current_snapshot,
-        current_request,
+        provider_request,
         structured_output,
         now_ms=now_ms,
     )
@@ -384,6 +510,13 @@ def validate_secretary_worker_collection(
             binding=launch_binding,
             result_sha256=collection_receipt.result_sha256,
             structured_output_digest=structured_output_digest,
+            basis_material_sha256=secretary_return.basis_material_sha256,
+            execution_material_sha256=secretary_return.execution_material_sha256,
+            current_snapshot_digest=secretary_return.current_snapshot_digest,
+            request_integrity_sha256=secretary_return.request_integrity_sha256,
+            cognition_deadline_ms=(
+                launch_binding.cognition_deadline_ms if request_is_v2 else None
+            ),
             worker_collection_correlated=True,
         )
 
@@ -397,13 +530,22 @@ def validate_secretary_worker_collection(
         reason_code=secretary_return.reason_code,
         requested_mode=secretary_return.requested_mode,
         fanout_candidate_ids=secretary_return.fanout_candidate_ids,
+        basis_material_sha256=secretary_return.basis_material_sha256,
+        execution_material_sha256=secretary_return.execution_material_sha256,
+        current_snapshot_digest=secretary_return.current_snapshot_digest,
+        request_integrity_sha256=secretary_return.request_integrity_sha256,
+        cognition_deadline_ms=(
+            launch_binding.cognition_deadline_ms if request_is_v2 else None
+        ),
         worker_collection_correlated=True,
     )
 
 
 __all__ = [
     "COLLECTION_VALIDATION_SCHEMA",
+    "COLLECTION_VALIDATION_SCHEMA_V2",
     "LAUNCH_BINDING_SCHEMA",
+    "LAUNCH_BINDING_SCHEMA_V2",
     "SecretaryWorkerCollectionValidation",
     "SecretaryWorkerLaunchBinding",
     "bind_secretary_worker_launch",
