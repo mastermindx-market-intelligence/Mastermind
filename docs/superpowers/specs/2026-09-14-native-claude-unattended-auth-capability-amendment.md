@@ -9,30 +9,33 @@
 ## 2026-09-27 unattended permission-mode requalification
 
 Native Claude Worker autonomy is a property of the canonical worker launch contract,
-not a remembered interactive-user preference or project-local setting. The worker
-adapter must launch noninteractively with Claude Code's unattended bypass flag
-(`-p --dangerously-skip-permissions`) and serialize the matching
-`permissions.defaultMode = "bypassPermissions"` policy. The serialized policy
-must keep `permissions.ask = []`, must not set
-`disableBypassPermissionsMode = "disable"`, and must disable hooks and project
-MCP discovery so an ambient customization cannot reintroduce a permission prompt.
+not a remembered interactive-user preference or project-local setting. Executive
+workers launch noninteractively with `-p --permission-mode dontAsk`.
+The serialized policy must keep `permissions.ask = []`,
+`permissions.defaultMode = "dontAsk"`, and
+`disableBypassPermissionsMode = "disable"`; hooks and project MCP discovery are
+also disabled. Claude Code's `dontAsk` contract converts every action that would
+otherwise request permission into a deterministic refusal, so a headless worker
+never waits for Chairman input.
 
-This does **not** widen the Executive grant. Existing authority-to-tool projection,
-protected-path denies, exact-model fencing, no-network sandbox, fail-if-sandbox-is-
-unavailable behavior, no session persistence, and explicit MCP/subagent/Web tool
-denials remain controlling. `AskUserQuestion` and `ExitPlanMode` are explicitly
-denied in the worker tool policy. Deny rules remain the deterministic ceiling even
-when permission prompting is bypassed.
+Do not replace this profile with `bypassPermissions` merely to remove prompts.
+Claude Code documents that allow rules have no effect in bypass mode. This worker's
+reviewed authority-to-tool projection uses narrow allow rules, including scoped
+file-edit grants, so bypass could silently widen the effective write surface.
+`dontAsk` preserves those grants while refusing everything outside them.
 
-Claude Code documents a small class of actions that no permission mode auto-approves.
-For an Executive worker those are not Chairman-interaction escape hatches: the
-noninteractive process must receive a refusal and return/replan through the existing
-Job/Attempt lifecycle. No new permission broker, approval queue, or retry plane is
-created here.
+Existing protected-path denies, exact-model fencing, no-network sandbox,
+fail-if-sandbox-is-unavailable behavior, no session persistence, and explicit
+MCP/subagent/Web tool denials remain controlling. `AskUserQuestion` and
+`ExitPlanMode` are explicitly denied in the worker tool policy. Interaction-
+requiring MCP calls and other would-be prompts are refusals, not Chairman gates;
+the worker must replan or return through the existing Job/Attempt lifecycle.
 
-This source amendment is a durability contract. It is not by itself installed-host
-or production proof; the exact accepted head still requires the normal source
-checks/review and a real worker-path canary before the capability is called live.
+No new permission broker, approval queue, retry plane, lifecycle, identity, or
+credential owner is created here. This source amendment is a durability contract,
+not by itself installed-host or production proof; the exact accepted head still
+requires normal source checks/review and a real worker-path canary before the
+capability is called live.
 
 ## 2026-09-27 native storage requalification
 
