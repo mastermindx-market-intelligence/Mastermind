@@ -23,11 +23,11 @@ import stat
 import subprocess
 import sys
 
-SCHEMA = "mastermind.paper_direct_install.v1"
+SCHEMA = "mastermind.paper_direct_install.v2"
 BINDING_SCHEMA = "mastermind.paper_direct_binding.v1"
 LABEL = "com.mastermind.paper-direct.business"
 SDK_VERSION = "1.30.0"
-SOURCE_FILES = ("bridge.py", "mcp_server.py", "requirements-mcp.txt", "direct_service.py")
+SOURCE_FILES = ("bridge.py", "prepare.py", "mcp_server.py", "requirements-mcp.txt", "direct_service.py")
 STATIC_FILES = {"ENROLLMENT.md", "app-definition.json", f"service/{LABEL}.plist"}
 EXPECTED_FILES = {f"runtime/{name}" for name in SOURCE_FILES} | STATIC_FILES
 PATH_VALUE = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
@@ -157,8 +157,9 @@ def verify_sdk(root: Path) -> None:
         raise Refusal("SDK_DEPENDENCIES_CHANGED")
 
 
-def _tools(write: bool) -> list[str]:
-    return sorted(["paper_catalog", "paper_inspect", "paper_read"] + (["paper_edit"] if write else []))
+def _tools(write: bool, prepare: bool = False) -> list[str]:
+    return sorted(["paper_catalog", "paper_inspect", "paper_read"]
+                  + (["paper_edit"] if write else []) + (["paper_prepare"] if prepare else []))
 
 
 def _command(root: Path, receipt: dict, action: str) -> list[str]:
@@ -184,9 +185,11 @@ def _enrollment() -> bytes:
     return b"""# Mastermind Paper: Business enrollment (last, attended step)
 
 STAGED_NOT_ENROLLED. No tunnel was created, bound or started by staging.
-The four guarded tools operate on the already-open exact Paper file. Native
-file switching is not exposed yet; do not use raw open_file or host tools from
-this app. One writer per file across all hosts remains required.
+The selected tool surface is recorded in INSTALLATION.json. Optional paper_prepare
+focuses an exact existing file through the guarded Paper API, never a host helper,
+URL or path. Paper must already be running and its current file inspectable. A fresh
+snapshot and stable operation ID are required. One writer per file across all hosts
+remains required; never expose raw open_file as a read or edit tool.
 
 1. Verify the existing Chairman-created tunnel ID and exact Business workspace
    association in OpenAI's admin surface. Check for an existing Paper app/client.
@@ -222,10 +225,10 @@ human/admin boundaries. Source tests and local stdio listing are not PROVEN_LIVE
 
 
 def stage(destination: Path, *, python: Path, tunnel_client: Path,
-          source_revision: str, allow_write: bool = False) -> dict:
+          source_revision: str, allow_write: bool = False, allow_prepare: bool = False) -> dict:
     if not re.fullmatch(r"[0-9a-f]{40}", source_revision):
         raise Refusal("SOURCE_REVISION_REQUIRED")
-    if type(allow_write) is not bool:
+    if type(allow_write) is not bool or type(allow_prepare) is not bool:
         raise Refusal("WRITE_FLAG_REQUIRED")
     root = _path(destination)
     if root.exists() or root.is_symlink():
@@ -233,7 +236,8 @@ def stage(destination: Path, *, python: Path, tunnel_client: Path,
     receipt = {
         "schema": SCHEMA, "state": "STAGED_NOT_ENROLLED", "root": str(root),
         "source_revision": source_revision, "target_plan": "Business",
-        "allow_write": allow_write, "tools": _tools(allow_write),
+        "allow_write": allow_write, "allow_prepare": allow_prepare,
+        "tools": _tools(allow_write, allow_prepare),
         "python": _binary(python), "tunnel_client": _binary(tunnel_client),
         "sdk_required": f"mcp=={SDK_VERSION}", "sdk_distributions": sdk_distributions(python),
         "production_acceptance": False,
@@ -276,7 +280,8 @@ def verify(root: Path) -> dict:
             or receipt.get("sdk_required") != f"mcp=={SDK_VERSION}"
             or not isinstance(receipt.get("sdk_distributions"), dict)
             or type(receipt.get("allow_write")) is not bool
-            or receipt.get("tools") != _tools(receipt["allow_write"])
+            or type(receipt.get("allow_prepare")) is not bool
+            or receipt.get("tools") != _tools(receipt["allow_write"], receipt["allow_prepare"])
             or not re.fullmatch(r"[0-9a-f]{40}", str(receipt.get("source_revision", "")))
             or not isinstance(receipt.get("files"), dict)
             or set(receipt["files"]) != EXPECTED_FILES):
@@ -396,7 +401,7 @@ def serve(root: Path) -> None:
     os.environ.update(environment)
     sys.path.insert(0, str(root / "runtime"))
     from mcp_server import build_server
-    build_server(receipt["allow_write"]).run(transport="stdio")
+    build_server(receipt["allow_write"], receipt["allow_prepare"]).run(transport="stdio")
 
 
 async def probe(root: Path) -> dict:
@@ -417,7 +422,7 @@ async def probe(root: Path) -> dict:
             for tool in tools.tools:
                 editing = tool.name == "paper_edit"
                 annotations = tool.annotations
-                if (annotations is None or annotations.readOnlyHint != (not editing)
+                if (annotations is None or annotations.readOnlyHint != (tool.name not in {"paper_edit", "paper_prepare"})
                         or annotations.destructiveHint != editing
                         or annotations.idempotentHint != (not editing)
                         or annotations.openWorldHint != editing):
@@ -437,6 +442,7 @@ def main() -> int:
     parser.add_argument("--tunnel-client", type=Path)
     parser.add_argument("--source-revision")
     parser.add_argument("--allow-write", action="store_true")
+    parser.add_argument("--allow-prepare", action="store_true")
     parser.add_argument("--tunnel-id")
     parser.add_argument("--workspace-id")
     args = parser.parse_args()
@@ -446,7 +452,8 @@ def main() -> int:
             if not (args.python and args.tunnel_client and args.source_revision):
                 raise Refusal("STAGE_ARGUMENTS_REQUIRED")
             value = stage(root, python=args.python, tunnel_client=args.tunnel_client,
-                          source_revision=args.source_revision, allow_write=args.allow_write)
+                          source_revision=args.source_revision, allow_write=args.allow_write,
+                          allow_prepare=args.allow_prepare)
         elif args.action == "bind":
             value = bind(root, args.tunnel_id, args.workspace_id)
         elif args.action == "serve":

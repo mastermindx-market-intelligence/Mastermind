@@ -167,7 +167,7 @@ def test_direct_runbook_separates_build_setup_and_live_proof():
     assert guide.exists(), "Missing direct Paper operator runbook"
     text = norm(guide)
     for required in ("STAGED_NOT_ENROLLED", "Business", "runtime key", "admin key",
-                     "already-open", "paper_prepare", "NOT_BUILT", "LOCAL_STDIO_PROVEN",
+                     "already-open", "paper_prepare", "BUILT_NOT_LIVE", "LOCAL_STDIO_PROVEN",
                      "EFFECT_UNKNOWN", "one existing tunnel", "Plugin Creator"):
         assert required in text
 

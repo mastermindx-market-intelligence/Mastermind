@@ -65,6 +65,22 @@ class DirectServiceTests(unittest.TestCase):
         receipt = self.stage()
         self.assertEqual(receipt["tools"], ["paper_catalog", "paper_edit", "paper_inspect", "paper_read"])
 
+    def test_prepare_is_independently_opt_in(self):
+        import inspect
+        self.assertIn("allow_prepare", inspect.signature(self.service().stage).parameters)
+        value = self.stage(allow_prepare=True)
+        self.assertTrue(value["allow_prepare"])
+        self.assertEqual(value["tools"], ["paper_catalog", "paper_edit", "paper_inspect", "paper_prepare", "paper_read"])
+        self.assertTrue((self.target / "runtime/prepare.py").exists())
+
+    def test_focus_permission_does_not_enable_content_editing(self):
+        import inspect
+        self.assertIn("allow_prepare", inspect.signature(self.service().stage).parameters)
+        value = self.stage(allow_write=False, allow_prepare=True)
+        self.assertIn("paper_prepare", value["tools"])
+        self.assertNotIn("paper_edit", value["tools"])
+        self.assertFalse(value["allow_write"])
+
     def test_existing_install_is_not_overwritten(self):
         self.stage()
         original = (self.target / "INSTALLATION.json").read_bytes()

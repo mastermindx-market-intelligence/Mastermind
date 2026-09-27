@@ -32,10 +32,15 @@ class DirectStdioTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def stage(self, write):
+    def stage(self, write, prepare=False):
         root = self.home / ("write" if write else "read")
+        options = {}
+        if prepare:
+            import inspect
+            self.assertIn("allow_prepare", inspect.signature(self.svc.stage).parameters)
+            options["allow_prepare"] = True
         self.svc.stage(root, python=Path(sys.executable).absolute(), tunnel_client=self.binary,
-                       source_revision="0" * 40, allow_write=write)
+                       source_revision="0" * 40, allow_write=write, **options)
         return root
 
     def test_real_stdio_readonly_surface(self):
@@ -57,6 +62,36 @@ class DirectStdioTests(unittest.TestCase):
         self.assertFalse(edit["annotations"]["idempotentHint"])
         self.assertTrue(edit["annotations"]["openWorldHint"])
         self.assertFalse(result["production_acceptance"])
+
+    def test_real_stdio_prepare_is_a_closed_non_destructive_write(self):
+        result = asyncio.run(asyncio.wait_for(self.svc.probe(self.stage(True, prepare=True)), timeout=20))
+        tools = {t["name"]: t for t in result["catalog"]["tools"]}
+        self.assertEqual(set(tools), {"paper_catalog", "paper_inspect", "paper_read", "paper_edit", "paper_prepare"})
+        tool = tools["paper_prepare"]
+        self.assertEqual(set(tool["inputSchema"]["required"]),
+                         {"file_id", "expected_snapshot", "operation_id"})
+        self.assertFalse(tool["annotations"]["readOnlyHint"])
+        self.assertFalse(tool["annotations"]["destructiveHint"])
+        self.assertTrue(tool["annotations"]["idempotentHint"])
+        self.assertFalse(tool["annotations"]["openWorldHint"])
+        self.assertFalse(result["paper_called"])
+
+    def test_real_stdio_prepare_rejects_vendor_url_before_dispatch(self):
+        root = self.stage(True, prepare=True)
+        async def run():
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            command = [sys.executable, "-I", str(root / "runtime/direct_service.py"), "serve", "--root", str(root)]
+            async with stdio_client(StdioServerParameters(command=command[0], args=command[1:],
+                                                         env=self.svc.clean_env(dict(os.environ)))) as (reader, writer):
+                async with ClientSession(reader, writer) as client:
+                    await client.initialize()
+                    return await client.call_tool("paper_prepare", {
+                        "file_id": "https://paper.design/file/" + "0" * 26,
+                        "expected_snapshot": "0" * 64, "operation_id": "sdk-invalid-url-no-effect"})
+        result = asyncio.run(asyncio.wait_for(run(), timeout=20))
+        self.assertTrue(result.isError)
+        self.assertEqual(json.loads(result.content[0].text)["state"], "FILE_ID_REQUIRED")
 
     def test_unbound_cli_cannot_start_a_tunnel(self):
         root = self.stage(True)

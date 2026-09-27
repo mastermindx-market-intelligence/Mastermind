@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge import execute, Refusal, READ_TOOLS, EDIT_TOOLS
 
 
-def build_server(allow_write=False):
+def build_server(allow_write=False, allow_prepare=False):
     from mcp.server.fastmcp import FastMCP
     from mcp.types import ToolAnnotations, CallToolResult, TextContent, ImageContent
 
@@ -31,10 +31,14 @@ def build_server(allow_write=False):
 
     def run(action, **kwargs):
         try:
-            value = execute(action, **kwargs)
+            if action == "prepare":
+                from prepare import prepare_document
+                value = prepare_document(**kwargs)
+            else:
+                value = execute(action, **kwargs)
         except Refusal as exc:
             value = {"state": exc.code, "detail": exc.detail, "retry_allowed": False}
-        bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED"}
+        bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}
         images = []
         for block in value.get("result", {}).get("content", []):
             if block.get("type") == "image":
@@ -64,6 +68,21 @@ def build_server(allow_write=False):
         return await asyncio.to_thread(run, "read", tool=tool, arguments=arguments,
                                        expected_snapshot=expected_snapshot)
 
+    if allow_prepare:
+        @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+                                                idempotentHint=True, openWorldHint=False))
+        async def paper_prepare(file_id: str, expected_snapshot: str, operation_id: str) -> CallToolResult:
+            """Focus one existing Paper file by bare ID, never a URL or path.
+
+            Paper must already be running with an inspectable current file. Use
+            paper_inspect first and pass its fresh snapshot. Changes active-file
+            focus, not design content. A lost/error reply is never replayed, even
+            when post-read evidence sees the target. Reconcile on this same app.
+            """
+            return await asyncio.to_thread(run, "prepare", file_id=file_id,
+                                           expected_snapshot=expected_snapshot,
+                                           operation_id=operation_id, allow_prepare=True)
+
     if allow_write:
         # HTML/style operations can reference external assets. A fixed loopback
         # transport alone does not establish a closed-world rendering boundary.
@@ -85,9 +104,10 @@ def build_server(allow_write=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allow-write", action="store_true")
+    parser.add_argument("--allow-prepare", action="store_true")
     args = parser.parse_args()
     try:
-        build_server(args.allow_write).run(transport="stdio")
+        build_server(args.allow_write, args.allow_prepare).run(transport="stdio")
     except ImportError:
         print("MCP_SDK_REQUIRED: install requirements-mcp.txt in a dedicated Python 3.10+ environment.", file=sys.stderr)
         return 2
