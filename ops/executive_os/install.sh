@@ -660,6 +660,21 @@ esac
 # install-owned daemons, including a separately prepared C1 Relay, disabled
 # and booted out across generation mutation and rollback.
 STAGING=""
+wait_for_launchd_absent() {
+  local label="$1"
+  local description="$2"
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if ! /bin/launchctl print "system/$label" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [ "$attempt" -lt 5 ]; then
+      /bin/sleep 1
+    fi
+  done
+  /bin/echo "$description LaunchDaemon remained loaded after bootout" >&2
+  return 1
+}
 leave_installed_services_stopped() {
   /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
@@ -696,26 +711,11 @@ trap leave_installed_services_stopped EXIT
 /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
-if /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1; then
-  /bin/echo "relay LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$CONTROL_LABEL" >/dev/null 2>&1; then
-  /bin/echo "control LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$WORKER_LABEL" >/dev/null 2>&1; then
-  /bin/echo "worker LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then
-  /bin/echo "backup LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
-  /bin/echo "privileged LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
+wait_for_launchd_absent "$RELAY_LABEL" relay || exit 65
+wait_for_launchd_absent "$CONTROL_LABEL" control || exit 65
+wait_for_launchd_absent "$WORKER_LABEL" worker || exit 65
+wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
+wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 if [ ! -d "$RELEASE_ROOT" ]; then
   STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
