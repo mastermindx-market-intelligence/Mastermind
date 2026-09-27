@@ -401,6 +401,8 @@
     MAX_ASSIGNMENT_BYTES,
     MAX_RENDERED_ASSIGNMENT_BYTES,
     validSubmitPayload,
+    validObservePayload,
+    observation,
     renderAssignmentPrompt,
     reduceConversation,
   });

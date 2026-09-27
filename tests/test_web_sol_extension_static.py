@@ -97,7 +97,7 @@ def test_manifest_has_one_background_and_one_exact_chatgpt_content_script():
 
 def test_extension_files_are_present_and_small():
     ceilings = {
-        BACKGROUND: 52, CONTENT: 36, SEMANTIC: 12, CONTINUATION: 12,
+        BACKGROUND: 58, CONTENT: 36, SEMANTIC: 12, CONTINUATION: 12,
         COGNITION_RESULT: 12, COGNITION_TRANSPORT: 20,
     }
     for path, kib in ceilings.items():

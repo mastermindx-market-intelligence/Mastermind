@@ -94,7 +94,7 @@ def receipt(req, status, *, generation_state="idle"):
 def test_cognition_submit_is_one_closed_new_surface_action():
     assert wsp.WEB_SOL_PACKAGE_VERSION == "0.6.0"
     assert "SUBMIT_COGNITION_ASSIGNMENT" in {item.value for item in wsp.SurfaceAction}
-    assert "OBSERVE_COGNITION_RESULT" not in {item.value for item in wsp.SurfaceAction}
+    assert "OBSERVE_COGNITION_RESULT" in {item.value for item in wsp.SurfaceAction}
 
 
 def test_cognition_submit_request_allows_only_the_validated_assignment_payload():

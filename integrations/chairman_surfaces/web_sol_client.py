@@ -123,6 +123,7 @@ def _request(
     wake_obligation_ids: Sequence[str] | None = None,
     wake_obligation_digest: str | None = None,
     cognition_payload: dict[str, Any] | None = None,
+    cognition_observe_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     accepted = _accepted_binding(binding)
     request = {
@@ -183,6 +184,17 @@ def _request(
             runtime_binding_generation=runtime_binding_lease.runtime_binding.binding_generation,
             runtime_binding_fingerprint=runtime_binding_lease.runtime_binding_fingerprint,
             cognition_payload=cognition_payload,
+        )
+    if action == wsp.SurfaceAction.OBSERVE_COGNITION_RESULT.value:
+        if not isinstance(runtime_binding_lease, wrb.WebSolRuntimeBindingLease):
+            raise WebSolExtensionError("runtime_binding_required")
+        request.update(
+            conversation_fingerprint=runtime_binding_lease.target.conversation_fingerprint,
+            session_alias=runtime_binding_lease.runtime_binding.session_alias,
+            runtime_binding_id=runtime_binding_lease.runtime_binding.binding_id,
+            runtime_binding_generation=runtime_binding_lease.runtime_binding.binding_generation,
+            runtime_binding_fingerprint=runtime_binding_lease.runtime_binding_fingerprint,
+            cognition_observe_payload=cognition_observe_payload,
         )
     return wsp.validate_request(request)
 
@@ -385,6 +397,8 @@ def _transport_failure_code(
         return "cognition_submit_effect_unknown"
     if action == "OBSERVE_CONTINUATION_ACK":
         return "semantic_ack_unavailable"
+    if action == "OBSERVE_COGNITION_RESULT":
+        return "cognition_result_timeout"
     if action == "CENSUS":
         return "census_unavailable"
     if sent:
@@ -491,6 +505,8 @@ def _untrusted_receipt_code(action: str, default: str) -> str:
         return "cognition_submit_effect_unknown"
     if action == "OBSERVE_CONTINUATION_ACK":
         return "semantic_ack_invalid"
+    if action == "OBSERVE_COGNITION_RESULT":
+        return "cognition_result_invalid"
     return default
 
 
@@ -510,6 +526,7 @@ def _invoke(
     wake_obligation_ids: Sequence[str] | None = None,
     wake_obligation_digest: str | None = None,
     cognition_payload: dict[str, Any] | None = None,
+    cognition_observe_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     request = _request(
         binding,
@@ -526,6 +543,7 @@ def _invoke(
         wake_obligation_ids=wake_obligation_ids,
         wake_obligation_digest=wake_obligation_digest,
         cognition_payload=cognition_payload,
+        cognition_observe_payload=cognition_observe_payload,
     )
     try:
         instance_id = wsi.adapter_instance_id(binding)
@@ -538,6 +556,7 @@ def _invoke(
         wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
         wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
         wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value,
+        wsp.SurfaceAction.OBSERVE_COGNITION_RESULT.value,
     }:
         assert runtime_binding_lease is not None
         if runtime_binding_lease.target.adapter_instance_id != instance_id:
@@ -615,6 +634,14 @@ def _invoke(
         }
         if accepted["cognition_identity"] != expected_identity:
             raise WebSolExtensionError("cognition_submit_effect_unknown")
+    if action == wsp.SurfaceAction.OBSERVE_COGNITION_RESULT.value:
+        match_fields.extend(wsp._COGNITION_BINDING_PAYLOAD_KEYS)
+        # Protocol validation permits null only for a closed pre-read refusal.
+        observation = accepted["cognition_observation"]
+        if observation is not None:
+            for field in wsp._COGNITION_OBSERVE_IDENTITY_KEYS:
+                if observation[field] != request["cognition_observe_payload"][field]:
+                    raise WebSolExtensionError("cognition_result_invalid")
     for field in match_fields:
         if accepted[field] != request[field]:
             raise WebSolExtensionError(
@@ -741,6 +768,30 @@ def submit_cognition_assignment_via_extension(
         operation_key=operation_key,
         runtime_binding_lease=runtime_binding_lease,
         cognition_payload=cognition_payload,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        nonce=nonce,
+    )
+
+
+def observe_cognition_result_via_extension(
+    binding: dict[str, Any],
+    runtime_binding_lease: wrb.WebSolRuntimeBindingLease,
+    *,
+    operation_key: str,
+    cognition_observe_payload: dict[str, Any],
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Observe one exact cognition result without resubmitting it."""
+
+    return _invoke(
+        binding,
+        action=wsp.SurfaceAction.OBSERVE_COGNITION_RESULT.value,
+        operation_key=operation_key,
+        runtime_binding_lease=runtime_binding_lease,
+        cognition_observe_payload=cognition_observe_payload,
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,

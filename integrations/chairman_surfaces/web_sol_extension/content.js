@@ -8,6 +8,8 @@ const CONTINUATION_RESULT_SCHEMA = "mastermind.web_sol_continuation_submit_resul
 const CONTINUATION_ACK_RESULT_SCHEMA = "mastermind.web_sol_continuation_ack_result.v1";
 const COGNITION_SUBMIT_KIND = "MMX_WEB_SOL_SUBMIT_COGNITION_ASSIGNMENT";
 const COGNITION_RESULT_SCHEMA = "mastermind.web_sol_cognition_submit_result.v1";
+const COGNITION_OBSERVE_KIND = "MMX_WEB_SOL_OBSERVE_COGNITION_RESULT";
+const COGNITION_OBSERVE_RESULT_SCHEMA = "mastermind.web_sol_cognition_observe_result/v1";
 const PROBE_SCHEMA = "mastermind.web_sol_surface_probe.v1";
 const CONTINUATION_DIRECTIVE_TEXT = [
   "SOL CONTINUE",
@@ -209,6 +211,24 @@ function validCognitionSubmitRequest(request) {
     globalThis.MMXWebSolCognitionTransport.validSubmitPayload(request.cognition_payload) === true;
 }
 
+function validCognitionObserveRequest(request) {
+  if (!request) return false;
+  const keys = [
+    "kind", "expected_conversation_fingerprint", "expected_document_epoch",
+    "session_alias", "cognition_observe_payload",
+  ];
+  return exactObjectKeys(request, keys) && request.kind === COGNITION_OBSERVE_KIND &&
+    typeof request.expected_conversation_fingerprint === "string" &&
+    /^[0-9a-f]{64}$/.test(request.expected_conversation_fingerprint) &&
+    typeof request.expected_document_epoch === "string" &&
+    /^[0-9a-f]{32}$/.test(request.expected_document_epoch) &&
+    validTurnId(request.session_alias) &&
+    typeof globalThis.MMXWebSolCognitionTransport?.validObservePayload === "function" &&
+    globalThis.MMXWebSolCognitionTransport.validObservePayload(
+      request.cognition_observe_payload
+    ) === true;
+}
+
 function continuationDirective(request) {
   if (!validWakeObligationSet(request)) return null;
   const identities = request.wake_obligation_ids.map((item) => `- ${item}`).join("\n");
@@ -317,6 +337,18 @@ function cognitionSubmitResult(request, effect) {
     runtime_binding_generation: payload.runtime_binding_generation,
     runtime_binding_fingerprint: payload.runtime_binding_fingerprint,
     cognition_identity: cognitionIdentity(payload),
+  };
+}
+
+function cognitionObserveResult(request, reduced) {
+  if (!reduced || !["COGNITION_RESULT_READY", "COGNITION_RESULT_PENDING",
+      "COGNITION_RESULT_REFUSED"].includes(reduced.status)) return null;
+  return {
+    schema: COGNITION_OBSERVE_RESULT_SCHEMA,
+    conversation_fingerprint: request.expected_conversation_fingerprint,
+    document_epoch: request.expected_document_epoch,
+    session_alias: request.session_alias,
+    cognition_observation: reduced,
   };
 }
 
@@ -615,6 +647,49 @@ async function observeSemanticAck(request) {
   return semanticAckResult(request, reduced);
 }
 
+async function observeCognitionResult(request) {
+  if (!validCognitionObserveRequest(request)) return null;
+  // Keep the accepted request independent from callers throughout awaited reads.
+  request = JSON.parse(JSON.stringify(request));
+  const core = globalThis.MMXWebSolCognitionTransport;
+  const identity = canonicalConversationIdentity();
+  const epoch = DOCUMENT_EPOCH;
+  const current = () => canonicalConversationIdentity() === identity &&
+    DOCUMENT_EPOCH === epoch && epoch === request.expected_document_epoch;
+  const healthy = (probe) => probe &&
+    probe.conversation_fingerprint === request.expected_conversation_fingerprint &&
+    probe.document_epoch === epoch && probe.observation.target_present &&
+    probe.observation.exact_conversation_loaded &&
+    probe.observation.page_responsive === true &&
+    probe.observation.auth_required === false &&
+    probe.observation.provider_error_present === false;
+  try {
+    if (!CHAT_PATH.test(location.pathname) ||
+        await sha256Hex(identity) !== request.expected_conversation_fingerprint ||
+        !current()) return null;
+    const before = await buildProbe(request.expected_conversation_fingerprint);
+    if (!current() || !healthy(before)) return null;
+    const provider = await fetchProviderSnapshot();
+    if (!current()) return null;
+    let reduced = provider.status === "SNAPSHOT"
+      ? await core.reduceConversation(provider.snapshot, request.cognition_observe_payload, epoch)
+      : core.observation(request.cognition_observe_payload, epoch,
+        provider.status === "PENDING" ? "COGNITION_RESULT_PENDING" : "COGNITION_RESULT_REFUSED");
+    if (!current()) return null;
+    const after = await buildProbe(request.expected_conversation_fingerprint);
+    if (!current() || !healthy(after)) return null;
+    if (reduced?.status === "COGNITION_RESULT_READY" &&
+        (before.observation.generation_state !== "idle" ||
+         after.observation.generation_state !== "idle")) {
+      reduced = core.observation(request.cognition_observe_payload, epoch,
+        "COGNITION_RESULT_PENDING");
+    }
+    return cognitionObserveResult(request, reduced);
+  } catch (_error) {
+    return null;
+  }
+}
+
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (validObserveContinuationAckRequest(request)) {
     observeSemanticAck(request)
@@ -636,6 +711,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       .catch(() => sendResponse(cognitionSubmitResult(
         request, "SUBMIT_EFFECT_UNKNOWN"
       )));
+    return true;
+  }
+  if (validCognitionObserveRequest(request)) {
+    observeCognitionResult(request)
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse(cognitionObserveResult(request, null)));
     return true;
   }
   if (
