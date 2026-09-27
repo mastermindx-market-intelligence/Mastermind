@@ -1,0 +1,394 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "enroll_linux_secondary_worker.py"
+
+
+def _load():
+    assert SCRIPT.is_file(), "Linux secondary enrollment wrapper is not implemented"
+    spec = importlib.util.spec_from_file_location("enroll_linux_secondary_worker", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _git(*args: str, cwd: Path) -> str:
+    result = subprocess.run(
+        ["git", *args], cwd=cwd, text=True, capture_output=True, check=True
+    )
+    return result.stdout.strip()
+
+
+def _source_repo(tmp_path: Path) -> tuple[Path, str, str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git("init", "-q", cwd=repo)
+    _git("config", "user.email", "fixture@example.invalid", cwd=repo)
+    _git("config", "user.name", "Fixture", cwd=repo)
+    (repo / "control_plane").mkdir()
+    (repo / "ops" / "executive_os").mkdir(parents=True)
+    (repo / "scripts").mkdir()
+    (repo / "control_plane" / "__init__.py").write_text("", encoding="utf-8")
+    (repo / "ops" / "executive_os" / "release_manifest.py").write_text(
+        "print('fixture')\n", encoding="utf-8"
+    )
+    (repo / "ops" / "executive_os" / "bootstrap-host.sh").write_text(
+        "CONTROL_USER=\"_mastermind_exec\"\n"
+        "CONTROL_GROUP=\"_mastermind_exec\"\n"
+        "CONTROL_UID=\"450\"\n"
+        "CONTROL_GID=\"450\"\n"
+        "WORKER_USER=\"_mastermind_worker\"\n"
+        "WORKER_GROUP=\"_mastermind_worker\"\n"
+        "WORKER_UID=\"451\"\n"
+        "WORKER_GID=\"451\"\n",
+        encoding="utf-8",
+    )
+    (repo / "scripts" / "executive_os_linux_worker.py").write_text(
+        "print('worker')\n", encoding="utf-8"
+    )
+    (repo / "scripts" / "executive_os_remote_worker_gateway.py").write_text(
+        "print('gateway')\n", encoding="utf-8"
+    )
+    for name in (
+        "mastermind-executive-worker.service.template",
+        "mastermind-executive-worker.socket.template",
+        "mastermind-executive-remote-worker-gateway.service.template",
+    ):
+        (repo / "ops" / "executive_os" / name).write_text("[Unit]\n", encoding="utf-8")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-qm", "fixture", cwd=repo)
+    return repo, _git("rev-parse", "HEAD", cwd=repo), _git("rev-parse", "HEAD^{tree}", cwd=repo)
+
+
+def _identities(m):
+    return m.ServiceIdentities(
+        control_user="_mastermind_exec", control_group="_mastermind_exec",
+        control_uid=450, control_gid=450,
+        worker_user="_mastermind_worker", worker_group="_mastermind_worker",
+        worker_uid=451, worker_gid=451,
+    )
+
+
+def test_closed_cli_and_bounded_claim() -> None:
+    m = _load()
+    parser = m._parser()
+    actions = parser.parse_args(
+        [
+            "--source-repo",
+            "/root/mastermind",
+            "--expected-sha",
+            "a" * 40,
+            "--expected-tree",
+            "b" * 40,
+            "--codex-source-binary",
+            "/tmp/codex",
+            "--codex-version",
+            "0.157.1",
+            "--codex-sha256",
+            "c" * 64,
+        ]
+    )
+    assert actions.expected_sha == "a" * 40
+    assert actions.codex_sha256 == "c" * 64
+    source = SCRIPT.read_text(encoding="utf-8")
+    for forbidden in (
+        "--host",
+        "--worker-id",
+        "--provider",
+        "--credential",
+        "--token",
+        "--password",
+        "--enable",
+        "--start",
+        "--restart",
+        "--capacity",
+    ):
+        assert forbidden not in source
+    assert "READY_FOR_PROVIDER_AND_MTLS_ENROLLMENT" in source
+    assert "WORKER_READY" not in source
+    assert "CAPACITY_READY" not in source
+
+
+def test_source_identity_is_exact_and_clean(tmp_path: Path) -> None:
+    m = _load()
+    repo, sha, tree = _source_repo(tmp_path)
+    observed = m.verify_source_identity(repo, sha, tree)
+    assert observed == {"commit": sha, "tree": tree}
+
+    (repo / "dirty.txt").write_text("dirty", encoding="utf-8")
+    with pytest.raises(m.EnrollmentError, match="dirty"):
+        m.verify_source_identity(repo, sha, tree)
+
+
+def test_source_identity_refuses_wrong_commit_or_tree(tmp_path: Path) -> None:
+    m = _load()
+    repo, sha, tree = _source_repo(tmp_path)
+    with pytest.raises(m.EnrollmentError, match="commit"):
+        m.verify_source_identity(repo, "0" * 40, tree)
+    with pytest.raises(m.EnrollmentError, match="tree"):
+        m.verify_source_identity(repo, sha, "0" * 40)
+
+
+def test_release_archive_scope_excludes_vendor_and_unneeded_surfaces() -> None:
+    m = _load()
+    assert m.RELEASE_PATHS == (
+        "control_plane",
+        "ops/executive_os",
+        "scripts/executive_os_linux_worker.py",
+        "scripts/executive_os_remote_worker_gateway.py",
+    )
+    assert all("vendor" not in item for item in m.RELEASE_PATHS)
+
+
+def test_linux_identities_are_consumed_from_canonical_bootstrap_source(tmp_path: Path) -> None:
+    m = _load()
+    repo, _sha, _tree = _source_repo(tmp_path)
+    identities = m.load_canonical_identities(repo, require_root_owner=False)
+    assert identities == _identities(m)
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert '_mastermind_exec' not in source
+    assert '_mastermind_worker' not in source
+    assert 'CONTROL_UID = 450' not in source
+    assert 'WORKER_UID = 451' not in source
+
+
+
+
+def test_identity_plan_refuses_collisions() -> None:
+    m = _load()
+    clean = {
+        "users_by_name": {},
+        "users_by_uid": {},
+        "groups_by_name": {},
+        "groups_by_gid": {},
+    }
+    identities = _identities(m)
+    plan = m.classify_identity_plan(clean, identities)
+    assert plan["control"] == "create"
+    assert plan["worker"] == "create"
+
+    collision = json.loads(json.dumps(clean))
+    collision["users_by_uid"]["450"] = "somebody"
+    with pytest.raises(m.EnrollmentError, match="UID 450"):
+        m.classify_identity_plan(collision, identities)
+
+    exact = {
+        "users_by_name": {
+            "_mastermind_exec": {"uid": 450, "gid": 450, "home": "/var/lib/mastermind-executive/control/home", "shell": "/usr/sbin/nologin"},
+            "_mastermind_worker": {"uid": 451, "gid": 451, "home": "/var/lib/mastermind-executive/workers/codex-01/provider-home", "shell": "/usr/sbin/nologin"},
+        },
+        "users_by_uid": {"450": "_mastermind_exec", "451": "_mastermind_worker"},
+        "groups_by_name": {"_mastermind_exec": 450, "_mastermind_worker": 451},
+        "groups_by_gid": {"450": "_mastermind_exec", "451": "_mastermind_worker"},
+    }
+    assert m.classify_identity_plan(exact, identities) == {"control": "verify", "worker": "verify"}
+
+
+def test_central_control_antiduplication_is_observation_only() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    for unit in (
+        "mastermind-executive-control.service",
+        "mastermind-executive-mcp.service",
+        "mastermind-executive-sol-state-relay.service",
+    ):
+        assert unit in source
+    for forbidden in (
+        "systemctl disable",
+        "systemctl enable",
+        "systemctl start",
+        "systemctl restart",
+        "systemctl stop",
+        "systemctl mask",
+        "systemctl unmask",
+    ):
+        assert forbidden not in source
+
+
+def test_codex_source_inspection_never_executes_mutable_input(tmp_path: Path) -> None:
+    m = _load()
+    source = tmp_path / "codex"
+    source.write_bytes(b"\x7fELFfixture")
+    source.chmod(0o755)
+
+    info = m.inspect_codex_source(source)
+    assert info["sha256"]
+    assert info["identity"]["size"] == len(b"\x7fELFfixture")
+
+    link = tmp_path / "link"
+    link.symlink_to(source)
+    with pytest.raises(m.EnrollmentError, match="direct"):
+        m.inspect_codex_source(link)
+
+    text = SCRIPT.read_text(encoding="utf-8")
+    install = text.split("def install_codex_binary(", 1)[1].split("def _safe_archive_members", 1)[0]
+    assert "attest_codex_binary" not in install
+    assert "subprocess" not in install
+    assert "codex_source_digest_not_accepted" in install
+
+
+def test_rendered_units_are_inert_and_use_stacked_runtime(tmp_path: Path) -> None:
+    m = _load()
+    release = tmp_path / "release"
+    template_root = release / "ops" / "executive_os"
+    template_root.mkdir(parents=True)
+    for name in (
+        "mastermind-executive-worker.service.template",
+        "mastermind-executive-worker.socket.template",
+        "mastermind-executive-remote-worker-gateway.service.template",
+    ):
+        source = ROOT / "ops" / "executive_os" / name
+        (template_root / name).write_bytes(source.read_bytes())
+
+    rendered = m.render_systemd_units(
+        release_root=release,
+        codex_binary=Path("/opt/mastermind-executive/bin/codex-0.157.1"),
+        identities=_identities(m),
+    )
+    worker = rendered["mastermind-executive-worker-codex-01.service"]
+    sock = rendered["mastermind-executive-worker-codex-01.socket"]
+    gateway = rendered["mastermind-executive-remote-worker-gateway.service"]
+
+    assert "_mastermind_worker" in worker
+    assert "scripts/executive_os_linux_worker.py" in worker
+    assert "worker-codex-01.json" in worker
+    assert "Service=mastermind-executive-worker-codex-01.service" in sock
+    assert "_mastermind_exec" in gateway
+    assert "scripts/executive_os_remote_worker_gateway.py" in gateway
+    assert "__" not in worker + sock + gateway
+    for unit in rendered.values():
+        active = [line.strip() for line in unit.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+        assert "[Install]" not in active
+        assert not any(line.startswith("WantedBy=") for line in active)
+
+
+def test_enrollment_source_never_logs_in_or_arms_provider_or_gateway() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    for forbidden in (
+        "codex login",
+        "claude auth",
+        "device-auth",
+        "auth.json",
+        "provider-readiness",
+        "certificate",
+        "private key",
+        "systemctl daemon-reload",
+        "systemctl enable",
+        "systemctl start",
+        "capacity-observe",
+        "RuntimeStore",
+        "sqlite3",
+    ):
+        assert forbidden not in source
+
+
+def test_apply_order_freezes_antidup_source_and_binary_before_identity_mutation() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    body = source.split("def apply_enrollment(", 1)[1]
+    antidup = body.index("assert_central_control_absent")
+    custody = body.index("verify_root_source_custody")
+    source_identity = body.index("verify_source_identity")
+    inspect_binary = body.index("inspect_codex_source")
+    identities = body.index("ensure_service_identities")
+    release = body.index("install_release")
+    binary = body.index("install_codex_binary")
+    units = body.index("install_inert_units")
+    final_antidup = body.rindex("assert_central_control_absent")
+    assert antidup < custody < source_identity < inspect_binary < identities < release < binary < units < final_antidup
+
+
+def test_module_has_no_network_or_remote_execution_surface() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    for forbidden in (
+        "/usr/bin/ssh",
+        "subprocess.run([\"ssh\"",
+        "/usr/bin/rsync",
+        "requests.",
+        "urllib.",
+        "import socket",
+        "socket.socket",
+        "curl",
+        "wget",
+    ):
+        assert forbidden not in source
+
+
+def test_root_git_reads_disable_local_execution_vectors() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert '"GIT_OPTIONAL_LOCKS": "0"' in source
+    assert '"-c", "core.fsmonitor=false"' in source
+    assert '"-c", "core.hooksPath=/dev/null"' in source
+    assert "verify_git_config_safe" in source
+    assert '"filter."' in source
+    assert '"include."' in source
+
+
+def test_release_manifest_logic_is_executed_from_accepted_source_not_installed_copy() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    install = source.split("def install_release(", 1)[1].split("def render_systemd_units", 1)[0]
+    assert 'manifest_tool = repo / "ops/executive_os/release_manifest.py"' in install
+    assert 'os.fspath(manifest_tool)' in install
+    assert 'destination / "ops/executive_os/release_manifest.py"' not in install
+    assert 'staging / "ops/executive_os/release_manifest.py"' not in install
+
+
+def test_identity_plan_resumes_after_exact_group_only_partial_effect() -> None:
+    m = _load()
+    identities = m.ServiceIdentities(
+        control_user="control-fixture", control_group="control-fixture",
+        control_uid=1450, control_gid=1450,
+        worker_user="worker-fixture", worker_group="worker-fixture",
+        worker_uid=1451, worker_gid=1451,
+    )
+    state = {
+        "users_by_name": {},
+        "users_by_uid": {},
+        "groups_by_name": {"control-fixture": 1450, "worker-fixture": 1451},
+        "groups_by_gid": {"1450": "control-fixture", "1451": "worker-fixture"},
+    }
+    assert m.classify_identity_plan(state, identities) == {
+        "control": "create_user",
+        "worker": "create_user",
+    }
+
+
+def test_source_custody_rejects_writable_git_admin_and_tracked_parent(tmp_path: Path) -> None:
+    m = _load()
+    repo, _sha, _tree = _source_repo(tmp_path)
+    owner = os.getuid()
+    _git("config", "--unset", "user.email", cwd=repo)
+    _git("config", "--unset", "user.name", cwd=repo)
+    for key in ("core.ignorecase", "core.precomposeunicode"):
+        subprocess.run(
+            ["git", "config", "--unset-all", key], cwd=repo,
+            capture_output=True, text=True, check=False,
+        )
+
+    # The ordinary fixture is safe under its current owner when the production
+    # root-only expectation is parameterized for this hermetic discriminator.
+    m.verify_root_source_custody(repo, expected_owner_uid=owner)
+
+    git_dir = repo / ".git"
+    original_git_mode = stat.S_IMODE(git_dir.lstat().st_mode)
+    git_dir.chmod(original_git_mode | 0o020)
+    with pytest.raises(m.EnrollmentError, match="git.*custody"):
+        m.verify_root_source_custody(repo, expected_owner_uid=owner)
+    git_dir.chmod(original_git_mode)
+
+    scripts = repo / "scripts"
+    original_scripts_mode = stat.S_IMODE(scripts.lstat().st_mode)
+    scripts.chmod(original_scripts_mode | 0o020)
+    with pytest.raises(m.EnrollmentError, match="source_directory_custody"):
+        m.verify_root_source_custody(repo, expected_owner_uid=owner)
+    scripts.chmod(original_scripts_mode)
