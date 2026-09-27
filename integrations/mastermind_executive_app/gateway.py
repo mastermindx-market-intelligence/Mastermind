@@ -570,3 +570,31 @@ async def observe_ingress_grounding(
     if result is None:
         raise GroundingUnavailable("installed grounding is unavailable")
     return result
+
+
+def make_jwt_authenticator_variants(
+    primary: AppPolicies,
+    alternates: tuple[AppPolicies, ...] = (),
+    *,
+    primary_jwks_cache: JwksKeySource | None = None,
+) -> tuple[tuple[JwtAuthenticator, JwtAuthenticator], ...]:
+    """Build exact per-resource authenticator pairs for one Executive service.
+
+    Every resource keeps its own immutable ResourcePolicy pair and therefore
+    retains exact JWT audience validation. This helper groups those exact
+    pairs for one app composition; it never turns the resource claim into a
+    wildcard or list-valued policy. A caller-supplied JWKS cache belongs only
+    to the primary resource. Alternate resources build their own bounded
+    caches so the existing cache-sharing contract is not widened across OAuth
+    resources.
+    """
+
+    if type(primary) is not AppPolicies:
+        raise TypeError("primary must be AppPolicies")
+    if type(alternates) is not tuple or any(
+        type(item) is not AppPolicies for item in alternates
+    ):
+        raise TypeError("alternates must be a tuple of AppPolicies")
+    pairs = [make_jwt_authenticators(primary, jwks_cache=primary_jwks_cache)]
+    pairs.extend(make_jwt_authenticators(item) for item in alternates)
+    return tuple(pairs)

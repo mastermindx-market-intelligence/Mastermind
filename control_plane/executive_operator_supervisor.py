@@ -26,6 +26,7 @@ from control_plane.executive_orchestration_result import (
     parse_canonical_json,
 )
 from control_plane.executive_runtime import (
+    INTERACTIVE_TX5_EXECUTION_PROFILE,
     AttemptLease,
     AttemptStatus,
     Job,
@@ -153,6 +154,13 @@ class ExecutiveOperatorSupervisor:
     def _requested_profile(
         self, job: Job, lease: AttemptLease
     ) -> RequestedExecutionProfile:
+        constraints = job.constraints
+        if constraints.get("execution_profile_id") == (
+            "operator.appserver.interactive.v1"
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "App Server supervisor refuses the interactive profile before claim"
+            )
         if job.orchestration_role != "plan":
             raise ExecutiveOperatorSupervisorError(
                 "App Server composition accepts only the read-only planner role"
@@ -843,6 +851,16 @@ class ExecutiveOperatorSupervisor:
         if previous is None:
             raise ExecutiveOperatorSupervisorError(
                 "operator recovery Attempt disappeared"
+            )
+        previous_job = self.runtime.jobs.get_job(previous.job_id)
+        if previous_job is not None and previous_job.constraints.get(
+            "execution_profile_id"
+        ) == INTERACTIVE_TX5_EXECUTION_PROFILE:
+            return ReconcileReceipt(
+                attempt_id=attempt_id,
+                job_id=previous.job_id,
+                status=ReconcileStatus.AWAITING_LEASE_EXPIRY,
+                process_was_live=False,
             )
         try:
             lease = self.runtime.attempts.takeover_expired_operator_harness(
