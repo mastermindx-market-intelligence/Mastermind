@@ -196,7 +196,11 @@ def test_paper_concurrency_is_target_scoped_not_file_leased():
     connection = norm(CONNECTION)
     prepare = norm(ROOT / "integrations/paper_desktop/prepare.py")
     studio = norm(ROOT / "integrations/studio_direct_mcp/paper-design.mjs")
-    combined = " ".join((runbook, integration, skill, connection, prepare, studio))
+    direct_service = norm(ROOT / "integrations/paper_desktop/direct_service.py")
+    install = norm(ROOT / "integrations/paper_desktop/install.py")
+    mcp_server = norm(ROOT / "integrations/paper_desktop/mcp_server.py")
+    combined = " ".join((runbook, integration, skill, connection, prepare, studio,
+                         direct_service, install, mcp_server))
 
     assert "MULTI_WRITER_PER_FILE_TARGET_SCOPED" in prepare
     assert "MULTI_WRITER_PER_FILE_TARGET_SCOPED" in studio
@@ -212,6 +216,9 @@ def test_paper_concurrency_is_target_scoped_not_file_leased():
         "exactly one modifying session may own",
         "Keep ONE assigned designer per desktop document",
         "one-writer-per-file rule remains unchanged",
+        "one writer per file across all hosts remains required",
+        "Only one designer owns the active desktop file",
+        "exclusive design-task ownership",
     ):
         assert forbidden.lower() not in combined.lower()
 
