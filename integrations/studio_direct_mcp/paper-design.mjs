@@ -406,7 +406,7 @@ export function createPaperDesigner(config, dependencies = {}) {
     async call(name, input = {}) {
       if (name === PAPER_INSPECT_TOOL.name) {
         const result = await dispatch('status', ['status']);
-        if (result?.value && typeof result.value === 'object' && !Array.isArray(result.value)) {
+        if (!result?.isError && result?.value && typeof result.value === 'object' && !Array.isArray(result.value)) {
           return {
             ...result,
             value: {
