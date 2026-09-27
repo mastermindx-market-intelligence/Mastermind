@@ -9,7 +9,7 @@ V1 intentionally permits only two provider commands, each fenced from ambient
 user/project/local settings and customization discovery:
 
 * ``claude --safe-mode --setting-sources "" --version``
-* ``claude --safe-mode --setting-sources "" auth status``
+* ``claude --safe-mode --setting-sources "" auth status --json``
 
 The public receipt is a closed, secret-free contract. Provider account PII is
 never copied into it. Host/principal references are wire identities supplied by
@@ -23,6 +23,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import pwd
 import re
 import selectors
 import shutil
@@ -33,14 +34,15 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 
 SCHEMA = "mastermind.claude_worker_preflight.v1"
 EXECUTION_CONTEXTS = frozenset({"INTERACTIVE_PRINCIPAL", "WORKER_BROKER"})
 AUTH_IDENTITY_CONFIDENCE = frozenset({"SLOT_ONLY", "PROVIDER_REPORTED"})
 ISOLATION_BASES = frozenset(
-    {"OS_PRINCIPAL_KEYCHAIN", "NON_MACOS_PROVIDER_PATH", "UNKNOWN"}
+    {"OS_PRINCIPAL_KEYCHAIN", "OS_PRINCIPAL_NATIVE_PRIVATE_FILE",
+     "NON_MACOS_PROVIDER_PATH", "UNKNOWN"}
 )
 AUTH_METHODS = frozenset({"claudeai", "non_native", "unknown"})
 API_PROVIDERS = frozenset({"first_party", "non_native", "unknown"})
@@ -121,11 +123,19 @@ _RAW_AUTH_ALLOWED_KEYS = frozenset(
         "subscriptionType",
         "apiKeySource",
         # Known provider PII is tolerated as INPUT only so it can be discarded.
-        # It is never returned or persisted by this module.
+        # It is never returned or persisted by this module. The current native
+        # 2.1.275 wire exposes organization identity under `orgId`/`orgName`
+        # alongside the older `organization`/`organizationId` aliases; both
+        # shapes are accepted and discarded, never projected.
         "email",
         "organization",
         "accountId",
         "organizationId",
+        "orgId",
+        "orgName",
+        "analyticsDisabled",
+        "projectsDirectory",
+        "configDirectory",
     }
 )
 _PROVIDER_TIMEOUT_SECONDS = 15.0
@@ -415,17 +425,32 @@ def require_canonical_identity(host_ref: str, os_principal_ref: str) -> tuple[st
     return host, principal
 
 
-def require_current_identity_owner(host_ref: str, os_principal_ref: str) -> None:
-    """Fail closed until the current estate exposes the accepted host owner.
+def require_current_identity_owner(
+    host_ref: str, os_principal_ref: str,
+    *, identity_owner: Callable[[str, str], None] | None = None,
+) -> None:
+    """Require the existing owner through a trusted composition-only seam.
 
     OCR-1 V3 Task 2 forbids deriving a competing host/principal identity from
     hostname, UID, username, home path, or machine UUID. Current protected
     Capacity/Executive law has no concrete host-ref resolver available to this
-    CLI, so a syntactically valid caller declaration remains unproven.
+    CLI, so a syntactically valid caller declaration remains unproven. Runtime
+    may inject its root-config/realm/worker-slot join in Python composition;
+    the callback is never accepted from a CLI or request document. It must
+    raise on mismatch and return None only after verifying the actual context.
     """
 
-    require_canonical_identity(host_ref, os_principal_ref)
-    _raise("HOST_IDENTITY_SEAM_UNAVAILABLE")
+    host, principal = require_canonical_identity(host_ref, os_principal_ref)
+    if identity_owner is None:
+        _raise("HOST_IDENTITY_SEAM_UNAVAILABLE")
+    if not callable(identity_owner):
+        _raise("PRINCIPAL_CONTEXT_MISMATCH")
+    try:
+        result = identity_owner(host, principal)
+    except Exception:
+        _raise("PRINCIPAL_CONTEXT_MISMATCH")
+    if result is not None:
+        _raise("PRINCIPAL_CONTEXT_MISMATCH")
 
 
 def _required_open_flags(*names: str) -> int:
@@ -1049,7 +1074,8 @@ def build_allowed_argv(
     if operation == "version":
         return (coordinate, *fence, "--version")
     if operation == "auth_status":
-        return (coordinate, *fence, "auth", "status")
+        # Explicit JSON; safe-mode diagnostics remain discard-only input.
+        return (coordinate, *fence, "auth", "status", "--json")
     _raise("COMMAND_NOT_ALLOWED")
 
 
@@ -1192,11 +1218,21 @@ def _closed_child_environment(
         if not isinstance(key, str) or _provider_environment_key_is_denied(key):
             _raise("PROVIDER_ENV_REFUSED")
 
+    try:
+        principal_name = pwd.getpwuid(os.geteuid()).pw_name
+    except (KeyError, OSError):
+        _raise("PRINCIPAL_CONTEXT_MISMATCH")
+    if not principal_name or _CONTROL_RE.search(principal_name):
+        _raise("PRINCIPAL_CONTEXT_MISMATCH")
     result = {
         "PATH": _SAFE_CHILD_PATH,
         "LANG": "C",
         "LC_ALL": "C",
         "TMPDIR": "/tmp",
+        # Native macOS credential lookup needs the real process username.
+        # Do not inherit caller-supplied USER/LOGNAME as identity evidence.
+        "USER": principal_name,
+        "LOGNAME": principal_name,
     }
     for key in _CHILD_ENV_PATH_KEYS:
         value = incoming.get(key)
@@ -1217,6 +1253,74 @@ def _closed_child_environment(
             _raise("PROVIDER_ENV_REFUSED")
         result[key] = value
     return result
+
+
+def observe_native_credential_storage(
+    *, provider_home: Path, config_dir: Path, expected_uid: int
+) -> str:
+    """Observe native file custody without opening credential contents.
+
+    Inputs are canonical absolute coordinates from the existing realm owner.
+    This point-in-time metadata fact is not auth readiness, account identity,
+    active credential-source selection, or a refresh/lease grant. Absence of a
+    file does not prove Keychain selection. The native CLI alone writes it.
+    """
+    if type(expected_uid) is not int or expected_uid <= 0:
+        _raise("NATIVE_STORAGE_UNSAFE")
+    home, config = Path(provider_home), Path(config_dir)
+    if (not home.is_absolute() or not config.is_absolute()
+            or ".." in home.parts or ".." in config.parts
+            or config != home / ".claude"):
+        _raise("NATIVE_STORAGE_UNSAFE")
+    descriptors: list[int] = []
+    try:
+        from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+    except ImportError:
+        _raise("NATIVE_STORAGE_UNSAFE")
+    try:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        descriptors.append(os.open("/", flags))
+        for part in home.parts[1:]:
+            descriptors.append(os.open(part, flags, dir_fd=descriptors[-1]))
+        home_fd = descriptors[-1]
+        descriptors.append(os.open(".claude", flags, dir_fd=home_fd))
+        config_fd = descriptors[-1]
+        for directory_path, directory_fd in ((home, home_fd), (config, config_fd)):
+            info = os.fstat(directory_fd)
+            if (info.st_uid != expected_uid or stat.S_IMODE(info.st_mode) != 0o700
+                    or has_macos_acl(directory_path, expected_identity=info,
+                                     descriptor=directory_fd)):
+                _raise("NATIVE_STORAGE_UNSAFE")
+        try:
+            info = os.stat(".credentials.json", dir_fd=config_fd,
+                           follow_symlinks=False)
+        except FileNotFoundError:
+            return "UNKNOWN"
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != expected_uid
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+            _raise("NATIVE_STORAGE_UNSAFE")
+        # Metadata-only handles cannot read credential bytes. Darwin ACLs can
+        # grant access beyond mode bits, so use the existing ACL observer too.
+        metadata_flag = getattr(os, "O_EVTONLY", None) or getattr(os, "O_PATH", None)
+        if type(metadata_flag) is not int or metadata_flag <= 0:
+            _raise("NATIVE_STORAGE_UNSAFE")
+        descriptors.append(os.open(".credentials.json",
+            metadata_flag | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+            dir_fd=config_fd))
+        file_fd = descriptors[-1]
+        observed = os.fstat(file_fd)
+        identity_fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
+                           "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if (any(getattr(info, key) != getattr(observed, key) for key in identity_fields)
+                or has_macos_acl(config / ".credentials.json",
+                                 expected_identity=info, descriptor=file_fd)):
+            _raise("NATIVE_STORAGE_UNSAFE")
+        return "NATIVE_PRIVATE_FILE"
+    except (OSError, AttributeError, FilesystemSecurityError):
+        _raise("NATIVE_STORAGE_UNSAFE")
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
 
 
 def _line_length_after(current: int, chunk: bytes) -> int:
@@ -1519,7 +1623,7 @@ def _parse_auth_status(raw: bytes | str) -> dict[str, Any]:
     if not set(parsed).issubset(_RAW_AUTH_ALLOWED_KEYS):
         _raise("AUTH_STATUS_UNSUPPORTED")
     for key, value in parsed.items():
-        if key == "loggedIn":
+        if key in {"loggedIn", "analyticsDisabled"}:
             if type(value) is not bool:
                 _raise("AUTH_STATUS_UNSUPPORTED")
             continue
@@ -1579,12 +1683,17 @@ def build_ready_receipt(
     quota_class: str | None = None,
     isolation_basis: str = "OS_PRINCIPAL_KEYCHAIN",
     observed_at: str | None = None,
+    identity_owner: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
     if execution_context != "INTERACTIVE_PRINCIPAL":
         # Task 3 owns the real Worker-broker composition. This Task 1/2 slice
         # cannot turn a caller declaration into worker-context evidence.
         _raise("EXECUTION_CONTEXT_UNPROVEN")
-    require_current_identity_owner(host_ref, os_principal_ref)
+    if identity_owner is None:
+        require_current_identity_owner(host_ref, os_principal_ref)
+    else:
+        require_current_identity_owner(host_ref, os_principal_ref,
+                                       identity_owner=identity_owner)
     if not auth.auth_ready:
         _raise(auth.reason_codes[0] if auth.reason_codes else "AUTH_STATUS_UNSUPPORTED")
     return validate_receipt(

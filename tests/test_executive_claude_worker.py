@@ -71,7 +71,7 @@ def _fixture_claude_binary(tmp_path: Path) -> Path:
         'mode=$(cat "$root/mode")\n'
         'printf "%s\\n" "$@" > "$root/argv"\n'
         'env | LC_ALL=C sort > "$root/environment"\n'
-        'if [ "$1" = "--safe-mode" ] && [ "$2" = "--setting-sources" ] && [ -z "$3" ] && [ "$4" = "auth" ] && [ "$5" = "status" ] && [ "$#" -eq 5 ]; then\n'
+        'if [ "$1" = "--safe-mode" ] && [ "$2" = "--setting-sources" ] && [ -z "$3" ] && [ "$4" = "auth" ] && [ "$5" = "status" ] && [ "$6" = "--json" ] && [ "$#" -eq 6 ]; then\n'
         '  case "$mode" in\n'
         '    auth-ready) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"person@example.invalid","organization":"discard-me","subscriptionType":"discard-me","apiKeySource":"/login managed key"}\\n\'; exit 0 ;;\n'
         '    auth-logged-out) printf \'{"loggedIn":false}\\n\'; exit 1 ;;\n'
@@ -83,6 +83,8 @@ def _fixture_claude_binary(tmp_path: Path) -> Path:
         '    auth-discard-nested) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","accountId":{"safe":[1,{"nested":true}]},"organizationId":[null,7],"email":{"nested":"discard"}}\\n\'; exit 0 ;;\n'
         '    auth-discard-secret) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","organization":{"credential":"CREDENTIAL-SENTINEL"}}\\n\'; exit 0 ;;\n'
         '    auth-malformed-sentinel) printf \'CREDENTIAL-SENTINEL{not-json\\n\'; exit 0 ;;\n'
+        '    auth-ready-orgids) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"person@example.invalid","organization":"discard-me","subscriptionType":"discard-me","apiKeySource":"/login managed key","orgId":"org-9f3a","orgName":"discard-me-org","analyticsDisabled":true,"projectsDirectory":"/private-fixture/projects","configDirectory":"/private-fixture/config"}\\n\'; exit 0 ;;\n'
+        '    auth-ready-orgid-secret) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","orgId":"Bearer abcdefghijklmnopqrstuvwxyz"}\\n\'; exit 0 ;;\n'
         '  esac\n'
         'fi\n'
         'case "$mode" in\n'
@@ -594,6 +596,7 @@ def test_auth_observation_uses_exact_fenced_argv_and_closed_environment(
         "",
         "auth",
         "status",
+        "--json",
     ]
     child_environment = (tmp_path / "environment").read_text(encoding="utf-8")
     assert "ARBITRARY_AMBIENT_VARIABLE" not in child_environment
@@ -621,9 +624,48 @@ def test_auth_observation_discards_pii_and_reports_logged_out(
     assert logged_out.exit_code == 1
 
 
+def test_auth_observation_accepts_current_orgid_orgname_and_discards_them(
+    tmp_path: Path,
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("auth-ready-orgids", encoding="utf-8")
+
+    observation = _adapter(tmp_path, binary).observe_auth_status(timeout_seconds=1)
+
+    assert observation == ClaudeAuthObservation(
+        client_version=_FIXTURE_VERSION,
+        authenticated=True,
+        ready=True,
+        auth_method="claudeai",
+        api_provider="first_party",
+        exit_code=0,
+        observed_at=observation.observed_at,
+    )
+    serialized = repr(observation)
+    # orgId/orgName values are INPUT-only and must never reach the receipt.
+    assert "org-9f3a" not in serialized
+    assert "discard-me-org" not in serialized
+    assert "private-fixture" not in serialized
+
+
+def test_auth_observation_still_refuses_unknown_wire_keys(tmp_path: Path) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("auth-unknown", encoding="utf-8")
+
+    with pytest.raises(ClaudeWorkerContractError, match="unsupported sensitive data"):
+        _adapter(tmp_path, binary).observe_auth_status(timeout_seconds=1)
+
+
 @pytest.mark.parametrize(
     "mode",
-    ("auth-malformed", "auth-unknown", "auth-token", "auth-nonzero", "auth-sleep"),
+    (
+        "auth-malformed",
+        "auth-unknown",
+        "auth-token",
+        "auth-nonzero",
+        "auth-sleep",
+        "auth-ready-orgid-secret",
+    ),
 )
 def test_auth_observation_refuses_unsafe_provider_responses(
     tmp_path: Path, mode: str
@@ -2808,7 +2850,7 @@ def test_launch_attestation_includes_review_enforced_permission_profile(
 ) -> None:
     binary = _fixture_claude_binary(tmp_path)
     observer = _observer_for(binary)
-    (tmp_path / "mode").write_text("success", encoding="utf-8")
+    (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
     adapter = ClaudeCodeWorkerAdapter(
         binary,
         allowed_versions=frozenset({_FIXTURE_VERSION}),
