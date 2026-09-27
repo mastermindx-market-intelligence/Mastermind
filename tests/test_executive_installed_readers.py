@@ -67,7 +67,11 @@ def test_installed_boot_packet_collector_uses_dependency_python_and_exact_roots(
     assert argv[argv.index("--repo-root") + 1] == str(repo)
     assert argv[argv.index("--macro-root") + 1] == str(macro)
     assert argv[argv.index("--now") + 1] == "2026-09-15T03:00:00Z"
-    assert argv[argv.index("--timeout") + 1] == "5"
+    inner_timeout = float(argv[argv.index("--timeout") + 1])
+    # #834 production proof retains the 28s/30s outer settlement boundary and
+    # reduces only the nested child reserve from 2.0s to 0.75s.
+    assert 0 < inner_timeout < 7.0
+    assert 0.70 <= 7.0 - inner_timeout <= 0.85
 
 
 def test_ceo_boot_packet_cli_accepts_explicit_repo_root(tmp_path: Path):
@@ -647,8 +651,10 @@ def test_installed_collector_reserves_inner_timeout_margin(tmp_path: Path):
     collector(repo_root=repo, macro_root_flag=str(macro), now=None, timeout=7.0)
     argv = helper["argv"]
     inner = float(argv[argv.index("--timeout") + 1])
-    assert helper["timeout"] == 7.0
-    assert 0 < inner <= 5.0
+    helper_timeout = float(helper["timeout"])
+    assert 0 < helper_timeout < 7.0
+    assert 0 < inner < helper_timeout
+    assert 0.70 <= helper_timeout - inner <= 0.80
 
 
 def test_default_packet_runner_repeated_fast_exit_overflow_is_closed(tmp_path: Path):

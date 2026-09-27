@@ -331,8 +331,9 @@ def draft_directives_from_nudges(codes: list[str] | None = None) -> dict:
     try:
         from brain import nw_reflection
         open_nudges: dict[str, dict] = {}
-        for n in (nw_reflection.latest().get("nudges") or []):
-            if isinstance(n, dict) and n.get("code"):
+        report = nw_reflection.latest()
+        for n in (report.get("nudges") or []):
+            if isinstance(n, dict) and n.get("code") and nw_reflection.nudge_is_evaluable(report, n):
                 open_nudges.setdefault(str(n["code"]), n)
         skipped: list[dict] = []
         wanted: list[str] = []

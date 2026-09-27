@@ -598,7 +598,7 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact():
     assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
     assert registry.capability_packages == {}
     assert registry.policy_digest == (
-        "daac5b9a290156b2b96bf562ed69ffd79d93ba753d3017799bef303aac2b38ed"
+        "f29fd9038a4b0d96dba1d50b24570f8f7fb383f046b48ec5ae4aae44363a38b0"
     )
     assert registry.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"

@@ -10,6 +10,28 @@
 
 **Spec:** `docs/EXECUTIVE_WEB_CEO_AUTONOMOUS_DELIVERY_AMENDMENT.md`
 
+## 2026-09-17 M0 receipt-truth correction
+
+The hermetic Task 1 acceptance helper remains a source invariant: its constructed fixture can prove
+that its own code path makes no external Sol/Chairman call. Those fixture counters are not production
+interval observations and must never enter an AD-CUTOVER denominator.
+
+Task 4's public reader now uses `mastermind.web_ceo_offline_delivery_canary/v2`. Version 1 is legacy
+and non-promotable. Version 2 emits `null` plus an explicit `UNMEASURED` reason when no canonical event
+source exists, keeps the receipt read time out of interval endpoints, and separates terminal-return
+projection, exact Wake phase, trusted acknowledgement mode, semantic parent/Sol action and production
+acceptance. Wake `TARGET_ACKNOWLEDGED` or `SOURCE_RESOLVED` is never relabeled as semantic or product
+acceptance. Terminal-return state is reconstructed through the existing immutable phase owner: exact
+known-zero phases remain visible, while `ATTEMPTED`, `EFFECT_UNKNOWN`, malformed history, multiple
+matching obligations and unresolved Wake delivery effects fail closed. The reader delegates Wake
+selection, the two-obligation ambiguity bound, the 64-event budget and causal reconstruction to the
+existing canonical terminal/Wake owner in one Runtime snapshot. It then requires that selected
+request's `PhysicalDialogueSourceIdentity` to bind the exact terminal message, projection receipt
+fingerprint/thread, operation, root/Job/Attempt/Worker, terminal evidence digest and CEO target.
+An APPLIED terminal return without trusted dialogue provenance is a typed correlation hold, never
+`NOT_REQUESTED`. Root creation reads remain bound to the exact root Job aggregate. The reader remains
+read-only and creates no telemetry, lifecycle, queue or acceptance store.
+
 ## Global Constraints
 
 - Pickup must fresh-read protected `master`, this spec, #595/#600 current source ownership, and current Executive provider/admission/install state before effects. The authoring source was `ef4682c8b998a9ca522b4690fadf938aa57029ad`. The 2026-09-13 compatibility review at protected `e8f755d1db35f29a227aaac7335caa86fa2b02c4` additionally includes #606, protected #576/#575, and #605. #605's workspace-custody rule is controlling for attended Web/host source edits: use installed `mmx-workspace`; if that launcher is unavailable, do not substitute raw `git worktree add`/clone as a production session-isolation path.
@@ -249,7 +271,7 @@ python3 -m pytest -q \
 
 **Interfaces:**
 - Input: exact existing `root_job_id` and expected accepted release SHA.
-- Output schema: `mastermind.web_ceo_offline_delivery_canary/v1`.
+- Output schema: `mastermind.web_ceo_offline_delivery_canary/v2`; v1 is legacy/non-promotable.
 - Read source: existing Executive Runtime/service read paths and current terminal-return evidence.
 - The script owns no persistence and performs no provider dispatch itself.
 
@@ -269,8 +291,14 @@ EXPECTED_KEYS = {
     "aggregation_result_digest",
     "web_sol_turns_between_admission_and_handoff",
     "manual_continue_edges",
-    "parent_consumption_state",
+    "intervention_measurements",
+    "terminal_return_projection_state",
+    "wake_obligation_state",
+    "wake_acknowledgement_mode",
+    "semantic_parent_action_state",
     "production_acceptance_state",
+    "stage_promotion_eligible",
+    "proof_admissibility",
     "effect_uncertainty",
     "source_evidence",
     "observed_at",
@@ -317,7 +345,9 @@ python3 -m pytest -q tests/test_web_ceo_offline_delivery_canary.py
 
 - [ ] **Step 5: Require independent reject -> repair -> re-review.** The repair must reference the exact rejected candidate and reviewer result. A different new root or worker retry under a fresh identity is a failed canary unless current effect law explicitly requires a reconciled successor.
 
-- [ ] **Step 6: Read the final canary receipt.** Pass requires:
+- [ ] **Step 6: Read the final canary receipt plus attributable interval evidence.** The v2 reader's
+`null / UNMEASURED` intervention fields are a HOLD, never a measured zero. L06 must join separately
+owned canonical interval evidence before evaluating the following pass conditions:
 
 ```text
 useful artifact/result exists
@@ -356,8 +386,9 @@ what current delivery may finish autonomously
 what exact strategic/Chairman decision is pending
 current operational principal and admitted children
 review/repair/integration state
-parent-delivery vs parent-consumption state
-production acceptance as separate state
+terminal-return projection and exact Wake phase
+semantic parent/Sol action as a separate state
+production acceptance as a separate state
 ```
 
 - [ ] **Step 2: Refuse inferred UI state.** A Figma label, chat title, model sentence, queued Job or delivery receipt cannot generate `autonomous`, `consumed`, `accepted` or `production proven` without its canonical source.
@@ -399,7 +430,10 @@ This plan intentionally contains no `TBD`, `TODO`, generic “add tests,” or u
 
 ### Type/interface consistency
 
-The plan introduces only one optional new schema, `mastermind.web_ceo_offline_delivery_canary/v1`, and only if the existing read/acceptance surface cannot emit the required proof. All execution semantics reuse existing `Runtime`, `CooCycle`, `ExecutiveControlService`, terminal-return and authority contracts.
+The plan introduced the source-only v1 reader; the M0 correction versions its public receipt as
+`mastermind.web_ceo_offline_delivery_canary/v2` and explicitly makes v1 non-promotable. The reader
+still owns no execution or acceptance semantics. All execution behavior reuses existing `Runtime`,
+`CooCycle`, `ExecutiveControlService`, terminal-return, Wake and authority contracts.
 
 ## Execution Handoff
 

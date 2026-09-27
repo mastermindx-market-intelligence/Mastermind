@@ -1,0 +1,61 @@
+{
+  "changes": [
+    "One complete-observation predicate gates both nudge emission and resolution",
+    "Incomplete evidence preserves the existing registry entry and still permits independent stale-context diagnostics",
+    "Missing-input fixture explicitly isolates the default persisted owner feed",
+    "Proof JSON moved to existing research/evidence namespace and checked by the unchanged structural identity guard"
+  ],
+  "code_hashes": {
+    "brain/improvement_agenda.py": "0df5ba6f83e1fb37aa302e6569eb239178faa18bcb8392175731ca94f9ccffeb",
+    "brain/improvement_discovery_nw.py": "f3b3cef8d20da33caabf4f23bc3abb19791c20456cbfa995482d339f997f3e02",
+    "brain/nw_reflection.py": "388bb946b239e8995261b2686f2309247d1e745c422d543bcabe1c28f43e6e66",
+    "tests/test_ceo_submit_armed_composition.py": "b936dfbda26b813f9735d57c17bec3877e9c74d5d0df8d3045680a459315c5be",
+    "tests/test_improvement_discovery_agenda.py": "f7d4670647840bb004fdf7a44d5dbc9f6c6e954a6d97da149e63ca2c40fabe22",
+    "tests/test_improvement_discovery_owner.py": "2c49c6da4bc1d378654fe2b95a50c0fa224eb97d808b80d4f1b6e6267f77f993",
+    "tests/test_nw_reflection.py": "397ae083b0556f8c035fe26ff8b7948c9c079fe492ad732761c54bf9c1e15616"
+  },
+  "commands": {
+    "focused": "python3 -m pytest -q tests/test_improvement_discovery_owner.py tests/test_improvement_discovery.py tests/test_improvement_discovery_agenda.py tests/test_agentos_readiness_agenda.py tests/test_nw_reflection.py tests/test_nw_feedback.py tests/test_mastermind_ai.py",
+    "identity_regression": "python3 -m pytest -q tests/test_ceo_submit_armed_composition.py",
+    "isolated_agenda": "python3 -m pytest -q tests/test_improvement_discovery_agenda.py"
+  },
+  "executive_jobs_created": 0,
+  "finding_id": 4090627665,
+  "focused": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 276
+  },
+  "hosted_ci_for_new_head": "PENDING_PUBLICATION",
+  "identity_regression": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 142
+  },
+  "independent_discovery_proven": false,
+  "independent_repaired_head_review": "NOT_REQUESTED_YET",
+  "isolated_agenda": {
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "tests": 6
+  },
+  "observed_at": "2026-09-24T06:54:07.535580+00:00",
+  "old_browser_proof": "Previous owner/API/browser proof remains historical; this repair is verified by owner-to-nudge-to-Agenda tests, not a newly executed browser or live release.",
+  "production_proven": false,
+  "red": {
+    "errors": 0,
+    "failures": 8,
+    "skipped": 0,
+    "tests": 9
+  },
+  "red_commit": "fb7b305895e7b937b1df8bef106aa99cea4b549d",
+  "review_id": 5300666596,
+  "review_observer_disabled": true,
+  "reviewed_head": "8d439a1fb8b95c967817e4e4588b2ced3ac12ffb",
+  "scope": "LOCAL_EXACT_SOURCE_REVIEW_REPAIR_NOT_PRODUCTION",
+  "source_commit": "c9879aadd61b52f042effce3d84d1e7a5b264da9",
+  "terminal_stop_comment": 5809212772
+}
