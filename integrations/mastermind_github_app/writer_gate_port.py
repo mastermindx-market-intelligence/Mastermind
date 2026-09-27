@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import json
 import re
 from typing import Callable, Protocol
+from urllib.parse import parse_qsl, urlsplit
 
 from control_plane.source_continuity import (
     SourceContinuityRefusal, WriterGateReceipt, WriterGateRequest,
@@ -191,7 +192,11 @@ class GithubWriterGatePort:
 
     def _get(self, target: WriterGateTarget, url: str, token: str, timeout: float):
         fixed = {REST_ROOT + "/" + builder(target.repository, target.branch) for builder in (
-            source._branch_endpoint, source._branch_protection_endpoint, source._branch_rules_endpoint)}
+            source._branch_endpoint, source._branch_protection_endpoint)}
+        rule_pages = {REST_ROOT + "/" + source._branch_rules_endpoint(
+            target.repository, target.branch, page): page
+            for page in range(1, source._MAX_PAGES + 1)}
+        fixed.update(rule_pages)
         repo_ruleset = REST_ROOT + "/repos/" + target.repository + "/rulesets/"
         org_ruleset = REST_ROOT + "/orgs/" + target.repository.split("/", 1)[0] + "/rulesets/"
         allowed_ruleset = False
@@ -220,15 +225,53 @@ class GithubWriterGatePort:
             raise source._RemoteResourceMissing()
         if response.status != 200:
             raise WriterGateServiceRefused("GITHUB_READ_FAILED")
-        # The existing collector does not paginate branch rules. Refuse any
-        # pagination indication rather than label the first page complete or
-        # follow an upstream-selected URL outside the closed endpoint family.
         if any(type(key) is not str or type(value) is not str
                for key, value in response.headers.items()):
             raise WriterGateServiceRefused("GITHUB_READ_FAILED")
-        if any(key.lower() == "link" and value.strip() for key, value in response.headers.items()):
-            raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")
         try:
-            return json.loads(response.body.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=_constant)
+            value = json.loads(response.body.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=_constant)
         except (UnicodeError, ValueError):
             raise WriterGateServiceRefused("GITHUB_READ_FAILED") from None
+        links = [value for key, value in response.headers.items() if key.lower() == "link" and value.strip()]
+        if url in rule_pages:
+            if type(value) is not list or len(value) > source._PAGE_SIZE:
+                raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")
+            self._validate_rule_links(url, rule_pages[url], len(value), links)
+        elif links:
+            raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")
+        return value
+
+    @staticmethod
+    def _validate_rule_links(url: str, page: int, count: int, links: list[str]) -> None:
+        # Links are checked, NEVER followed. Canonical Source Continuity alone
+        # generates page requests and decides completion under its read budgets.
+        if not links:
+            return
+        if len(links) != 1 or len(links[0]) > 8192:
+            raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")
+        expected = urlsplit(url)
+        seen = set()
+        parts = links[0].split(",")
+        if len(parts) > 4:
+            raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")
+        for part in parts:
+            match = re.fullmatch(r'\s*<([^<>\s]+)>\s*;\s*rel="(next|prev|first|last)"\s*', part)
+            if match is None or match[2] in seen:
+                raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")
+            seen.add(match[2])
+            parsed = urlsplit(match[1])
+            query = parse_qsl(parsed.query, keep_blank_values=True)
+            values = dict(query)
+            number = values.get("page", "")
+            if ((parsed.scheme, parsed.netloc, parsed.path) != (expected.scheme, expected.netloc, expected.path)
+                    or parsed.fragment or len(query) != 2 or set(values) != {"page", "per_page"}
+                    or values["per_page"] != str(source._PAGE_SIZE)
+                    or not number.isascii() or not number.isdecimal() or number.startswith("0")
+                    or len(number) > 3 or not 1 <= int(number) <= source._MAX_PAGES):
+                raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")
+            linked = int(number)
+            if ((match[2] == "next" and (linked != page + 1 or count != source._PAGE_SIZE))
+                    or (match[2] == "prev" and linked != page - 1)
+                    or (match[2] == "first" and linked != 1)
+                    or (match[2] == "last" and (linked < page or (linked > page and count != source._PAGE_SIZE)))):
+                raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")

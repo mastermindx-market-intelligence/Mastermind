@@ -574,7 +574,7 @@ def test_receipt_digest_moves_when_gate_identity_moves() -> None:
 
 
 def _rules_endpoint(branch: str = BRANCH) -> str:
-    return f"repos/{REPOSITORY}/rules/branches/{quote(branch, safe='')}"
+    return f"repos/{REPOSITORY}/rules/branches/{quote(branch, safe='')}?per_page=100&page=1"
 
 
 def _branch_endpoint(branch: str = BRANCH) -> str:

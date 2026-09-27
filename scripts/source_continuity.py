@@ -848,8 +848,11 @@ def _branch_protection_endpoint(repository: str, branch: str) -> str:
     return f"repos/{repository}/branches/{quote(branch, safe='')}/protection"
 
 
-def _branch_rules_endpoint(repository: str, branch: str) -> str:
-    return f"repos/{repository}/rules/branches/{quote(branch, safe='')}"
+def _branch_rules_endpoint(repository: str, branch: str, page: int = 1) -> str:
+    if type(page) is not int or not 1 <= page <= _MAX_PAGES:
+        raise _RemoteProbeError()
+    return (f"repos/{repository}/rules/branches/{quote(branch, safe='')}"
+            f"?per_page={_PAGE_SIZE}&page={page}")
 
 
 def _ruleset_endpoint(repository: str, source_type: str, ruleset_id: int) -> str:
@@ -2420,9 +2423,15 @@ def _probe_writer_gate_facts(
     else:
         raise _RemoteProbeError()
 
-    rules = _parse_branch_rules(
-        _api(http_get, token, _branch_rules_endpoint(request.repository, request.branch))
+    # Branch rules are paginated by GitHub. A complete first page is not a
+    # complete rule census; preserve every page under the existing read budget.
+    rule_rows, complete = _paged_array(
+        http_get, token,
+        lambda page: _branch_rules_endpoint(request.repository, request.branch, page),
     )
+    if not complete:
+        return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+    rules = _parse_branch_rules(rule_rows)
     referenced: dict[int, str] = {}
     for rule in rules:
         # Preserve every active applicable rule. The pure verifier owns the
