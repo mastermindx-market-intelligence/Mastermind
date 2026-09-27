@@ -347,12 +347,38 @@ class BrowserActionPort:
         caller: ActionCaller,
         browser_ref: object,
         action_ref: object,
+        *,
+        require_live: bool = True,
     ) -> tuple[BrowserResourceRef, ProjectActionBinding, Path, PreparedBrowserAction]:
         if type(browser_ref) is not str:
             raise BrowserPortRefused("BROWSER_REF_INVALID")
-        browser, binding, socket_path = self._resource(caller, browser_ref)
+        if require_live:
+            browser, binding, socket_path = self._resource(caller, browser_ref)
+        else:
+            # Execution capability expiry or process retirement must not erase
+            # durable effect evidence. Historical references authorize no
+            # dispatch: the current authenticated owner still controls reads.
+            started_at_ms = self._now()
+            try:
+                browser = self._codec.decode_resource(
+                    browser_ref, now_ms=started_at_ms, require_fresh=False
+                )
+            except BrowserContractError as error:
+                raise BrowserPortRefused("BROWSER_REF_INVALID") from error
+            binding = self._binding(caller, browser)
+            now_ms = self._now()
+            if now_ms < started_at_ms:
+                raise BrowserPortRefused("CLOCK_UNAVAILABLE")
+            if (
+                now_ms >= caller.expires_at * 1000
+                or now_ms >= binding.scope.expires_at_ms
+            ):
+                raise BrowserPortRefused("BROWSER_RECONCILIATION_AUTH_EXPIRED")
+            socket_path = self._relay_root / f"{browser.start_action_id}.sock"
         try:
-            prepared = self._codec.decode_action(action_ref, now_ms=self._now())
+            prepared = self._codec.decode_action(
+                action_ref, now_ms=self._now(), require_fresh=require_live
+            )
         except BrowserContractError as error:
             raise BrowserPortRefused("BROWSER_ACTION_INVALID") from error
         if (
@@ -390,7 +416,7 @@ class BrowserActionPort:
         action_ref: object,
     ) -> dict[str, Any]:
         browser, binding, _socket_path, prepared = self._decode_action(
-            caller, browser_ref, action_ref
+            caller, browser_ref, action_ref, require_live=False
         )
         identity = self._action_identity(browser, binding, prepared)
         classified = classify_action(self._store, identity)

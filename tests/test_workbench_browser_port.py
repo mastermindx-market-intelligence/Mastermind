@@ -251,3 +251,134 @@ def test_wrong_process_identity_refuses_before_relay(tmp_path: Path):
             port.call_read_tool(caller, bad_ref, "browser_snapshot", {})
     finally:
         os.close(fd)
+
+
+@pytest.mark.parametrize("prior_effect", ["APPLIED", "NOT_APPLIED", "EFFECT_UNKNOWN"])
+@pytest.mark.parametrize("retirement", ["action_expired", "browser_expired", "process_gone"])
+def test_reconcile_recovers_existing_receipt_after_execution_capability_retires(
+    tmp_path: Path, prior_effect: str, retirement: str
+):
+    """Receipt authority outlives execution authority, never the current caller."""
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append(request)
+        if prior_effect == "EFFECT_UNKNOWN":
+            raise BrowserRelayError("lost reply after possible dispatch")
+        if prior_effect == "NOT_APPLIED":
+            return {
+                "schema": "mastermind.workbench_browser_relay_response.v1",
+                "request_id": request["request_id"],
+                "resource_id": "c" * 32,
+                "ok": False,
+                "error": "REQUEST_REFUSED",
+            }
+        return {
+            "schema": "mastermind.workbench_browser_relay_response.v1",
+            "request_id": request["request_id"],
+            "resource_id": "c" * 32,
+            "ok": True,
+            "result": {"content": [], "isError": False},
+        }
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        action_ref = port.prepare_action(
+            caller, browser_ref, "browser_click", {"target": "button"}
+        )
+        first = port.run_action(caller, browser_ref, action_ref)
+        assert first["effect_state"] == prior_effect
+        if retirement == "action_expired":
+            port._clock_ms = lambda: 6000
+        elif retirement == "browser_expired":
+            port._clock_ms = lambda: 8500
+        else:
+            from control_plane.codex_worker import ProcessIdentityError
+
+            class GoneInspector:
+                def inspect(self, _pid):
+                    raise ProcessIdentityError("owned browser process retired")
+
+            port._inspector = GoneInspector()
+
+        recovered = port.reconcile_action(caller, browser_ref, action_ref)
+        assert recovered["effect_state"] == prior_effect
+        assert recovered["reconciled"] is True
+        assert "result" not in recovered
+        assert len(calls) == 1
+        # Historical evidence access must never re-enable the retired action.
+        with pytest.raises(BrowserPortRefused):
+            port.run_action(caller, browser_ref, action_ref)
+        assert len(calls) == 1
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("tamper", ["browser", "action", "caller", "owner"])
+def test_historical_reconciliation_keeps_exact_authority_binding(tmp_path: Path, tamper: str):
+    import dataclasses
+
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append(request)
+        raise BrowserRelayError("lost reply after possible dispatch")
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        action_ref = port.prepare_action(caller, browser_ref, "browser_click", {"target": "button"})
+        assert port.run_action(caller, browser_ref, action_ref)["effect_state"] == "EFFECT_UNKNOWN"
+        port._clock_ms = lambda: 6000
+        if tamper == "browser":
+            browser_ref = "x" + browser_ref[1:]
+        elif tamper == "action":
+            action_ref = "x" + action_ref[1:]
+        elif tamper == "caller":
+            caller = dataclasses.replace(caller, subject_digest="f" * 64)
+        else:
+            original_resolver = port._resolve_binding
+
+            def moved_resolver(actual, project):
+                binding = original_resolver(actual, project)
+                return dataclasses.replace(binding, scope=dataclasses.replace(
+                    binding.scope, generation="generation:replacement"))
+
+            port._resolve_binding = moved_resolver
+        with pytest.raises(BrowserPortRefused):
+            port.reconcile_action(caller, browser_ref, action_ref)
+        assert len(calls) == 1
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("expired", ["caller", "scope", "clock-regression"])
+def test_historical_reconciliation_rechecks_read_authority_after_owner_lookup(
+    tmp_path: Path, expired: str
+):
+    import dataclasses
+
+    def relay(_path, request, *, timeout):
+        raise AssertionError("read-only reconciliation must not dispatch")
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        action_ref = port.prepare_action(caller, browser_ref, "browser_click", {"target": "button"})
+        original_resolver = port._resolve_binding
+        now = [2000]
+        port._clock_ms = lambda: now[0]
+
+        def delayed_resolver(actual, project):
+            binding = original_resolver(actual, project)
+            if expired == "caller":
+                now[0] = 10000
+                return dataclasses.replace(binding, scope=dataclasses.replace(
+                    binding.scope, expires_at_ms=20000))
+            now[0] = 9000 if expired == "scope" else 1999
+            return binding
+
+        port._resolve_binding = delayed_resolver
+        with pytest.raises(BrowserPortRefused, match="AUTH_EXPIRED|CLOCK_UNAVAILABLE"):
+            port.reconcile_action(caller, browser_ref, action_ref)
+        assert list((tmp_path / "artifacts").iterdir()) == []
+    finally:
+        os.close(fd)
