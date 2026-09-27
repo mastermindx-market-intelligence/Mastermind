@@ -316,8 +316,9 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
         assert ("--model", _EXACT_MODEL) == (
             argv[argv.index("--model") : argv.index("--model") + 2]
         )
-        assert "--dangerously-skip-permissions" in argv
-        assert "--permission-mode" not in argv
+        assert ("--permission-mode", "dontAsk") == (
+            argv[argv.index("--permission-mode") : argv.index("--permission-mode") + 2]
+        )
         assert "--strict-mcp-config" in argv
         assert "--disable-slash-commands" in argv
         assert '{"mcpServers":{}}' in argv
@@ -347,7 +348,7 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
                     ]
                 ),
                 "ask": [],
-                "defaultMode": "bypassPermissions",
+                "defaultMode": "dontAsk",
                 "deny": (
                     [
                         "Agent",
@@ -426,6 +427,7 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
                         "Write(config.toml)",
                     ]
                 ),
+                "disableBypassPermissionsMode": "disable",
             },
             # The fail-closed subprocess sandbox rides in the same request.
             "sandbox": _PROTECTED_SANDBOX_REQUEST,
@@ -2625,8 +2627,9 @@ def test_compile_launch_argv_contains_restricted_and_closed_model_policy(
     argv = invocation.argv
     assert "--restricted" in argv
     assert "--safe-mode" in argv
-    assert "--dangerously-skip-permissions" in argv
-    assert "--permission-mode" not in argv
+    assert ("--permission-mode", "dontAsk") == (
+        argv[argv.index("--permission-mode") : argv.index("--permission-mode") + 2]
+    )
     assert ("--model", _EXACT_MODEL) == (
         argv[argv.index("--model") : argv.index("--model") + 2]
     )
@@ -2732,14 +2735,12 @@ def test_permission_profile_reflects_the_emitted_settings_request(
             id="add-ask-rule",
         ),
         pytest.param(
-            lambda s: s["permissions"].__setitem__("defaultMode", "dontAsk"),
-            id="downgrade-default-mode",
+            lambda s: s["permissions"].__setitem__("defaultMode", "bypassPermissions"),
+            id="widen-default-mode",
         ),
         pytest.param(
-            lambda s: s["permissions"].__setitem__(
-                "disableBypassPermissionsMode", "disable"
-            ),
-            id="disable-bypass-permissions",
+            lambda s: s["permissions"].pop("disableBypassPermissionsMode"),
+            id="remove-bypass-lock",
         ),
         pytest.param(
             lambda s: s["permissions"]["deny"].remove("Read(.git/**)"),
