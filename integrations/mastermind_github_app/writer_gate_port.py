@@ -23,6 +23,7 @@ from control_plane.source_continuity import (
 from scripts import source_continuity as source
 from .github_port import API_VERSION, REST_ROOT, GithubTokenProvider, HttpResponse, UrllibHttpTransport
 from .models import AuthenticatedPrincipal, PrincipalProvider
+from .read_installation_identity import InstallationCredentialError
 
 WRITER_GATE_SCOPE = "mastermind.github.writer_gate.read"
 WRITER_GATE_TOOL_SPEC = {
@@ -40,7 +41,7 @@ _CODES = frozenset({"PRODUCTION_DISARMED", "INPUT_REFUSED", "AUTHENTICATION_REFU
     "SCOPE_REFUSED", "TARGET_UNRESOLVED", "AUTHORITY_EXPIRED", "AUTHORITY_CHANGED",
     "CLOCK_UNAVAILABLE", "GITHUB_AUTH_UNAVAILABLE", "GITHUB_PERMISSION_DENIED",
     "GITHUB_RATE_LIMITED", "GITHUB_REDIRECT_REFUSED", "GITHUB_READ_FAILED",
-    "GITHUB_SOURCE_MOVED", "GITHUB_CENSUS_INCOMPLETE", "SERVICE_UNAVAILABLE"})
+    "GITHUB_SOURCE_MOVED", "GITHUB_CENSUS_INCOMPLETE", "GITHUB_CREDENTIAL_ISSUANCE_UNRESOLVED", "SERVICE_UNAVAILABLE"})
 
 
 class WriterGateServiceRefused(RuntimeError):
@@ -154,6 +155,10 @@ class GithubWriterGatePort:
             return result.to_dict()
         except WriterGateServiceRefused:
             raise
+        except InstallationCredentialError as error:
+            code = ("GITHUB_CREDENTIAL_ISSUANCE_UNRESOLVED" if error.issuance_possible
+                    else "GITHUB_AUTH_UNAVAILABLE")
+            raise WriterGateServiceRefused(code) from None
         except Exception:
             raise WriterGateServiceRefused("SERVICE_UNAVAILABLE") from None
 
