@@ -39,8 +39,6 @@ _ACTIONS = (
     "executive.services.start",
     "executive.services.stop",
     "executive.services.restart",
-    "executive.services.start_readside",
-    "executive.services.stop_readside",
     "executive.worker_auth.verify_only",
     "executive.worker_auth.verify_ready",
     "executive.worker_auth.recover_transaction",
