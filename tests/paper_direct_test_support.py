@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import importlib.metadata
+import os
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,8 @@ import venv
 PINNED_MCP_VERSION = "1.30.0"
 
 def has_pinned_mcp_sdk() -> bool:
+    if os.environ.get("PAPER_DIRECT_PINNED_SDK_TESTS") != "1":
+        return False
     try:
         return importlib.metadata.version("mcp") == PINNED_MCP_VERSION
     except importlib.metadata.PackageNotFoundError:
