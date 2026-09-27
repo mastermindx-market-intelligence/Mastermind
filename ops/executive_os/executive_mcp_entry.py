@@ -307,19 +307,21 @@ def main(argv=None):
 
     policies = load_app_policies(raw['policies'])
     additional_resources = validate_additional_resources(raw)
-    if policies.read.resource in additional_resources:
-        raise ValueError('primary Executive OAuth resource cannot be duplicated')
-    additional_policies = tuple(
-        AppPolicies(
-            read=validate_resource_policy(
-                dataclasses.replace(policies.read, resource=resource)
-            ),
-            submit=validate_resource_policy(
-                dataclasses.replace(policies.submit, resource=resource)
-            ),
+    additional_policies = ()
+    if additional_resources:
+        if policies.read.resource in additional_resources:
+            raise ValueError('primary Executive OAuth resource cannot be duplicated')
+        additional_policies = tuple(
+            AppPolicies(
+                read=validate_resource_policy(
+                    dataclasses.replace(policies.read, resource=resource)
+                ),
+                submit=validate_resource_policy(
+                    dataclasses.replace(policies.submit, resource=resource)
+                ),
+            )
+            for resource in additional_resources
         )
-        for resource in additional_resources
-    )
     settings = AppSettings(
         policies=policies, mastermind_root=source, macro_root_flag=None, environ={},
         ceo_ingress_socket_path=raw['ceo_ingress_socket_path'],
