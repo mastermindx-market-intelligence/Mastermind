@@ -66,6 +66,13 @@ test('inspect dispatches exact bridge status without shell or caller path', asyn
   const result = await designer.call('paper_inspect', {});
   assert.equal(result.isError, false);
   assert.equal(result.effectUnknown, false);
+  assert.equal(result.value.gateway_surface.schema, 'mastermind.paper_studio_surface.v1');
+  assert.deepEqual(result.value.gateway_surface.gateway_advertises, [
+    'paper_inspect', 'paper_catalog', 'paper_read', 'paper_prepare', 'paper_edit',
+  ]);
+  assert.equal(result.value.gateway_surface.file_transition_tool, 'paper_prepare');
+  assert.equal(result.value.gateway_surface.file_transition_requires_direct_tool, true);
+  assert.equal(result.value.gateway_surface.generic_process_fallback_allowed, false);
   assert.deepEqual(calls[0][0], '/opt/paper/python');
   assert.deepEqual(calls[0][1], ['/opt/paper/bridge.py', 'status']);
   assert.equal(calls[0][2].shell, undefined);
