@@ -330,8 +330,11 @@ def _classify_one(
         raise EnrollmentError(f"group {group} has the wrong GID")
     existing = users.get(name)
     if existing is None:
+        # A same-operation interruption can land the exact reviewed group before
+        # useradd runs. Re-adopt only that exact name/GID pair; foreign identity
+        # collisions were already rejected above.
         if existing_group is not None:
-            raise EnrollmentError(f"group {group} exists without its reviewed user")
+            return "create_user"
         return "create"
     if (
         existing.get("uid") != uid
@@ -366,9 +369,12 @@ def ensure_service_identities(identities: ServiceIdentities) -> None:
         ("worker", identities.worker_group, identities.worker_gid, identities.worker_user, identities.worker_uid, WORKER_HOME),
     )
     for key, group, gid, user, uid, home in specs:
-        if plan[key] != "create":
+        if plan[key] == "verify":
             continue
-        _run(["/usr/sbin/groupadd", "--system", "--gid", str(gid), group])
+        if plan[key] == "create":
+            _run(["/usr/sbin/groupadd", "--system", "--gid", str(gid), group])
+        elif plan[key] != "create_user":
+            raise EnrollmentError(f"identity_plan_invalid:{key}")
         _run(
             [
                 "/usr/sbin/useradd",

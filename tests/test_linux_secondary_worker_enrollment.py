@@ -340,3 +340,23 @@ def test_release_manifest_logic_is_executed_from_accepted_source_not_installed_c
     assert 'os.fspath(manifest_tool)' in install
     assert 'destination / "ops/executive_os/release_manifest.py"' not in install
     assert 'staging / "ops/executive_os/release_manifest.py"' not in install
+
+
+def test_identity_plan_resumes_after_exact_group_only_partial_effect() -> None:
+    m = _load()
+    identities = m.ServiceIdentities(
+        control_user="control-fixture", control_group="control-fixture",
+        control_uid=1450, control_gid=1450,
+        worker_user="worker-fixture", worker_group="worker-fixture",
+        worker_uid=1451, worker_gid=1451,
+    )
+    state = {
+        "users_by_name": {},
+        "users_by_uid": {},
+        "groups_by_name": {"control-fixture": 1450, "worker-fixture": 1451},
+        "groups_by_gid": {"1450": "control-fixture", "1451": "worker-fixture"},
+    }
+    assert m.classify_identity_plan(state, identities) == {
+        "control": "create_user",
+        "worker": "create_user",
+    }
