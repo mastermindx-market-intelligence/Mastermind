@@ -176,6 +176,9 @@ test('prepare opens only the host-pinned app and returns read-only when write sc
   assert.equal(result.value.already_active, false);
   assert.equal(result.value.app_open_attempted, true);
   assert.equal(result.value.concurrency_rule, 'MULTI_WRITER_PER_FILE_TARGET_SCOPED');
+  assert.equal(result.value.same_file_multi_writer_allowed, true);
+  assert.equal(result.value.same_page_multi_writer_allowed, true);
+  assert.equal(result.value.coordination_scope, 'BOARD_ARTBOARD_NODE');
   assert.deepEqual(opens, [['/Applications/Paper.app', fileId]]);
 });
 
