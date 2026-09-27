@@ -68,6 +68,7 @@ from control_plane.subscription_harness_bindings import (
     get_binding,
 )
 from control_plane.worker_adapter import adapter_descriptor
+from control_plane.worker_execution_contract import BinaryAttestation
 from control_plane.worker_browser_b1 import BrowserGenerationResource
 
 
@@ -285,8 +286,9 @@ def _subscription_binding_for_config(
 
 
 def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
-    if config.get("native_provider") == "claude":
-        raise WorkerConfigError("native Claude broker factory is not composed")
+    if (config.get("native_provider") == "claude"
+            and not config.get("claude_sdk_python")):
+        raise WorkerConfigError("native Claude requires an explicit SDK runtime")
     if (config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION
             and config.get("operator_harness_armed") is not True):
         raise WorkerConfigError("native service requires current operator autonomy admission")
@@ -504,16 +506,7 @@ def _build_autonomy_canary_factory(
     return issue
 
 
-def _build_broker(
-    config: dict[str, Any],
-    *,
-    autonomy_guard=None,
-    native_account: CodexAccountEnvironment | None = None,
-) -> ExecutiveWorkerBroker:
-    if config.get("native_provider") == "claude":
-        raise WorkerConfigError("native Claude broker factory is not composed")
-    if config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION and native_account is None:
-        raise WorkerConfigError("native broker requires its lifetime account scope")
+def _broker_policy(config: Mapping[str, Any]) -> BrokerPolicy:
     policy = BrokerPolicy(
         control_uid=int(config["control_uid"]),
         worker_uid=int(config["worker_uid"]),
@@ -528,6 +521,118 @@ def _build_broker(
     )
     if os.geteuid() != policy.worker_uid or os.getegid() != policy.worker_gid:
         raise WorkerConfigError("worker broker is not running as its configured OS principal")
+    return policy
+
+
+def _load_native_claude_binary(config: Mapping[str, Any]):
+    """Consume Runtime's installed CLI/SDK attestation; never re-attest or guess."""
+    if not config.get("claude_sdk_python"):
+        raise WorkerConfigError("native Claude requires an explicit SDK runtime")
+    try:
+        from control_plane.native_provider_attestation import load_native_claude_attestation
+    except ImportError:
+        raise WorkerConfigError("native Claude binary attestation reader is not composed") from None
+    try:
+        binary = load_native_claude_attestation(
+            Path(config["claude_attestation_receipt"]),
+            expected_binary_path=Path(config["claude_binary"]),
+            expected_owner_gid=int(config["worker_gid"]),
+            allowed_versions=frozenset(config["allowed_claude_versions"]),
+            sdk_python=Path(config["claude_sdk_python"]),
+        )
+        if (not isinstance(binary, BinaryAttestation)
+                or binary.version not in config["allowed_claude_versions"]
+                or binary.path != config["claude_binary"]
+                or binary.sha256 != config["native_realm_enrollment"].get("provider_binary_sha256")):
+            raise WorkerConfigError("native binary attestation differs from its enrollment")
+        return binary
+    except Exception:
+        raise WorkerConfigError("native Claude binary/SDK attestation refused") from None
+
+
+def _native_claude_adapter_types():
+    try:
+        from control_plane.claude_operator_adapter import (
+            ClaudeOperatorAdapter, ClaudeReadbackPolicyObserver,
+        )
+    except ImportError:
+        raise WorkerConfigError("native Claude broker factory is not composed") from None
+    return ClaudeOperatorAdapter, ClaudeReadbackPolicyObserver
+
+
+def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
+    _assert_service_activation_allowed(config)
+    policy = _broker_policy(config)
+    binary = _load_native_claude_binary(config)
+    adapter_type, observer_type = _native_claude_adapter_types()
+    try:
+        registry = ExecutionCapabilityRegistry.load()
+    except CapabilityPolicyError:
+        raise WorkerConfigError("native Claude capability policy is invalid") from None
+
+    def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+        matches = []
+        for profile in registry.profiles.values():
+            if (not profile.enabled or profile.execution_surface != "claude-agent-sdk"
+                    or requested.provider != "claude"
+                    or requested.harness_kind != "claude-agent-sdk"):
+                continue
+            try:
+                manifest = profile.capability_manifest(
+                    harness_binary_digest=requested.harness_binary_digest)
+            except CapabilityPolicyError:
+                continue
+            if (manifest == requested.capabilities
+                    and profile.sandbox_policy == requested.sandbox_policy
+                    and profile.approval_policy == requested.approval_policy
+                    and profile.network_policy == requested.network_policy
+                    and profile.write_capable == requested.write_capable
+                    and profile.native_helper_policy == requested.native_helper_policy
+                    and profile.expected_config_digest == requested.expected_config_digest):
+                matches.append(profile)
+        if len(matches) != 1:
+            raise WorkerConfigError("native Claude request does not resolve to one reviewed policy")
+        profile = matches[0]
+        return adapter_type(
+            binary_path=Path(config["claude_binary"]),
+            provider_home=policy.provider_home,
+            workspace_root=workspace,
+            worker_id=policy.worker_id,
+            expected_harness_version=binary.version,
+            expected_config_digest=profile.expected_config_digest,
+            network_policy=profile.network_policy,
+            turn_input_loader=turn_input_loader,
+            policy_observer=observer_type(profile.claude_sdk_config_projection()),
+            sdk_python=Path(config["claude_sdk_python"]),
+        )
+
+    return ExecutiveWorkerBroker(
+        None,
+        policy,
+        DedicatedUIDSweeper(policy.worker_uid, receipt_path=Path(config["uid_sweep_receipt"]),
+                            ambient_classifier=DarwinDistnotedClassifier()),
+        adapter_id=None,
+        operator_binary_attestation=binary,
+        operator_adapter_factory=operator_adapter_factory,
+        operator_harness_armed=True,
+        autonomy_guard=autonomy_guard,
+        autonomy_canary_factory=_build_autonomy_canary_factory(config),
+    )
+
+
+def _build_broker(
+    config: dict[str, Any],
+    *,
+    autonomy_guard=None,
+    native_account: CodexAccountEnvironment | None = None,
+) -> ExecutiveWorkerBroker:
+    if config.get("native_provider") == "claude":
+        if native_account is not None:
+            raise WorkerConfigError("native Claude cannot borrow a Codex account scope")
+        return _build_native_claude_broker(config, autonomy_guard=autonomy_guard)
+    if config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION and native_account is None:
+        raise WorkerConfigError("native broker requires its lifetime account scope")
+    policy = _broker_policy(config)
     # Fast, no-subprocess path: the receipt was attested once, warm, at
     # normal priority, by install.sh running as root.  Loading it here (one
     # open+fstat of the receipt, one open+fstat of the binary) is what keeps
@@ -657,11 +762,13 @@ def _build_broker(
 
 
 async def _serve(config: dict[str, Any], *, autonomy_guard=None) -> None:
-    if config.get("native_provider") == "claude":
-        raise WorkerConfigError("native Claude broker factory is not composed")
     if (os.geteuid() != config["worker_uid"] or os.getegid() != config["worker_gid"]
             or config["control_uid"] == config["worker_uid"]):
         raise WorkerConfigError("native scope requires the configured distinct worker principal")
+    if config.get("native_provider") == "claude":
+        broker = _build_broker(config, autonomy_guard=autonomy_guard)
+        await _serve_broker(broker, str(config["launchd_socket_name"]))
+        return
     scope = (nullcontext(None) if _subscription_binding_for_config(config) is not None
              else native_codex_account_scope(Path(config["provider_home"]),
                                              principal_home_admitted=True))
@@ -761,8 +868,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.config,
                 require_root_owner=not args.allow_non_root_owner_for_test,
             )
-            if value.get("native_provider") == "claude":
-                raise WorkerConfigError("native Claude broker factory is not composed")
             # install.sh runs check-config as the worker principal itself
             # (sudo -u "$WORKER_USER" ... check-config) -- the one moment
             # before launchd is trusted with the daemon that anything runs
@@ -771,11 +876,15 @@ def main(argv: list[str] | None = None) -> int:
             # too, so a broken or unreadable receipt fails installation
             # loudly and up front, not only later and silently when
             # launchd first starts the daemon.
-            load_codex_attestation_receipt(
-                Path(value["codex_attestation_receipt"]),
-                expected_binary_path=Path(value["codex_binary"]),
-                expected_owner_gid=int(value["worker_gid"]),
-            )
+            if value.get("native_provider") == "claude":
+                _load_native_claude_binary(value)
+                _native_claude_adapter_types()
+            else:
+                load_codex_attestation_receipt(
+                    Path(value["codex_attestation_receipt"]),
+                    expected_binary_path=Path(value["codex_binary"]),
+                    expected_owner_gid=int(value["worker_gid"]),
+                )
             if value.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION:
                 _native_identity_guard(value, Path(args.config))
             print(

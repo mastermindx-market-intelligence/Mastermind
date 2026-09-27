@@ -43,9 +43,9 @@ def test_claude_config_shape_is_distinct_and_does_not_claim_implemented_factory(
     value["allowed_claude_versions"] = ["2.1.275"]
     del value["allowed_codex_versions"], value["required_team_identifier"]
     assert worker._load_config(_write_config(tmp_path, value), require_root_owner=False) == value
-    with pytest.raises(worker.WorkerConfigError, match="Claude broker factory is not composed"):
+    with pytest.raises(worker.WorkerConfigError, match="explicit SDK runtime"):
         worker._assert_service_activation_allowed(value)
-    with pytest.raises(worker.WorkerConfigError, match="Claude broker factory is not composed"):
+    with pytest.raises(worker.WorkerConfigError, match="explicit SDK runtime"):
         worker._build_broker(value)
     path = tmp_path / "worker.json"
     path.unlink()
