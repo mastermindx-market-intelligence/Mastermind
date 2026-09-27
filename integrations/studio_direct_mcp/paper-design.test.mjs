@@ -72,6 +72,9 @@ test('inspect dispatches exact bridge status without shell or caller path', asyn
   ]);
   assert.equal(result.value.gateway_surface.file_transition_tool, 'paper_prepare');
   assert.equal(result.value.gateway_surface.file_transition_requires_direct_tool, true);
+  assert.equal(result.value.gateway_surface.client_surface_drift_state, 'STUDIO_TOOL_PUBLICATION_DRIFT');
+  assert.equal(result.value.gateway_surface.client_surface_recovery, 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT');
+  assert.equal(result.value.gateway_surface.reconnect_alone_proves_refresh, false);
   assert.equal(result.value.gateway_surface.generic_process_fallback_allowed, false);
   assert.deepEqual(calls[0][0], '/opt/paper/python');
   assert.deepEqual(calls[0][1], ['/opt/paper/bridge.py', 'status']);
