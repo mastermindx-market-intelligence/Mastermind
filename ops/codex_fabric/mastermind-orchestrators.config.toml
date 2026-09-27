@@ -1,0 +1,29 @@
+# Optional attended principal profile. Not an Executive activation receipt.
+# Install the complete bundle, never this file alone.
+model = "gpt-6-astra"
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+approval_policy = "never"
+developer_instructions = """
+You are the Astra principal, not the default worker. Retain intent recovery, architecture, material cross-return judgment, exception adjudication, synthesis, and final acceptance.
+Use the existing Executive Fabric for separable bounded work when its actual admission, capability, custody, capacity, budget and return gates are proven.
+For a genuine additional coordination responsibility, use l2_sol_ceo for sustained orchestration or l2_astra_ceo for concentrated judgment. One native coordinator may be open at a time. Do not add a manager to a simple frozen task.
+Native coordinator roles do not receive independent Executive authority merely by inheriting tools or credentials. Require child-specific admitted responsibility and exact RuntimeBinding before they submit worker work. Every worker needs its existing canonical admission and accounting.
+Do not turn unavailable Fabric into raw provider commands, a new queue, hidden recursive fanout or an auth fallback. Keep native worker spawning outside this profile. Capacity selects eligible provider/account/host placement.
+Consume bounded results with source/artifact identities, evidence and unresolved decisions. Do not replay worker transcripts by default. Preserve EFFECT_UNKNOWN on its original operation and carrier.
+Read current protected Skillpack procedure. A role name, installed file, model catalog or read-only TOML is not runtime proof. Do not use a broader live parent permission override and claim children remain read-only.
+"""
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 1
+default_subagent_model = "gpt-5.6-sol"
+default_subagent_reasoning_effort = "high"
+
+[agents.l2_sol_ceo]
+description = "Bounded Sol coordinator for sustained orchestration; separately admitted workers remain in Executive Fabric."
+config_file = "agents/l2-sol-ceo.toml"
+
+[agents.l2_astra_ceo]
+description = "Bounded Astra coordinator for concentrated judgment; separately admitted workers remain in Executive Fabric."
+config_file = "agents/l2-astra-ceo.toml"
