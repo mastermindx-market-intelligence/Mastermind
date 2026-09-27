@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 
@@ -360,3 +361,34 @@ def test_identity_plan_resumes_after_exact_group_only_partial_effect() -> None:
         "control": "create_user",
         "worker": "create_user",
     }
+
+
+def test_source_custody_rejects_writable_git_admin_and_tracked_parent(tmp_path: Path) -> None:
+    m = _load()
+    repo, _sha, _tree = _source_repo(tmp_path)
+    owner = os.getuid()
+    _git("config", "--unset", "user.email", cwd=repo)
+    _git("config", "--unset", "user.name", cwd=repo)
+    for key in ("core.ignorecase", "core.precomposeunicode"):
+        subprocess.run(
+            ["git", "config", "--unset-all", key], cwd=repo,
+            capture_output=True, text=True, check=False,
+        )
+
+    # The ordinary fixture is safe under its current owner when the production
+    # root-only expectation is parameterized for this hermetic discriminator.
+    m.verify_root_source_custody(repo, expected_owner_uid=owner)
+
+    git_dir = repo / ".git"
+    original_git_mode = stat.S_IMODE(git_dir.lstat().st_mode)
+    git_dir.chmod(original_git_mode | 0o020)
+    with pytest.raises(m.EnrollmentError, match="git.*custody"):
+        m.verify_root_source_custody(repo, expected_owner_uid=owner)
+    git_dir.chmod(original_git_mode)
+
+    scripts = repo / "scripts"
+    original_scripts_mode = stat.S_IMODE(scripts.lstat().st_mode)
+    scripts.chmod(original_scripts_mode | 0o020)
+    with pytest.raises(m.EnrollmentError, match="source_directory_custody"):
+        m.verify_root_source_custody(repo, expected_owner_uid=owner)
+    scripts.chmod(original_scripts_mode)

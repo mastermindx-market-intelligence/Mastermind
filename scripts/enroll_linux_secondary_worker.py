@@ -202,34 +202,80 @@ def verify_source_identity(repo: Path, expected_sha: str, expected_tree: str) ->
     return {"commit": commit, "tree": tree}
 
 
-def verify_root_source_custody(repo: Path) -> None:
+def verify_root_source_custody(
+    repo: Path, *, expected_owner_uid: int = 0
+) -> None:
     repo = Path(repo)
-    try:
-        repo_info = repo.lstat()
-        git_info = (repo / ".git").lstat()
-    except OSError as exc:
-        raise EnrollmentError("source_custody_unavailable") from exc
-    if not stat.S_ISDIR(repo_info.st_mode) or stat.S_ISLNK(repo_info.st_mode):
-        raise EnrollmentError("source_repo_not_direct")
-    if repo_info.st_uid != 0 or stat.S_IMODE(repo_info.st_mode) & 0o022:
-        raise EnrollmentError("source_repo_custody_invalid")
-    if not stat.S_ISDIR(git_info.st_mode) or git_info.st_uid != 0:
-        raise EnrollmentError("source_git_custody_invalid")
+    git_dir = repo / ".git"
+
+    def require_directory(path: Path, *, code: str) -> None:
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise EnrollmentError(code) from exc
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != int(expected_owner_uid)
+            or stat.S_IMODE(info.st_mode) & 0o022
+        ):
+            raise EnrollmentError(code)
+
+    def require_file(path: Path, *, code: str) -> None:
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise EnrollmentError(code) from exc
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != int(expected_owner_uid)
+            or info.st_nlink != 1
+            or stat.S_IMODE(info.st_mode) & 0o022
+        ):
+            raise EnrollmentError(code)
+
+    require_directory(repo, code="source_repo_custody_invalid")
+    require_directory(git_dir, code="source_git_custody_invalid")
+
+    # Git is executed as root later. Close the complete local Git administrative
+    # tree before invoking it so a non-root writer cannot race object/config/ref
+    # bytes between source verification and `git archive`.
+    for current, directory_names, file_names in os.walk(
+        git_dir, topdown=True, followlinks=False
+    ):
+        current_path = Path(current)
+        require_directory(current_path, code="source_git_custody_invalid")
+        for name in directory_names:
+            require_directory(current_path / name, code="source_git_custody_invalid")
+        for name in file_names:
+            require_file(current_path / name, code="source_git_custody_invalid")
+
     verify_git_config_safe(repo)
 
     listed = _git(repo, "ls-files", "-z").stdout.split(b"\0")
+    parent_directories: set[Path] = {repo}
     for encoded in listed:
         if not encoded:
             continue
         relative = encoded.decode("utf-8", errors="strict")
         target = repo / relative
         info = target.lstat()
+        parent = target.parent
+        while parent != repo:
+            parent_directories.add(parent)
+            parent = parent.parent
         if stat.S_ISLNK(info.st_mode):
+            if info.st_uid != int(expected_owner_uid):
+                raise EnrollmentError("source_member_custody_invalid")
             continue
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0:
-            raise EnrollmentError("source_member_custody_invalid")
-        if info.st_nlink != 1 or stat.S_IMODE(info.st_mode) & 0o022:
-            raise EnrollmentError("source_member_custody_invalid")
+        require_file(target, code="source_member_custody_invalid")
+
+    # Root-owned tracked files are insufficient when a writable ancestor lets a
+    # non-root process unlink/replace them after verification. Close every
+    # tracked-file ancestor used by the accepted checkout.
+    for directory in sorted(parent_directories, key=os.fspath):
+        require_directory(directory, code="source_directory_custody_invalid")
 
 
 def load_canonical_identities(
