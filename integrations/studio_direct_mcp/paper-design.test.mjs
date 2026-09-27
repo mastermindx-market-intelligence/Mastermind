@@ -46,6 +46,11 @@ test('paper tools expose discovery, bounded prepare, reads and one explicit cont
   assert.equal(PAPER_DESIGN_TOOLS[4].annotations.idempotentHint, false);
   assert.equal(PAPER_DESIGN_TOOLS[4].annotations.destructiveHint, true);
   assert.equal(PAPER_DESIGN_TOOLS[4].annotations.openWorldHint, true);
+  assert.match(PAPER_DESIGN_TOOLS[3].description, /same file\/page across hosts/);
+  assert.match(PAPER_DESIGN_TOOLS[4].description, /board\/artboard\/node/);
+  assert.match(PAPER_DESIGN_TOOLS[4].description, /target-scoped, not a file-wide lease/);
+  assert.doesNotMatch(PAPER_DESIGN_TOOLS[3].description, /Only one modifying session/);
+  assert.doesNotMatch(PAPER_DESIGN_TOOLS[4].description, /Only one modifying session/);
 });
 
 test('paper config is closed, absolute and digest pinned', () => {
