@@ -435,6 +435,7 @@ class AttendedTargetBroker:
             or type(issued) is not int
             or type(expires) is not int
             or issued < 0
+            or issued > now_ms
             or expires <= now_ms
             or expires <= issued
         ):
@@ -557,6 +558,7 @@ class AttendedTargetBroker:
             type(issued) is not int
             or type(expires) is not int
             or issued < 0
+            or issued > now
             or expires <= now
             or expires <= issued
             or not isinstance(identity_raw, dict)
