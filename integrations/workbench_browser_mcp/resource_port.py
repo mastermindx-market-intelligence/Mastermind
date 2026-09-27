@@ -160,6 +160,7 @@ def default_relay_command(
     config: BrowserHostConfig,
     prepared: PreparedBrowserStart,
     barrier_fd: int,
+    artifact_store_fd: int,
     socket_path: Path,
     output_dir: Path,
     profile_dir: Path | None,
@@ -198,6 +199,12 @@ def default_relay_command(
         str(barrier_fd),
         "--expires-at-ms",
         str(prepared.resource_expires_at_ms),
+        "--artifact-store-fd",
+        str(artifact_store_fd),
+        "--artifact-store-device",
+        str(prepared.store_device),
+        "--artifact-store-inode",
+        str(prepared.store_inode),
     )
 
 
@@ -754,6 +761,7 @@ class BrowserResourcePort:
                         config=self._config,
                         prepared=start,
                         barrier_fd=read_fd,
+                        artifact_store_fd=self._store.dir_fd,
                         socket_path=socket_path,
                         output_dir=output_path,
                         profile_dir=profile_path,
@@ -772,7 +780,7 @@ class BrowserResourcePort:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     close_fds=True,
-                    pass_fds=(read_fd,),
+                    pass_fds=(read_fd, self._store.dir_fd),
                     start_new_session=True,
                 )
                 os.close(read_fd)

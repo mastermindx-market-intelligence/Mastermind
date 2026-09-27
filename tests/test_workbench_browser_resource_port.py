@@ -147,7 +147,7 @@ def _port(tmp_path: Path):
         startup_timeout_seconds=3,
     )
 
-    def command_builder(*, config, prepared, barrier_fd, socket_path, output_dir, profile_dir):
+    def command_builder(*, config, prepared, barrier_fd, artifact_store_fd, socket_path, output_dir, profile_dir):
         assert profile_dir is None
         return (
             sys.executable,
@@ -406,7 +406,7 @@ time.sleep(60)
         encoding="utf-8",
     )
 
-    def command_builder(*, config, prepared, barrier_fd, socket_path, output_dir, profile_dir):
+    def command_builder(*, config, prepared, barrier_fd, artifact_store_fd, socket_path, output_dir, profile_dir):
         return (
             sys.executable,
             str(script),
@@ -463,10 +463,14 @@ def test_default_relay_command_carries_authoritative_resource_expiry(tmp_path: P
             config=port._config,
             prepared=prepared,
             barrier_fd=9,
+            artifact_store_fd=fd,
             socket_path=relay_root / (prepared.action_id + ".sock"),
             output_dir=output_dir,
             profile_dir=None,
         )
+        assert argv[argv.index("--artifact-store-fd") + 1] == str(fd)
+        assert argv[argv.index("--artifact-store-device") + 1] == str(prepared.store_device)
+        assert argv[argv.index("--artifact-store-inode") + 1] == str(prepared.store_inode)
         assert "--expires-at-ms" in argv
         assert argv[argv.index("--expires-at-ms") + 1] == str(
             prepared.resource_expires_at_ms

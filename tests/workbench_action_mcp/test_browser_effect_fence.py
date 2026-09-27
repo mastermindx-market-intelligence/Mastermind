@@ -140,3 +140,63 @@ finally:
         assert sorted(p.name for p in root.iterdir()) == [identity.action_id + ".claim"]
     finally:
         os.close(fd)
+
+
+@pytest.mark.parametrize("case", ["missing", "wrong_kind", "terminal", "pending", "unknown"])
+def test_relay_retirement_requires_original_resource_and_terminal_effects(tmp_path, case):
+    from integrations.workbench_browser_mcp.relay import ArtifactRetirementGuard
+    fd, store, identity, root = _store(tmp_path)
+    resource = dataclasses.replace(identity, purpose="browser_resource", relative_path="browser:resource")
+    try:
+        with aa.acquire_store_writer(store):
+            if case != "missing":
+                _terminal(store, identity if case == "wrong_kind" else resource)
+            if case in {"pending", "unknown"}:
+                action = dataclasses.replace(identity, action_id="f" * 32)
+                aa.claim_action(store, action, claimed_at_ms=2000)
+                if case == "unknown":
+                    aa.finalize_action(store, action, effect_state="EFFECT_UNKNOWN", observed_sha256=None,
+                                       completed_at_ms=2500, durability="durable")
+        before = {p.name: p.read_bytes() for p in root.iterdir()}
+        guard = ArtifactRetirementGuard(store, resource.action_id)
+        with guard() as terminal:
+            assert terminal is (case == "terminal")
+            # Even terminal evidence is consumed under the writer mutex.
+            with pytest.raises(aa.ActionArtifactBusy):
+                aa.acquire_store_writer(store)
+        assert {p.name: p.read_bytes() for p in root.iterdir()} == before
+    finally:
+        os.close(fd)
+
+
+def test_relay_retirement_caches_only_refusal_and_rechecks_new_owner_evidence(tmp_path, monkeypatch):
+    import integrations.workbench_browser_mcp.relay as module
+    fd, store, identity, _root = _store(tmp_path)
+    resource = dataclasses.replace(identity, purpose="browser_resource", relative_path="browser:resource")
+    calls = []
+    original = module.require_terminal_store_effects
+
+    def count(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "require_terminal_store_effects", count)
+    try:
+        with aa.acquire_store_writer(store):
+            _terminal(store, resource)
+            action = dataclasses.replace(identity, action_id="f" * 32)
+            aa.claim_action(store, action, claimed_at_ms=2000)
+        guard = module.ArtifactRetirementGuard(store, resource.action_id)
+        for _ in range(3):
+            with guard() as terminal:
+                assert terminal is False
+        assert len(calls) == 1
+        with aa.acquire_store_writer(store):
+            aa.finalize_action(store, action, effect_state="NOT_APPLIED", observed_sha256=None,
+                               completed_at_ms=3000, durability="durable")
+        for _ in range(2):
+            with guard() as terminal:
+                assert terminal is True
+        assert len(calls) == 3, "positive retirement permission is never cached"
+    finally:
+        os.close(fd)

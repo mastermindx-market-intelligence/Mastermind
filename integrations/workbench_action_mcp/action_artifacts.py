@@ -755,6 +755,7 @@ MAX_EFFECT_FENCE_BYTES = 8 * 1024 * 1024
 
 def require_terminal_store_effects(
     store: ActionArtifactStore, writer: ArtifactWriterLock,
+    *, required_resource_id: str | None = None,
 ) -> None:
     """Fence new Browser effects using this owner's existing durable records.
 
@@ -769,6 +770,11 @@ def require_terminal_store_effects(
         raise ActionArtifactUncertain("held store writer required")
     revalidate_artifact_store(store)
     store.raise_if_cleanup_uncertain()
+    if required_resource_id is not None and (
+        type(required_resource_id) is not str or _HEX32.fullmatch(required_resource_id) is None
+    ):
+        raise ActionArtifactUncertain("required resource identity invalid")
+    required_seen = required_resource_id is None
     before = os.fstat(store.dir_fd)
     inventory: dict[str, tuple[int, ...]] = {}
     actions: dict[str, set[str]] = {}
@@ -812,6 +818,10 @@ def require_terminal_store_effects(
             identity = _decode_claim(raw, None, require_match=False).identity
             if identity.action_id != action_id:
                 raise ActionArtifactUncertain("action evidence identity changed")
+            if action_id == required_resource_id:
+                if identity.purpose != ACTION_PURPOSE_BROWSER_RESOURCE:
+                    raise ActionArtifactUncertain("required browser resource evidence invalid")
+                required_seen = True
             classified = classify_action(store, identity)
             if (classified.evidence_status != "qualified"
                     or classified.effect_state not in {"APPLIED", "NOT_APPLIED"}):
@@ -828,6 +838,8 @@ def require_terminal_store_effects(
                 if identity.purpose != ACTION_PURPOSE_CLOSED_COMMAND or "process" not in kinds:
                     raise ActionArtifactUncertain("orphan output evidence")
 
+        if not required_seen:
+            raise ActionArtifactUncertain("required browser resource evidence missing")
         # No cooperating writer can change the inventory under this mutex.
         # Metadata fences also refuse observable non-cooperating modification.
         for name, fingerprint in inventory.items():

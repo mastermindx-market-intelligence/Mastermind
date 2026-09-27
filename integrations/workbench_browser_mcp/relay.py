@@ -24,6 +24,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
 from typing import Any
 
 from control_plane.browser_resource_contract import (
@@ -32,6 +33,11 @@ from control_plane.browser_resource_contract import (
     BrowserMode,
 )
 from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
+from integrations.workbench_action_mcp.action_artifacts import (
+    ActionArtifactError, ActionArtifactStore,
+    acquire_store_writer, adopt_artifact_store, revalidate_artifact_store,
+    require_terminal_store_effects,
+)
 
 
 RELAY_REQUEST_SCHEMA = "mastermind.workbench_browser_relay_request.v1"
@@ -384,6 +390,51 @@ class McpStdioSession:
                 raise BrowserRelayError("MCP child cleanup was uncertain") from cleanup_error
 
 
+class ArtifactRetirementGuard:
+    """Borrow the existing owner store; persist nothing and never authorize calls."""
+
+    def __init__(self, store: ActionArtifactStore, resource_id: str) -> None:
+        self._store = revalidate_artifact_store(store)
+        if type(resource_id) is not str or _HEX32.fullmatch(resource_id) is None:
+            raise BrowserRelayError("retirement resource identity is invalid")
+        self._resource_id = resource_id
+        self._refused_generation: tuple[int, ...] | None = None
+
+    @contextmanager
+    def __call__(self):
+        try:
+            writer = acquire_store_writer(self._store)
+        except (ActionArtifactError, OSError):
+            # A live writer may be finishing the original effect. No blocking
+            # lock wait and no permission derived from its absence/parent loss.
+            yield False
+            return
+        with writer:
+            try:
+                revalidate_artifact_store(self._store)
+                info = os.fstat(self._store.dir_fd)
+                generation = (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns)
+                if generation == self._refused_generation:
+                    terminal = False
+                else:
+                    try:
+                        require_terminal_store_effects(
+                            self._store, writer, required_resource_id=self._resource_id
+                        )
+                    except ActionArtifactError:
+                        # Cache only a refusal. New append-only owner evidence
+                        # changes directory metadata. Positive proof is never
+                        # cached, and the mutex stays held through child close.
+                        self._refused_generation = generation
+                        terminal = False
+                    else:
+                        self._refused_generation = None
+                        terminal = True
+            except (ActionArtifactError, OSError):
+                terminal = False
+            yield terminal
+
+
 class BrowserRelayServer:
     """One Unix socket and one MCP child for one exact browser resource."""
 
@@ -397,6 +448,7 @@ class BrowserRelayServer:
         parent_pid: int,
         expires_at_ms: int | None = None,
         clock_ms: Callable[[], int] | None = None,
+        retirement_guard: Callable | None = None,
     ) -> None:
         if type(resource_id) is not str or _HEX32.fullmatch(resource_id) is None:
             raise BrowserRelayError("resource identity is invalid")
@@ -427,6 +479,12 @@ class BrowserRelayServer:
         self._owner_pid = owner_pid
         self._parent_pid = parent_pid
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
+        if retirement_guard is not None and not callable(retirement_guard):
+            raise BrowserRelayError("retirement evidence guard is invalid")
+        self._retirement_guard = retirement_guard
+        self._admission_closed = False
+        self._session_closed = False
+        self._last_clock_ms: int | None = None
         self._stop = threading.Event()
         self._ready = threading.Event()
         self._server: socket.socket | None = None
@@ -459,13 +517,36 @@ class BrowserRelayServer:
         self._stop.set()
 
     def _owner_requires_stop(self) -> bool:
-        if self._expires_at_ms is not None:
-            now_ms = self._clock_ms()
-            if type(now_ms) is not int or now_ms < 0 or now_ms >= self._expires_at_ms:
-                return True
-        if os.getppid() != self._parent_pid:
+        if self._admission_closed:
             return True
-        return False
+        try:
+            now_ms = self._clock_ms()
+            if (type(now_ms) is not int or not 0 <= now_ms < 2**63
+                    or (self._last_clock_ms is not None and now_ms < self._last_clock_ms)):
+                return True
+            self._last_clock_ms = now_ms
+            if self._expires_at_ms is not None and now_ms >= self._expires_at_ms:
+                return True
+            return os.getppid() != self._parent_pid
+        except Exception:
+            # Unreadable authority time/parent identity cannot authorize a call.
+            return True
+
+    def _try_automatic_retirement(self) -> bool:
+        self._admission_closed = True
+        guard = self._retirement_guard
+        try:
+            with guard() if guard is not None else nullcontext(False) as terminal:
+                if terminal is not True:
+                    return False
+                # Keep the owner's SAME writer mutex held through child close.
+                self._session.close()
+                self._session_closed = True
+                return True
+        except Exception:
+            # Failure to qualify evidence is retention, never destruction or
+            # authority to issue another browser action.
+            return False
 
     def _response(
         self,
@@ -513,6 +594,7 @@ class BrowserRelayServer:
                 tool_schema_digest=receipt.tool_schema_digest,
                 allowed_tools=list(receipt.allowed_tools),
                 child_pid=receipt.child_pid,
+                admission_closed=self._admission_closed,
             )
         if kind == "tool":
             if set(value) != {
@@ -528,9 +610,12 @@ class BrowserRelayServer:
             arguments = value.get("arguments")
             if type(tool) is not str or type(arguments) is not dict:
                 raise BrowserRelayError("relay tool request is invalid")
+            if self._owner_requires_stop():
+                self._admission_closed = True
+                return self._response(request_id=request_id, ok=False, error="REQUEST_REFUSED")
             try:
                 result = self._session.call(tool, arguments)
-            except BrowserRelayError:
+            except Exception:
                 # Once the MCP child call begins, request bytes may already have
                 # crossed the browser-effect boundary. A missing/invalid reply
                 # can never be downgraded to a pre-dispatch refusal.
@@ -575,6 +660,9 @@ class BrowserRelayServer:
         server: socket.socket | None = None
         try:
             self._validate_parent()
+            if self._owner_requires_stop():
+                self._admission_closed = True
+                raise BrowserRelayError("owner authority retired before native startup")
             self._session.start()
             server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             server.bind(str(self._socket_path))
@@ -588,7 +676,7 @@ class BrowserRelayServer:
             self._server = server
             self._ready.set()
             while not self._stop.is_set():
-                if self._owner_requires_stop():
+                if self._owner_requires_stop() and self._try_automatic_retirement():
                     break
                 try:
                     connection, _ = server.accept()
@@ -604,7 +692,7 @@ class BrowserRelayServer:
                         if type(value) is dict and type(value.get("request_id")) is str:
                             request_id = value["request_id"]
                         response = self._handle(value)
-                    except BrowserRelayError:
+                    except (BrowserRelayError, OSError):
                         response = self._response(
                             request_id=request_id
                             if _HEX32.fullmatch(request_id or "") is not None
@@ -612,7 +700,15 @@ class BrowserRelayServer:
                             ok=False,
                             error="REQUEST_REFUSED",
                         )
-                    self._write_response(connection, response)
+                    try:
+                        self._write_response(connection, response)
+                    except (BrowserRelayError, OSError, UnicodeError, TypeError, ValueError):
+                        # A lost possible-effect reply closes admission, not
+                        # the target. A lost read/refusal reply alone carries
+                        # no native effect and must not quarantine the owner.
+                        if "result" in response or response.get("error") == "EFFECT_UNKNOWN":
+                            self._admission_closed = True
+                        continue
         except BaseException as error:
             self._serve_error = error
             self._ready.set()
@@ -625,7 +721,9 @@ class BrowserRelayServer:
                 except OSError:
                     pass
             try:
-                self._session.close()
+                if not self._session_closed:
+                    self._session.close()
+                    self._session_closed = True
             finally:
                 identity = self._socket_identity
                 if identity is not None:
@@ -751,6 +849,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tmp-dir", required=True)
     parser.add_argument("--barrier-fd", type=int, required=True)
     parser.add_argument("--expires-at-ms", type=int, required=True)
+    parser.add_argument("--artifact-store-fd", type=int, required=True)
+    parser.add_argument("--artifact-store-device", type=int, required=True)
+    parser.add_argument("--artifact-store-inode", type=int, required=True)
     args = parser.parse_args(argv)
 
     if _HEX32.fullmatch(args.resource_id) is None:
@@ -775,6 +876,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if barrier != b"\x01":
         raise BrowserRelayError("launch barrier was not released")
 
+    if args.artifact_store_fd < 3 or args.artifact_store_fd == args.barrier_fd:
+        raise BrowserRelayError("artifact descriptor is invalid")
+    os.set_inheritable(args.artifact_store_fd, False)
+    store = adopt_artifact_store(args.artifact_store_fd)
+    if (store.device, store.inode) != (args.artifact_store_device, args.artifact_store_inode):
+        raise BrowserRelayError("artifact store identity changed")
+    retirement_guard = ArtifactRetirementGuard(store, args.resource_id)
+
     session = McpStdioSession(
         argv=child_argv,
         env={
@@ -796,6 +905,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         owner_pid=owner_pid,
         parent_pid=owner_pid,
         expires_at_ms=args.expires_at_ms,
+        retirement_guard=retirement_guard,
     )
     previous: dict[int, Any] = {}
 
@@ -809,6 +919,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
+        os.close(args.artifact_store_fd)
     return 0
 
 

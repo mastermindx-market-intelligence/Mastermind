@@ -6,12 +6,14 @@ import socket
 import subprocess
 import sys
 import threading
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
 
 from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
 from integrations.workbench_browser_mcp.relay import (
+    RELAY_REQUEST_SCHEMA,
     BrowserRelayError,
     BrowserRelayServer,
     McpSessionReceipt,
@@ -393,6 +395,7 @@ def test_relay_self_retires_at_authoritative_lease_expiry(tmp_path):
         expires_at_ms=2000,
         clock_ms=lambda: now["value"],
     )
+    relay._retirement_guard = lambda: nullcontext(True)  # synthetic terminal-owner proof
     thread = threading.Thread(target=relay.serve_forever, daemon=True)
     thread.start()
     relay.wait_ready(timeout=3)
@@ -425,6 +428,7 @@ def test_relay_self_retires_when_workbench_parent_disappears(
         owner_pid=os.getpid(),
         parent_pid=4242,
     )
+    relay._retirement_guard = lambda: nullcontext(True)  # synthetic terminal-owner proof
     thread = threading.Thread(target=relay.serve_forever, daemon=True)
     thread.start()
     relay.wait_ready(timeout=3)
@@ -433,3 +437,191 @@ def test_relay_self_retires_when_workbench_parent_disappears(
     thread.join(timeout=3)
     assert not thread.is_alive()
     assert not socket_path.exists()
+
+
+@pytest.mark.parametrize("trigger", ["expiry", "parent_loss"])
+def test_automatic_retirement_retains_target_when_evidence_not_terminal(tmp_path, monkeypatch, trigger):
+    from contextlib import contextmanager
+    import integrations.workbench_browser_mcp.relay as module
+
+    parent = [4242]
+    now = [1000]
+    monkeypatch.setattr(module.os, "getppid", lambda: parent[0])
+    session = _CountingSession()
+    relay = BrowserRelayServer(
+        resource_id="a" * 32, socket_path=tmp_path / "retained.sock", session=session,
+        owner_pid=os.getpid(), parent_pid=4242, expires_at_ms=2000,
+        clock_ms=lambda: now[0],
+    )
+    checked = threading.Event()
+
+    @contextmanager
+    def guard():
+        checked.set()
+        yield False
+
+    relay._retirement_guard = guard
+    thread = threading.Thread(target=relay.serve_forever, daemon=True)
+    thread.start()
+    relay.wait_ready(timeout=3)
+    try:
+        if trigger == "expiry":
+            now[0] = 2000
+        else:
+            parent[0] = 1
+        assert checked.wait(1), "automatic retirement must consult existing effect evidence"
+        assert thread.is_alive(), "an uncertain target must survive automatic retirement"
+        assert session.receipt.child_pid == os.getpid()
+        status = relay_request(relay._socket_path, {
+            "schema": RELAY_REQUEST_SCHEMA, "kind": "status",
+            "request_id": "b" * 32, "resource_id": "a" * 32,
+        }, timeout=2)
+        assert status["ok"] is True and status["admission_closed"] is True
+        refused = relay_request(relay._socket_path, {
+            "schema": RELAY_REQUEST_SCHEMA, "kind": "tool",
+            "request_id": "c" * 32, "resource_id": "a" * 32,
+            "tool": "browser_click", "arguments": {"target": "button"},
+        }, timeout=2)
+        assert refused["ok"] is False and refused["error"] == "REQUEST_REFUSED"
+        assert session.calls == 0
+    finally:
+        relay.stop()
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+
+
+def test_expiry_at_handle_time_refuses_and_cannot_reopen_on_clock_rollback(tmp_path):
+    now = [2000]
+    session = _CountingSession()
+    session.start()
+    relay = BrowserRelayServer(
+        resource_id="a" * 32, socket_path=tmp_path / "late.sock", session=session,
+        owner_pid=os.getpid(), parent_pid=os.getppid(), expires_at_ms=2000,
+        clock_ms=lambda: now[0],
+    )
+    request = {"schema": RELAY_REQUEST_SCHEMA, "kind": "tool", "request_id": "b" * 32,
+               "resource_id": "a" * 32, "tool": "browser_click", "arguments": {"target": "button"}}
+    try:
+        assert relay._handle(request)["ok"] is False
+        now[0] = 1000
+        assert relay._handle(request)["ok"] is False
+        assert session.calls == 0
+    finally:
+        session.close()
+
+
+def test_response_write_loss_does_not_destroy_browser_target(tmp_path, monkeypatch):
+    session = _CountingSession()
+    relay = BrowserRelayServer(
+        resource_id="a" * 32, socket_path=tmp_path / "lost.sock", session=session,
+        owner_pid=os.getpid(), parent_pid=os.getppid(),
+    )
+    original = relay._write_response
+    lost = threading.Event()
+
+    def lose_tool_response(connection, response):
+        if "result" in response:
+            lost.set()
+            raise BrokenPipeError("synthetic caller disconnected after native action")
+        return original(connection, response)
+
+    monkeypatch.setattr(relay, "_write_response", lose_tool_response)
+    failures = []
+
+    def run():
+        try:
+            relay.serve_forever()
+        except BaseException as error:
+            failures.append(type(error).__name__)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    relay.wait_ready(timeout=3)
+    try:
+        with pytest.raises(BrowserRelayError):
+            relay_request(relay._socket_path, {
+                "schema": RELAY_REQUEST_SCHEMA, "kind": "tool", "request_id": "b" * 32,
+                "resource_id": "a" * 32, "tool": "browser_click", "arguments": {"target": "button"},
+            }, timeout=2)
+        assert lost.wait(1)
+        thread.join(timeout=0.1)
+        assert not failures and thread.is_alive(), "connection loss cannot retire the effect target"
+        assert session.calls == 1
+        assert session.receipt.child_pid == os.getpid()
+    finally:
+        relay.stop()
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("trigger", ["already_expired", "already_orphaned"])
+def test_relay_never_starts_native_child_under_retired_authority(tmp_path, trigger):
+    session = _CountingSession()
+    started = []
+    original_start = session.start
+
+    def start():
+        started.append(True)
+        return original_start()
+
+    session.start = start
+    relay = BrowserRelayServer(
+        resource_id="a"*32, socket_path=tmp_path / "not-started.sock", session=session,
+        owner_pid=os.getpid(), parent_pid=os.getppid() if trigger=="already_expired" else os.getppid()+100,
+        expires_at_ms=2000, clock_ms=lambda: 2000 if trigger=="already_expired" else 1000,
+        retirement_guard=lambda: nullcontext(True),
+    )
+    with pytest.raises(BrowserRelayError):
+        relay.serve_forever()
+    assert started == []
+    assert not relay._socket_path.exists()
+
+
+@pytest.mark.parametrize("guard", [None, lambda: True])
+def test_absent_or_invalid_retirement_proof_cannot_close_target(tmp_path, guard):
+    session = _CountingSession()
+    session.start()
+    relay = BrowserRelayServer(
+        resource_id="a"*32, socket_path=tmp_path / "no-proof.sock", session=session,
+        owner_pid=os.getpid(), parent_pid=os.getppid(), retirement_guard=guard,
+    )
+    try:
+        assert relay._try_automatic_retirement() is False
+        assert relay._admission_closed is True
+        assert session.receipt.child_pid == os.getpid()
+    finally:
+        session.close()
+
+
+def test_lost_status_reply_does_not_quarantine_an_unmodified_resource(tmp_path, monkeypatch):
+    session = _CountingSession()
+    relay = BrowserRelayServer(
+        resource_id="a"*32, socket_path=tmp_path / "status-loss.sock", session=session,
+        owner_pid=os.getpid(), parent_pid=os.getppid(),
+    )
+    original = relay._write_response
+    first = [True]
+
+    def lose_first_status(connection, response):
+        if first[0] and "child_pid" in response:
+            first[0] = False
+            raise BrokenPipeError("synthetic lost read-only status reply")
+        return original(connection, response)
+
+    monkeypatch.setattr(relay, "_write_response", lose_first_status)
+    thread = threading.Thread(target=relay.serve_forever, daemon=True)
+    thread.start()
+    relay.wait_ready(timeout=3)
+    request = {"schema":RELAY_REQUEST_SCHEMA,"kind":"status","request_id":"b"*32,"resource_id":"a"*32}
+    try:
+        with pytest.raises(BrowserRelayError):
+            relay_request(relay._socket_path,request,timeout=2)
+        status = relay_request(relay._socket_path,request,timeout=2)
+        assert status["ok"] is True and status["admission_closed"] is False
+        result = relay_request(relay._socket_path,{**request,"kind":"tool","tool":"browser_click",
+                                                  "arguments":{"target":"button"}},timeout=2)
+        assert result["ok"] is True and session.calls == 1
+    finally:
+        relay.stop()
+        thread.join(timeout=3)
+        assert not thread.is_alive()
