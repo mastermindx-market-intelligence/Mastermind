@@ -738,3 +738,55 @@ def test_duplicate_initialize_keeps_original_generation(fake_sdk):
         assert original.disconnect_called == 0
         await r.disconnect()
     asyncio.run(scenario())
+
+
+def test_completed_result_cannot_recycle_turn_until_drain_closes(fake_sdk):
+    async def scenario():
+        r=helper.HelperRuntime('gen', _good_config());await r.initialize()
+        release=asyncio.Event();yielded=asyncio.Event()
+        async def delayed_close():
+            yield FakeResultMessage('success',r.session_id,False,1,0,{},'turn A')
+            yielded.set()
+            await release.wait()
+        r.client.receive_response=delayed_close
+        await r.begin_turn('A','first')
+        await yielded.wait()
+        assert (await r.collect())['terminal'] is False
+        with pytest.raises(HelperProtocolError, match='active|closed'):
+            await r.begin_turn('B','must not race')
+        assert len(r.client.queries)==2
+        release.set();await r._drain_task
+        result=await r.collect()
+        assert result['turn_id']=='A' and result['summary']=='turn A'
+        await r.disconnect()
+    asyncio.run(scenario())
+
+
+def test_event_evidence_is_scrubbed_before_helper_export(fake_sdk):
+    async def scenario():
+        r=helper.HelperRuntime('gen',_good_config());await r.initialize()
+        r.client.enqueue_turn_events([FakeAssistantMessage([{'type':'text','text':'privateperson@example.test'}]),
+            FakeResultMessage('success',r.session_id,False,1,0,{},'complete')])
+        await r.begin_turn('A','read');await r._drain_task
+        events=await r.read_events(256)
+        assert 'privateperson@example.test' not in json.dumps(events)
+        assert '<redacted>' in json.dumps(events)
+        assert events==await r.read_events(256)
+        await r.disconnect()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('bad',[None,{},['valid',{}],['x'*201]])
+def test_native_inventory_malformed_never_becomes_empty(bad):
+    with pytest.raises(HelperProtocolError):helper._bounded_list(bad)
+
+
+def test_aborted_success_shape_cannot_be_successful_candidate(fake_sdk):
+    async def scenario():
+        r=helper.HelperRuntime('gen',_good_config());await r.initialize()
+        result=FakeResultMessage('success',r.session_id,False,1,0,{},'partial')
+        result.terminal_reason='aborted_streaming'
+        r.client.enqueue_turn_events([result]);await r.begin_turn('A','work');await r._drain_task
+        assert (await r.collect())['success'] is False
+        await r.disconnect()
+    asyncio.run(scenario())

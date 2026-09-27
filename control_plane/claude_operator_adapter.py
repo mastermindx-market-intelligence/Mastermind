@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from control_plane.claude_operator_helper_protocol import INTERFACE_VERSION, security_settings
+from control_plane.executive_agent_capabilities import claude_security_config_digest
 from control_plane.codex_operator_adapter import _default_base_sha, _default_process_identity
 from control_plane.executive_orchestration_result import RawRoleResultObservation, parse_canonical_json
 from control_plane.operator_harness_contract import (
@@ -98,10 +99,13 @@ class ClaudeReadbackPolicyObserver:
         if observed_policy != {"sandbox": self._config["sandbox"]}:
             raise ClaudeOperatorError(AdapterFailureClass.CONFIG_DRIFT, "effective native policy differs from qualified profile")
         # Ordered tool encoding follows the registry; every member was observed.
-        observed = {"tools": ["Read", "Glob", "Grep"], "permission_mode": init["permissionMode"],
-                    "setting_sources": [], "strict_mcp_config": True, "mcp_servers": {},
-                    "skills": [], "sandbox": observed_policy["sandbox"]}
-        return ClaudePolicyObservation("read-only", "never", "disabled", _digest(observed))
+        provenance = handshake.get("applied_launch_provenance")
+        if (provenance != {"setting_sources": [], "strict_mcp_config": True, "skills": []}
+                or handshake.get("settings_readback_provenance") != "native-get_settings/0.2.160/2.1.275"):
+            raise ClaudeOperatorError(AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                                      "native readback and applied launch provenance are unavailable")
+        return ClaudePolicyObservation("read-only", "never", "disabled",
+            claude_security_config_digest(observed_policy, launch_provenance=provenance))
 
 
 @dataclass
@@ -163,7 +167,7 @@ class ClaudeOperatorAdapter:
     def _env(self) -> dict[str, str]:
         # Never inherit provider keys, refresh seeds, proxy routing or test hooks.
         principal = pwd.getpwuid(os.geteuid())
-        for path in (self.provider_home, self.provider_home / ".claude"):
+        for path in (self.provider_home, self.provider_home / ".claude", self.provider_home / "tmp"):
             st = path.lstat()
             if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != stat.S_IRWXU:
                 raise ClaudeOperatorError(AdapterFailureClass.AUTH_FAILURE, "native home is not private to the current principal")
@@ -190,7 +194,10 @@ class ClaudeOperatorAdapter:
             reasons.append("native profile differs from bound constructor")
         if requested.write_capable or requested.native_helper_policy is not NativeHelperPolicy.DISABLED:
             reasons.append("profile exceeds qualified native capability")
-        if self.expected_config_digest != _digest(self.policy_observer.launch_config()):
+        config = self.policy_observer.launch_config()
+        if self.expected_config_digest != claude_security_config_digest(
+                {"sandbox": config["sandbox"]},
+                launch_provenance={k:config[k] for k in ("setting_sources", "strict_mcp_config", "skills")}):
             reasons.append("native policy digest mismatch")
         return ProfileValidation(requested, not reasons, tuple(reasons))
 
@@ -310,7 +317,7 @@ class ClaudeOperatorAdapter:
                 events.append(NormalizedEvent(turn.attempt_id, turn.session_epoch_id, turn.process_generation_id,
                     turn.turn_id, kind, payload_redacted={k:v for k,v in item.items() if k not in {"sequence", "turn_id"}}))
             status = state.client.request("collect", self._fields(state, turn_id=turn.turn_id))
-            if status.get("terminal") or status.get("failure"):
+            if (status.get("terminal") or status.get("failure")) and not page.get("has_more", False):
                 break
             if time.monotonic() >= deadline:
                 raise ClaudeOperatorError(AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE, "native turn remains unfinished", effect_unknown=True)
@@ -329,6 +336,10 @@ class ClaudeOperatorAdapter:
                 or result.get("session_id") != state.session_id or result.get("turn_id") != turn.turn_id
                 or not isinstance(result.get("summary"), str) or not result.get("native_result_id")):
             raise ClaudeOperatorError(AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE, "native successful terminal result is missing", effect_unknown=True)
+        try:
+            uuid.UUID(result["native_result_id"])
+        except (TypeError, ValueError) as exc:
+            raise ClaudeOperatorError(AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE, "native result UUID is malformed") from exc
         return result
 
     def collect_candidate_result(self, turn: TurnRef) -> CandidateResult:

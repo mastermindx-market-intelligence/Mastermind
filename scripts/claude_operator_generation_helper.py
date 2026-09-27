@@ -28,6 +28,7 @@ from control_plane.claude_operator_helper_protocol import (  # noqa: E402
     encode_json_line,
     parse_request,
 )
+from scripts.ohf.redaction import redact_evidence_text  # noqa: E402
 
 
 # Allowed config keys; env / extra_args are deliberately rejected.
@@ -72,16 +73,10 @@ def _bump_event(events: list, entry: dict) -> None:
 
 
 def _bounded_list(value: Any, *, limit: int = 200) -> list:
-    if not isinstance(value, list):
-        return []
-    out = []
-    for item in value:
-        text = bounded_text(item, limit=limit)
-        if text is not None:
-            out.append(text)
-        if len(out) >= MAX_EVENTS:
-            break
-    return out
+    if (not isinstance(value, list) or len(value) > MAX_EVENTS or
+            any(not isinstance(x, str) or not 1 <= len(x) <= limit for x in value)):
+        raise HelperProtocolError("native capability inventory is malformed or unsupported")
+    return list(value)
 
 
 class HelperRuntime:
@@ -115,6 +110,8 @@ class HelperRuntime:
         self._effective_policy: dict[str, Any] = {}
         self._event_sequence = 0
         self._native_result_id: str | None = None
+        self._applied_launch_provenance: dict[str, Any] = {}
+        self._drain_closed = True
 
     def _record_event(self, entry: dict[str, Any]) -> None:
         self._event_sequence += 1
@@ -188,6 +185,9 @@ class HelperRuntime:
             options_kwargs["settings"] = json.dumps(self.config["settings"], allow_nan=False)
 
         try:
+            self._applied_launch_provenance = {
+                name: options_kwargs.get(name) for name in ("setting_sources", "strict_mcp_config", "skills")
+            }
             self.client = Client(Options(**options_kwargs))
             await self.client.connect(prompt=None)
         except HelperProtocolError:
@@ -314,6 +314,10 @@ class HelperRuntime:
             response = await self.client._query._send_control_request(
                 {"subtype": "get_settings"}, timeout=10.0
             )
+            if (not isinstance(response, Mapping) or set(response) != {"applied", "effective", "sources"}
+                    or not isinstance(response["effective"], Mapping)
+                    or set(response["effective"]) - {"sandbox", "permissions"}):
+                raise HelperProtocolError("unqualified effective settings or native readback shape")
             from control_plane.claude_operator_helper_protocol import security_settings
             return security_settings(response.get("effective"))
         except Exception as exc:
@@ -396,6 +400,8 @@ class HelperRuntime:
             "registration_zero_turn": True,
             "effective_policy": self._effective_policy,
             "native_subscription_verified": True,
+            "applied_launch_provenance": self._applied_launch_provenance,
+            "settings_readback_provenance": "native-get_settings/0.2.160/2.1.275",
         }
 
     async def begin_turn(self, turn_id: str, payload: str) -> Mapping[str, Any]:
@@ -411,6 +417,8 @@ class HelperRuntime:
             raise HelperProtocolError("turn_id is duplicate")
         if self.active_turn_id is not None and not self._collected:
             raise HelperProtocolError("turn is already active")
+        if self._drain_task is not None and not self._drain_task.done():
+            raise HelperProtocolError("previous native response drain is not closed")
         if not isinstance(payload, str):
             raise HelperProtocolError("payload must be a string")
         if len(payload.encode("utf-8")) > MAX_TEXT_CHARS:
@@ -448,17 +456,22 @@ class HelperRuntime:
             raise HelperProtocolError("native query effect requires reconciliation") from exc
 
         self._model_was_queried = True
+        self._drain_closed = False
         self._drain_task = asyncio.create_task(self._drain_response())
         # ACK is only marked true when an actual provider response event is observed.
         return {"provider_turn_id": turn_id, "acknowledged": self.acknowledged}
 
     async def _drain_response(self) -> None:
+        draining_turn_id = self.active_turn_id
         sdk = _SDK_FACTORY()
         AssistantMessage = getattr(sdk, "AssistantMessage", None)
         SystemMessage = getattr(sdk, "SystemMessage", None)
         ResultMessage = getattr(sdk, "ResultMessage", None)
         try:
             async for msg in self.client.receive_response():
+                if self.active_turn_id != draining_turn_id:
+                    self._failure = "late_response_turn_mismatch"
+                    return
                 if self._stop_drain.is_set():
                     break
                 if SystemMessage is not None and isinstance(msg, SystemMessage):
@@ -475,7 +488,7 @@ class HelperRuntime:
                         return
                     text = self._extract_assistant_text(msg)
                     self._record_event(
-                        {"kind": "message", "text": bounded_text(text, limit=MAX_TEXT_CHARS)},
+                        {"kind": "message", "text": redact_evidence_text(text[:MAX_TEXT_CHARS])},
                     )
                     self.acknowledged = True
                 elif ResultMessage is not None and isinstance(msg, ResultMessage):
@@ -485,11 +498,18 @@ class HelperRuntime:
                     self.summary = bounded_text(getattr(msg, "result", None), limit=MAX_TEXT_CHARS)
                     self.terminal = True
                     self._success = msg.subtype == "success" and msg.is_error is False
+                    if getattr(msg, "terminal_reason", None) in {"aborted_streaming", "aborted_tools", "max_turns"}:
+                        self._success = False
+                    origin = getattr(msg, "origin", None)
+                    if origin is not None and (not isinstance(origin, Mapping) or origin.get("kind") != "human"):
+                        self._failure = "unexpected_terminal_origin"
+                        self._success = False
                     self._native_result_id = bounded_text(getattr(msg, "uuid", None), limit=128)
                     if not self._success:
                         status = getattr(msg, "api_error_status", None)
-                        self._failure = "authentication_required" if status in (401, 403) else (
+                        self._failure = self._failure or ("authentication_required" if status in (401, 403) else (
                             "quota_or_rate_limit" if status == 429 else "provider_turn_failed")
+                        )
                     self.acknowledged = True
                     self._record_event(
                         {
@@ -506,6 +526,8 @@ class HelperRuntime:
             raise
         except Exception:
             self._failure = "response_effect_unknown"
+        finally:
+            self._drain_closed = True
 
     @staticmethod
     def _extract_assistant_text(msg: Any) -> str:
@@ -528,7 +550,7 @@ class HelperRuntime:
                     chunks.append(block.text[:MAX_TEXT_CHARS])
         elif isinstance(content, str):
             chunks.append(content)
-        return "".join(chunks)
+        return "".join(chunks)[:MAX_TEXT_CHARS]
 
     async def read_events(self, max_events: int, after_sequence: int = 0) -> Mapping[str, Any]:
         await self._require_client()
@@ -538,8 +560,15 @@ class HelperRuntime:
             raise HelperProtocolError("event cursor is invalid")
         if self.events and after_sequence < self.events[0]["sequence"] - 1:
             raise HelperProtocolError("event cursor fell outside retained window")
-        drained = [x for x in self.events if x["sequence"] > after_sequence][:max_events]
-        return {"events": drained}
+        pending = [x for x in self.events if x["sequence"] > after_sequence]
+        drained, wire_size = [], 0
+        for event in pending[:max_events]:
+            size = len(encode_json_line(event))
+            if wire_size + size > MAX_WIRE_BYTES // 2:
+                break
+            drained.append(event)
+            wire_size += size
+        return {"events": drained, "has_more": len(drained) < len(pending)}
 
     async def interrupt(self) -> None:
         await self._require_client()
@@ -553,7 +582,7 @@ class HelperRuntime:
         await self._require_client()
         if self.active_turn_id is None:
             raise HelperProtocolError("turn is not active")
-        if not self.terminal:
+        if not self.terminal or not self._drain_closed:
             return {"terminal": False, "success": False, "failure": self._failure,
                     "summary": None, "acknowledged": self.acknowledged}
         # Fully drain terminal turn: keep candidate bounded, preserve session match.

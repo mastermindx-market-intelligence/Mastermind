@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from control_plane.claude_operator_adapter import ClaudeOperatorAdapter, ClaudeReadbackPolicyObserver, ClaudeOperatorError, _digest
+from control_plane.executive_agent_capabilities import claude_security_config_digest
 from control_plane.operator_harness_contract import (CapabilityIdentity, CapabilityManifest,
     RequestedExecutionProfile, NativeHelperPolicy, SessionEpochRef, ProcessGenerationRef,
     ProcessIdentityObservation, OperationId, TurnRef, EventCursor, compare_launch, LaunchDecision,
@@ -38,6 +39,8 @@ class FakeClient:
             c=fields['config'];self.sid=c['session_id']
             return {'sdk_version':'0.2.160','cli_version':'2.1.275','session_id':self.sid,
                     'registration_zero_turn':True,'native_subscription_verified':True,
+                    'applied_launch_provenance':{'setting_sources':[],'strict_mcp_config':True,'skills':[]},
+                    'settings_readback_provenance':'native-get_settings/0.2.160/2.1.275',
                     'initialization':{'model':c['model'],'cwd':c['cwd'],'tools':['Read','Glob','Grep'],
                         'skills':[],'plugins':[],'mcp_servers':[],'permissionMode':'dontAsk'},
                     'mcp_status':{'servers':[]},'server_info':{'account':{'apiProvider':'firstParty','subscriptionType':'Claude Max'}},
@@ -52,7 +55,7 @@ class FakeClient:
         return {'acknowledged':True}
     def request_raw_turn_page(self, **kwargs):
         result={'terminal':self.terminal,'success':not self.bad_result,'session_id':self.sid,'turn_id':self.turn,
-                'native_result_id':'native-result-1','summary':'{"answer":"verified"}'}
+                'native_result_id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','summary':'{"answer":"verified"}'}
         return SimpleNamespace(consume=lambda:result)
     def graceful_close(self, **kwargs):
         self.running=False
@@ -65,7 +68,7 @@ def configured(tmp_path):
     workspace=root/'workspace';workspace.mkdir();binary=root/'claude';binary.write_bytes(b'qualified fixture executable')
     client=FakeClient()
     a=ClaudeOperatorAdapter(binary_path=binary,provider_home=home,workspace_root=workspace,
-        worker_id='worker',expected_harness_version='2.1.275',expected_config_digest=_digest(POLICY),
+        worker_id='worker',expected_harness_version='2.1.275',expected_config_digest=claude_security_config_digest({'sandbox':POLICY['sandbox']},launch_provenance={k:POLICY[k] for k in ('setting_sources','strict_mcp_config','skills')}),
         network_policy='disabled',turn_input_loader=lambda t:'Actual project task for '+t.turn_id,
         policy_observer=ClaudeReadbackPolicyObserver(POLICY),client_factory=lambda *args:client,
         process_identity_observer=lambda pid:ProcessIdentityObservation(pid,pid,'start','boot'),
@@ -73,7 +76,7 @@ def configured(tmp_path):
     profile=RequestedExecutionProfile('worker','claude','claude-opus-5','claude-agent-sdk',a.binary_digest,'2.1.275',
         a.configured_workspace,'read-only','never','disabled',
         CapabilityManifest(required=tuple(CapabilityIdentity(t,a.binary_digest,kind='tool') for t in POLICY['tools'])),
-        NativeHelperPolicy.DISABLED,'authority-hash',expected_config_digest=_digest(POLICY))
+        NativeHelperPolicy.DISABLED,'authority-hash',expected_config_digest=claude_security_config_digest({'sandbox':POLICY['sandbox']},launch_provenance={k:POLICY[k] for k in ('setting_sources','strict_mcp_config','skills')}))
     epoch=SessionEpochRef('epoch','attempt','worker',1);gen=ProcessGenerationRef('generation','epoch',1,'worker')
     return a,client,profile,epoch,gen
 
@@ -140,3 +143,15 @@ def test_changed_policy_readback_refuses(configured):
     handshake['effective_policy']['sandbox']['allowUnsandboxedCommands']=True
     with pytest.raises(ClaudeOperatorError,match='policy differs'):
         a.policy_observer.observe(handshake)
+
+
+def test_absent_private_tmp_refuses_before_any_process_start(configured):
+    a,c,p,e,g=configured;(a.provider_home/'tmp').rmdir()
+    with pytest.raises((OSError,ClaudeOperatorError)):start(configured)
+    assert not c.running and not c.calls
+
+
+def test_shared_policy_encoder_matches_actual_handshake_provenance(configured):
+    a,c,p,e,g=configured;_,launch=start(configured)
+    assert launch.observed.effective_config_digest==p.expected_config_digest
+    assert launch.decision is LaunchDecision.ALLOW
