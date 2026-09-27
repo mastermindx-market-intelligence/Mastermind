@@ -39,20 +39,24 @@ def build_read_only_mcp_server(port: GithubWriterGatePort) -> Server:
     async def list_tools():
         return [tool.model_copy(deep=True)]
 
-    # Validate here, not in a generic schema-error formatter that may echo the
-    # rejected instance. Model input and upstream error bodies are never copied.
     @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict | None):
-        if (name != tool.name or type(arguments) is not dict
-                or set(arguments) != {"operation_key"}
-                or type(arguments["operation_key"]) is not str):
-            return _result({"code": "INPUT_REFUSED", "receipt": None}, failed=True)
-        try:
-            receipt = await port.observe_writer_gate(arguments["operation_key"])
-            return _result(receipt, failed=receipt.get("schema") != "mastermind.source_continuity_writer_gate/v1")
-        except WriterGateServiceRefused as error:
-            return _result({"code": error.code, "receipt": None}, failed=True)
-        except Exception:
-            return _result({"code": "SERVICE_UNAVAILABLE", "receipt": None}, failed=True)
+        return await invoke_writer_gate(port, name, arguments)
 
     return server
+
+
+async def invoke_writer_gate(port: GithubWriterGatePort, name: str, arguments: dict | None):
+    """One closed invocation shared by stdio and authenticated HTTP composition."""
+    # Never reflect a rejected instance or an upstream credential-bearing error.
+    if (name != WRITER_GATE_TOOL_SPEC["name"] or type(arguments) is not dict
+            or set(arguments) != {"operation_key"}
+            or type(arguments["operation_key"]) is not str):
+        return _result({"code": "INPUT_REFUSED", "receipt": None}, failed=True)
+    try:
+        receipt = await port.observe_writer_gate(arguments["operation_key"])
+        return _result(receipt, failed=receipt.get("schema") != "mastermind.source_continuity_writer_gate/v1")
+    except WriterGateServiceRefused as error:
+        return _result({"code": error.code, "receipt": None}, failed=True)
+    except Exception:
+        return _result({"code": "SERVICE_UNAVAILABLE", "receipt": None}, failed=True)
