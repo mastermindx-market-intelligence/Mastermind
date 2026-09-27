@@ -65,11 +65,13 @@ the workspace's accepted primary route.
    organizational denial ends that action. Tool absence is not proof that a denied permission may be
    recovered elsewhere. Do not switch to Desktop Commander, another mode, account, or provider to
    obtain the denied effect.
-5. **Bind mutations to one carrier.** Select the modifying carrier before the first edit. A
+5. **Bind each logical mutation to one carrier.** Select the modifying carrier before that edit. A
    pre-dispatch technical absence with proven `EFFECT_NONE` may justify choosing the other lawful
    carrier only when that carrier is already independently authorized. Once a Paper edit is dispatched,
    keep that logical mutation and its reconciliation on the original carrier. On `EFFECT_UNKNOWN`,
-   stop writes and inspect the original file; never replay the edit through the other carrier.
+   stop that target's writes and inspect the original file; never replay the edit through another
+   carrier. This fence is operation/target-scoped, not a file-wide lease: other admitted sessions may
+   concurrently modify disjoint targets in the same `fileId` or page on their own carriers.
 
 For native MCP clients, use only the Paper actions exposed and approved in that client. Tool discovery
 never grants permission, and sealed workers do not inherit ambient plugins or Executive grants.
@@ -80,8 +82,10 @@ never grants permission, and sealed workers do not inherit ambient plugins or Ex
 Define the user's task, primary persona, target screen, meaningful states and
 acceptance before editing. Preserve original product ambition; do not replace a
 working workflow with a prettier but incomplete mockup. Use our own/licensed assets.
-Keep one designer assigned to the active desktop document. Other agents may do
-research or review screenshots without becoming concurrent canvas writers.
+Multiple designers may modify the same exact Paper `fileId` across hosts, including
+the same page. Prefer disjoint board/artboard/node target sets. For known same-board
+overlap, partition node targets and re-read/re-plan before the next bounded edit rather
+than acquiring a file-wide or page-wide lease.
 
 ## Inspect, design and verify
 
@@ -92,8 +96,10 @@ research or review screenshots without becoming concurrent canvas writers.
    active page or file after an earlier capability probe.
 2. Read the live catalog once for exact upstream schemas. Never guess Paper tool
    argument names. Prefer existing tokens and components over arbitrary styles.
-3. Plan small, useful visual changes. Get a fresh snapshot guard before an edit and
-   give the operation a stable correlation ID. The guard is NOT a revision or grant.
+3. Plan small, useful visual changes. Get a fresh snapshot guard immediately before each bounded
+   edit and give the operation a stable correlation ID. Another concurrent writer may invalidate
+   an older observation; re-read and re-plan the next operation instead of claiming ownership.
+   The guard is NOT a revision, collaboration lock or grant.
 4. Edit through the modifying tool/CLI only with current permission. Do not send
    edits through read tools, native path-export or deletion bypasses. Use bounded
    HTML/CSS changes; do not introduce remote assets without authorization.

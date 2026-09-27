@@ -188,3 +188,30 @@ def test_direct_business_multiseat_reuses_one_paper_plane():
     assert "transport singleton" in runbook.lower()
     assert "must **not invent a workspace id**" in runbook.lower()
     assert "one Paper execution plane" in runbook
+
+def test_paper_concurrency_is_target_scoped_not_file_leased():
+    runbook = norm(ROOT / "docs/PAPER_DIRECT_CHATGPT.md")
+    integration = norm(INTEGRATION)
+    skill = norm(SKILL)
+    connection = norm(CONNECTION)
+    prepare = norm(ROOT / "integrations/paper_desktop/prepare.py")
+    studio = norm(ROOT / "integrations/studio_direct_mcp/paper-design.mjs")
+    combined = " ".join((runbook, integration, skill, connection, prepare, studio))
+
+    assert "MULTI_WRITER_PER_FILE_TARGET_SCOPED" in prepare
+    assert "MULTI_WRITER_PER_FILE_TARGET_SCOPED" in studio
+    assert "same exact `fileId`" in integration
+    assert "same page" in integration.lower()
+    assert "board/artboard/node" in integration
+    assert "file-wide or page-wide lease" in integration
+    assert "operation/target-scoped" in skill
+    assert "local bridge-call mutex" in connection
+
+    for forbidden in (
+        "ONE_WRITER_PER_FILE_ACROSS_HOSTS",
+        "exactly one modifying session may own",
+        "Keep ONE assigned designer per desktop document",
+        "one-writer-per-file rule remains unchanged",
+    ):
+        assert forbidden.lower() not in combined.lower()
+
