@@ -1,10 +1,11 @@
 """Optional native-client MCP projection using the official, pinned Python SDK.
 
 Transport is stdio only. Approved local clients may launch this process directly.
-ChatGPT Web uses the existing Studio Direct private tunnel and its gateway-owned
-paper_* tools, which invoke the same guarded bridge; do not enroll a second Paper
-web gateway from this module. This module does not create HTTP/auth infrastructure
-or arm Executive grants.
+An explicitly enrolled private Business Mastermind Paper app may reach this same
+stdio server through OpenAI Secure MCP Tunnel, without Studio Direct in its normal
+Paper path. direct_service.py stages that route without enrolling or starting it.
+Legacy seats may retain Studio Direct as another client of the same guarded bridge.
+This module creates no HTTP/auth infrastructure and arms no Executive grants.
 """
 
 import argparse
@@ -64,6 +65,9 @@ def build_server(allow_write=False):
                                        expected_snapshot=expected_snapshot)
 
     if allow_write:
+        # HTML/style operations can reference external assets. A fixed loopback
+        # transport alone does not establish a closed-world rendering boundary.
+        # Keep this consequential, non-idempotent tool truthfully annotated.
         @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True,
                                                 idempotentHint=False, openWorldHint=True))
         async def paper_edit(tool: str, arguments: dict, expected_snapshot: str, operation_id: str) -> CallToolResult:

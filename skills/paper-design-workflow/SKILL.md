@@ -1,6 +1,6 @@
 ---
 name: paper-design-workflow
-description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind guarded adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. ChatGPT Web prefers Studio Direct's Paper actions; an independently authorized Remote Desktop Commander carrier may invoke the same protected bridge only when the exact host and Paper action are already within current authority. Studio absence never grants that authority. Neither path creates a second Paper gateway. Requires Paper Desktop plus exact document identity; setup, login and worker grants remain separate gates.
+description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind guarded adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. ChatGPT Web uses private Mastermind Paper after Business enrollment and direct-path acceptance; legacy/non-migrated seats prefer Studio Direct's Paper actions; an independently authorized Remote Desktop Commander carrier may invoke the same protected bridge only when the exact host and Paper action are already within current authority. Studio absence never grants that authority. Neither path creates a second Paper gateway. Requires Paper Desktop plus exact document identity; setup, login and worker grants remain separate gates.
 ---
 
 # Paper design workflow
@@ -15,6 +15,17 @@ the generic file/process tools that happened to be visible first.
 
 For an attended ChatGPT Paper task, discover the **exact Paper action family** on the current tool
 surface before making a capability claim.
+
+**Business direct route.** After explicit enrollment and accepted scratch-file proof, use the private
+Mastermind Paper app as this workspace's normal Paper carrier. Read
+`docs/PAPER_DIRECT_CHATGPT.md` for its exact staged/accepted tool set. Never infer enrollment from
+source, a healthy tunnel, or a plugin name. The first direct build exposes inspect/catalog/read/edit
+against an already-open exact file; it does not yet expose `paper_prepare`. Preserve that exact
+file-transition limitation instead of using raw `open_file` or silently invoking a host helper.
+All denial and original-carrier reconciliation fences below apply equally to the direct app.
+The numbered Studio/RDC procedure below is for legacy/non-migrated seats, not a fallback after
+a denied or effect-unknown direct call. A commissioning canary uses the explicitly assigned direct
+carrier before it becomes the workspace's accepted primary route.
 
 1. **Studio Direct first when Paper actions are exposed.** Look specifically for
    `paper_inspect`, `paper_catalog`, `paper_read`, and `paper_edit`; use

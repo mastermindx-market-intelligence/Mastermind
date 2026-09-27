@@ -14,7 +14,27 @@ No production lifecycle, queue, identity, credential or authentication store is 
 The only shared runtime file is a per-OS-user advisory mutex for the Paper desktop.
 It is not an ownership lease, Job state, deduplication ledger or authorization token.
 
-## Architecture
+## Direct Business migration — issue #1011
+
+Chairman direction, 2026-09-26: build the private **Mastermind Paper** direct route first, reuse one
+existing tunnel, and leave credentials, Business workspace enrollment, activation and live canary
+until the final attended setup. See `docs/PAPER_DIRECT_CHATGPT.md` for installation and acceptance.
+
+Target normal Business path: private Mastermind Paper app -> OpenAI Secure MCP Tunnel -> existing
+guarded stdio `mcp_server.py` -> the same `bridge.py` -> fixed Paper loopback. The direct app exposes
+no generic workstation tools and does not depend on Studio Direct/DC for normal Paper calls.
+The previous blanket dedicated-app prohibition is superseded for this commissioned migration.
+It does not authorize public publication, duplicate tunnels, unattended account changes, or a second
+Paper guard/auth/retry owner. The first build works on an already-open exact file; shared direct
+`paper_prepare` remains NOT_BUILT and must not be impersonated with arbitrary host or raw file tools.
+
+Staging and local stdio proof are not enrollment or cutover. After the actual Business app and
+scratch-file path are accepted, retire Studio Direct's primary Paper-Web requirement for that
+workspace. Other seats retain their legacy route until separately migrated. No denial or unknown
+effect ever authorizes a carrier/account/model switch. A migration canary is an explicit single-carrier
+operation, not two concurrent Paper writers.
+
+## Architecture — shared adapter and legacy/non-migrated clients
 
 Local Claude/Codex/Cursor/OpenCode/VS Code client -> approved project-scoped MCP
 configuration -> `mcp_server.py` (official MCP SDK, stdio) -> `bridge.py` ->
@@ -26,9 +46,9 @@ gateway-owned `paper_inspect` / `paper_catalog` / `paper_read` / `paper_prepare`
 Screenshots remain native MCP image blocks. The Web caller cannot provide an
 arbitrary host path, Paper endpoint, account or credential.
 
-Studio Direct is the existing Web gateway/auth/transport owner; Paper does not get a
-second public gateway. It is the preferred attended-Web carrier when the Paper tool
-family is actually exposed. Remote Desktop Commander is also a direct-host client of the
+Studio Direct is the existing legacy Web gateway/auth/transport owner; Paper does not get a
+second public gateway. It is the preferred attended-Web carrier for non-migrated seats when the
+Paper tool family is actually exposed. Remote Desktop Commander is also a direct-host client of the
 **same guarded bridge**, but Studio Direct absence grants it no authority. RDC may be
 selected for a Paper effect only when the current Chairman assignment/delegation or
 accepted canonical placement independently authorizes that exact host carrier and
@@ -279,9 +299,9 @@ Installed SHA-256 after hardening:
 wrapper/server and requirement pins are unchanged. This proves the local
 read/write/screenshot/JSX substrate, not fleet production or visual product quality.
 
-ChatGPT Web now reuses the existing Studio Direct Secure MCP Tunnel and
-gateway-owned Paper tools. Do not enroll a second direct Paper ChatGPT app merely
-because the underlying stdio projection exists. Remote Desktop Commander remains
+At this historical native-proof checkpoint, ChatGPT Web reused the Studio Direct Secure MCP
+Tunnel and gateway-owned Paper tools. The former blanket dedicated-app prohibition is superseded
+only by the explicit Business migration above, not merely by existence of the stdio projection. Remote Desktop Commander remains
 an authorized host-diagnostic/local-ops carrier, not the normal design product path.
 
 ### Observed local-client enrollment

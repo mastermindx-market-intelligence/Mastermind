@@ -3,7 +3,26 @@
 Paper has one guarded adapter and multiple lawful clients. Carrier choice changes how the session
 reaches that adapter; it does not create a second Paper auth, lifecycle, retry, or ownership plane.
 
-## ChatGPT Web — Studio Direct preferred
+## Business direct Web route — staged, enrollment separate
+
+The private **Mastermind Paper** app is the normal Business Paper route after explicit enrollment
+and accepted direct-path scratch-file proof. Its path is Secure MCP Tunnel -> guarded stdio
+`mcp_server.py` -> the same `bridge.py` -> Paper loopback. It has no generic workstation tools.
+`direct_service.py` stages and verifies this deployment; `docs/PAPER_DIRECT_CHATGPT.md` owns its
+operator procedure. Use one existing tunnel, not a replacement for the Chairman-created tunnel.
+
+The previous blanket rule against a dedicated Paper ChatGPT app is superseded for this explicitly
+commissioned Business migration. It does not authorize unattended enrollment or publication.
+The first build supports an already-open exact file and leaves direct `paper_prepare` NOT_BUILT.
+Retain one modifying carrier, no fallback after a denial, and original-carrier reconciliation of
+EFFECT_UNKNOWN. Source/config/stdio proof is not a working ChatGPT app or accepted cutover.
+
+The Studio/RDC selection matrix below applies only to legacy/non-migrated seats. Do not apply it
+to evade a direct-app denial or unknown effect. At accepted Business cutover, Studio Direct's
+primary Paper-Web requirement is retired for that workspace; other Studio host capabilities and
+non-migrated seats are not silently removed. There is one primary route per accepted workspace.
+
+## Legacy/non-migrated ChatGPT Web — Studio Direct preferred
 
 For ChatGPT Web, first inspect the current effective tool surface for the Paper action family itself.
 When a connected Studio Direct seat advertises `paper_inspect`, `paper_catalog`, `paper_read`
@@ -123,9 +142,10 @@ adapter can be read-only or write-capable. Clients control their approval prompt
 Use `paper_inspect`, `paper_catalog`, `paper_read`, `paper_prepare` and `paper_edit` only
 when those actions are actually exposed and approved.
 
-Do not enroll a second dedicated Paper ChatGPT app, public-tunnel `127.0.0.1:29979`, build a new
-auth service, or hide mutations behind read-only declarations. Seat enrollment and tunnel publication
-remain Studio Direct's existing account/admin ceremony.
+Do not public-tunnel `127.0.0.1:29979`, build a new auth service, or hide mutations behind read-only
+declarations. The commissioned Business migration may enroll one private Mastermind Paper app at
+the final attended setup boundary. Account/admin ceremony is still required; a staged bundle,
+model-mode change, or direct tool discovery never grants permission or transfers an unknown effect.
 
 The full source/acceptance contract is `docs/PAPER_DESIGN_INTEGRATION.md`. Re-read current protected
 procedure before modifying work.

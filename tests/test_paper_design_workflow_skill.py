@@ -148,3 +148,31 @@ def test_integration_declares_one_adapter_two_clients_not_two_gateways():
     assert "Studio Direct absence grants it no authority" in text
     assert "not a second gateway, auth plane, write authority, or permission fallback" in text
     assert "publication/surface drift" in text
+
+
+def test_direct_business_route_is_explicit_and_enrollment_gated():
+    for path in (INDEX, SKILL, CONNECTION, INTEGRATION):
+        text = norm(path)
+        assert "Mastermind Paper" in text
+        assert "Business" in text
+        assert "enrollment" in text.lower()
+    text = norm(CONNECTION)
+    assert "legacy/non-migrated" in text
+    assert "no fallback after a denial" in text
+    assert "docs/PAPER_DIRECT_CHATGPT.md" in text
+
+
+def test_direct_runbook_separates_build_setup_and_live_proof():
+    guide = ROOT / "docs/PAPER_DIRECT_CHATGPT.md"
+    assert guide.exists(), "Missing direct Paper operator runbook"
+    text = norm(guide)
+    for required in ("STAGED_NOT_ENROLLED", "Business", "runtime key", "admin key",
+                     "already-open", "paper_prepare", "NOT_BUILT", "LOCAL_STDIO_PROVEN",
+                     "EFFECT_UNKNOWN", "one existing tunnel", "Plugin Creator"):
+        assert required in text
+
+
+def test_stdio_module_permits_guarded_private_tunnel_without_host_tools():
+    text = norm(ROOT / "integrations/paper_desktop/mcp_server.py")
+    assert "private Business" in text
+    assert "do not enroll a second Paper web gateway from this module" not in text
