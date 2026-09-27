@@ -82,14 +82,16 @@ test('gateway advertises and dispatches guarded Paper design tools locally', asy
 
   const listed = await client.listTools();
   const byName = new Map(listed.tools.map((tool) => [tool.name, tool]));
-  for (const name of ['paper_inspect', 'paper_catalog', 'paper_read', 'paper_prepare', 'paper_edit']) {
-    assert.ok(byName.has(name), `missing ${name}`);
-  }
+  const expectedPaperTools = ['paper_catalog', 'paper_edit', 'paper_inspect', 'paper_prepare', 'paper_read'];
+  const paperToolNames = [...byName.keys()].filter((name) => name.startsWith('paper_')).sort();
+  assert.deepEqual(paperToolNames, expectedPaperTools, 'Paper surface must stay narrow and exact');
   assert.equal(byName.get('paper_inspect').annotations.readOnlyHint, true);
   assert.equal(byName.get('paper_read').annotations.readOnlyHint, true);
   assert.equal(byName.get('paper_prepare').annotations.readOnlyHint, false);
   assert.equal(byName.get('paper_prepare').annotations.destructiveHint, false);
+  assert.equal(byName.get('paper_prepare').annotations.idempotentHint, true);
   assert.equal(byName.get('paper_edit').annotations.readOnlyHint, false);
+  assert.equal(byName.get('paper_edit').annotations.destructiveHint, true);
   assert.equal(byName.get('paper_edit').annotations.idempotentHint, false);
 
   const inspect = await client.callTool({ name: 'paper_inspect', arguments: {} });
