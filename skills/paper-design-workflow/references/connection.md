@@ -16,11 +16,14 @@ cannot choose an arbitrary host path, Paper endpoint, account, credential or app
 `paper_inspect` returns a fail-closed `gateway_surface` contract naming the exact Paper tools the
 gateway advertises. If that contract includes `paper_prepare` while the current ChatGPT tool surface
 does not, the state is `STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`: current-file inspect/read/edit
-may remain usable, but another-file transition is held until the **same Studio Direct plugin/tool
-catalog** is refreshed and `paper_prepare` is directly surfaced. Never reproduce the transition
-with generic Studio process/filesystem actions, Desktop Commander, raw `open_file`, shell, or UI
-automation. After refresh, call `paper_inspect` again before the direct `paper_prepare(file_id)`
-transition and again before the first edit.
+may remain usable, but another-file transition is held until the **same Studio Direct app's
+approved action snapshot** is brought current and `paper_prepare` is directly surfaced. ChatGPT does
+not auto-apply MCP tool changes after workspace approval. Current OpenAI Business behavior also does
+not support updating a published app in place: recreate + republish is required; draft/dev apps use
+their tool scan/recreation flow. Never reproduce the transition with generic Studio process/filesystem
+actions, Desktop Commander, raw `open_file`, shell, or UI automation. After the workspace action
+snapshot is current, start a fresh chat/tool selection, call `paper_inspect` again, then the direct
+`paper_prepare(file_id)`, then inspect once more before the first edit.
 
 ## Remote Desktop Commander — same bridge, independently authorized alternative
 
