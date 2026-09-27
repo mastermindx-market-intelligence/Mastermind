@@ -162,10 +162,10 @@ current source-law path; never broaden the bridge's raw `open_file` capability.
 A pre-dispatch technical absence with proven `EFFECT_NONE` may justify choosing another carrier
 before the first Paper edit **only when that carrier is independently authorized under the predicates
 above**. Technical absence does not grant that authorization. An explicit safety/permission denial
-never permits fallback. After any Paper edit dispatch, that logical mutation remains on its carrier until its post-read/effect
+never permits fallback. After any Paper edit dispatch, the logical mutation remains on that carrier until its post-read/effect
 is reconciled. This is an operation/target fence, not a file-wide or page-wide lease; disjoint admitted
-writers may continue in the same file. A timeout or lost response is `EFFECT_UNKNOWN`; do not replay
-that mutation through Desktop Commander, Studio Direct, another mode, account or provider.
+writers may continue in the same file. A timeout or lost response is `EFFECT_UNKNOWN`; do not replay through Desktop Commander,
+Studio Direct, another mode, account or provider.
 
 Read-only diagnosis through the other carrier does not grant it write authority and must not be used
 to hide an unresolved original effect.

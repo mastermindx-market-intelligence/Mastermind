@@ -29,7 +29,7 @@ to re-prove the route.
 The action remains a bounded explicit-file binding, not a host-control escape hatch: callers provide
 one exact bare Paper file ID, a fresh source snapshot, and a stable operation ID; URL/path/page
 overrides, shell/process control, and unrestricted raw `open_file` are not exposed. Paper 0.5.12 can
-address another file directly by `fileId` while another file remains user-active. Prepare therefore
+address another file directly by `fileId`, including an already-open or background file, while another file remains user-active. Prepare therefore
 performs no UI-focus/open effect; it validates the explicit target and returns that target snapshot
 for the subsequent edit.
 
