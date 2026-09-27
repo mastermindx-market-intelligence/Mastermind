@@ -10,16 +10,31 @@ set -euo pipefail
 umask 077
 
 SLOT_ID="codex-01"
+SLOT_MODE="codex"
 
 usage() {
-  /bin/echo "usage: $0 [--slot-id codex-01|codex-pro-01|codex-pro-02|codex-pro-03]" >&2
+  /bin/echo "usage: $0 [--slot-id codex-01|codex-pro-01|codex-pro-02|codex-pro-03 | --subscription-slot-id alibaba-token-01|minimax-token-01]" >&2
   exit 64
 }
 
 if [ "$#" -gt 0 ]; then
-  [ "$#" -eq 2 ] && [ "$1" = "--slot-id" ] || usage
-  case "$2" in
-    codex-01|codex-pro-01|codex-pro-02|codex-pro-03) SLOT_ID="$2" ;;
+  [ "$#" -eq 2 ] || usage
+  case "$1" in
+    --slot-id)
+      case "$2" in
+        codex-01|codex-pro-01|codex-pro-02|codex-pro-03) SLOT_ID="$2" ;;
+        *) usage ;;
+      esac
+      ;;
+    --subscription-slot-id)
+      case "$2" in
+        alibaba-token-01|minimax-token-01)
+          SLOT_ID="$2"
+          SLOT_MODE="subscription"
+          ;;
+        *) usage ;;
+      esac
+      ;;
     *) usage ;;
   esac
 fi
@@ -40,7 +55,12 @@ PYTHON_BINARY="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12
   exit 65
 }
 
-"$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_inference_canary.py" \
-  --slot-id "$SLOT_ID"
+if [ "$SLOT_MODE" = "subscription" ]; then
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_inference_canary.py" \
+    --subscription-slot-id "$SLOT_ID"
+else
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_inference_canary.py" \
+    --slot-id "$SLOT_ID"
+fi
 status=$?
 exit "$status"
