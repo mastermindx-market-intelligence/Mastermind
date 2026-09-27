@@ -309,8 +309,31 @@ def _git_generation_seal(
 
 def _worktree_path_sets(
     root: Path, *, deadline: float | None = None, label: str = "worktree",
+    expected: Mapping[str, tuple[str, str]] | None = None,
+    expected_directories: set[str] | None = None,
 ) -> tuple[dict[str, str], set[str], str]:
     """Return raw paths plus a mutation-sensitive metadata generation seal."""
+    if expected is not None:
+        directories = (
+            _tree_directory_paths(set(expected))
+            if expected_directories is None
+            else set(expected_directories)
+        )
+        try:
+            seal = _worktree_generation_seal_from_expected(
+                root, expected=expected, expected_directories=directories,
+                deadline=deadline, label=label,
+            )
+        except GatewayError:
+            # Drift is exceptional. Fall back to the complete raw discovery so
+            # callers keep the same typed path-set comparison and diagnostics.
+            return _worktree_path_sets(root, deadline=deadline, label=label)
+        leaves = {
+            rel: ("symlink" if mode == "120000" else "regular")
+            for rel, (mode, _oid) in expected.items()
+        }
+        return leaves, directories, seal
+
     leaves: dict[str, str] = {}
     directories: set[str] = set()
     seal = hashlib.sha256()
@@ -355,6 +378,87 @@ def _tree_directory_paths(leaves: set[str]) -> set[str]:
         for depth in range(1, len(parts)):
             directories.add("/".join(parts[:depth]))
     return directories
+
+
+def _worktree_generation_seal_from_expected(
+    root: Path, *, expected: Mapping[str, tuple[str, str]],
+    expected_directories: set[str] | None = None,
+    deadline: float | None = None, label: str = "worktree",
+) -> str:
+    """Re-seal one already-proved worktree without rediscovering its full path graph.
+
+    The initial snapshot proves that the raw namespace equals the tracked Git tree.
+    A later generation check can therefore traverse that exact proved namespace
+    directly, while still listing every proved directory to reject added, removed
+    or renamed entries. The stat-hash order matches _worktree_path_sets so an
+    unchanged tree reproduces the original seal.
+    """
+    expected_leaves = set(expected)
+    implied_directories = _tree_directory_paths(expected_leaves)
+    directories = (
+        implied_directories
+        if expected_directories is None
+        else set(expected_directories)
+    )
+    if not implied_directories <= directories:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} worktree path set differs"
+        )
+    expected_types = {
+        rel: ("symlink" if expected[rel][0] == "120000" else "regular")
+        for rel in expected_leaves
+    }
+    children: dict[str, set[str]] = {}
+    for rel in directories | expected_leaves:
+        parent, _sep, name = rel.rpartition("/")
+        children.setdefault(parent, set()).add(name)
+
+    seal = hashlib.sha256()
+    root_stat = root.lstat()
+    if not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode):
+        raise OSError("installed worktree root is not a direct directory")
+    _seal_stat(seal, rel="", kind="directory", observed=root_stat)
+
+    stack: list[str] = [""]
+    while stack:
+        _check_deadline(deadline, label=label)
+        prefix = stack.pop()
+        directory = root if not prefix else root / prefix
+        expected_names = children.get(prefix, set())
+        with os.scandir(directory) as raw_entries:
+            entries = {
+                entry.name: entry
+                for entry in raw_entries
+                if not (not prefix and entry.name == ".git")
+            }
+        if set(entries) != expected_names:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} worktree path set differs"
+            )
+
+        for name in sorted(expected_names, key=os.fsencode):
+            _check_deadline(deadline, label=label)
+            rel = f"{prefix}/{name}" if prefix else name
+            observed = entries[name].stat(follow_symlinks=False)
+            if rel in directories:
+                kind = "directory"
+                if not stat.S_ISDIR(observed.st_mode) or stat.S_ISLNK(observed.st_mode):
+                    raise GatewayError(
+                        "backend_unavailable", f"installed {label} worktree path set differs"
+                    )
+                stack.append(rel)
+            else:
+                kind = (
+                    "symlink" if stat.S_ISLNK(observed.st_mode)
+                    else "regular" if stat.S_ISREG(observed.st_mode)
+                    else "other"
+                )
+                if kind != expected_types[rel]:
+                    raise GatewayError(
+                        "backend_unavailable", f"installed {label} worktree path set differs"
+                    )
+            _seal_stat(seal, rel=rel, kind=kind, observed=observed)
+    return seal.hexdigest()
 
 
 def _raw_worktree_blob_oid(
@@ -528,9 +632,47 @@ def _git_head_tree(
 def _require_git_object_types(
     path: Path, expected_types: Mapping[str, str], *, runner: PacketRunner,
     env: Mapping[str, str], deadline: float | None, label: str,
+    connectivity_root: str | None = None,
 ) -> None:
     """Prove exact object existence/type without inflating packed object headers."""
     if not expected_types:
+        return
+    if connectivity_root is not None:
+        if (
+            not _valid_sha(connectivity_root)
+            or set(expected_types.values()) != {"blob"}
+        ):
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            )
+        try:
+            connectivity = runner(
+                [
+                    "git", "fsck", "--connectivity-only", "--no-dangling",
+                    "--no-reflogs", "--no-progress", connectivity_root,
+                ],
+                cwd=path,
+                timeout=_remaining_deadline_seconds(
+                    deadline, label=label, ceiling=10.0,
+                ),
+                max_bytes=256 * 1024, env=env,
+            )
+        except Exception as exc:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            ) from exc
+        if (
+            not isinstance(connectivity, Mapping)
+            or any(
+                connectivity.get(flag) is True
+                for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
+            )
+            or connectivity.get("code") != 0
+            or type(connectivity.get("stdout")) is not str
+        ):
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} repository objects are incomplete"
+            )
         return
     object_input = ("\n".join(sorted(expected_types)) + "\n").encode("ascii")
     try:
@@ -1089,6 +1231,39 @@ def _clean_git_snapshot(
             raise GatewayError("backend_unavailable", f"installed {label} tree is unsupported")
         expected[rel] = (mode, oid)
 
+    root_tree = observe(
+        ["rev-parse", "--verify", f"{head}^{{tree}}"], max_bytes=256,
+    ).strip()
+    if not _valid_sha(root_tree):
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository objects are incomplete"
+        )
+
+    all_tree_directories = _tree_directory_paths(set(expected))
+    if admitted_worktree_files is None and admitted_worktree_directories is None:
+        expected_leaves = set(expected)
+        expected_directories = all_tree_directories
+    elif admitted_worktree_files is None or admitted_worktree_directories is None:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} admitted worktree is incomplete"
+        )
+    else:
+        expected_leaves = set(admitted_worktree_files)
+        expected_directories = set(admitted_worktree_directories)
+        implied_directories = _tree_directory_paths(expected_leaves)
+        if (
+            not expected_leaves <= set(expected)
+            or not expected_directories <= all_tree_directories
+            or not implied_directories <= expected_directories
+        ):
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} admitted worktree differs"
+            )
+    inventory_expected = {
+        rel: expected[rel]
+        for rel in expected_leaves
+    }
+
     # Commit graphs can enumerate missing parents as bare object IDs, so every
     # ancestry commit still crosses the no-lazy-fetch object database boundary.
     # Current HEAD blobs stay fully checked. Agent OS also consumes historical
@@ -1102,6 +1277,7 @@ def _clean_git_snapshot(
         _require_git_object_types(
             path, {object_oid: "blob" for _rel, (_mode, object_oid) in expected.items()},
             runner=runner, env=env, deadline=deadline, label=label,
+            connectivity_root=root_tree,
         )
         if content_scope == "macro_brief":
             try:
@@ -1129,7 +1305,11 @@ def _clean_git_snapshot(
 
     def _worktree_inventory() -> tuple[dict[str, str], set[str], str]:
         try:
-            return _worktree_path_sets(path, deadline=deadline, label=label)
+            return _worktree_path_sets(
+                path, deadline=deadline, label=label,
+                expected=inventory_expected,
+                expected_directories=expected_directories,
+            )
         except (OSError, TimeoutError) as exc:
             raise GatewayError(
                 "backend_unavailable", f"installed {label} worktree observation failed"
@@ -1146,26 +1326,6 @@ def _clean_git_snapshot(
         )
     )
 
-    all_tree_directories = _tree_directory_paths(set(expected))
-    if admitted_worktree_files is None and admitted_worktree_directories is None:
-        expected_leaves = set(expected)
-        expected_directories = all_tree_directories
-    elif admitted_worktree_files is None or admitted_worktree_directories is None:
-        raise GatewayError(
-            "backend_unavailable", f"installed {label} admitted worktree is incomplete"
-        )
-    else:
-        expected_leaves = set(admitted_worktree_files)
-        expected_directories = set(admitted_worktree_directories)
-        implied_directories = _tree_directory_paths(expected_leaves)
-        if (
-            not expected_leaves <= set(expected)
-            or not expected_directories <= all_tree_directories
-            or not implied_directories <= expected_directories
-        ):
-            raise GatewayError(
-                "backend_unavailable", f"installed {label} admitted worktree differs"
-            )
     expected_types = {
         rel: ("symlink" if expected[rel][0] == "120000" else "regular")
         for rel in expected_leaves
@@ -1236,6 +1396,73 @@ def _clean_git_snapshot(
             )
         return head, generation_seal
     return head
+
+
+def _snapshot_generation_from_verified_snapshot(
+    snapshot: _VerifiedRepositorySnapshot, *, runner: PacketRunner,
+    env: Mapping[str, str], label: str, deadline: float | None = None,
+) -> tuple[str, str]:
+    """Re-seal one previously full-proved repository generation."""
+    path = snapshot.root
+    git_metadata = _direct_git_directory(path, label=label)
+    if git_metadata is None:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} repository topology is unsafe"
+        )
+
+    def observe_head() -> str:
+        try:
+            result = runner(
+                ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+                cwd=path,
+                timeout=_remaining_deadline_seconds(
+                    deadline, label=label, ceiling=10.0,
+                ),
+                max_bytes=256, env=env,
+            )
+        except Exception as exc:
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} observation failed"
+            ) from exc
+        if (
+            not isinstance(result, Mapping)
+            or any(
+                result.get(flag) is True
+                for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
+            )
+            or result.get("code") != 0
+            or type(result.get("stdout")) is not str
+        ):
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} observation failed"
+            )
+        head = result["stdout"].strip()
+        if not _valid_sha(head):
+            raise GatewayError(
+                "backend_unavailable", f"installed {label} HEAD is unavailable"
+            )
+        return head
+
+    head = observe_head()
+    if head != snapshot.head:
+        raise GatewayError("backend_unavailable", f"installed {label} HEAD changed")
+    try:
+        worktree_seal = _worktree_generation_seal_from_expected(
+            path, expected=snapshot.expected, deadline=deadline, label=label,
+        )
+        generation_seal = _git_generation_seal(
+            git_metadata, worktree_seal=worktree_seal,
+            deadline=deadline, label=label,
+        )
+    except GatewayError:
+        raise
+    except (OSError, TimeoutError) as exc:
+        raise GatewayError(
+            "backend_unavailable", f"installed {label} generation seal failed"
+        ) from exc
+    if observe_head() != head:
+        raise GatewayError("backend_unavailable", f"installed {label} HEAD changed")
+    return head, generation_seal
 
 
 def _snapshot_generation_observation(
@@ -1648,18 +1875,27 @@ class InstalledBootPacketCollector:
 
     def _generation_pair(
         self, env: Mapping[str, str], *, deadline: float | None,
+        macro_snapshot: _VerifiedRepositorySnapshot | None = None,
     ) -> tuple[str, str, str, str]:
+        def macro_generation() -> tuple[str, str]:
+            if macro_snapshot is not None and not self._allow_synthetic_fixture:
+                return _snapshot_generation_from_verified_snapshot(
+                    macro_snapshot, runner=self._runner, env=env,
+                    label="Macro source", deadline=deadline,
+                )
+            return _snapshot_generation_observation(
+                self._macro_root, runner=self._runner, env=env,
+                label="Macro source", deadline=deadline,
+                _allow_synthetic_fixture=self._allow_synthetic_fixture,
+            )
+
         source_observation, macro_observation = self._repository_observation_pair(
             lambda: _snapshot_generation_observation(
                 self._source_root, runner=self._runner, env=env,
                 label="Mastermind source", deadline=deadline,
                 _allow_synthetic_fixture=self._allow_synthetic_fixture,
             ),
-            lambda: _snapshot_generation_observation(
-                self._macro_root, runner=self._runner, env=env,
-                label="Macro source", deadline=deadline,
-                _allow_synthetic_fixture=self._allow_synthetic_fixture,
-            ),
+            macro_generation,
             deadline=deadline, label="generation pair",
         )
         source_sha, source_seal = source_observation
@@ -1809,7 +2045,10 @@ class InstalledBootPacketCollector:
                 raise GatewayError("backend_unavailable", "installed boot-packet SHA binding differs")
 
             post_source_sha, post_macro_sha, post_source_seal, post_macro_seal = (
-                self._generation_pair(live_env, deadline=deadline)
+                self._generation_pair(
+                    live_env, deadline=deadline,
+                    macro_snapshot=(macro_snapshots[0] if macro_snapshots else None),
+                )
             )
             if (
                 post_source_sha != pre_source_sha
