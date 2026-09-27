@@ -75,6 +75,45 @@ _AUTH_REALMS = frozenset({"dedicated-worker-account"})
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
 _NETWORK_POLICIES = frozenset({"disabled", "loopback-browser-only"})
+
+
+def claude_security_config_projection(effective: Mapping[str, Any], *,
+                                     launch_provenance: Mapping[str, Any]) -> dict[str, object]:
+    """Canonical security subset of native get_settings.effective.
+
+    This encoder grants no observation authority. The helper supplies actual
+    readback; the registry supplies expected policy through the same encoder.
+    Missing permissions in a complete effective-settings read means no rules;
+    null/malformed values refuse. Never fill missing sandbox state from intent.
+    Tools and permission mode are attested separately from native init metadata.
+    launch_provenance records the helper's actually applied immutable launch
+    options; it is explicitly separate from native effective-settings readback.
+    """
+    if not isinstance(effective, Mapping):
+        raise CapabilityPolicyError("Claude effective settings are unavailable")
+    sandbox, permissions = effective.get("sandbox"), effective.get("permissions", {})
+    if (not isinstance(sandbox, Mapping) or not isinstance(permissions, Mapping)
+            or type(sandbox.get("enabled")) is not bool):
+        raise CapabilityPolicyError("Claude effective security settings are unavailable")
+    if (not isinstance(launch_provenance, Mapping)
+            or set(launch_provenance) != {"setting_sources", "strict_mcp_config", "skills"}
+            or type(launch_provenance["strict_mcp_config"]) is not bool
+            or any(not isinstance(launch_provenance[k], list)
+                   or len(launch_provenance[k]) > 32
+                   or any(not isinstance(x, str) or not x or len(x) > 128 for x in launch_provenance[k])
+                   for k in ("setting_sources", "skills"))):
+        raise CapabilityPolicyError("Claude applied launch provenance is unavailable")
+    try:
+        return json.loads(json.dumps({"sandbox": dict(sandbox), "permissions": dict(permissions),
+                                     "applied_launch_provenance": dict(launch_provenance)},
+                                     sort_keys=True, allow_nan=False))
+    except (TypeError, ValueError):
+        raise CapabilityPolicyError("Claude effective security settings are invalid") from None
+
+
+def claude_security_config_digest(effective: Mapping[str, Any], *,
+                                 launch_provenance: Mapping[str, Any]) -> str:
+    return _digest(claude_security_config_projection(effective, launch_provenance=launch_provenance))
 _MCP_TRANSPORTS = frozenset({"stdio", "streamable-http"})
 _MCP_AUTH_STATUSES = frozenset(
     {"unsupported", "notLoggedIn", "bearerToken", "oAuth"}
@@ -803,7 +842,11 @@ class ExecutionCapabilityProfile:
     @property
     def expected_config_digest(self) -> str:
         if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
-            return _digest(self.claude_sdk_config_projection())
+            requested = self.claude_sdk_config_projection()
+            return claude_security_config_digest({
+                "sandbox": requested["sandbox"],
+                "permissions": {},
+            }, launch_provenance={k: requested[k] for k in ("setting_sources", "strict_mcp_config", "skills")})
         return _digest(self.app_server_config_projection())
 
     def claude_sdk_config_projection(self) -> dict[str, object]:
@@ -822,6 +865,7 @@ class ExecutionCapabilityProfile:
             raise CapabilityPolicyError("Claude policy exceeds its unadmitted first profile")
         return {
             "tools": ["Read", "Glob", "Grep"],
+            "skills": [],
             "permission_mode": "dontAsk",
             "setting_sources": [],
             "strict_mcp_config": True,
