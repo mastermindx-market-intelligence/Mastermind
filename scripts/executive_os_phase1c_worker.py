@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -34,6 +35,10 @@ from control_plane.codex_provider_realm import (
     provider_home_credential_loader,
 )
 from control_plane.codex_operator_adapter import CodexOperatorAdapter
+from control_plane.codex_account_environment import (
+    CodexAccountEnvironment,
+    native_codex_account_scope,
+)
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
     sha256_file,
@@ -68,6 +73,7 @@ from control_plane.worker_browser_b1 import BrowserGenerationResource
 
 CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v4"
 SUBSCRIPTION_CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v5"
+NATIVE_CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v6"
 AUTONOMY_RECEIPT = Path(
     "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
 )
@@ -99,6 +105,13 @@ _CONFIG_FIELDS = frozenset(
     }
 )
 _SUBSCRIPTION_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({"harness_binding_id"})
+_NATIVE_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({
+    "native_provider", "native_realm_enrollment",
+})
+_NATIVE_CLAUDE_CONFIG_FIELDS = (_NATIVE_CONFIG_FIELDS - frozenset({
+    "codex_binary", "codex_attestation_receipt", "allowed_codex_versions",
+    "required_team_identifier",
+})) | frozenset({"claude_binary", "claude_attestation_receipt", "allowed_claude_versions"})
 _CONTROL_ENV_ATTESTATION_FIELDS = frozenset(
     {
         "schema_version",
@@ -161,11 +174,20 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         expected_fields = _CONFIG_FIELDS
     elif schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
         expected_fields = _SUBSCRIPTION_CONFIG_FIELDS
+    elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
+        expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
+                           else _NATIVE_CONFIG_FIELDS)
     else:
         raise WorkerConfigError("worker config schema version is unsupported")
     if set(value) != expected_fields:
         raise WorkerConfigError("worker config fields do not match the schema")
-    versions = value.get("allowed_codex_versions")
+    if schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
+        if value.get("native_provider") not in {"codex", "claude"}:
+            raise WorkerConfigError("native provider is not supported")
+        if not isinstance(value.get("native_realm_enrollment"), dict):
+            raise WorkerConfigError("native realm enrollment must be an object")
+    provider = "claude" if value.get("native_provider") == "claude" else "codex"
+    versions = value.get(f"allowed_{provider}_versions")
     if (
         not isinstance(versions, list)
         or not versions
@@ -178,13 +200,13 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         "workspace_root",
         "run_root",
         "provider_home",
-        "codex_binary",
-        "codex_attestation_receipt",
+        f"{provider}_binary",
+        f"{provider}_attestation_receipt",
         "uid_sweep_receipt",
     ):
         if not isinstance(value.get(field), str) or not Path(value[field]).is_absolute():
             raise WorkerConfigError(f"{field} must be an absolute path")
-    if value.get("required_team_identifier") != _OPENAI_TEAM_IDENTIFIER:
+    if provider == "codex" and value.get("required_team_identifier") != _OPENAI_TEAM_IDENTIFIER:
         raise WorkerConfigError("the worker config must require the reviewed OpenAI team")
     if value.get("require_secret_canary") is not True:
         raise WorkerConfigError("production worker config must require the secret canary")
@@ -257,6 +279,11 @@ def _subscription_binding_for_config(
 
 
 def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
+    if config.get("native_provider") == "claude":
+        raise WorkerConfigError("native Claude broker factory is not composed")
+    if (config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION
+            and config.get("operator_harness_armed") is not True):
+        raise WorkerConfigError("native service requires current operator autonomy admission")
     binding = _subscription_binding_for_config(config)
     if binding is None:
         return
@@ -475,7 +502,12 @@ def _build_broker(
     config: dict[str, Any],
     *,
     autonomy_guard=None,
+    native_account: CodexAccountEnvironment | None = None,
 ) -> ExecutiveWorkerBroker:
+    if config.get("native_provider") == "claude":
+        raise WorkerConfigError("native Claude broker factory is not composed")
+    if config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION and native_account is None:
+        raise WorkerConfigError("native broker requires its lifetime account scope")
     policy = BrokerPolicy(
         control_uid=int(config["control_uid"]),
         worker_uid=int(config["worker_uid"]),
@@ -516,15 +548,25 @@ def _build_broker(
         if provider_realm is not None
         else None
     )
-    adapter = CodexWorkerAdapter(
-        Path(config["codex_binary"]),
-        codex_home=policy.provider_home,
-        binary_attestation=binary_attestation,
-        allowed_versions=frozenset(config["allowed_codex_versions"]),
-        required_team_identifier=str(config["required_team_identifier"]),
-        provider_realm=provider_realm,
-        provider_credential_loader=credential_loader,
-    )
+    if native_account is not None:
+        if provider_realm is not None or native_account.home != policy.provider_home:
+            raise WorkerConfigError("native account differs from the configured provider realm")
+        adapter = native_account.worker_adapter(
+            Path(config["codex_binary"]),
+            binary_attestation=binary_attestation,
+            allowed_versions=frozenset(config["allowed_codex_versions"]),
+            required_team_identifier=str(config["required_team_identifier"]),
+        )
+    else:
+        adapter = CodexWorkerAdapter(
+            Path(config["codex_binary"]),
+            codex_home=policy.provider_home,
+            binary_attestation=binary_attestation,
+            allowed_versions=frozenset(config["allowed_codex_versions"]),
+            required_team_identifier=str(config["required_team_identifier"]),
+            provider_realm=provider_realm,
+            provider_credential_loader=credential_loader,
+        )
     sweeper = DedicatedUIDSweeper(
         policy.worker_uid,
         receipt_path=Path(config["uid_sweep_receipt"]),
@@ -564,6 +606,8 @@ def _build_broker(
         return matching[0]
 
     def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+        if native_account is not None:
+            native_account.auth_metadata()
         profile = resolve_operator_profile(requested)
         return CodexOperatorAdapter(
             binary_path=Path(config["codex_binary"]),
@@ -607,9 +651,23 @@ def _build_broker(
 
 
 async def _serve(config: dict[str, Any], *, autonomy_guard=None) -> None:
-    broker = _build_broker(config, autonomy_guard=autonomy_guard)
-    activated = activate_launchd_socket(str(config["launchd_socket_name"]))
-    task = asyncio.create_task(broker.serve(activated))
+    if config.get("native_provider") == "claude":
+        raise WorkerConfigError("native Claude broker factory is not composed")
+    if (os.geteuid() != config["worker_uid"] or os.getegid() != config["worker_gid"]
+            or config["control_uid"] == config["worker_uid"]):
+        raise WorkerConfigError("native scope requires the configured distinct worker principal")
+    scope = (nullcontext(None) if _subscription_binding_for_config(config) is not None
+             else native_codex_account_scope(Path(config["provider_home"]),
+                                             principal_home_admitted=True))
+    with scope as native_account:
+        broker = _build_broker(config, autonomy_guard=autonomy_guard,
+                               native_account=native_account)
+        await _serve_broker(broker, str(config["launchd_socket_name"]))
+
+
+async def _serve_broker(broker, socket_name: str) -> None:
+    activated = None
+    task = stop_task = None
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
 
@@ -621,19 +679,53 @@ async def _serve(config: dict[str, Any], *, autonomy_guard=None) -> None:
             loop.add_signal_handler(signum, request_stop)
         except NotImplementedError:  # pragma: no cover - Unix service only
             pass
-    stop_task = asyncio.create_task(stopping.wait())
-    done, _ = await asyncio.wait({task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
-    if task in done:
-        stop_task.cancel()
-        await asyncio.gather(stop_task, return_exceptions=True)
-        await task
-        return
-    task.cancel()
-    await asyncio.gather(task, return_exceptions=True)
     try:
-        await broker.shutdown()
+        activated = activate_launchd_socket(socket_name)
+        task = asyncio.create_task(broker.serve(activated))
+        stop_task = asyncio.create_task(stopping.wait())
+        done, _ = await asyncio.wait({task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            await task
     finally:
-        activated.close()
+        for pending in (task, stop_task):
+            if pending is not None:
+                pending.cancel()
+        await asyncio.gather(*(p for p in (task, stop_task) if p is not None),
+                             return_exceptions=True)
+        try:
+            await broker.shutdown()
+        finally:
+            if activated is not None:
+                activated.close()
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.remove_signal_handler(signum)
+                except NotImplementedError:
+                    pass
+
+
+def _native_identity_guard(config: Mapping[str, Any], config_path: Path):
+    """Consume the existing realm owner's typed config-bound identity join."""
+    from control_plane import codex_provider_realm
+    loader = getattr(codex_provider_realm, "load_native_realm_owner", None)
+    if loader is None:
+        raise WorkerConfigError("native realm owner is not composed")
+    digest = sha256_file(config_path)
+    if (_load_config(config_path, require_root_owner=True) != dict(config)
+            or sha256_file(config_path) != digest):
+        raise WorkerConfigError("native config changed before identity binding")
+    owner = loader(config_path, expected_config_sha256=digest)
+    enrollment = config["native_realm_enrollment"]
+    def require_identity() -> None:
+        try:
+            result = owner.require_current_identity(
+                enrollment["host_ref"], enrollment["os_principal_ref"])
+            if result is not None:
+                raise WorkerConfigError("native realm identity owner returned an invalid result")
+        except Exception:
+            raise WorkerConfigError("native realm identity refused") from None
+    require_identity()
+    return require_identity
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -663,6 +755,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.config,
                 require_root_owner=not args.allow_non_root_owner_for_test,
             )
+            if value.get("native_provider") == "claude":
+                raise WorkerConfigError("native Claude broker factory is not composed")
             # install.sh runs check-config as the worker principal itself
             # (sudo -u "$WORKER_USER" ... check-config) -- the one moment
             # before launchd is trusted with the daemon that anything runs
@@ -676,6 +770,8 @@ def main(argv: list[str] | None = None) -> int:
                 expected_binary_path=Path(value["codex_binary"]),
                 expected_owner_gid=int(value["worker_gid"]),
             )
+            if value.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION:
+                _native_identity_guard(value, Path(args.config))
             print(
                 json.dumps(
                     {
@@ -694,6 +790,9 @@ def main(argv: list[str] | None = None) -> int:
         config = _load_config(config_path, require_root_owner=True)
         _assert_service_activation_allowed(config)
         autonomy_guard = None
+        native_guard = (_native_identity_guard(config, config_path)
+                        if config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION
+                        else None)
         if config.get("operator_harness_armed") is True:
             own_config_sha256 = sha256_file(config_path)
             release_sha = _ROOT.name
@@ -704,6 +803,8 @@ def main(argv: list[str] | None = None) -> int:
 
             def require_autonomy() -> None:
                 try:
+                    if native_guard is not None:
+                        native_guard()
                     validate_runtime_guard_file(
                         AUTONOMY_RECEIPT,
                         role="worker",

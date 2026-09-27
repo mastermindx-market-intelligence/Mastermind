@@ -143,6 +143,34 @@ def test_environment_never_inherits_api_keys_or_provider_overrides(home, monkeyp
         environment.process_environment()
 
 
+def test_admitted_service_principal_home_is_supported_but_interactive_default_is_not(home, monkeypatch):
+    monkeypatch.setenv("HOME", str(home))
+    private(home / "auth.json", auth())
+    with pytest.raises(CodexAccountError, match="PRIVATE_DEDICATED"):
+        with native_codex_account_scope(home):
+            pass
+    with native_codex_account_scope(home, principal_home_admitted=True) as environment:
+        assert environment.process_environment()["HOME"] == str(home)
+    default = home / ".codex"
+    default.mkdir(mode=0o700)
+    with pytest.raises(CodexAccountError, match="PRIVATE_DEDICATED"):
+        with native_codex_account_scope(default, principal_home_admitted=True):
+            pass
+
+
+def test_scope_cannot_be_constructed_directly_or_follow_replaced_home(home, tmp_path):
+    from control_plane.codex_account_environment import CodexAccountEnvironment
+    with pytest.raises(CodexAccountError, match="SCOPE_REQUIRED"):
+        CodexAccountEnvironment(home)
+    private(home / "auth.json", auth())
+    with native_codex_account_scope(home) as environment:
+        home.rename(tmp_path / "old-provider")
+        home.mkdir(mode=0o700)
+        private(home / "auth.json", auth("replacement"))
+        with pytest.raises(CodexAccountError, match="HOME_CHANGED"):
+            environment.auth_metadata()
+
+
 def test_adapter_factory_reuses_existing_implementation_and_exact_home(home, monkeypatch):
     from control_plane import codex_worker
     private(home / "auth.json", auth())
@@ -154,7 +182,8 @@ def test_adapter_factory_reuses_existing_implementation_and_exact_home(home, mon
     monkeypatch.setattr(codex_worker, "CodexWorkerAdapter", constructor)
     with native_codex_account_scope(home) as environment:
         assert environment.worker_adapter(Path("/bin/codex"), binary_attestation="existing") is sentinel
-        assert observed == {"binary": Path("/bin/codex"), "binary_attestation": "existing", "codex_home": home}
+        assert observed == {"binary": Path("/bin/codex"), "binary_attestation": "existing", "codex_home": home,
+                            "allowed_versions": None, "required_team_identifier": "2DC432GLL2"}
         for key in ["codex_home", "provider_realm", "provider_credential_loader"]:
             with pytest.raises(CodexAccountError, match="OVERRIDE_FORBIDDEN"):
                 environment.worker_adapter(Path("/bin/codex"), **{key: None})
@@ -216,6 +245,75 @@ def test_absent_named_bucket_cannot_fall_back_to_legacy():
     result = account_readiness(ACCOUNT, {"rateLimitsByLimitId": {}, "rateLimits": {
         "primary": window(), "secondary": window()}}, now=1000)
     assert result["capacity_state"] == "UNKNOWN"
+
+
+def test_explicit_null_named_buckets_cannot_fall_back_to_legacy():
+    result = account_readiness(ACCOUNT, {"rateLimitsByLimitId": None,
+        "rateLimits": {"primary": window(), "secondary": window()}}, now=1000)
+    assert result["capacity_state"] == "UNKNOWN"
+    assert result["windows"] == {}
+
+
+@pytest.mark.parametrize("target", ["home", "auth.json", ".executive-native-account.lock"])
+def test_acl_refuses_even_with_private_mode_bits(home, monkeypatch, target):
+    from control_plane import codex_account_environment as module
+    private(home / "auth.json", auth())
+    monkeypatch.setattr(module, "has_macos_acl", lambda p, **kw:
+        Path(p) == (home if target == "home" else home / target))
+    with pytest.raises(CodexAccountError, match="ACL_FORBIDDEN"):
+        with native_codex_account_scope(home) as environment:
+            environment.auth_metadata()
+
+
+def test_concurrent_invalid_seed_winner_is_refused_not_preserved(home, tmp_path, monkeypatch):
+    seed = private(tmp_path / "seed", auth())
+    real_link = os.link
+    def race(source, destination, **kwargs):
+        private(Path(destination), {"OPENAI_API_KEY": "foreign-secret"})
+        return real_link(source, destination, **kwargs)
+    monkeypatch.setattr(os, "link", race)
+    with native_codex_account_scope(home) as environment:
+        with pytest.raises(CodexAccountError, match="MANAGED_CHATGPT_AUTH_REQUIRED"):
+            environment.seed_if_missing(seed)
+    assert json.loads((home / "auth.json").read_text()) == {"OPENAI_API_KEY": "foreign-secret"}
+    assert list(home.glob(".native-auth-seed-*")) == []
+
+
+@pytest.mark.parametrize("failure", ["construct", "start", "read", "close", "unproven"])
+def test_probe_sanitizes_all_transport_boundaries_and_preserves_cleanup_uncertainty(home, monkeypatch, failure):
+    from scripts.ohf import laboratory
+    from control_plane.codex_account_environment import probe_native_account
+    private(home / "auth.json", auth())
+    class Client:
+        def __init__(self, *args, **kwargs):
+            if failure == "construct":
+                raise RuntimeError("Authorization: Bearer secret-token")
+        def start(self):
+            if failure == "start":
+                raise RuntimeError("Authorization: Bearer secret-token")
+        def request(self, method, *args, **kwargs):
+            if failure == "read":
+                raise RuntimeError("Authorization: Bearer secret-token")
+            return ACCOUNT if method == "account/read" else {}
+        def notify(self, *args):
+            pass
+        def graceful_close(self):
+            if failure == "close":
+                raise RuntimeError("Authorization: Bearer secret-token")
+            return laboratory.AppServerStopProof(
+                controller_returncode=0, private_group_id=12345,
+                private_group_empty=failure != "unproven",
+                leader_exit_confirmed_graceful=True,
+                survivors_detected_after_controller_exit=False,
+                termination_outcome="fixture")
+    monkeypatch.setattr(laboratory, "AppServerClient", Client)
+    with native_codex_account_scope(home) as environment:
+        result = probe_native_account(environment, Path("/not-launched"))
+    assert "secret" not in json.dumps(result)
+    assert result["state"] != "NATIVE_READS_COMPLETED"
+    if failure in {"close", "unproven"}:
+        assert result["state"] == "NATIVE_CLEANUP_UNPROVEN"
+        assert result["stop"]["private_group_empty"] is False
 
 
 @pytest.mark.parametrize("account,expected", [({"account": None}, "LOGIN_REQUIRED"),

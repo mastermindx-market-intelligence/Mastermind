@@ -21,9 +21,22 @@ import time
 from typing import Any, Iterator, Mapping
 import uuid
 
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
+_SCOPE_CONSTRUCTION = object()
+
 
 class CodexAccountError(ValueError):
     """Fixed, secret-free diagnostic; never includes a credential or RPC body."""
+
+
+def _require_no_acl(path: Path, info: os.stat_result, descriptor=None) -> None:
+    try:
+        present = has_macos_acl(path, expected_identity=info, descriptor=descriptor)
+    except (FilesystemSecurityError, OSError):
+        raise CodexAccountError("ACCOUNT_ACL_UNPROVEN") from None
+    if present:
+        raise CodexAccountError("ACCOUNT_ACL_FORBIDDEN")
 
 
 def _private_file(path: Path) -> bytes:
@@ -35,6 +48,7 @@ def _private_file(path: Path) -> bytes:
                     or stat.S_IMODE(info.st_mode) & 0o077 or info.st_nlink != 1
                     or info.st_size > 1024 * 1024):
                 raise CodexAccountError("AUTH_FILE_UNSAFE")
+            _require_no_acl(path, info, stream.fileno())
             return stream.read(1024 * 1024 + 1)
     except OSError:
         raise CodexAccountError("AUTH_FILE_UNAVAILABLE") from None
@@ -56,7 +70,7 @@ def _managed_auth(raw: bytes) -> Mapping[str, Any]:
     return value
 
 
-def _home(path: Path) -> Path:
+def _home(path: Path, *, principal_home_admitted: bool = False) -> Path:
     path = Path(path)
     try:
         canonical = path.resolve(strict=True)
@@ -65,20 +79,22 @@ def _home(path: Path) -> Path:
         raise CodexAccountError("PROVIDER_HOME_UNAVAILABLE") from None
     if (not path.is_absolute() or path != canonical or not stat.S_ISDIR(info.st_mode)
             or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077
-            or path in {Path.home().resolve(), (Path.home() / ".codex").resolve()}):
+            or path == (Path.home() / ".codex").resolve()
+            or (path == Path.home().resolve() and not principal_home_admitted)):
         raise CodexAccountError("PROVIDER_HOME_NOT_PRIVATE_DEDICATED")
+    _require_no_acl(path, info)
     return path
 
 
 @contextmanager
-def native_codex_account_scope(provider_home: Path) -> Iterator["CodexAccountEnvironment"]:
+def native_codex_account_scope(provider_home: Path, *, principal_home_admitted: bool = False) -> Iterator["CodexAccountEnvironment"]:
     """Serialize one pre-existing private home, never wait or choose another account.
 
 Runtime wraps its entire existing broker lifetime in this scope, including
 startup reconciliation and shutdown. It must not release the scope merely
 because a model request timed out. Cross-host admission stays with Executive.
     """
-    home = _home(provider_home)
+    home = _home(provider_home, principal_home_admitted=principal_home_admitted)
     try:
         fd = os.open(home / ".executive-native-account.lock",
                      os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
@@ -89,11 +105,13 @@ because a model request timed out. Cross-host admission stays with Executive.
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
                 or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) & 0o077):
             raise CodexAccountError("ACCOUNT_LOCK_UNSAFE")
+        _require_no_acl(home / ".executive-native-account.lock", info, fd)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise CodexAccountError("ACCOUNT_REFRESH_WRITER_BUSY") from None
-        environment = CodexAccountEnvironment(home)
+        environment = CodexAccountEnvironment(home, principal_home_admitted=principal_home_admitted,
+                                               _scope=_SCOPE_CONSTRUCTION)
         try:
             yield environment
         finally:
@@ -105,14 +123,22 @@ because a model request timed out. Cross-host admission stays with Executive.
 class CodexAccountEnvironment:
     """Construct through native_codex_account_scope; auth remains in this home."""
 
-    def __init__(self, home: Path):
+    def __init__(self, home: Path, *, principal_home_admitted: bool = False, _scope=None):
+        if _scope is not _SCOPE_CONSTRUCTION:
+            raise CodexAccountError("ACCOUNT_SCOPE_REQUIRED")
         self.home = home
+        info = home.lstat()
+        self._home_identity = (info.st_dev, info.st_ino)
+        self._principal_home_admitted = principal_home_admitted
         self._active = True
 
     def _check(self) -> None:
         if not self._active:
             raise CodexAccountError("ACCOUNT_SCOPE_CLOSED")
-        _home(self.home)
+        _home(self.home, principal_home_admitted=self._principal_home_admitted)
+        info = self.home.lstat()
+        if (info.st_dev, info.st_ino) != self._home_identity:
+            raise CodexAccountError("ACCOUNT_HOME_CHANGED")
 
     def seed_if_missing(self, seed_file: Path) -> str:
         """Seed an explicitly admitted native auth file once, without replacement.
@@ -166,13 +192,18 @@ Existing credentials take precedence even when the seed is absent or stale.
         return {"HOME": str(self.home), "CODEX_HOME": str(self.home),
                 "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"}
 
-    def worker_adapter(self, binary_path: Path, **kwargs: Any):
+    def worker_adapter(self, binary_path: Path, *, binary_attestation=None,
+                       allowed_versions: frozenset[str] | None = None,
+                       required_team_identifier: str | None = "2DC432GLL2",
+                       **overrides: Any):
         """Existing Executive adapter factory seam, bound to this exact home."""
         from control_plane.codex_worker import CodexWorkerAdapter
         self.auth_metadata()
-        if {"codex_home", "provider_realm", "provider_credential_loader"} & kwargs.keys():
+        if overrides:
             raise CodexAccountError("NATIVE_ACCOUNT_OVERRIDE_FORBIDDEN")
-        return CodexWorkerAdapter(binary_path, codex_home=self.home, **kwargs)
+        return CodexWorkerAdapter(binary_path, codex_home=self.home,
+            binary_attestation=binary_attestation, allowed_versions=allowed_versions,
+            required_team_identifier=required_team_identifier)
 
 
 def _window(value: Any, now: float) -> dict[str, Any] | None:
@@ -212,7 +243,7 @@ def account_readiness(account: Mapping[str, Any], limits: Mapping[str, Any], *,
         result["plan_type"] = plan
     # Account/read is a local observation; a real rate-limit response establishes
     # remote reachability. Prefer the named current bucket, never sum accounts.
-    if "rateLimitsByLimitId" in limits and limits["rateLimitsByLimitId"] is not None:
+    if "rateLimitsByLimitId" in limits:
         buckets = limits["rateLimitsByLimitId"]
         selected = buckets.get(limit_id) if isinstance(buckets, Mapping) else None
     else:
@@ -253,15 +284,18 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
     from scripts.ohf.laboratory import AppServerClient
     # The explicit provider overrides prevent a saved profile selecting an API
     # route. File storage lets Codex persist its own refreshed managed session.
-    client = AppServerClient([str(binary), "app-server", "-c",
-        'cli_auth_credentials_store="file"', "-c", 'model_provider="openai"'],
-        env=environment.process_environment(), cwd=environment.home,
-        start_new_session=True)
+    client = None
     result: dict[str, Any] = {"account": None, "state": "UNKNOWN", "api_fallback": False,
                             "home_identity": environment.auth_metadata()}
-    stage = "initialize"
+    stage = "construct"
     try:
+        client = AppServerClient([str(binary), "app-server", "-c",
+            'cli_auth_credentials_store="file"', "-c", 'model_provider="openai"'],
+            env=environment.process_environment(), cwd=environment.home,
+            start_new_session=True)
+        stage = "start"
         client.start()
+        stage = "initialize"
         initialized = client.request("initialize", {"clientInfo": {
             "name": "mastermind_native_account", "version": "1.0"},
             "capabilities": {"experimentalApi": True}}, timeout=timeout)
@@ -279,5 +313,18 @@ def probe_native_account(environment: CodexAccountEnvironment, binary: Path,
         result["state"] = _failure_kind(error)
         result["failed_method"] = stage
     finally:
-        result["stop"] = asdict(client.graceful_close())
+        if client is None:
+            result["stop"] = {"termination_outcome": "not-constructed",
+                              "private_group_empty": False}
+        else:
+            try:
+                result["stop"] = asdict(client.graceful_close())
+            except Exception:
+                # Shutdown may carry provider text too. Preserve uncertainty;
+                # never report native-read success or retry a possibly live run.
+                result["state"] = "NATIVE_CLEANUP_UNPROVEN"
+                result["stop"] = {"termination_outcome": "unproven",
+                                  "private_group_empty": False}
+            if result["state"] == "NATIVE_READS_COMPLETED" and not result["stop"].get("private_group_empty"):
+                result["state"] = "NATIVE_CLEANUP_UNPROVEN"
     return result
