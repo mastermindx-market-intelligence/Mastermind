@@ -78,6 +78,11 @@ _CURRENT_MODES = frozenset({"EXTRA_HIGH", "PRO", "OTHER", "UNKNOWN"})
 _MODE_RECOMMENDATIONS = frozenset({"NONE", "EXTRA_HIGH", "PRO"})
 _REQUESTED_MODES = frozenset({"EXTRA_HIGH", "PRO"})
 
+
+def _enum_member(value: object, members: frozenset[str]) -> bool:
+    return type(value) is str and value in members
+
+
 _SNAPSHOT_KEYS = frozenset(
     {
         "schema",
@@ -207,27 +212,27 @@ def _valid_snapshot_shape(value: object) -> bool:
         return False
     if not _text(value["responsibility_ref"], maximum=256, allow_space=False):
         return False
-    if value["trigger"] not in _TRIGGERS:
+    if not _enum_member(value["trigger"], _TRIGGERS):
         return False
-    if value["mission_state"] not in _MISSION_STATES:
+    if not _enum_member(value["mission_state"], _MISSION_STATES):
         return False
-    if value["turn_state"] not in _TURN_STATES:
+    if not _enum_member(value["turn_state"], _TURN_STATES):
         return False
-    if value["effect_state"] not in _EFFECT_STATES:
+    if not _enum_member(value["effect_state"], _EFFECT_STATES):
         return False
-    if value["context_state"] not in _CONTEXT_STATES:
+    if not _enum_member(value["context_state"], _CONTEXT_STATES):
         return False
-    if value["checkpoint_state"] not in _CHECKPOINT_STATES:
+    if not _enum_member(value["checkpoint_state"], _CHECKPOINT_STATES):
         return False
-    if value["binding_state"] not in _BINDING_STATES:
+    if not _enum_member(value["binding_state"], _BINDING_STATES):
         return False
-    if value["capability_state"] not in _CAPABILITY_STATES:
+    if not _enum_member(value["capability_state"], _CAPABILITY_STATES):
         return False
-    if value["human_gate"] not in _HUMAN_GATES:
+    if not _enum_member(value["human_gate"], _HUMAN_GATES):
         return False
-    if value["current_mode"] not in _CURRENT_MODES:
+    if not _enum_member(value["current_mode"], _CURRENT_MODES):
         return False
-    if value["mode_recommendation"] not in _MODE_RECOMMENDATIONS:
+    if not _enum_member(value["mode_recommendation"], _MODE_RECOMMENDATIONS):
         return False
     if not _count(value["outstanding_children"]) or not _count(value["ready_returns"]):
         return False
@@ -261,11 +266,13 @@ def _valid_recommendation_shape(value: object) -> bool:
     assert isinstance(value, dict)
     if value["schema"] != RECOMMENDATION_SCHEMA:
         return False
-    if value["action"] not in _ACTIONS:
+    if not _enum_member(value["action"], _ACTIONS):
         return False
     if type(value["reason_code"]) is not str:
         return False
-    if value["requested_mode"] is not None and value["requested_mode"] not in _REQUESTED_MODES:
+    if value["requested_mode"] is not None and not _enum_member(
+        value["requested_mode"], _REQUESTED_MODES
+    ):
         return False
     if not _bounded_unique_strings(
         value["fanout_candidate_ids"],
@@ -371,7 +378,7 @@ def validate_secretary_recommendation(
     if rec["reason_code"] != _ACTION_REASON[action]:
         return _refuse("REASON_ACTION_MISMATCH", snap, rec)
     if action == "SWITCH_MODE_THEN_CONTINUE":
-        if rec["requested_mode"] not in _REQUESTED_MODES:
+        if not _enum_member(rec["requested_mode"], _REQUESTED_MODES):
             return _refuse("REQUESTED_MODE_REQUIRED", snap, rec)
     elif rec["requested_mode"] is not None:
         return _refuse("REQUESTED_MODE_NOT_ALLOWED", snap, rec)
@@ -400,6 +407,8 @@ def validate_secretary_recommendation(
     if snap["mission_state"] == "COMPLETE":
         if action != "STOP_COMPLETE":
             return _refuse("MISSION_STOP_REQUIRED", snap, rec)
+        if snap["outstanding_children"] > 0 or snap["ready_returns"] > 0:
+            return _refuse("MISSION_NOT_COMPLETE", snap, rec)
         return _accept(snap, rec)
     if action == "STOP_COMPLETE":
         return _refuse("MISSION_NOT_COMPLETE", snap, rec)

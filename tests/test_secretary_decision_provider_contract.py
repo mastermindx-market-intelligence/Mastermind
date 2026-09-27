@@ -159,6 +159,122 @@ if contract is not None:
         assert accepted.action == "STOP_COMPLETE"
 
 
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("trigger", ["TURN_COMPLETED"]),
+            ("trigger", {"trigger": "TURN_COMPLETED"}),
+            ("trigger", True),
+            ("trigger", None),
+            ("mission_state", ["COMPLETE"]),
+            ("mission_state", {"state": "COMPLETE"}),
+            ("mission_state", True),
+            ("mission_state", None),
+            ("turn_state", ["TERMINAL"]),
+            ("turn_state", {"state": "TERMINAL"}),
+            ("turn_state", True),
+            ("turn_state", None),
+            ("effect_state", ["CLEAR"]),
+            ("effect_state", {"state": "CLEAR"}),
+            ("effect_state", True),
+            ("effect_state", None),
+            ("context_state", ["HEALTHY"]),
+            ("context_state", {"state": "HEALTHY"}),
+            ("context_state", True),
+            ("context_state", None),
+            ("checkpoint_state", ["NONE"]),
+            ("checkpoint_state", {"state": "NONE"}),
+            ("checkpoint_state", True),
+            ("checkpoint_state", None),
+            ("binding_state", ["EXACT_CURRENT"]),
+            ("binding_state", {"state": "EXACT_CURRENT"}),
+            ("binding_state", True),
+            ("binding_state", None),
+            ("capability_state", ["SERVICEABLE"]),
+            ("capability_state", {"state": "SERVICEABLE"}),
+            ("capability_state", True),
+            ("capability_state", None),
+            ("human_gate", ["NONE"]),
+            ("human_gate", {"gate": "NONE"}),
+            ("human_gate", True),
+            ("human_gate", None),
+            ("current_mode", ["PRO"]),
+            ("current_mode", {"mode": "PRO"}),
+            ("current_mode", True),
+            ("current_mode", None),
+            ("mode_recommendation", ["NONE"]),
+            ("mode_recommendation", {"mode": "NONE"}),
+            ("mode_recommendation", True),
+            ("mode_recommendation", None),
+        ],
+    )
+    def test_snapshot_enum_json_type_violations_refuse_without_error(
+        field: str, value
+    ) -> None:
+        request = contract.build_secretary_provider_request(
+            snapshot(**{field: value}), now_ms=20_000
+        )
+        receipt = validate(snapshot(**{field: value}))
+        assert request.status == "REFUSED"
+        assert request.refusal_code == "SNAPSHOT_INVALID"
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "SNAPSHOT_INVALID"
+        assert request.provider_selected is False
+        assert receipt.execution_authorized is False
+
+
+    @pytest.mark.parametrize("value", [["STOP_COMPLETE"], {"action": "STOP_COMPLETE"}, True, None])
+    def test_provider_action_json_type_violations_refuse_without_error(
+        value,
+    ) -> None:
+        receipt = validate(rec=recommendation(action=value))
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "RECOMMENDATION_INVALID"
+        assert receipt.execution_authorized is False
+
+
+    @pytest.mark.parametrize("value", [["EXTRA_HIGH"], {"mode": "EXTRA_HIGH"}, True])
+    def test_requested_mode_non_null_json_type_violations_refuse_without_error(
+        value,
+    ) -> None:
+        receipt = validate(
+            rec=recommendation(
+                "SWITCH_MODE_THEN_CONTINUE",
+                "MODE_CHANGE_RECOMMENDED",
+                requested_mode=value,
+                rationale="A malformed JSON type cannot select a mode.",
+            )
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "RECOMMENDATION_INVALID"
+        assert receipt.execution_authorized is False
+
+
+    @pytest.mark.parametrize(
+        ("outstanding_children", "ready_returns"),
+        [(1, 0), (0, 1), (2, 3)],
+    )
+    def test_complete_with_children_or_ready_returns_cannot_stop(
+        outstanding_children: int, ready_returns: int
+    ) -> None:
+        snap = snapshot(
+            mission_state="COMPLETE",
+            outstanding_children=outstanding_children,
+            ready_returns=ready_returns,
+        )
+        receipt = validate(
+            snap,
+            recommendation(
+                "STOP_COMPLETE",
+                "MISSION_COMPLETE",
+                rationale="Completion cannot be admitted while child facts contradict it.",
+            ),
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "MISSION_NOT_COMPLETE"
+        assert receipt.action == "STOP_COMPLETE"
+        assert_safe(receipt)
+
     def test_switch_mode_requires_matching_session_recommendation_and_different_mode() -> None:
         snap = snapshot(
             current_mode="PRO",
@@ -756,6 +872,80 @@ if contract is not None:
         assert receipt.execution_authorized is False
 
 
+    @pytest.mark.parametrize(
+        "value",
+        [["HOLD_EFFECT_UNKNOWN"], {"action": "HOLD_EFFECT_UNKNOWN"}, True, None],
+    )
+    def test_provider_return_action_type_violation_refuses_without_error(
+        value,
+    ) -> None:
+        snap, request_receipt, output = exact_provider_pair()
+        output["action"] = value
+        receipt = contract.validate_secretary_provider_return(
+            snap,
+            request_receipt,
+            output,
+            now_ms=20_000,
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "STRUCTURED_OUTPUT_INVALID"
+        assert receipt.provider_result_attested is False
+        assert receipt.execution_authorized is False
+
+
+    @pytest.mark.parametrize("value", [["EXTRA_HIGH"], {"mode": "EXTRA_HIGH"}, True])
+    def test_provider_return_requested_mode_type_violation_refuses_without_error(
+        value,
+    ) -> None:
+        snap = snapshot(current_mode="PRO", mode_recommendation="EXTRA_HIGH")
+        _, request_receipt, output = exact_provider_pair(
+            snap=snap,
+            rec=recommendation(
+                "SWITCH_MODE_THEN_CONTINUE",
+                "MODE_CHANGE_RECOMMENDED",
+                requested_mode="EXTRA_HIGH",
+                rationale="A bounded mode transition is pending.",
+            ),
+        )
+        output["requested_mode"] = value
+        receipt = contract.validate_secretary_provider_return(
+            snap,
+            request_receipt,
+            output,
+            now_ms=20_000,
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "STRUCTURED_OUTPUT_INVALID"
+        assert receipt.provider_result_attested is False
+
+
+    def test_provider_return_refuses_contradictory_forced_stop() -> None:
+        snap = snapshot(
+            mission_state="COMPLETE",
+            outstanding_children=1,
+            ready_returns=0,
+        )
+        _, request_receipt, output = exact_provider_pair(
+            snap=snap,
+            rec=recommendation(
+                "STOP_COMPLETE",
+                "MISSION_COMPLETE",
+                rationale="A contradictory provider stop must remain unadmitted.",
+            ),
+        )
+        receipt = contract.validate_secretary_provider_return(
+            snap,
+            request_receipt,
+            output,
+            now_ms=20_000,
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.refusal_code == "RECOMMENDATION_REFUSED"
+        assert receipt.semantic_refusal_code == "MISSION_NOT_COMPLETE"
+        assert receipt.action is None
+        assert receipt.provider_result_attested is False
+        assert receipt.execution_authorized is False
+
     def test_provider_return_current_snapshot_stale_refuses_before_request_correlation() -> None:
         snap = snapshot(observed_at_ms=1_000, expires_at_ms=10_000)
         earlier_request = contract.build_secretary_provider_request(snap, now_ms=5_000)
@@ -865,6 +1055,48 @@ if contract is not None:
         assert done.forced_reason_code == "MISSION_COMPLETE"
         assert done.provider_invocation_required is False
 
+
+    @pytest.mark.parametrize(
+        ("outstanding_children", "ready_returns"),
+        [(1, 0), (0, 1), (2, 3)],
+    )
+    def test_shadow_complete_with_children_or_ready_returns_refuses_stop(
+        outstanding_children: int, ready_returns: int
+    ) -> None:
+        value = baseline(
+            snapshot(
+                mission_state="COMPLETE",
+                outstanding_children=outstanding_children,
+                ready_returns=ready_returns,
+            )
+        )
+        assert value.status == "REFUSED"
+        assert value.baseline_class is None
+        assert value.forced_action is None
+        assert value.refusal_code == "MISSION_NOT_COMPLETE"
+        assert value.provider_invocation_required is False
+        assert_shadow_safe(value)
+
+    @pytest.mark.parametrize(
+        ("outstanding_children", "ready_returns"),
+        [(1, 0), (0, 1), (2, 3)],
+    )
+    def test_shadow_complete_with_children_or_ready_returns_refuses_stop(
+        outstanding_children: int, ready_returns: int
+    ) -> None:
+        value = baseline(
+            snapshot(
+                mission_state="COMPLETE",
+                outstanding_children=outstanding_children,
+                ready_returns=ready_returns,
+            )
+        )
+        assert value.status == "REFUSED"
+        assert value.baseline_class is None
+        assert value.forced_action is None
+        assert value.refusal_code == "MISSION_NOT_COMPLETE"
+        assert value.provider_invocation_required is False
+        assert_shadow_safe(value)
 
     def test_shadow_checkpoint_before_rotation_and_ready_rotation_are_forced() -> None:
         checkpoint = baseline(
