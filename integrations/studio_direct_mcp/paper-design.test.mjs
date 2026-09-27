@@ -342,6 +342,7 @@ test('bridge hash drift refuses before process dispatch', async () => {
   });
   const result = await designer.call('paper_inspect', {});
   assert.equal(result.value.state, 'PAPER_BRIDGE_IDENTITY_REFUSED');
+  assert.equal(result.value.gateway_surface, undefined);
   assert.equal(result.effectUnknown, false);
   assert.equal(calls, 0);
 
