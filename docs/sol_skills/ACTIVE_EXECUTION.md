@@ -127,8 +127,13 @@ After recovery/reconciliation, keep one compact working frame:
 OUTCOME
 CURRENT_CRITICAL_DEPENDENCY
 ACTIVE_LANE
+ACTIVE_PHASE
+PHASE_DONE_WHEN
+ALLOWED_SURFACES
+DEFERRED_NONBLOCKING_FINDINGS
 HELD_OR_BLOCKED_LANES
 LAST_MATERIAL_CAPABILITY_DELTA
+LAST_DURABLE_EFFECT
 MATERIAL_INVALIDATORS_SINCE_PIN
 TOOL_SURFACE_STATE
 FINALIZATION_CLASSIFICATION
@@ -139,6 +144,18 @@ ledger. Exact durable facts still belong to their canonical owners.
 
 `CURRENT_CRITICAL_DEPENDENCY` is the next dependency whose completion most directly unlocks the
 requested outcome. Do not replace it with the easiest available task merely to show activity.
+
+`ACTIVE_PHASE` is the one coherent semantic unit currently being executed. `PHASE_DONE_WHEN` names
+its observable exit condition and `ALLOWED_SURFACES` bounds the files, tools, repositories, browser
+or Studio surfaces that directly serve it. **Depth is allowed; breadth is fenced.** A phase may use
+many necessary calls, edits, tests, captures, or long reasoning while they directly serve
+`PHASE_DONE_WHEN`; elapsed time and raw call count are not automatic stop conditions.
+
+Before a broad filesystem, Studio, browser, process, or log read, state the exact active-phase
+question and its stopping condition. A newly discovered item that does not block `PHASE_DONE_WHEN`
+goes to `DEFERRED_NONBLOCKING_FINDINGS` and does not silently become current scope. A genuine blocker
+may open one bounded blocking subphase. If that subphase reveals another broad blocker, perform a
+phase-boundary re-evaluation before expanding further rather than recursively widening the turn.
 
 ## Step 1A — Select principal duty without inventing authority
 
@@ -174,7 +191,10 @@ For a human-attended ChatGPT Project session, Sol owns the **mode recommendation
 the current phase is dominated by deep research, synthesis, architecture, adjudication, or other
 principal judgment. Prefer **Extra High** when the current phase is dominated by iterative coding,
 terminal/browser work, tests, or writes. These are reversible task-fit defaults, not capability
-guarantees. Stay in a working mode unless switching materially improves the next critical action.
+guarantees. The mode choice is session-level by default. Once substantial work has begun, mode
+stickiness is the default: stay in a working mode across research, implementation, validation, and
+tool-heavy subphases unless a concrete critical-path capability or quality need makes switching
+materially better.
 
 Observed capability is action-specific and generation-specific. Pro may expose a needed write action,
 lack that exact action, or lose it later in the session. Extra High is a recovery candidate, not a
@@ -186,7 +206,12 @@ perform one bounded diagnostic, reconcile any modifying effect, then recommend t
 its purpose, checkpoint, next action, and unresolved effects. If the exact surface exposes an authorized
 mode selector, use it only with verified readback; otherwise the Chairman performs that UI control.
 Text cannot self-switch. After a relevant mode/session change, re-verify the exact capability needed.
-Do not alternate modes ceremonially, and return to Pro when deep judgment again dominates.
+Do not alternate modes ceremonially. In particular, do not bounce a mature Sol Pro conversation
+to Extra High and back merely because the next phase is tool-heavy. If a genuine cross-mode need
+appears after the chat is already heavy, prefer a durable fresh-chat boundary into the required mode
+over mutating the mature conversation in place. Astra Pro may remain long-lived while healthy;
+Extra High may sustain implementation/tool work; Sol Pro may sustain workhorse delivery. These are
+observed operating defaults, not provider duration guarantees.
 
 A mode change grants **no** authority, permission, admission, source custody, carrier transfer, retry
 right, or effect clearance. It never bypasses a safety/permission denial and never clears
@@ -196,10 +221,12 @@ with their existing owners. A mode switch is not context rotation or proof that 
 At a continuation boundary, record the recommended next mode and why when that fact materially affects
 recovery.
 
+
 ## Step 2 — Execute one observable capability step
 
-Choose the smallest action that can materially advance the current dependency. Prefer an action that
-produces one of these observable deltas:
+Choose the next material action inside `ACTIVE_PHASE` that can advance the current dependency.
+A single action may require many necessary tool operations; do not fragment productive depth merely
+to keep a turn short. Prefer work that produces one of these observable deltas:
 
 * a previously absent user/machine capability now works;
 * a blocking implementation defect is removed;
@@ -432,6 +459,25 @@ Compare like tasks and distinguish elapsed time from known waiting. Do not score
 or infer hidden reasoning usage from elapsed time. Update provisional task-fit preferences only from
 attributable evidence; source-contract tests alone do not establish fresh-model behavior.
 
+The reliability invariant is the **recovery gap**, not runtime: accepted work that is not recoverable
+from canonical owners should not exceed the current coherent semantic phase. Persist material effects
+and accepted results at coherent milestones and before opening a new risky/high-output phase; do not
+checkpoint after every trivial operation. A checkpoint may occur mid-turn and does not itself require
+the turn to stop.
+
+When `PHASE_DONE_WHEN` is satisfied, perform a **PHASE BARRIER** before materially different work:
+
+1. If the next phase is still critical-path, bounded, on the same lawful carrier, effects are
+   reconciled, and the exact surface remains healthy, continue in the same turn.
+2. If the next phase is useful but continuity pressure is material, persist the cumulative frontier
+   and use `CHECKPOINTED_CONTINUATION`; resume on the next turn in the same healthy chat.
+3. If the session itself is heavy/unstable enough to satisfy `ROTATION_REQUIRED`, persist, seal, and
+   continue through the existing context-rotation owner instead of repeatedly issuing `Continue`.
+
+`MORE_WORK_EXISTS` means the parent mission is incomplete; it does not require the current assistant
+generation to remain open after every verified semantic boundary. Normal same-chat next-turn
+continuation is distinct from hard/fresh-chat rotation.
+
 At a verified semantic phase boundary, checkpoint accepted deltas and rotate before another
 high-context phase only when the exact surface is `ROTATION_REQUIRED`, all modifying effects are
 reconciled, a compact durable continuation exists, and one lawful successor can recover the same
@@ -499,8 +545,11 @@ successor must reconcile and persist it before treating it as durable. Classify 
 genuine `EXACT_HUMAN_GATE` or `EFFECT_UNKNOWN` disposition, never a fabricated
 `CHECKPOINTED_CONTINUATION`. Such a note neither proves persistence nor changes the effect state.
 
-If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**. Select the highest-leverage
-unblocked dependency and continue execution.
+If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize** merely to stop work.
+Select the highest-leverage unblocked dependency and continue execution while the active phase and
+surface remain healthy. At a verified phase boundary, however, when the `CHECKPOINTED_CONTINUATION`
+gates are independently satisfied, reclassify to that explicit incomplete-mission disposition rather
+than pretending that `MORE_WORK_EXISTS` requires one assistant generation to remain open forever.
 
 A requested effort window such as "work for 60–120 minutes" is not a correctness boundary. Use the
 productive turn fully; stop on outcome/gate evidence, not because an arbitrary amount of time elapsed

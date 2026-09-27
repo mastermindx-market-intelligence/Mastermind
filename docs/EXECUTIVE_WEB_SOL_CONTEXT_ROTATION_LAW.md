@@ -174,6 +174,16 @@ from automated Executive/ModelRouter admission, provider placement, source custo
 effect authority. A fresh mode/session is a material capability invalidator only for the exact actions
 that must be re-proven; one prior READ/WRITE success does not generalize across action families or time.
 
+### 6.2 Stream attachment uncertainty is not session death
+
+The rule is: **client stream detachment is not session death**. A red exclamation, unavailable resume
+stream, "Stopped thinking" label, browser disconnect, or other client/UI symptom without canonical
+termination evidence is `STREAM_ATTACHMENT_UNCERTAIN`; it does not establish `ROTATION_REQUIRED`.
+First reacquire the exact conversation/request state and reconcile any exact PID, process, or modifying
+effect that may still be alive. Do not duplicate `Continue` or any modifying effect merely because the
+client lost its stream. Escalate to terminal-turn/session recovery only when observable evidence shows
+the turn ended, the bound surface is unsafe, or the existing repeated-failure rule is actually met.
+
 A tainted connector generation is unusable for further work. The next connector generation must
 reconcile the exact original PID/action/effect before any replacement or repeat. A timeout, taint, or
 lost response never authorizes carrier failover or a blind retry.

@@ -116,3 +116,27 @@
 ## Plan self-review
 
 Every SR-F0 source requirement maps to one task. Studio Direct transport work is explicitly excluded. The plan contains no placeholder implementation step, no new control plane, and no source path outside the existing owner set plus one evidence record. File and state names match the design.
+
+
+## Amendment — 2026-09-27 long-run workhorse behavior
+
+Implement and verify the Chairman refinement without turning SR-F0 into a timer policy:
+
+- [x] Extend the active-turn frame with `ACTIVE_PHASE`, `PHASE_DONE_WHEN`, allowed surfaces,
+  deferred findings, and last durable effect.
+- [x] Add phase fencing: productive depth can use many calls; nonblocking breadth is deferred; one
+  blocking subphase is allowed before re-evaluating scope.
+- [x] Define recovery gap as the reliability invariant and allow checkpoints mid-turn without forcing
+  a stop.
+- [x] Clarify `MORE_WORK_EXISTS`: parent mission remains incomplete, but a verified semantic boundary
+  may yield via `CHECKPOINTED_CONTINUATION` rather than keeping one response alive indefinitely.
+- [x] Make attended mode selection session-sticky by default. Do not bounce mature Sol Pro merely for
+  a tool-heavy phase; use fresh-chat mode migration when a heavy conversation genuinely needs it.
+- [x] Distinguish stream attachment uncertainty from turn end, session instability, and workspace or
+  effect uncertainty.
+- [x] Keep the Project bootstrap under 8000 characters while carrying the minimum phase/mode/recovery
+  kernel.
+- [x] Add discriminating RED/GREEN tests for long Extra High/Sol work, phase boundaries, stream
+  detachment, same-chat continuation, and no mode-bounce behavior.
+- [ ] After lawful same-carrier source custody is available, commit/publish the current-base candidate,
+  run hosted CI/security, obtain independent non-author review, and prove Project/bootstrap adoption.

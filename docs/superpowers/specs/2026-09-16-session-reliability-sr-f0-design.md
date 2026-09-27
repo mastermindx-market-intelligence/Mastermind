@@ -152,3 +152,37 @@ Latest-base integration and independent review must verify that no held carrier 
 SR-F0 is accepted only when the exact head passes focused source-law tests, current-base integration, independent review, and protected CI; the protected Skillpack exposes the new companion and aligned stop semantics; the incident record remains sanitized; and the PR remains records/procedure-only.
 
 After merge, procedural guidance is protected, while bounded Studio Direct output/timeout/taint enforcement remains `SPEC_ONLY` until SR-T1 is separately implemented, installed, and canaried. No session reliability capability is `PROVEN_LIVE` before the later SR-D1 and SR-PROD1 evidence gates.
+
+
+## 2026-09-27 long-run reliability refinement
+
+The product target is **small recovery gap, not short model runs**. A healthy turn may remain active for
+substantial elapsed time and many tool calls when it stays inside one coherent semantic phase and all
+material effects are recoverable. The scheduler hierarchy is:
+
+```text
+SESSION -> TURN -> SEMANTIC PHASE -> TOOL OPERATION
+```
+
+Each active phase has `PHASE_DONE_WHEN`, allowed surfaces, and deferred nonblocking findings.
+Depth is allowed; breadth is fenced. A nonblocking discovery is recorded and deferred. One genuine
+blocking subphase may be opened; a second broad blocker forces a phase-boundary decision instead of
+recursive archaeology.
+
+Tool-call, output, and elapsed-time budgets are pressure indicators and checkpoint prompts, never
+hard productivity ceilings. A checkpoint can occur mid-turn without ending it. At a clean phase
+boundary, continue the same turn when the next phase is critical-path, bounded, effects are reconciled,
+and the surface is healthy. When continuity pressure is material, use durable
+`CHECKPOINTED_CONTINUATION` and resume next turn in the same healthy chat. Hard rotation is reserved
+for an unsafe/heavy session or repeated terminal failure.
+
+Mode choice is session-level by default. Astra Pro may remain long-lived while healthy. Extra High may
+perform sustained 10-20+ minute tool phases and longer when healthy. Sol Pro may perform sustained
+30-50m+ workhorse turns; several substantial turns in the same chat are expected. Mature Sol Pro should
+not be bounced to Extra High and back merely because one phase is tool-heavy. If cross-mode migration
+becomes genuinely necessary in a heavy chat, checkpoint and move at a fresh-chat boundary.
+
+Failure handling distinguishes client stream detachment, ended turn/tool execution, unstable
+conversation state, and surviving workspace/process/effect state. A UI "Stopped thinking" symptom
+does not prove the underlying request stopped. Reconcile the exact original request/PID/effect before
+duplicate Continue, retry, mode migration, or context rotation.

@@ -28,7 +28,11 @@ Keep only the minimum frame needed for the current action:
 
 ```text
 SESSION_HEALTH
-CURRENT_PHASE
+FAILURE_LAYER
+ACTIVE_PHASE
+PHASE_DONE_WHEN
+ALLOWED_SURFACES
+DEFERRED_NONBLOCKING_FINDINGS
 LAST_DURABLE_CHECKPOINT
 CURRENT_TOOL_OR_PROCESS_IDENTITY
 CURRENT_SELECTED_MODE_AND_CAPABILITY_EVIDENCE
@@ -38,6 +42,18 @@ EXACT_NEXT_ACTION
 ```
 
 This frame is ephemeral. Never persist it as another state store.
+
+## Semantic phase discipline
+
+The primary reliability invariant is **recovery gap, not run length**. Keep accepted work that is not
+recoverable from canonical owners to at most the current coherent semantic phase. **Depth is allowed;
+breadth is fenced.** A healthy long turn may use many calls and substantial elapsed time while it
+remains inside the same bounded phase and effects are recoverable.
+
+Every broad filesystem, Studio, browser, process, or log exploration must answer a named active-phase
+question with a stop condition. Nonblocking discoveries are deferred. One true blocker may open one
+bounded blocking subphase; a second broad blocker triggers a phase-boundary decision instead of
+recursive scope growth. Completing a checkpoint does not itself end the turn.
 
 ## Session-health classifications
 
@@ -81,7 +97,11 @@ The truth rule remains **Thinking failed != context exhausted**. A single failur
 
 ## Tool-output and command budgets
 
-These are conservative Mastermind engineering budgets, not undocumented provider limits.
+These are conservative Mastermind engineering budgets, not undocumented provider limits. They are
+**pressure indicators and checkpoint prompts, never hard productivity ceilings**. A healthy long turn
+that stays on the same bounded phase may continue beyond a soft budget after compressing/retrieving
+more selectively and making its durable frontier current. The budgets exist to prevent transcript
+bloat and stale recovery state, not to force short Pro or Extra High runs.
 
 ### Per response
 
@@ -93,7 +113,8 @@ These are conservative Mastermind engineering budgets, not undocumented provider
 ### Per active turn
 
 - cumulative raw-output target: **32 KiB**;
-- after **six material tool calls**, synthesize and checkpoint before another broad phase;
+- after **six material tool calls**, synthesize and checkpoint before another broad phase; this is
+  a pressure trigger, not a mandatory stop or call ceiling;
 - do not load multiple complete source files, PR bodies, logs, metrics, schemas, or process tables when
   exact ranges or selected fields answer the question.
 
@@ -169,6 +190,51 @@ DO_NOT_REDO, exact next action, and recommended next mode when material. Classif
 `EXACT_HUMAN_GATE` or `EFFECT_UNKNOWN`; never call this a verified checkpoint. A successor must
 reconcile and persist the frontier before using it as durable truth.
 
+## Failure-layer classifier
+
+Classify the observed boundary before choosing recovery. These are diagnostic classes only; they do
+not create Executive lifecycle states.
+
+### `STREAM_ATTACHMENT_UNCERTAIN`
+
+The UI/client stream is detached, red-exclamation, resume-stream unavailable, or visibly says stopped
+without proof that the underlying request/process ended. Reacquire/read observable state first; do
+not duplicate Continue or effects merely because the client detached.
+
+### `TURN_EXECUTION_ENDED`
+
+The reasoning/tool turn ended, but the conversation and exact workspace/process may still be valid.
+Reconcile PID/action/effect identity and, when the chat remains healthy, continue on the next turn in
+the same conversation.
+
+### `SESSION_UNSTABLE`
+
+The conversation is materially heavy/unstable, or terminal generation failure repeats. Persist the
+frontier, seal the predecessor, and use a fresh same-mode chat through the existing rotation owner.
+Do not turn mode switching into an ersatz compaction mechanism.
+
+### `WORKSPACE_OR_EFFECT_UNCERTAIN`
+
+Filesystem, process, request, branch, or modifying effect may have survived independently of the
+chat. Preserve the exact original identity; `EFFECT_UNKNOWN` blocks replay, mode movement, receiver
+change, and rotation until same-carrier reconciliation.
+
+## Mode-specific continuation defaults
+
+- **Astra Pro:** keep the same healthy conversation and exploit observed continuity/self-compaction;
+  no scheduled rotation is required.
+- **Extra High:** sustained **10–20+ minute** implementation/tool phases are normal and may run longer
+  while the active phase stays bounded and effects remain recoverable.
+- **Sol Pro:** sustained **30–50m+** productive workhorse turns are normal when available. Prefer mode
+  stickiness across several substantial turns; the Chairman-observed roughly 2–3 major-turn renewal
+  rhythm is a practical default, **not a timer law**. When the mature chat becomes materially heavy,
+  checkpoint and open a fresh Sol Pro successor.
+- Do not bounce a mature Sol Pro conversation to Extra High and back merely because the next phase is
+  tool-heavy. A genuine cross-mode need in a heavy chat moves at a durable fresh-chat boundary.
+
+These are empirical operating defaults, not platform duration guarantees. Elapsed time alone never
+establishes `ROTATION_REQUIRED`.
+
 ## Failure triage
 
 ### Failure inside one tool call
@@ -199,6 +265,10 @@ shown, browser/version, clean-environment comparisons, HAR, and console errors. 
 private tool payloads, and company-confidential evidence not required by support.
 
 ## Closeout and rotation sequence
+
+A clean semantic phase boundary under material continuity pressure may use
+`CHECKPOINTED_CONTINUATION` and resume on the next turn in the same healthy chat. That is not
+context rotation. The sequence below is for `ROTATION_REQUIRED` or an explicitly retired session.
 
 1. stop new modifying effects;
 2. reconcile every existing effect and timed-out process by exact identity;

@@ -311,3 +311,43 @@ def test_final_gate_projects_platform_and_ui_recovery_without_new_lifecycle_stat
     assert "`CHECKPOINTED_CONTINUATION`" in text
     assert "`NOT_CANONICALLY_PERSISTED`" in text
     assert "genuine `EXACT_HUMAN_GATE` or `EFFECT_UNKNOWN`" in text
+
+
+def test_long_run_phase_contract_fences_breadth_without_shortening_productive_turns():
+    text = " ".join(_section("Step 1 — Freeze the active-turn frame").split())
+    for phrase in (
+        "ACTIVE_PHASE",
+        "PHASE_DONE_WHEN",
+        "ALLOWED_SURFACES",
+        "DEFERRED_NONBLOCKING_FINDINGS",
+        "Depth is allowed; breadth is fenced",
+        "one bounded blocking subphase",
+        "phase-boundary re-evaluation",
+    ):
+        assert phrase in text
+
+
+def test_attended_mode_policy_is_session_sticky_after_substantial_work_begins():
+    text = " ".join(_section("Step 1B — Adapt attended reasoning mode to the current phase").split())
+    for phrase in (
+        "mode choice is session-level by default",
+        "mode stickiness is the default",
+        "do not bounce a mature Sol Pro conversation",
+        "tool-heavy",
+        "fresh-chat boundary",
+    ):
+        assert phrase in text
+
+
+def test_phase_barrier_separates_mission_incomplete_from_current_turn_lifetime():
+    text = " ".join(_section("Step 7A — Preserve operational continuity before interruption").split())
+    for phrase in (
+        "recovery gap",
+        "PHASE BARRIER",
+        "MORE_WORK_EXISTS",
+        "mission is incomplete",
+        "does not require the current assistant generation to remain open",
+        "same healthy chat",
+        "A checkpoint may occur mid-turn",
+    ):
+        assert phrase in text

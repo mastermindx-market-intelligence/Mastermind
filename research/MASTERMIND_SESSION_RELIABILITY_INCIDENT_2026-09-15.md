@@ -107,3 +107,20 @@ This incident record and SR-F0 source law do not enforce tool-response limits an
 model adoption. Session-reliability transport protection remains `SPEC_ONLY` until the separate SR-T1
 implementation is protected, installed, and canaried. End-to-end capability remains unaccepted until
 the disposable and real-program recovery gates pass.
+
+
+## 2026-09-27 refinement — failure envelope versus scope drift
+
+Follow-up evidence does not support treating the observed 20–35 minute failures as one universal
+provider timer. Current operating evidence includes both route-local tool/stream failures around that
+range and materially longer successful turns. Hidden provider deadlines remain unknown.
+
+The actionable defect is therefore not "turns are too long." It is that one tool-heavy turn can cross
+multiple semantic phases without a durable boundary, especially after entering filesystem, Studio,
+browser, process-monitoring, or broad-source archaeology. That increases the amount of good work lost
+when any provider/UI/tool boundary fails.
+
+SR-F0 now targets a small **recovery gap** while preserving long productive turns. Long Extra High and
+Sol Pro work is explicitly valid when it remains in one bounded phase. Phase completion, scope
+expansion, stream detachment, terminal turn failure, session instability, and surviving workspace or
+effect state are separate conditions and must not be collapsed into one context-limit diagnosis.

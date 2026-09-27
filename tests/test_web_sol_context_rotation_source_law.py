@@ -382,3 +382,67 @@ def test_compact_project_kernel_carries_adaptive_mode_and_rotation_boundary() ->
         "MODE_SWITCH/FRESH_CHAT are human-gate reasons, not lifecycle states",
     ):
         assert phrase in kernel
+
+
+def test_session_reliability_budgets_are_pressure_indicators_not_productivity_ceilings() -> None:
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
+    for phrase in (
+        "pressure indicators and checkpoint prompts",
+        "never hard productivity ceilings",
+        "healthy long turn",
+        "same bounded phase",
+        "Depth is allowed; breadth is fenced",
+    ):
+        assert phrase in skill
+
+
+def test_session_reliability_distinguishes_stream_turn_session_and_workspace_failures() -> None:
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
+    for phrase in (
+        "STREAM_ATTACHMENT_UNCERTAIN",
+        "TURN_EXECUTION_ENDED",
+        "SESSION_UNSTABLE",
+        "WORKSPACE_OR_EFFECT_UNCERTAIN",
+        "do not duplicate Continue or effects",
+        "same conversation",
+        "fresh same-mode chat",
+    ):
+        assert phrase in skill
+
+
+def test_session_reliability_preserves_long_mode_specific_work() -> None:
+    skill = _normalized(_read("docs/sol_skills/SESSION_RELIABILITY.md"))
+    for phrase in (
+        "Astra Pro",
+        "10–20+ minute",
+        "30–50m+",
+        "mode stickiness",
+        "not a timer law",
+        "Do not bounce",
+    ):
+        assert phrase in skill
+
+
+def test_compact_kernel_projects_phase_fence_and_mode_stickiness() -> None:
+    kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
+    for phrase in (
+        "mode stickiness",
+        "active semantic phase",
+        "Depth allowed; breadth fenced",
+        "same healthy chat",
+        "mission is incomplete",
+        "fresh same-mode chat",
+    ):
+        assert phrase in kernel
+
+
+def test_stream_attachment_uncertainty_does_not_imply_context_rotation() -> None:
+    law = _normalized(_read(LAW_PATH))
+    for phrase in (
+        "client stream detachment is not session death",
+        "STREAM_ATTACHMENT_UNCERTAIN",
+        "does not establish `ROTATION_REQUIRED`",
+        "reacquire the exact conversation/request state",
+        "Do not duplicate `Continue` or any modifying effect",
+    ):
+        assert phrase in law
