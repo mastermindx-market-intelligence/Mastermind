@@ -1,0 +1,53 @@
+{
+  "operation": "astra-sol-orchestrator-bundle-20260926-sol-001",
+  "observed_at": "2026-09-27T01:12:45.379328+00:00",
+  "source_parent": "aaa7b350fb379d1aa54dcc016dc6d75634d65468",
+  "protected_procedure_pin": "4c6b206d3fb7fbc6d077faf61ae361bedf259925",
+  "source_sha256": {
+    "ops/codex_fabric/orchestrator_bundle.py": "10a520281782ede864c2b825fd1d67f4207ee1de10507f60ccb3b2b5ba85ceb4",
+    "ops/codex_fabric/mastermind-orchestrators.config.toml": "44e2ba4e2ec9ab4d318ff2155621e099cda708034b5c6fececc225f47d9b5a2f",
+    "ops/codex_fabric/agents/l2-astra-ceo.toml": "55b7b7a310b787356542d8c9039229d0beda968bda5d8c3940291a595afa5513",
+    "ops/codex_fabric/agents/l2-sol-ceo.toml": "d63329c349e7bade1892e6c914b30684e1815497c66522a79531be1fe54266c4",
+    "tests/test_codex_orchestrator_bundle.py": "26284f91a3e136c4f10a967471ce7219c5b101ff6b2f39f118caaaf9c5a8119a",
+    "tests/test_codex_orchestrator_native_config.py": "86fa97e87bdf36c70ebd3c91c6c79f96f6188a5f5c443f3d116a46287c2b4ea0"
+  },
+  "focused_test_result": {
+    "command": [
+      "/private/tmp/mmx-astra-bundle-test-ko_8w550/venv/bin/python",
+      "-m",
+      "pytest",
+      "-o",
+      "addopts=",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "tests/test_codex_orchestrator_bundle.py",
+      "tests/test_codex_orchestrator_native_config.py",
+      "tests/test_astra_delegation_source_policy.py",
+      "tests/test_astra_external_fabric_contract.py",
+      "tests/test_codex_fabric_registration.py",
+      "tests/test_codex_fabric_auth.py",
+      "tests/test_codex_fabric_enrollment.py",
+      "--tb=short"
+    ],
+    "exit_code": 0,
+    "output": "........................................................................ [ 57%]\n.....................................................                    [100%]\n125 passed in 5.38s\n"
+  },
+  "native_binary": "/opt/homebrew/bin/codex",
+  "native_scope": "credentialless prompt/config only, no model turn",
+  "trusted_project_without_overrides_slots_including_root": 4,
+  "trusted_project_with_overrides_slots_including_root": 2,
+  "real_codex_home_inspected": "/Users/chriswong/.codex",
+  "live_installation_performed": false,
+  "live_bundle_paths_missing": true,
+  "global_configuration_modified": false,
+  "credentials_or_dcr_modified": false,
+  "full_repository_ci_proven": false,
+  "independent_review_proven": false,
+  "role_selection_proven": false,
+  "child_enforcement_proven": false,
+  "executive_worker_dispatch_proven": false,
+  "mission_complete": false,
+  "record_type": "source_verification_receipt",
+  "format_version": 1
+}
