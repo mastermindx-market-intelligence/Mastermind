@@ -134,7 +134,13 @@ _DENIED_PROVIDER_ENV_KEYS = frozenset(
 _RAW_AUTH_ALLOWED_KEYS = frozenset(
     {
         "loggedIn", "authMethod", "apiProvider", "subscriptionType", "apiKeySource",
+        # Known provider PII is tolerated as INPUT only so it can be discarded.
+        # It is never returned or persisted by this module. The current native
+        # 2.1.275 wire exposes organization identity under `orgId`/`orgName`
+        # alongside the older `organization`/`organizationId` aliases; both
+        # shapes are accepted and discarded, never projected.
         "email", "organization", "accountId", "organizationId",
+        "orgId", "orgName", "analyticsDisabled", "projectsDirectory", "configDirectory",
     }
 )
 _SECRET_KEY_RE = re.compile(
@@ -1330,6 +1336,8 @@ class ClaudeCodeWorkerAdapter:
                 "",
                 "auth",
                 "status",
+                # Explicit JSON; safe-mode diagnostics remain discard-only input.
+                "--json",
             ),
             timeout=timeout,
             env=_closed_auth_environment(),
@@ -1346,9 +1354,15 @@ class ClaudeCodeWorkerAdapter:
             or (exit_code == 0) is not logged_in
         ):
             raise ClaudeAuthStatusError("auth observation response is unsupported")
+        if "analyticsDisabled" in parsed and type(parsed["analyticsDisabled"]) is not bool:
+            raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
+        for key in ("projectsDirectory", "configDirectory"):
+            if key in parsed and not isinstance(parsed[key], str):
+                raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
         for key in (
             "email", "organization", "subscriptionType", "apiKeySource",
-            "accountId", "organizationId",
+            "accountId", "organizationId", "orgId", "orgName",
+            "projectsDirectory", "configDirectory",
         ):
             if key in parsed:
                 _validate_discard_only(parsed[key])

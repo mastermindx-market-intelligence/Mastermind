@@ -5,6 +5,47 @@
 **Status:** `RECORDS ONLY / SPEC_ONLY / PRODUCTION INERT`  
 **Authority correction:** current provider documentation and installed-version observations are evidence for future requalification; they do **not** silently supersede protected PF1/OCR-1 authentication source law.
 
+## 2026-09-27 native storage requalification
+
+This delivery amendment supersedes the Keychain-only **storage** requirement in
+this document's historical baseline below. It preserves a dedicated OS principal,
+one isolated persistent provider home/config directory, native `auth login --claudeai`,
+credential-precedence checks, and the existing canonical host/principal owner.
+It does not admit setup-token, API credentials, copied credentials, or several
+account realms sharing one mutable auth file.
+
+The first-party [credential management documentation](https://code.claude.com/docs/en/authentication#credential-management)
+now documents native macOS OAuth fallback to a mode0600 `.credentials.json` when
+Keychain rejects a write, and `CLAUDE_CONFIG_DIR` namespacing of both stores. Claude
+Code alone creates and refreshes that file; Executive does not read its contents,
+seed it from another account, or replace it after refresh.
+
+The canonical preflight adds `observe_native_credential_storage`: a metadata-only,
+no-follow directory-descriptor walk on canonical absolute coordinates. The dedicated
+home and `.claude` directory must be mode0700 and owned by the bound principal;
+a file observation requires a mode0600, single-link regular file with that owner.
+A missing file yields `UNKNOWN`, never an inferred Keychain proof. The observer
+never opens the credential file for reading: it uses a metadata-only handle
+and the existing filesystem ACL observer, refusing extended ACLs. `OS_PRINCIPAL_NATIVE_PRIVATE_FILE` is an allowed
+isolation-basis value, not an enrollment or readiness grant. File presence does
+not identify which native credential store the CLI selected. Native auth status
+must separately establish claude.ai/firstParty in the actual worker context.
+
+The installed CLI2.1.275 additionally requires OS username environment for native
+macOS credential lookup: the same closed environment reported logged out without
+USER/LOGNAME and native authenticated with them. Preflight derives those fields
+from `pwd.getpwuid(os.geteuid())`, never caller-supplied account names. Its exact
+`auth status --json` wire includes safe-mode diagnostics and organization aliases;
+these are validated as bounded discard-only inputs and never enter public receipts.
+
+This source amendment alone does not prove a production realm, token renewal,
+concurrent-account isolation, restart or cold-boot recovery. The unchanged
+worker-context, precedence, expiry, isolation and recovery gates below still need
+actual evidence. It does not remove the canonical identity-owner refusal or
+create another identity authority. Runtime owns connecting that existing seam.
+
+## Historical baseline (2026-09-15)
+
 ## Why this amendment exists
 
 Cruise-mode autonomy adds requirements the realm/capacity contract alone cannot satisfy: a native Claude realm must survive process/host restart, remain on the intended subscription credential source, and surface credential failure before work is silently stranded.
