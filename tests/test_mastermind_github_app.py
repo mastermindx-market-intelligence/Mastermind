@@ -803,8 +803,11 @@ def test_expiry_is_exclusive_at_exact_expiry_but_reconcile_remains_available() -
             },
         )
     )
-    assert reconcile["status"] == "OK"
-    assert reconcile["data"]["effect_state"] == "NOT_APPLIED"
+    # Historical reading remains available, but a negative GitHub snapshot
+    # alone carries no durable proof that an earlier request never executed.
+    assert reconcile["status"] == "UNKNOWN"
+    assert reconcile["data"]["effect_state"] == "EFFECT_UNKNOWN"
+    assert reconcile["data"]["reconciled"] is False
 
 
 @pytest.mark.parametrize(
