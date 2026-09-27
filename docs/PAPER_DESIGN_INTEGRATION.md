@@ -45,7 +45,7 @@ process tools but has not checked for `paper_inspect`, `paper_catalog`, `paper_r
 and `paper_edit` has **not** established Paper unavailability. `paper_inspect` now
 returns `gateway_surface`, which declares the exact Paper tool family the current gateway
 is built to advertise. If that contract includes `paper_prepare` while the ChatGPT client
-surface omits it, classify `STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`: current-file
+surface omits it, classify the mismatch as publication/surface drift: `STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`. Current-file
 reads/edits may remain available, but exact-file transition is held until the same Studio
 Direct app's **workspace-approved action snapshot** is current and `paper_prepare` is directly
 surfaced. OpenAI documents that approved MCP apps use a frozen tool/input snapshot and do not
