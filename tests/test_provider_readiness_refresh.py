@@ -1403,6 +1403,11 @@ def test_t13b_crash_between_temp_write_and_replace_leaves_no_partial_sibling(
     digest-named path.
     """
     receipt = _build_receipt(expired=True)
+    # This test is about atomic sibling recovery, not credential rotation.
+    # Reuse the receipt's already-authorized deadline across both attempts so
+    # wall-clock advancement cannot accidentally request a later credential
+    # window and trip the production no-extension guard.
+    credential_expires_at = receipt["credential_expires_at"]
     receipt_path = tmp_path / "readiness.json"
     _write_with_storage(receipt_path, receipt)
 
@@ -1451,7 +1456,7 @@ def test_t13b_crash_between_temp_write_and_replace_leaves_no_partial_sibling(
             "--identity-json", str(identity_json),
             "--expected-kind", "device-auth",
             "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
-            "--credential-expires-at", _credential_expiry(hours=12),
+            "--credential-expires-at", credential_expires_at,
             "--worker-uid", "454",
             "--worker-gid", "454",
         ],
@@ -1492,7 +1497,7 @@ def test_t13b_crash_between_temp_write_and_replace_leaves_no_partial_sibling(
             "--identity-json", str(identity_json),
             "--expected-kind", "device-auth",
             "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
-            "--credential-expires-at", _credential_expiry(hours=12),
+            "--credential-expires-at", credential_expires_at,
             "--worker-uid", "454",
             "--worker-gid", "454",
         ],
