@@ -30,6 +30,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import UTC, datetime
@@ -1278,7 +1279,14 @@ def observe_native_credential_storage(
     except ImportError:
         _raise("NATIVE_STORAGE_UNSAFE")
     try:
-        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        # Service principals may search root-owned 0711 ancestors without
+        # listing them. Darwin fcntl.h defines O_SEARCH as O_EXEC|O_DIRECTORY;
+        # supported Python versions do not all export the constant.
+        if sys.platform == "darwin":
+            search_flag = getattr(os, "O_SEARCH", 0x40000000 | os.O_DIRECTORY)
+        else:
+            search_flag = getattr(os, "O_PATH", os.O_RDONLY)
+        flags = search_flag | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
         descriptors.append(os.open("/", flags))
         for part in home.parts[1:]:
             descriptors.append(os.open(part, flags, dir_fd=descriptors[-1]))

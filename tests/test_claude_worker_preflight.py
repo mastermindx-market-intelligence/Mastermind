@@ -1794,3 +1794,23 @@ def test_identity_owner_is_explicit_composition_and_absence_stays_closed():
         raise RuntimeError("private realm mismatch")
     with pytest.raises(module.PreflightError, match="^PRINCIPAL_CONTEXT_MISMATCH$"):
         module.require_current_identity_owner(host, principal, identity_owner=refusing_owner)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Darwin service-ancestor traversal")
+def test_native_storage_uses_search_only_directory_handles(tmp_path, monkeypatch):
+    module = _load()
+    home, config, credential = _native_storage_fixture(tmp_path)
+    real_open = module.os.open
+    observed = []
+    search_flag = getattr(os, "O_SEARCH", 0x40000000 | os.O_DIRECTORY)
+    def search_only_ancestor(path, flags, *args, **kwargs):
+        if flags & os.O_DIRECTORY:
+            # Simulate an ancestor granting search without directory-list access.
+            if flags & search_flag != search_flag:
+                raise PermissionError("ancestor is searchable, not readable")
+            observed.append(str(path))
+        return real_open(path, flags, *args, **kwargs)
+    monkeypatch.setattr(module.os, "open", search_only_ancestor)
+    assert module.observe_native_credential_storage(provider_home=home, config_dir=config,
+        expected_uid=os.geteuid()) == "NATIVE_PRIVATE_FILE"
+    assert observed[0] == "/" and observed[-1] == ".claude"
