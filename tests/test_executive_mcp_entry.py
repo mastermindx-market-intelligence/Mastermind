@@ -50,6 +50,27 @@ def test_additional_executive_resources_are_closed_exact_tunnel_urls():
             )
 
 
+def test_additional_executive_resources_bound_types_count_and_legacy_empty():
+    module = _module()
+    prefix = (
+        "https://tunnel-service.gateway.unified-0.internal.api.openai.org/"
+        "v1/mcp/tunnel_"
+    )
+    seventeen = [prefix + f"{index:032x}" for index in range(17)]
+
+    assert module.validate_additional_resources({}) == ()
+    assert module.validate_additional_resources(
+        {"executive_additional_resources": []}
+    ) == ()
+    for value in (None, (), "", {}, seventeen, [1], [True]):
+        with pytest.raises(
+            ValueError, match="additional Executive OAuth resources"
+        ):
+            module.validate_additional_resources(
+                {"executive_additional_resources": value}
+            )
+
+
 def test_installed_launcher_refuses_user_owned_configuration(tmp_path):
     path=tmp_path/'policy.json'
     path.write_text('{}')
