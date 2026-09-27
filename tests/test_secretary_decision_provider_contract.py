@@ -753,6 +753,11 @@ if contract is not None:
         value = snapshot(
             schema="mastermind.secretary_decision_snapshot/v2",
             owner_material=dict(owner_material),
+            source_refs=[
+                "runtime:binding-current",
+                "github:pr-989",
+                "commission:owner-001",
+            ],
         )
         value.update(overrides)
         return value
@@ -1032,6 +1037,240 @@ if contract is not None:
             now_ms=30_000,
         )
         assert receipt.refusal_code == "PROVIDER_REQUEST_MISMATCH"
+
+
+if contract is not None:
+    def v3_decision_context(**overrides):
+        objective = {
+            "summary": "Objective summary",
+            "source_owner": "COMMISSION_CONTINUITY",
+            "source_reference": "commission:owner-001",
+            "source_revision": "commission-rev-001",
+        }
+        dependency = {
+            "dependency_id": "dependency-ready",
+            "summary": "Ready prerequisite",
+            "state": "READY",
+            "source_owner": "RUNTIME_BINDING",
+            "source_reference": "runtime:binding-current",
+            "source_revision": "binding-rev-001",
+        }
+        work = {
+            "work_id": "work-independent",
+            "summary": "Named independent task",
+            "readiness": "READY",
+            "dependency_ids": ["dependency-ready"],
+            "independent_of_outstanding_children": True,
+            "source_owner": "GIT_SOURCE",
+            "source_reference": "github:pr-989",
+            "source_revision": "git-rev-001",
+        }
+        value = {
+            "schema_version": "mastermind.secretary_decision_context/v1",
+            "context_owner_revision": "owner-rev-001",
+            "objective": objective,
+            "dependencies": [dependency],
+            "next_work": [work],
+            "fanout_candidates": [],
+        }
+        value.update(overrides)
+        return value
+
+    def snapshot_v3(**overrides):
+        context = v3_decision_context()
+        if "decision_context" in overrides:
+            context = overrides.pop("decision_context")
+        value = snapshot_v2(schema="mastermind.secretary_decision_snapshot/v3")
+        value["decision_context"] = context
+        value.update(overrides)
+        return value
+
+    def v3_request(snap=None, *, now_ms=20_000, budget=200_000):
+        return contract.build_secretary_provider_request(
+            snapshot_v3() if snap is None else dict(snap),
+            now_ms=now_ms,
+            cognition_budget_ms=budget,
+        )
+
+    def v3_recommendation(action, reason, *, fanout=None, mode=None):
+        return recommendation(
+            action,
+            reason,
+            requested_mode=mode,
+            fanout_candidate_ids=[] if fanout is None else fanout,
+            rationale="Bounded v3 semantic acceptance path.",
+        )
+
+    def test_v3_closed_context_material_hash_and_prompt_bounds() -> None:
+        request = v3_request()
+        assert request.schema_version == "mastermind.secretary_provider_request/v3"
+        assert request.status == "READY"
+        assert set(snapshot_v3()) == set(snapshot_v2()) | {"decision_context"}
+        assert set(snapshot_v3()["decision_context"]) == {
+            "schema_version", "context_owner_revision", "objective", "dependencies", "next_work", "fanout_candidates"
+        }
+        assert "Objective summary" in request.prompt
+        assert "Named independent task" in request.prompt
+        assert "Ready prerequisite" in request.prompt
+        assert "secret:source-ref-needle" not in request.prompt
+        assert request.basis_material_sha256 is not None
+        refreshed = v3_request(refresh(snapshot_v3(), 30_000, 70_000), now_ms=40_000)
+        assert refreshed.basis_material_sha256 == request.basis_material_sha256
+        assert refreshed.snapshot_digest != request.snapshot_digest
+        changed = v3_decision_context(context_owner_revision="owner-rev-002")
+        assert v3_request(snapshot_v3(decision_context=changed)).basis_material_sha256 != request.basis_material_sha256
+
+    @pytest.mark.parametrize(
+        "context",
+        [
+            v3_decision_context(extra="bad"),
+            v3_decision_context(context_owner_revision="wrong"),
+            dict(v3_decision_context(), schema_version="wrong"),
+            dict(v3_decision_context(), objective=dict(v3_decision_context()["objective"], summary=True)),
+            dict(v3_decision_context(), dependencies=[dict(v3_decision_context()["dependencies"][0], state=["READY"])]),
+            dict(v3_decision_context(), next_work=[dict(v3_decision_context()["next_work"][0], readiness={"READY"})]),
+            dict(v3_decision_context(), next_work=[dict(v3_decision_context()["next_work"][0], independent_of_outstanding_children="true")]),
+            dict(v3_decision_context(), fanout_candidates=[{"candidate_id": "candidate-001", "work_id": "other-work"}]),
+        ],
+    )
+    def test_v3_invalid_closed_context_refuses_cleanly(context) -> None:
+        request = v3_request(snapshot_v3(decision_context=context))
+        assert request.status == "REFUSED"
+        assert request.refusal_code == "SNAPSHOT_INVALID"
+
+    def test_v3_priority_owner_ready_return_and_eligibility() -> None:
+        owner = snapshot_v3(
+            outstanding_children=2,
+            ready_returns=1,
+            trigger="MATERIAL_RETURN",
+            fanout_candidates=["candidate-001"],
+            decision_context=v3_decision_context(fanout_candidates=[{"candidate_id": "candidate-001", "work_id": "work-independent"}]),
+        )
+        for action, reason in (
+            ("WAIT_FOR_RETURN", "CHILDREN_OUTSTANDING"),
+            ("CONTINUE_CURRENT_SESSION", "MORE_WORK"),
+            ("FANOUT", "INDEPENDENT_WORK_READY"),
+        ):
+            receipt = contract.validate_secretary_recommendation(owner, v3_recommendation(action, reason), now_ms=20_000)
+            if action == "FANOUT":
+                assert receipt.refusal_code == "FANOUT_IDS_REQUIRED"
+                continue
+            assert receipt.refusal_code == "READY_RETURN_OWNER_CONSUMPTION_REQUIRED"
+
+        independent = snapshot_v3(
+            outstanding_children=2,
+            fanout_candidates=["candidate-001"],
+            decision_context=v3_decision_context(fanout_candidates=[{"candidate_id": "candidate-001", "work_id": "work-independent"}]),
+        )
+        receipt = contract.validate_secretary_recommendation(independent, v3_recommendation("CONTINUE_CURRENT_SESSION", "MORE_WORK"), now_ms=20_000)
+        assert receipt.status == "ACCEPTED"
+        fanout = contract.validate_secretary_recommendation(independent, v3_recommendation("FANOUT", "INDEPENDENT_WORK_READY", fanout=["candidate-001"]), now_ms=20_000)
+        assert fanout.status == "ACCEPTED"
+        assert fanout.fanout_candidate_ids == ("candidate-001",)
+
+        blocked = snapshot_v3(decision_context=v3_decision_context(
+            next_work=[dict(v3_decision_context()["next_work"][0], readiness="UNKNOWN")]
+        ), outstanding_children=1)
+        blocked_wait = contract.validate_secretary_recommendation(blocked, v3_recommendation("WAIT_FOR_RETURN", "CHILDREN_OUTSTANDING"), now_ms=20_000)
+        assert blocked_wait.status == "ACCEPTED"
+
+        no_action = snapshot_v3(decision_context=v3_decision_context(next_work=[], fanout_candidates=[]))
+        for action, reason in (
+            ("CONTINUE_CURRENT_SESSION", "MORE_WORK"),
+            ("WAIT_FOR_RETURN", "CHILDREN_OUTSTANDING"),
+        ):
+            receipt = contract.validate_secretary_recommendation(no_action, v3_recommendation(action, reason), now_ms=20_000)
+            assert receipt.status == "REFUSED"
+
+        dependent = snapshot_v3(decision_context=v3_decision_context(
+            next_work=[dict(v3_decision_context()["next_work"][0], independent_of_outstanding_children=False)]
+        ), outstanding_children=1)
+        receipt = contract.validate_secretary_recommendation(dependent, v3_recommendation("CONTINUE_CURRENT_SESSION", "MORE_WORK"), now_ms=20_000)
+        assert receipt.refusal_code == "NO_ELIGIBLE_WORK"
+        for readiness in ("UNKNOWN", "HELD"):
+            work = dict(v3_decision_context()["next_work"][0], readiness=readiness)
+            snap = snapshot_v3(decision_context=v3_decision_context(next_work=[work]))
+            receipt = contract.validate_secretary_recommendation(snap, v3_recommendation("CONTINUE_CURRENT_SESSION", "MORE_WORK"), now_ms=20_000)
+            assert receipt.refusal_code == "NO_ELIGIBLE_WORK"
+
+        wait = snapshot_v3(decision_context=v3_decision_context(
+            next_work=[dict(v3_decision_context()["next_work"][0], readiness="UNKNOWN")]
+        ), outstanding_children=1)
+        receipt = contract.validate_secretary_recommendation(wait, v3_recommendation("WAIT_FOR_RETURN", "CHILDREN_OUTSTANDING"), now_ms=20_000)
+        assert receipt.status == "ACCEPTED"
+
+        empty = snapshot_v3(decision_context=v3_decision_context(next_work=[], fanout_candidates=[]))
+        receipt = contract.validate_secretary_recommendation(empty, v3_recommendation("WAIT_FOR_RETURN", "CHILDREN_OUTSTANDING"), now_ms=20_000)
+        assert receipt.refusal_code == "NO_OUTSTANDING_CHILDREN"
+
+    def test_v3_request_return_timing_launch_and_crossversion_fences() -> None:
+        original = snapshot_v3()
+        request = v3_request(original)
+        assert contract.validate_secretary_provider_return(
+            refresh(original, 30_000, 70_000), request, recommendation(), now_ms=40_000
+        ).status == "ACCEPTED"
+        drifted = snapshot_v3(decision_context=v3_decision_context(objective=dict(v3_decision_context()["objective"], summary="Changed")))
+        assert contract.validate_secretary_provider_return(
+            refresh(drifted, 30_000, 70_000), request, recommendation(), now_ms=40_000
+        ).refusal_code == "PROVIDER_MATERIAL_DRIFT"
+        assert contract.validate_secretary_provider_return(
+            refresh(original, 220_000, 260_000), request, recommendation(), now_ms=220_001
+        ).refusal_code == "COGNITION_BUDGET_EXPIRED"
+        cross = v3_request(refresh(snapshot_v2(), 30_000, 70_000), now_ms=40_000)
+        assert cross.schema_version == "mastermind.secretary_provider_request/v2"
+
+    def test_v3_shadow_baseline_evaluates_material_and_owner_obligation() -> None:
+        owner = snapshot_v3(
+            outstanding_children=2,
+            ready_returns=1,
+            trigger="MATERIAL_RETURN",
+            fanout_candidates=["candidate-001"],
+            decision_context=v3_decision_context(fanout_candidates=[{"candidate_id": "candidate-001", "work_id": "work-independent"}]),
+        )
+        baseline = contract.derive_secretary_shadow_baseline(owner, now_ms=20_000)
+        assert baseline.status == "READY"
+        assert baseline.schema_version == "mastermind.secretary_shadow_baseline/v2"
+        assert baseline.baseline_class == "OWNER_ACTION_REQUIRED"
+        assert baseline.owner_obligation == "CONSUME_READY_RETURN"
+
+        independent = snapshot_v3(outstanding_children=2, fanout_candidates=["candidate-001"], decision_context=v3_decision_context(fanout_candidates=[{"candidate_id": "candidate-001", "work_id": "work-independent"}]))
+        baseline = contract.derive_secretary_shadow_baseline(independent, now_ms=20_000)
+        assert baseline.baseline_class == "AI_JUDGMENT_REQUIRED"
+        returned = contract.validate_secretary_provider_return(
+            independent, v3_request(independent), v3_recommendation("FANOUT", "INDEPENDENT_WORK_READY", fanout=["candidate-001"]), now_ms=20_000
+        )
+        assert returned.schema_version == "mastermind.secretary_provider_return_validation/v3"
+        result = contract.evaluate_secretary_shadow_return(baseline, returned)
+        assert result.status == "AI_CHOICE_ACCEPTED"
+        assert result.schema_version == "mastermind.secretary_shadow_evaluation/v2"
+        assert result.baseline_material_sha256 == baseline.basis_material_sha256
+        assert result.provider_material_sha256 == returned.execution_material_sha256
+
+        wait = snapshot_v3(
+            decision_context=v3_decision_context(next_work=[dict(v3_decision_context()["next_work"][0], readiness="UNKNOWN")], fanout_candidates=[]),
+            outstanding_children=1,
+            fanout_candidates=[],
+        )
+        baseline = contract.derive_secretary_shadow_baseline(wait, now_ms=20_000)
+        assert baseline.baseline_class == "POLICY_DEFAULT"
+        assert baseline.policy_action == "WAIT_FOR_RETURN"
+        returned = contract.validate_secretary_provider_return(wait, v3_request(wait), v3_recommendation("WAIT_FOR_RETURN", "CHILDREN_OUTSTANDING"), now_ms=20_000)
+        result = contract.evaluate_secretary_shadow_return(baseline, returned)
+        assert result.status == "MATCHED_POLICY"
+        assert result.policy_action == "WAIT_FOR_RETURN"
+
+        checkpoint = snapshot_v3(context_state="CHECKPOINT_REQUIRED", checkpoint_state="READY")
+        baseline = contract.derive_secretary_shadow_baseline(checkpoint, now_ms=20_000)
+        assert baseline.owner_obligation == "CHECKPOINT_READY_AWAITING_OWNER_EDGE"
+
+    def test_v2_shadow_baseline_works_without_budget_and_legacy_shape_is_unchanged() -> None:
+        v2_base = contract.derive_secretary_shadow_baseline(snapshot_v2(), now_ms=20_000)
+        v1_base = contract.derive_secretary_shadow_baseline(snapshot(), now_ms=20_000)
+        assert v2_base.status == "READY"
+        assert v2_base.schema_version == "mastermind.secretary_shadow_baseline/v1"
+        assert v2_base.provider_invocation_required is False
+        assert v2_base.forced_action == "CONTINUE_CURRENT_SESSION"
+        assert "cognition_budget" not in v2_base.to_dict()
 
 
 def test_secretary_provider_return_validator_api_is_available() -> None:
@@ -1569,3 +1808,125 @@ if contract is not None:
         assert result.provider_action == "FANOUT"
         assert result.rule_promotion_authorized is False
         assert result.execution_authorized is False
+
+
+import copy
+
+def principal_snapshot():
+    return copy.deepcopy(snapshot_v3())
+
+def principal_request(s):
+    return contract.build_secretary_provider_request(s, now_ms=20000, cognition_budget_ms=200000)
+
+@pytest.mark.parametrize("change", ["top_only", "context_only", "different_sets"])
+def test_candidate_context_ids_must_equal_top_level(change):
+    s=principal_snapshot()
+    if change != "context_only": s["fanout_candidates"]=["top-candidate"]
+    if change != "top_only": s["decision_context"]["fanout_candidates"]=[{"candidate_id":"context-candidate","work_id":"work-independent"}]
+    assert principal_request(s).status == "REFUSED"
+
+@pytest.mark.parametrize("field", ["schema_version", "context_owner_revision"])
+@pytest.mark.parametrize("value", [[], {}, True, None, "\ud800"])
+def test_context_identity_bad_json_types_refuse(field,value):
+    s=principal_snapshot();s["decision_context"][field]=value
+    assert principal_request(s).status == "REFUSED"
+
+@pytest.mark.parametrize("section", ["objective", "dependencies", "next_work"])
+@pytest.mark.parametrize("field", ["source_owner", "source_reference", "source_revision", "summary"])
+@pytest.mark.parametrize("value", [[], {}, True, None, "\ud800"])
+def test_source_qualified_fields_refuse_malformed(section,field,value):
+    s=principal_snapshot();item=s["decision_context"][section]
+    if isinstance(item,list):item=item[0]
+    item[field]=value
+    assert principal_request(s).status == "REFUSED"
+
+@pytest.mark.parametrize("section", ["objective", "dependencies", "next_work"])
+def test_material_source_revision_change_refuses_delayed_provider(section):
+    s=principal_snapshot();r=principal_request(s);assert r.status=="READY"
+    current=copy.deepcopy(s);item=current["decision_context"][section]
+    if isinstance(item,list):item=item[0]
+    item["source_revision"] += "-changed"
+    current.update(observed_at_ms=30000,expires_at_ms=70000)
+    result=contract.validate_secretary_provider_return(current,r,recommendation(),now_ms=40000)
+    assert result.status == "REFUSED"
+    assert result.refusal_code == "PROVIDER_MATERIAL_DRIFT"
+
+def test_delayed_return_serialization_retains_v3_material_fields():
+    s=principal_snapshot();r=principal_request(s);assert r.status=="READY"
+    current=copy.deepcopy(s);current.update(observed_at_ms=90000,expires_at_ms=130000)
+    result=contract.validate_secretary_provider_return(current,r,recommendation(),now_ms=110000)
+    assert result.status=="ACCEPTED"
+    value=result.to_dict()
+    assert value["schema_version"].endswith("/v3")
+    for field in ["basis_material_sha256","execution_material_sha256","current_snapshot_digest","request_integrity_sha256"]:
+        assert value[field] == getattr(result,field)
+
+def test_shadow_delayed_timestamp_only_return_matches_policy():
+    s=principal_snapshot();baseline=contract.derive_secretary_shadow_baseline(s,now_ms=20000)
+    r=principal_request(s);current=copy.deepcopy(s);current.update(observed_at_ms=90000,expires_at_ms=130000)
+    result=contract.validate_secretary_provider_return(current,r,recommendation(),now_ms=110000)
+    evaluated=contract.evaluate_secretary_shadow_return(baseline,result)
+    assert baseline.baseline_class=="POLICY_DEFAULT"
+    assert evaluated.status=="MATCHED_POLICY"
+    assert evaluated.baseline_material_sha256 == evaluated.provider_material_sha256 == r.basis_material_sha256
+
+@pytest.mark.parametrize("action,reason",[("CONTINUE_CURRENT_SESSION","MORE_WORK"),("FANOUT","INDEPENDENT_WORK_READY"),("WAIT_FOR_RETURN","CHILDREN_OUTSTANDING")])
+def test_ready_return_priority_on_valid_recommendation(action,reason):
+    s=principal_snapshot();s.update(outstanding_children=2,ready_returns=1,fanout_candidates=["candidate"])
+    s["decision_context"]["fanout_candidates"]=[{"candidate_id":"candidate","work_id":"work-independent"}]
+    rec=recommendation(action,reason,fanout_candidate_ids=["candidate"] if action=="FANOUT" else [])
+    r=contract.validate_secretary_recommendation(s,rec,now_ms=20000)
+    assert r.status=="REFUSED"
+    assert r.refusal_code=="READY_RETURN_OWNER_CONSUMPTION_REQUIRED"
+
+@pytest.mark.parametrize("outstanding,independent,readiness,expected",[(2,True,"READY","POLICY_DEFAULT"),(2,False,"READY","POLICY_DEFAULT"),(0,False,"READY","POLICY_DEFAULT"),(2,True,"UNKNOWN","POLICY_DEFAULT")])
+def test_policy_baseline_never_forced_for_ordinary_readiness(outstanding,independent,readiness,expected):
+    s=principal_snapshot();s["outstanding_children"]=outstanding
+    s["decision_context"]["next_work"][0].update(independent_of_outstanding_children=independent,readiness=readiness)
+    b=contract.derive_secretary_shadow_baseline(s,now_ms=20000)
+    assert b.status=="READY"
+    assert b.baseline_class==expected
+    assert b.forced_action is None
+    assert b.policy_action==("CONTINUE_CURRENT_SESSION" if readiness=="READY" and (outstanding==0 or independent) else "WAIT_FOR_RETURN")
+
+
+def test_v3_human_gate_precedes_ready_return_obligation():
+    s = principal_snapshot()
+    s.update(human_gate="REQUIRED", ready_returns=1, outstanding_children=2)
+    value = contract.validate_secretary_recommendation(
+        s, recommendation("ESCALATE_HUMAN", "HUMAN_GATE"), now_ms=20000
+    )
+    assert value.status == "ACCEPTED"
+    baseline = contract.derive_secretary_shadow_baseline(s, now_ms=20000)
+    assert baseline.forced_action == "ESCALATE_HUMAN"
+
+
+@pytest.mark.parametrize("readiness", ["READY", "AVAILABLE"])
+def test_v3_completion_refuses_remaining_ready_or_available_work(readiness):
+    s = principal_snapshot()
+    s["mission_state"] = "COMPLETE"
+    s["decision_context"]["next_work"][0]["readiness"] = readiness
+    value = contract.validate_secretary_recommendation(
+        s, recommendation("STOP_COMPLETE", "MISSION_COMPLETE"), now_ms=20000
+    )
+    assert value.status == "REFUSED"
+    assert value.refusal_code == "MISSION_NOT_COMPLETE"
+
+
+@pytest.mark.parametrize("field,value", [("capability_state", "DENIED"), ("binding_state", "STALE")])
+def test_v3_fanout_baseline_cannot_bypass_semantic_admission(field, value):
+    s = principal_snapshot()
+    s[field] = value
+    s["fanout_candidates"] = ["candidate"]
+    s["decision_context"]["fanout_candidates"] = [{"candidate_id": "candidate", "work_id": "work-independent"}]
+    b = contract.derive_secretary_shadow_baseline(s, now_ms=20000)
+    r = contract.validate_secretary_recommendation(s, recommendation("FANOUT", "INDEPENDENT_WORK_READY", fanout_candidate_ids=["candidate"]), now_ms=20000)
+    assert b.status == r.status == "REFUSED"
+
+
+def test_v3_checkpoint_ready_obligation_retains_versioned_serialization():
+    s = principal_snapshot()
+    s.update(context_state="CHECKPOINT_REQUIRED", checkpoint_state="READY")
+    b = contract.derive_secretary_shadow_baseline(s, now_ms=20000)
+    assert b.to_dict()["owner_obligation"] == "CHECKPOINT_READY_AWAITING_OWNER_EDGE"
+    assert b.schema_version == "mastermind.secretary_shadow_baseline/v2"

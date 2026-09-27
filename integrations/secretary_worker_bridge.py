@@ -23,6 +23,7 @@ from control_plane.worker_execution_contract import (
 )
 from integrations.mastermind_secretary_mcp.decision_provider_contract import (
     PROVIDER_REQUEST_SCHEMA_V2,
+    PROVIDER_REQUEST_SCHEMA_V3,
     SecretaryProviderRequest,
     build_secretary_provider_request,
     validate_secretary_provider_request,
@@ -31,8 +32,10 @@ from integrations.mastermind_secretary_mcp.decision_provider_contract import (
 
 LAUNCH_BINDING_SCHEMA = "mastermind.secretary_worker_launch_binding/v1"
 LAUNCH_BINDING_SCHEMA_V2 = "mastermind.secretary_worker_launch_binding/v2"
+LAUNCH_BINDING_SCHEMA_V3 = "mastermind.secretary_worker_launch_binding/v3"
 COLLECTION_VALIDATION_SCHEMA = "mastermind.secretary_worker_collection_validation/v1"
 COLLECTION_VALIDATION_SCHEMA_V2 = "mastermind.secretary_worker_collection_validation/v2"
+COLLECTION_VALIDATION_SCHEMA_V3 = "mastermind.secretary_worker_collection_validation/v3"
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_ID_CHARS = 256
@@ -133,7 +136,7 @@ def _request_is_ready(value: object) -> bool:
         or value.execution_authorized
     ):
         return False
-    if value.schema_version == PROVIDER_REQUEST_SCHEMA_V2:
+    if value.schema_version in {PROVIDER_REQUEST_SCHEMA_V2, PROVIDER_REQUEST_SCHEMA_V3}:
         return validate_secretary_provider_request(value)
     return hashlib.sha256(value.prompt.encode("utf-8")).hexdigest() == value.prompt_sha256
 
@@ -161,10 +164,14 @@ def bind_secretary_worker_launch(
     if not _request_is_ready(provider_request):
         return _launch_refusal("PROVIDER_REQUEST_INVALID")
     assert isinstance(provider_request, SecretaryProviderRequest)
+    request_is_v3 = provider_request.schema_version == PROVIDER_REQUEST_SCHEMA_V3
     if not isinstance(worker_launch_spec, WorkerLaunchSpec):
         return _launch_refusal("WORKER_LAUNCH_SPEC_INVALID")
-    request_is_v2 = provider_request.schema_version == PROVIDER_REQUEST_SCHEMA_V2
-    if request_is_v2:
+    request_is_timestamped = provider_request.schema_version in {
+        PROVIDER_REQUEST_SCHEMA_V2,
+        PROVIDER_REQUEST_SCHEMA_V3,
+    }
+    if request_is_timestamped:
         required_budget = _launch_budget_ms(worker_launch_spec.timeout_seconds)
         if required_budget is None or required_budget != provider_request.cognition_budget_ms:
             return _launch_refusal("COGNITION_BUDGET_MISMATCH")
@@ -213,18 +220,18 @@ def bind_secretary_worker_launch(
         job_id=worker_launch_spec.job_id,
         worker_id=worker_launch_spec.worker_id,
         basis_material_sha256=(
-            provider_request.basis_material_sha256 if request_is_v2 else None
+            provider_request.basis_material_sha256 if request_is_timestamped else None
         ),
         cognition_budget_ms=(
-            provider_request.cognition_budget_ms if request_is_v2 else None
+            provider_request.cognition_budget_ms if request_is_timestamped else None
         ),
         cognition_deadline_ms=(
             provider_request.request_created_at_ms + provider_request.cognition_budget_ms
-            if request_is_v2
+            if request_is_timestamped
             else None
         ),
         schema_version=(
-            LAUNCH_BINDING_SCHEMA_V2 if request_is_v2 else LAUNCH_BINDING_SCHEMA
+            LAUNCH_BINDING_SCHEMA_V3 if request_is_v3 else LAUNCH_BINDING_SCHEMA_V2 if request_is_timestamped else LAUNCH_BINDING_SCHEMA
         ),
     )
 
@@ -248,6 +255,22 @@ def _plain_json(value: object) -> object:
     raise ValueError("non-JSON value")
 
 
+def _snapshot_v2_material(snapshot: dict[str, object]) -> dict[str, object]:
+    material_keys = frozenset(snapshot) - {"observed_at_ms", "expires_at_ms"}
+    return {key: snapshot[key] for key in sorted(material_keys)}
+
+
+def _snapshot_v2_material_digest(snapshot: dict[str, object]) -> str:
+    encoded = json.dumps(
+        _snapshot_v2_material(snapshot),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _collection_receipt(
     *,
     status: str,
@@ -267,6 +290,7 @@ def _collection_receipt(
     request_integrity_sha256: str | None = None,
     cognition_deadline_ms: int | None = None,
     worker_collection_correlated: bool = False,
+    request_is_v3: bool = False,
 ) -> SecretaryWorkerCollectionValidation:
     return SecretaryWorkerCollectionValidation(
         status=status,
@@ -290,7 +314,9 @@ def _collection_receipt(
         cognition_deadline_ms=cognition_deadline_ms,
         worker_collection_correlated=worker_collection_correlated,
         schema_version=(
-            COLLECTION_VALIDATION_SCHEMA_V2
+            COLLECTION_VALIDATION_SCHEMA_V3
+            if request_is_v3 and request_integrity_sha256 is not None
+            else COLLECTION_VALIDATION_SCHEMA_V2
             if request_integrity_sha256 is not None
             else COLLECTION_VALIDATION_SCHEMA
         ),
@@ -314,7 +340,10 @@ def _binding_matches_request(
         return False
     if binding.worker_started or binding.execution_authorized:
         return False
-    if request.schema_version != PROVIDER_REQUEST_SCHEMA_V2:
+    if request.schema_version not in {
+        PROVIDER_REQUEST_SCHEMA_V2,
+        PROVIDER_REQUEST_SCHEMA_V3,
+    }:
         return True
     return (
         binding.basis_material_sha256 == request.basis_material_sha256
@@ -349,33 +378,70 @@ def validate_secretary_worker_collection(
 ) -> SecretaryWorkerCollectionValidation:
     """Correlate one existing worker collection with the current Secretary request."""
 
-    request_is_v2 = (
+    request_is_timestamped = (
         type(provider_request) is SecretaryProviderRequest
-        and provider_request.schema_version == PROVIDER_REQUEST_SCHEMA_V2
+        and provider_request.schema_version
+        in {PROVIDER_REQUEST_SCHEMA_V2, PROVIDER_REQUEST_SCHEMA_V3}
+    )
+    request_is_v3 = (
+        type(provider_request) is SecretaryProviderRequest
+        and provider_request.schema_version == PROVIDER_REQUEST_SCHEMA_V3
     )
     current_request = build_secretary_provider_request(
         current_snapshot,
         now_ms=now_ms,
         cognition_budget_ms=(
-            provider_request.cognition_budget_ms if request_is_v2 else None
+            provider_request.cognition_budget_ms if request_is_timestamped else None
         ),
     )
-    if current_request.status != "READY":
-        return _collection_receipt(
-            status="REFUSED",
-            refusal_code="CURRENT_PROVIDER_REQUEST_NOT_READY",
-        )
     if type(provider_request) is not SecretaryProviderRequest:
         return _collection_receipt(
             status="REFUSED",
             refusal_code="PROVIDER_REQUEST_MISMATCH",
+            request_is_v3=request_is_v3,
         )
-    if not request_is_v2 and provider_request != current_request:
+    if current_request.status != "READY":
+        if (
+            request_is_timestamped
+            and isinstance(current_snapshot, dict)
+        ):
+            current_material = None
+            if isinstance(current_snapshot, dict):
+                try:
+                    current_material = _snapshot_v2_material_digest(current_snapshot)
+                except (TypeError, ValueError):
+                    current_material = None
+            if (
+                current_material is not None
+                and current_material != provider_request.basis_material_sha256
+            ):
+                return _collection_receipt(
+                    status="REFUSED",
+                    refusal_code="SECRETARY_RETURN_REFUSED",
+                    return_refusal_code="PROVIDER_MATERIAL_DRIFT",
+                    binding=launch_binding if type(launch_binding) is SecretaryWorkerLaunchBinding else None,
+                    basis_material_sha256=provider_request.basis_material_sha256,
+                    execution_material_sha256=current_material,
+                    current_snapshot_digest=current_request.snapshot_digest,
+                    request_integrity_sha256=provider_request.request_integrity_sha256,
+                    request_is_v3=request_is_v3,
+                )
+        return _collection_receipt(
+            status="REFUSED",
+            refusal_code="CURRENT_PROVIDER_REQUEST_NOT_READY",
+            request_is_v3=request_is_v3,
+            request_integrity_sha256=(
+                provider_request.request_integrity_sha256
+                if request_is_timestamped
+                else None
+            ),
+        )
+    if not request_is_timestamped and provider_request != current_request:
         return _collection_receipt(
             status="REFUSED",
             refusal_code="PROVIDER_REQUEST_MISMATCH",
         )
-    if request_is_v2 and not validate_secretary_provider_request(provider_request):
+    if request_is_timestamped and not validate_secretary_provider_request(provider_request):
         return _collection_receipt(
             status="REFUSED",
             refusal_code="PROVIDER_REQUEST_MISMATCH",
@@ -389,7 +455,7 @@ def validate_secretary_worker_collection(
             binding=launch_binding if type(launch_binding) is SecretaryWorkerLaunchBinding else None,
         )
     assert isinstance(launch_binding, SecretaryWorkerLaunchBinding)
-    if request_is_v2:
+    if request_is_timestamped:
         if not isinstance(worker_launch_spec, WorkerLaunchSpec):
             return _collection_receipt(
                 status="REFUSED",
@@ -515,9 +581,10 @@ def validate_secretary_worker_collection(
             current_snapshot_digest=secretary_return.current_snapshot_digest,
             request_integrity_sha256=secretary_return.request_integrity_sha256,
             cognition_deadline_ms=(
-                launch_binding.cognition_deadline_ms if request_is_v2 else None
+                launch_binding.cognition_deadline_ms if request_is_timestamped else None
             ),
             worker_collection_correlated=True,
+            request_is_v3=request_is_v3,
         )
 
     return _collection_receipt(
@@ -535,17 +602,20 @@ def validate_secretary_worker_collection(
         current_snapshot_digest=secretary_return.current_snapshot_digest,
         request_integrity_sha256=secretary_return.request_integrity_sha256,
         cognition_deadline_ms=(
-            launch_binding.cognition_deadline_ms if request_is_v2 else None
+            launch_binding.cognition_deadline_ms if request_is_timestamped else None
         ),
         worker_collection_correlated=True,
+        request_is_v3=request_is_v3,
     )
 
 
 __all__ = [
     "COLLECTION_VALIDATION_SCHEMA",
     "COLLECTION_VALIDATION_SCHEMA_V2",
+    "COLLECTION_VALIDATION_SCHEMA_V3",
     "LAUNCH_BINDING_SCHEMA",
     "LAUNCH_BINDING_SCHEMA_V2",
+    "LAUNCH_BINDING_SCHEMA_V3",
     "SecretaryWorkerCollectionValidation",
     "SecretaryWorkerLaunchBinding",
     "bind_secretary_worker_launch",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import pytest
 from pathlib import Path
 
 from control_plane.worker_execution_contract import (
@@ -15,7 +16,9 @@ from control_plane.worker_execution_contract import (
     WorkerRunStatus,
 )
 from integrations.mastermind_secretary_mcp.decision_provider_contract import (
+    PROVIDER_REQUEST_SCHEMA_V3,
     SNAPSHOT_SCHEMA_V2,
+    SNAPSHOT_SCHEMA_V3,
     build_secretary_provider_request,
 )
 
@@ -184,6 +187,11 @@ if worker_bridge is not None:
         value = snapshot(
             schema="mastermind.secretary_decision_snapshot/v2",
             owner_material=dict(owner_material),
+            source_refs=[
+                "runtime:binding-current",
+                "github:pr-989",
+                "commission:owner-001",
+            ],
         )
         value.update(overrides)
         return value
@@ -613,3 +621,132 @@ if worker_bridge is not None:
         assert receipt.execution_authorized is False
         assert receipt.requires_owner_admission is True
         assert "secret:source-ref-needle" not in json.dumps(receipt.to_dict())
+
+
+if worker_bridge is not None:
+    decision_context = {
+        "schema_version": "mastermind.secretary_decision_context/v1",
+        "context_owner_revision": "owner-rev-001",
+        "objective": {
+            "summary": "Bridge objective",
+            "source_owner": "COMMISSION_CONTINUITY",
+            "source_reference": "commission:owner-001",
+            "source_revision": "commission-rev-001",
+        },
+        "dependencies": [{
+            "dependency_id": "dependency-ready",
+            "summary": "Ready prerequisite",
+            "state": "READY",
+            "source_owner": "RUNTIME_BINDING",
+            "source_reference": "runtime:binding-current",
+            "source_revision": "binding-rev-001",
+        }],
+        "next_work": [{
+            "work_id": "work-independent",
+            "summary": "Independent bridge task",
+            "readiness": "READY",
+            "dependency_ids": ["dependency-ready"],
+            "independent_of_outstanding_children": True,
+            "source_owner": "GIT_SOURCE",
+            "source_reference": "github:pr-989",
+            "source_revision": "git-rev-001",
+        }],
+        "fanout_candidates": [{"candidate_id": "candidate-001", "work_id": "work-independent"}],
+    }
+
+    def snapshot_v3(**overrides):
+        value = snapshot_v2(schema=SNAPSHOT_SCHEMA_V3)
+        value["decision_context"] = dict(decision_context)
+        value["fanout_candidates"] = [
+            item["candidate_id"] for item in decision_context["fanout_candidates"]
+        ]
+        value.update(overrides)
+        return value
+
+    def v3_request(snap=None, *, now_ms=20_000, budget=200_000):
+        budget = 200_000 if budget is None else budget
+        return provider_request(
+            snapshot_v3() if snap is None else snap,
+            now_ms=now_ms,
+            budget=budget,
+        )
+
+    def v3_launch_spec(request=None, **overrides):
+        request = v3_request() if request is None else request
+        return launch_spec(request, timeout_seconds=200.0, **overrides)
+
+    def bound_pair_v3():
+        snap = snapshot_v3()
+        req = v3_request(snap)
+        spec = v3_launch_spec(req)
+        binding = worker_bridge.bind_secretary_worker_launch(req, spec, req.output_schema_json)
+        return snap, req, spec, binding
+
+    def test_v3_bridge_end_to_end_launch_and_collection_are_versioned() -> None:
+        original, req, spec, binding = bound_pair_v3()
+        assert req.schema_version == PROVIDER_REQUEST_SCHEMA_V3
+        assert binding.status == "READY"
+        assert binding.schema_version == "mastermind.secretary_worker_launch_binding/v3"
+        assert binding.basis_material_sha256 == req.basis_material_sha256
+        assert binding.cognition_deadline_ms == 220_000
+        receipt = worker_bridge.validate_secretary_worker_collection(
+            refresh(original, 30_000, 70_000), req, binding, v2_collection(spec), now_ms=40_000, worker_launch_spec=spec
+        )
+        assert receipt.status == "ACCEPTED"
+        assert receipt.schema_version == "mastermind.secretary_worker_collection_validation/v3"
+        assert receipt.basis_material_sha256 == req.basis_material_sha256
+        assert receipt.execution_material_sha256 == req.basis_material_sha256
+        assert receipt.provider_result_attested is False
+        assert receipt.execution_authorized is False
+
+    def test_v3_bridge_refuses_material_and_exact_launch_drift() -> None:
+        original, req, spec, binding = bound_pair_v3()
+        changed_context = dict(decision_context, context_owner_revision="owner-rev-002")
+        drifted = refresh(snapshot_v3(decision_context=changed_context), 30_000, 70_000)
+        receipt = worker_bridge.validate_secretary_worker_collection(
+            drifted, req, binding, v2_collection(spec), now_ms=40_000, worker_launch_spec=spec
+        )
+        assert receipt.status == "REFUSED"
+        assert receipt.return_refusal_code == "PROVIDER_MATERIAL_DRIFT"
+
+        wrong_spec = v3_launch_spec(req, worker_id="other-worker")
+        receipt = worker_bridge.validate_secretary_worker_collection(
+            refresh(original, 30_000, 70_000), req, binding, v2_collection(spec), now_ms=40_000, worker_launch_spec=wrong_spec
+        )
+        assert receipt.refusal_code == "LAUNCH_SPEC_MISMATCH"
+
+        cross_request = v3_request(refresh(snapshot_v2(), 30_000, 70_000), now_ms=40_000)
+        assert cross_request.schema_version != PROVIDER_REQUEST_SCHEMA_V3
+
+    def test_v3_bridge_prompt_keeps_source_refs_out_of_receipts() -> None:
+        secret = "commission:secret-source-ref"
+        snap = snapshot_v3(
+            source_refs=[
+                secret,
+                "runtime:binding-current",
+                "github:pr-989",
+                "commission:owner-001",
+            ]
+        )
+        req = v3_request(snap)
+        spec = v3_launch_spec(req)
+        binding = worker_bridge.bind_secretary_worker_launch(req, spec, req.output_schema_json)
+        receipt = worker_bridge.validate_secretary_worker_collection(
+            refresh(snap, 30_000, 70_000), req, binding, v2_collection(spec), now_ms=40_000, worker_launch_spec=spec
+        )
+        assert receipt.status == "ACCEPTED"
+        assert secret not in json.dumps(receipt.to_dict(), sort_keys=True)
+
+
+@pytest.mark.parametrize("changes", [
+    {"request_integrity_sha256": "0" * 64},
+    {"basis_material_sha256": "0" * 64},
+    {"request_created_at_ms": None},
+    {"original_expires_at_ms": 50001},
+])
+def test_v3_launch_rejects_tampered_original_request_before_admission(changes):
+    _, request, spec, _ = bound_pair_v3()
+    forged = dataclasses.replace(request, **changes)
+    receipt = worker_bridge.bind_secretary_worker_launch(forged, spec, request.output_schema_json)
+    assert receipt.status == "REFUSED"
+    assert receipt.refusal_code == "PROVIDER_REQUEST_INVALID"
