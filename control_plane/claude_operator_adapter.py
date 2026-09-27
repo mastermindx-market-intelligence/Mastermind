@@ -11,6 +11,7 @@ import json
 import os
 import pwd
 import stat
+import subprocess
 import sys
 import time
 import uuid
@@ -22,6 +23,9 @@ from control_plane.claude_operator_helper_protocol import INTERFACE_VERSION, sec
 from control_plane.executive_agent_capabilities import claude_security_config_digest
 from control_plane.codex_operator_adapter import _default_base_sha, _default_process_identity
 from control_plane.executive_orchestration_result import RawRoleResultObservation, parse_canonical_json
+from control_plane.executive_orchestration_principal import (
+    OSProcessCredentialObservation, ProviderHomeIdentityObservation,
+)
 from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION, AdapterFailureClass, AuthIdentityConfidence,
     AuthRealmFact, CandidateResult, EventCursor, HarnessAdapterCapabilities,
@@ -267,6 +271,44 @@ class ClaudeOperatorAdapter:
     def observed_attestation(self, generation: ProcessGenerationRef) -> ObservedHarnessAttestation:
         return self._state(generation).observed
 
+    def observe_process_credentials(self, generation: ProcessGenerationRef) -> OSProcessCredentialObservation:
+        """Observe credentials between two checks of the exact owned process."""
+        state = self._state(generation)
+        try:
+            before = self.process_identity_observer(int(state.process.pid or 0))
+            if before != state.process:
+                raise ValueError("process identity changed")
+            result = subprocess.run(["/bin/ps", "-o", "uid=", "-p", str(before.pid)],
+                                    check=True, capture_output=True, text=True, timeout=5)
+            uid = int(result.stdout.strip())
+            principal = pwd.getpwuid(uid).pw_name
+            if self.process_identity_observer(int(before.pid or 0)) != before:
+                raise ValueError("process identity changed during credential observation")
+        except (KeyError, OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise ClaudeOperatorError(AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "launched process credentials are not observable", effect_unknown=True) from exc
+        return OSProcessCredentialObservation(
+            process_identity={"pid": before.pid, "pgid": before.pgid,
+                "process_start_identity": before.process_start_identity, "boot_id": before.boot_id},
+            os_principal_name=principal, os_principal_uid=uid)
+
+    def observe_provider_home_identity(self, generation: ProcessGenerationRef) -> ProviderHomeIdentityObservation:
+        """Fresh metadata only; never open native credential contents."""
+        self._state(generation)
+        try:
+            if self.provider_home.resolve(strict=True) != self.provider_home:
+                raise ValueError("provider home contains a symlink")
+            observed = self.provider_home.lstat()
+            if (not stat.S_ISDIR(observed.st_mode) or observed.st_uid != os.geteuid()
+                    or stat.S_IMODE(observed.st_mode) != stat.S_IRWXU):
+                raise ValueError("provider home is not private to the current principal")
+        except (OSError, ValueError) as exc:
+            raise ClaudeOperatorError(AdapterFailureClass.AUTH_FAILURE,
+                "dedicated provider home is not observable", effect_unknown=True) from exc
+        return ProviderHomeIdentityObservation(provider_home_identity={
+            "path": str(self.provider_home), "device": observed.st_dev, "inode": observed.st_ino,
+            "uid": observed.st_uid, "gid": observed.st_gid, "mode": stat.S_IMODE(observed.st_mode)})
+
     def begin_turn(self, *, operation_id: OperationId, turn: TurnRef,
                    generation: ProcessGenerationRef, launch: LaunchComparison) -> TurnStartObservation:
         state = self._state(generation)
@@ -317,8 +359,15 @@ class ClaudeOperatorAdapter:
                 events.append(NormalizedEvent(turn.attempt_id, turn.session_epoch_id, turn.process_generation_id,
                     turn.turn_id, kind, payload_redacted={k:v for k,v in item.items() if k not in {"sequence", "turn_id"}}))
             status = state.client.request("collect", self._fields(state, turn_id=turn.turn_id))
-            if (status.get("terminal") or status.get("failure")) and not page.get("has_more", False):
-                break
+            if status.get("drain_closed") is True and (status.get("terminal") or status.get("failure")):
+                high_water = status.get("event_sequence")
+                if type(high_water) is not int or high_water < sequence:
+                    raise ClaudeOperatorError(AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                        "native terminal event cursor is invalid", effect_unknown=True)
+                # collect can observe completion after the preceding event page.
+                # Read again until the closed drain's stable high-water is consumed.
+                if sequence == high_water and not page.get("has_more", False):
+                    break
             if time.monotonic() >= deadline:
                 raise ClaudeOperatorError(AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE, "native turn remains unfinished", effect_unknown=True)
             time.sleep(0.1)
@@ -332,7 +381,7 @@ class ClaudeOperatorAdapter:
     def _raw_candidate(self, state: _Generation, turn: TurnRef) -> Mapping[str, Any]:
         page = state.client.request_raw_turn_page(thread_id=state.session_id, native_turn_id=turn.turn_id)
         result = page.consume()
-        if (result.get("terminal") is not True or result.get("success") is not True
+        if (result.get("terminal") is not True or result.get("success") is not True or result.get("failure") is not None
                 or result.get("session_id") != state.session_id or result.get("turn_id") != turn.turn_id
                 or not isinstance(result.get("summary"), str) or not result.get("native_result_id")):
             raise ClaudeOperatorError(AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE, "native successful terminal result is missing", effect_unknown=True)

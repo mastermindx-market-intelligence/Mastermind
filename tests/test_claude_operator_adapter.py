@@ -1,6 +1,9 @@
 """Executive/native boundaries: no model calls or credential material in fixtures."""
 import copy
 import json
+import os
+import pwd
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -49,7 +52,8 @@ class FakeClient:
             self.turn=fields['turn_id']
             if self.lost_begin:raise TimeoutError('response lost')
             return {'acknowledged':False}
-        if method=='collect':return {'terminal':self.terminal,'success':True,'acknowledged':True}
+        if method=='collect':return {'terminal':self.terminal,'success':True,'acknowledged':True,
+                                    'drain_closed':True,'event_sequence':1}
         if method=='read_events':return {'events':[{'kind':'result','sequence':1,'turn_id':self.turn,'is_error':False}]}
         if method=='reconcile':return {'session_reachable':True,'session_id':self.sid}
         return {'acknowledged':True}
@@ -155,3 +159,75 @@ def test_shared_policy_encoder_matches_actual_handshake_provenance(configured):
     a,c,p,e,g=configured;_,launch=start(configured)
     assert launch.observed.effective_config_digest==p.expected_config_digest
     assert launch.decision is LaunchDecision.ALLOW
+
+
+def test_terminal_event_arriving_after_page_is_consumed(configured):
+    a,c,p,e,g=configured;_,launch=start(configured);t=TurnRef('turn','epoch','generation','attempt')
+    a.begin_turn(operation_id=OperationId('ohf-op:turn'),turn=t,generation=g,launch=launch)
+    request=c.request;pages=[]
+    def raced(method, fields, **kwargs):
+        if method=='read_events':
+            pages.append(fields['after_sequence'])
+            if len(pages)==1:return {'events':[],'has_more':False}
+        return request(method,fields,**kwargs)
+    c.request=raced
+    events,cursor=a.read_events(EventCursor('attempt','epoch','generation',turn_id='turn'))
+    assert len(pages)==2 and cursor.local_sequence==1
+    assert [x.kind for x in events]==['turn/completed']
+
+
+def test_uncertain_drain_cannot_supply_candidate_even_if_success_claimed(configured):
+    a,c,p,e,g=configured;_,launch=start(configured);t=TurnRef('turn','epoch','generation','attempt')
+    a.begin_turn(operation_id=OperationId('ohf-op:turn'),turn=t,generation=g,launch=launch)
+    original=c.request_raw_turn_page
+    def uncertain(**kwargs):
+        value=original(**kwargs).consume();value['failure']='response_effect_unknown'
+        return SimpleNamespace(consume=lambda:value)
+    c.request_raw_turn_page=uncertain
+    with pytest.raises(ClaudeOperatorError,match='terminal result'):a.collect_candidate_result(t)
+
+
+def test_actual_owned_process_credentials_are_observed(configured):
+    a,c,p,e,g=configured;start(configured)
+    child=subprocess.Popen(['/bin/sleep','5'],start_new_session=True)
+    try:
+        from control_plane.codex_operator_adapter import _default_process_identity
+        state=a._state(g);state.process=_default_process_identity(child.pid)
+        a.process_identity_observer=_default_process_identity
+        result=a.observe_process_credentials(g)
+        assert result.os_principal_uid==os.geteuid()
+        assert result.os_principal_name==pwd.getpwuid(os.geteuid()).pw_name
+        assert result.process_identity['pid']==child.pid
+    finally:
+        child.terminate();child.wait(timeout=5)
+
+
+def test_changed_process_identity_refuses_credential_admission(configured,monkeypatch):
+    a,c,p,e,g=configured;start(configured)
+    a.process_identity_observer=lambda pid:ProcessIdentityObservation(pid,pid,'other-start','boot')
+    monkeypatch.setattr(subprocess,'run',lambda *args,**kwargs:pytest.fail('must not inspect recycled PID'))
+    with pytest.raises(ClaudeOperatorError,match='credentials') as error:a.observe_process_credentials(g)
+    assert error.value.effect_unknown
+
+
+def test_process_identity_changed_during_credential_probe_refuses(configured,monkeypatch):
+    a,c,p,e,g=configured;start(configured);state=a._state(g)
+    identities=iter([state.process,replace(state.process,process_start_identity='changed')])
+    a.process_identity_observer=lambda pid:next(identities)
+    monkeypatch.setattr(subprocess,'run',lambda *args,**kwargs:SimpleNamespace(stdout=str(os.geteuid())))
+    with pytest.raises(ClaudeOperatorError,match='credentials'):a.observe_process_credentials(g)
+
+
+def test_native_home_observation_is_fresh_and_metadata_only(configured):
+    a,c,p,e,g=configured;start(configured)
+    original=a.observe_provider_home_identity(g).provider_home_identity
+    assert original['inode']==a.provider_home.stat().st_ino
+    retired=a.provider_home.with_name('retired-home');a.provider_home.rename(retired)
+    a.provider_home.mkdir(mode=0o700)
+    fresh=a.observe_provider_home_identity(g).provider_home_identity
+    assert fresh['inode']!=original['inode']
+    # Broker compares this fresh observation to its enrolled immutable identity.
+    a.provider_home.chmod(0o755)
+    with pytest.raises(ClaudeOperatorError,match='provider home'):a.observe_provider_home_identity(g)
+    a.provider_home.rmdir();a.provider_home.symlink_to(retired,target_is_directory=True)
+    with pytest.raises(ClaudeOperatorError,match='provider home'):a.observe_provider_home_identity(g)

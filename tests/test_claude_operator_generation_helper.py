@@ -790,3 +790,27 @@ def test_aborted_success_shape_cannot_be_successful_candidate(fake_sdk):
         assert (await r.collect())['success'] is False
         await r.disconnect()
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('cancelled',[False,True])
+def test_success_followed_by_uncertain_drain_is_not_accepted_or_recycled(fake_sdk,cancelled):
+    async def scenario():
+        r=helper.HelperRuntime('gen',_good_config());await r.initialize()
+        async def uncertain():
+            yield FakeResultMessage('success',r.session_id,False,1,0,{},'unaccepted')
+            if cancelled:raise asyncio.CancelledError()
+            raise RuntimeError('private transport diagnostic')
+        r.client.receive_response=uncertain
+        await r.begin_turn('A','work')
+        try:await r._drain_task
+        except asyncio.CancelledError:pass
+        result=await r.collect()
+        assert result['terminal'] is True and result['drain_closed'] is True
+        assert result['success'] is False and result['summary'] is None
+        assert result['failure']=='response_effect_unknown'
+        assert result['event_sequence']==1
+        with pytest.raises(HelperProtocolError,match='reconciliation'):
+            await r.begin_turn('B','must not recycle')
+        assert len(r.client.queries)==2
+        await r.disconnect()
+    asyncio.run(scenario())

@@ -523,6 +523,7 @@ class HelperRuntime:
             if not self.terminal and self._failure is None:
                 self._failure = "terminal_result_missing"
         except asyncio.CancelledError:
+            self._failure = "response_effect_unknown"
             raise
         except Exception:
             self._failure = "response_effect_unknown"
@@ -584,19 +585,23 @@ class HelperRuntime:
             raise HelperProtocolError("turn is not active")
         if not self.terminal or not self._drain_closed:
             return {"terminal": False, "success": False, "failure": self._failure,
-                    "summary": None, "acknowledged": self.acknowledged}
+                    "summary": None, "acknowledged": self.acknowledged,
+                    "drain_closed": self._drain_closed, "event_sequence": self._event_sequence}
         # Fully drain terminal turn: keep candidate bounded, preserve session match.
         if len(self.events) > MAX_EVENTS:
             self.events = self.events[-MAX_EVENTS:]
-        # A terminal turn is done; subsequent begin_turn is allowed.
+        # Only a completely observed successful turn permits subsequent work.
         finished_turn_id = self.active_turn_id
-        self._collected = True
+        successful = self._success and self._failure is None
+        self._collected = successful
         return {
             "terminal": True,
-            "success": self._success,
+            "success": successful,
             "failure": self._failure,
-            "summary": self.summary if self._success else None,
+            "summary": self.summary if successful else None,
             "acknowledged": self.acknowledged,
+            "drain_closed": True,
+            "event_sequence": self._event_sequence,
             "session_id": self.session_id,
             "turn_id": finished_turn_id,
             "native_result_id": self._native_result_id,
