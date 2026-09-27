@@ -33,8 +33,8 @@ edits validate and post-read the same explicit target file.
 Staging and local stdio proof are not enrollment or cutover. After the actual Business app and
 scratch-file path are accepted, retire Studio Direct's primary Paper-Web requirement for that
 workspace. Other seats retain their legacy route until separately migrated. No denial or unknown
-effect ever authorizes a carrier/account/model switch. A migration canary is an explicit single-carrier
-operation, not two concurrent Paper writers.
+effect ever authorizes a carrier/account/model switch. A migration canary is an explicit single-carrier operation. That carrier/effect fence is scoped to
+that logical canary; it is not a file-wide writer lease for unrelated Paper edits.
 
 Direct target-binding qualification — 2026-09-27: live Paper 0.5.12 evidence showed that raw vendor
 `open_file` can return the requested file's `get_basic_info` while the user-active file remains
@@ -151,23 +151,30 @@ measured per editor; keep quota scope UNKNOWN until Paper exposes it authoritati
 Paper 0.5.11 supports multiple desktop tabs, and Paper's August 2026 build log says
 agents may work across multiple open files, including background tabs. That makes a
 single real execution seat compatible with multiple governed agent workflows without
-credential sharing between fake Paper members. Our bridge still serializes modifying
-calls on one desktop until stronger multi-file isolation is explicitly proven.
+credential sharing between fake Paper members. Our bridge serializes individual calls
+from one OS user through `desktop.lock`; that local call mutex is not a document lease
+and does not make one designer the owner of a Paper file.
 
-### Dual-Studio concurrency boundary - 2026-09-22
+### Multi-writer collaboration boundary - 2026-09-27
 
-The same real Paper editor identity may back the governed Paper Desktop processes on
-both M1 and M2; do not buy or fabricate a separate Paper member merely because another
-agent session runs on another owned Mac. Each host remains a separate local MCP process
-and may work on a different Paper file in parallel.
+The same real Paper editor identity may back governed Paper Desktop processes on M1, M2,
+and other admitted hosts; do not buy or fabricate separate Paper members merely because
+another agent session runs on another owned Mac. Each host remains a separate local MCP
+process and may work on the same or a different Paper file in parallel.
 
-Concurrency is bounded by **file identity**, not by Paper account identity. Until a
-stronger accepted isolation mechanism exists, exactly one modifying session may own a
-given `fileId` across all hosts. Another session may inspect/review that same file
-read-only. Different `fileId` values may have independent modifying owners. The local
-per-OS-user mutex does not provide a distributed lock, and `paper_prepare` does not
-mint ownership or replace the existing Capacity/routing owner. Never infer that two
-successful host-local preflights make same-file concurrent edits serializable.
+Concurrency is **target-scoped, not file-scoped**. Multiple modifying sessions/hosts may
+work on the same exact `fileId`, including the same Paper page. Prefer disjoint
+board/artboard/node target sets. Same-board editing is allowed when target sets are
+partitioned; if overlap is known or suspected, re-read the current target and coordinate
+or re-plan the next operation rather than acquiring a file-wide or page-wide lease.
+This contract is advertised as `MULTI_WRITER_PER_FILE_TARGET_SCOPED`.
+
+The local per-OS-user mutex remains only a bridge-call serialization primitive. It does
+not provide a distributed lock, and `paper_prepare` does not mint ownership or replace
+the existing Capacity/routing owner. A fresh snapshot is optimistic evidence for one
+bounded edit, not a global revision or collaboration lock. Every logical mutation still
+binds to one carrier + operation identity until its effect is reconciled; `EFFECT_UNKNOWN`
+remains original-carrier sticky.
 
 ## Existing harness integration boundary
 
@@ -253,8 +260,10 @@ hash. `get_basic_info` may not change after an inner text/style edit. It cannot
 prove serializable isolation. The mutex serializes bridge calls from one OS user,
 not manual UI edits, raw Paper clients, other OS users or whole multi-call tasks.
 The artboard anchor is an observed guard, not globally proven file identity.
-Keep ONE assigned designer per desktop document; other agents can research or
-review artifacts concurrently. Do not advertise arbitrary concurrent canvas writers.
+Multiple designers may be assigned to the same Paper file across hosts, including the
+same page. Partition work by board/artboard/node where practical; for known same-board
+overlap, use disjoint node targets and fresh re-read/re-plan before the next bounded edit.
+Do not advertise a file-wide or page-wide modifying lease.
 
 Reads and edits are bounded, with no proxy environment, arbitrary URL, redirects,
 background polling, automatic replay or resumable mutation transport. A missing
