@@ -176,3 +176,15 @@ def test_stdio_module_permits_guarded_private_tunnel_without_host_tools():
     text = norm(ROOT / "integrations/paper_desktop/mcp_server.py")
     assert "private Business" in text
     assert "do not enroll a second Paper web gateway from this module" not in text
+
+
+def test_direct_business_multiseat_reuses_one_paper_plane():
+    runbook = norm(ROOT / "docs/PAPER_DIRECT_CHATGPT.md")
+    connection = norm(CONNECTION)
+    integration = norm(INTEGRATION)
+    for text in (runbook, connection, integration):
+        assert "multi-seat" in text.lower()
+        assert "desktop.lock" in text
+    assert "transport singleton" in runbook.lower()
+    assert "must **not invent a workspace id**" in runbook.lower()
+    assert "one Paper execution plane" in runbook

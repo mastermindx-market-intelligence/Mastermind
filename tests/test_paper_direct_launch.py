@@ -18,7 +18,7 @@ from paper_direct_test_support import PrivatePython, has_pinned_mcp_sdk
 SOURCE = Path(__file__).resolve().parents[1] / "integrations/paper_desktop/direct_service.py"
 
 
-@unittest.skipUnless(importlib.util.find_spec("mcp"), "Dedicated pinned MCP SDK required")
+@unittest.skipUnless(has_pinned_mcp_sdk(), "Dedicated mcp==1.30.0 SDK lane required")
 class DirectLaunchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

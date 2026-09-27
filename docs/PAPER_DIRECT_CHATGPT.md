@@ -64,6 +64,30 @@ across versioned bundles. It is not a Paper write lease, distributed lock or rep
 Existing launchd remains the supervision owner; no new supervisor, background queue or scheduler
 is added. Raw clients launched outside this adapter are still an operator collision to check.
 
+## Multi-seat Business rollout
+
+Multiple ChatGPT accounts/workspaces use **one Paper execution plane** through the same guarded bridge, not one Paper
+gateway or editor identity per account. Each accepted ChatGPT seat gets one seat-aware v3 bundle
+with a safe lowercase `seat_id`, one exact existing Secure MCP Tunnel, one transport lock, one
+loopback health endpoint, one log pair, and one launchd label
+`com.mastermind.paper-direct.business.<seat>`. The Paper Desktop process, bridge allowlists, schema
+pin, effect semantics and per-OS-user `~/.local/state/mastermind-paper/desktop.lock` remain shared.
+Consequently, two ChatGPT seats may keep their tunnel clients connected concurrently, but bridge
+calls still serialize at the Paper desktop and a colliding call may fail closed as `DESKTOP_BUSY`;
+this is not a hidden queue or retry plane. The one-writer-per-file rule remains unchanged.
+
+A v3 seat binding records the exact tunnel ID and may record an exact backend workspace ID when it
+is independently known. It must **not invent a workspace ID** merely to start the daemon: OpenAI's
+existing tunnel/workspace association remains the platform-side owner, while local `doctor` proves
+only that the runtime credential can use that tunnel. Legacy v2 bundles retain their historical
+workspace-ID requirement and global transport singleton so already-running seats are not silently
+reinterpreted.
+
+One runtime key may be reused across seat bundles only when the exact key/tunnel matrix is proven by
+`doctor`; otherwise isolate the affected seat behind its own runtime key. Credentials remain local
+and are never copied into ChatGPT, Git, plist arguments or logs. A working seat does not need to be
+restarted merely to add another seat.
+
 ## Secret-free preparation
 
 Use a reviewed immutable source commit and a new bundle directory. Example operator commands:

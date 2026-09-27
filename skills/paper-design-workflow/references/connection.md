@@ -19,6 +19,14 @@ validates the target and returns its snapshot without using raw `open_file` as a
 Retain one modifying carrier, no fallback after a denial, and original-carrier reconciliation of
 EFFECT_UNKNOWN. Source/config/stdio proof is not a working ChatGPT app or accepted cutover.
 
+For multi-seat Business rollout, each ChatGPT seat may have its own exact tunnel-client transport,
+seat-specific launchd label and transport singleton. All such transports reuse the same stdio server
+implementation/bridge contract and the same host-global Paper `desktop.lock`; do not create a Paper
+account, bridge, auth plane, retry queue or raw-port listener per ChatGPT account. A seat-aware v3
+binding may omit a backend workspace ID when it is not independently observable; never fabricate one.
+The OpenAI-side tunnel/workspace association remains authoritative and must be completed in that
+account's attended app setup.
+
 The Studio/RDC selection matrix below applies only to legacy/non-migrated seats. Do not apply it
 to evade a direct-app denial or unknown effect. At accepted Business cutover, Studio Direct's
 primary Paper-Web requirement is retired for that workspace; other Studio host capabilities and

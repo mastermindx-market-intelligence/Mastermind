@@ -23,8 +23,12 @@ import stat
 import subprocess
 import sys
 
-SCHEMA = "mastermind.paper_direct_install.v2"
-BINDING_SCHEMA = "mastermind.paper_direct_binding.v1"
+SCHEMA_V2 = "mastermind.paper_direct_install.v2"
+SCHEMA_V3 = "mastermind.paper_direct_install.v3"
+SCHEMA = SCHEMA_V2  # legacy/default when no seat_id is supplied
+BINDING_SCHEMA_V1 = "mastermind.paper_direct_binding.v1"
+BINDING_SCHEMA_V2 = "mastermind.paper_direct_binding.v2"
+BINDING_SCHEMA = BINDING_SCHEMA_V1
 LABEL = "com.mastermind.paper-direct.business"
 SDK_VERSION = "1.30.0"
 SOURCE_FILES = ("bridge.py", "prepare.py", "mcp_server.py", "requirements-mcp.txt", "direct_service.py")
@@ -32,6 +36,8 @@ STATIC_FILES = {"ENROLLMENT.md", "app-definition.json", f"service/{LABEL}.plist"
 EXPECTED_FILES = {f"runtime/{name}" for name in SOURCE_FILES} | STATIC_FILES
 PATH_VALUE = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
 TUNNEL_RE = re.compile(r"tunnel_[A-Za-z0-9_-]{8,120}")
+SEAT_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
+WORKSPACE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{2,150}")
 
 
 class Refusal(RuntimeError):
@@ -165,6 +171,33 @@ def verify_sdk(root: Path) -> None:
         raise Refusal("SDK_DEPENDENCIES_CHANGED")
 
 
+def _seat_id(value: str) -> str:
+    if not isinstance(value, str) or not SEAT_RE.fullmatch(value):
+        raise Refusal("SEAT_ID_REQUIRED")
+    return value
+
+
+def service_label(receipt: dict) -> str:
+    if receipt.get("schema") == SCHEMA_V3:
+        return f"{LABEL}.{_seat_id(receipt.get('seat_id'))}"
+    return LABEL
+
+
+def service_file(receipt: dict) -> str:
+    return f"service/{service_label(receipt)}.plist"
+
+
+def expected_files(receipt: dict) -> set[str]:
+    return {f"runtime/{name}" for name in SOURCE_FILES} | {"ENROLLMENT.md", "app-definition.json", service_file(receipt)}
+
+
+def service_owner(receipt: dict) -> Path:
+    base = Path.home() / ".local/state/mastermind-paper/direct-business"
+    if receipt.get("schema") == SCHEMA_V3:
+        return base / "seats" / _seat_id(receipt.get("seat_id"))
+    return base
+
+
 def _tools(write: bool, prepare: bool = False) -> list[str]:
     return sorted(["paper_catalog", "paper_inspect", "paper_read"]
                   + (["paper_edit"] if write else []) + (["paper_prepare"] if prepare else []))
@@ -176,7 +209,7 @@ def _command(root: Path, receipt: dict, action: str) -> list[str]:
 
 def _plist(root: Path, receipt: dict) -> bytes:
     return plistlib.dumps({
-        "Label": LABEL,
+        "Label": service_label(receipt),
         "ProgramArguments": _command(root, receipt, "launch"),
         "WorkingDirectory": str(root),
         "EnvironmentVariables": {"HOME": str(Path.home()), "PATH": PATH_VALUE},
@@ -194,6 +227,8 @@ def _enrollment() -> bytes:
     return b"""# Mastermind Paper: Business enrollment (last, attended step)
 
 STAGED_NOT_ENROLLED. No tunnel was created, bound or started by staging.
+Seat-aware v3 bundles use one transport singleton and launchd label per ChatGPT seat while
+all seats share bridge.py's per-OS-user Paper desktop mutex. This is not a second Paper plane.
 The selected tool surface is recorded in INSTALLATION.json. Optional paper_prepare
 binds one exact existing file through Paper's explicit `fileId` API, never a host helper,
 URL, path, or raw open_file transition. Paper must already be running. A fresh active-context
@@ -207,8 +242,10 @@ by the subsequent target-bound edit. One writer per file across all hosts remain
    key in the daemon. Save it locally as secrets/runtime-key, private mode 0600,
    through the approved credential-entry surface. Do not paste keys into Git,
    logs, this document, command arguments, or a plugin archive.
-3. Run bind --root BUNDLE --tunnel-id EXACT_ID --workspace-id EXACT_WORKSPACE.
-   Binding is a local configuration, NOT proof of workspace access.
+3. Run bind --root BUNDLE --tunnel-id EXACT_ID. New seat-aware bundles do not invent
+   a backend workspace ID that the local tunnel runtime does not use; if an exact workspace
+   ID is independently known it may be recorded with --workspace-id. Legacy v2 bundles keep
+   their historical workspace-ID requirement. Binding is local configuration, not access proof.
 4. Run doctor --root BUNDLE. Review exact results; this contacts OpenAI and
    requires the runtime key. A successful doctor alone is not a working app.
 5. After the canonical route decision and required release checks are accepted,
@@ -234,16 +271,20 @@ human/admin boundaries. Source tests and local stdio listing are not PROVEN_LIVE
 
 
 def stage(destination: Path, *, python: Path, tunnel_client: Path,
-          source_revision: str, allow_write: bool = False, allow_prepare: bool = False) -> dict:
+          source_revision: str, allow_write: bool = False, allow_prepare: bool = False,
+          seat_id: str | None = None) -> dict:
     if not re.fullmatch(r"[0-9a-f]{40}", source_revision):
         raise Refusal("SOURCE_REVISION_REQUIRED")
     if type(allow_write) is not bool or type(allow_prepare) is not bool:
         raise Refusal("WRITE_FLAG_REQUIRED")
+    if seat_id is not None:
+        seat_id = _seat_id(seat_id)
     root = _path(destination)
     if root.exists() or root.is_symlink():
         raise Refusal("DESTINATION_EXISTS")
     receipt = {
-        "schema": SCHEMA, "state": "STAGED_NOT_ENROLLED", "root": str(root),
+        "schema": SCHEMA_V3 if seat_id is not None else SCHEMA_V2,
+        "state": "STAGED_NOT_ENROLLED", "root": str(root),
         "source_revision": source_revision, "target_plan": "Business",
         "allow_write": allow_write, "allow_prepare": allow_prepare,
         "tools": _tools(allow_write, allow_prepare),
@@ -252,14 +293,17 @@ def stage(destination: Path, *, python: Path, tunnel_client: Path,
         "production_acceptance": False,
         "service_loaded": False, "account_modified": False,
     }
+    if seat_id is not None:
+        receipt["seat_id"] = seat_id
     source = Path(__file__).resolve().parent
     files = {f"runtime/{name}": (source / name).read_bytes() for name in SOURCE_FILES}
-    files[f"service/{LABEL}.plist"] = _plist(root, receipt)
+    files[service_file(receipt)] = _plist(root, receipt)
     files["ENROLLMENT.md"] = _enrollment()
     files["app-definition.json"] = _json_bytes({
         "name": "Mastermind Paper", "visibility": "PRIVATE", "target_plan": "Business",
         "connection": "Secure MCP Tunnel", "tools": receipt["tools"],
         "enrollment_state": "NOT_ENROLLED", "tunnel_id": None, "workspace_id": None,
+        "seat_id": receipt.get("seat_id"),
         "purpose": "Guarded Paper design inspection, screenshots, JSX and explicitly approved edits.",
         "not_a_plugin_creator_manifest": True,
     })
@@ -280,7 +324,8 @@ def verify(root: Path) -> dict:
     root = _path(root)
     _private_dir(root)
     receipt = _json(root / "INSTALLATION.json")
-    if (receipt.get("schema") != SCHEMA or receipt.get("root") != str(root)
+    schema = receipt.get("schema")
+    if (schema not in {SCHEMA_V2, SCHEMA_V3} or receipt.get("root") != str(root)
             or receipt.get("target_plan") != "Business"
             or receipt.get("state") != "STAGED_NOT_ENROLLED"
             or receipt.get("production_acceptance") is not False
@@ -293,8 +338,10 @@ def verify(root: Path) -> dict:
             or receipt.get("tools") != _tools(receipt["allow_write"], receipt["allow_prepare"])
             or not re.fullmatch(r"[0-9a-f]{40}", str(receipt.get("source_revision", "")))
             or not isinstance(receipt.get("files"), dict)
-            or set(receipt["files"]) != EXPECTED_FILES):
+            or set(receipt["files"]) != expected_files(receipt)):
         raise Refusal("INVALID_MANIFEST")
+    if schema == SCHEMA_V3:
+        _seat_id(receipt.get("seat_id"))
     for name in ("runtime", "service", "logs", "state", "secrets"):
         _private_dir(root / name)
     for name, expected in receipt["files"].items():
@@ -306,7 +353,7 @@ def verify(root: Path) -> dict:
             raise Refusal("INVALID_MANIFEST")
         if _binary(Path(observed["path"])) != observed:
             raise Refusal("BINARY_CHANGED")
-    if _read(root / f"service/{LABEL}.plist") != _plist(root, receipt):
+    if _read(root / service_file(receipt)) != _plist(root, receipt):
         raise Refusal("SERVICE_TEMPLATE_CHANGED")
     return receipt
 
@@ -328,16 +375,26 @@ def profile_text(root: Path, tunnel_id: str) -> str:
     )
 
 
-def bind(root: Path, tunnel_id: str, workspace_id: str) -> dict:
-    profile = profile_text(root, tunnel_id)
-    if not isinstance(workspace_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{2,150}", workspace_id):
-        raise Refusal("WORKSPACE_ID_REQUIRED")
+def bind(root: Path, tunnel_id: str, workspace_id: str | None = None) -> dict:
     root = _path(root)
+    receipt = verify(root)
+    profile = profile_text(root, tunnel_id)
     connection = root / "connection"
     if connection.exists() or connection.is_symlink():
         raise Refusal("BINDING_EXISTS")
-    value = {"schema": BINDING_SCHEMA, "state": "BOUND_NOT_ACTIVATED", "tunnel_id": tunnel_id,
-             "workspace_id": workspace_id, "target_plan": "Business", "workspace_access_verified": False}
+    if receipt.get("schema") == SCHEMA_V2:
+        if not isinstance(workspace_id, str) or not WORKSPACE_RE.fullmatch(workspace_id):
+            raise Refusal("WORKSPACE_ID_REQUIRED")
+        value = {"schema": BINDING_SCHEMA_V1, "state": "BOUND_NOT_ACTIVATED",
+                 "tunnel_id": tunnel_id, "workspace_id": workspace_id,
+                 "target_plan": "Business", "workspace_access_verified": False}
+    else:
+        if workspace_id is not None and (not isinstance(workspace_id, str) or not WORKSPACE_RE.fullmatch(workspace_id)):
+            raise Refusal("WORKSPACE_ID_REQUIRED")
+        value = {"schema": BINDING_SCHEMA_V2, "state": "BOUND_NOT_ACTIVATED",
+                 "seat_id": _seat_id(receipt.get("seat_id")), "tunnel_id": tunnel_id,
+                 "workspace_id": workspace_id, "target_plan": "Business",
+                 "workspace_access_verified": False}
     _private_dir(connection, create=True)
     _write(connection / "profile.yaml", profile.encode())
     _write(connection / "BINDING.json", _json_bytes(value))
@@ -347,13 +404,24 @@ def bind(root: Path, tunnel_id: str, workspace_id: str) -> dict:
 
 def verify_binding(root: Path) -> dict:
     root = _path(root)
-    verify(root)
+    receipt = verify(root)
     if not (root / "connection").exists():
         raise Refusal("BINDING_REQUIRED")
     _private_dir(root / "connection")
     value = _json(root / "connection/BINDING.json")
-    if (value.get("schema") != BINDING_SCHEMA or value.get("target_plan") != "Business"
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{2,150}", str(value.get("workspace_id", "")))):
+    schema = value.get("schema")
+    if value.get("target_plan") != "Business" or not TUNNEL_RE.fullmatch(str(value.get("tunnel_id", ""))):
+        raise Refusal("INVALID_BINDING")
+    if schema == BINDING_SCHEMA_V1:
+        if receipt.get("schema") != SCHEMA_V2 or not WORKSPACE_RE.fullmatch(str(value.get("workspace_id", ""))):
+            raise Refusal("INVALID_BINDING")
+    elif schema == BINDING_SCHEMA_V2:
+        if receipt.get("schema") != SCHEMA_V3 or value.get("seat_id") != receipt.get("seat_id"):
+            raise Refusal("INVALID_BINDING")
+        workspace_id = value.get("workspace_id")
+        if workspace_id is not None and not WORKSPACE_RE.fullmatch(str(workspace_id)):
+            raise Refusal("INVALID_BINDING")
+    else:
         raise Refusal("INVALID_BINDING")
     if _read(root / "connection/profile.yaml") != profile_text(root, value.get("tunnel_id")).encode():
         raise Refusal("PROFILE_CHANGED")
@@ -461,6 +529,7 @@ def main() -> int:
     parser.add_argument("--source-revision")
     parser.add_argument("--allow-write", action="store_true")
     parser.add_argument("--allow-prepare", action="store_true")
+    parser.add_argument("--seat-id")
     parser.add_argument("--tunnel-id")
     parser.add_argument("--workspace-id")
     args = parser.parse_args()
@@ -471,7 +540,7 @@ def main() -> int:
                 raise Refusal("STAGE_ARGUMENTS_REQUIRED")
             value = stage(root, python=args.python, tunnel_client=args.tunnel_client,
                           source_revision=args.source_revision, allow_write=args.allow_write,
-                          allow_prepare=args.allow_prepare)
+                          allow_prepare=args.allow_prepare, seat_id=args.seat_id)
         elif args.action == "bind":
             value = bind(root, args.tunnel_id, args.workspace_id)
         elif args.action == "serve":
@@ -492,8 +561,9 @@ def main() -> int:
             if args.action == "doctor":
                 command += ["--json", "--explain"]
                 os.execve(executable, command, clean_env(dict(os.environ)))
-            # Same logical Business Paper service across all versioned bundles.
-            owner = Path.home() / ".local/state/mastermind-paper/direct-business"
+            # One transport singleton per ChatGPT seat; all seats still share
+            # bridge.py's fixed per-OS-user Paper desktop mutex.
+            owner = service_owner(receipt)
             with service_lock(owner) as fd:
                 os.set_inheritable(fd, True)
                 os.execve(executable, command, clean_env(dict(os.environ)))

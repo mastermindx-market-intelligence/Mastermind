@@ -24,9 +24,13 @@ is an explicit-file binding step: it returns the target file's guarded snapshot 
 the user-viewed Paper file to switch and never forwards raw `open_file` or a host helper. Paper's
 write tools already require explicit `fileId`, and direct edits validate/post-read that exact target.
 All denial and original-carrier reconciliation fences below apply equally to the direct app.
-The numbered Studio/RDC procedure below is for legacy/non-migrated seats, not a fallback after
-a denied or effect-unknown direct call. A commissioning canary uses the explicitly assigned direct
-carrier before it becomes the workspace's accepted primary route.
+Multiple accepted Business ChatGPT seats may each have a distinct Secure MCP Tunnel transport,
+but they all terminate in the same guarded Paper bridge and the same per-OS-user desktop mutex;
+this is one Paper execution plane, not multiple gateways or Paper identities. Transport singleton
+state is per ChatGPT seat while Paper-call serialization remains global. The numbered Studio/RDC
+procedure below is for legacy/non-migrated seats, not a fallback after a denied or effect-unknown
+direct call. A commissioning canary uses the explicitly assigned direct carrier before it becomes
+the workspace's accepted primary route.
 
 1. **Studio Direct first when Paper actions are exposed.** Look specifically for
    `paper_inspect`, `paper_catalog`, `paper_read`, and `paper_edit`; use

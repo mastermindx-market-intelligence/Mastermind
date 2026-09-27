@@ -47,6 +47,21 @@ The resulting target-aware bridge is immutable runtime generation **v6**, SHA-25
 remains pinned to runtime v5 until separately selected for upgrade; the Business direct canary may
 stage v6 without moving that legacy carrier.
 
+### Direct Business multi-seat transport — 2026-09-27
+
+The direct route may serve multiple ChatGPT accounts/workspaces concurrently without multiplying the
+Paper control plane. Each Business seat owns one exact tunnel-client process, loopback health endpoint,
+private bundle state and seat-specific transport singleton/launchd label. Every seat's MCP child still
+loads the same guarded bridge implementation and all Paper calls contend on the existing per-OS-user
+`desktop.lock`. This preserves one Paper Desktop execution seat and one safety/effect owner while
+allowing C1/C2/C3/C4/admin ChatGPT transports to remain connected simultaneously. No transport seat
+creates a Paper user identity, retry owner, queue, document lease or second auth plane.
+
+Seat-aware install schema v3 requires a safe stable `seat_id`; legacy v2 bundles remain backward
+compatible. v3 local binding requires the exact tunnel ID but does not require a guessed backend
+workspace ID. When an exact workspace ID is independently observed it may be recorded; otherwise the
+OpenAI tunnel/workspace association is proven through attended account setup and direct app discovery.
+
 ## Architecture — shared adapter and legacy/non-migrated clients
 
 Local Claude/Codex/Cursor/OpenCode/VS Code client -> approved project-scoped MCP
