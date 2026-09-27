@@ -72,7 +72,6 @@ __all__ = [
     "GroundingUnavailable",
     "load_app_policies",
     "make_jwt_authenticators",
-    "make_jwt_authenticator_variants",
     "make_shared_jwks_cache",
     "observe_trusted_grounding",
     "read_only_gateway_config",
