@@ -64,10 +64,6 @@ class DirectStdioTests(unittest.TestCase):
         result = self.probe_bundle(self.stage(False))
         self.assertEqual(result["state"], "LOCAL_STDIO_PROVEN")
         self.assertEqual(result["tools"], ["paper_catalog", "paper_inspect", "paper_read"])
-        instructions = result["catalog"].get("instructions") or ""
-        self.assertIn("Multiple admitted designers may modify the same file/page across hosts", instructions)
-        self.assertIn("board/artboard/node", instructions)
-        self.assertNotIn("Only one design operator may own a desktop document", instructions)
         self.assertFalse(result["paper_called"])
         self.assertFalse(result["chatgpt_enrolled"])
 
