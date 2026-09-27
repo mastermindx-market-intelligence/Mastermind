@@ -162,7 +162,9 @@ def test_worker_builder_reuses_broker_and_linux_attestation(monkeypatch, tmp_pat
     m = _load()
     value = _config(tmp_path)
     for key in ("workspace_root", "run_root", "provider_home"):
-        Path(str(value[key])).mkdir(parents=True)
+        path = Path(str(value[key]))
+        path.mkdir(parents=True)
+        path.chmod(0o700)
     binary = Path(str(value["codex_binary"]))
     binary.write_bytes(b"ELF")
     binary.chmod(0o755)
