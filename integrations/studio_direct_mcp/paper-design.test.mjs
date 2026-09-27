@@ -81,6 +81,10 @@ test('inspect dispatches exact bridge status without shell or caller path', asyn
   assert.equal(result.value.gateway_surface.client_surface_recovery, 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT');
   assert.equal(result.value.gateway_surface.reconnect_alone_proves_refresh, false);
   assert.equal(result.value.gateway_surface.generic_process_fallback_allowed, false);
+  assert.equal(result.value.gateway_surface.concurrency_rule, 'MULTI_WRITER_PER_FILE_TARGET_SCOPED');
+  assert.equal(result.value.gateway_surface.same_file_multi_writer_allowed, true);
+  assert.equal(result.value.gateway_surface.same_page_multi_writer_allowed, true);
+  assert.equal(result.value.gateway_surface.coordination_scope, 'BOARD_ARTBOARD_NODE');
   assert.deepEqual(calls[0][0], '/opt/paper/python');
   assert.deepEqual(calls[0][1], ['/opt/paper/bridge.py', 'status']);
   assert.equal(calls[0][2].shell, undefined);
