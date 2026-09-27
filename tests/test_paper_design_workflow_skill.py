@@ -167,9 +167,15 @@ def test_direct_runbook_separates_build_setup_and_live_proof():
     assert guide.exists(), "Missing direct Paper operator runbook"
     text = norm(guide)
     for required in ("STAGED_NOT_ENROLLED", "Business", "runtime key", "admin key",
-                     "already-open", "paper_prepare", "BUILT_NOT_LIVE", "LOCAL_STDIO_PROVEN",
-                     "EFFECT_UNKNOWN", "one existing tunnel", "Plugin Creator"):
+                     "already-open", "paper_prepare", "PROVEN_LIVE", "Ryan Business",
+                     "LOCAL_STDIO_PROVEN", "EFFECT_UNKNOWN", "one existing tunnel",
+                     "Plugin Creator", "C1/C2/C3/C4/Chris Admin"):
         assert required in text
+    assert "Direct `paper_prepare`: BUILT_NOT_LIVE" not in text
+    assert "do not invent a backend workspace ID" in text
+    assert "com.mastermind.paper-direct.business.<seat>.plist" in text
+    assert "DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE" in text
+    assert "same app's" in text
 
 
 def test_stdio_module_permits_guarded_private_tunnel_without_host_tools():

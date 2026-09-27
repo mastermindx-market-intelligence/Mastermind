@@ -53,7 +53,7 @@ The direct route may serve multiple ChatGPT accounts/workspaces concurrently wit
 Paper control plane. Each Business seat owns one exact tunnel-client process, loopback health endpoint,
 private bundle state and seat-specific transport singleton/launchd label. Every seat's MCP child still
 loads the same guarded bridge implementation and all Paper calls contend on the existing per-OS-user
-`desktop.lock`. This preserves one Paper Desktop execution seat and one safety/effect owner while
+`desktop.lock`. This preserves one Paper Desktop execution plane and one shared safety/effect contract while
 allowing C1/C2/C3/C4/admin ChatGPT transports to remain connected simultaneously. No transport seat
 creates a Paper user identity, retry owner, queue, document lease or second auth plane.
 
@@ -150,7 +150,7 @@ measured per editor; keep quota scope UNKNOWN until Paper exposes it authoritati
 
 Paper 0.5.11 supports multiple desktop tabs, and Paper's August 2026 build log says
 agents may work across multiple open files, including background tabs. That makes a
-single real execution seat compatible with multiple governed agent workflows without
+single real Paper editor identity/seat compatible with multiple governed agent workflows without
 credential sharing between fake Paper members. Our bridge serializes individual calls
 from one OS user through `desktop.lock`; that local call mutex is not a document lease
 and does not make one designer the owner of a Paper file.

@@ -24,6 +24,13 @@ is an explicit-file binding step: it returns the target file's guarded snapshot 
 the user-viewed Paper file to switch and never forwards raw `open_file` or a host helper. Paper's
 write tools already require explicit `fileId`, and direct edits validate/post-read that exact target.
 All denial and original-carrier reconciliation fences below apply equally to the direct app.
+If the accepted source/runtime contract advertises target-scoped multi-writer collaboration but
+the current ChatGPT app action snapshot still contains older file-exclusive wording, classify
+**DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. A stale tool description is transport/publication
+metadata, not a new document lease and not authority to undo current Chairman/source policy. Refresh
+the **same Mastermind Paper app's** approved action snapshot after the accepted runtime is deployed;
+do not create a duplicate app/tunnel, switch carriers, or replay any Paper effect merely to refresh
+tool metadata.
 Multiple accepted Business ChatGPT seats may each have a distinct Secure MCP Tunnel transport,
 but they all terminate in the same guarded Paper bridge and the same per-OS-user desktop mutex;
 this is one Paper execution plane, not multiple gateways or Paper identities. Transport singleton
