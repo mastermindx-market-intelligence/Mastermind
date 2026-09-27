@@ -78,6 +78,8 @@ class DirectStdioTests(unittest.TestCase):
         self.assertTrue(edit["annotations"]["destructiveHint"])
         self.assertFalse(edit["annotations"]["idempotentHint"])
         self.assertTrue(edit["annotations"]["openWorldHint"])
+        self.assertIn("same Paper file or page", edit["description"])
+        self.assertIn("not a file-wide or page-wide lease", edit["description"])
         self.assertFalse(result["production_acceptance"])
 
     def test_real_stdio_prepare_is_a_closed_non_destructive_write(self):
