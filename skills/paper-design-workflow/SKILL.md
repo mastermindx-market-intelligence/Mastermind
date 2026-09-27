@@ -32,10 +32,21 @@ carrier before it becomes the workspace's accepted primary route.
    `paper_prepare` when that action is actually exposed. Call `paper_inspect` before declaring
    connection state. The presence of generic Studio `read_file` / `start_process` actions says
    nothing about whether the Paper family is available.
-2. **Do not over-block on `paper_prepare`.** Its absence alone does not make Paper unavailable.
-   If the intended file is already active, inspect/read/edit may still be usable. If a different file
-   must be focused, use `paper_prepare` when exposed; otherwise use only an independently authorized
-   host carrier or surface the exact missing file-transition action.
+2. **Do not over-block on `paper_prepare`, and do not emulate it.** Its absence alone does not make Paper unavailable;
+   it may block only the exact file-transition step. Current-file Paper reads/edits can remain usable. If another exact file must be focused, first call
+   `paper_inspect`. A current gateway may return
+   `gateway_surface.gateway_advertises=[paper_inspect,paper_catalog,paper_read,paper_prepare,paper_edit]`.
+   When that contract lists `paper_prepare` but the ChatGPT tool surface omits it, classify
+   **STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. Do **not** use generic Studio
+   `start_process`, filesystem tools, Desktop Commander, raw `open_file`, shell, or UI automation
+   to reproduce the transition. ChatGPT MCP apps use an admin-approved **frozen tool snapshot**;
+   server-side tool additions do not automatically appear in chats. Recover the **same Studio Direct
+   app** through its workspace action-catalog ceremony: for a draft/dev app, re-scan/recreate it as
+   needed; for a published Business app, current OpenAI behavior requires recreate + republish rather
+   than assuming an in-place server update will refresh actions. Then start a fresh chat/tool selection,
+   re-run `paper_inspect`, and invoke the surfaced `paper_prepare(file_id)` directly. Only after
+   that same-app publication path is actually unavailable or explicitly refused is file transition
+   an exact human/platform gate. Re-inspect the target file before any edit.
 3. **Desktop Commander is a real guarded-bridge alternative, never authority by fallback.**
    Technical absence or unserviceability of the Studio Direct Paper family may justify considering
    RDC **before any Paper mutation**, but does not authorize it. Require

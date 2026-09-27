@@ -31,9 +31,18 @@ exposed and an exact file transition is needed. Generic Studio filesystem/proces
 evidence that Paper actions are missing.
 
 The gateway pins the local Python interpreter, bridge path, bridge SHA and Paper app. A Web caller
-cannot choose an arbitrary host path, Paper endpoint, account, credential or application. A missing
-`paper_prepare` action is action-specific surface degradation; it does not by itself invalidate
-current-file inspect/read/edit capability.
+cannot choose an arbitrary host path, Paper endpoint, account, credential or application.
+`paper_inspect` returns a fail-closed `gateway_surface` contract naming the exact Paper tools the
+gateway advertises. If that contract includes `paper_prepare` while the current ChatGPT tool surface
+does not, the state is `STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`: current-file inspect/read/edit
+may remain usable, but another-file transition is held until the **same Studio Direct app's
+approved action snapshot** is brought current and `paper_prepare` is directly surfaced. ChatGPT does
+not auto-apply MCP tool changes after workspace approval. Current OpenAI Business behavior also does
+not support updating a published app in place: recreate + republish is required; draft/dev apps use
+their tool scan/recreation flow. Never reproduce the transition with generic Studio process/filesystem
+actions, Desktop Commander, raw `open_file`, shell, or UI automation. After the workspace action
+snapshot is current, start a fresh chat/tool selection, call `paper_inspect` again, then the direct
+`paper_prepare(file_id)`, then inspect once more before the first edit.
 
 ## Remote Desktop Commander — same bridge, independently authorized alternative
 
@@ -66,6 +75,7 @@ carrier/permission gate instead of using host access as a substitute for permiss
     {"studio_state":"ANY","rdc_independently_authorized":"ANY","effect_state":"EFFECT_UNKNOWN","decision":"BLOCK_RECONCILE_ORIGINAL_CARRIER"},
     {"studio_state":"EXPLICIT_DENIAL","rdc_independently_authorized":"ANY","effect_state":"NONE","decision":"BLOCK_NO_FALLBACK"},
     {"studio_state":"PAPER_ACTION_AVAILABLE","rdc_independently_authorized":"ANY","effect_state":"NONE","decision":"USE_STUDIO"},
+    {"studio_state":"SURFACE_DRIFT_ADVERTISED","rdc_independently_authorized":"ANY","effect_state":"NONE","decision":"REPAIR_SAME_STUDIO_PUBLICATION"},
     {"studio_state":"ACTION_ABSENT_OR_UNSERVICEABLE","rdc_independently_authorized":true,"effect_state":"NONE","decision":"RDC_ELIGIBLE_PRE_EFFECT"},
     {"studio_state":"ACTION_ABSENT_OR_UNSERVICEABLE","rdc_independently_authorized":false,"effect_state":"NONE","decision":"BLOCK_EXACT_CARRIER_GATE"}
   ]
@@ -116,10 +126,12 @@ checks above. Keep returned image artifacts on that same device. `catalog` is th
 schema owner; never guess Paper tool arguments. An unavailable endpoint is not proof of logged-out
 status.
 
-If a different Paper file must be focused, prefer Studio Direct's bounded `paper_prepare` when
-available. Do not synthesize an arbitrary host/application transition from memory. If the current
-surface lacks a reviewed file-transition action, keep that as the exact blocker or use a separately
-authorized current source-law path; do not broaden the bridge's raw `open_file` capability.
+If a different Paper file must be focused, use Studio Direct's bounded `paper_prepare`. If
+`paper_inspect.gateway_surface` says that action is part of the gateway contract but the current
+client surface omitted it, repair/refresh that same Studio publication first; generic Studio host
+commands are not a substitute for the missing action. If the refreshed current surface still lacks
+a reviewed file-transition action, keep that as the exact blocker or use only a separately authorized
+current source-law path; never broaden the bridge's raw `open_file` capability.
 
 ## Mutation and fallback fence
 
