@@ -34,6 +34,7 @@ from integrations.workbench_action_mcp.action_artifacts import (
     finalize_action,
     read_action_process,
     revalidate_artifact_store,
+    require_terminal_store_effects,
     write_action_process,
 )
 from integrations.workbench_action_mcp.contracts import (
@@ -712,6 +713,11 @@ class BrowserResourcePort:
             if classified.evidence_status != "absent":
                 return self._reconcile_existing(start, identity, classified)
 
+            try:
+                require_terminal_store_effects(self._store, writer)
+            except ActionArtifactUncertain as error:
+                raise BrowserResourceRefused("PRIOR_EFFECT_UNRESOLVED") from error
+
             outcome = claim_action(
                 self._store,
                 identity,
@@ -905,6 +911,25 @@ class BrowserResourcePort:
                 "profile_deleted": False,
             }
 
+        try:
+            writer = acquire_store_writer(self._store)
+        except ActionArtifactBusy:
+            return {"status": "OK", "cleanup_action": "keep", "released": False,
+                    "profile_deleted": False}
+        except ActionArtifactUncertain:
+            return {"status": "OK", "cleanup_action": "block_effect_unknown",
+                    "released": False, "profile_deleted": False, "cleanup_uncertain": True}
+        with writer:
+            try:
+                require_terminal_store_effects(self._store, writer)
+            except ActionArtifactUncertain:
+                return {"status": "OK", "cleanup_action": "block_effect_unknown",
+                        "released": False, "profile_deleted": False}
+            # Hold the same writer through termination: no new action can cross
+            # dispatch between the evidence fence and destruction of the target.
+            return self._cleanup_terminal_resource(browser)
+
+    def _cleanup_terminal_resource(self, browser: BrowserResourceRef) -> dict[str, Any]:
         record = ActionProcessRecord(
             schema="mastermind.workbench_command_process.v1",
             identity=ActionArtifactIdentity(

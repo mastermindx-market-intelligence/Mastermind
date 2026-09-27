@@ -49,3 +49,28 @@ Use the existing action artifact owner to test whether preparing a new action wh
 - No production browser/profile/credential use, installation, remote source push or merge occurred. This is a source repair candidate, not an independently approved release.
 
 Evidence root: `/Volumes/Mastermind/evidence/browser-continuity-convergence-20260927-astra-001`.
+
+## R2 — durable prior-effect fence (2026-09-27)
+
+Fresh protected procedure pin: `429bf720788f8c68e76a576b7b3fedd8f8ad423a`; INDEX/Cold Start/Active Execution/Web CEO Delegation/Delivery/AGENTS fetched from this exact commit and unchanged from the prior pin. Owned source remains `4aecefb7fc08bb21ff575cc7a1b3b5ef492b29da`, clean, same workspace. No new #940 return since checkpoint5852810158.
+
+Bounded implementation choice: reuse the existing descriptor-owned ActionArtifactStore claim/result evidence and writer mutex, not a new ledger or an Executive database transplanted into attended Workbench. The earlier continuation's generic Executive/OHF composition wording applies to the future worker projection; it does not replace #940's attended effect owner. The existing Fleet renewal guard already treats unresolved store evidence as a renewal barrier. Strengthen the owning artifact API to provide a bounded descriptor-based terminal-evidence check, then consume it before NEW Browser actions/resources. Original-action reconciliation and safe historical replay stay readable. Gate destructive owner cleanup under the same writer mutex so a caller-supplied APPLIED flag cannot erase unresolved evidence.
+
+The fence is intentionally conservative across this one exclusive Workbench artifact store. It persists across reconstructed port objects/service restart and newly minted resource/action references because it reads original durable records; it creates no files, new state schema, retry budget, registry, or queue. Cross-store/host/profile continuity still belongs to existing resource/profile admission and must be production-proven later; this local fence does not claim global cross-host authority.
+
+Tests: two already-known fresh-ID cases; reconstructed port/store; second resource; positive sequential terminal actions; original unknown reconciliation; malformed/orphan/foreign/oversized evidence; writer contention; cleanup refusal. Bound the evidence scan and refuse overflow; never turn a partial scan into clear. All new effects in this slice are synthetic tests and source changes only.
+
+Direct principal work rationale: PRINCIPAL_JUDGMENT for effect-owner adjudication, then LOWER_TOTAL_OVERHEAD for this bounded existing-owner repair. No worker is started, no Fable capacity consumed, no production browser or credential accessed. Prior safety-denied source-map/evidence-packaging operations remain unretired and are not retried.
+
+### R2 implemented and tested
+
+- New action/resource discriminator campaign BEFORE the fence: 14 FAIL / 2 PASS. The two controls prove normal terminal actions remain usable.
+- Separate cleanup discriminator BEFORE cleanup integration: 1 FAIL (`released=True` despite a durable unresolved claim).
+- Final Browser plus entire Workbench Action matrix: **446 PASS / 1 SKIP**, exit0, in `r2-final-browser.log` / `r2-final-browser.xml` in the existing evidence root. The skip is inherited; no full-repository acceptance is claimed.
+- Focused durable fence/action/resource matrix: 58 PASS, including a fresh Python process reopening the original pending claim, repeated inventory reads, malformed/mismatched/foreign-store/unknown/symlink/oversized evidence, bounded-scan exhaustion and held-writer validation.
+- Issuance refuses with `PRIOR_EFFECT_UNRESOLVED` before creating a replacement claim or dispatching. The original action can still reconcile. Owner-requested destructive cleanup now consumes durable evidence under the same writer mutex, rather than trusting a caller APPLIED flag.
+- All evidence and tests are synthetic; no real browser, credentials or remote website were exercised. No record schema, persistent barrier file, index, queue, retry plane or new effect owner was added.
+
+Remaining release/production obligations: independent review and incumbent #940 adoption; cross-store/profile/host admission and durable resource binding; relay self-retirement on parent loss/expiry remains a SEPARATE existing lifecycle path and has not acquired this store fence. Do not claim R2 prevents that automatic path from retiring an uncertain target. One useful real authenticated workflow and persistent-login proof remain owed. The prior full-repository collection blockers (`engine.signal_archive`, `lib`) are unchanged and were not rerun as another failure cycle.
+
+Writer-gate lane: #409's exact branch still resolves to `55155d33a51921a3b6d2cae2db49d31703a80b8a`. Current source already owns bounded writer facts and repeated/conditional observation in `scripts/source_continuity.py::_run_writer_gate`; the existing GitHub app owns authenticated principal and installation-token provider protocols. A service extension should reuse these rather than copy the verifier/acquisition logic or route through human gh. Official GitHub REST branch-protection documentation confirms Administration(read) for GET and Administration(write) only for mutation; no live permission change or credential read occurred.

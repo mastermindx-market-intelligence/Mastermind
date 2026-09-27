@@ -2,8 +2,9 @@
 
 The helper borrows one already-open host-owned artifact directory descriptor.
 It does not open or close a runtime root or store owner, create a service,
-own an executor, launch processes, or scan artifact directories. Closed
-per-action names only.
+own an executor or launch processes. Closed per-action names only. Its bounded
+Browser issuance fence reads existing records under the held store writer;
+it creates no additional state or authority.
 
 Artifacts belong to the existing Action runtime. Patch and command reuse the
 same borrowed fd and the same claim/create/finalize/read operations with a
@@ -746,6 +747,107 @@ def classify_action(
         return ActionClassification("EFFECT_UNKNOWN", claim, result, True, "uncertain")
 
 
+# These are read budgets, not action admission or retention policy. Exhaustion
+# refuses issuance; it never treats a partial inventory as terminal evidence.
+MAX_EFFECT_FENCE_ENTRIES = 2048
+MAX_EFFECT_FENCE_BYTES = 8 * 1024 * 1024
+
+
+def require_terminal_store_effects(
+    store: ActionArtifactStore, writer: ArtifactWriterLock,
+) -> None:
+    """Fence new Browser effects using this owner's existing durable records.
+
+    The caller holds the SAME store writer through this check and its effect.
+    No record, index, journal or cached clearance is created. Conservative store-
+    wide refusal also covers replacement resource/operation references and
+    restarted services reopening the same owner store. Other stores/hosts remain
+    the responsibility of existing resource/profile admission, not this helper.
+    """
+    if (type(writer) is not ArtifactWriterLock or writer._released
+            or writer._store is not store):
+        raise ActionArtifactUncertain("held store writer required")
+    revalidate_artifact_store(store)
+    store.raise_if_cleanup_uncertain()
+    before = os.fstat(store.dir_fd)
+    inventory: dict[str, tuple[int, ...]] = {}
+    actions: dict[str, set[str]] = {}
+    total_bytes = 0
+    scan_fd = -1
+    try:
+        # An independent directory description avoids sharing a readdir offset
+        # with the long-lived borrowed store descriptor across repeated calls.
+        scan_fd = os.open(".", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                          dir_fd=store.dir_fd)
+        opened = os.fstat(scan_fd)
+        if (opened.st_dev, opened.st_ino) != (store.device, store.inode):
+            raise ActionArtifactUncertain("store census identity changed")
+        with os.scandir(scan_fd) as entries:
+            for entry in entries:
+                if len(inventory) >= MAX_EFFECT_FENCE_ENTRIES:
+                    raise ActionArtifactUncertain("store evidence budget exhausted")
+                name = entry.name
+                action_id, separator, kind = name.partition(".")
+                if (not separator or _HEX32.fullmatch(action_id) is None
+                        or kind not in ACTION_ARTIFACT_KINDS):
+                    raise ActionArtifactUncertain("unrecognized action evidence")
+                info = os.stat(name, dir_fd=store.dir_fd, follow_symlinks=False)
+                maximum = {"claim": MAX_CLAIM_BYTES, "result": MAX_RESULT_BYTES,
+                           "process": MAX_PROCESS_BYTES}.get(kind, MAX_BLOB_BYTES)
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                        or info.st_uid != store.owner_uid
+                        or stat.S_IMODE(info.st_mode) & 0o022 or info.st_size > maximum):
+                    raise ActionArtifactUncertain("action evidence identity refused")
+                total_bytes += info.st_size
+                if total_bytes > MAX_EFFECT_FENCE_BYTES:
+                    raise ActionArtifactUncertain("store evidence budget exhausted")
+                inventory[name] = _file_identity(info)
+                actions.setdefault(action_id, set()).add(kind)
+
+        for action_id, kinds in actions.items():
+            if not {"claim", "result"}.issubset(kinds):
+                raise ActionArtifactUncertain("prior action evidence unresolved")
+            raw = _read_regular_file(store, artifact_name(action_id, "claim"),
+                                     max_bytes=MAX_CLAIM_BYTES, missing_ok=False)
+            identity = _decode_claim(raw, None, require_match=False).identity
+            if identity.action_id != action_id:
+                raise ActionArtifactUncertain("action evidence identity changed")
+            classified = classify_action(store, identity)
+            if (classified.evidence_status != "qualified"
+                    or classified.effect_state not in {"APPLIED", "NOT_APPLIED"}):
+                raise ActionArtifactUncertain("prior action evidence unresolved")
+            if identity.purpose in {ACTION_PURPOSE_TEXT_PATCH, ACTION_PURPOSE_BROWSER_ACTION}:
+                if kinds != {"claim", "result"}:
+                    raise ActionArtifactUncertain("unexpected action evidence")
+            if "process" in kinds:
+                if identity.purpose not in {ACTION_PURPOSE_CLOSED_COMMAND, ACTION_PURPOSE_BROWSER_RESOURCE}:
+                    raise ActionArtifactUncertain("unexpected process evidence")
+                if read_action_process(store, identity) is None:
+                    raise ActionArtifactUncertain("process evidence disappeared")
+            if kinds.intersection({"stdout", "stderr"}):
+                if identity.purpose != ACTION_PURPOSE_CLOSED_COMMAND or "process" not in kinds:
+                    raise ActionArtifactUncertain("orphan output evidence")
+
+        # No cooperating writer can change the inventory under this mutex.
+        # Metadata fences also refuse observable non-cooperating modification.
+        for name, fingerprint in inventory.items():
+            if _file_identity(os.stat(name, dir_fd=store.dir_fd, follow_symlinks=False)) != fingerprint:
+                raise ActionArtifactUncertain("action evidence moved during census")
+        if _file_identity(os.fstat(store.dir_fd)) != _file_identity(before):
+            raise ActionArtifactUncertain("store evidence moved during census")
+        revalidate_artifact_store(store)
+        store.raise_if_cleanup_uncertain()
+    except (ActionArtifactError, OSError, TypeError, ValueError, UnicodeError, RecursionError) as error:
+        raise ActionArtifactUncertain("prior action evidence unresolved") from error
+    finally:
+        if scan_fd >= 0:
+            try:
+                os.close(scan_fd)
+            except OSError as error:
+                store.mark_cleanup_uncertain("effect_fence_reader_close")
+                raise ActionArtifactUncertain("effect fence cleanup uncertain") from error
+
+
 def _check_store_stat(value: os.stat_result) -> None:
     if (
         not stat.S_ISDIR(value.st_mode)
@@ -1198,6 +1300,7 @@ __all__ = [
     "artifact_name",
     "claim_action",
     "classify_action",
+    "require_terminal_store_effects",
     "finalize_action",
     "read_action_blob",
     "read_action_claim",

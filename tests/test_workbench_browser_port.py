@@ -382,3 +382,120 @@ def test_historical_reconciliation_rechecks_read_authority_after_owner_lookup(
         assert list((tmp_path / "artifacts").iterdir()) == []
     finally:
         os.close(fd)
+
+
+@pytest.mark.parametrize("preprepare", [True, False])
+@pytest.mark.parametrize("reply", ["lost", "tool_error"])
+@pytest.mark.parametrize("reopen", [True, False])
+def test_prior_unknown_blocks_fresh_action_without_replacing_original(
+    tmp_path: Path, preprepare: bool, reply: str, reopen: bool
+):
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append(request)
+        if reply == "lost":
+            raise BrowserRelayError("synthetic lost reply")
+        return {
+            "schema": "mastermind.workbench_browser_relay_response.v1",
+            "request_id": request["request_id"], "resource_id": "c" * 32,
+            "ok": True, "result": {"content": [], "isError": True},
+        }
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    reopened_fd = None
+    try:
+        first = port.prepare_action(caller, browser_ref, "browser_click", {"target": "submit"})
+        second = port.prepare_action(caller, browser_ref, "browser_click", {"target": "submit"}) if preprepare else None
+        assert port.run_action(caller, browser_ref, first)["effect_state"] == "EFFECT_UNKNOWN"
+        if reopen:
+            reopened_fd = os.open(tmp_path / "artifacts", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            port = BrowserActionPort(
+                resolve_binding=port._resolve_binding, clock_ms=port._clock_ms,
+                codec=port.codec, artifact_store=adopt_artifact_store(reopened_fd),
+                host_binding=port._host_binding, inspector=Inspector(),
+                relay_root=tmp_path / "relay", relay_requester=relay,
+                action_ttl_ms=3000, relay_timeout_seconds=2,
+            )
+        if second is None:
+            second = port.prepare_action(caller, browser_ref, "browser_click", {"target": "submit"})
+        before = sorted(p.name for p in (tmp_path / "artifacts").iterdir())
+        with pytest.raises(BrowserPortRefused, match="PRIOR_EFFECT_UNRESOLVED"):
+            port.run_action(caller, browser_ref, second)
+        assert len(calls) == 1
+        assert sorted(p.name for p in (tmp_path / "artifacts").iterdir()) == before
+        assert port.reconcile_action(caller, browser_ref, first)["effect_state"] == "EFFECT_UNKNOWN"
+        assert port.run_action(caller, browser_ref, first)["effect_state"] == "EFFECT_UNKNOWN"
+        assert len(calls) == 1
+    finally:
+        if reopened_fd is not None:
+            os.close(reopened_fd)
+        os.close(fd)
+
+
+@pytest.mark.parametrize("prior_effect", ["APPLIED", "NOT_APPLIED"])
+def test_terminal_prior_action_allows_new_action(tmp_path: Path, prior_effect: str):
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append(request)
+        response = {
+            "schema": "mastermind.workbench_browser_relay_response.v1",
+            "request_id": request["request_id"], "resource_id": "c" * 32,
+            "ok": prior_effect == "APPLIED",
+        }
+        if prior_effect == "APPLIED":
+            response["result"] = {"content": [], "isError": False}
+        else:
+            response["error"] = "REQUEST_REFUSED"
+        return response
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        for _ in range(2):
+            action = port.prepare_action(caller, browser_ref, "browser_click", {"target": "button"})
+            assert port.run_action(caller, browser_ref, action)["effect_state"] == prior_effect
+        assert len(calls) == 2
+    finally:
+        os.close(fd)
+
+
+def test_new_resource_reference_cannot_escape_same_store_uncertainty(tmp_path: Path):
+    import dataclasses
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append(request)
+        raise BrowserRelayError("synthetic lost reply")
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        first = port.prepare_action(caller, browser_ref, "browser_click", {"target": "submit"})
+        assert port.run_action(caller, browser_ref, first)["effect_state"] == "EFFECT_UNKNOWN"
+        new_resource = dataclasses.replace(
+            port.codec.decode_resource(browser_ref, now_ms=2000), start_action_id="e" * 32)
+        new_ref = port.codec.encode_resource(new_resource)
+        second = port.prepare_action(caller, new_ref, "browser_click", {"target": "submit"})
+        with pytest.raises(BrowserPortRefused, match="PRIOR_EFFECT_UNRESOLVED"):
+            port.run_action(caller, new_ref, second)
+        assert len(calls) == 1
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("kind", ["claim", "result", "stdout", "unrecognized"])
+def test_orphan_evidence_blocks_new_browser_action(tmp_path: Path, kind: str):
+    def relay(*_args, **_kwargs):
+        raise AssertionError("orphan evidence must refuse before dispatch")
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        orphan = tmp_path / "artifacts" / ("e" * 32 + "." + kind)
+        orphan.write_bytes(b"{}")
+        before = {p.name: p.read_bytes() for p in (tmp_path / "artifacts").iterdir()}
+        action = port.prepare_action(caller, browser_ref, "browser_click", {"target": "button"})
+        with pytest.raises(BrowserPortRefused, match="PRIOR_EFFECT_UNRESOLVED"):
+            port.run_action(caller, browser_ref, action)
+        assert {p.name: p.read_bytes() for p in (tmp_path / "artifacts").iterdir()} == before
+    finally:
+        os.close(fd)

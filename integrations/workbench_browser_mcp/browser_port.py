@@ -34,6 +34,7 @@ from integrations.workbench_action_mcp.action_artifacts import (
     classify_action,
     finalize_action,
     revalidate_artifact_store,
+    require_terminal_store_effects,
 )
 from integrations.workbench_action_mcp.contracts import (
     ActionCaller,
@@ -464,6 +465,11 @@ class BrowserActionPort:
                     "observed_sha256": None,
                     "reconciled": True,
                 }
+            try:
+                require_terminal_store_effects(self._store, writer)
+            except ActionArtifactUncertain as error:
+                raise BrowserPortRefused("PRIOR_EFFECT_UNRESOLVED") from error
+
             outcome = claim_action(
                 self._store,
                 identity,

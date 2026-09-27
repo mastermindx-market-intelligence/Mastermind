@@ -474,3 +474,65 @@ def test_default_relay_command_carries_authoritative_resource_expiry(tmp_path: P
     finally:
         os.close(fd)
         shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_replacement_browser_refuses_unresolved_store_before_process_start(tmp_path: Path):
+    import dataclasses
+    from integrations.workbench_action_mcp.action_artifacts import acquire_store_writer, claim_action
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    try:
+        first = port.prepare_resource(caller, project_ref="project:browser", mode="isolated")
+        start, binding = port._decode_start(caller, first)
+        prior = dataclasses.replace(port._identity(start, binding),
+            purpose="browser_action", relative_path="browser:prior:browser_click")
+        with acquire_store_writer(port._store):
+            assert claim_action(port._store, prior, claimed_at_ms=2000).created
+        replacement = port.prepare_resource(caller, project_ref="project:browser", mode="isolated")
+        def no_launch(**_kwargs):
+            raise AssertionError("unresolved action must refuse before process creation")
+        port._relay_command_builder = no_launch
+        before = sorted(p.name for p in (tmp_path / "artifacts").iterdir())
+        with pytest.raises(BrowserResourceRefused, match="PRIOR_EFFECT_UNRESOLVED"):
+            port.start_resource(caller, replacement)
+        assert sorted(p.name for p in (tmp_path / "artifacts").iterdir()) == before
+        assert list((tmp_path / "output").iterdir()) == []
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root)
+
+
+def test_cleanup_reads_durable_uncertainty_instead_of_trusting_caller_flag(tmp_path: Path):
+    import dataclasses
+    from integrations.workbench_action_mcp.action_artifacts import acquire_store_writer, claim_action
+    from integrations.workbench_browser_mcp.contracts import BrowserResourceRef
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    terminated = []
+    try:
+        start_ref = port.prepare_resource(caller, project_ref="project:browser", mode="isolated")
+        start, binding = port._decode_start(caller, start_ref)
+        prior = dataclasses.replace(port._identity(start, binding),
+            purpose="browser_action", relative_path="browser:prior:browser_click")
+        with acquire_store_writer(port._store):
+            assert claim_action(port._store, prior, claimed_at_ms=2000).created
+        resource = BrowserResourceRef(
+            schema="mastermind.workbench_browser_ref.v1", start_action_id=start.action_id,
+            subject_digest=start.subject_digest, client_ref=start.client_ref,
+            resource=start.resource, project_ref=start.project_ref, context_ref=start.context_ref,
+            responsibility_ref=start.responsibility_ref, operation_ref=start.operation_ref,
+            owner_ref=start.owner_ref, generation=start.generation, host_id=start.host_id,
+            boot_session_id=start.boot_session_id, relay_pid=4321,
+            relay_start_identity="synthetic-process", relay_pgid=4321, relay_session_id=4321,
+            mode="isolated", profile_ref=None, tool_schema_digest="d" * 64,
+            issued_at_ms=1000, expires_at_ms=60000,
+        )
+        port._terminate_exact_process = lambda record: terminated.append(record) or True
+        result = port.cleanup_resource(port.codec.encode_resource(resource),
+            owner_state="expired", effect_state="APPLIED")
+        assert result["released"] is False
+        assert result["cleanup_action"] == "block_effect_unknown"
+        assert terminated == []
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root)
