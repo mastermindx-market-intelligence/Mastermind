@@ -67,7 +67,10 @@ _DUPLICATE_JSON_KEY_REASON = "capability policy has a duplicate JSON key"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 _CONFIG_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-_EXECUTION_SURFACES = frozenset({"codex-exec", "codex-app-server"})
+CLAUDE_OPERATOR_PROVIDER = "claude"
+CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
+CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+_EXECUTION_SURFACES = frozenset({"codex-exec", "codex-app-server", CLAUDE_OPERATOR_EXECUTION_SURFACE})
 _AUTH_REALMS = frozenset({"dedicated-worker-account"})
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
@@ -732,6 +735,9 @@ class ExecutionCapabilityProfile:
     def app_server_config_projection(self) -> dict[str, object]:
         """Security-relevant config expected back from ``config/read``."""
 
+        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+            raise CapabilityPolicyError("Claude policy cannot use a Codex config projection")
+
         agents: dict[str, object]
         multi_agent: object = False
         multi_agent_v2: object = False
@@ -796,7 +802,39 @@ class ExecutionCapabilityProfile:
 
     @property
     def expected_config_digest(self) -> str:
+        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+            return _digest(self.claude_sdk_config_projection())
         return _digest(self.app_server_config_projection())
+
+    def claude_sdk_config_projection(self) -> dict[str, object]:
+        """Requested policy only; never evidence that the CLI enforced it.
+
+        This first disabled profile has no command, write, MCP, plugin or child
+        capability. A current production policy observer is still required
+        before enabling it or deriving observed OHF enforcement fields.
+        """
+        if (self.execution_surface != CLAUDE_OPERATOR_EXECUTION_SURFACE
+                or self.write_capable or self.sandbox_policy != "read-only"
+                or self.network_policy != "disabled"
+                or self.native_helper_policy is not NativeHelperPolicy.DISABLED
+                or self.skills or self.skill_grants or self.mcp_server_grants
+                or self.plugins or self.resource_grants):
+            raise CapabilityPolicyError("Claude policy exceeds its unadmitted first profile")
+        return {
+            "tools": ["Read", "Glob", "Grep"],
+            "permission_mode": "dontAsk",
+            "setting_sources": [],
+            "strict_mcp_config": True,
+            "mcp_servers": {},
+            "sandbox": {
+                "enabled": True, "failIfUnavailable": True,
+                "autoAllowBashIfSandboxed": False,
+                "allowUnsandboxedCommands": False,
+                "excludedCommands": [],
+                "network": {"allowedDomains": [], "deniedDomains": ["*"],
+                            "allowAllUnixSockets": False, "allowLocalBinding": False},
+            },
+        }
 
     def app_server_config_overrides(self) -> tuple[str, ...]:
         if self.execution_surface != "codex-app-server":
@@ -1271,6 +1309,8 @@ class ExecutionCapabilityRegistry:
                 field=f"profiles.{profile_id}.execution_surface",
                 choices=_EXECUTION_SURFACES,
             )
+            if execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE and enabled:
+                raise CapabilityPolicyError("Claude policy observation is not admitted")
             auth_realm = _closed_choice(
                 value.get("auth_realm"),
                 field=f"profiles.{profile_id}.auth_realm",
