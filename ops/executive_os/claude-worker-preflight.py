@@ -1295,7 +1295,7 @@ def observe_native_credential_storage(
         config_fd = descriptors[-1]
         for directory_path, directory_fd in ((home, home_fd), (config, config_fd)):
             info = os.fstat(directory_fd)
-            if (info.st_uid != expected_uid or stat.S_IMODE(info.st_mode) != 0o700
+            if (info.st_uid != expected_uid or stat.S_IMODE(info.st_mode) != stat.S_IRWXU
                     or has_macos_acl(directory_path, expected_identity=info,
                                      descriptor=directory_fd)):
                 _raise("NATIVE_STORAGE_UNSAFE")
