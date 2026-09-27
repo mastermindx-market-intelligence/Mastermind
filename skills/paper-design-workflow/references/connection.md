@@ -16,8 +16,9 @@ commissioned Business migration. It does not authorize unattended enrollment or 
 The direct build supports explicit-file target binding through `paper_prepare`: Paper 0.5.12 can
 read/write an addressed file by `fileId` while another file remains user-active, so direct prepare
 validates the target and returns its snapshot without using raw `open_file` as a focus surrogate.
-Retain one modifying carrier, no fallback after a denial, and original-carrier reconciliation of
-EFFECT_UNKNOWN. Source/config/stdio proof is not a working ChatGPT app or accepted cutover.
+Retain one carrier per logical modifying operation, no fallback after a denial, and original-carrier
+reconciliation of EFFECT_UNKNOWN. This carrier fence is not a file-wide ownership lease. Source/config/
+stdio proof is not a working ChatGPT app or accepted cutover.
 
 For multi-seat Business rollout, each ChatGPT seat may have its own exact tunnel-client transport,
 seat-specific launchd label and transport singleton. All such transports reuse the same stdio server
@@ -25,7 +26,10 @@ implementation/bridge contract and the same host-global Paper `desktop.lock`; do
 account, bridge, auth plane, retry queue or raw-port listener per ChatGPT account. A seat-aware v3
 binding may omit a backend workspace ID when it is not independently observable; never fabricate one.
 The OpenAI-side tunnel/workspace association remains authoritative and must be completed in that
-account's attended app setup.
+account's attended app setup. Multiple admitted sessions/hosts may modify the same exact `fileId`,
+including the same page. Coordinate by board/artboard/node target: prefer disjoint boards, and when
+same-board work overlaps, partition node targets and re-read/re-plan the next operation. The host-global
+`desktop.lock` is only a local bridge-call mutex, never a distributed document or page lease.
 
 The Studio/RDC selection matrix below applies only to legacy/non-migrated seats. Do not apply it
 to evade a direct-app denial or unknown effect. At accepted Business cutover, Studio Direct's
@@ -67,7 +71,8 @@ grants authority to use it. Before selecting RDC for a Paper modifying action, e
 2. the current session directly observes RDC access/resource permission for that exact host;
 3. no explicit provider, Studio Direct, Paper, workspace, account, safety, or organizational denial
    applies to the intended effect;
-4. no Paper mutation on another carrier is STARTed, pending, or `EFFECT_UNKNOWN`; and
+4. no conflicting mutation for the same logical operation/target on another carrier is STARTed,
+   pending, or `EFFECT_UNKNOWN`; disjoint target mutations in the same file/page do not block; and
 5. current same-pinned source procedure, document identity, source custody, and action-specific write
    gates are satisfied.
 
@@ -93,10 +98,11 @@ carrier/permission gate instead of using host access as a substitute for permiss
 ```
 <!-- PAPER_CARRIER_DECISION_V1_END -->
 
-Evaluate the matrix top-to-bottom. `ANY` is a wildcard. `EFFECT_UNKNOWN` therefore blocks before
-all carrier-selection logic, and `EXPLICIT_DENIAL` blocks regardless of RDC authorization. If no
-row matches, `default_decision` applies and fails closed; an unrecognized future state never becomes
-implicit fallback authority.
+Evaluate the matrix top-to-bottom. `ANY` is a wildcard. Here `effect_state` is scoped to the
+logical mutation/target being selected, not every other edit in the same Paper file. `EFFECT_UNKNOWN`
+for that operation therefore blocks before all carrier-selection logic, and `EXPLICIT_DENIAL` blocks
+regardless of RDC authorization. If no row matches, `default_decision` applies and fails closed; an
+unrecognized future state never becomes implicit fallback authority.
 
 
 RDC remains valid for authorized host diagnosis/installation even when it is not authorized to edit
@@ -148,10 +154,10 @@ current source-law path; never broaden the bridge's raw `open_file` capability.
 A pre-dispatch technical absence with proven `EFFECT_NONE` may justify choosing another carrier
 before the first Paper edit **only when that carrier is independently authorized under the predicates
 above**. Technical absence does not grant that authorization. An explicit safety/permission denial
-never permits fallback. After any Paper edit dispatch, the logical mutation remains on that carrier
-until its post-read/effect is reconciled.
-A timeout or lost response is `EFFECT_UNKNOWN`; do not replay through Desktop Commander, Studio
-Direct, another mode, account or provider.
+never permits fallback. After any Paper edit dispatch, that logical mutation remains on its carrier until its post-read/effect
+is reconciled. This is an operation/target fence, not a file-wide or page-wide lease; disjoint admitted
+writers may continue in the same file. A timeout or lost response is `EFFECT_UNKNOWN`; do not replay
+that mutation through Desktop Commander, Studio Direct, another mode, account or provider.
 
 Read-only diagnosis through the other carrier does not grant it write authority and must not be used
 to hide an unresolved original effect.
