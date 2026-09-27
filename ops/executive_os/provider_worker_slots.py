@@ -35,6 +35,7 @@ RUNTIME_WORKER_ROOT = Path("/var/db/mastermind-executive/workers")
 WORKER_GROUP = "_mastermind_worker"
 WORKER_GID = 451
 _SLOT_ID_RE = re.compile(r"^codex(?:-pro)?-[0-9]{2}$")
+_SUBSCRIPTION_SLOT_ID_RE = re.compile(r"^(?:alibaba|minimax)-token-[0-9]{2}$")
 _WORKER_USER_RE = re.compile(r"^_mastermind_[a-z0-9_]+$")
 
 
@@ -77,6 +78,39 @@ class ProviderWorkerSlot:
         }
 
 
+@dataclass(frozen=True)
+class SubscriptionWorkerSlot:
+    """Reviewed local principal for a held Codex-backed subscription realm.
+
+    This catalog owns only host identity/config coordinates. Provider account,
+    Capacity capability/generation, readiness, routing and autonomous admission
+    remain with their existing owners.
+    """
+
+    slot_id: str
+    provider: str
+    profile_id: str
+    harness_binding_id: str
+    worker_user: str
+    worker_group: str
+    worker_uid: int
+    worker_gid: int
+    provider_home: Path
+    worker_config: Path
+
+    def public_descriptor(self) -> dict[str, Any]:
+        return {
+            "slot_id": self.slot_id,
+            "provider": self.provider,
+            "profile_id": self.profile_id,
+            "harness_binding_id": self.harness_binding_id,
+            "worker_user": self.worker_user,
+            "worker_uid": self.worker_uid,
+            "worker_gid": self.worker_gid,
+            "admission_state": "HELD_FOR_REAL_CANARY",
+        }
+
+
 _SLOTS = (
     ProviderWorkerSlot(
         slot_id="codex-01",
@@ -115,7 +149,35 @@ _SLOTS = (
 )
 
 
-def _unique(rows: Sequence[ProviderWorkerSlot], field: str) -> None:
+_SUBSCRIPTION_SLOTS = (
+    SubscriptionWorkerSlot(
+        slot_id="alibaba-token-01",
+        provider="alibaba",
+        profile_id="alibaba-token-plan-personal",
+        harness_binding_id="alibaba-token-plan-personal.codex-responses",
+        worker_user="_mastermind_alibaba_01",
+        worker_group="_mastermind_alibaba_01",
+        worker_uid=459,
+        worker_gid=459,
+        provider_home=RUNTIME_WORKER_ROOT / "alibaba-token-01" / "provider-home",
+        worker_config=SYSTEM_CONFIG_ROOT / "worker-alibaba-token-01.json",
+    ),
+    SubscriptionWorkerSlot(
+        slot_id="minimax-token-01",
+        provider="minimax",
+        profile_id="minimax-token-plan",
+        harness_binding_id="minimax-token-plan.codex-responses",
+        worker_user="_mastermind_minimax_01",
+        worker_group="_mastermind_minimax_01",
+        worker_uid=460,
+        worker_gid=460,
+        provider_home=RUNTIME_WORKER_ROOT / "minimax-token-01" / "provider-home",
+        worker_config=SYSTEM_CONFIG_ROOT / "worker-minimax-token-01.json",
+    ),
+)
+
+
+def _unique(rows: Sequence[Any], field: str) -> None:
     values = [getattr(row, field) for row in rows]
     if len(values) != len(set(values)):
         raise SlotCatalogError(f"duplicate_{field}")
@@ -185,6 +247,87 @@ def all_slots() -> tuple[ProviderWorkerSlot, ...]:
     return validate_slots(_SLOTS)
 
 
+def validate_subscription_slots(
+    rows: Sequence[SubscriptionWorkerSlot],
+) -> tuple[SubscriptionWorkerSlot, ...]:
+    catalog = tuple(rows)
+    if tuple(row.slot_id for row in catalog) != (
+        "alibaba-token-01",
+        "minimax-token-01",
+    ):
+        raise SlotCatalogError("subscription_slot_inventory_invalid")
+    for field in (
+        "slot_id",
+        "worker_user",
+        "worker_group",
+        "worker_uid",
+        "worker_gid",
+        "provider_home",
+        "worker_config",
+    ):
+        _unique(catalog, field)
+    expected = (
+        (
+            "alibaba-token-01",
+            "alibaba",
+            "alibaba-token-plan-personal",
+            "alibaba-token-plan-personal.codex-responses",
+            "_mastermind_alibaba_01",
+            459,
+        ),
+        (
+            "minimax-token-01",
+            "minimax",
+            "minimax-token-plan",
+            "minimax-token-plan.codex-responses",
+            "_mastermind_minimax_01",
+            460,
+        ),
+    )
+    legacy = all_slots()
+    legacy_uids = {row.worker_uid for row in legacy}
+    legacy_gids = {row.worker_gid for row in legacy}
+    legacy_homes = {row.provider_home for row in legacy}
+    for row, identity in zip(catalog, expected):
+        slot_id, provider, profile_id, binding_id, worker_user, numeric_id = identity
+        if (
+            _SUBSCRIPTION_SLOT_ID_RE.fullmatch(row.slot_id) is None
+            or row.slot_id != slot_id
+            or row.provider != provider
+            or row.profile_id != profile_id
+            or row.harness_binding_id != binding_id
+            or row.worker_user != worker_user
+            or row.worker_group != worker_user
+            or row.worker_uid != numeric_id
+            or row.worker_gid != numeric_id
+            or row.provider_home
+            != RUNTIME_WORKER_ROOT / row.slot_id / "provider-home"
+            or row.worker_config
+            != SYSTEM_CONFIG_ROOT / f"worker-{row.slot_id}.json"
+        ):
+            raise SlotCatalogError("subscription_slot_invalid")
+        if (
+            row.worker_uid in legacy_uids
+            or row.worker_gid in legacy_gids
+            or row.provider_home in legacy_homes
+        ):
+            raise SlotCatalogError("subscription_slot_collision")
+    return catalog
+
+
+def subscription_slots() -> tuple[SubscriptionWorkerSlot, ...]:
+    return validate_subscription_slots(_SUBSCRIPTION_SLOTS)
+
+
+def get_subscription_slot(slot_id: str) -> SubscriptionWorkerSlot:
+    if not isinstance(slot_id, str) or _SUBSCRIPTION_SLOT_ID_RE.fullmatch(slot_id) is None:
+        raise SlotCatalogError("unknown_subscription_slot")
+    for row in subscription_slots():
+        if row.slot_id == slot_id:
+            return row
+    raise SlotCatalogError("unknown_subscription_slot")
+
+
 def get_slot(slot_id: str) -> ProviderWorkerSlot:
     if not isinstance(slot_id, str) or _SLOT_ID_RE.fullmatch(slot_id) is None:
         raise SlotCatalogError("unknown_slot")
@@ -192,6 +335,28 @@ def get_slot(slot_id: str) -> ProviderWorkerSlot:
         if row.slot_id == slot_id:
             return row
     raise SlotCatalogError("unknown_slot")
+
+
+_SUBSCRIPTION_RESOLVABLE_FIELDS = frozenset(
+    {
+        "slot_id",
+        "provider",
+        "profile_id",
+        "harness_binding_id",
+        "worker_user",
+        "worker_group",
+        "worker_uid",
+        "worker_gid",
+        "provider_home",
+        "worker_config",
+    }
+)
+
+
+def resolve_subscription_field(slot_id: str, field: str) -> str:
+    if field not in _SUBSCRIPTION_RESOLVABLE_FIELDS:
+        raise SlotCatalogError("unknown_subscription_field")
+    return str(getattr(get_subscription_slot(slot_id), field))
 
 
 _RESOLVABLE_FIELDS = frozenset(
@@ -221,15 +386,23 @@ def resolve_field(slot_id: str, field: str) -> str:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Resolve one reviewed provider worker slot field")
-    parser.add_argument("slot_id", choices=[row.slot_id for row in all_slots()])
-    parser.add_argument("field", choices=sorted(_RESOLVABLE_FIELDS))
+    parser.add_argument("--subscription", action="store_true")
+    parser.add_argument(
+        "slot_id",
+        choices=[row.slot_id for row in all_slots() + subscription_slots()],
+    )
+    parser.add_argument("field")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        value = resolve_field(args.slot_id, args.field)
+        value = (
+            resolve_subscription_field(args.slot_id, args.field)
+            if args.subscription
+            else resolve_field(args.slot_id, args.field)
+        )
     except SlotCatalogError:
         return 2
     sys.stdout.write(value + "\n")
@@ -238,6 +411,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 __all__ = [
     "ProviderWorkerSlot",
+    "SubscriptionWorkerSlot",
     "RUNTIME_WORKER_ROOT",
     "SYSTEM_CONFIG_ROOT",
     "SlotCatalogError",
@@ -245,9 +419,13 @@ __all__ = [
     "WORKER_GROUP",
     "all_slots",
     "get_slot",
+    "get_subscription_slot",
     "main",
     "resolve_field",
+    "resolve_subscription_field",
+    "subscription_slots",
     "validate_slots",
+    "validate_subscription_slots",
 ]
 
 

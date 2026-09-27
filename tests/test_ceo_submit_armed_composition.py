@@ -203,6 +203,46 @@ def _scan_evidence_identity_literals(document: str) -> list[str]:
 
 
 _NON_PRODUCTION_IDENTITY_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
+
+# D8 identity expansion is explicit and source-owner-local.  These exact lines are
+# the reviewed Alibaba/MiniMax subscription principals owned by
+# provider_worker_slots.py.  This is deliberately not a path exemption: the
+# line must occur exactly once in the postimage and only the named token on that
+# line is suppressed.  New identities, aliases, duplicate rows, or the same
+# literal in another file remain visible to the ordinary scanner.
+_REVIEWED_IDENTITY_OWNER_LINES = {
+    "ops/executive_os/provider_worker_slots.py": {
+        '        worker_user="_mastermind_alibaba_01",': ("_mastermind_alibaba_01",),
+        '        worker_group="_mastermind_alibaba_01",': ("_mastermind_alibaba_01",),
+        "        worker_uid=459,": ("459",),
+        "        worker_gid=459,": ("459",),
+        '            "_mastermind_alibaba_01",': ("_mastermind_alibaba_01",),
+        '        worker_user="_mastermind_minimax_01",': ("_mastermind_minimax_01",),
+        '        worker_group="_mastermind_minimax_01",': ("_mastermind_minimax_01",),
+        "        worker_uid=460,": ("460",),
+        "        worker_gid=460,": ("460",),
+        '            "_mastermind_minimax_01",': ("_mastermind_minimax_01",),
+    },
+}
+
+
+def _reviewed_identity_owner_line_allowance(
+    path: str,
+    line: str,
+    *,
+    source_postimages: dict[str, str] | None,
+) -> tuple[str, ...]:
+    if source_postimages is None:
+        return ()
+    allowed = _REVIEWED_IDENTITY_OWNER_LINES.get(path, {}).get(line)
+    if allowed is None:
+        return ()
+    postimage = source_postimages.get(path)
+    if postimage is None or postimage.splitlines().count(line) != 1:
+        return ()
+    return allowed
+
+
 _PERMISSION_MODE_MARKERS = ("chmod", "umask", "st_mode", "dir_mode", "file_mode", "permission")
 _HTTP_STATUS_MARKERS = (
     "sendjsonerror(", "err?.status", "http_fallback", "http_code",
@@ -1057,13 +1097,25 @@ def _scan_added_identity_diff(
         path_identity = bool(_semantic_words(path) & _SOURCE_IDENTITY_WORDS)
         scopes, line_scope = scopes_by_path[path]
         for index, line in enumerate(lines):
-            flagged.extend(_scan_identity_source_lines(
+            line_flags = _scan_identity_source_lines(
                 [line],
                 path_identity=path_identity,
                 identity_aliases=_visible_aliased_names(scopes, line_scope[index]),
-            ))
+            )
             if path in string_accounts:
-                flagged.extend(string_accounts[path][index])
+                line_flags.extend(string_accounts[path][index])
+            allowance = list(
+                _reviewed_identity_owner_line_allowance(
+                    path,
+                    line,
+                    source_postimages=source_postimages,
+                )
+            )
+            for item in line_flags:
+                if item in allowance:
+                    allowance.remove(item)
+                else:
+                    flagged.append(item)
     return flagged
 
 
@@ -1435,6 +1487,65 @@ def test_d8_scanner_rejects_mastermind_identity_name_in_unrelated_source():
         ]
     )
     assert _scan_added_identity_diff(diff) == ["_mastermind_shadow"]
+
+
+def test_d8_provider_worker_identity_owner_admits_only_reviewed_subscription_rows():
+    path = "ops/executive_os/provider_worker_slots.py"
+    approved_lines = [
+        '        worker_user="_mastermind_alibaba_01",',
+        '        worker_group="_mastermind_alibaba_01",',
+        "        worker_uid=459,",
+        "        worker_gid=459,",
+        '        worker_user="_mastermind_minimax_01",',
+        '        worker_group="_mastermind_minimax_01",',
+        "        worker_uid=460,",
+        "        worker_gid=460,",
+    ]
+    source = "\n".join(["# canonical owner fixture", *approved_lines, ""])
+    diff = "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            "--- /dev/null",
+            f"+++ b/{path}",
+            "@@ -0,0 +1,9 @@",
+            "+# canonical owner fixture",
+            *[f"+{line}" for line in approved_lines],
+        ]
+    )
+    assert _scan_added_identity_diff(
+        diff, source_postimages={path: source},
+    ) == []
+
+    hostile = source + 'worker_user="_mastermind_shadow"\nworker_uid=461\n'
+    hostile_diff = diff + "\n" + "\n".join(
+        [
+            "@@ -10,0 +10,2 @@",
+            '+worker_user="_mastermind_shadow"',
+            "+worker_uid=461",
+        ]
+    )
+    assert _scan_added_identity_diff(
+        hostile_diff, source_postimages={path: hostile},
+    ) == ["_mastermind_shadow", "461"]
+
+
+def test_d8_provider_worker_identity_owner_refuses_duplicate_approved_line():
+    path = "ops/executive_os/provider_worker_slots.py"
+    line = '        worker_user="_mastermind_alibaba_01",'
+    source = "\n".join([line, line, ""])
+    diff = "\n".join(
+        [
+            f"diff --git a/{path} b/{path}",
+            "--- /dev/null",
+            f"+++ b/{path}",
+            "@@ -0,0 +1,2 @@",
+            f"+{line}",
+            f"+{line}",
+        ]
+    )
+    assert _scan_added_identity_diff(
+        diff, source_postimages={path: source},
+    ) == ["_mastermind_alibaba_01", "_mastermind_alibaba_01"]
 
 def test_d8_scanner_ignores_unrelated_protocol_modes_and_nonproduction_paths():
     diff = "\n".join(
