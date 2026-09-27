@@ -384,6 +384,6 @@ def test_closed_model_entry_and_empty_metadata_are_accepted():
     catalog = _catalog()
     catalog["metadata"] = {}
     catalog["profiles"]["glm-coding-plan"]["metadata"] = {}
-    catalog["profiles"]["glm-coding-plan"]["models"]["routine"] = {"id": "GLM-5.3"}
+    catalog["profiles"]["glm-coding-plan"]["models"]["routine"] = {"id": "GLM-5.3-Flash"}
     validate_profiles(catalog)
-    assert get_profile("glm-coding-plan", document=catalog).model_for("routine") == "GLM-5.3"
+    assert get_profile("glm-coding-plan", document=catalog).model_for("routine") == "GLM-5.3-Flash"
