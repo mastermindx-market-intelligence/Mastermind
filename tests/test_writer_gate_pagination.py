@@ -177,3 +177,27 @@ def test_oversized_page_refuses_without_a_partial_gate():
 def test_per_page_budget_is_fixed_to_github_maximum():
     assert source._PAGE_SIZE == 100
     assert source._branch_rules_endpoint("example/repository", "sol/example", 2).endswith("?per_page=100&page=2")
+
+
+def test_empty_terminal_probe_allows_last_link_to_previous_full_page():
+    owner = PagedOwner(second_rule=None, links=True)
+    original = owner.read
+    def exact_boundary(*args):
+        response = original(*args)
+        if "/rules/branches/" in args[1] and args[1].endswith("page=2"):
+            root = args[1].split("?", 1)[0]
+            return dataclasses.replace(response, headers={"Link":
+                f'<{root}?per_page=100&page=1>; rel="last", <{root}?per_page=100&page=1>; rel="prev"'})
+        return response
+    owner.read = exact_boundary
+    assert call(port(owner))["state"] == "TECHNICAL_WRITER_GATE_ACTIVE"
+    assert owner.page_reads == [1, 2, 1, 2]
+
+
+@pytest.mark.parametrize("page,count", [(2, 1), (3, 0)])
+def test_terminal_probe_exception_does_not_admit_inconsistent_backward_last(page, count):
+    from integrations.mastermind_github_app.writer_gate_port import GithubWriterGatePort
+    root = "https://api.github.com/repos/example/repository/rules/branches/sol%2Fexample"
+    with pytest.raises(WriterGateServiceRefused, match="GITHUB_CENSUS_INCOMPLETE"):
+        GithubWriterGatePort._validate_rule_links(f"{root}?per_page=100&page={page}", page, count,
+            [f'<{root}?per_page=100&page=1>; rel="last"'])

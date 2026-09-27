@@ -270,8 +270,12 @@ class GithubWriterGatePort:
                     or len(number) > 3 or not 1 <= int(number) <= source._MAX_PAGES):
                 raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")
             linked = int(number)
+            # Count-based collection probes after an exactly full final page.
+            # Its empty response may truthfully name that preceding page last.
+            terminal_probe_last = count == 0 and linked == page - 1
             if ((match[2] == "next" and (linked != page + 1 or count != source._PAGE_SIZE))
                     or (match[2] == "prev" and linked != page - 1)
                     or (match[2] == "first" and linked != 1)
-                    or (match[2] == "last" and (linked < page or (linked > page and count != source._PAGE_SIZE)))):
+                    or (match[2] == "last" and ((linked < page and not terminal_probe_last)
+                        or (linked > page and count != source._PAGE_SIZE)))):
                 raise WriterGateServiceRefused("GITHUB_CENSUS_INCOMPLETE")
