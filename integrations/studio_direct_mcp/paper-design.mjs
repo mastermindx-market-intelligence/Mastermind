@@ -26,7 +26,8 @@ export const PAPER_INSPECT_TOOL = Object.freeze({
     'Read Paper Desktop availability and the active design identity through the guarded Mastermind adapter. ' +
     'Start here when Paper is already on the intended file; if not, use paper_read with tool=list_files, then paper_prepare. ' +
     'The response also declares the gateway Paper surface contract. If paper_prepare is listed there but absent from the current client tool surface, ' +
-    'treat that as client publication drift and refresh/reconnect the same Studio Direct plugin before file-transition work; do not emulate prepare through generic process or desktop commands. ' +
+    'treat that as client publication drift and review/refresh the same Studio Direct app\'s approved action snapshot before file-transition work; a reconnect alone is not proof of refresh. ' +
+    'Do not emulate prepare through generic process or desktop commands. ' +
     'Returns a fresh snapshot guard for later edits. This tool does not modify the design.',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   annotations: {
@@ -160,6 +161,9 @@ export const PAPER_DESIGN_SURFACE_CONTRACT = Object.freeze({
   gateway_advertises: Object.freeze(PAPER_DESIGN_TOOLS.map((tool) => tool.name)),
   file_transition_tool: 'paper_prepare',
   file_transition_requires_direct_tool: true,
+  client_surface_drift_state: 'STUDIO_TOOL_PUBLICATION_DRIFT',
+  client_surface_recovery: 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT',
+  reconnect_alone_proves_refresh: false,
   generic_process_fallback_allowed: false,
 });
 
