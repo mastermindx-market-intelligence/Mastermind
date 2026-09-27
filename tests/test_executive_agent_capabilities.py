@@ -14,6 +14,8 @@ from control_plane.executive_agent_capabilities import (
     app_server_security_config_digest,
     app_server_security_config_projection,
     observed_mcp_tool_schema_digest,
+    claude_security_config_digest,
+    claude_security_config_projection,
 )
 from control_plane.operator_harness_contract import NativeHelperPolicy
 from integrations.mastermind_company_mcp.schemas import (
@@ -77,6 +79,26 @@ def test_claude_cannot_inherit_codex_capability_or_write_authority(tmp_path):
         changed = dataclasses.replace(profile, **overrides)
         with pytest.raises(CapabilityPolicyError, match="exceeds its unadmitted first profile"):
             changed.claude_sdk_config_projection()
+
+
+def test_claude_digest_uses_actual_security_state_and_detects_drift(tmp_path):
+    profile = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy())).profiles["operator.claude.readonly.v1"]
+    sandbox = profile.claude_sdk_config_projection()["sandbox"]
+    provenance = {"setting_sources": [], "strict_mcp_config": True, "skills": []}
+    observed = {"sandbox": sandbox, "model": "irrelevant-model-field"}
+    assert claude_security_config_digest(observed, launch_provenance=provenance) == profile.expected_config_digest
+    assert claude_security_config_digest(observed, launch_provenance={**provenance, "skills": ["unexpected"]}) != profile.expected_config_digest
+    with pytest.raises(CapabilityPolicyError, match="launch provenance"):
+        claude_security_config_digest(observed, launch_provenance={})
+    assert claude_security_config_digest({"sandbox": {**sandbox, "allowUnsandboxedCommands": True}}, launch_provenance=provenance) != profile.expected_config_digest
+    assert claude_security_config_digest({"sandbox": sandbox, "permissions": {"allow": ["Bash"]}}, launch_provenance=provenance) != profile.expected_config_digest
+    for bad in ({}, {"sandbox": None}, {"sandbox": sandbox, "permissions": None},
+                {"sandbox": {**sandbox, "enabled": 1}}, {"sandbox": {**sandbox, "unexpected": float("nan")}}):
+        with pytest.raises(CapabilityPolicyError):
+            claude_security_config_digest(bad, launch_provenance=provenance)
+    snapshot = claude_security_config_projection(observed, launch_provenance=provenance)
+    sandbox["enabled"] = False
+    assert snapshot["sandbox"]["enabled"] is True
 
 
 def _company_dialogue_fixture_policy() -> dict:
