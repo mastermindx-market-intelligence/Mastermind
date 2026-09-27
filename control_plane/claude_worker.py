@@ -102,6 +102,8 @@ def _subprocess_sandbox_request() -> dict[str, Any]:
 _MAX_POLICY_GENERATION = 2**63 - 1
 _FORBIDDEN_TOOLS = (
     "Agent",
+    "AskUserQuestion",
+    "ExitPlanMode",
     "NotebookEdit",
     "Skill",
     "Task",
@@ -1176,10 +1178,12 @@ class ClaudeCodeWorkerAdapter:
             "enabledMcpjsonServers": [],
             "permissions": {
                 "allow": list(preapproved),
+                # The worker is noninteractive by construction.  The CLI also
+                # selects bypass at the launch edge; keeping the same value here
+                # makes the serialized policy and launch attestation explicit.
                 "ask": [],
-                "defaultMode": "dontAsk",
+                "defaultMode": "bypassPermissions",
                 "deny": deny,
-                "disableBypassPermissionsMode": "disable",
             },
             "model": self.exact_model,
             "fallbackModel": [],
@@ -1216,6 +1220,20 @@ class ClaudeCodeWorkerAdapter:
         if not isinstance(permissions, Mapping):
             raise ClaudeWorkerContractError(
                 "protected path file-tool deny fence drifted: mutation refuses"
+            )
+        # Autonomy is a launch invariant, not a remembered user preference.
+        # Hooks, ask rules, project MCP servers, or the bypass-disable setting
+        # could all reintroduce a human prompt or silently downgrade this worker.
+        if (
+            observed.get("disableAllHooks") is not True
+            or observed.get("enableAllProjectMcpServers") is not False
+            or observed.get("enabledMcpjsonServers") != []
+            or permissions.get("ask") != []
+            or permissions.get("defaultMode") != "bypassPermissions"
+            or "disableBypassPermissionsMode" in permissions
+        ):
+            raise ClaudeWorkerContractError(
+                "unattended permission fence drifted: mutation refuses"
             )
         allow = permissions.get("allow") or []
         if not isinstance(allow, list) or any(not isinstance(rule, str) for rule in allow):
@@ -1265,6 +1283,8 @@ class ClaudeCodeWorkerAdapter:
             "isolation_manifest_sha256": spec.isolation_manifest_sha256,
             "network_enabled": False,
             "safe_mode": True,
+            "permission_mode": "bypassPermissions",
+            "noninteractive": True,
             "session_persistence": False,
             "mcp_servers": [],
             "shell_environment_policy": "include_only",
@@ -1303,8 +1323,9 @@ class ClaudeCodeWorkerAdapter:
             str(self.max_turns),
             "--model",
             self.exact_model,
-            "--permission-mode",
-            "dontAsk",
+            # Anthropic's noninteractive unattended launch flag.  Existing
+            # tool/path/network/sandbox denies remain in force under bypass.
+            "--dangerously-skip-permissions",
             "--tools",
             ",".join(tools),
             "--allowedTools",
