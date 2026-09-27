@@ -167,6 +167,10 @@ export const PAPER_DESIGN_SURFACE_CONTRACT = Object.freeze({
   client_surface_recovery: 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT',
   reconnect_alone_proves_refresh: false,
   generic_process_fallback_allowed: false,
+  concurrency_rule: 'MULTI_WRITER_PER_FILE_TARGET_SCOPED',
+  same_file_multi_writer_allowed: true,
+  same_page_multi_writer_allowed: true,
+  coordination_scope: 'BOARD_ARTBOARD_NODE',
 });
 
 function assertExactKeys(value, allowed, label) {

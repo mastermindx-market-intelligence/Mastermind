@@ -24,10 +24,12 @@ def build_server(allow_write=False, allow_prepare=False):
     from mcp.types import ToolAnnotations, CallToolResult, TextContent, ImageContent
 
     server = FastMCP("mastermind-paper", instructions=(
-        "Inspect the active Paper document first. Read the catalog for exact upstream schemas. "
-        "A snapshot is a drift guard, not permission or a document revision. "
-        "Only one design operator may own a desktop document at a time. "
-        "Never retry EFFECT_UNKNOWN; reconcile the original operation with the same carrier."
+        "Inspect the exact Paper target first. Read the catalog for exact upstream schemas. "
+        "A snapshot is a drift guard, not permission, a document revision, or a collaboration lock. "
+        "Multiple admitted designers may modify the same file/page across hosts; coordinate by "
+        "board/artboard/node target and re-read/re-plan known overlap. "
+        "Each logical mutation remains on one carrier until reconciled. Never retry EFFECT_UNKNOWN; "
+        "reconcile the original operation with the same carrier."
     ))
 
     def run(action, **kwargs):
@@ -37,6 +39,12 @@ def build_server(allow_write=False, allow_prepare=False):
                 value = prepare_document(**kwargs)
             else:
                 value = execute(action, **kwargs)
+            if action == "status" and isinstance(value, dict):
+                value = dict(value,
+                             concurrency_rule="MULTI_WRITER_PER_FILE_TARGET_SCOPED",
+                             same_file_multi_writer_allowed=True,
+                             same_page_multi_writer_allowed=True,
+                             coordination_scope="BOARD_ARTBOARD_NODE")
         except Refusal as exc:
             value = {"state": exc.code, "detail": exc.detail, "retry_allowed": False}
         bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}
