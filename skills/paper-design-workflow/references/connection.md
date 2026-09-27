@@ -13,7 +13,9 @@ operator procedure. Use one existing tunnel, not a replacement for the Chairman-
 
 The previous blanket rule against a dedicated Paper ChatGPT app is superseded for this explicitly
 commissioned Business migration. It does not authorize unattended enrollment or publication.
-The first build supports an already-open exact file and leaves direct `paper_prepare` NOT_BUILT.
+The direct build supports explicit-file target binding through `paper_prepare`: Paper 0.5.12 can
+read/write an addressed file by `fileId` while another file remains user-active, so direct prepare
+validates the target and returns its snapshot without using raw `open_file` as a focus surrogate.
 Retain one modifying carrier, no fallback after a denial, and original-carrier reconciliation of
 EFFECT_UNKNOWN. Source/config/stdio proof is not a working ChatGPT app or accepted cutover.
 

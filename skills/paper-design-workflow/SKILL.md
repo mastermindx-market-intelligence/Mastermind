@@ -19,9 +19,10 @@ surface before making a capability claim.
 **Business direct route.** After explicit enrollment and accepted scratch-file proof, use the private
 Mastermind Paper app as this workspace's normal Paper carrier. Read
 `docs/PAPER_DIRECT_CHATGPT.md` for its exact staged/accepted tool set. Never infer enrollment from
-source, a healthy tunnel, or a plugin name. The first direct build exposes inspect/catalog/read/edit
-against an already-open exact file; it does not yet expose `paper_prepare`. Preserve that exact
-file-transition limitation instead of using raw `open_file` or silently invoking a host helper.
+source, a healthy tunnel, or a plugin name. The direct Business build exposes inspect/catalog/read/prepare/edit. Its direct `paper_prepare`
+is an explicit-file binding step: it returns the target file's guarded snapshot without requiring
+the user-viewed Paper file to switch and never forwards raw `open_file` or a host helper. Paper's
+write tools already require explicit `fileId`, and direct edits validate/post-read that exact target.
 All denial and original-carrier reconciliation fences below apply equally to the direct app.
 The numbered Studio/RDC procedure below is for legacy/non-migrated seats, not a fallback after
 a denied or effect-unknown direct call. A commissioning canary uses the explicitly assigned direct

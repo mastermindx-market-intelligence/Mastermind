@@ -93,10 +93,10 @@ class CoreTests(unittest.TestCase):
         with self.assertRaisesRegex(b.Refusal, "DOCUMENT_CHANGED"):
             self.call()
         self.assertNotIn("create_artboard", self.client.calls)
-    def test_unanchored_document_refuses(self):
+    def test_edit_without_explicit_target_refuses_before_legacy_binding(self):
         self.client.info = {"fileName": "Mastermind scratch", "pageName": "Design",
                             "nodeCount": 0, "artboards": []}
-        with self.assertRaisesRegex(b.Refusal, "DOCUMENT_ANCHOR_REQUIRED"):
+        with self.assertRaisesRegex(b.Refusal, "FILE_ID_REQUIRED"):
             self.call(expected_snapshot=b.digest(self.client.info), arguments={})
         self.assertNotIn("create_artboard", self.client.calls)
 
@@ -132,6 +132,31 @@ class CoreTests(unittest.TestCase):
             self.call(expected_snapshot=b.digest(self.client.info),
                       arguments={"fileId": "file-b"})
         self.assertNotIn("create_artboard", self.client.calls)
+
+    def test_explicit_target_edit_does_not_require_active_file_switch(self):
+        active = {"fileId": "file-a", "fileName": "Active", "pageName": "Page A", "artboards": []}
+        target = {"fileId": "file-b", "fileName": "Target", "pageName": "Page B", "artboards": []}
+        owner = self
+
+        class TargetClient(Fake):
+            def __init__(self):
+                super().__init__()
+                self.info = copy.deepcopy(active)
+            def call(self, name, arguments):
+                self.calls.append(name)
+                if name == "get_basic_info":
+                    value = target if arguments.get("fileId") == "file-b" else self.info
+                    return {"structuredContent": copy.deepcopy(value)}
+                if name in b.EDIT_TOOLS:
+                    return {"content": [{"type": "text", "text": "ok"}]}
+                return {"content": [{"type": "text", "text": "ok"}]}
+
+        self.client = TargetClient()
+        result = self.call(expected_snapshot=b.digest(target), arguments={"fileId": "file-b"})
+        self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertEqual(result["before"]["identity"], {"kind": "file-id", "id": "file-b"})
+        self.assertEqual(result["after"]["identity"], {"kind": "file-id", "id": "file-b"})
+        self.assertEqual(self.client.info["fileId"], "file-a")
 
     def test_paper_0511_header_and_detail_merge(self):
         info = b.basic_object(copy.deepcopy(PAPER_0511_RESULT))

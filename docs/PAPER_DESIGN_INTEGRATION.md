@@ -25,14 +25,27 @@ guarded stdio `mcp_server.py` -> the same `bridge.py` -> fixed Paper loopback. T
 no generic workstation tools and does not depend on Studio Direct/DC for normal Paper calls.
 The previous blanket dedicated-app prohibition is superseded for this commissioned migration.
 It does not authorize public publication, duplicate tunnels, unattended account changes, or a second
-Paper guard/auth/retry owner. The first build works on an already-open exact file; shared direct
-`paper_prepare` remains NOT_BUILT and must not be impersonated with arbitrary host or raw file tools.
+Paper guard/auth/retry owner. The direct build uses Paper's explicit-file contract: `paper_prepare`
+validates one target by bare `fileId` and returns that target's snapshot without requiring the
+user-active file to switch or exposing arbitrary host/raw `open_file` control. Subsequent direct
+edits validate and post-read the same explicit target file.
 
 Staging and local stdio proof are not enrollment or cutover. After the actual Business app and
 scratch-file path are accepted, retire Studio Direct's primary Paper-Web requirement for that
 workspace. Other seats retain their legacy route until separately migrated. No denial or unknown
 effect ever authorizes a carrier/account/model switch. A migration canary is an explicit single-carrier
 operation, not two concurrent Paper writers.
+
+Direct target-binding qualification — 2026-09-27: live Paper 0.5.12 evidence showed that raw vendor
+`open_file` can return the requested file's `get_basic_info` while the user-active file remains
+unchanged. A separate read-only probe proved `get_basic_info(fileId=...)` succeeds for a recent file
+that is not open, without changing the active file. All 12 guarded edit schemas require `fileId`.
+Therefore UI focus is not a write-safety prerequisite for the direct route; exact target identity and
+target snapshot are. Legacy Studio `paper_prepare` publication behavior remains a separate client path.
+The resulting target-aware bridge is immutable runtime generation **v6**, SHA-256
+`938c45356f95f3a57df2290e2da045eae9a6c4a0c3507dfff81c40a87e85b72a`. Legacy Studio Direct
+remains pinned to runtime v5 until separately selected for upgrade; the Business direct canary may
+stage v6 without moving that legacy carrier.
 
 ## Architecture — shared adapter and legacy/non-migrated clients
 

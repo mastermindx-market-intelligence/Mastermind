@@ -195,10 +195,10 @@ def _enrollment() -> bytes:
 
 STAGED_NOT_ENROLLED. No tunnel was created, bound or started by staging.
 The selected tool surface is recorded in INSTALLATION.json. Optional paper_prepare
-focuses an exact existing file through the guarded Paper API, never a host helper,
-URL or path. Paper must already be running and its current file inspectable. A fresh
-snapshot and stable operation ID are required. One writer per file across all hosts
-remains required; never expose raw open_file as a read or edit tool.
+binds one exact existing file through Paper's explicit `fileId` API, never a host helper,
+URL, path, or raw open_file transition. Paper must already be running. A fresh active-context
+snapshot and stable operation ID are required; prepare returns the exact target snapshot used
+by the subsequent target-bound edit. One writer per file across all hosts remains required.
 
 1. Verify the existing Chairman-created tunnel ID and exact Business workspace
    association in OpenAI's admin surface. Check for an existing Paper app/client.

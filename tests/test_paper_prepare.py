@@ -1,4 +1,4 @@
-"""Bounded file-focus safety tests. No real Paper document is opened."""
+"""Bounded explicit-file preparation safety tests. No real Paper document is mutated."""
 import copy
 import importlib.util
 from pathlib import Path
@@ -23,21 +23,23 @@ class PrepareTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name).resolve()
-        self.assertTrue((ROOT / "prepare.py").exists(), "Bounded API file preparation is not implemented")
         self.b = load("paper_prepare_guard_fixture", ROOT / "bridge.py")
         with patch.dict(sys.modules, {"bridge": self.b}):
             self.p = load("paper_prepare_fixture", ROOT / "prepare.py")
-        self.info = {"fileId": CURRENT, "fileName": "Fixture", "pageName": "Page 1", "artboards": []}
+        self.active_info = {
+            "fileId": CURRENT, "fileName": "Active", "pageName": "Page 1", "artboards": []
+        }
+        self.target_info = {
+            "fileId": TARGET, "fileName": "Target", "pageName": "Page 1", "artboards": []
+        }
         self.calls = []
         owner = self
 
         class Client:
             server = {"name": "fixture", "version": "1"}
             fail_initial = None
-            fail_after = False
-            lost_reply = False
-            tool_error = False
-            wrong_file = False
+            fail_target = None
+            wrong_target = False
             missing_open_tool = False
 
             def initialize(self):
@@ -45,36 +47,50 @@ class PrepareTests(unittest.TestCase):
                     raise owner.b.Refusal(self.fail_initial)
 
             def catalog(self):
-                tools = {"get_basic_info": {"name": "get_basic_info", "inputSchema": {"type": "object"}}}
+                tools = {
+                    "get_basic_info": {
+                        "name": "get_basic_info",
+                        "inputSchema": {"type": "object"},
+                    }
+                }
                 if not self.missing_open_tool:
-                    tools["open_file"] = {"name": "open_file", "inputSchema": {"type": "object"}}
+                    tools["open_file"] = {
+                        "name": "open_file",
+                        "inputSchema": {"type": "object"},
+                    }
                 return tools
 
             def call(self, name, arguments):
                 owner.calls.append((name, copy.deepcopy(arguments)))
-                if name == "get_basic_info":
-                    if self.fail_after and any(n == "open_file" for n, _ in owner.calls):
-                        raise owner.b.Refusal("UPSTREAM_FORBIDDEN")
-                    return {"structuredContent": copy.deepcopy(owner.info)}
-                if name == "open_file":
-                    if not self.wrong_file:
-                        owner.info["fileId"] = arguments["fileId"]
-                    if self.lost_reply:
-                        raise TimeoutError()
-                    return {"isError": self.tool_error, "structuredContent": copy.deepcopy(owner.info)}
-                raise AssertionError("Unexpected vendor call")
+                if name != "get_basic_info":
+                    raise AssertionError("prepare must not dispatch vendor open_file")
+                if arguments.get("fileId") == TARGET:
+                    if self.fail_target:
+                        raise owner.b.Refusal(self.fail_target)
+                    value = owner.active_info if self.wrong_target else owner.target_info
+                    return {"structuredContent": copy.deepcopy(value)}
+                if arguments:
+                    raise AssertionError("unexpected target")
+                return {"structuredContent": copy.deepcopy(owner.active_info)}
 
         self.client = Client()
-        self.expected = self.b.digest(self.info)
+        self.expected = self.b.digest(self.active_info)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def prepare(self, **kwargs):
-        parameters = dict(file_id=TARGET, expected_snapshot=self.expected,
-                          operation_id="prepare-test-1", allow_prepare=True,
-                          client=self.client, lock_root=self.root,
-                          _server_pin=None, _catalog_pin=None, _sleep=lambda _: None)
+        parameters = dict(
+            file_id=TARGET,
+            expected_snapshot=self.expected,
+            operation_id="prepare-test-1",
+            allow_prepare=True,
+            client=self.client,
+            lock_root=self.root,
+            _server_pin=None,
+            _catalog_pin=None,
+            _sleep=lambda _: None,
+        )
         parameters.update(kwargs)
         return self.p.prepare_document(**parameters)
 
@@ -87,8 +103,15 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_rejects_urls_routes_paths_and_non_ulid_ids(self):
-        for value in ("https://paper.design/file/" + TARGET, "/file/" + TARGET,
-                      "paper://file/" + TARGET, "/tmp/test", TARGET.lower(), "x", "A" * 500):
+        for value in (
+            "https://paper.design/file/" + TARGET,
+            "/file/" + TARGET,
+            "paper://file/" + TARGET,
+            "/tmp/test",
+            TARGET.lower(),
+            "x",
+            "A" * 500,
+        ):
             with self.subTest(value=value), self.assertRaisesRegex(self.b.Refusal, "FILE_ID"):
                 self.prepare(file_id=value)
         self.assertEqual(self.calls, [])
@@ -103,94 +126,100 @@ class PrepareTests(unittest.TestCase):
             self.prepare(expected_snapshot="invalid")
         self.assertEqual(self.calls, [])
 
-    def test_fresh_snapshot_precedes_focus(self):
-        self.info["pageName"] = "Human changed this"
+    def test_fresh_active_snapshot_precedes_target_binding(self):
+        self.active_info["pageName"] = "Human changed this"
         with self.assertRaisesRegex(self.b.Refusal, "DOCUMENT_CHANGED"):
             self.prepare()
-        self.assertEqual(self.opens(), [])
+        self.assertEqual(
+            self.calls, [("get_basic_info", {})],
+            "stale source context must stop before target inspection",
+        )
 
     def test_reuses_bridge_desktop_mutex(self):
         with self.b.desktop_lock(self.root):
             with self.assertRaisesRegex(self.b.Refusal, "DESKTOP_BUSY"):
                 self.prepare()
-        self.assertEqual(self.opens(), [])
+        self.assertEqual(self.calls, [])
 
-    def test_initial_denial_never_opens_file(self):
+    def test_initial_denial_never_reads_target(self):
         self.client.fail_initial = "UPSTREAM_FORBIDDEN"
         with self.assertRaisesRegex(self.b.Refusal, "UPSTREAM_FORBIDDEN"):
             self.prepare()
         self.assertEqual(self.calls, [])
 
-    def test_schema_drift_refuses_focus(self):
-        with self.assertRaisesRegex(self.b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
-            self.prepare(_catalog_pin="0" * 64)
+    def test_background_target_schema_drift_is_readonly_ready(self):
+        result = self.prepare(_catalog_pin="0" * 64)
+        self.assertEqual(result["state"], "PAPER_READY_READ_ONLY")
+        self.assertFalse(result["write_qualified"])
+        self.assertTrue(result["target_addressable"])
+        self.assertFalse(result["target_active"])
+        self.assertEqual(result["after"]["identity"]["id"], TARGET)
         self.assertEqual(self.opens(), [])
 
-    def test_missing_open_tool_refuses_focus(self):
+    def test_vendor_open_tool_is_not_required(self):
         self.client.missing_open_tool = True
-        with self.assertRaisesRegex(self.b.Refusal, "TOOL_NOT_AVAILABLE"):
-            self.prepare()
+        result = self.prepare()
+        self.assertEqual(result["state"], "PAPER_READY")
+        self.assertEqual(result["prepare_mode"], "EXPLICIT_FILE_BINDING")
         self.assertEqual(self.opens(), [])
 
     def test_already_active_file_is_verified_without_open(self):
-        result = self.prepare(file_id=CURRENT)
+        self.active_info = copy.deepcopy(self.target_info)
+        self.expected = self.b.digest(self.active_info)
+        result = self.prepare()
         self.assertEqual(result["state"], "PAPER_READY")
         self.assertTrue(result["already_active"])
+        self.assertTrue(result["target_active"])
+        self.assertTrue(result["target_addressable"])
         self.assertFalse(result["open_attempted"])
         self.assertEqual(self.opens(), [])
 
     def test_already_active_schema_drift_is_readonly_ready(self):
-        result = self.prepare(file_id=CURRENT, _catalog_pin="0" * 64)
+        self.active_info = copy.deepcopy(self.target_info)
+        self.expected = self.b.digest(self.active_info)
+        result = self.prepare(_catalog_pin="0" * 64)
         self.assertEqual(result["state"], "PAPER_READY_READ_ONLY")
         self.assertFalse(result["write_qualified"])
         self.assertEqual(self.opens(), [])
 
-    def test_exact_bare_id_only_is_forwarded_once(self):
+    def test_background_target_is_bound_without_vendor_open(self):
         result = self.prepare()
-        self.assertEqual(self.opens(), [("open_file", {"fileId": TARGET})])
         self.assertEqual(result["state"], "PAPER_READY")
-        self.assertEqual(result["file_id"], TARGET)
+        self.assertFalse(result["already_active"])
+        self.assertFalse(result["open_attempted"])
+        self.assertTrue(result["target_observed"])
+        self.assertFalse(result["target_active"])
+        self.assertTrue(result["target_addressable"])
         self.assertEqual(result["after"]["identity"]["id"], TARGET)
-        self.assertEqual(result["snapshot_sha256"], self.b.digest(self.info))
+        self.assertEqual(result["snapshot_sha256"], self.b.digest(self.target_info))
         self.assertEqual(result["operation_id"], "prepare-test-1")
         self.assertFalse(result["retry_allowed"])
         self.assertFalse(result["production_acceptance"])
+        self.assertEqual(self.opens(), [])
+        self.assertEqual(
+            self.calls,
+            [("get_basic_info", {}), ("get_basic_info", {"fileId": TARGET})],
+        )
 
-    def test_post_read_is_untargeted_active_file_observation(self):
-        self.prepare()
-        self.assertTrue(all(a == {} for n, a in self.calls if n == "get_basic_info"))
-        self.assertGreaterEqual(sum(n == "get_basic_info" for n, _ in self.calls), 2)
+    def test_target_mismatch_refuses_without_effect(self):
+        self.client.wrong_target = True
+        with self.assertRaisesRegex(self.b.Refusal, "FILE_ID_MISMATCH"):
+            self.prepare()
+        self.assertEqual(self.opens(), [])
+        self.assertEqual(
+            self.calls,
+            [("get_basic_info", {}), ("get_basic_info", {"fileId": TARGET})],
+        )
 
-    def test_wrong_file_is_unknown_never_retried(self):
-        self.client.wrong_file = True
-        result = self.prepare()
-        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
-        self.assertFalse(result["retry_allowed"])
-        self.assertEqual(len(self.opens()), 1)
-        self.assertLessEqual(len(self.calls), 8)
-
-    def test_lost_reply_stays_unknown_with_post_read_evidence(self):
-        self.client.lost_reply = True
-        result = self.prepare()
-        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
-        self.assertEqual(result["after"]["identity"]["id"], TARGET)
-        self.assertFalse(result["response_observed"])
-        self.assertFalse(result["retry_allowed"])
-        self.assertEqual(len(self.opens()), 1)
-
-    def test_upstream_error_does_not_masquerade_as_success(self):
-        self.client.tool_error = True
-        result = self.prepare()
-        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
-        self.assertFalse(result["retry_allowed"])
-        self.assertEqual(len(self.opens()), 1)
-
-    def test_post_read_denial_stops_observation_loop(self):
-        self.client.fail_after = True
-        result = self.prepare()
-        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
-        self.assertEqual(len(self.opens()), 1)
-        self.assertEqual(sum(n == "get_basic_info" for n, _ in self.calls), 2)
+    def test_target_read_denial_refuses_without_effect(self):
+        self.client.fail_target = "UPSTREAM_FORBIDDEN"
+        with self.assertRaisesRegex(self.b.Refusal, "UPSTREAM_FORBIDDEN"):
+            self.prepare()
+        self.assertEqual(self.opens(), [])
+        self.assertEqual(
+            self.calls,
+            [("get_basic_info", {}), ("get_basic_info", {"fileId": TARGET})],
+        )
 
     def test_raw_open_remains_blocked_in_original_guard(self):
         self.assertNotIn("open_file", self.b.READ_TOOLS)

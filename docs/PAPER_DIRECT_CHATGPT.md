@@ -17,14 +17,15 @@ The raw vendor `paper mcp` route is not selected: convenience is not evidence th
 our guard contract. Studio Direct remains a legacy client, not a dependency of normal direct
 Paper operations. It is not a fallback after a direct-app permission or safety denial.
 
-**Direct `paper_prepare`: BUILT_NOT_LIVE.** It is a bounded direct file-focus action, not a
+**Direct `paper_prepare`: BUILT_NOT_LIVE.** It is a bounded explicit-file binding action, not a
 host-control escape hatch: callers provide one exact bare Paper file ID, a fresh source snapshot,
 and a stable operation ID; URL/path/page overrides, shell/process control, and unrestricted raw
-`open_file` are not exposed. If the exact target is already-open, prepare performs no focus dispatch.
-Otherwise the adapter requires the reviewed Paper catalog before dispatch, sends at most one focus
-request, then observes the actual active file. A lost or ambiguous reply remains
-`EFFECT_UNKNOWN` and is never replayed automatically. Source support and tool discovery do not by
-themselves prove the live focus/write path.
+`open_file` are not exposed. Paper 0.5.12 can address another file directly by `fileId` even when
+that file is not user-active (and even when it was not already-open). Prepare therefore performs
+no UI-focus/open effect: it verifies the caller's fresh active context, reads the exact target by
+`fileId`, and returns that target's snapshot for the subsequent explicit-file edit. The user's
+active Paper file may remain unchanged. Source support and tool discovery do not by themselves
+prove the live target-bound write path.
 
 A newly staged bundle begins as **STAGED_NOT_ENROLLED** infrastructure until the user-attended setup.
 That staging receipt is not current service liveness. `LOCAL_STDIO_PROVEN` proves only initialization/

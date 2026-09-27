@@ -1,11 +1,11 @@
-"""Bounded Paper file focus through the reviewed vendor API, not host control.
+"""Bounded Paper target preparation through explicit file binding, not host control.
 
-Reuses bridge.py's transport, desktop mutex, snapshots and exact schema pin.
-The raw vendor open_file accepts URLs and incorrectly labels focus as read-only.
-This projection accepts only one bare Paper ULID, treats focus as a write, checks
-fresh source context, sends at most one open, and observes the actual active file.
-No shell, app launcher, filesystem path, URL, page override or retry owner exists.
-Paper must already be running and its current document inspectable.
+Reuses bridge.py's transport, desktop mutex, target snapshots and exact schema pin.
+Paper 0.5.12 can address files directly by fileId even when another file remains
+user-active. This projection accepts only one bare Paper ULID, checks fresh source
+context, validates the exact target read, and returns its snapshot for a subsequent
+explicit-file edit. It never calls raw vendor open_file, shell, app launchers, paths,
+URLs, page overrides, or a retry owner. Paper must already be running.
 """
 from __future__ import annotations
 
@@ -29,11 +29,11 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
                      _server_pin=bridge.SUPPORTED_SERVER,
                      _catalog_pin=bridge.SUPPORTED_CATALOG_SHA256,
                      _sleep=time.sleep) -> dict:
-    """One opt-in, serialized file-focus operation with no content mutation.
+    """One opt-in, serialized target-binding operation with no Paper mutation.
 
     An operation ID is correlation, not a deduplication token or a write grant.
-    A lost/error reply remains EFFECT_UNKNOWN even when post-read sees the target;
-    that evidence is available to the caller for same-carrier reconciliation.
+    The returned snapshot belongs to the exact requested file and is the guard for
+    the subsequent explicit-file edit; the user's active Paper file need not switch.
     """
     if allow_prepare is not True:
         raise bridge.Refusal("PREPARE_DISABLED")
@@ -60,44 +60,19 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
         if _file_id(before) == file_id:
             return dict(receipt, state="PAPER_READY" if schema["accepted_for_write"] else "PAPER_READY_READ_ONLY",
                         already_active=True, open_attempted=False, response_observed=True,
+                        target_observed=True, target_active=True, target_addressable=True,
                         after=before, snapshot_sha256=before["snapshot_sha256"])
-        if not schema["accepted_for_write"]:
-            raise bridge.Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "File focus also requires the reviewed schema pin.")
-        if "open_file" not in catalog:
-            raise bridge.Refusal("TOOL_NOT_AVAILABLE")
 
-        # Deliberately do not accept vendor URL, route or pageId forms. There is
-        # exactly one effect-bearing request. Neither response loss nor timeout
-        # leads to another open or to a host-level fallback.
-        result = None
-        try:
-            result = client.call("open_file", {"fileId": file_id})
-        except Exception:
-            pass
-        response_observed = isinstance(result, dict)
-        response_ok = response_observed and not result.get("isError")
-        after, observation_error = None, None
-        for attempt in range(MAX_OBSERVATIONS):
-            try:
-                # No fileId parameter: observe what is actually active, rather
-                # than merely reading the requested target in the background.
-                after = bridge.snapshot(client)
-            except bridge.Refusal as exc:
-                observation_error = exc.code
-                break  # An explicit denial is not a reason to keep probing.
-            except Exception:
-                observation_error = "POST_READ_UNAVAILABLE"
-                break
-            if _file_id(after) == file_id:
-                break
-            if attempt + 1 < MAX_OBSERVATIONS:
-                _sleep(0.15)
-        matched = _file_id(after) == file_id
-        ready = bool(response_ok and matched)
-        return dict(receipt, state="PAPER_READY" if ready else "EFFECT_UNKNOWN",
-                    already_active=False, open_attempted=True,
-                    response_observed=response_observed, response_ok=bool(response_ok),
-                    target_observed=matched, result=result, after=after,
-                    snapshot_sha256=after["snapshot_sha256"] if after else None,
-                    observation_error=observation_error,
-                    reason=None if ready else ("PREPARE_REPLY_UNCERTAIN" if not response_ok else "TARGET_NOT_OBSERVED"))
+        # Paper 0.5.12 addresses files directly by fileId, including files that are
+        # not user-active. Do not use vendor open_file as a focus surrogate: its
+        # successful response is not a guarantee that the user's active file changes.
+        # Prepare therefore performs only a target-specific read/binding check and
+        # returns the target snapshot required by the subsequent explicit-file edit.
+        target = bridge.snapshot(client, file_id)
+        return dict(receipt,
+                    state="PAPER_READY" if schema["accepted_for_write"] else "PAPER_READY_READ_ONLY",
+                    already_active=False, open_attempted=False, response_observed=True,
+                    response_ok=True, target_observed=True, target_active=False,
+                    target_addressable=True, prepare_mode="EXPLICIT_FILE_BINDING",
+                    result=None, after=target, snapshot_sha256=target["snapshot_sha256"],
+                    observation_error=None, reason=None)

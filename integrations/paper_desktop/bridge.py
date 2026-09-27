@@ -326,8 +326,11 @@ def document_identity(info):
     return {"kind": "artboard-anchor", "file": name, "page": page, "anchor": ids[0]}
 
 
-def snapshot(client):
-    info = basic_object(client.call("get_basic_info", {}))
+def snapshot(client, file_id: str | None = None):
+    if file_id is not None and (not isinstance(file_id, str) or not file_id):
+        raise Refusal("FILE_ID_REQUIRED")
+    arguments = {} if file_id is None else {"fileId": file_id}
+    info = basic_object(client.call("get_basic_info", arguments))
     try:
         identity = document_identity(info)
         bind_error = None
@@ -335,6 +338,9 @@ def snapshot(client):
         identity, bind_error = None, exc.code
     if identity is not None and identity.get("kind") != "file-id":
         bind_error = "FILE_ID_REQUIRED"
+    if file_id is not None and (identity is None or identity.get("kind") != "file-id"
+                                or identity.get("id") != file_id):
+        raise Refusal("FILE_ID_MISMATCH", "Paper target read did not return the requested file.")
     return {"basic_info": info, "identity": identity, "snapshot_sha256": digest(info),
             "write_binding_ready": identity is not None and identity.get("kind") == "file-id",
             "binding_error": bind_error}
@@ -406,17 +412,16 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server/catalog changed; inspect read-only and review a new exact pin before editing.")
         if tool not in catalog:
             raise Refusal("TOOL_NOT_AVAILABLE")
-        before = snapshot(client) if editing or expected_snapshot else None
+        supplied_file = arguments.get("fileId") if editing else None
+        if editing and (not isinstance(supplied_file, str) or not supplied_file):
+            raise Refusal("FILE_ID_REQUIRED", "Pass the exact inspected Paper file ID for every edit.")
+        before = snapshot(client, supplied_file) if editing else (snapshot(client) if expected_snapshot else None)
         if before and before["snapshot_sha256"] != expected_snapshot:
-            raise Refusal("DOCUMENT_CHANGED", "Read the current document before deciding on a new edit.")
+            raise Refusal("DOCUMENT_CHANGED", "Read the exact target file before deciding on a new edit.")
         if editing and not before["write_binding_ready"]:
             raise Refusal(before["binding_error"] or "DOCUMENT_BINDING_REQUIRED")
-        if editing:
-            supplied_file = arguments.get("fileId")
-            if supplied_file is None:
-                raise Refusal("FILE_ID_REQUIRED", "Pass the exact inspected Paper file ID for every edit.")
-            if supplied_file != before["identity"]["id"]:
-                raise Refusal("FILE_ID_MISMATCH", "Edit target does not match the inspected Paper file.")
+        if editing and supplied_file != before["identity"]["id"]:
+            raise Refusal("FILE_ID_MISMATCH", "Edit target does not match the inspected Paper file.")
         if editing and tool == "set_tokens":
             updates = arguments.get("tokens")
             if isinstance(updates, list) and any(isinstance(item, dict) and item.get("delete") is True for item in updates):
@@ -435,7 +440,7 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             return {"state": "EFFECT_UNKNOWN", "operation_id": operation_id, "tool": tool,
                     "result": result, "before": before, "retry_allowed": False, "reason": "UPSTREAM_TOOL_ERROR_MAY_BE_PARTIAL"}
         try:
-            after = snapshot(client)
+            after = snapshot(client, supplied_file)
             matched = same_document(before["identity"], after["basic_info"])
         except Exception:
             after, matched = None, False
