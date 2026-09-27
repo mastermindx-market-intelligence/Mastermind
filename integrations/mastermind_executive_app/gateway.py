@@ -598,5 +598,3 @@ def make_jwt_authenticator_variants(
     pairs = [make_jwt_authenticators(primary, jwks_cache=primary_jwks_cache)]
     pairs.extend(make_jwt_authenticators(item) for item in alternates)
     return tuple(pairs)
-
-
