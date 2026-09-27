@@ -118,7 +118,10 @@ def build_server(allow_write=False, allow_prepare=False):
         async def paper_edit(tool: str, arguments: dict, expected_snapshot: str, operation_id: str) -> CallToolResult:
             """Mutate the explicitly approved active Paper design. Never auto-retry this action.
 
-            Caller must have current write permission and exclusive design-task ownership.
+            Caller must have current write permission for this logical mutation/target.
+            Other admitted sessions may modify disjoint targets in the same Paper file or page.
+            Known same-board overlap should use disjoint node targets plus fresh re-read/re-plan;
+            this operation/carrier fence is not a file-wide or page-wide lease.
             File creation/open transitions, native exports, node deletion and token deletion are intentionally not permitted.
             """
             return await asyncio.to_thread(run, "edit", tool=tool, arguments=arguments,
