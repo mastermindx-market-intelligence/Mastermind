@@ -25,10 +25,21 @@ def enrolled(tmp_path, monkeypatch):
     binary.write_bytes(b"native-binary-v1")
     binary.chmod(0o555)
     config_path = tmp_path / "worker.json"
-    slot = dataclasses.replace(slots.get_slot("claude8-native-01"), provider_home=home)
-    monkeypatch.setattr(slots, "get_slot", lambda identifier: slot if identifier == slot.slot_id else
-                        (_ for _ in ()).throw(slots.SlotCatalogError("unknown_slot")))
+    slot = slots.ProviderWorkerSlot(
+        slot_id="claude8-native-01", worker_user="_mastermind_claude_01",
+        worker_group="_mastermind_claude_01", worker_uid=459, worker_gid=459,
+        provider_home=home, readiness_receipt=tmp_path / "ready.json",
+        workspace_binding_class="native_claude_subscription",
+        allowed_credential_kinds=("claudeai-subscription",), oauth_seat_ref="claude8",
+        provider_family="anthropic",
+    )
+    real_projection = slots.native_slot_from_config
+    def projection(config):
+        observed = real_projection(config)
+        return dataclasses.replace(observed, provider_home=home)
+    monkeypatch.setattr(slots, "native_slot_from_config", projection)
     config = {
+        "native_provider": "claude", "control_uid": 450,
         "worker_uid": 459, "worker_gid": 459, "worker_user": slot.worker_user,
         "provider_home": str(home), "claude_binary": str(binary),
         "allowed_supplementary_gids": [],
@@ -101,7 +112,7 @@ def test_unowned_or_revoked_enrollment_refuses(enrolled, field, value):
 def test_slot_config_cannot_select_another_principal(enrolled, field, value):
     enrolled.config[field] = value
     with pytest.raises(realm.ProviderRealmError):
-        enrolled.load()
+        enrolled.load().observe()
 
 
 def test_unknown_enrollment_fields_refuse(enrolled):
@@ -209,11 +220,17 @@ def test_lexical_path_refuses_parent_traversal():
 
 def test_native_slot_does_not_widen_legacy_codex_install_inventory():
     assert len(slots.all_slots()) == 4
-    assert len(slots.native_slots()) == 5
-    native = slots.get_slot("claude8-native-01")
+    config = {"native_provider": "claude", "control_uid": 450,
+              "worker_uid": 459, "worker_gid": 459, "worker_user": "_mastermind_claude_01",
+              "native_realm_enrollment": {"slot_id": "claude8-native-01"}}
+    native = slots.native_slot_from_config(config)
     assert native.worker_uid == native.worker_gid == 459
     assert native.auth_path.name == ".credentials.json"
     assert native.provider_family == "anthropic"
+    with pytest.raises(slots.SlotCatalogError):
+        slots.native_slot_from_config({})
+    with pytest.raises(slots.SlotCatalogError):
+        slots.get_slot("claude8-native-01")
 
 
 def test_root_walk_does_not_require_listing_permission(tmp_path, monkeypatch):

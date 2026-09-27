@@ -705,7 +705,9 @@ def _native_read_config(path: Path, expected_digest: str) -> dict[str, Any]:
 
 def _native_enrollment(config: Mapping[str, Any]):
     from control_plane.executive_host_pressure import HOST_REF_RE
-    from ops.executive_os.provider_worker_slots import get_slot, SlotCatalogError
+    from ops.executive_os.provider_worker_slots import (
+        get_slot, native_slot_from_config, SlotCatalogError,
+    )
     enrollment = config.get("native_realm_enrollment")
     if type(enrollment) is not dict or set(enrollment) != _NATIVE_ENROLLMENT_FIELDS:
         _native_refuse()
@@ -721,7 +723,8 @@ def _native_enrollment(config: Mapping[str, Any]):
         if type(enrollment[key]) is not str or not pattern.fullmatch(enrollment[key]):
             _native_refuse()
     try:
-        slot = get_slot(enrollment["slot_id"])
+        slot = (native_slot_from_config(config) if config.get("native_provider") == "claude"
+                else get_slot(enrollment["slot_id"]))
     except (SlotCatalogError, TypeError):
         raise ProviderRealmError("NATIVE_REALM_IDENTITY_UNAVAILABLE") from None
     if (type(config.get("worker_uid")) is not int
