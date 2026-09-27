@@ -36,7 +36,7 @@ def test_active_execution_skill_is_compatible_with_current_pack():
     assert meta == {
         "schema": "mastermind.sol_skillpack.v1",
         "skillpack_version": "1.0.1",
-        "minimum_bootstrap_major": 1,
+        "minimum_bootstrap_major": "1",
         "skill": "active_execution",
     }
 
@@ -204,7 +204,8 @@ def test_checkpoint_does_not_transfer_authority_or_invent_continuation():
 def test_role_pressure_cases_are_explicit_and_not_behavioral_proof():
     text = _section("Role-aware pressure cases")
     for phrase in ("Astra owns the whole delivery", "Sol receives a routine implementation",
-                   "One worker returns while another runs", "A cheap provider is disarmed"):
+                   "One worker returns while another runs", "A cheap provider is disarmed",
+                   "A worker repeats the same unsuccessful loop"):
         assert phrase in text
     assert "These cases are specifications, not recorded model behavior" in text
 
