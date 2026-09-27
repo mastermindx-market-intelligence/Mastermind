@@ -1178,12 +1178,13 @@ class ClaudeCodeWorkerAdapter:
             "enabledMcpjsonServers": [],
             "permissions": {
                 "allow": list(preapproved),
-                # The worker is noninteractive by construction.  The CLI also
-                # selects bypass at the launch edge; keeping the same value here
-                # makes the serialized policy and launch attestation explicit.
+                # The worker is noninteractive by construction. dontAsk keeps
+                # the reviewed allowlist meaningful while converting every
+                # would-be permission prompt into a deterministic refusal.
                 "ask": [],
-                "defaultMode": "bypassPermissions",
+                "defaultMode": "dontAsk",
                 "deny": deny,
+                "disableBypassPermissionsMode": "disable",
             },
             "model": self.exact_model,
             "fallbackModel": [],
@@ -1229,8 +1230,8 @@ class ClaudeCodeWorkerAdapter:
             or observed.get("enableAllProjectMcpServers") is not False
             or observed.get("enabledMcpjsonServers") != []
             or permissions.get("ask") != []
-            or permissions.get("defaultMode") != "bypassPermissions"
-            or "disableBypassPermissionsMode" in permissions
+            or permissions.get("defaultMode") != "dontAsk"
+            or permissions.get("disableBypassPermissionsMode") != "disable"
         ):
             raise ClaudeWorkerContractError(
                 "unattended permission fence drifted: mutation refuses"
@@ -1283,8 +1284,9 @@ class ClaudeCodeWorkerAdapter:
             "isolation_manifest_sha256": spec.isolation_manifest_sha256,
             "network_enabled": False,
             "safe_mode": True,
-            "permission_mode": "bypassPermissions",
+            "permission_mode": "dontAsk",
             "noninteractive": True,
+            "human_interaction_policy": "deny",
             "session_persistence": False,
             "mcp_servers": [],
             "shell_environment_policy": "include_only",
@@ -1323,9 +1325,8 @@ class ClaudeCodeWorkerAdapter:
             str(self.max_turns),
             "--model",
             self.exact_model,
-            # Anthropic's noninteractive unattended launch flag.  Existing
-            # tool/path/network/sandbox denies remain in force under bypass.
-            "--dangerously-skip-permissions",
+            "--permission-mode",
+            "dontAsk",
             "--tools",
             ",".join(tools),
             "--allowedTools",
