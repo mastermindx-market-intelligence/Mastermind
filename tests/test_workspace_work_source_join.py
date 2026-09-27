@@ -17,8 +17,20 @@ from control_plane import executive_runtime as er
 from control_plane.workspace_read_service import WorkspaceReadService
 from tests.test_workspace_source_join import intent, actual  # noqa: F401  (pytest fixture, resolved from module globals)
 from tests.test_workspace_read_service import cache_fixture, frame, run
+from scripts import chairman_control_room as ccr
 import pytest
 import re  # noqa: E402  (kept here so the events-guard regex stays near its use site)
+
+
+def _neutral_cache(tmp_path):
+    """Keep a qualified source row but remove actionable ownership evidence."""
+    owners, clock, cache = cache_fixture(tmp_path)
+    owner = owners[0]
+    doc = owner.state_cache["doc"]
+    doc["autonomy"]["responsibilities"][0]["is_actionable"] = False
+    with owner.state_lock:
+        ccr._publish_source_validity(owner, doc, tuple(clock), tuple(clock))
+    return owners, clock, cache
 
 
 def _service(cache, writer, bound, *, armed=None, runtime_identity=None):
@@ -46,7 +58,7 @@ def test_work_read_over_actual_bound_runtime_is_available(actual, tmp_path):
     )
     from control_plane.work_queue_projection import WORK_QUEUE_SCHEMA
     writer, bound, namespace, job = actual
-    _, _, cache = cache_fixture(tmp_path / "cache")
+    _, _, cache = _neutral_cache(tmp_path / "cache")
     service = _service(cache, writer, bound)
     response = run(service, frame("work"))
     # Envelope shape.
@@ -91,6 +103,25 @@ def test_work_read_over_actual_bound_runtime_is_available(actual, tmp_path):
     # Acceptance: NOT_PROJECTED for a QUEUED row (no producer in this projection).
     assert row["acceptance"]["state"] == "NOT_PROJECTED"
     # Namespace custody: one enter, one exit, never left active.
+    assert namespace.entries == namespace.exits == 1
+    assert namespace.active is False
+
+
+def test_work_read_actionable_worker_is_needs_worker_with_raw_queued_lifecycle(actual, tmp_path):
+    """Explicit synthetic owed-turn evidence changes ownership grouping, not lifecycle."""
+    writer, bound, namespace, job = actual
+    _, _, cache = cache_fixture(tmp_path / "cache")
+    body = run(_service(cache, writer, bound), frame("work"))["result"]
+    assert body["availability"] == "AVAILABLE"
+    assert body["source_observation"]["state"] == "SAME"
+    rows = body["groups"]["NEEDS_WORKER"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["root_job_id"] == job
+    assert row["group"] == "NEEDS_WORKER"
+    assert row["lifecycle"]["status"] == "QUEUED"
+    assert row["next_actor"]["value"] == "NEEDS_WORKER"
+    assert row["next_actor"]["source"] == "AGENT_OS"
     assert namespace.entries == namespace.exits == 1
     assert namespace.active is False
 
@@ -200,7 +231,7 @@ def test_work_read_two_roots_are_sorted_and_counted(actual, tmp_path):
     writer, bound, namespace, first = actual
     from control_plane.ceo_intent import submit_intent
     second = submit_intent(writer, intent(2, workstream="WS:TWO"))["job_id"]
-    _, _, cache = cache_fixture(tmp_path / "cache")
+    _, _, cache = _neutral_cache(tmp_path / "cache")
     service = _service(cache, writer, bound)
     response = run(service, frame("work"))
     assert response["ok"] is True
