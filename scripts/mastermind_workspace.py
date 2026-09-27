@@ -88,6 +88,13 @@ def _parser() -> argparse.ArgumentParser:
         command = sub.add_parser(name, help=f"{name} one managed linked workspace")
         command.add_argument("--operation-id", required=True)
         command.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
+        command.add_argument(
+            "--published-branch",
+            help=(
+                "exact existing origin branch that already contains this clean HEAD; "
+                "used only as additional recoverability evidence"
+            ),
+        )
     return parser
 
 
@@ -247,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
                 root,
                 destination,
                 expected_operation_id=args.operation_id,
+                published_branch=args.published_branch,
             )
             return _emit("status", receipt, effect="NOT_APPLIED")
         receipt = release_linked_worktree(
@@ -254,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
             root,
             destination,
             expected_operation_id=args.operation_id,
+            published_branch=args.published_branch,
         )
         return _emit(
             "release",
