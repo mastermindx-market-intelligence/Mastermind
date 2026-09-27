@@ -46,6 +46,7 @@ from control_plane.executive_ambient_process import (
     NullAmbientClassifier,
 )
 from control_plane.codex_worker import (
+    BinaryAttestation,
     GitPreflightFailed,
     GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
@@ -1306,15 +1307,21 @@ def activate_launchd_socket(name: str) -> socket.socket:
 
 
 class ExecutiveWorkerBroker:
-    """One-worker, one-active-job typed adapter broker."""
+    """One-worker, one-active-job typed adapter broker.
+
+    An explicitly armed Operator Harness-only broker binds no flat adapter.
+    Its installed entrypoint supplies the attested binary and rich factory;
+    flat execution and validation remain unavailable on that broker.
+    """
 
     def __init__(
         self,
-        adapter: WorkerExecutionAdapter,
+        adapter: WorkerExecutionAdapter | None,
         policy: BrokerPolicy,
         sweeper: ResidualSweeper,
         *,
-        adapter_id: str = "codex-cli",
+        adapter_id: str | None = "codex-cli",
+        operator_binary_attestation: BinaryAttestation | None = None,
         validation_adapter: WorkerExecutionAdapter | None = None,
         validation_adapter_id: str | None = None,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
@@ -1327,57 +1334,84 @@ class ExecutiveWorkerBroker:
         ]
         | None = None,
     ) -> None:
-        try:
-            descriptor = bind_reviewed_adapter(adapter, adapter_id)
-        except AdapterBindingError as exc:
-            raise WorkerBrokerError(str(exc)) from exc
-        except Exception as exc:
-            raise WorkerBrokerError(
-                f"worker adapter {adapter_id!r} failed to bind"
-            ) from exc
-        self.adapter = adapter
-        self.adapter_id = descriptor.adapter_id
-        if validation_adapter is None:
-            if validation_adapter_id not in (None, self.adapter_id):
+        self._operator_only = adapter is None
+        self._operator_binary_attestation = operator_binary_attestation
+        if self._operator_only:
+            if (adapter_id is not None or validation_adapter is not None
+                    or validation_adapter_id is not None):
                 raise WorkerBrokerError(
-                    "validation adapter identity was supplied without an adapter"
+                    "operator-only broker cannot bind a flat or validation adapter"
                 )
-            if self.adapter_id == "claude-code":
+            if (operator_harness_armed is not True
+                    or not callable(operator_adapter_factory)
+                    or not isinstance(operator_binary_attestation, BinaryAttestation)
+                    or not isinstance(operator_binary_attestation.sha256, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", operator_binary_attestation.sha256) is None
+                    or not isinstance(operator_binary_attestation.version, str)
+                    or not operator_binary_attestation.version.strip()):
                 raise WorkerBrokerError(
-                    "Claude broker requires the reviewed common validation adapter"
+                    "operator-only broker requires armed factory and typed binary attestation"
                 )
-            validation_descriptor = descriptor
-            validation_adapter = adapter
+            self.adapter = None
+            self.adapter_id = None
+            self.validation_adapter = None
+            self.validation_adapter_id = None
         else:
-            if not isinstance(validation_adapter_id, str) or not validation_adapter_id:
+            if operator_binary_attestation is not None:
                 raise WorkerBrokerError(
-                    "validation adapter requires one exact reviewed identity"
+                    "flat broker binary identity must remain on its reviewed adapter"
                 )
             try:
-                validation_descriptor = bind_reviewed_adapter(
-                    validation_adapter, validation_adapter_id
-                )
+                descriptor = bind_reviewed_adapter(adapter, adapter_id)
             except AdapterBindingError as exc:
                 raise WorkerBrokerError(str(exc)) from exc
             except Exception as exc:
                 raise WorkerBrokerError(
-                    f"validation adapter {validation_adapter_id!r} failed to bind"
+                    f"worker adapter {adapter_id!r} failed to bind"
                 ) from exc
-            if self.adapter_id == "codex-cli" and (
-                validation_adapter is not adapter
-                or validation_descriptor.adapter_id != self.adapter_id
-            ):
-                raise WorkerBrokerError(
-                    "Codex broker validation must remain on its primary reviewed adapter"
-                )
-            if self.adapter_id == "claude-code" and (
-                validation_descriptor.adapter_id != "codex-cli"
-            ):
-                raise WorkerBrokerError(
-                    "Claude broker validation requires the reviewed common Codex sandbox"
-                )
-        self.validation_adapter = validation_adapter
-        self.validation_adapter_id = validation_descriptor.adapter_id
+            self.adapter = adapter
+            self.adapter_id = descriptor.adapter_id
+            if validation_adapter is None:
+                if validation_adapter_id not in (None, self.adapter_id):
+                    raise WorkerBrokerError(
+                        "validation adapter identity was supplied without an adapter"
+                    )
+                if self.adapter_id == "claude-code":
+                    raise WorkerBrokerError(
+                        "Claude broker requires the reviewed common validation adapter"
+                    )
+                validation_descriptor = descriptor
+                validation_adapter = adapter
+            else:
+                if not isinstance(validation_adapter_id, str) or not validation_adapter_id:
+                    raise WorkerBrokerError(
+                        "validation adapter requires one exact reviewed identity"
+                    )
+                try:
+                    validation_descriptor = bind_reviewed_adapter(
+                        validation_adapter, validation_adapter_id
+                    )
+                except AdapterBindingError as exc:
+                    raise WorkerBrokerError(str(exc)) from exc
+                except Exception as exc:
+                    raise WorkerBrokerError(
+                        f"validation adapter {validation_adapter_id!r} failed to bind"
+                    ) from exc
+                if self.adapter_id == "codex-cli" and (
+                    validation_adapter is not adapter
+                    or validation_descriptor.adapter_id != self.adapter_id
+                ):
+                    raise WorkerBrokerError(
+                        "Codex broker validation must remain on its primary reviewed adapter"
+                    )
+                if self.adapter_id == "claude-code" and (
+                    validation_descriptor.adapter_id != "codex-cli"
+                ):
+                    raise WorkerBrokerError(
+                        "Claude broker validation requires the reviewed common Codex sandbox"
+                    )
+            self.validation_adapter = validation_adapter
+            self.validation_adapter_id = validation_descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -1498,6 +1532,10 @@ class ExecutiveWorkerBroker:
             "ok": True,
             "result": _jsonable(result),
         }
+
+    def _require_flat_adapter(self) -> None:
+        if self._operator_only:
+            raise BrokerStateError("operator-only broker refuses flat worker operations")
 
     async def _dispatch(self, operation: str, payload: dict[str, Any]) -> Any:
         if operation == "start":
@@ -1676,7 +1714,8 @@ class ExecutiveWorkerBroker:
     async def _ohf_identity(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload:
             raise BrokerProtocolError("ohf-identity payload must be empty")
-        binary = getattr(self.adapter, "binary", None)
+        binary = (self._operator_binary_attestation if self._operator_only
+                  else getattr(self.adapter, "binary", None))
         if binary is None:
             raise BrokerStateError("worker binary attestation is unavailable")
         return {
@@ -2906,6 +2945,7 @@ class ExecutiveWorkerBroker:
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         descriptor = adapter_descriptor(self.adapter_id)
         if not descriptor.implemented:
             raise WorkerAdapterNotImplementedError(
@@ -2977,6 +3017,7 @@ class ExecutiveWorkerBroker:
         }
 
     async def _status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) - {"run_id", "fresh_uid_sweep"}:
             raise BrokerProtocolError("status payload fields are invalid")
         run_id = payload.get("run_id")
@@ -3125,6 +3166,7 @@ class ExecutiveWorkerBroker:
         return receipt, sweep
 
     async def _collect(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) != {"run_id"}:
             raise BrokerProtocolError("collect payload fields are invalid")
         async with self._state_lock:
@@ -3142,6 +3184,7 @@ class ExecutiveWorkerBroker:
         return {"collection": receipt, "uid_sweep": sweep}
 
     async def _cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) != {"run_id", "reason"}:
             raise BrokerProtocolError("cancel payload fields are invalid")
         reason = payload.get("reason")
@@ -3239,6 +3282,7 @@ class ExecutiveWorkerBroker:
                 self._validation_busy = False
 
     async def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) != {"run_id", "argv", "timeout_seconds"}:
             raise BrokerProtocolError("validate payload fields are invalid")
         commands = _validation_commands([payload["argv"]])
