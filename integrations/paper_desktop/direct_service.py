@@ -38,6 +38,7 @@ PATH_VALUE = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
 TUNNEL_RE = re.compile(r"tunnel_[A-Za-z0-9_-]{8,120}")
 SEAT_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
 WORKSPACE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{2,150}")
+ORG_RE = re.compile(r"org-[A-Za-z0-9_-]{8,150}")
 
 
 class Refusal(RuntimeError):
@@ -358,15 +359,19 @@ def verify(root: Path) -> dict:
     return receipt
 
 
-def profile_text(root: Path, tunnel_id: str) -> str:
+def profile_text(root: Path, tunnel_id: str, organization_id: str | None = None) -> str:
     if not isinstance(tunnel_id, str) or not TUNNEL_RE.fullmatch(tunnel_id):
         raise Refusal("TUNNEL_ID_REQUIRED")
+    if organization_id is not None and (not isinstance(organization_id, str) or not ORG_RE.fullmatch(organization_id)):
+        raise Refusal("ORGANIZATION_ID_REQUIRED")
     root = _path(root)
     receipt = verify(root)
     q = json.dumps
     return (
         "config_version: 1\ncontrol_plane:\n  base_url: \"https://api.openai.com\"\n"
-        f"  tunnel_id: {q(tunnel_id)}\n  api_key: {q('file:' + str(root / 'secrets/runtime-key'))}\n"
+        f"  tunnel_id: {q(tunnel_id)}\n"
+        + (f"  organization_id: {q(organization_id)}\n" if organization_id is not None else "")
+        + f"  api_key: {q('file:' + str(root / 'secrets/runtime-key'))}\n"
         "health:\n  listen_addr: \"127.0.0.1:0\"\n"
         f"  url_file: {q(str(root / 'state/health.url'))}\n"
         "admin_ui:\n  open_browser: false\nlog:\n  level: info\n  format: json\n"
@@ -375,10 +380,12 @@ def profile_text(root: Path, tunnel_id: str) -> str:
     )
 
 
-def bind(root: Path, tunnel_id: str, workspace_id: str | None = None) -> dict:
+def bind(root: Path, tunnel_id: str, workspace_id: str | None = None, organization_id: str | None = None) -> dict:
     root = _path(root)
     receipt = verify(root)
-    profile = profile_text(root, tunnel_id)
+    if organization_id is not None and (not isinstance(organization_id, str) or not ORG_RE.fullmatch(organization_id)):
+        raise Refusal("ORGANIZATION_ID_REQUIRED")
+    profile = profile_text(root, tunnel_id, organization_id)
     connection = root / "connection"
     if connection.exists() or connection.is_symlink():
         raise Refusal("BINDING_EXISTS")
@@ -393,8 +400,8 @@ def bind(root: Path, tunnel_id: str, workspace_id: str | None = None) -> dict:
             raise Refusal("WORKSPACE_ID_REQUIRED")
         value = {"schema": BINDING_SCHEMA_V2, "state": "BOUND_NOT_ACTIVATED",
                  "seat_id": _seat_id(receipt.get("seat_id")), "tunnel_id": tunnel_id,
-                 "workspace_id": workspace_id, "target_plan": "Business",
-                 "workspace_access_verified": False}
+                 "workspace_id": workspace_id, "organization_id": organization_id,
+                 "target_plan": "Business", "workspace_access_verified": False}
     _private_dir(connection, create=True)
     _write(connection / "profile.yaml", profile.encode())
     _write(connection / "BINDING.json", _json_bytes(value))
@@ -421,9 +428,12 @@ def verify_binding(root: Path) -> dict:
         workspace_id = value.get("workspace_id")
         if workspace_id is not None and not WORKSPACE_RE.fullmatch(str(workspace_id)):
             raise Refusal("INVALID_BINDING")
+        organization_id = value.get("organization_id")
+        if organization_id is not None and not ORG_RE.fullmatch(str(organization_id)):
+            raise Refusal("INVALID_BINDING")
     else:
         raise Refusal("INVALID_BINDING")
-    if _read(root / "connection/profile.yaml") != profile_text(root, value.get("tunnel_id")).encode():
+    if _read(root / "connection/profile.yaml") != profile_text(root, value.get("tunnel_id"), value.get("organization_id")).encode():
         raise Refusal("PROFILE_CHANGED")
     return value
 
@@ -532,6 +542,7 @@ def main() -> int:
     parser.add_argument("--seat-id")
     parser.add_argument("--tunnel-id")
     parser.add_argument("--workspace-id")
+    parser.add_argument("--organization-id")
     args = parser.parse_args()
     try:
         root = _path(args.root)
@@ -542,7 +553,7 @@ def main() -> int:
                           source_revision=args.source_revision, allow_write=args.allow_write,
                           allow_prepare=args.allow_prepare, seat_id=args.seat_id)
         elif args.action == "bind":
-            value = bind(root, args.tunnel_id, args.workspace_id)
+            value = bind(root, args.tunnel_id, args.workspace_id, args.organization_id)
         elif args.action == "serve":
             serve(root)
             return 0

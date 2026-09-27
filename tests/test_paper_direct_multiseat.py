@@ -107,6 +107,32 @@ class MultiSeatTests(unittest.TestCase):
         self.assertFalse(value["workspace_access_verified"])
         self.assertEqual(self.svc.verify_binding(root)["tunnel_id"], tunnel)
 
+    def test_v3_binding_can_pin_exact_openai_organization(self):
+        root, _ = self.stage("c1")
+        tunnel = "tunnel_" + "b" * 32
+        org = "org-2KfBEPZB4fcssTJfl9q9PVmM"
+        value = self.svc.bind(root, tunnel, None, org)
+        self.assertEqual(value["organization_id"], org)
+        profile = (root / "connection/profile.yaml").read_text()
+        self.assertIn(f'organization_id: "{org}"', profile)
+        self.assertEqual(self.svc.verify_binding(root)["organization_id"], org)
+
+    def test_v3_binding_without_org_keeps_c2_shape(self):
+        root, _ = self.stage("c2")
+        tunnel = "tunnel_" + "b" * 32
+        value = self.svc.bind(root, tunnel, None)
+        self.assertIsNone(value["organization_id"])
+        self.assertNotIn("organization_id:", (root / "connection/profile.yaml").read_text())
+
+    def test_invalid_org_refuses_before_binding_write(self):
+        root, _ = self.stage("c4")
+        tunnel = "tunnel_" + "b" * 32
+        for value in ("", "../org", "org bad", "org:\nattack", "x" * 200):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(self.svc.Refusal, "ORGANIZATION_ID_REQUIRED"):
+                    self.svc.bind(root, tunnel, None, value)
+                self.assertFalse((root / "connection").exists())
+
     def test_legacy_v2_bundle_still_requires_workspace_id_and_global_owner(self):
         root = self.home / "legacy"
         value = self.svc.stage(
