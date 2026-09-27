@@ -28,6 +28,7 @@ SCHEMA_V3 = "mastermind.paper_direct_install.v3"
 SCHEMA = SCHEMA_V2  # legacy/default when no seat_id is supplied
 BINDING_SCHEMA_V1 = "mastermind.paper_direct_binding.v1"
 BINDING_SCHEMA_V2 = "mastermind.paper_direct_binding.v2"
+BINDING_SCHEMA_V3 = "mastermind.paper_direct_binding.v3"
 BINDING_SCHEMA = BINDING_SCHEMA_V1
 LABEL = "com.mastermind.paper-direct.business"
 SDK_VERSION = "1.30.0"
@@ -242,9 +243,11 @@ known overlap; the per-OS-user desktop mutex is a local call guard, not a docume
    association in OpenAI's admin surface. Check for an existing Paper app/client.
    Reuse the existing tunnel; do not substitute another seat's tunnel or key.
 2. Use a runtime key whose principal has Tunnels Read + Use. Never put an admin
-   key in the daemon. Save it locally as secrets/runtime-key, private mode 0600,
-   through the approved credential-entry surface. Do not paste keys into Git,
-   logs, this document, command arguments, or a plugin archive.
+   key in the daemon. A legacy/single-seat bundle may store it locally as
+   secrets/runtime-key, private mode 0600. A seat-aware v3 binding may instead
+   reference one existing owner-private runtime-key file with --runtime-key-file;
+   the key stays in place and only its path is recorded. Do not paste keys into
+   Git, logs, this document, command arguments, or a plugin archive.
 3. Run bind --root BUNDLE --tunnel-id EXACT_ID. New seat-aware bundles do not invent
    a backend workspace ID that the local tunnel runtime does not use; if an exact workspace
    ID is independently known it may be recorded with --workspace-id. Legacy v2 bundles keep
@@ -361,19 +364,21 @@ def verify(root: Path) -> dict:
     return receipt
 
 
-def profile_text(root: Path, tunnel_id: str, organization_id: str | None = None) -> str:
+def profile_text(root: Path, tunnel_id: str, organization_id: str | None = None,
+                 runtime_key_file: Path | None = None) -> str:
     if not isinstance(tunnel_id, str) or not TUNNEL_RE.fullmatch(tunnel_id):
         raise Refusal("TUNNEL_ID_REQUIRED")
     if organization_id is not None and (not isinstance(organization_id, str) or not ORG_RE.fullmatch(organization_id)):
         raise Refusal("ORGANIZATION_ID_REQUIRED")
     root = _path(root)
     receipt = verify(root)
+    key_path = _path(runtime_key_file) if runtime_key_file is not None else root / "secrets/runtime-key"
     q = json.dumps
     return (
         "config_version: 1\ncontrol_plane:\n  base_url: \"https://api.openai.com\"\n"
         f"  tunnel_id: {q(tunnel_id)}\n"
         + (f"  organization_id: {q(organization_id)}\n" if organization_id is not None else "")
-        + f"  api_key: {q('file:' + str(root / 'secrets/runtime-key'))}\n"
+        + f"  api_key: {q('file:' + str(key_path))}\n"
         "health:\n  listen_addr: \"127.0.0.1:0\"\n"
         f"  url_file: {q(str(root / 'state/health.url'))}\n"
         "admin_ui:\n  open_browser: false\nlog:\n  level: info\n  format: json\n"
@@ -382,12 +387,30 @@ def profile_text(root: Path, tunnel_id: str, organization_id: str | None = None)
     )
 
 
-def bind(root: Path, tunnel_id: str, workspace_id: str | None = None, organization_id: str | None = None) -> dict:
+def _verify_runtime_key_path(key: Path) -> Path:
+    key = _path(key)
+    if not key.exists() and not key.is_symlink():
+        raise Refusal("RUNTIME_KEY_MISSING")
+    value = _read(key, limit=4096).strip()
+    if value.startswith(b"sk-admin-"):
+        raise Refusal("ADMIN_KEY_NOT_RUNTIME")
+    if not value or any(char <= 32 or char >= 127 for char in value):
+        raise Refusal("INVALID_RUNTIME_KEY")
+    return key
+
+
+def bind(root: Path, tunnel_id: str, workspace_id: str | None = None, organization_id: str | None = None,
+         runtime_key_file: Path | None = None) -> dict:
     root = _path(root)
     receipt = verify(root)
     if organization_id is not None and (not isinstance(organization_id, str) or not ORG_RE.fullmatch(organization_id)):
         raise Refusal("ORGANIZATION_ID_REQUIRED")
-    profile = profile_text(root, tunnel_id, organization_id)
+    external_key = None
+    if runtime_key_file is not None:
+        if receipt.get("schema") != SCHEMA_V3:
+            raise Refusal("RUNTIME_KEY_REFERENCE_UNSUPPORTED")
+        external_key = _verify_runtime_key_path(Path(runtime_key_file))
+    profile = profile_text(root, tunnel_id, organization_id, external_key)
     connection = root / "connection"
     if connection.exists() or connection.is_symlink():
         raise Refusal("BINDING_EXISTS")
@@ -400,10 +423,13 @@ def bind(root: Path, tunnel_id: str, workspace_id: str | None = None, organizati
     else:
         if workspace_id is not None and (not isinstance(workspace_id, str) or not WORKSPACE_RE.fullmatch(workspace_id)):
             raise Refusal("WORKSPACE_ID_REQUIRED")
-        value = {"schema": BINDING_SCHEMA_V2, "state": "BOUND_NOT_ACTIVATED",
+        value = {"schema": BINDING_SCHEMA_V3 if external_key is not None else BINDING_SCHEMA_V2,
+                 "state": "BOUND_NOT_ACTIVATED",
                  "seat_id": _seat_id(receipt.get("seat_id")), "tunnel_id": tunnel_id,
                  "workspace_id": workspace_id, "organization_id": organization_id,
                  "target_plan": "Business", "workspace_access_verified": False}
+        if external_key is not None:
+            value["runtime_key_file"] = str(external_key)
     _private_dir(connection, create=True)
     _write(connection / "profile.yaml", profile.encode())
     _write(connection / "BINDING.json", _json_bytes(value))
@@ -424,7 +450,7 @@ def verify_binding(root: Path) -> dict:
     if schema == BINDING_SCHEMA_V1:
         if receipt.get("schema") != SCHEMA_V2 or not WORKSPACE_RE.fullmatch(str(value.get("workspace_id", ""))):
             raise Refusal("INVALID_BINDING")
-    elif schema == BINDING_SCHEMA_V2:
+    elif schema in {BINDING_SCHEMA_V2, BINDING_SCHEMA_V3}:
         if receipt.get("schema") != SCHEMA_V3 or value.get("seat_id") != receipt.get("seat_id"):
             raise Refusal("INVALID_BINDING")
         workspace_id = value.get("workspace_id")
@@ -433,23 +459,30 @@ def verify_binding(root: Path) -> dict:
         organization_id = value.get("organization_id")
         if organization_id is not None and not ORG_RE.fullmatch(str(organization_id)):
             raise Refusal("INVALID_BINDING")
+        if schema == BINDING_SCHEMA_V3:
+            raw_key = value.get("runtime_key_file")
+            if not isinstance(raw_key, str) or not raw_key:
+                raise Refusal("INVALID_BINDING")
+            _verify_runtime_key_path(Path(raw_key))
+        elif "runtime_key_file" in value:
+            raise Refusal("INVALID_BINDING")
     else:
         raise Refusal("INVALID_BINDING")
-    if _read(root / "connection/profile.yaml") != profile_text(root, value.get("tunnel_id"), value.get("organization_id")).encode():
+    runtime_key_file = Path(value["runtime_key_file"]) if schema == BINDING_SCHEMA_V3 else None
+    if _read(root / "connection/profile.yaml") != profile_text(root, value.get("tunnel_id"), value.get("organization_id"), runtime_key_file).encode():
         raise Refusal("PROFILE_CHANGED")
     return value
 
 
 def verify_runtime_key(root: Path) -> None:
-    key = _path(root) / "secrets/runtime-key"
-    if not key.exists() and not key.is_symlink():
-        raise Refusal("RUNTIME_KEY_MISSING")
-    _private_dir(key.parent)
-    value = _read(key, limit=4096).strip()
-    if value.startswith(b"sk-admin-"):
-        raise Refusal("ADMIN_KEY_NOT_RUNTIME")
-    if not value or any(char <= 32 or char >= 127 for char in value):
-        raise Refusal("INVALID_RUNTIME_KEY")
+    root = _path(root)
+    key = root / "secrets/runtime-key"
+    binding_path = root / "connection/BINDING.json"
+    if binding_path.exists() and not binding_path.is_symlink():
+        value = _json(binding_path)
+        if value.get("schema") == BINDING_SCHEMA_V3:
+            key = Path(value.get("runtime_key_file", ""))
+    _verify_runtime_key_path(key)
 
 
 @contextlib.contextmanager
@@ -545,6 +578,7 @@ def main() -> int:
     parser.add_argument("--tunnel-id")
     parser.add_argument("--workspace-id")
     parser.add_argument("--organization-id")
+    parser.add_argument("--runtime-key-file", type=Path)
     args = parser.parse_args()
     try:
         root = _path(args.root)
@@ -555,7 +589,7 @@ def main() -> int:
                           source_revision=args.source_revision, allow_write=args.allow_write,
                           allow_prepare=args.allow_prepare, seat_id=args.seat_id)
         elif args.action == "bind":
-            value = bind(root, args.tunnel_id, args.workspace_id, args.organization_id)
+            value = bind(root, args.tunnel_id, args.workspace_id, args.organization_id, args.runtime_key_file)
         elif args.action == "serve":
             serve(root)
             return 0

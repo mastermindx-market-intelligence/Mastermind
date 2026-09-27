@@ -117,6 +117,28 @@ class MultiSeatTests(unittest.TestCase):
         self.assertIn(f'organization_id: "{org}"', profile)
         self.assertEqual(self.svc.verify_binding(root)["organization_id"], org)
 
+    def test_v3_binding_can_reference_existing_private_runtime_key(self):
+        root, _ = self.stage("c1-keyref")
+        key = self.home / "existing-runtime-key"
+        key.write_text("fixture-only-not-a-real-credential")
+        key.chmod(0o600)
+        tunnel = "tunnel_" + "b" * 32
+        value = self.svc.bind(root, tunnel, None, runtime_key_file=key)
+        self.assertEqual(value["runtime_key_file"], str(key))
+        self.assertFalse((root / "secrets/runtime-key").exists())
+        profile = (root / "connection/profile.yaml").read_text()
+        self.assertIn('api_key: "file:' + str(key) + '"', profile)
+        self.svc.verify_runtime_key(root)
+
+    def test_v3_external_runtime_key_must_be_owner_private_regular_file(self):
+        root, _ = self.stage("c4-keyref")
+        key = self.home / "unsafe-runtime-key"
+        key.write_text("fixture-only-not-a-real-credential")
+        key.chmod(0o644)
+        with self.assertRaisesRegex(self.svc.Refusal, "PRIVATE_FILE_REQUIRED"):
+            self.svc.bind(root, "tunnel_" + "b" * 32, None, runtime_key_file=key)
+        self.assertFalse((root / "connection").exists())
+
     def test_v3_binding_without_org_keeps_c2_shape(self):
         root, _ = self.stage("c2")
         tunnel = "tunnel_" + "b" * 32
