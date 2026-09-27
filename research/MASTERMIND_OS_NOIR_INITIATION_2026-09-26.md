@@ -186,3 +186,93 @@ No unresolved current-turn modifying effect remains. Historical failure classifi
 **FINALIZATION_CLASSIFICATION: CHECKPOINTED_CONTINUATION**, conditional on exact committed-file readback. **MISSION_COMPLETE: false.** Boundary: the independent initial static qualification phase is complete; the next material integration crosses the explicit shared-definition/P-series custody and historical-action recovery fence. This is not parent completion or custody transfer.
 
 Resume on the existing execution-capable surface with the latest committed file and exact gate return, not a full history replay. A mode change grants no permission or custody; no switch is required by the observed successful native Figma editing/audit. Pro may later be useful for substantive design adjudication, not routine status polling.
+
+
+## Paper canonical design-system continuation — Studio Direct MCP
+
+The Chairman subsequently directed that the live design-system work use the **Paper MCP connection through Studio Direct**, not manual Paper desktop interaction. This continuation records the verified Paper effects and the exact transport gate so later sessions do not repeat or bypass them.
+
+### Canonical Paper artifact and verified effects
+
+Paper file: `Mastermind Product Design System — Canonical`  
+File ID: `01M312VSDSZFVT45674GDVJVZN`  
+Paper server observed during the applied slice: `paper-desktop 0.5.12`.
+
+The modifying carrier was the guarded Studio Direct Paper surface. The accepted write-schema catalog at the successful prepare boundary was `ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570`. All listed content mutations returned `APPLIED_RESPONSE_OBSERVED`; no current Paper mutation is left `EFFECT_UNKNOWN`.
+
+Created design tokens, current token content hash `356191c3`:
+
+| Role | Token | Value |
+|---|---|---|
+| neutral | `--noir-canvas` | `#080808` |
+| neutral | `--noir-sidebar` | `#0C0C0C` |
+| neutral | `--noir-panel` | `#121212` |
+| neutral | `--noir-raised` | `#191919` |
+| neutral | `--noir-hover` | `#222222` |
+| neutral | `--noir-selected` | `#292929` |
+| text | `--noir-text-primary` | `#F3F3F3` |
+| text | `--noir-text-secondary` | `#B8B8B8` |
+| text | `--noir-text-tertiary` | `#949494` |
+| semantic | `--noir-champagne` | `#C9B99B` |
+| semantic | `--noir-sage` | `#A8C2AD` |
+| semantic | `--noir-rose` | `#DEA4A5` |
+| semantic | `--noir-steel` | `#A7B4C2` |
+| semantic | `--noir-lilac` | `#BDB2CE` |
+| market | `--market-canvas` | `#0A0B0D` |
+| market | `--market-panel` | `#111318` |
+| market | `--market-raised` | `#181B20` |
+| market | `--market-line` | `#2B3038` |
+| intelligence | `--intelligence-panel` | `#10131A` |
+| intelligence | `--intelligence-active` | `#151B29` |
+
+Verified Paper boards:
+
+- `3XJ-1` — `Foundations · NOIR Family System · Canonical`. Defines the neutral material ladder, the Command/Market/Intelligence sibling profiles, semantic signal palette and four design grammar laws. A post-edit Paper screenshot was visually inspected; the board was switched to fit-content and its working indicator released.
+- `40D-1` — `Reference · NOIR Profile Application`. Demonstrates the same structural grammar across Mastermind OS / NOIR Command, Consumer Mastermind / NOIR Market and Mastermind AI / NOIR Intelligence. A post-edit screenshot was visually inspected and the working indicator released.
+- Existing `24A-0` was renamed `Foundations · Legacy Dual-Theme Reference`; it was not deleted or overwritten.
+
+The resulting system rule is: **NOIR is the parent foundation; Command, Market and Intelligence are controlled material profiles, not competing brands/themes.** Neutral structure carries almost all interface area. Semantic hue communicates state, signal or active intelligence. Cool color is localized rather than used as navy wallpaper.
+
+### Real component migration census
+
+The next useful Paper work is migration of existing component families, not another static study. Read-only Paper inspection identified these current definitions on Components page `p-4-0`:
+
+- `MX/Button` `28D-0`
+- `MX/Tab` `26C-0`
+- `MX/Freshness` `272-0`
+- `MX/State Panel` `2A7-0`
+- `MX/Table Frame` `2O6-0`
+- `MX/Chart Frame` `2PH-0`
+- `MX/Tier Gate` `2RE-0`
+
+Representative legacy values are still embedded in these definitions: `#181B21`, `#1E222A`, `#3A4150`, `#D7DCE3`, `#8B93A1`, plus semantic blues/greens/reds/amber and localized Prophet purple. The verified migration direction is:
+
+- neutral panel/raised/text/line values -> existing NOIR semantic tokens rather than new raw colors;
+- positive -> `--noir-sage`;
+- negative/error -> `--noir-rose`;
+- stale/warning/premium attention -> `--noir-champagne`;
+- evidence/context/focus/loading -> `--noir-steel`;
+- AI/Prophet-only localized intelligence -> `--noir-lilac` / `--intelligence-active`;
+- table/chart shells use the NOIR Market material profile; generic buttons remain neutral rather than blue-themed.
+
+Before bulk component edits, prefer adding higher-level semantic aliases only if they remove repeated profile-specific literals without creating a competing token plane. Migrate one bounded representative vertical first (Button + State Panel + Table/Chart), then screenshot + JSX + computed-style readback before widening to Tier Gate/Tab/Freshness.
+
+### Current exact Paper transport gate
+
+At the latest read, Studio Direct itself is healthy but the current ChatGPT app surface exposes `paper_inspect`, `paper_catalog`, `paper_read`, and `paper_edit` while omitting the already-implemented bounded `paper_prepare` action. The live service reports gateway `0.1.7`. The active Paper document is currently a different file (`01M2WGNCX9475G79JRKJTCM08P`), while the canonical design-system file remains readable by explicit file ID in a background Paper tab.
+
+Do **not** mutate the background design-system file. The guarded bridge binds modifying calls to the active exact file, and the write snapshot is an active-document guard. Do not use generic Studio `start_process`, filesystem actions, Desktop Commander, raw `open_file`, shell or UI automation to imitate the missing transition.
+
+Studio Direct hardening is carried by PR #1012, `sol/paper-studio-prepare-continuity-20260926`. Its current contract makes `paper_inspect` advertise the exact five-tool Paper family and declares missing client-side prepare as `STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`, with recovery through the same Studio Direct app's workspace-approved action snapshot. Current OpenAI Business behavior uses a frozen approved MCP tool/input snapshot; a server restart or OAuth reconnect alone is not proof that the action catalog refreshed.
+
+Exact continuation order:
+
+1. Protect/release #1012 through its exact-head CI/review/merge-queue gates.
+2. Upgrade the existing `chatgpt2-business` Studio Direct service through its existing private-service owner; prove gateway `0.1.8` and healthy `gateway_surface`.
+3. Refresh/recreate+republish the **same** Studio Direct C2 Business workspace app action snapshot as required by the current Business app workflow; do not create a duplicate Studio Direct control plane.
+4. In a fresh ChatGPT tool selection, prove direct `paper_prepare(file_id)` is surfaced.
+5. Prepare `01M312VSDSZFVT45674GDVJVZN`, re-inspect the exact file, then execute the bounded component migration slice above through direct guarded Paper MCP writes.
+
+This Paper continuation supersedes any inference that manual desktop focus is normal execution. Manual Chairman interaction is an exact last-resort platform gate, not the default Paper workflow.
+
+**PAPER_CONTINUATION_STATE: CHECKPOINTED / SOURCE_HARDENING_IN_REVIEW / CANVAS_WRITES_HELD_AT_DIRECT_PREPARE_PUBLICATION.**
