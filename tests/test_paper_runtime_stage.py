@@ -83,9 +83,13 @@ class RuntimeStageTests(unittest.TestCase):
 
     def test_current_v5_reviewed_hash_matches_bridge_source(self):
         bridge = ROOT / "integrations" / "paper_desktop" / "bridge.py"
+        current = load_local(
+            "paper_runtime_stage_current_source_pin",
+            ROOT / "integrations" / "paper_desktop" / "runtime_stage.py",
+        )
         self.assertEqual(
-            stage.REVIEWED_GENERATIONS["v5"]["bridge.py"],
-            stage._sha256(bridge.read_bytes()),
+            current.REVIEWED_GENERATIONS["v5"]["bridge.py"],
+            current._sha256(bridge.read_bytes()),
         )
 
     def test_source_hash_must_match_reviewed_generation(self):
