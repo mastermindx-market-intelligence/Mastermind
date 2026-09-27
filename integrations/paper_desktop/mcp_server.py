@@ -10,6 +10,7 @@ This module creates no HTTP/auth infrastructure and arms no Executive grants.
 
 import argparse
 import asyncio
+import copy
 import json
 from pathlib import Path
 import sys
@@ -39,13 +40,38 @@ def build_server(allow_write=False, allow_prepare=False):
         except Refusal as exc:
             value = {"state": exc.code, "detail": exc.detail, "retry_allowed": False}
         bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}
-        images = []
-        for block in value.get("result", {}).get("content", []):
+        # Formatting is downstream of effect observation. A missing reply or
+        # malformed image must not erase the operation's canonical receipt.
+        value = copy.deepcopy(value)
+        images, presentation_errors = [], []
+        result = value.get("result")
+        blocks = result.get("content", []) if isinstance(result, dict) else []
+        if result is not None and not isinstance(result, dict):
+            presentation_errors.append("RESULT_BLOCK_INVALID")
+        if not isinstance(blocks, list):
+            presentation_errors.append("CONTENT_BLOCK_INVALID")
+            blocks = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                presentation_errors.append("CONTENT_BLOCK_INVALID")
+                continue
             if block.get("type") == "image":
-                images.append(ImageContent.model_validate(block))
-                block.pop("data", None)
-                block["rendered_as_mcp_image"] = True
-        return CallToolResult(content=[TextContent(type="text", text=json.dumps(value)), *images], isError=bad)
+                try:
+                    image = ImageContent.model_validate(block)
+                except ValueError:
+                    # Do not include the validation exception: it can embed the
+                    # complete image payload. Preserve the effect state instead.
+                    presentation_errors.append("IMAGE_BLOCK_INVALID")
+                    block.pop("data", None)
+                    block["rendered_as_mcp_image"] = False
+                else:
+                    images.append(image)
+                    block.pop("data", None)
+                    block["rendered_as_mcp_image"] = True
+        if presentation_errors:
+            value["presentation_errors"] = presentation_errors
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(value)), *images],
+                              isError=bad or bool(presentation_errors))
 
     read_annotations = ToolAnnotations(readOnlyHint=True, destructiveHint=False,
                                       idempotentHint=True, openWorldHint=False)
