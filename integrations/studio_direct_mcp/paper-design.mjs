@@ -94,7 +94,8 @@ export const PAPER_PREPARE_TOOL = Object.freeze({
   description:
     'Launch or focus the host-pinned Paper Desktop app on one exact Paper file id, then verify the active file and current write-schema qualification. ' +
     'Use paper_read with tool=list_files first when the file id is unknown. This changes desktop focus but does not edit design content. ' +
-    'Only one modifying session may own a Paper file across hosts at a time.',
+    'Multiple admitted sessions may modify the same file/page across hosts; coordinate by board/artboard/node target. ' +
+    'The operation/carrier fence is target-scoped, not a file-wide lease.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -123,7 +124,8 @@ export const PAPER_EDIT_TOOL = Object.freeze({
   description:
     'Apply one explicitly requested Paper design edit through the guarded adapter. ' +
     'Requires the exact inspected snapshot and a stable operation id. The adapter refuses standalone node-deletion tools, ' +
-    'native host export, file-open transitions and token deletion. Only one modifying session may own a Paper file across hosts at a time. ' +
+    'native host export, file-open transitions and token deletion. Multiple admitted sessions may modify the same file/page across hosts; ' +
+    'prefer disjoint board/artboard/node targets and re-read/re-plan known overlap. The operation/carrier fence is target-scoped, not a file-wide lease. ' +
     'A lost or ambiguous response is reported as EFFECT_UNKNOWN with retry_allowed=false; the gateway performs no automatic replay.',
   inputSchema: {
     type: 'object',
