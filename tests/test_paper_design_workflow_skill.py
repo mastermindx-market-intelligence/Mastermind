@@ -219,6 +219,7 @@ def test_paper_concurrency_is_target_scoped_not_file_leased():
         "one writer per file across all hosts remains required",
         "Only one designer owns the active desktop file",
         "exclusive design-task ownership",
+        "Only one design operator may own a desktop document",
     ):
         assert forbidden.lower() not in combined.lower()
 
