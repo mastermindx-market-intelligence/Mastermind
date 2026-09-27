@@ -20,6 +20,8 @@ def test_manifest_exposes_the_reader_without_permission_widening():
     assert manifest["background"] == {"service_worker": "background.js"}
     assert manifest["content_scripts"][0]["js"] == [
         "semantic_ack_core.js",
+        "cognition_result_core.js",
+        "cognition_transport_core.js",
         "content.js",
     ]
     assert "externally_connectable" not in manifest

@@ -476,6 +476,8 @@ _CENSUS_SOURCE_KINDS = (
     ("semantic_ack_core.js", "extension_semantic_ack_core"),
     ("content.js", "extension_content"),
     ("continuation_core.js", "extension_continuation_core"),
+    ("cognition_result_core.js", "extension_cognition_result_core"),
+    ("cognition_transport_core.js", "extension_cognition_transport_core"),
     ("census.html", "extension_census_html"),
     ("census.css", "extension_census_css"),
     ("census_core.js", "extension_census_core"),
@@ -483,7 +485,7 @@ _CENSUS_SOURCE_KINDS = (
 )
 _CENSUS_SOURCE_NAMES = frozenset(name for name, _kind in _CENSUS_SOURCE_KINDS)
 _CENSUS_MAX_FILE_BYTES = 262144
-_CENSUS_MAX_TOTAL_BYTES = 1048576
+_CENSUS_MAX_TOTAL_BYTES = 1572864
 
 
 def _manifest_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -513,7 +515,12 @@ def _validate_census_manifest(payload: bytes, release: WebSolRelease) -> None:
                 or manifest["host_permissions"] != origins
                 or manifest["background"] != {"service_worker": "background.js"}
                 or manifest["content_scripts"] != [{"matches": origins,
-                    "js": ["semantic_ack_core.js", "content.js"],
+                    "js": [
+                        "semantic_ack_core.js",
+                        "cognition_result_core.js",
+                        "cognition_transport_core.js",
+                        "content.js",
+                    ],
                     "run_at": "document_idle"}]):
             raise ValueError("unsupported_manifest")
         action = manifest["action"]

@@ -6,6 +6,8 @@ const CONTINUATION_SUBMIT_KIND = "MMX_WEB_SOL_SUBMIT_CONTINUATION";
 const CONTINUATION_ACK_OBSERVE_KIND = "MMX_WEB_SOL_OBSERVE_CONTINUATION_ACK";
 const CONTINUATION_RESULT_SCHEMA = "mastermind.web_sol_continuation_submit_result.v1";
 const CONTINUATION_ACK_RESULT_SCHEMA = "mastermind.web_sol_continuation_ack_result.v1";
+const COGNITION_SUBMIT_KIND = "MMX_WEB_SOL_SUBMIT_COGNITION_ASSIGNMENT";
+const COGNITION_RESULT_SCHEMA = "mastermind.web_sol_cognition_submit_result.v1";
 const PROBE_SCHEMA = "mastermind.web_sol_surface_probe.v1";
 const CONTINUATION_DIRECTIVE_TEXT = [
   "SOL CONTINUE",
@@ -186,6 +188,27 @@ function validObserveContinuationAckRequest(request) {
     /^NUDGE-[0-9a-f]{32}$/.test(request.turn_id);
 }
 
+function exactObjectKeys(value, keys) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return keys.length === Object.keys(value).length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function validCognitionSubmitRequest(request) {
+  const keys = [
+    "kind", "expected_conversation_fingerprint", "expected_document_epoch",
+    "session_alias", "cognition_payload",
+  ];
+  return exactObjectKeys(request, keys) && request.kind === COGNITION_SUBMIT_KIND &&
+    typeof request.expected_conversation_fingerprint === "string" &&
+    /^[0-9a-f]{64}$/.test(request.expected_conversation_fingerprint) &&
+    typeof request.expected_document_epoch === "string" &&
+    /^[0-9a-f]{32}$/.test(request.expected_document_epoch) &&
+    validTurnId(request.session_alias) &&
+    typeof globalThis.MMXWebSolCognitionTransport?.validSubmitPayload === "function" &&
+    globalThis.MMXWebSolCognitionTransport.validSubmitPayload(request.cognition_payload) === true;
+}
+
 function continuationDirective(request) {
   if (!validWakeObligationSet(request)) return null;
   const identities = request.wake_obligation_ids.map((item) => `- ${item}`).join("\n");
@@ -235,14 +258,18 @@ function dispatchComposerInput(composer, data) {
   return composer.dispatchEvent(event);
 }
 
-function writeComposer(composer, value) {
+function writeComposer(composer, value, onWritten = null) {
   if (!composer) return false;
   if (typeof composer.value === "string") {
     composer.value = value;
+    onWritten?.(null);
   } else if (composer.isContentEditable || composer.getAttribute?.("contenteditable") === "true") {
     if (typeof composer.replaceChildren === "function") {
-      if (value) composer.replaceChildren(document.createTextNode(value));
-      else composer.replaceChildren();
+      if (value) {
+        const ownedNode = document.createTextNode(value);
+        composer.replaceChildren(ownedNode);
+        onWritten?.(ownedNode);
+      } else composer.replaceChildren();
     } else {
       return false;
     }
@@ -263,6 +290,105 @@ function clearComposer(composer) {
 
 function submitButtonReady(button) {
   return !!button && button.disabled !== true && button.getAttribute?.("aria-disabled") !== "true";
+}
+
+function cognitionIdentity(payload) {
+  return {
+    turn_id: payload.turn_id,
+    assignment_digest: payload.assignment_digest,
+    result_schema_digest: payload.result_schema_digest,
+    job_id: payload.job_id,
+    attempt_id: payload.attempt_id,
+    worker_id: payload.worker_id,
+    root_job_id: payload.root_job_id,
+    role: payload.role,
+  };
+}
+
+function cognitionSubmitResult(request, effect) {
+  const payload = request.cognition_payload;
+  return {
+    schema: COGNITION_RESULT_SCHEMA,
+    conversation_fingerprint: request.expected_conversation_fingerprint,
+    document_epoch: DOCUMENT_EPOCH,
+    effect,
+    session_alias: request.session_alias,
+    runtime_binding_id: payload.runtime_binding_id,
+    runtime_binding_generation: payload.runtime_binding_generation,
+    runtime_binding_fingerprint: payload.runtime_binding_fingerprint,
+    cognition_identity: cognitionIdentity(payload),
+  };
+}
+
+async function currentDocumentMatches(request, identity) {
+  if (canonicalConversationIdentity() !== identity ||
+      !CHAT_PATH.test(location.pathname) ||
+      DOCUMENT_EPOCH !== request.expected_document_epoch) return false;
+  const digest = await sha256Hex(identity);
+  return canonicalConversationIdentity() === identity &&
+    DOCUMENT_EPOCH === request.expected_document_epoch &&
+    digest === request.expected_conversation_fingerprint;
+}
+
+async function submitCognitionAssignment(request) {
+  if (!validCognitionSubmitRequest(request)) return null;
+  const identity = canonicalConversationIdentity();
+  let composer = null;
+  let prompt = null;
+  let ownedNode = null;
+  const ownsPrompt = () => typeof composer?.value === "string"
+    ? composer.value === prompt
+    : !!ownedNode && composer?.childNodes?.length === 1 &&
+      composer.childNodes[0] === ownedNode && ownedNode.data === prompt;
+  let mutationPossible = false;
+  let submitPossible = false;
+  const ready = () => canonicalConversationIdentity() === identity &&
+    CHAT_PATH.test(location.pathname) && DOCUMENT_EPOCH === request.expected_document_epoch &&
+    document.visibilityState !== "hidden" && document.readyState !== "loading" &&
+    firstElement(COMPOSER_SELECTORS) === composer && composer?.disabled !== true &&
+    composer?.readOnly !== true && composer?.getAttribute?.("aria-disabled") !== "true" &&
+    !firstMatch(ACTIVE_SELECTORS) && !firstMatch(ERROR_SELECTORS);
+  const refuseAfterMutation = () => {
+    // Never erase a replaced node or text changed by a user/input callback.
+    if (firstElement(COMPOSER_SELECTORS) === composer &&
+        ownsPrompt() && clearComposer(composer)) {
+      return cognitionSubmitResult(request, "NOT_SUBMITTED");
+    }
+    return cognitionSubmitResult(request, "SUBMIT_EFFECT_UNKNOWN");
+  };
+  try {
+    if (!await currentDocumentMatches(request, identity)) {
+      return cognitionSubmitResult(request, "NOT_SUBMITTED");
+    }
+    composer = firstElement(COMPOSER_SELECTORS);
+    if (!composer || !composerIsEmpty(composer) || !ready()) {
+      return cognitionSubmitResult(request, "NOT_SUBMITTED");
+    }
+    prompt = await globalThis.MMXWebSolCognitionTransport.renderAssignmentPrompt(request.cognition_payload);
+    if (!prompt || !await currentDocumentMatches(request, identity) ||
+        !ready() || !composerIsEmpty(composer)) {
+      return cognitionSubmitResult(request, "NOT_SUBMITTED");
+    }
+    composer.focus?.();
+    if (!ready() || !composerIsEmpty(composer)) {
+      return cognitionSubmitResult(request, "NOT_SUBMITTED");
+    }
+    mutationPossible = true;
+    if (!writeComposer(composer, prompt, node => { ownedNode = node; })) return refuseAfterMutation();
+    await Promise.resolve();
+    if (!await currentDocumentMatches(request, identity) || !ready() ||
+        !ownsPrompt()) return refuseAfterMutation();
+    const sendButton = firstElement(SEND_SELECTORS);
+    if (!submitButtonReady(sendButton) || !ready() ||
+        !ownsPrompt()) return refuseAfterMutation();
+    submitPossible = true;
+    sendButton.click();
+    return cognitionSubmitResult(request, "SUBMIT_TRIGGERED");
+  } catch (_error) {
+    if (submitPossible) return cognitionSubmitResult(request, "SUBMIT_EFFECT_UNKNOWN");
+    if (mutationPossible) return refuseAfterMutation();
+    return cognitionSubmitResult(request, "NOT_SUBMITTED");
+  }
 }
 
 async function submitContinuation(request) {
@@ -502,6 +628,14 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     submitContinuation(request)
       .then((result) => sendResponse(result))
       .catch(() => sendResponse(continuationResult(request, "SUBMIT_EFFECT_UNKNOWN")));
+    return true;
+  }
+  if (validCognitionSubmitRequest(request)) {
+    submitCognitionAssignment(request)
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse(cognitionSubmitResult(
+        request, "SUBMIT_EFFECT_UNKNOWN"
+      )));
     return true;
   }
   if (

@@ -910,6 +910,8 @@ def test_complete_census1_bundle_applies_reads_back_and_rolls_back(
         "manifest.json",
         "background.js",
         "semantic_ack_core.js",
+        "cognition_result_core.js",
+        "cognition_transport_core.js",
         "content.js",
         "continuation_core.js",
         "census.html",
@@ -929,7 +931,7 @@ def test_complete_census1_bundle_applies_reads_back_and_rolls_back(
         expected_source_digests=expected,
     )
     assert len(bundle_seed.artifacts) == 3
-    assert len(bundle.artifacts) == 12
+    assert len(bundle.artifacts) == 14
     prepared = applier.prepare_deployment(
         bundle,
         deployment.plan_deployment(bundle, {}),
@@ -941,9 +943,9 @@ def test_complete_census1_bundle_applies_reads_back_and_rolls_back(
 
     applied = applier.apply_deployment(prepared)
 
-    assert applied.public_receipt["target_count"] == 12
-    assert applier.verify_applied_deployment(applied)["target_count"] == 12
-    assert applier.rollback_deployment(applied)["removed_count"] == 12
+    assert applied.public_receipt["target_count"] == 14
+    assert applier.verify_applied_deployment(applied)["target_count"] == 14
+    assert applier.rollback_deployment(applied)["removed_count"] == 14
     assert list(install_root.rglob("*")) == []
 
 

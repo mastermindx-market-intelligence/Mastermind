@@ -84,7 +84,7 @@ def _receipt(**overrides) -> dict:
 
 
 def test_semantic_ack_action_and_package_generation_are_explicit() -> None:
-    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.5.0"
+    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.6.0"
     assert "OBSERVE_CONTINUATION_ACK" in {item.value for item in wsp.SurfaceAction}
     assert {
         "CONTINUATION_ACKNOWLEDGED",

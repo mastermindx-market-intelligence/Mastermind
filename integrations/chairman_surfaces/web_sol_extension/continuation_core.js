@@ -22,6 +22,14 @@
     "schema", "conversation_fingerprint", "effect", ...CORRELATION_KEYS,
   ]);
   const effects = [];
+  const reserveEffect = (nonce, turnId) => {
+    if (effects.some((row) => row.nonce === nonce || row.turn_id === turnId) ||
+        effects.length >= MAX_EFFECTS) {
+      return false;
+    }
+    effects.push({nonce, turn_id: turnId});
+    return true;
+  };
 
   function exactKeys(value, expected) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -77,6 +85,16 @@
     return {status, observation};
   }
 
+  // One fixed process-local observation schedule; never invokes a submit or reserves an effect.
+  async function* startObservationTicks(immediate = false) {
+    for (let attempt = 0; attempt < START_OBSERVATION_ATTEMPTS; attempt += 1) {
+      if (!immediate || attempt) {
+        await new Promise((resolve) => setTimeout(resolve, START_OBSERVATION_INTERVAL_MS));
+      }
+      yield attempt;
+    }
+  }
+
   async function handle(request, ops) {
     if (!validRequest(request) || request.action !== "SUBMIT_CONTINUATION" || !ops) {
       return result("CONTINUATION_SUBMIT_EFFECT_UNKNOWN", ops?.unknownObservation?.());
@@ -101,7 +119,9 @@
       return result("CONTINUATION_NOT_SUBMITTED", before.observation);
     }
 
-    effects.push({nonce: request.nonce, turn_id: request.turn_id});
+    if (!reserveEffect(request.nonce, request.turn_id)) {
+      return result("CONTINUATION_NOT_SUBMITTED", before.observation);
+    }
     let submission;
     try {
       submission = await ops.sendMessage(resolved.tabId, {
@@ -129,8 +149,7 @@
       return result("CONTINUATION_SUBMIT_EFFECT_UNKNOWN", before.observation);
     }
     let after = null;
-    for (let attempt = 0; attempt < START_OBSERVATION_ATTEMPTS; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, START_OBSERVATION_INTERVAL_MS));
+    for await (const _attempt of startObservationTicks()) {
       after = await ops.freshProbe(resolved.tabId, request.conversation_fingerprint);
       if (after && after.conversation_fingerprint === request.conversation_fingerprint &&
           after.observation.target_present && after.observation.exact_conversation_loaded &&
@@ -147,5 +166,11 @@
     );
   }
 
-  globalThis.MMXWebSolContinuation = Object.freeze({validRequest, handle, correlationKeys: CORRELATION_KEYS});
+  globalThis.MMXWebSolContinuation = Object.freeze({
+    validRequest, handle, reserveEffect, startObservationTicks,
+    hasEffect: (nonce, turnId) => effects.some((row) =>
+      row.nonce === nonce || row.turn_id === turnId),
+    effectCapacity: () => Math.max(0, MAX_EFFECTS - effects.length),
+    correlationKeys: CORRELATION_KEYS,
+  });
 })();

@@ -21,6 +21,10 @@ import re
 from typing import Any, Final
 
 from common.commission_ref import CommissionRefError, normalize_commission_ref
+from control_plane.executive_orchestration_result import (
+    OrchestrationResultError,
+    parse_and_validate_envelope,
+)
 
 
 ASSIGNMENT_SCHEMA: Final[str] = "mastermind.web_sol_cognition_assignment/v1"
@@ -248,7 +252,7 @@ def _binding_generation(value: Any, path: str) -> int:
 
 
 def _role(value: Any, path: str) -> str:
-    if value not in _SUPPORTED_ROLES:
+    if type(value) is not str or value not in _SUPPORTED_ROLES:
         raise _error(path, "must be work or review")
     return str(value)
 
@@ -671,12 +675,22 @@ def validate_result_observation(value: Any) -> dict[str, Any]:
         raise _error("$.document_epoch", "must be 32 lowercase hexadecimal characters")
 
     status = observation["status"]
-    if status not in {
+    if type(status) is not str or status not in {
         "COGNITION_RESULT_READY",
         "COGNITION_RESULT_PENDING",
         "COGNITION_RESULT_REFUSED",
     }:
         raise _error("$.status", "contains an unknown cognition result state")
+
+    if (
+        type(observation["result_byte_length"]) is not int
+        or observation["result_byte_length"] < 0
+        or (
+            status != "COGNITION_RESULT_READY"
+            and observation["result_byte_length"] > MAX_RESULT_BYTES
+        )
+    ):
+        raise _error("$.result_byte_length", "must be an exact bounded integer")
 
     if status != "COGNITION_RESULT_READY":
         if (
@@ -733,6 +747,17 @@ def validate_result_observation(value: Any) -> dict[str, Any]:
             "$.result_digest",
             "must match the canonical result document",
         )
+    try:
+        parse_and_validate_envelope(
+            encoded.decode("utf-8"),
+            expected_job_id=observation["job_id"],
+            expected_run_id=observation["attempt_id"],
+            expected_worker_id=observation["worker_id"],
+            expected_role=observation["role"],
+            expected_root_job_id=observation["root_job_id"],
+        )
+    except OrchestrationResultError as exc:
+        raise _error("$.result", "does not match the canonical result contract") from exc
     _ensure_transport_budget(observation)
     return copy.deepcopy(observation)
 

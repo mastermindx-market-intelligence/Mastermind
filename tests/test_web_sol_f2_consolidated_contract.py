@@ -424,9 +424,9 @@ const config = {
   instanceId: INSTANCE,
   nativeHost: `com.mastermind.web_sol_surface.${INSTANCE.slice(0, 24)}`,
   protocolMajor: 1,
-  clientPackageVersion: "0.5.0",
-  nativePackageVersion: "0.5.0",
-  extensionPackageVersion: "0.5.0",
+  clientPackageVersion: "0.6.0",
+  nativePackageVersion: "0.6.0",
+  extensionPackageVersion: "0.6.0",
   capabilityDigest,
 };
 

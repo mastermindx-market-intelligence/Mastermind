@@ -219,7 +219,7 @@ def collected_census_receipt(binding: dict) -> dict:
 
 
 def test_runtime_bound_continuation_is_package_generation_four_and_closed() -> None:
-    assert protocol.WEB_SOL_PACKAGE_VERSION == "0.5.0"
+    assert protocol.WEB_SOL_PACKAGE_VERSION == "0.6.0"
     accepted = protocol.validate_request(continuation_request())
     assert accepted["runtime_binding_generation"] == 1
     assert accepted["session_alias"] == "EXECUTIVE-CEO-A"

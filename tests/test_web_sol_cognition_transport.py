@@ -426,6 +426,42 @@ def test_ready_result_observation_round_trips_canonical_result_object() -> None:
     assert len(_canonical(observation)) <= MAX_TRANSPORT_PAYLOAD_BYTES
 
 
+@pytest.mark.parametrize("status", [[], {}, True, 0, None])
+def test_result_observation_malformed_status_is_a_closed_refusal(status) -> None:
+    with pytest.raises(WebSolCognitionTransportError, match="status"):
+        validate_result_observation(_ready_observation(status=status))
+
+
+@pytest.mark.parametrize("length", [False, True, 0.0, "0", -1, MAX_RESULT_BYTES + 1])
+def test_nonready_result_length_requires_an_exact_bounded_integer(length) -> None:
+    value = _ready_observation(
+        status="COGNITION_RESULT_PENDING",
+        provider_native_turn_id=None,
+        provider_turn_artifact_digest=None,
+        result=None,
+        result_digest=None,
+        result_byte_length=length,
+    )
+    with pytest.raises(WebSolCognitionTransportError, match="result_byte_length"):
+        validate_result_observation(value)
+
+
+@pytest.mark.parametrize("malformation", ["summary_type", "role_extra_key", "errors_type"])
+def test_ready_observation_consumes_the_canonical_result_owner(malformation) -> None:
+    result = _result()
+    if malformation == "summary_type":
+        result["summary"] = []
+    elif malformation == "role_extra_key":
+        result["role_result"]["extra"] = "unexpected"
+    else:
+        result["errors"] = "not-a-list"
+    value = _ready_observation(result=result)
+    # Identity, digest and length all remain self-consistent; only the
+    # authoritative envelope/role schema distinguishes these counterexamples.
+    with pytest.raises(WebSolCognitionTransportError, match="canonical result contract"):
+        validate_result_observation(value)
+
+
 @pytest.mark.parametrize("status", ["COGNITION_RESULT_PENDING", "COGNITION_RESULT_REFUSED"])
 def test_nonready_result_observation_carries_no_result_or_provider_turn(status: str) -> None:
     value = _ready_observation(
@@ -475,3 +511,17 @@ def test_payload_schemas_remain_separate_from_existing_surface_action_schema() -
     assert SUBMIT_PAYLOAD_SCHEMA != "mastermind.web_sol_surface_action.v1"
     assert OBSERVE_PAYLOAD_SCHEMA != "mastermind.web_sol_surface_action.v1"
     assert RESULT_OBSERVATION_SCHEMA != "mastermind.web_sol_surface_receipt.v1"
+
+
+@pytest.mark.parametrize("malformed", [[], {}])
+@pytest.mark.parametrize("kind", ["submit", "observe", "result"])
+def test_all_cognition_wire_roles_refuse_unhashable_json(kind, malformed) -> None:
+    factory, validator = {
+        "submit": (_submit, validate_assignment_submit_payload),
+        "observe": (_observe, validate_result_observe_payload),
+        "result": (_ready_observation, validate_result_observation),
+    }[kind]
+    payload = factory()
+    payload["role"] = malformed
+    with pytest.raises(WebSolCognitionTransportError):
+        validator(payload)

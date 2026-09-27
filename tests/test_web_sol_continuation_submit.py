@@ -154,7 +154,7 @@ def receipt(req: dict, status: str, *, generation_state: str = "idle") -> dict:
 
 
 def test_continuation_action_is_a_new_advertised_package_generation():
-    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.5.0"
+    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.6.0"
     assert "SUBMIT_CONTINUATION" in {item.value for item in wsp.SurfaceAction}
     assert len(wsp.CONTINUATION_DIRECTIVE_DIGEST) == 64
     assert "Continue the same logical responsibility." in wsp.CONTINUATION_DIRECTIVE_TEXT

@@ -14,6 +14,8 @@ BACKGROUND = EXTENSION / "background.js"
 CONTENT = EXTENSION / "content.js"
 SEMANTIC = EXTENSION / "semantic_ack_core.js"
 CONTINUATION = EXTENSION / "continuation_core.js"
+COGNITION_RESULT = EXTENSION / "cognition_result_core.js"
+COGNITION_TRANSPORT = EXTENSION / "cognition_transport_core.js"
 
 CHATGPT_MATCHES = {"https://chatgpt.com/*", "https://chat.openai.com/*"}
 EXPECTED_EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
@@ -37,7 +39,7 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
 
     assert manifest["manifest_version"] == 3
     assert manifest["name"] == "Mastermind Web Sol Surface Adapter"
-    assert manifest["version"] == "0.5.0"
+    assert manifest["version"] == "0.6.0"
     assert set(manifest["host_permissions"]) == CHATGPT_MATCHES
 
     permissions = set(manifest.get("permissions", []))
@@ -82,14 +84,22 @@ def test_manifest_has_one_background_and_one_exact_chatgpt_content_script():
     assert manifest["content_scripts"] == [
         {
             "matches": sorted(CHATGPT_MATCHES),
-            "js": ["semantic_ack_core.js", "content.js"],
+            "js": [
+                "semantic_ack_core.js",
+                "cognition_result_core.js",
+                "cognition_transport_core.js",
+                "content.js",
+            ],
             "run_at": "document_idle",
         }
     ]
 
 
 def test_extension_files_are_present_and_small():
-    ceilings = {BACKGROUND: 40, CONTENT: 32, SEMANTIC: 12, CONTINUATION: 12}
+    ceilings = {
+        BACKGROUND: 52, CONTENT: 36, SEMANTIC: 12, CONTINUATION: 12,
+        COGNITION_RESULT: 12, COGNITION_TRANSPORT: 20,
+    }
     for path, kib in ceilings.items():
         payload = path.read_bytes()
         assert payload
@@ -127,6 +137,19 @@ def test_extension_source_contains_no_content_extraction_or_powerful_browser_api
         "document.cookie",
     }
     for fragment in forbidden_fragments:
+        assert fragment not in source
+
+
+def test_cognition_cores_are_pure_and_load_for_background_and_content_use():
+    source = (
+        COGNITION_RESULT.read_text(encoding="utf-8")
+        + "\n"
+        + COGNITION_TRANSPORT.read_text(encoding="utf-8")
+    ).lower()
+    for fragment in (
+        "chrome.runtime", "chrome.tabs", "document.queryselector",
+        "localstorage", "sessionstorage", "xmlhttprequest", "websocket",
+    ):
         assert fragment not in source
 
 

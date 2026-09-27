@@ -3,8 +3,11 @@
 importScripts("instance_config.js");
 importScripts("census_core.js");
 importScripts("continuation_core.js");
+importScripts("cognition_result_core.js");
+importScripts("cognition_transport_core.js");
 
 const K = globalThis.MMXWebSolContinuation;
+const C = globalThis.MMXWebSolCognitionTransport;
 const PROBE_KIND = "MMX_WEB_SOL_PROBE";
 const REPROBE_KIND = "MMX_WEB_SOL_REPROBE";
 const ACTION_SCHEMA = "mastermind.web_sol_surface_action.v1";
@@ -14,8 +17,8 @@ const HELLO_SCHEMA = "mastermind.web_sol_transport_hello.v1";
 const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
-const PACKAGE_VERSION = "0.5.0";
-const EXPECTED_CAPABILITY_DIGEST = "f82f3a7d3e6b85771348df5f422dc5a0c0a8a9fd19835415516fc66e03c51a5f";
+const PACKAGE_VERSION = "0.6.0";
+const EXPECTED_CAPABILITY_DIGEST = "740b866cfaaace27042b76fb66e5e5a7e52ff68c532d48a3f39fc281655e9649";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
@@ -28,15 +31,31 @@ const RECONNECT_DELAYS_MINUTES = Object.freeze([1, 5, 15]);
 const HANDSHAKE_TIMEOUT_MINUTES = 0.5;
 const CONTINUATION_ACK_RESULT_SCHEMA = "mastermind.web_sol_continuation_ack_result.v1";
 const CONTINUATION_ACK_OBSERVE_KIND = "MMX_WEB_SOL_OBSERVE_CONTINUATION_ACK";
+const ACTION_KEYS = new Set([
+  "schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
+  "action", "operation_key", "issued_at", "expires_at", "nonce",
+]);
+const COGNITION_RESULT_SCHEMA = "mastermind.web_sol_cognition_submit_result.v1";
+const COGNITION_SUBMIT_KIND = "MMX_WEB_SOL_SUBMIT_COGNITION_ASSIGNMENT";
+const COGNITION_IDENTITY_KEYS = Object.freeze([
+  "turn_id", "assignment_digest", "result_schema_digest", "job_id",
+  "attempt_id", "worker_id", "root_job_id", "role",
+]);
+const COGNITION_CONTENT_RESPONSE_KEYS = new Set([
+  "schema", "conversation_fingerprint", "document_epoch", "effect",
+  "session_alias", "runtime_binding_id", "runtime_binding_generation",
+  "runtime_binding_fingerprint", "cognition_identity",
+]);
 
 const OBSERVATION_KEYS = new Set([
   "schema", "target_present", "exact_conversation_loaded", "page_responsive",
   "document_ready_state", "visibility", "composer_available", "generation_state",
   "auth_required", "provider_error_present",
 ]);
-const ACTION_KEYS = new Set([
-  "schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
-  "action", "operation_key", "issued_at", "expires_at", "nonce",
+const COGNITION_REQUEST_KEYS = new Set([
+  ...ACTION_KEYS, "session_alias", "runtime_binding_id",
+  "runtime_binding_generation", "runtime_binding_fingerprint",
+  "cognition_payload",
 ]);
 const TYPED_REENTRY_KEYS = new Set([...ACTION_KEYS, "operation_id", "result_digest", "obligation_digest"]);
 const SEMANTIC_CONTENT_RESULT_KEYS = new Set([
@@ -89,6 +108,11 @@ function isNonce(value) {
 
 function validTurnId(value) {
   return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$/.test(value);
+}
+
+function validEntityId(value) {
+  return typeof value === "string" &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 }
 
 function validDocumentEpoch(value) {
@@ -278,6 +302,15 @@ function receipt(request, status, observation, semantic = null) {
       result[key] = key === "wake_obligation_ids" ? [...request[key]] : request[key];
     }
   }
+  if (request.action === "SUBMIT_COGNITION_ASSIGNMENT") {
+    for (const key of [
+      "session_alias", "runtime_binding_id", "runtime_binding_generation",
+      "runtime_binding_fingerprint",
+    ]) {
+      result[key] = request[key];
+    }
+    result.cognition_identity = cognitionIdentity(request.cognition_payload);
+  }
   if (request.action === "OBSERVE_CONTINUATION_ACK") {
     result.provider_native_turn_id = semantic?.provider_native_turn_id ?? null;
     result.acknowledged_obligation_ids = semantic?.acknowledged_obligation_ids
@@ -322,6 +355,25 @@ async function freshProbe(tabId, expectedConversationFingerprint) {
     return null;
   }
   return event;
+}
+
+function sameResolvedTarget(left, right) {
+  return Boolean(left && right && !left.status && !right.status &&
+    left.tabId === right.tabId && left.windowId === right.windowId &&
+    left.navigationGeneration === right.navigationGeneration &&
+    left.documentEpoch === right.documentEpoch);
+}
+
+function cognitionProbeRefusal(request, event) {
+  if (!event || event.conversation_fingerprint !== request.conversation_fingerprint) {
+    return "TARGET_CHANGED";
+  }
+  if (!event.observation.target_present || !event.observation.exact_conversation_loaded) {
+    return "TARGET_CHANGED";
+  }
+  if (event.observation.auth_required === true) return "AUTH_REQUIRED";
+  if (event.observation.provider_error_present === true) return "PROVIDER_ERROR";
+  return "COGNITION_NOT_SUBMITTED";
 }
 
 async function refreshTabMapping(tabId) {
@@ -451,6 +503,125 @@ async function handleTypedReentry(request) {
 function validSubmitContinuationRequest(request) {
   return request?.action === "SUBMIT_CONTINUATION" && K?.validRequest(request) === true;
 }
+
+function validSubmitCognitionRequest(request) {
+  if (!exactKeys(request, COGNITION_REQUEST_KEYS) ||
+      request.schema !== ACTION_SCHEMA ||
+      typeof request.issued_at !== "string" || typeof request.expires_at !== "string" ||
+      request.action !== "SUBMIT_COGNITION_ASSIGNMENT" ||
+      !isHex64(request.conversation_fingerprint) ||
+      !isHex64(request.binding_fingerprint) ||
+      typeof request.binding_id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.binding_id) ||
+      typeof request.operation_key !== "string" || !request.operation_key ||
+      request.operation_key.length > 256 || /\s/.test(request.operation_key) ||
+      !isNonce(request.nonce)) return false;
+  if (!validTurnId(request.session_alias) ||
+      typeof request.runtime_binding_id !== "string" ||
+      !/^bind-wsx-[0-9a-f]{48}$/.test(request.runtime_binding_id) ||
+      !Number.isSafeInteger(request.runtime_binding_generation) ||
+      request.runtime_binding_generation < 1 ||
+      !isHex64(request.runtime_binding_fingerprint) ||
+      !C?.validSubmitPayload?.(request.cognition_payload)) return false;
+  const payload = request.cognition_payload;
+  return payload.runtime_binding_id === request.runtime_binding_id &&
+    payload.runtime_binding_generation === request.runtime_binding_generation &&
+    payload.runtime_binding_fingerprint === request.runtime_binding_fingerprint;
+}
+
+function cognitionIdentity(payload) {
+  return Object.fromEntries(COGNITION_IDENTITY_KEYS.map((field) => [field, payload[field]]));
+}
+
+function validCognitionContentResponse(value, request, expectedDocumentEpoch) {
+  if (!exactKeys(value, COGNITION_CONTENT_RESPONSE_KEYS) ||
+      value.schema !== COGNITION_RESULT_SCHEMA ||
+      !["NOT_SUBMITTED", "SUBMIT_TRIGGERED", "SUBMIT_EFFECT_UNKNOWN"]
+        .includes(value.effect)) return false;
+  const payload = request.cognition_payload;
+  return value.conversation_fingerprint === request.conversation_fingerprint &&
+    value.document_epoch === expectedDocumentEpoch &&
+    value.session_alias === request.session_alias &&
+    value.runtime_binding_id === request.runtime_binding_id &&
+    value.runtime_binding_generation === request.runtime_binding_generation &&
+    value.runtime_binding_fingerprint === request.runtime_binding_fingerprint &&
+    exactKeys(value.cognition_identity, new Set(COGNITION_IDENTITY_KEYS)) &&
+    COGNITION_IDENTITY_KEYS.every((field) =>
+      value.cognition_identity[field] === payload[field]);
+}
+
+async function handleSubmitCognition(request, transportCurrent) {
+  // Reuse the canonical renderer to validate the digest before reserving an effect.
+  if (!await C.renderAssignmentPrompt(request.cognition_payload)) {
+    return receipt(request, "COGNITION_NOT_SUBMITTED", unknownObservation());
+  }
+  if (!transportCurrent()) return null;
+  const initial = resolveExactTarget(request.conversation_fingerprint);
+  if (initial.status || !initial.documentEpoch) {
+    return receipt(request, initial.status || "TARGET_CHANGED", unknownObservation());
+  }
+  const before = await freshProbe(initial.tabId, request.conversation_fingerprint);
+  if (!before || before.document_epoch !== initial.documentEpoch) {
+    return receipt(request, "TARGET_CHANGED", before ? before.observation : unknownObservation());
+  }
+  const probe = before.observation;
+  const windowStatus = requestWindowStatus(request);
+  if (windowStatus) return receipt(request, windowStatus, probe);
+  if (!sameResolvedTarget(initial, resolveExactTarget(request.conversation_fingerprint))) {
+    return receipt(request, "TARGET_CHANGED", probe);
+  }
+  if (!probe.target_present || !probe.exact_conversation_loaded ||
+      !probe.page_responsive || probe.visibility !== "visible" ||
+      probe.document_ready_state === "loading" ||
+      probe.composer_available !== true || probe.generation_state !== "idle" ||
+      probe.auth_required !== false || probe.provider_error_present !== false) {
+    return receipt(request, cognitionProbeRefusal(request, before), probe);
+  }
+  // No await separates this generation check, reservation and first dispatch.
+  if (!transportCurrent()) return null;
+  if (!K.reserveEffect(request.nonce, request.cognition_payload.turn_id)) {
+    return receipt(request, "COGNITION_NOT_SUBMITTED", probe);
+  }
+  let submission;
+  try {
+    submission = await chrome.tabs.sendMessage(initial.tabId, {
+      kind: COGNITION_SUBMIT_KIND,
+      expected_conversation_fingerprint: request.conversation_fingerprint,
+      expected_document_epoch: initial.documentEpoch,
+      session_alias: request.session_alias,
+      cognition_payload: JSON.parse(JSON.stringify(request.cognition_payload)),
+    }, {frameId: 0});
+  } catch (_error) {
+    return receipt(request, "COGNITION_SUBMIT_EFFECT_UNKNOWN", probe);
+  }
+  if (!transportCurrent()) return null;
+  if (!validCognitionContentResponse(submission, request, initial.documentEpoch)) {
+    return receipt(request, "COGNITION_SUBMIT_EFFECT_UNKNOWN", probe);
+  }
+  let after = null;
+  for await (const _attempt of K.startObservationTicks(true)) {
+    if (!transportCurrent()) return null;
+    after = await freshProbe(initial.tabId, request.conversation_fingerprint);
+    if (!transportCurrent()) return null;
+    const current = resolveExactTarget(request.conversation_fingerprint);
+    if (!after || after.document_epoch !== initial.documentEpoch ||
+        !sameResolvedTarget(initial, current) || requestWindowStatus(request)) break;
+    // Reconcile the full target before accepting any downstream response, even NOT_SUBMITTED.
+    if (submission.effect === "NOT_SUBMITTED") {
+      return receipt(request, "COGNITION_NOT_SUBMITTED", after.observation);
+    }
+    if (submission.effect === "SUBMIT_EFFECT_UNKNOWN") break;
+    const observed = after.observation;
+    if (!observed.target_present || !observed.exact_conversation_loaded ||
+        !observed.page_responsive || observed.auth_required !== false ||
+        observed.provider_error_present !== false) break;
+    if (observed.generation_state === "active") {
+      return receipt(request, "COGNITION_STARTED", observed);
+    }
+  }
+  return receipt(request, "COGNITION_SUBMIT_EFFECT_UNKNOWN", after ? after.observation : probe);
+}
+
 function validObserveContinuationAckRequest(request) {
   return request?.action === "OBSERVE_CONTINUATION_ACK" && K?.validRequest(request) === true;
 }
@@ -646,10 +817,19 @@ async function handleNativeRequest(request, port) {
   if (request && request.schema === CENSUS_REQUEST_SCHEMA) return handleCensusRequest(request, port);
   const typedReentry = validTypedReentryRequest(request);
   const submitContinuation = validSubmitContinuationRequest(request);
+  const submitCognition = validSubmitCognitionRequest(request);
   const observeContinuationAck = validObserveContinuationAckRequest(request);
   if (!typedReentry && !submitContinuation && !observeContinuationAck &&
+      !submitCognition &&
       !validActionRequest(request)) return;
-  const accepted = Object.freeze({...request});
+  // A cognition action belongs to the admitted native connection, including across awaits.
+  const cognitionToken = nativePortToken, cognitionEpoch = nativePortEpoch;
+  const cognitionBoot = transportBootNonce;
+  const cognitionTransportCurrent = () => nativePort === port &&
+    nativePortToken === cognitionToken && nativePortEpoch === cognitionEpoch &&
+    transportBootNonce === cognitionBoot && !!cognitionBoot && transportHandshakeReady;
+  if (submitCognition && !cognitionTransportCurrent()) return;
+  const accepted = Object.freeze(submitCognition ? JSON.parse(JSON.stringify(request)) : {...request});
   const windowStatus = requestWindowStatus(accepted);
   if (windowStatus) {
     port.postMessage(receipt(accepted, windowStatus, unknownObservation()));
@@ -658,9 +838,11 @@ async function handleNativeRequest(request, port) {
   const result = accepted.action === "INSPECT"
     ? await handleInspect(accepted)
     : accepted.action === "FOREGROUND" ? await handleForeground(accepted)
+    : submitCognition ? await handleSubmitCognition(accepted, cognitionTransportCurrent)
     : typedReentry ? await handleTypedReentry(accepted)
     : submitContinuation ? await handleSubmitContinuation(accepted)
     : observeContinuationAck ? await handleObserveContinuationAck(accepted) : null;
+  if (submitCognition && !cognitionTransportCurrent()) return;
   if (result) port.postMessage(result);
   return result;
 }

@@ -11,9 +11,12 @@ import pytest
 from integrations.chairman_surfaces import web_sol_deployment as deployment
 from test_web_sol_deployment import binding, release
 
-NAMES = ("manifest.json", "background.js", "semantic_ack_core.js", "content.js",
-         "continuation_core.js",
-         "census.html", "census.css", "census_core.js", "census.js")
+NAMES = (
+    "manifest.json", "background.js", "semantic_ack_core.js", "content.js",
+    "continuation_core.js", "cognition_result_core.js",
+    "cognition_transport_core.js", "census.html", "census.css",
+    "census_core.js", "census.js",
+)
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -24,7 +27,7 @@ def digest_map(assets):
 @pytest.fixture
 def assets():
     root = ROOT / "integrations/chairman_surfaces/web_sol_extension"
-    values = {name: (root / name).read_bytes() for name in NAMES[:5]}
+    values = {name: (root / name).read_bytes() for name in NAMES[:7]}
     manifest = json.loads(values["manifest.json"])
     manifest["action"] = {"default_title": "Session census", "default_popup": "census.html"}
     values["manifest.json"] = json.dumps(manifest).encode()
@@ -42,7 +45,7 @@ def render(assets, expected=None, row=None, spec=None):
 def test_complete_bundle_preserves_generated_contract_and_all_source_bytes(assets):
     legacy = deployment.render_bundle(binding(), release())
     complete = render(assets)
-    assert len(complete.artifacts) == 12
+    assert len(complete.artifacts) == 14
     assert set(legacy.artifacts).issubset(set(complete.artifacts))
     assert complete.bundle_digest != legacy.bundle_digest
     assert complete.wrapper_argv == legacy.wrapper_argv
@@ -50,7 +53,7 @@ def test_complete_bundle_preserves_generated_contract_and_all_source_bytes(asset
     for name, content in assets.items():
         assert rows[name].content == content and rows[name].mode == 0o600
         assert rows[name].destination.parent.name == complete.instance_id[:24]
-    assert len(complete.public_receipt["artifact_digests"]) == 12
+    assert len(complete.public_receipt["artifact_digests"]) == 14
     assert deployment.verify_deployment_readback(complete, complete.as_files())["ok"] is True
 
 
@@ -230,9 +233,9 @@ def test_complete_plan_and_rollback_cover_new_and_prior_assets(assets):
     before = {str(item.destination): b"prior" for item in bundle.artifacts[:4]}
     original = dict(before)
     plan = deployment.plan_deployment(bundle, before)
-    assert len(plan.changes) == 12 and before == original
+    assert len(plan.changes) == 14 and before == original
     assert [row.action for row in plan.changes].count("UPDATE") == 4
-    assert [row.action for row in plan.changes].count("CREATE") == 8
+    assert [row.action for row in plan.changes].count("CREATE") == 10
     entries = plan.rollback_manifest["entries"]
     assert {entry["path"] for entry in entries} == set(observed)
     for entry in entries:
@@ -271,7 +274,7 @@ def test_renderer_does_not_read_source_paths(assets, monkeypatch):
     with monkeypatch.context() as guard:
         guard.setattr(Path, "read_bytes", forbidden)
         guard.setattr(Path, "read_text", forbidden)
-        assert len(render(assets).artifacts) == 12
+        assert len(render(assets).artifacts) == 14
 
 
 def test_duplicate_otherwise_valid_manifest_field_is_refused(assets):

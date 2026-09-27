@@ -37,9 +37,9 @@ const config = {
   instanceId: INSTANCE,
   nativeHost: EXPECTED_HOST,
   protocolMajor: 1,
-  clientPackageVersion: "0.5.0",
-  nativePackageVersion: "0.5.0",
-  extensionPackageVersion: "0.5.0",
+  clientPackageVersion: "0.6.0",
+  nativePackageVersion: "0.6.0",
+  extensionPackageVersion: "0.6.0",
   capabilityDigest,
 };
 

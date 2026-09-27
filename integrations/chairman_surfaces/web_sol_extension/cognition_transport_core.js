@@ -199,6 +199,7 @@
     return prompt;
   }
 
+
   function currentProviderPath(snapshot) {
     if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) ||
         !snapshot.mapping || typeof snapshot.mapping !== "object" || Array.isArray(snapshot.mapping) ||
@@ -399,6 +400,7 @@
     DIRECTIVE_TEXT,
     MAX_ASSIGNMENT_BYTES,
     MAX_RENDERED_ASSIGNMENT_BYTES,
+    validSubmitPayload,
     renderAssignmentPrompt,
     reduceConversation,
   });
