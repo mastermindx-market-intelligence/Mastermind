@@ -12,6 +12,7 @@ import pytest
 
 from control_plane.claude_operator_adapter import ClaudeOperatorAdapter, ClaudeReadbackPolicyObserver, ClaudeOperatorError, _digest
 from control_plane.executive_agent_capabilities import claude_security_config_digest
+from control_plane.claude_operator_helper_protocol import native_plan_contract
 from control_plane.operator_harness_contract import (CapabilityIdentity, CapabilityManifest,
     RequestedExecutionProfile, NativeHelperPolicy, SessionEpochRef, ProcessGenerationRef,
     ProcessIdentityObservation, OperationId, TurnRef, EventCursor, compare_launch, LaunchDecision,
@@ -44,7 +45,8 @@ class FakeClient:
                     'registration_zero_turn':True,'native_subscription_verified':True,
                     'applied_launch_provenance':{'setting_sources':[],'strict_mcp_config':True,'skills':[]},
                     'settings_readback_provenance':'native-get_settings/0.2.160/2.1.275',
-                    'initialization':{'model':c['model'],'cwd':c['cwd'],'tools':['Read','Glob','Grep'],
+                    'result_contract':native_plan_contract(),
+                    'initialization':{'model':c['model'],'cwd':c['cwd'],'tools':['Read','Glob','Grep','StructuredOutput'],
                         'skills':[],'plugins':[],'mcp_servers':[],'permissionMode':'dontAsk'},
                     'mcp_status':{'servers':[]},'server_info':{'account':{'apiProvider':'firstParty','subscriptionType':'Claude Max'}},
                     'effective_policy':{'sandbox':copy.deepcopy(POLICY['sandbox'])}}
@@ -59,6 +61,7 @@ class FakeClient:
         return {'acknowledged':True}
     def request_raw_turn_page(self, **kwargs):
         result={'terminal':self.terminal,'success':not self.bad_result,'session_id':self.sid,'turn_id':self.turn,
+                'result_source':'native-structured-output','result_contract':native_plan_contract(),
                 'native_result_id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','summary':'{"answer":"verified"}'}
         return SimpleNamespace(consume=lambda:result)
     def graceful_close(self, **kwargs):
@@ -79,7 +82,7 @@ def configured(tmp_path):
         base_sha_resolver=lambda path:'a'*40)
     profile=RequestedExecutionProfile('worker','claude','claude-opus-5','claude-agent-sdk',a.binary_digest,'2.1.275',
         a.configured_workspace,'read-only','never','disabled',
-        CapabilityManifest(required=tuple(CapabilityIdentity(t,a.binary_digest,kind='tool') for t in POLICY['tools'])),
+        CapabilityManifest(required=tuple(CapabilityIdentity(t,a.binary_digest,kind='tool') for t in [*POLICY['tools'],'StructuredOutput'])),
         NativeHelperPolicy.DISABLED,'authority-hash',expected_config_digest=claude_security_config_digest({'sandbox':POLICY['sandbox']},launch_provenance={k:POLICY[k] for k in ('setting_sources','strict_mcp_config','skills')}))
     epoch=SessionEpochRef('epoch','attempt','worker',1);gen=ProcessGenerationRef('generation','epoch',1,'worker')
     return a,client,profile,epoch,gen
@@ -231,3 +234,15 @@ def test_native_home_observation_is_fresh_and_metadata_only(configured):
     with pytest.raises(ClaudeOperatorError,match='provider home'):a.observe_provider_home_identity(g)
     a.provider_home.rmdir();a.provider_home.symlink_to(retired,target_is_directory=True)
     with pytest.raises(ClaudeOperatorError,match='provider home'):a.observe_provider_home_identity(g)
+
+
+@pytest.mark.parametrize('field,value',[('result_source','native-result-text'),('result_contract',None)])
+def test_text_fallback_or_unknown_schema_cannot_supply_candidate(configured,field,value):
+    a,c,p,e,g=configured;_,launch=start(configured);t=TurnRef('turn','epoch','generation','attempt')
+    a.begin_turn(operation_id=OperationId('ohf-op:turn'),turn=t,generation=g,launch=launch)
+    original=c.request_raw_turn_page
+    def wrong(**kwargs):
+        result=original(**kwargs).consume();result[field]=value
+        return SimpleNamespace(consume=lambda:result)
+    c.request_raw_turn_page=wrong
+    with pytest.raises(ClaudeOperatorError,match='terminal result'):a.collect_candidate_result(t)

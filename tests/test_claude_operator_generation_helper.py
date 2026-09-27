@@ -54,6 +54,7 @@ class FakeAssistantMessage:
 
 @dataclass
 class FakeAgentOptions:
+    output_format: dict | None = None
     cli_path: str = ""
     cwd: str = ""
     model: str = ""
@@ -812,5 +813,58 @@ def test_success_followed_by_uncertain_drain_is_not_accepted_or_recycled(fake_sd
         with pytest.raises(HelperProtocolError,match='reconciliation'):
             await r.begin_turn('B','must not recycle')
         assert len(r.client.queries)==2
+        await r.disconnect()
+    asyncio.run(scenario())
+
+
+def _structured_plan():
+    return {'schema_version':'mastermind.executive_orchestration_result/v1',
+        'job_id':'JOB-1','run_id':'ATT-1','worker_id':'worker','role':'plan','status':'COMPLETED',
+        'role_result':{'schema_version':'mastermind.execution_plan/v1','root_job_id':'JOB-ROOT',
+            'plan_attempt_id':'ATT-1','steps':[{'ordinal':0,'step_id':'STEP-1','objective':'Inspect protocol',
+                'business_impact':'routine','review_required':False,'requested_authorities':['READ'],
+                'allowed_write_paths':[],'validation_ids':[],'attempt_limit':1,'cost_class':'small'}]},
+        'summary':'Plan ready','current_state':'Read complete','next_actions':[],'errors':[],'validations':[]}
+
+
+def test_native_structured_output_is_lossless_and_not_text_repair(fake_sdk):
+    async def scenario():
+        from control_plane.claude_operator_helper_protocol import native_plan_contract,native_plan_schema
+        from control_plane.executive_orchestration_result import canonical_bytes
+        r=helper.HelperRuntime('gen',{**_good_config(),'result_contract':'executive-plan-v1'})
+        handshake=await r.initialize()
+        assert handshake['result_contract']==native_plan_contract()
+        assert r.client.options.output_format=={'type':'json_schema','schema':native_plan_schema()}
+        msg=FakeResultMessage('success',r.session_id,False,1,0,{},'ignore this prose')
+        msg.structured_output=_structured_plan()
+        msg.uuid=str(uuid.uuid4())
+        r.client.enqueue_turn_events([msg]);await r.begin_turn('A','work');await r._drain_task
+        result=await r.collect()
+        assert result['success'] is True
+        assert result['summary'].encode()==canonical_bytes(msg.structured_output)
+        assert result['result_source']=='native-structured-output'
+        assert result['native_result_id']==msg.uuid and result['session_id']==r.session_id
+        assert result['result_contract']==native_plan_contract()
+        await r.disconnect()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('case',['absent','missing-worker','bad-cost','too-large'])
+def test_native_structured_output_failure_never_uses_plausible_text(fake_sdk,case):
+    async def scenario():
+        r=helper.HelperRuntime('gen',{**_good_config(),'result_contract':'executive-plan-v1'});await r.initialize()
+        msg=FakeResultMessage('success',r.session_id,False,1,0,{},json.dumps(_structured_plan()))
+        structured=_structured_plan()
+        if case=='absent':structured=None
+        elif case=='missing-worker':structured.pop('worker_id')
+        elif case=='bad-cost':structured['role_result']['steps'][0]['cost_class']='invented'
+        else:
+            for k in ('summary','current_state'):structured[k]='x'*8000
+        msg.structured_output=structured
+        r.client.enqueue_turn_events([msg]);await r.begin_turn('A','work');await r._drain_task
+        result=await r.collect()
+        assert result['success'] is False and result['summary'] is None
+        assert result['failure']=='native_structured_result_invalid'
+        with pytest.raises(HelperProtocolError,match='reconciliation'):await r.begin_turn('B','do not retry')
         await r.disconnect()
     asyncio.run(scenario())

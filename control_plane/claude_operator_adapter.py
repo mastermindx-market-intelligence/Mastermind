@@ -19,7 +19,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from control_plane.claude_operator_helper_protocol import INTERFACE_VERSION, security_settings
+from control_plane.claude_operator_helper_protocol import (
+    INTERFACE_VERSION, security_settings, EXECUTIVE_PLAN_CONTRACT, native_plan_contract,
+)
 from control_plane.executive_agent_capabilities import claude_security_config_digest
 from control_plane.codex_operator_adapter import _default_base_sha, _default_process_identity
 from control_plane.executive_orchestration_result import RawRoleResultObservation, parse_canonical_json
@@ -93,7 +95,8 @@ class ClaudeReadbackPolicyObserver:
         if (handshake.get("registration_zero_turn") is not True
                 or handshake.get("native_subscription_verified") is not True
                 or handshake.get("sdk_version") != "0.2.160" or handshake.get("cli_version") != "2.1.275"
-                or set(init.get("tools", [])) != {"Read", "Glob", "Grep"}
+                or set(init.get("tools", [])) != {"Read", "Glob", "Grep", "StructuredOutput"}
+                or handshake.get("result_contract") != native_plan_contract()
                 or init.get("skills") != [] or init.get("plugins") != []
                 or init.get("mcp_servers") != [] or handshake.get("mcp_status") != {"servers": []}
                 or init.get("permissionMode") != "dontAsk"):
@@ -238,7 +241,7 @@ class ClaudeOperatorAdapter:
             raise ClaudeOperatorError(AdapterFailureClass.ACTIVE_WRITER_CONFLICT, "adapter already owns a generation")
         self._take_operation(operation_id)
         session_id = str(uuid.uuid4())
-        client = self.client_factory([str(self.sdk_python), str(self.helper_path)], self._env(), self.workspace_root)
+        client = self.client_factory([str(self.sdk_python), "-B", str(self.helper_path)], self._env(), self.workspace_root)
         client.start()
         try:
             process = self.process_identity_observer(client.pid)
@@ -246,7 +249,7 @@ class ClaudeOperatorAdapter:
                 raise ClaudeOperatorError(AdapterFailureClass.PROCESS_CRASH, "native helper lacks a private process group")
             config = {**self.policy_observer.launch_config(), "cli_path": str(self.binary_path),
                       "cwd": str(self.workspace_root), "model": requested.requested_model,
-                      "session_id": session_id, "max_turns": 20}
+                      "session_id": session_id, "max_turns": 20, "result_contract": EXECUTIVE_PLAN_CONTRACT}
             handshake = client.request("initialize", {"interface_version": INTERFACE_VERSION,
                 "generation_id": generation.process_generation_id, "config": config}, timeout=30)
             policy = self.policy_observer.observe(handshake)
@@ -382,6 +385,8 @@ class ClaudeOperatorAdapter:
         page = state.client.request_raw_turn_page(thread_id=state.session_id, native_turn_id=turn.turn_id)
         result = page.consume()
         if (result.get("terminal") is not True or result.get("success") is not True or result.get("failure") is not None
+                or result.get("result_source") != "native-structured-output"
+                or result.get("result_contract") != native_plan_contract()
                 or result.get("session_id") != state.session_id or result.get("turn_id") != turn.turn_id
                 or not isinstance(result.get("summary"), str) or not result.get("native_result_id")):
             raise ClaudeOperatorError(AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE, "native successful terminal result is missing", effect_unknown=True)

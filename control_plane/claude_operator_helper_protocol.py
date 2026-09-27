@@ -8,6 +8,7 @@ authority; this module owns only encoding validation.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -17,6 +18,21 @@ INTERFACE_VERSION = "mastermind.claude_native_helper/v1"
 MAX_WIRE_BYTES = 1024 * 1024
 MAX_TEXT_CHARS = 16_000
 MAX_EVENTS = 256
+EXECUTIVE_PLAN_CONTRACT = "executive-plan-v1"
+
+
+def native_plan_schema() -> dict[str, Any]:
+    """Reuse the Executive contract; its keywords are equivalent in Draft 7."""
+    from control_plane.executive_orchestration_result import orchestration_result_schema
+    schema = orchestration_result_schema("plan")
+    schema["$schema"] = "http://json-schema.org/draft-07/schema#"
+    return schema
+
+
+def native_plan_contract() -> dict[str, str]:
+    from control_plane.executive_orchestration_result import canonical_bytes
+    return {"name": EXECUTIVE_PLAN_CONTRACT,
+            "schema_digest": hashlib.sha256(canonical_bytes(native_plan_schema())).hexdigest()}
 REQUEST_ID_RE = re.compile(r"req-[A-Za-z0-9_-]{1,64}")
 OPERATIONS = frozenset(
     {
@@ -58,6 +74,7 @@ _ALLOWED_CONFIG_KEYS = frozenset(
         "disallowed_tools",
         "sandbox",
         "settings",
+        "result_contract",
     }
 )
 

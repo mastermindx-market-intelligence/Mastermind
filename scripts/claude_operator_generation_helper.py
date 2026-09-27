@@ -50,6 +50,7 @@ _CONFIG_KEYS = frozenset(
         "disallowed_tools",
         "sandbox",
         "settings",
+        "result_contract",
     }
 )
 
@@ -112,6 +113,11 @@ class HelperRuntime:
         self._native_result_id: str | None = None
         self._applied_launch_provenance: dict[str, Any] = {}
         self._drain_closed = True
+        from control_plane.claude_operator_helper_protocol import EXECUTIVE_PLAN_CONTRACT, native_plan_contract
+        result_contract = self.config.get("result_contract")
+        if result_contract not in (None, EXECUTIVE_PLAN_CONTRACT):
+            raise HelperProtocolError("native result contract is unsupported")
+        self._result_contract = native_plan_contract() if result_contract else None
 
     def _record_event(self, entry: dict[str, Any]) -> None:
         self._event_sequence += 1
@@ -183,6 +189,9 @@ class HelperRuntime:
             options_kwargs["sandbox"] = self.config.get("sandbox")
         if "settings" in self.config:
             options_kwargs["settings"] = json.dumps(self.config["settings"], allow_nan=False)
+        if self._result_contract is not None:
+            from control_plane.claude_operator_helper_protocol import native_plan_schema
+            options_kwargs["output_format"] = {"type": "json_schema", "schema": native_plan_schema()}
 
         try:
             self._applied_launch_provenance = {
@@ -402,6 +411,7 @@ class HelperRuntime:
             "native_subscription_verified": True,
             "applied_launch_provenance": self._applied_launch_provenance,
             "settings_readback_provenance": "native-get_settings/0.2.160/2.1.275",
+            "result_contract": self._result_contract,
         }
 
     async def begin_turn(self, turn_id: str, payload: str) -> Mapping[str, Any]:
@@ -504,6 +514,25 @@ class HelperRuntime:
                     if origin is not None and (not isinstance(origin, Mapping) or origin.get("kind") != "human"):
                         self._failure = "unexpected_terminal_origin"
                         self._success = False
+                    if self._result_contract is not None:
+                        # This is the actual provider object, never a repaired
+                        # result.result string or an inferred success envelope.
+                        from jsonschema import Draft7Validator
+                        from control_plane.claude_operator_helper_protocol import native_plan_schema
+                        from control_plane.executive_orchestration_result import canonical_bytes
+                        structured = getattr(msg, "structured_output", None)
+                        try:
+                            if not isinstance(structured, dict):
+                                raise ValueError("native structured object is absent")
+                            Draft7Validator(native_plan_schema()).validate(structured)
+                            encoded = canonical_bytes(structured)
+                            if len(encoded) > MAX_TEXT_CHARS:
+                                raise ValueError("native structured object exceeds bound")
+                            self.summary = encoded.decode("utf-8")
+                        except Exception:
+                            self.summary = None
+                            self._failure = "native_structured_result_invalid"
+                            self._success = False
                     self._native_result_id = bounded_text(getattr(msg, "uuid", None), limit=128)
                     if not self._success:
                         status = getattr(msg, "api_error_status", None)
@@ -605,6 +634,8 @@ class HelperRuntime:
             "session_id": self.session_id,
             "turn_id": finished_turn_id,
             "native_result_id": self._native_result_id,
+            "result_source": "native-structured-output" if self._result_contract is not None else "native-result-text",
+            "result_contract": self._result_contract,
         }
 
     async def reconcile(self) -> Mapping[str, Any]:
