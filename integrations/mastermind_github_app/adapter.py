@@ -569,6 +569,15 @@ class GithubPatchGateway:
         # No current write-authority resolution occurs here. The HMAC token
         # binds the exact server-resolved target that may already have changed.
         observation = await self._observe(self._token_target(claims.raw), claims)
+        # A negative history snapshot cannot establish that an earlier native
+        # request terminated before application. Reconciliation has no durable
+        # owner terminal-no-send receipt; never turn that absence into finality.
+        # The exact positive effect remains readable without current write authority.
+        if observation.state is not EffectState.APPLIED or not observation.complete:
+            return self._effect_unknown_receipt(
+                RECONCILE_TOOL, now, claims,
+                native_request_attempts=0, observation=observation,
+            )
         return self._receipt(
             RECONCILE_TOOL,
             now,
