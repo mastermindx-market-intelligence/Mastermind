@@ -47,6 +47,14 @@ def test_claude_config_shape_is_distinct_and_does_not_claim_implemented_factory(
         worker._assert_service_activation_allowed(value)
     with pytest.raises(worker.WorkerConfigError, match="Claude broker factory is not composed"):
         worker._build_broker(value)
+    path = tmp_path / "worker.json"
+    path.unlink()
+    value["claude_sdk_python"] = "/Library/Application Support/MastermindExecutive/providers/claude-agent-sdk/0.2.160/bin/python3.12"
+    assert worker._load_config(_write_config(tmp_path, value), require_root_owner=False) == value
+    path.unlink()
+    value["claude_sdk_python"] = "python3"
+    with pytest.raises(worker.WorkerConfigError, match="absolute path"):
+        worker._load_config(_write_config(tmp_path, value), require_root_owner=False)
 
 
 def test_wrong_principal_refused_before_native_scope_or_socket(tmp_path, monkeypatch):

@@ -177,6 +177,8 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
     elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
         expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
                            else _NATIVE_CONFIG_FIELDS)
+        if value.get("native_provider") == "claude" and "claude_sdk_python" in value:
+            expected_fields = expected_fields | frozenset({"claude_sdk_python"})
     else:
         raise WorkerConfigError("worker config schema version is unsupported")
     if set(value) != expected_fields:
@@ -206,6 +208,10 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
     ):
         if not isinstance(value.get(field), str) or not Path(value[field]).is_absolute():
             raise WorkerConfigError(f"{field} must be an absolute path")
+    if "claude_sdk_python" in value and (
+            not isinstance(value["claude_sdk_python"], str)
+            or not Path(value["claude_sdk_python"]).is_absolute()):
+        raise WorkerConfigError("claude_sdk_python must be an absolute path")
     if provider == "codex" and value.get("required_team_identifier") != _OPENAI_TEAM_IDENTIFIER:
         raise WorkerConfigError("the worker config must require the reviewed OpenAI team")
     if value.get("require_secret_canary") is not True:
