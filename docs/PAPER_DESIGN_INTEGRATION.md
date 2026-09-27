@@ -42,14 +42,19 @@ another OAuth service, or put design tools into Executive OS's bounded CEO-admis
 
 Capability discovery is action-specific. A session that sees Studio Direct filesystem/
 process tools but has not checked for `paper_inspect`, `paper_catalog`, `paper_read`
-and `paper_edit` has **not** established Paper unavailability. Likewise, source may
-define an action such as `paper_prepare` while a particular installed ChatGPT plugin
-generation does not expose it; that is a publication/surface drift for that action, not
-evidence that current-file Paper reads or edits are impossible. Before the first edit,
-a proven pre-dispatch technical absence may make an **independently authorized** RDC
-carrier eligible; the absence itself never supplies permission. After edit dispatch,
-timeout/lost response remains `EFFECT_UNKNOWN` on the original carrier and forbids
-cross-carrier replay.
+and `paper_edit` has **not** established Paper unavailability. `paper_inspect` now
+returns `gateway_surface`, which declares the exact Paper tool family the current gateway
+is built to advertise. If that contract includes `paper_prepare` while the ChatGPT client
+surface omits it, classify `STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`: current-file
+reads/edits may remain available, but exact-file transition is held until the same Studio
+Direct plugin/tool catalog is refreshed and `paper_prepare` is directly surfaced.
+Do not reproduce prepare with generic Studio `start_process`/filesystem tools, RDC,
+raw upstream `open_file`, shell, or UI automation. This keeps file transition inside
+the reviewed narrow action instead of silently broadening workstation authority.
+A proven pre-dispatch absence that remains after current same-Studio publication recovery
+may make an **independently authorized** RDC carrier eligible under the separate carrier
+law; absence itself never supplies permission. After edit dispatch, timeout/lost response
+remains `EFFECT_UNKNOWN` on the original carrier and forbids cross-carrier replay.
 
 No MCP tool is disguised as read-only to bypass client write permissions.
 `paper_edit` is explicitly modifying/destructive/non-idempotent; it exists only
@@ -223,10 +228,12 @@ code output is a starting point, not automatic tested production implementation.
 1. Exact source runtime installed without changing other worker homes.
 2. Native MCP initialize/list and real CLI read against Paper after login/file-open.
 3. Approved scratch edit, screenshot, JSX extraction; no wrong-document changes.
-4. Fresh ChatGPT Web session runs `paper_inspect`; when needed, `paper_read` with
-   `tool=list_files` -> `paper_prepare(file_id)`; then the same read/edit/screenshot/JSX
-   journey through a Paper-enabled Studio Direct seat. Tunnel health alone is not the
-   design-journey proof.
+4. Fresh ChatGPT Web session runs `paper_inspect` and confirms its
+   `gateway_surface` names the five exact Paper actions. When another file is needed, the
+   **client surface itself** must expose `paper_prepare`; `paper_read` with
+   `tool=list_files` -> direct `paper_prepare(file_id)` -> re-inspect -> read/edit/
+   screenshot/JSX. Generic host-command emulation does not satisfy this acceptance.
+   Tunnel health alone is not the design-journey proof.
 5. Existing capability registry attests a bounded worker; no second control plane.
 6. One real product design-to-code/browser journey before Figma retirement.
 
