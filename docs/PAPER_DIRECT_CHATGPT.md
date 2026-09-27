@@ -17,21 +17,27 @@ The raw vendor `paper mcp` route is not selected: convenience is not evidence th
 our guard contract. Studio Direct remains a legacy client, not a dependency of normal direct
 Paper operations. It is not a fallback after a direct-app permission or safety denial.
 
-**Direct `paper_prepare`: BUILT_NOT_LIVE.** It is a bounded explicit-file binding action, not a
-host-control escape hatch: callers provide one exact bare Paper file ID, a fresh source snapshot,
-and a stable operation ID; URL/path/page overrides, shell/process control, and unrestricted raw
-`open_file` are not exposed. Paper 0.5.12 can address another file directly by `fileId` even when
-that file is not user-active (and even when it was not already-open). Prepare therefore performs
-no UI-focus/open effect: it verifies the caller's fresh active context, reads the exact target by
-`fileId`, and returns that target's snapshot for the subsequent explicit-file edit. The user's
-active Paper file may remain unchanged. Source support and tool discovery do not by themselves
-prove the live target-bound write path.
+**Direct `paper_prepare` + target-bound edit: PROVEN_LIVE on the Ryan Business direct v6 route.**
+The accepted #1011 canary used the private Mastermind Paper app to bind the background scratch file
+by exact `fileId` without changing the user-active MASTERMIND PAGES document, then performed one
+bounded `set_text_content` edit with `APPLIED_RESPONSE_OBSERVED`, same-carrier post-read, screenshot
+and JSX verification. No replay occurred and the user-active file remained unchanged. This is real
+Ryan-route acceptance, not a claim that every Business seat is enrolled or that every future edit is
+safe without its own fresh target/snapshot checks. Do not repeat the accepted scratch canary merely
+to re-prove the route.
 
-A newly staged bundle begins as **STAGED_NOT_ENROLLED** infrastructure until the user-attended setup.
-That staging receipt is not current service liveness. `LOCAL_STDIO_PROVEN` proves only initialization/
-tool discovery; it calls neither Paper nor OpenAI. Current #1011 acceptance still separately requires
-the live direct Business prepare/edit/reconciliation/screenshot/JSX journey before write capability
-can be called live.
+The action remains a bounded explicit-file binding, not a host-control escape hatch: callers provide
+one exact bare Paper file ID, a fresh source snapshot, and a stable operation ID; URL/path/page
+overrides, shell/process control, and unrestricted raw `open_file` are not exposed. Paper 0.5.12 can
+address another file directly by `fileId` while another file remains user-active. Prepare therefore
+performs no UI-focus/open effect; it validates the explicit target and returns that target snapshot
+for the subsequent edit.
+
+A newly staged bundle still begins as **STAGED_NOT_ENROLLED** infrastructure. That staging receipt is
+not current service liveness, and `LOCAL_STDIO_PROVEN` still proves only initialization/tool
+discovery. Current fleet truth is narrower: Ryan Business has the accepted live direct-app
+prepare/edit journey; C1/C2/C3/C4/Chris Admin host tunnel services are live/ready but each still
+requires its own attended ChatGPT app enrollment before that seat's direct app is accepted.
 
 ## Implementation
 
@@ -124,18 +130,21 @@ Do not publish a skills-only placeholder and describe it as a working Paper conn
    `$BUNDLE/secrets/runtime-key`, owner-only mode `0600`. Never put it in chat, Git, logs,
    a command argument, an environment dump, or a plugin archive. The launcher rejects an
    obvious admin-key prefix as an additional guard, not as proof of runtime permissions.
-3. Bind only after the actual IDs and association are known:
+3. Bind only after the exact tunnel is known. For seat-aware v3 bundles, do not invent a backend
+   workspace ID: bind the exact tunnel and include `--workspace-id` only when that ID is
+   independently observed. Legacy v2 bundles retain their historical workspace-ID requirement.
 
    ```sh
    "$SDK_PYTHON" -I "$BUNDLE/runtime/direct_service.py" bind --root "$BUNDLE" \
-     --tunnel-id "$EXISTING_TUNNEL_ID" --workspace-id "$BUSINESS_WORKSPACE_ID"
+     --tunnel-id "$EXISTING_TUNNEL_ID"
    "$SDK_PYTHON" -I "$BUNDLE/runtime/direct_service.py" doctor --root "$BUNDLE"
    ```
 
-4. Through the existing host service owner, install the staged
-   `service/com.mastermind.paper-direct.business.plist` as one user LaunchAgent, with no
-   overwrite of an incumbent service. Bootstrap it once. Do not also launch a manual client.
-   Health binds only to `127.0.0.1:0`; its assigned address is in `state/health.url`.
+4. Through the existing host service owner, install the staged LaunchAgent exactly once with no
+   overwrite of an incumbent service. Seat-aware v3 uses
+   `service/com.mastermind.paper-direct.business.<seat>.plist`; legacy v2 retains the historical
+   unsuffixed label. Do not also launch a manual client for the same seat. Health binds only to
+   `127.0.0.1:0`; its assigned address is in `state/health.url`.
 5. In the actual Business workspace, the authorized admin enables developer mode and creates
    private **Mastermind Paper**, choosing Connection **Tunnel** and the existing tunnel ID.
    A plugin name or successful registration is not proof of any Paper operation.
@@ -164,12 +173,17 @@ narrower tool must reuse the bridge and have its own truthful semantics, not dis
 
 ## Proof and release
 
-The required proof stages are distinct: source tests -> staged integrity -> local stdio ->
-real tunnel doctor/health -> Business app discovery -> exact scratch read -> bounded write and
-same-carrier reconciliation -> visual screenshot/JSX -> restart/cutover acceptance.
-No earlier stage implies a later one. Global repository CI and independent release review remain
-separate from the targeted Paper tests. No production merge, account setup or activation is
-performed merely by running `stage` or `probe`.
+The proof stages remain distinct: source tests -> staged integrity -> local stdio -> real tunnel
+doctor/health -> Business app discovery -> exact scratch read -> bounded write and same-carrier
+reconciliation -> visual screenshot/JSX -> restart/reconnect -> cutover acceptance. Ryan Business
+has completed that direct-app canary and a same-runtime host restart, with loopback-only listener
+proof and a read-only representative Studio comparison recorded on #1011. C1/C2/C3/C4/Chris Admin
+have live/ready host transports but still require per-account app enrollment and fresh read-only
+discovery before their seat can claim direct-app acceptance.
+
+Global repository CI, independent exact-head review and protected source convergence remain separate
+from runtime acceptance. No source merge is implied by a live canary, and no newly staged seat is
+accepted merely by running `stage`, `probe` or `doctor`.
 
 ## Official sources rechecked 2026-09-26
 
