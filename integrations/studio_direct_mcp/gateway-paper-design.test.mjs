@@ -103,6 +103,9 @@ test('gateway advertises and dispatches guarded Paper design tools locally', asy
   ]);
   assert.equal(inspectPayload.gateway_surface.file_transition_tool, 'paper_prepare');
   assert.equal(inspectPayload.gateway_surface.file_transition_requires_direct_tool, true);
+  assert.equal(inspectPayload.gateway_surface.client_surface_drift_state, 'STUDIO_TOOL_PUBLICATION_DRIFT');
+  assert.equal(inspectPayload.gateway_surface.client_surface_recovery, 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT');
+  assert.equal(inspectPayload.gateway_surface.reconnect_alone_proves_refresh, false);
   assert.equal(inspectPayload.gateway_surface.generic_process_fallback_allowed, false);
 
   const read = await client.callTool({
