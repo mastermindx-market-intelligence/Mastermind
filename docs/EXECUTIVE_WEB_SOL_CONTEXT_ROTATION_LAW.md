@@ -194,10 +194,14 @@ conclusions, exact identities, unresolved effects, DO_NOT_REDO boundaries, and t
 canonical state.
 
 Planned retirement requires an already-durable continuation before the predecessor is abandoned. If
-canonical persistence itself is unavailable, emit only a copyable `NOT_CANONICALLY_PERSISTED` frontier
-under the genuine human/effect gate; it is not a durable checkpoint and a successor must reconcile and
-persist it before treating it as such. This law creates no chat registry, transcript store, retry ledger,
-or second memory plane.
+canonical persistence itself is unavailable, emit only a copyable `NOT_CANONICALLY_PERSISTED` frontier;
+it is not a durable checkpoint. Classify the boundary through current protected ACTIVE_EXECUTION Step 8
+from observed cause: `EFFECT_UNKNOWN` only for an ambiguous checkpoint write, `EXACT_HUMAN_GATE` only
+for a real human/admin ceremony, and a confirmed pre-dispatch persistence/platform outage as
+`ALL_SCOPED_LANES_BLOCKED` only when every useful lane is blocked. If safe independent work remains,
+the truthful state is `MORE_WORK_EXISTS`. A successor must reconcile and persist the frontier before
+treating it as durable. This law creates no chat registry, transcript store, retry ledger, or second
+memory plane.
 
 ## 7. Closed Web-Sol action surface
 

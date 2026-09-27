@@ -528,3 +528,19 @@ def test_semantic_mutation_guard_rejects_threshold_and_healthy_phase_reversal() 
     assert "healthy-phase-continuation" in _sr_f0_semantic_guard_errors(
         law=law, skill=skill, active=bad_active
     )
+
+
+def test_rotation_law_persistence_frontier_uses_cause_based_disposition_mapping() -> None:
+    law = " ".join(_read(LAW_PATH).split())
+    assert "under the genuine human/effect gate" not in law
+    for phrase in (
+        "ACTIVE_EXECUTION Step 8",
+        "`EFFECT_UNKNOWN` only for an ambiguous checkpoint write",
+        "`EXACT_HUMAN_GATE` only for a real human/admin ceremony",
+        "confirmed pre-dispatch persistence/platform outage",
+        "`ALL_SCOPED_LANES_BLOCKED`",
+        "safe independent work remains",
+        "`MORE_WORK_EXISTS`",
+        "`NOT_CANONICALLY_PERSISTED`",
+    ):
+        assert phrase in law
