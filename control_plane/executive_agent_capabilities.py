@@ -949,6 +949,15 @@ class ExecutionCapabilityProfile:
                 "harness_binary_digest must be a lowercase SHA-256 digest"
             )
         required: list[CapabilityIdentity] = []
+        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+            # The SDK injects its result-rendering tool only for the fixed
+            # Executive plan output schema. It is observed as a capability,
+            # not supplied as a permission or an extra base tool in the SDK.
+            self.claude_sdk_config_projection()
+            required.extend(
+                CapabilityIdentity(name=name, kind="tool", harness_binary_digest=binary_digest)
+                for name in ("Read", "Glob", "Grep", "StructuredOutput")
+            )
         if self.skill_grants:
             # Exact V4 company-Skill grants compile their closure digest
             # into the existing OHF identity; package path, source commit
